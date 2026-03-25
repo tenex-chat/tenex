@@ -77,15 +77,22 @@ export async function setupStreamExecution(
     const nudgeResult = nudgeEventIds.length > 0
         ? await NudgeService.getInstance().fetchNudgesWithPermissions(nudgeEventIds)
         : { nudges: [], content: "", toolPermissions: {} };
+    const projectContext = getProjectContext();
+    const skillLookupContext = {
+        agentPubkey: context.agent.pubkey,
+        projectDTag: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
+    };
 
     // === FETCH SKILLS ===
     // Skills do NOT affect tools, but we fetch them early to download attached files
-    // Merge delegation-provided skills with self-applied skills from conversation state
+    // Merge delegation-provided skills, self-applied skills from conversation state,
+    // and agent-level always-on skills from agent config
     const delegationSkillIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
     const selfAppliedSkillIds = context.conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
-    const skillEventIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds])];
-    const skillResult = skillEventIds.length > 0
-        ? await SkillService.getInstance().fetchSkills(skillEventIds)
+    const agentAlwaysSkillIds = context.agent.alwaysSkills ?? [];
+    const requestedSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds, ...agentAlwaysSkillIds])];
+    const skillResult = requestedSkillIds.length > 0
+        ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
         : { skills: [], content: "" };
 
     // Now get tools with nudge permissions applied
@@ -145,7 +152,6 @@ export async function setupStreamExecution(
         });
     }
 
-    const projectContext = getProjectContext();
     const conversation = context.getConversation();
     if (!conversation) {
         throw new Error(`Conversation ${context.conversationId} not found`);

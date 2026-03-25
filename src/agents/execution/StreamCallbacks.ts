@@ -126,8 +126,6 @@ export function createPrepareStep(
         nudgeContent,
         nudges,
         nudgeToolPermissions,
-        skillContent,
-        skills,
         ralNumber,
         execContext,
         executionSpan,
@@ -152,6 +150,10 @@ export function createPrepareStep(
     return async (step: StepData) => {
         const { getProjectContext } = await loadProjectContextModule();
         const projectContext = getProjectContext();
+        const skillLookupContext = {
+            agentPubkey: context.agent.pubkey,
+            projectDTag: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
+        };
         const conversation = context.getConversation();
         if (!conversation) {
             throw new Error("Conversation store unavailable during prepareStep");
@@ -275,9 +277,14 @@ export function createPrepareStep(
             // Rehydrate skills from ConversationStore to pick up mid-RAL self-applied changes
             const delegationSkillIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
             const selfAppliedSkillIds = conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
-            const currentSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds])];
-            const currentSkillResult = currentSkillIds.length > 0
-                ? await SkillService.getInstance().fetchSkills(currentSkillIds)
+            const agentAlwaysSkillIds = context.agent.alwaysSkills ?? [];
+            const requestedSkillIds = [...new Set([
+                ...delegationSkillIds,
+                ...selfAppliedSkillIds,
+                ...agentAlwaysSkillIds,
+            ])];
+            const currentSkillResult = requestedSkillIds.length > 0
+                ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
                 : { skills: [] as SkillData[], content: "" };
 
             const { messages: rebuiltMessages } = await messageCompiler.compile({

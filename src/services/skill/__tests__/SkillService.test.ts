@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import * as crypto from "node:crypto";
+import * as path from "node:path";
 import * as fsPromises from "node:fs/promises";
 import * as constantsModule from "@/constants";
 import * as fsLibModule from "@/lib/fs";
@@ -10,16 +10,99 @@ import { SkillService } from "../SkillService";
 const mockFetchEvents = mock(() => Promise.resolve(new Set<NDKEvent>()));
 const mockFetchEvent = mock(() => Promise.resolve(null));
 
-const mockWriteFile = mock(() => Promise.resolve());
-const mockMkdir = mock(() => Promise.resolve());
-const mockAccess = mock(() => Promise.resolve());
-
-// Mock global fetch
 const originalFetch = globalThis.fetch;
 let mockFetch: ReturnType<typeof mock>;
 
+const files = new Map<string, Buffer>();
+const directories = new Set<string>();
+const AGENT_PUBKEY = "a".repeat(64);
+const PROJECT_DTAG = "TENEX-ff3ssq";
+const LOOKUP_CONTEXT = {
+    agentPubkey: AGENT_PUBKEY,
+    projectDTag: PROJECT_DTAG,
+};
+
+function normalizePath(target: string): string {
+    return path.resolve(target);
+}
+
+function ensureMockDirectory(target: string): void {
+    let current = normalizePath(target);
+    const parts = current.split(path.sep);
+    let built = current.startsWith(path.sep) ? path.sep : "";
+
+    for (const part of parts) {
+        if (!part) continue;
+        built = built === path.sep ? path.join(built, part) : path.join(built, part);
+        directories.add(normalizePath(built));
+    }
+}
+
+function seedFile(target: string, content: string): void {
+    const normalized = normalizePath(target);
+    ensureMockDirectory(path.dirname(normalized));
+    files.set(normalized, Buffer.from(content));
+}
+
+function createSkillDocument({
+    name,
+    description,
+    content,
+    metadata,
+}: {
+    name: string;
+    description: string;
+    content: string;
+    metadata?: Record<string, string>;
+}): string {
+    const lines = [
+        "---",
+        `name: ${JSON.stringify(name)}`,
+        `description: ${JSON.stringify(description)}`,
+    ];
+
+    if (metadata && Object.keys(metadata).length > 0) {
+        lines.push("metadata:");
+        for (const [key, value] of Object.entries(metadata)) {
+            lines.push(`  ${key}: ${JSON.stringify(value)}`);
+        }
+    }
+
+    lines.push("---", "", content);
+    return lines.join("\n");
+}
+
+function listImmediateChildren(dir: string): Array<{ name: string; isDirectory: boolean }> {
+    const normalizedDir = normalizePath(dir);
+    const children = new Map<string, boolean>();
+
+    for (const candidate of directories) {
+        if (candidate === normalizedDir) continue;
+        if (path.dirname(candidate) === normalizedDir) {
+            children.set(path.basename(candidate), true);
+        }
+    }
+
+    for (const candidate of files.keys()) {
+        if (path.dirname(candidate) === normalizedDir) {
+            if (!children.has(path.basename(candidate))) {
+                children.set(path.basename(candidate), false);
+            }
+        }
+    }
+
+    return Array.from(children.entries()).map(([name, isDirectory]) => ({
+        name,
+        isDirectory,
+    }));
+}
+
 beforeEach(() => {
     SkillService.resetInstance();
+    files.clear();
+    directories.clear();
+    ensureMockDirectory("/tmp/test-tenex/skills");
+
     mockFetch = mock(() =>
         Promise.resolve(
             new Response(Buffer.from("file content"), {
@@ -30,21 +113,68 @@ beforeEach(() => {
     );
     globalThis.fetch = mockFetch as unknown as typeof fetch;
 
-    mockFetchEvents.mockClear();
-    mockFetchEvent.mockClear();
-    mockWriteFile.mockClear();
-    mockMkdir.mockClear();
-    mockAccess.mockClear();
+    mockFetchEvents.mockReset();
+    mockFetchEvent.mockReset();
 
     SkillService.setNDKProviderForTesting(() => ({
         fetchEvents: mockFetchEvents,
         fetchEvent: mockFetchEvent,
     } as any));
+
     spyOn(constantsModule, "getTenexBasePath").mockReturnValue("/tmp/test-tenex");
-    spyOn(fsPromises, "writeFile").mockImplementation(mockWriteFile as any);
-    spyOn(fsPromises, "mkdir").mockImplementation(mockMkdir as any);
-    spyOn(fsPromises, "access").mockImplementation(mockAccess as any);
-    spyOn(fsLibModule, "ensureDirectory").mockResolvedValue();
+    spyOn(fsLibModule, "ensureDirectory").mockImplementation(async (target: string) => {
+        ensureMockDirectory(target);
+    });
+    spyOn(fsPromises, "writeFile").mockImplementation(async (target: fsPromises.PathLike, data: string | ArrayBufferView) => {
+        const normalized = normalizePath(String(target));
+        ensureMockDirectory(path.dirname(normalized));
+        files.set(
+            normalized,
+            Buffer.isBuffer(data) ? data : Buffer.from(data as string)
+        );
+    });
+    spyOn(fsPromises, "readFile").mockImplementation(async (target: fsPromises.PathLike, encoding?: any) => {
+        const normalized = normalizePath(String(target));
+        const file = files.get(normalized);
+        if (!file) {
+            throw new Error(`ENOENT: ${normalized}`);
+        }
+        return encoding === "utf-8" || encoding === "utf8" ? file.toString("utf-8") : file;
+    });
+    spyOn(fsPromises, "readdir").mockImplementation(async (target: fsPromises.PathLike, options?: any) => {
+        const normalized = normalizePath(String(target));
+        const children = listImmediateChildren(normalized);
+        if (options?.withFileTypes) {
+            return children.map((child) => ({
+                name: child.name,
+                isDirectory: () => child.isDirectory,
+                isFile: () => !child.isDirectory,
+            })) as any;
+        }
+        return children.map((child) => child.name) as any;
+    });
+    spyOn(fsPromises, "access").mockImplementation(async (target: fsPromises.PathLike) => {
+        const normalized = normalizePath(String(target));
+        if (!files.has(normalized) && !directories.has(normalized)) {
+            throw new Error(`ENOENT: ${normalized}`);
+        }
+    });
+    spyOn(fsPromises, "stat").mockImplementation(async (target: fsPromises.PathLike) => {
+        const normalized = normalizePath(String(target));
+        if (directories.has(normalized)) {
+            return {
+                isDirectory: () => true,
+                isFile: () => false,
+            } as any;
+        }
+        if (files.has(normalized)) {
+            return {
+                isDirectory: () => false,
+                isFile: () => true,
+            } as any;
+        }
+        throw new Error(`ENOENT: ${normalized}`);
+    });
 });
 
 afterEach(() => {
@@ -54,707 +184,314 @@ afterEach(() => {
 });
 
 describe("SkillService", () => {
-    describe("getInstance", () => {
-        it("should return the same instance", () => {
-            const instance1 = SkillService.getInstance();
-            const instance2 = SkillService.getInstance();
-            expect(instance1).toBe(instance2);
-        });
+    it("lists local skills from SKILL.md frontmatter and body", async () => {
+        seedFile(
+            "/tmp/test-tenex/skills/custom-id/SKILL.md",
+            createSkillDocument({
+                name: "custom-id",
+                description: "Frontmatter-backed local skill description",
+                content: "Local skill content",
+            })
+        );
+        seedFile("/tmp/test-tenex/skills/custom-id/helper.ts", "export const helper = true;");
+
+        const skills = await SkillService.getInstance().listAvailableSkills();
+
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("custom-id");
+        expect(skills[0].description).toBe("Frontmatter-backed local skill description");
+        expect(skills[0].content).toBe("Local skill content");
+        expect(skills[0].installedFiles.map((file) => file.relativePath)).toEqual(["helper.ts"]);
     });
 
-    describe("fetchSkills", () => {
-        it("should return empty result when no event IDs provided", async () => {
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills([]);
+    it("prefers project skills over global skills when identifiers conflict", async () => {
+        seedFile(
+            "/Users/pablofernandez/.agents/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "poster-kit",
+                description: "Legacy poster description",
+                content: "Legacy poster skill",
+            })
+        );
+        seedFile(
+            "/tmp/test-tenex/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "poster-kit",
+                description: "Global poster description",
+                content: "Global poster skill",
+            })
+        );
+        seedFile(
+            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "poster-kit",
+                description: "Project poster description",
+                content: "Project poster skill",
+            })
+        );
 
-            expect(result).toEqual({
-                skills: [],
-                content: "",
-            });
-            expect(mockFetchEvents).not.toHaveBeenCalled();
+        const skills = await SkillService.getInstance().listAvailableSkills({
+            projectDTag: PROJECT_DTAG,
         });
+        const result = await SkillService.getInstance().fetchSkills(
+            ["poster-kit"],
+            { projectDTag: PROJECT_DTAG }
+        );
 
-        it("should fetch and process skill events", async () => {
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789abcdef";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "This is skill content";
-            skillEvent.tags = [
-                ["title", "Test Skill"],
-                ["name", "test-skill"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789abcdef"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].content).toBe("This is skill content");
-            expect(result.skills[0].title).toBe("Test Skill");
-            expect(result.skills[0].name).toBe("test-skill");
-            expect(result.skills[0].shortId).toBe("skill1234567");
-            expect(result.content).toBe("This is skill content");
-        });
-
-        it("should filter out non-skill events", async () => {
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Valid skill";
-            skillEvent.tags = [];
-
-            const otherEvent = new NDKEvent();
-            otherEvent.id = "other123456789";
-            otherEvent.kind = 1; // Regular text note
-            otherEvent.content = "Not a skill";
-            otherEvent.tags = [];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent, otherEvent]));
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789", "other123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].content).toBe("Valid skill");
-        });
-
-        it("should concatenate multiple skill contents", async () => {
-            const skill1 = new NDKEvent();
-            skill1.id = "skill111111111";
-            skill1.kind = NDKKind.AgentSkill;
-            skill1.content = "First skill";
-            skill1.tags = [];
-
-            const skill2 = new NDKEvent();
-            skill2.id = "skill222222222";
-            skill2.kind = NDKKind.AgentSkill;
-            skill2.content = "Second skill";
-            skill2.tags = [];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skill1, skill2]));
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill111111111", "skill222222222"]);
-
-            expect(result.skills).toHaveLength(2);
-            expect(result.content).toContain("First skill");
-            expect(result.content).toContain("Second skill");
-            expect(result.content).toBe("First skill\n\nSecond skill");
-        });
-
-        it("should return empty result on fetch error", async () => {
-            mockFetchEvents.mockRejectedValueOnce(new Error("Network error"));
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123"]);
-
-            expect(result).toEqual({
-                skills: [],
-                content: "",
-            });
-        });
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("poster-kit");
+        expect(skills[0].content).toBe("Project poster skill");
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Project poster skill");
     });
 
-    describe("fetchSkill", () => {
-        it("should return null when event not found", async () => {
-            mockFetchEvents.mockResolvedValueOnce(new Set());
+    it("prefers agent skills over project and global skills when identifiers conflict", async () => {
+        seedFile(
+            "/Users/pablofernandez/.agents/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "poster-kit",
+                description: "Legacy poster description",
+                content: "Legacy poster skill",
+            })
+        );
+        seedFile(
+            "/tmp/test-tenex/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "poster-kit",
+                description: "Global poster description",
+                content: "Global poster skill",
+            })
+        );
+        seedFile(
+            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "poster-kit",
+                description: "Project poster description",
+                content: "Project poster skill",
+            })
+        );
+        seedFile(
+            "/tmp/test-tenex/home/aaaaaaaa/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "poster-kit",
+                description: "Agent poster description",
+                content: "Agent poster skill",
+            })
+        );
 
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkill("nonexistent");
+        const skills = await SkillService.getInstance().listAvailableSkills(LOOKUP_CONTEXT);
+        const result = await SkillService.getInstance().fetchSkills(
+            ["poster-kit"],
+            LOOKUP_CONTEXT
+        );
 
-            expect(result).toBeNull();
-        });
-
-        it("should return the skill event when found", async () => {
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill content";
-            skillEvent.tags = [];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkill("skill123");
-
-            expect(result).toBe(skillEvent);
-        });
-
-        it("should return null for non-skill events", async () => {
-            const otherEvent = new NDKEvent();
-            otherEvent.id = "other123";
-            otherEvent.kind = 1; // Regular text note
-            otherEvent.content = "Not a skill";
-            otherEvent.tags = [];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([otherEvent]));
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkill("other123");
-
-            expect(result).toBeNull();
-        });
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("poster-kit");
+        expect(skills[0].content).toBe("Agent poster skill");
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Agent poster skill");
     });
 
-    describe("file handling", () => {
-        it("should download and install files referenced in skill events", async () => {
-            // Create file metadata event (kind:1063)
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "scripts/helper.py"],
-                ["m", "text/x-python"],
-            ];
+    it("loads legacy ~/.agents skills when no higher-precedence copy exists", async () => {
+        seedFile(
+            "/Users/pablofernandez/.agents/skills/legacy-only/SKILL.md",
+            createSkillDocument({
+                name: "legacy-only",
+                description: "Legacy only description",
+                content: "Legacy only skill",
+            })
+        );
 
-            // Create skill event with reference to file
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with files";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
+        const skills = await SkillService.getInstance().listAvailableSkills(LOOKUP_CONTEXT);
+        const result = await SkillService.getInstance().fetchSkills(
+            ["legacy-only"],
+            LOOKUP_CONTEXT
+        );
 
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(true);
-            expect(result.skills[0].installedFiles[0].relativePath).toBe("scripts/helper.py");
-            expect(mockFetch).toHaveBeenCalledWith(
-                "https://blossom.example.com/abc123",
-                expect.any(Object)
-            );
-        });
-
-        it("should handle file download failures gracefully", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "scripts/helper.py"],
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with files";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-            mockFetch.mockResolvedValueOnce(
-                new Response(null, { status: 404, statusText: "Not Found" })
-            );
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("Failed to download");
-        });
-
-        it("should handle missing file metadata event", async () => {
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with files";
-            skillEvent.tags = [
-                ["e", "nonexistent-file"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(null);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("Could not fetch event");
-        });
-
-        it("should handle non-1063 events referenced by e-tags", async () => {
-            const nonFileEvent = new NDKEvent();
-            nonFileEvent.id = "event123456789";
-            nonFileEvent.kind = 1; // Not a file metadata event
-            nonFileEvent.content = "Some text";
-            nonFileEvent.tags = [];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill content";
-            skillEvent.tags = [
-                ["e", "event123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(nonFileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("not kind:1063");
-        });
-
-        it("should handle file metadata event missing required tags", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                // Missing url and name tags
-                ["m", "text/plain"],
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill content";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("Missing required tags");
-        });
+        expect(skills.map((skill) => skill.identifier)).toEqual(["legacy-only"]);
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Legacy only skill");
     });
 
-    describe("security: path traversal protection", () => {
-        it("should reject paths with ../ that escape skill directory", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "../../../etc/passwd"],
-            ];
+    it("prefers global skills over legacy ~/.agents skills when identifiers conflict", async () => {
+        seedFile(
+            "/Users/pablofernandez/.agents/skills/fallback-kit/SKILL.md",
+            createSkillDocument({
+                name: "fallback-kit",
+                description: "Legacy fallback description",
+                content: "Legacy fallback skill",
+            })
+        );
+        seedFile(
+            "/tmp/test-tenex/skills/fallback-kit/SKILL.md",
+            createSkillDocument({
+                name: "fallback-kit",
+                description: "Global fallback description",
+                content: "Global fallback skill",
+            })
+        );
 
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Malicious skill";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
+        const skills = await SkillService.getInstance().listAvailableSkills(LOOKUP_CONTEXT);
+        const result = await SkillService.getInstance().fetchSkills(
+            ["fallback-kit"],
+            LOOKUP_CONTEXT
+        );
 
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("Security violation");
-            expect(result.skills[0].installedFiles[0].error).toContain("escape skill directory");
-        });
-
-        it("should reject paths with encoded traversal like ../abc that still escape", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                // This could trick startsWith check: /skills/abc/../../../outside
-                ["name", "../../../outside/file.txt"],
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Malicious skill";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("Security violation");
-        });
-
-        it("should reject absolute paths", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "/etc/passwd"],
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Malicious skill";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("Security violation");
-        });
-
-        it("should allow valid nested paths", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "scripts/lib/helper.py"],
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Valid skill";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(true);
-            expect(result.skills[0].installedFiles[0].relativePath).toBe("scripts/lib/helper.py");
-        });
+        expect(skills.find((skill) => skill.identifier === "fallback-kit")?.content).toBe(
+            "Global fallback skill"
+        );
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Global fallback skill");
     });
 
-    describe("security: SHA-256 hash verification", () => {
-        it("should pass when SHA-256 hash matches", async () => {
-            const fileContent = "test file content";
-            const correctHash = crypto.createHash("sha256").update(fileContent).digest("hex");
+    it("treats missing project and agent skill directories as empty", async () => {
+        seedFile(
+            "/tmp/test-tenex/skills/global-only/SKILL.md",
+            createSkillDocument({
+                name: "global-only",
+                description: "Global only description",
+                content: "Global only skill",
+            })
+        );
 
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "script.py"],
-                ["x", correctHash],
-            ];
+        const skills = await SkillService.getInstance().listAvailableSkills(LOOKUP_CONTEXT);
+        const result = await SkillService.getInstance().fetchSkills(
+            ["global-only"],
+            LOOKUP_CONTEXT
+        );
 
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with verified file";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-            mockFetch.mockResolvedValueOnce(
-                new Response(Buffer.from(fileContent), {
-                    status: 200,
-                    statusText: "OK",
-                })
-            );
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(true);
-        });
-
-        it("should fail when SHA-256 hash does not match", async () => {
-            const fileContent = "actual content";
-            const wrongHash = crypto.createHash("sha256").update("different content").digest("hex");
-
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "script.py"],
-                ["x", wrongHash],
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with tampered file";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-            mockFetch.mockResolvedValueOnce(
-                new Response(Buffer.from(fileContent), {
-                    status: 200,
-                    statusText: "OK",
-                })
-            );
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("SHA-256 hash mismatch");
-        });
-
-        it("should handle case-insensitive hash comparison", async () => {
-            const fileContent = "test content";
-            const hash = crypto.createHash("sha256").update(fileContent).digest("hex");
-            // Use uppercase version
-            const upperHash = hash.toUpperCase();
-
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "script.py"],
-                ["x", upperHash],
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with file";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-            mockFetch.mockResolvedValueOnce(
-                new Response(Buffer.from(fileContent), {
-                    status: 200,
-                    statusText: "OK",
-                })
-            );
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(true);
-        });
-
-        it("should succeed without hash when x tag is not present", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/abc123"],
-                ["name", "script.py"],
-                // No x tag
-            ];
-
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill without hash";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
-
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
-
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(true);
-        });
+        expect(skills.map((skill) => skill.identifier)).toEqual(["global-only"]);
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Global only skill");
     });
 
-    describe("security: download size limit", () => {
-        it("should reject downloads exceeding 10MB via Content-Length header", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/large-file"],
-                ["name", "huge.bin"],
-            ];
+    it("hydrates remote skills into slugged local directories and loads them from disk", async () => {
+        const skillEvent = new NDKEvent();
+        skillEvent.id = "b".repeat(64);
+        skillEvent.kind = NDKKind.AgentSkill;
+        skillEvent.content = "Make a poster";
+        skillEvent.tags = [
+            ["title", "Make Poster"],
+            ["description", "Creates posters from structured inputs"],
+        ];
 
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with large file";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
+        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
 
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
+        const result = await SkillService.getInstance().fetchSkills(["b".repeat(64)]);
 
-            // Return response with Content-Length > 10MB
-            const headers = new Headers();
-            headers.set("Content-Length", String(11 * 1024 * 1024)); // 11MB
-            mockFetch.mockResolvedValueOnce(
-                new Response(null, {
-                    status: 200,
-                    statusText: "OK",
-                    headers,
-                })
-            );
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].identifier).toBe("make-poster");
+        expect(result.skills[0].name).toBe("Make Poster");
+        expect(result.skills[0].description).toBe("Creates posters from structured inputs");
+        expect(result.skills[0].content).toBe("Make a poster");
+        const storedSkillDocument = files
+            .get(normalizePath("/tmp/test-tenex/skills/make-poster/SKILL.md"))
+            ?.toString("utf-8");
+        expect(storedSkillDocument).toContain('name: "Make Poster"');
+        expect(storedSkillDocument).toContain(
+            'description: "Creates posters from structured inputs"'
+        );
+        expect(storedSkillDocument).toContain(`tenex-event-id: "${"b".repeat(64)}"`);
+        expect(storedSkillDocument).not.toContain("tenex-title");
+        expect(storedSkillDocument).not.toContain("tenex-hydrated-at");
+        expect(storedSkillDocument).toContain("Make a poster");
 
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
+        const listedSkills = await SkillService.getInstance().listAvailableSkills();
+        expect(listedSkills.map((skill) => skill.identifier)).toEqual(["make-poster"]);
+    });
 
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("File too large");
-            expect(result.skills[0].installedFiles[0].error).toContain("byte limit");
-        });
+    it("falls back to remote hydration when no scoped local match exists", async () => {
+        const skillEvent = new NDKEvent();
+        skillEvent.id = "e".repeat(64);
+        skillEvent.kind = NDKKind.AgentSkill;
+        skillEvent.content = "Remote scoped skill";
+        skillEvent.tags = [["title", "Remote Scoped"]];
 
-        it("should reject downloads exceeding 10MB during streaming", async () => {
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/large-file"],
-                ["name", "huge.bin"],
-            ];
+        seedFile(
+            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/local-only/SKILL.md",
+            createSkillDocument({
+                name: "local-only",
+                description: "Project only description",
+                content: "Project only skill",
+            })
+        );
 
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with large file";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
+        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
 
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
+        const result = await SkillService.getInstance().fetchSkills(
+            ["e".repeat(64)],
+            LOOKUP_CONTEXT
+        );
 
-            // Create a ReadableStream that yields chunks exceeding 10MB total
-            // No Content-Length header to bypass that check
-            let chunkCount = 0;
-            const chunkSize = 1024 * 1024; // 1MB chunks
-            const maxChunks = 12; // 12MB total, exceeds limit
-            const stream = new ReadableStream<Uint8Array>({
-                pull(controller) {
-                    if (chunkCount >= maxChunks) {
-                        controller.close();
-                        return;
-                    }
-                    chunkCount++;
-                    controller.enqueue(new Uint8Array(chunkSize).fill(0));
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].identifier).toBe("remote-scoped");
+        expect(result.skills[0].name).toBe("Remote Scoped");
+        expect(result.skills[0].content).toBe("Remote scoped skill");
+        const storedScopedSkillDocument = files
+            .get(normalizePath("/tmp/test-tenex/skills/remote-scoped/SKILL.md"))
+            ?.toString("utf-8");
+        expect(storedScopedSkillDocument).toContain('name: "Remote Scoped"');
+        expect(storedScopedSkillDocument).toContain('description: "Remote scoped skill"');
+        expect(storedScopedSkillDocument).toContain(`tenex-event-id: "${"e".repeat(64)}"`);
+        expect(storedScopedSkillDocument).not.toContain("tenex-title");
+        expect(storedScopedSkillDocument).not.toContain("tenex-hydrated-at");
+        expect(storedScopedSkillDocument).toContain("Remote scoped skill");
+    });
+
+    it("reuses already-hydrated local skill content instead of re-fetching the remote event", async () => {
+        seedFile(
+            "/tmp/test-tenex/skills/poster-kit/SKILL.md",
+            createSkillDocument({
+                name: "Poster Kit",
+                description: "Poster skill description",
+                content: "Locally edited content",
+                metadata: {
+                    "tenex-event-id": "c".repeat(64),
                 },
-            });
+            })
+        );
 
-            mockFetch.mockResolvedValueOnce(
-                new Response(stream, {
-                    status: 200,
-                    statusText: "OK",
-                })
-            );
+        const result = await SkillService.getInstance().fetchSkills(["c".repeat(64)]);
 
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].identifier).toBe("poster-kit");
+        expect(result.skills[0].name).toBe("Poster Kit");
+        expect(result.skills[0].content).toBe("Locally edited content");
+        expect(mockFetchEvents).not.toHaveBeenCalled();
+    });
 
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(false);
-            expect(result.skills[0].installedFiles[0].error).toContain("File too large");
-            expect(result.skills[0].installedFiles[0].error).toContain("exceeded");
-        });
+    it("falls back to the short event id when a remote skill has no title, name, or d-tag", async () => {
+        const skillEvent = new NDKEvent();
+        skillEvent.id = "d".repeat(64);
+        skillEvent.kind = NDKKind.AgentSkill;
+        skillEvent.content = "Unnamed remote skill";
+        skillEvent.tags = [];
 
-        it("should allow downloads under 10MB", async () => {
-            const smallContent = Buffer.alloc(1024, "x"); // 1KB
+        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
 
-            const fileEvent = new NDKEvent();
-            fileEvent.id = "file123456789";
-            fileEvent.kind = 1063;
-            fileEvent.content = "";
-            fileEvent.tags = [
-                ["url", "https://blossom.example.com/small-file"],
-                ["name", "small.txt"],
-            ];
+        const result = await SkillService.getInstance().fetchSkills(["d".repeat(64)]);
 
-            const skillEvent = new NDKEvent();
-            skillEvent.id = "skill123456789";
-            skillEvent.kind = NDKKind.AgentSkill;
-            skillEvent.content = "Skill with small file";
-            skillEvent.tags = [
-                ["e", "file123456789"],
-            ];
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].identifier).toBe("dddddddddddd");
+    });
 
-            mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-            mockFetchEvent.mockResolvedValueOnce(fileEvent);
-            mockFetch.mockResolvedValueOnce(
-                new Response(smallContent, {
-                    status: 200,
-                    statusText: "OK",
-                })
-            );
+    it("fetchSkill returns only kind:4202 skill events", async () => {
+        const skillEvent = new NDKEvent();
+        skillEvent.id = "skill123";
+        skillEvent.kind = NDKKind.AgentSkill;
+        skillEvent.content = "Skill content";
+        skillEvent.tags = [];
 
-            const service = SkillService.getInstance();
-            const result = await service.fetchSkills(["skill123456789"]);
+        const otherEvent = new NDKEvent();
+        otherEvent.id = "other123";
+        otherEvent.kind = 1;
+        otherEvent.content = "Not a skill";
+        otherEvent.tags = [];
 
-            expect(result.skills).toHaveLength(1);
-            expect(result.skills[0].installedFiles).toHaveLength(1);
-            expect(result.skills[0].installedFiles[0].success).toBe(true);
-        });
+        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent, otherEvent]));
+
+        const result = await SkillService.getInstance().fetchSkill("skill123");
+
+        expect(result).toBe(skillEvent);
     });
 });

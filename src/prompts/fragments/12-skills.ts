@@ -4,7 +4,7 @@ import type { PromptFragment } from "../core/types";
 interface SkillsArgs {
     /** Legacy: concatenated skill content (for backward compatibility) */
     skillContent?: string;
-    /** Individual skill data with title, content, and files */
+    /** Individual skill data with name, content, and files */
     skills?: SkillData[];
 }
 
@@ -20,21 +20,17 @@ function escapeAttrValue(value: string): string {
 }
 
 /**
- * Render a single skill with its title, content, and attached files.
- * Title is escaped to prevent XML injection.
+ * Render a single skill with its name, content, and attached files.
  */
 export function renderSkill(skill: SkillData): string {
     const parts: string[] = [];
 
     // Build attributes
     const attrs: string[] = [];
-    if (skill.title) {
-        attrs.push(`title="${escapeAttrValue(skill.title)}"`);
-    }
     if (skill.name) {
         attrs.push(`name="${escapeAttrValue(skill.name)}"`);
     }
-    attrs.push(`id="${skill.shortId}"`);
+    attrs.push(`id="${escapeAttrValue(skill.identifier)}"`);
 
     const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
 
@@ -109,11 +105,10 @@ ${skillContent}
             for (const skill of a.skills) {
                 if (typeof skill !== "object" || skill === null) return false;
                 const s = skill as Record<string, unknown>;
-                // content and shortId are required
+                // content, identifier, and installedFiles are required
                 if (typeof s.content !== "string") return false;
-                if (typeof s.shortId !== "string") return false;
-                // title and name are optional
-                if (s.title !== undefined && typeof s.title !== "string") return false;
+                if (typeof s.identifier !== "string") return false;
+                // name is optional
                 if (s.name !== undefined && typeof s.name !== "string") return false;
                 // installedFiles must be an array
                 if (!Array.isArray(s.installedFiles)) return false;

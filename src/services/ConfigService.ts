@@ -53,6 +53,8 @@ export type TenexSubdir =
     | "conversations"
     | "data"
     | "projects"
+    | "skills"
+    | "telegram/media"
     | "tool-messages";
 
 /**
@@ -81,6 +83,10 @@ export class ConfigService {
 
     getGlobalPath(): string {
         return this.getConfigPath();
+    }
+
+    getLegacyAgentsSkillsPath(): string {
+        return path.join(homedir(), ".agents", "skills");
     }
 
     getProjectPath(projectPath: string): string {

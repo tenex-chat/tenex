@@ -28,8 +28,8 @@ export interface SkillFileInfo {
  * Result of downloading and installing a skill file
  */
 export interface SkillFileInstallResult {
-    /** Event ID of the source kind:1063 event */
-    eventId: string;
+    /** Event ID of the source kind:1063 event, when available */
+    eventId?: string;
     /** Relative path within the skill directory */
     relativePath: string;
     /** Absolute path where the file was installed */
@@ -41,19 +41,35 @@ export interface SkillFileInstallResult {
 }
 
 /**
- * Individual skill data with content, title, and attached files
+ * Context used when resolving the effective local skill set.
+ *
+ * Resolution precedence is:
+ * 1. agent home (`$TENEX_BASE_DIR/home/<agent-short-pubkey>/skills`)
+ * 2. project metadata (`$TENEX_BASE_DIR/projects/<project-dTag>/skills`)
+ * 3. global (`$TENEX_BASE_DIR/skills`)
+ * 4. legacy shared skills (`~/.agents/skills`)
+ */
+export interface SkillLookupContext {
+    /** Agent pubkey whose home-scoped skills should be considered */
+    agentPubkey?: string;
+    /** Project d-tag whose project-scoped skills should be considered */
+    projectDTag?: string;
+}
+
+/**
+ * Individual skill data with content, name, and attached files
  */
 export interface SkillData {
-    /** The canonical Nostr event ID of this skill */
-    eventId: string;
+    /** Local authoritative skill ID (directory name in the effective local skill set) */
+    identifier: string;
+    /** Canonical Nostr event ID when the skill was hydrated from Nostr */
+    eventId?: string;
+    /** Short description from SKILL.md frontmatter, when available */
+    description?: string;
     /** The skill content/instructions */
     content: string;
-    /** The skill title (from "title" tag) */
-    title?: string;
-    /** The skill name/identifier (from "name" tag) */
+    /** The skill name/label from SKILL.md frontmatter */
     name?: string;
-    /** Short ID for directory naming (first 12 chars of event ID) */
-    shortId: string;
     /** List of installed files for this skill */
     installedFiles: SkillFileInstallResult[];
 }

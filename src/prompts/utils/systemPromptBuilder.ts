@@ -355,11 +355,14 @@ function addAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     availableAgents: AgentInstance[],
-    projectManagerPubkey?: string
+    projectManagerPubkey?: string,
+    projectDTag?: string
 ): void {
     // Add available nudges and skills for delegation (priority 13, before available-agents)
-    // Fragment reads from NudgeSkillWhitelistService directly; returns "" when none available.
-    builder.add("available-nudges-and-skills", {});
+    builder.add("available-nudges-and-skills", {
+        agentPubkey: agent.pubkey,
+        projectDTag,
+    });
 
     // Add available agents for delegations
     builder.add("available-agents", {
@@ -784,11 +787,13 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     }
 
     // Add agent-specific fragments
+    const projectDTag = project.dTag || project.tagValue("d") || undefined;
     addAgentFragments(
         systemPromptBuilder,
         agentForFragments,
         availableAgents,
-        options.projectManagerPubkey
+        options.projectManagerPubkey,
+        projectDTag
     );
 
     // Build and return the complete prompt with all fragments

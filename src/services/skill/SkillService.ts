@@ -1,29 +1,70 @@
+import * as crypto from "node:crypto";
+import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
+import { getAgentHomeDirectory } from "@/lib/agent-home";
+import { ensureDirectory } from "@/lib/fs";
+import { slugifyIdentifier } from "@/lib/string";
 import { getNDK } from "@/nostr";
 import { NDKKind } from "@/nostr/kinds";
-import { getTenexBasePath } from "@/constants";
-import { ensureDirectory } from "@/lib/fs";
+import { config } from "@/services/ConfigService";
+import { NudgeSkillWhitelistService } from "@/services/nudge/NudgeWhitelistService";
+import type {
+    SkillData,
+    SkillFileInfo,
+    SkillFileInstallResult,
+    SkillLookupContext,
+    SkillResult,
+} from "./types";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-import type { SkillResult, SkillData, SkillFileInfo, SkillFileInstallResult } from "./types";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { shortenEventId } from "@/utils/conversation-id";
-import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
 
 const tracer = trace.getTracer("tenex.skill-service");
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
-/** Maximum file download size: 10MB */
 const MAX_DOWNLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+const SKILL_CONTENT_FILENAME = "SKILL.md";
+const FULL_EVENT_ID_REGEX = /^[0-9a-f]{64}$/;
+const FRONTMATTER_DELIMITER = "---";
+const FRONTMATTER_METADATA_FIELD = "metadata";
+const TENEX_METADATA_EVENT_ID_KEY = "tenex-event-id";
+
+interface StoredSkillMetadata {
+    eventId?: string;
+    name?: string;
+    description?: string;
+}
+
+interface ParsedSkillDocument {
+    content: string;
+    metadata?: StoredSkillMetadata;
+}
+
+interface LocalSkillRecord {
+    id: string;
+    dir: string;
+    scope: SkillStoreScope;
+    metadata?: StoredSkillMetadata;
+}
+
+type SkillStoreScope = "agent" | "project" | "global" | "legacy-agents";
+
+interface SkillStoreDirectory {
+    dir: string;
+    scope: SkillStoreScope;
+}
 
 /**
- * Service for fetching and processing Agent Skill events (kind:4202)
- * Single Responsibility: Retrieve skill content, download attached files,
- * and prepare for system prompt injection.
+ * Service for resolving the effective local skill set across agent, project,
+ * global directories, plus the shared ~/.agents fallback.
  *
- * Skills are stored in .tenex/skills/<short-id>/ directory structure.
+ * Remote kind:4202 skills still hydrate into the global store at
+ * $TENEX_BASE_DIR/skills/<id>/SKILL.md.
+ *
+ * When the same local skill ID exists in multiple scopes, precedence is:
+ * agent > project > global > ~/.agents.
  */
 export class SkillService {
     private static instance: SkillService;
@@ -55,266 +96,712 @@ export class SkillService {
         SkillService.instance = undefined as unknown as SkillService;
     }
 
-    private getNDK() {
+    private getNDK(): ReturnType<typeof getNDK> {
         return SkillService.ndkProvider();
     }
 
-    /**
-     * Get the base directory for skill files
-     * @returns Path to .tenex/skills/
-     */
-    private async getSkillsBaseDir(): Promise<string> {
-        const basePath = getTenexBasePath();
-        const skillsDir = path.join(basePath, "skills");
-        await ensureDirectory(skillsDir);
+    private async getGlobalSkillsBaseDir(ensureExists = true): Promise<string> {
+        const skillsDir = config.getConfigPath("skills");
+        if (ensureExists) {
+            await ensureDirectory(skillsDir);
+        }
         return skillsDir;
     }
 
-    /**
-     * Get the directory for a specific skill
-     * @param shortId Short event ID (first 12 chars)
-     * @returns Path to .tenex/skills/<short-id>/
-     */
-    private async getSkillDir(shortId: string): Promise<string> {
+    private async getProjectSkillsBaseDir(
+        projectDTag: string,
+        ensureExists = false
+    ): Promise<string> {
+        const skillsDir = path.join(config.getConfigPath("projects"), projectDTag, "skills");
+        if (ensureExists) {
+            await ensureDirectory(skillsDir);
+        }
+        return skillsDir;
+    }
+
+    private async getAgentSkillsBaseDir(
+        agentPubkey: string,
+        ensureExists = false
+    ): Promise<string> {
+        const skillsDir = path.join(getAgentHomeDirectory(agentPubkey), "skills");
+        if (ensureExists) {
+            await ensureDirectory(skillsDir);
+        }
+        return skillsDir;
+    }
+
+    private async getLegacyAgentsSkillsBaseDir(ensureExists = false): Promise<string> {
+        const skillsDir = config.getLegacyAgentsSkillsPath();
+        if (ensureExists) {
+            await ensureDirectory(skillsDir);
+        }
+        return skillsDir;
+    }
+
+    private async getSkillsBaseDir(): Promise<string> {
+        return this.getGlobalSkillsBaseDir(true);
+    }
+
+    private async getSkillDir(skillId: string, ensureExists = true): Promise<string> {
         const baseDir = await this.getSkillsBaseDir();
-        const skillDir = path.join(baseDir, shortId);
-        await ensureDirectory(skillDir);
+        const skillDir = path.join(baseDir, skillId);
+        if (ensureExists) {
+            await ensureDirectory(skillDir);
+        }
         return skillDir;
     }
 
-    /**
-     * Fetch skill events by IDs and process their content and attached files.
-     *
-     * @param eventIds Array of skill event IDs to fetch
-     * @returns SkillResult with skills data and concatenated content
-     */
-    async fetchSkills(eventIds: string[]): Promise<SkillResult> {
-        const emptyResult: SkillResult = {
-            skills: [],
-            content: "",
-        };
+    private async getLookupDirectories(
+        lookupContext: SkillLookupContext = {}
+    ): Promise<SkillStoreDirectory[]> {
+        const directories: SkillStoreDirectory[] = [];
 
-        if (eventIds.length === 0) {
-            return emptyResult;
+        if (lookupContext.agentPubkey) {
+            directories.push({
+                scope: "agent",
+                dir: await this.getAgentSkillsBaseDir(lookupContext.agentPubkey),
+            });
         }
 
-        const span = tracer.startSpan("tenex.skill.fetch_skills", {
-            attributes: {
-                "skill.requested_count": eventIds.length,
-            },
-        }, otelContext.active());
+        if (lookupContext.projectDTag) {
+            directories.push({
+                scope: "project",
+                dir: await this.getProjectSkillsBaseDir(lookupContext.projectDTag),
+            });
+        }
 
-        return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
-            try {
-                const ndk = this.getNDK();
-                const skillEvents = await ndk.fetchEvents({
-                    ids: eventIds,
-                });
+        directories.push({
+            scope: "global",
+            dir: await this.getGlobalSkillsBaseDir(true),
+        });
 
-                const skills = Array.from(skillEvents);
+        directories.push({
+            scope: "legacy-agents",
+            dir: await this.getLegacyAgentsSkillsBaseDir(false),
+        });
 
-                // Filter to only kind:4202 events
-                const validSkills = skills.filter((event) => event.kind === NDKKind.AgentSkill);
+        return directories;
+    }
 
-                // Process each skill and its attached files
-                const skillDataArray: SkillData[] = [];
-
-                for (const skill of validSkills) {
-                    const skillData = await this.processSkillEvent(skill);
-                    if (skillData) {
-                        skillDataArray.push(skillData);
-                    }
-                }
-
-                // Concatenate content for backward compatibility
-                const concatenated = skillDataArray
-                    .map((data) => data.content)
-                    .filter((content) => content.length > 0)
-                    .join("\n\n");
-
-                const skillTitles = skillDataArray
-                    .map((s) => s.title || s.name || "untitled")
-                    .join(", ");
-
-                span.setAttributes({
-                    "skill.fetched_count": validSkills.length,
-                    "skill.content_length": concatenated.length,
-                    "skill.titles": skillTitles,
-                    "skill.total_files": skillDataArray.reduce(
-                        (acc, s) => acc + s.installedFiles.length,
-                        0
-                    ),
-                });
-
-                span.setStatus({ code: SpanStatusCode.OK });
-                span.end();
-
-                return {
-                    skills: skillDataArray,
-                    content: concatenated,
-                };
-            } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({
-                    code: SpanStatusCode.ERROR,
-                    message: (error as Error).message,
-                });
-                span.end();
-                logger.error("[SkillService] Failed to fetch skills", { error });
-                return emptyResult;
+    private isMissingDirectoryError(error: unknown): boolean {
+        if (typeof error === "object" && error !== null) {
+            const code = (error as { code?: unknown }).code;
+            if (code === "ENOENT") {
+                return true;
             }
+        }
+
+        return error instanceof Error && error.message.includes("ENOENT");
+    }
+
+    private getSkillContentPath(skillDir: string): string {
+        return path.join(skillDir, SKILL_CONTENT_FILENAME);
+    }
+
+    private normalizeStoredSkillMetadata(
+        metadata: StoredSkillMetadata | undefined
+    ): StoredSkillMetadata | undefined {
+        if (!metadata) {
+            return undefined;
+        }
+
+        const normalized: StoredSkillMetadata = {
+            eventId: metadata.eventId?.trim() || undefined,
+            name: metadata.name?.trim() || undefined,
+            description: metadata.description?.trim() || undefined,
+        };
+
+        return Object.values(normalized).some((value) => value !== undefined)
+            ? normalized
+            : undefined;
+    }
+
+    private countIndent(line: string): number {
+        return line.length - line.trimStart().length;
+    }
+
+    private stripInlineYamlComment(value: string): string {
+        let inSingleQuotes = false;
+        let inDoubleQuotes = false;
+
+        for (let index = 0; index < value.length; index += 1) {
+            const character = value[index];
+            const previousCharacter = index > 0 ? value[index - 1] : "";
+
+            if (character === "'" && !inDoubleQuotes) {
+                inSingleQuotes = !inSingleQuotes;
+                continue;
+            }
+
+            if (character === "\"" && !inSingleQuotes && previousCharacter !== "\\") {
+                inDoubleQuotes = !inDoubleQuotes;
+                continue;
+            }
+
+            if (
+                character === "#" &&
+                !inSingleQuotes &&
+                !inDoubleQuotes &&
+                (index === 0 || /\s/.test(previousCharacter))
+            ) {
+                return value.slice(0, index).trimEnd();
+            }
+        }
+
+        return value;
+    }
+
+    private parseYamlScalarValue(value: string): string {
+        const trimmedValue = this.stripInlineYamlComment(value.trim());
+
+        if (!trimmedValue) {
+            return "";
+        }
+
+        if (
+            trimmedValue.length >= 2 &&
+            trimmedValue.startsWith("\"") &&
+            trimmedValue.endsWith("\"")
+        ) {
+            try {
+                return JSON.parse(trimmedValue) as string;
+            } catch {
+                return trimmedValue.slice(1, -1);
+            }
+        }
+
+        if (
+            trimmedValue.length >= 2 &&
+            trimmedValue.startsWith("'") &&
+            trimmedValue.endsWith("'")
+        ) {
+            return trimmedValue.slice(1, -1).replace(/''/g, "'");
+        }
+
+        return trimmedValue;
+    }
+
+    private readYamlValue(
+        lines: string[],
+        startIndex: number,
+        parentIndent: number,
+        rawValue: string
+    ): { nextIndex: number; value: string } {
+        const trimmedValue = rawValue.trim();
+        if (trimmedValue !== "|" && trimmedValue !== ">") {
+            return {
+                nextIndex: startIndex + 1,
+                value: this.parseYamlScalarValue(rawValue),
+            };
+        }
+
+        const collectedLines: string[] = [];
+        let lineIndex = startIndex + 1;
+
+        while (lineIndex < lines.length) {
+            const nextLine = lines[lineIndex];
+            const nextIndent = this.countIndent(nextLine);
+
+            if (nextLine.trim().length === 0) {
+                collectedLines.push("");
+                lineIndex += 1;
+                continue;
+            }
+
+            if (nextIndent <= parentIndent) {
+                break;
+            }
+
+            const contentStart = Math.min(nextLine.length, parentIndent + 2);
+            collectedLines.push(nextLine.slice(contentStart));
+            lineIndex += 1;
+        }
+
+        return {
+            nextIndex: lineIndex,
+            value:
+                trimmedValue === ">"
+                    ? collectedLines.join(" ").trim()
+                    : collectedLines.join("\n").trim(),
+        };
+    }
+
+    private parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMetadata | undefined {
+        const lines = frontmatterBlock.replace(/\r\n/g, "\n").split("\n");
+        const metadataValues: Record<string, string> = {};
+        let name: string | undefined;
+        let description: string | undefined;
+        let lineIndex = 0;
+
+        while (lineIndex < lines.length) {
+            const line = lines[lineIndex];
+            const trimmedLine = line.trim();
+
+            if (!trimmedLine || trimmedLine.startsWith("#")) {
+                lineIndex += 1;
+                continue;
+            }
+
+            const indent = this.countIndent(line);
+            if (indent > 0) {
+                lineIndex += 1;
+                continue;
+            }
+
+            const separatorIndex = line.indexOf(":");
+            if (separatorIndex <= 0) {
+                lineIndex += 1;
+                continue;
+            }
+
+            const key = line.slice(0, separatorIndex).trim();
+            const rawValue = line.slice(separatorIndex + 1);
+
+            if (key === FRONTMATTER_METADATA_FIELD && rawValue.trim().length === 0) {
+                lineIndex += 1;
+                while (lineIndex < lines.length) {
+                    const nestedLine = lines[lineIndex];
+                    const nestedTrimmedLine = nestedLine.trim();
+
+                    if (!nestedTrimmedLine || nestedTrimmedLine.startsWith("#")) {
+                        lineIndex += 1;
+                        continue;
+                    }
+
+                    const nestedIndent = this.countIndent(nestedLine);
+                    if (nestedIndent <= indent) {
+                        break;
+                    }
+
+                    const nestedSeparatorIndex = nestedTrimmedLine.indexOf(":");
+                    if (nestedSeparatorIndex <= 0) {
+                        lineIndex += 1;
+                        continue;
+                    }
+
+                    const nestedKey = nestedTrimmedLine.slice(0, nestedSeparatorIndex).trim();
+                    const nestedRawValue = nestedTrimmedLine.slice(nestedSeparatorIndex + 1);
+                    const nestedValue = this.readYamlValue(
+                        lines,
+                        lineIndex,
+                        nestedIndent,
+                        nestedRawValue
+                    );
+                    metadataValues[nestedKey] = nestedValue.value;
+                    lineIndex = nestedValue.nextIndex;
+                }
+                continue;
+            }
+
+            const parsedValue = this.readYamlValue(lines, lineIndex, indent, rawValue);
+            if (key === "name" && parsedValue.value) {
+                name = parsedValue.value;
+            }
+            if (key === "description" && parsedValue.value) {
+                description = parsedValue.value;
+            }
+            lineIndex = parsedValue.nextIndex;
+        }
+
+        return this.normalizeStoredSkillMetadata({
+            eventId: metadataValues[TENEX_METADATA_EVENT_ID_KEY],
+            name,
+            description,
         });
     }
 
-    /**
-     * Process a single skill event: extract content, metadata, and download attached files.
-     *
-     * @param event The skill event (kind:4202)
-     * @returns SkillData or null if invalid
-     */
-    private async processSkillEvent(event: NDKEvent): Promise<SkillData | null> {
-        const content = event.content.trim();
-        const dTag = event.tagValue("d") || undefined;
-        const title = event.tagValue("title") || undefined;
-        const name = event.tagValue("name") || undefined;
-        const description = event.tagValue("description") || undefined;
-        const shortId = shortenEventId(event.id);
-        const identifier = assignCapabilityIdentifiers([
-            {
-                eventId: event.id,
-                dTag,
-                name,
-                title,
-            },
-        ]).get(event.id)?.identifier;
+    private parseSkillDocument(rawContent: string): ParsedSkillDocument {
+        const normalizedContent = rawContent.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
 
-        // Extract e-tags that reference kind:1063 (NIP-94 file metadata) events
-        const fileETags = this.extractFileETags(event);
+        if (!normalizedContent.startsWith(`${FRONTMATTER_DELIMITER}\n`)) {
+            return {
+                content: normalizedContent.trim(),
+            };
+        }
 
-        // Download and install attached files
-        const installedFiles = await this.installSkillFiles(fileETags, shortId);
+        const lines = normalizedContent.split("\n");
+        const closingDelimiterIndex = lines.findIndex(
+            (line, index) => index > 0 && line.trim() === FRONTMATTER_DELIMITER
+        );
 
-        // Write skill content to SKILL.md and metadata to skill.json
-        const skillDir = await this.getSkillDir(shortId);
-        const skillMdPath = path.join(skillDir, "SKILL.md");
-        await fs.writeFile(skillMdPath, content);
+        if (closingDelimiterIndex === -1) {
+            return {
+                content: normalizedContent.trim(),
+            };
+        }
 
-        const metadataPath = path.join(skillDir, `${shortId}.json`);
-        await fs.writeFile(metadataPath, JSON.stringify({ eventId: event.id, description }, null, 2));
+        const frontmatterBlock = lines.slice(1, closingDelimiterIndex).join("\n");
+        const body = lines.slice(closingDelimiterIndex + 1).join("\n").trim();
+        const metadata = this.parseSkillFrontmatter(frontmatterBlock);
 
         return {
-            eventId: event.id,
-            identifier,
-            content,
-            title,
-            name,
-            shortId,
-            installedFiles,
+            content: body,
+            metadata,
         };
     }
 
-    /**
-     * Extract e-tags from a skill event that reference kind:1063 file metadata events.
-     * Format: ["e", "<event-id>", "<relay-url>?"]
-     *
-     * NOTE: Relay hints (tag[2]) are parsed but not currently used. NDK's fetchEvent
-     * handles relay discovery automatically through our connected relay pool. Adding
-     * explicit relay hints would require significant refactoring and the current approach
-     * works well for events that are available on commonly-connected relays.
-     *
-     * @param event The skill event
-     * @returns Array of event IDs to fetch
-     */
+    private formatYamlScalar(value: string): string {
+        return JSON.stringify(value);
+    }
+
+    private serializeSkillDocument(content: string, metadata: StoredSkillMetadata): string {
+        const lines = [
+            FRONTMATTER_DELIMITER,
+            `name: ${this.formatYamlScalar(metadata.name ?? "skill")}`,
+            `description: ${this.formatYamlScalar(metadata.description ?? "")}`,
+        ];
+
+        const metadataEntries = [[TENEX_METADATA_EVENT_ID_KEY, metadata.eventId]].filter(
+            (entry): entry is [string, string] => Boolean(entry[1])
+        );
+
+        if (metadataEntries.length > 0) {
+            lines.push(`${FRONTMATTER_METADATA_FIELD}:`);
+            for (const [key, value] of metadataEntries) {
+                lines.push(`  ${key}: ${this.formatYamlScalar(value)}`);
+            }
+        }
+
+        return `${lines.join("\n")}\n${FRONTMATTER_DELIMITER}\n\n${content.trim()}`;
+    }
+
+    private async readSkillDocument(skillDir: string): Promise<ParsedSkillDocument | null> {
+        try {
+            const raw = await fs.readFile(this.getSkillContentPath(skillDir), "utf-8");
+            return this.parseSkillDocument(raw);
+        } catch {
+            return null;
+        }
+    }
+
+    private async readSkillMetadata(skillDir: string): Promise<StoredSkillMetadata | undefined> {
+        const document = await this.readSkillDocument(skillDir);
+        return document?.metadata;
+    }
+
+    private async listLocalSkillRecordsInDirectory(
+        directory: SkillStoreDirectory
+    ): Promise<LocalSkillRecord[]> {
+        let entries: Dirent[];
+        try {
+            entries = await fs.readdir(directory.dir, { withFileTypes: true });
+        } catch (error) {
+            if (this.isMissingDirectoryError(error)) {
+                return [];
+            }
+            throw error;
+        }
+
+        const records: LocalSkillRecord[] = [];
+
+        for (const entry of entries) {
+            if (!entry.isDirectory()) {
+                continue;
+            }
+
+            const skillDir = path.join(directory.dir, entry.name);
+            try {
+                await fs.access(this.getSkillContentPath(skillDir));
+            } catch {
+                continue;
+            }
+
+            records.push({
+                id: entry.name,
+                dir: skillDir,
+                scope: directory.scope,
+                metadata: await this.readSkillMetadata(skillDir),
+            });
+        }
+
+        return records.sort((a, b) => a.id.localeCompare(b.id));
+    }
+
+    private async listAllLocalSkillRecords(
+        lookupContext: SkillLookupContext = {}
+    ): Promise<LocalSkillRecord[]> {
+        const records: LocalSkillRecord[] = [];
+        const directories = await this.getLookupDirectories(lookupContext);
+
+        for (const directory of directories) {
+            records.push(...await this.listLocalSkillRecordsInDirectory(directory));
+        }
+
+        return records;
+    }
+
+    private async listVisibleLocalSkillRecords(
+        lookupContext: SkillLookupContext = {}
+    ): Promise<LocalSkillRecord[]> {
+        const visibleById = new Map<string, LocalSkillRecord>();
+        const records = await this.listAllLocalSkillRecords(lookupContext);
+
+        for (const record of records) {
+            if (!visibleById.has(record.id)) {
+                visibleById.set(record.id, record);
+            }
+        }
+
+        return Array.from(visibleById.values()).sort((a, b) => a.id.localeCompare(b.id));
+    }
+
+    private async findLocalSkillRecordById(
+        skillId: string,
+        lookupContext: SkillLookupContext = {}
+    ): Promise<LocalSkillRecord | null> {
+        const trimmedSkillId = skillId.trim();
+        if (!trimmedSkillId) {
+            return null;
+        }
+
+        const directories = await this.getLookupDirectories(lookupContext);
+
+        for (const directory of directories) {
+            const skillDir = path.join(directory.dir, trimmedSkillId);
+            try {
+                await fs.access(this.getSkillContentPath(skillDir));
+                return {
+                    id: trimmedSkillId,
+                    dir: skillDir,
+                    scope: directory.scope,
+                    metadata: await this.readSkillMetadata(skillDir),
+                };
+            } catch {
+                continue;
+            }
+        }
+
+        return null;
+    }
+
+    private async listLocalSkillFiles(
+        skillDir: string,
+        sourceEventId?: string,
+        currentDir = skillDir
+    ): Promise<SkillFileInstallResult[]> {
+        const entries = await fs.readdir(currentDir, { withFileTypes: true });
+        const files: SkillFileInstallResult[] = [];
+
+        for (const entry of entries) {
+            const entryPath = path.join(currentDir, entry.name);
+            const relativePath = path.relative(skillDir, entryPath);
+
+            if (entry.isDirectory()) {
+                files.push(...await this.listLocalSkillFiles(skillDir, sourceEventId, entryPath));
+                continue;
+            }
+
+            if (
+                relativePath === SKILL_CONTENT_FILENAME
+            ) {
+                continue;
+            }
+
+            files.push({
+                eventId: sourceEventId,
+                relativePath,
+                absolutePath: entryPath,
+                success: true,
+            });
+        }
+
+        return files;
+    }
+
+    private mergeInstalledFiles(
+        localFiles: SkillFileInstallResult[],
+        hydrationFiles: SkillFileInstallResult[]
+    ): SkillFileInstallResult[] {
+        const merged = new Map<string, SkillFileInstallResult>();
+
+        for (const file of localFiles) {
+            merged.set(file.relativePath, file);
+        }
+
+        for (const file of hydrationFiles) {
+            merged.set(file.relativePath, file);
+        }
+
+        return Array.from(merged.values());
+    }
+
+    private async loadLocalSkillRecord(record: LocalSkillRecord): Promise<SkillData | null> {
+        const skillDir = record.dir;
+
+        try {
+            const skillDocument = await this.readSkillDocument(skillDir);
+            if (!skillDocument) {
+                return null;
+            }
+            const metadata = record.metadata ?? skillDocument.metadata;
+            const whitelistedDescription = metadata?.eventId
+                ? this.getWhitelistedSkillDescription(metadata.eventId)
+                : undefined;
+            const description = whitelistedDescription ?? metadata?.description;
+            const installedFiles = await this.listLocalSkillFiles(skillDir, metadata?.eventId);
+
+            return {
+                identifier: record.id,
+                eventId: metadata?.eventId,
+                description,
+                content: skillDocument.content,
+                name: metadata?.name,
+                installedFiles,
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    private async loadLocalSkillById(
+        skillId: string,
+        lookupContext: SkillLookupContext = {}
+    ): Promise<SkillData | null> {
+        const record = await this.findLocalSkillRecordById(skillId, lookupContext);
+        if (!record) {
+            return null;
+        }
+
+        return this.loadLocalSkillRecord(record);
+    }
+
+    private async findLocalSkillBySourceIdentifier(
+        identifier: string,
+        lookupContext: SkillLookupContext = {}
+    ): Promise<SkillData | null> {
+        const normalizedIdentifier = identifier.trim().toLowerCase();
+        if (!normalizedIdentifier) {
+            return null;
+        }
+
+        const records = await this.listAllLocalSkillRecords(lookupContext);
+
+        for (const record of records) {
+            const eventId = record.metadata?.eventId?.toLowerCase();
+            const shortId = record.metadata?.eventId
+                ? shortenEventId(record.metadata.eventId).toLowerCase()
+                : undefined;
+
+            if (eventId === normalizedIdentifier || shortId === normalizedIdentifier) {
+                return this.loadLocalSkillRecord(record);
+            }
+        }
+
+        return null;
+    }
+
+    private resolveRemoteSkillEventId(identifier: string): string | null {
+        const normalizedIdentifier = identifier.trim().toLowerCase();
+        if (!normalizedIdentifier) {
+            return null;
+        }
+
+        if (FULL_EVENT_ID_REGEX.test(normalizedIdentifier)) {
+            return normalizedIdentifier;
+        }
+
+        const availableSkills = NudgeSkillWhitelistService.getInstance().getWhitelistedSkills();
+        for (const skill of availableSkills) {
+            const aliases = [skill.identifier, skill.shortId, skill.eventId];
+            if (aliases.some((alias) => alias?.toLowerCase() === normalizedIdentifier)) {
+                return skill.eventId;
+            }
+        }
+
+        return null;
+    }
+
+    private async isHydrationTargetAvailable(skillId: string, eventId: string): Promise<boolean> {
+        const skillDir = await this.getSkillDir(skillId, false);
+
+        try {
+            const stats = await fs.stat(skillDir);
+            if (!stats.isDirectory()) {
+                return false;
+            }
+        } catch {
+            return true;
+        }
+
+        const metadata = await this.readSkillMetadata(skillDir);
+        return metadata?.eventId === eventId;
+    }
+
+    private async resolveHydratedSkillId(event: NDKEvent): Promise<string> {
+        const existingSkill = await this.findLocalSkillBySourceIdentifier(event.id);
+        if (existingSkill?.identifier) {
+            return existingSkill.identifier;
+        }
+
+        const shortId = shortenEventId(event.id);
+        const preferredSlug = slugifyIdentifier(
+            event.tagValue("title") ||
+            event.tagValue("name") ||
+            event.tagValue("d") ||
+            ""
+        );
+        const baseCandidates = [
+            preferredSlug,
+            shortId,
+            preferredSlug ? `${preferredSlug}-${shortId}` : undefined,
+            `skill-${shortId}`,
+        ].filter((candidate): candidate is string => Boolean(candidate));
+
+        for (const candidate of baseCandidates) {
+            if (await this.isHydrationTargetAvailable(candidate, event.id)) {
+                return candidate;
+            }
+        }
+
+        let counter = 1;
+        const fallbackBase = preferredSlug || "skill";
+        while (true) {
+            const candidate = `${fallbackBase}-${shortId}-${counter}`;
+            if (await this.isHydrationTargetAvailable(candidate, event.id)) {
+                return candidate;
+            }
+            counter += 1;
+        }
+    }
+
     private extractFileETags(event: NDKEvent): string[] {
         return event.tags
             .filter((tag) => tag[0] === "e" && tag[1])
             .map((tag) => tag[1]);
     }
 
-    /**
-     * Fetch and install files referenced by e-tags in a skill event.
-     *
-     * @param fileEventIds Array of event IDs referencing kind:1063 events
-     * @param shortId Short skill ID for directory naming
-     * @returns Array of installation results
-     */
-    private async installSkillFiles(
-        fileEventIds: string[],
-        shortId: string
-    ): Promise<SkillFileInstallResult[]> {
-        if (fileEventIds.length === 0) {
-            return [];
+    private getHydratedSkillDescription(event: NDKEvent, content: string): string | undefined {
+        const whitelistedDescription = this.getWhitelistedSkillDescription(event.id);
+
+        if (whitelistedDescription) {
+            return whitelistedDescription;
         }
 
-        const results: SkillFileInstallResult[] = [];
-        const ndk = this.getNDK();
-        const skillDir = await this.getSkillDir(shortId);
-
-        for (const eventId of fileEventIds) {
-            try {
-                // Fetch the kind:1063 file metadata event
-                const fileEvent = await ndk.fetchEvent(eventId, { groupable: false });
-
-                if (!fileEvent) {
-                    throw new Error(`[SkillService] Could not fetch event ${eventId}`);
-                }
-
-                // Verify it's a kind:1063 event
-                if (fileEvent.kind !== 1063) {
-                    throw new Error(
-                        `[SkillService] Event ${eventId} is not kind:1063 (got kind:${fileEvent.kind})`
-                    );
-                }
-
-                // Extract file info from the event
-                const fileInfo = this.extractFileInfo(fileEvent);
-                if (!fileInfo) {
-                    throw new Error(
-                        `[SkillService] Missing required tags (url, name) in kind:1063 event ${eventId}`
-                    );
-                }
-
-                // Download and install the file
-                const result = await this.installFile(fileInfo, skillDir);
-                results.push(result);
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                throw new Error(`[SkillService] Failed to install skill file ${eventId}: ${errorMessage}`);
-            }
+        const tagDescription = event.tagValue("description") || event.tagValue("summary") || "";
+        const trimmedTagDescription = tagDescription.trim();
+        if (trimmedTagDescription) {
+            return trimmedTagDescription;
         }
 
-        // Log summary
-        const successCount = results.filter((r) => r.success).length;
-        const failCount = results.filter((r) => !r.success).length;
+        const fallbackDescription = content
+            .split("\n")
+            .map((line) => line.trim())
+            .find((line) => line.length > 0);
 
-        if (failCount > 0) {
-            logger.warn("[SkillService] Skill file installation completed with errors", {
-                skillId: shortId,
-                success: successCount,
-                failed: failCount,
-            });
-        } else if (successCount > 0) {
-            logger.info("[SkillService] All skill files installed successfully", {
-                skillId: shortId,
-                count: successCount,
-            });
-        }
-
-        return results;
+        return fallbackDescription?.slice(0, 1024) || undefined;
     }
 
-    /**
-     * Extract file information from a kind:1063 (NIP-94) event.
-     *
-     * Expected tags:
-     * - ["url", "https://blossom.server/sha256"] - Required: Blossom download URL
-     * - ["name", "relative/path/file.ext"] - Required: Relative filepath
-     * - ["m", "text/plain"] - Optional: MIME type
-     * - ["x", "sha256hash"] - Optional: SHA-256 hash for verification
-     *
-     * @param event The kind:1063 event
-     * @returns SkillFileInfo or null if required tags are missing
-     */
+    private getWhitelistedSkillDescription(eventId: string): string | undefined {
+        const description = NudgeSkillWhitelistService
+            .getInstance()
+            .getWhitelistedSkills()
+            .find((skill) => skill.eventId === eventId)
+            ?.description
+            ?.trim();
+
+        return description || undefined;
+    }
+
     private extractFileInfo(event: NDKEvent): SkillFileInfo | null {
         const url = event.tagValue("url");
         const relativePath = event.tagValue("name");
@@ -336,24 +823,80 @@ export class SkillService {
         };
     }
 
-    /**
-     * Download and install a single file to the skill directory.
-     *
-     * @param fileInfo Information about the file to install
-     * @param skillDir Base directory for this skill
-     * @returns Installation result
-     */
+    private async installSkillFiles(
+        fileEventIds: string[],
+        skillId: string
+    ): Promise<SkillFileInstallResult[]> {
+        if (fileEventIds.length === 0) {
+            return [];
+        }
+
+        const results: SkillFileInstallResult[] = [];
+        const ndk = this.getNDK();
+        const skillDir = await this.getSkillDir(skillId);
+
+        for (const eventId of fileEventIds) {
+            try {
+                const fileEvent = await ndk.fetchEvent(eventId, { groupable: false });
+
+                if (!fileEvent) {
+                    throw new Error(`[SkillService] Could not fetch event ${eventId}`);
+                }
+
+                if (fileEvent.kind !== 1063) {
+                    throw new Error(
+                        `[SkillService] Event ${eventId} is not kind:1063 (got kind:${fileEvent.kind})`
+                    );
+                }
+
+                const fileInfo = this.extractFileInfo(fileEvent);
+                if (!fileInfo) {
+                    throw new Error(
+                        `[SkillService] Missing required tags (url, name) in kind:1063 event ${eventId}`
+                    );
+                }
+
+                const result = await this.installFile(fileInfo, skillDir);
+                results.push(result);
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                results.push({
+                    eventId,
+                    relativePath: eventId,
+                    absolutePath: path.resolve(skillDir, eventId),
+                    success: false,
+                    error: `[SkillService] Failed to install skill file ${eventId}: ${errorMessage}`,
+                });
+            }
+        }
+
+        const successCount = results.filter((result) => result.success).length;
+        const failCount = results.filter((result) => !result.success).length;
+
+        if (failCount > 0) {
+            logger.warn("[SkillService] Skill file installation completed with errors", {
+                skillId,
+                success: successCount,
+                failed: failCount,
+            });
+        } else if (successCount > 0) {
+            logger.info("[SkillService] All skill files installed successfully", {
+                skillId,
+                count: successCount,
+            });
+        }
+
+        return results;
+    }
+
     private async installFile(
         fileInfo: SkillFileInfo,
         skillDir: string
     ): Promise<SkillFileInstallResult> {
-        // Resolve to absolute path, normalizing any ../ components
         const resolvedSkillDir = path.resolve(skillDir);
         const absolutePath = path.resolve(skillDir, fileInfo.relativePath);
 
         try {
-            // Security check: ensure the resolved path stays within the skill directory
-            // Using path.relative and checking for ".." prefix is more robust than startsWith
             const relativeToBoundary = path.relative(resolvedSkillDir, absolutePath);
             if (relativeToBoundary.startsWith("..") || path.isAbsolute(relativeToBoundary)) {
                 throw new Error(
@@ -361,15 +904,11 @@ export class SkillService {
                 );
             }
 
-            // Create parent directories
-            const parentDir = path.dirname(absolutePath);
-            await ensureDirectory(parentDir);
+            await ensureDirectory(path.dirname(absolutePath));
 
-            // Download the file with size limit
             logger.debug(`[SkillService] Downloading file from ${fileInfo.url}`);
             const content = await this.downloadFile(fileInfo.url);
 
-            // Verify SHA-256 hash if provided (NIP-94 "x" tag)
             if (fileInfo.sha256) {
                 const actualHash = crypto.createHash("sha256").update(content).digest("hex");
                 if (actualHash.toLowerCase() !== fileInfo.sha256.toLowerCase()) {
@@ -377,17 +916,9 @@ export class SkillService {
                         `SHA-256 hash mismatch: expected ${fileInfo.sha256}, got ${actualHash}`
                     );
                 }
-                logger.debug(`[SkillService] SHA-256 verification passed for ${fileInfo.relativePath}`);
             }
 
-            // Write the file
             await fs.writeFile(absolutePath, content);
-
-            logger.info(`[SkillService] Installed skill file: ${fileInfo.relativePath}`, {
-                eventId: fileInfo.eventId,
-                absolutePath,
-                size: content.length,
-            });
 
             return {
                 eventId: fileInfo.eventId,
@@ -412,13 +943,6 @@ export class SkillService {
         }
     }
 
-    /**
-     * Download a file from a Blossom URL with size limit enforcement.
-     *
-     * @param url The Blossom URL to download from
-     * @returns The downloaded file content as a Buffer
-     * @throws Error if download exceeds MAX_DOWNLOAD_SIZE_BYTES
-     */
     private async downloadFile(url: string): Promise<Buffer> {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
@@ -435,7 +959,6 @@ export class SkillService {
                 throw new Error(`Failed to download: ${response.status} ${response.statusText}`);
             }
 
-            // Check Content-Length header first if available
             const contentLength = response.headers.get("Content-Length");
             if (contentLength) {
                 const declaredSize = Number.parseInt(contentLength, 10);
@@ -446,7 +969,6 @@ export class SkillService {
                 }
             }
 
-            // Stream the response and enforce size limit during download
             const reader = response.body?.getReader();
             if (!reader) {
                 throw new Error("Response body is not readable");
@@ -472,7 +994,9 @@ export class SkillService {
             return Buffer.concat(chunks);
         } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
-                throw new Error(`Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms`);
+                throw new Error(`Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms`, {
+                    cause: error,
+                });
             }
             throw error;
         } finally {
@@ -480,11 +1004,172 @@ export class SkillService {
         }
     }
 
+    private async hydrateSkillEvent(event: NDKEvent): Promise<SkillData | null> {
+        const skillId = await this.resolveHydratedSkillId(event);
+        const skillDir = await this.getSkillDir(skillId);
+        const content = event.content.trim();
+        const name =
+            event.tagValue("name") || event.tagValue("title") || skillId;
+        const description = this.getHydratedSkillDescription(event, content);
+
+        await fs.writeFile(
+            this.getSkillContentPath(skillDir),
+            this.serializeSkillDocument(content, {
+                eventId: event.id,
+                name,
+                description: description ?? skillId,
+            })
+        );
+
+        const hydrationResults = await this.installSkillFiles(
+            this.extractFileETags(event),
+            skillId
+        );
+
+        const localSkill = await this.loadLocalSkillById(skillId);
+        if (!localSkill) {
+            return null;
+        }
+
+        return {
+            ...localSkill,
+            installedFiles: this.mergeInstalledFiles(localSkill.installedFiles, hydrationResults),
+        };
+    }
+
+    private async resolveAndLoadSkill(
+        skillIdentifier: string,
+        lookupContext: SkillLookupContext = {}
+    ): Promise<SkillData | null> {
+        const trimmedIdentifier = skillIdentifier.trim();
+        if (!trimmedIdentifier) {
+            return null;
+        }
+
+        const localSkill = await this.loadLocalSkillById(trimmedIdentifier, lookupContext);
+        if (localSkill) {
+            return localSkill;
+        }
+
+        const hydratedSkill = await this.findLocalSkillBySourceIdentifier(
+            trimmedIdentifier,
+            lookupContext
+        );
+        if (hydratedSkill) {
+            return hydratedSkill;
+        }
+
+        const remoteEventId = this.resolveRemoteSkillEventId(trimmedIdentifier);
+        if (!remoteEventId) {
+            return null;
+        }
+
+        const existingHydratedSkill = await this.findLocalSkillBySourceIdentifier(
+            remoteEventId,
+            lookupContext
+        );
+        if (existingHydratedSkill) {
+            return existingHydratedSkill;
+        }
+
+        const remoteSkill = await this.fetchSkill(remoteEventId);
+        if (!remoteSkill) {
+            return null;
+        }
+
+        return this.hydrateSkillEvent(remoteSkill);
+    }
+
+    async listAvailableSkills(lookupContext: SkillLookupContext = {}): Promise<SkillData[]> {
+        const records = await this.listVisibleLocalSkillRecords(lookupContext);
+        const skills = await Promise.all(records.map((record) => this.loadLocalSkillRecord(record)));
+        return skills.filter((skill): skill is SkillData => skill !== null);
+    }
+
+    async fetchSkills(
+        skillIdentifiers: string[],
+        lookupContext: SkillLookupContext = {}
+    ): Promise<SkillResult> {
+        const emptyResult: SkillResult = {
+            skills: [],
+            content: "",
+        };
+
+        if (skillIdentifiers.length === 0) {
+            return emptyResult;
+        }
+
+        const span = tracer.startSpan(
+            "tenex.skill.fetch_skills",
+            {
+                attributes: {
+                    "skill.requested_count": skillIdentifiers.length,
+                },
+            },
+            otelContext.active()
+        );
+
+        return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
+            try {
+                const skillDataArray: SkillData[] = [];
+                const loadedSkillIds = new Set<string>();
+
+                for (const skillIdentifier of skillIdentifiers) {
+                    const skillData = await this.resolveAndLoadSkill(
+                        skillIdentifier,
+                        lookupContext
+                    );
+                    if (!skillData) {
+                        continue;
+                    }
+
+                    if (loadedSkillIds.has(skillData.identifier)) {
+                        continue;
+                    }
+
+                    loadedSkillIds.add(skillData.identifier);
+                    skillDataArray.push(skillData);
+                }
+
+                const concatenated = skillDataArray
+                    .map((data) => data.content)
+                    .filter((content) => content.length > 0)
+                    .join("\n\n");
+
+                span.setAttributes({
+                    "skill.fetched_count": skillDataArray.length,
+                    "skill.content_length": concatenated.length,
+                    "skill.names": skillDataArray
+                        .map((skill) => skill.name || skill.identifier || "untitled")
+                        .join(", "),
+                    "skill.total_files": skillDataArray.reduce(
+                        (count, skill) => count + skill.installedFiles.length,
+                        0
+                    ),
+                });
+
+                span.setStatus({ code: SpanStatusCode.OK });
+                span.end();
+
+                return {
+                    skills: skillDataArray,
+                    content: concatenated,
+                };
+            } catch (error) {
+                span.recordException(error as Error);
+                span.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: (error as Error).message,
+                });
+                span.end();
+                logger.error("[SkillService] Failed to fetch skills", { error });
+                return emptyResult;
+            }
+        });
+    }
+
     /**
-     * Fetch a single skill event by ID.
-     *
-     * @param eventId The skill event ID
-     * @returns The skill event or null if not found
+     * Fetch a single skill event by canonical Nostr event ID.
      */
     async fetchSkill(eventId: string): Promise<NDKEvent | null> {
         try {

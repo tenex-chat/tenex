@@ -1,11 +1,14 @@
 import { NudgeSkillWhitelistService } from "@/services/nudge";
 import type { WhitelistItem } from "@/services/nudge";
+import { SkillService } from "@/services/skill/SkillService";
+import type { SkillData } from "@/services/skill";
 import type { PromptFragment } from "../core/types";
-import { shortenEventId } from "@/utils/conversation-id";
 
-/**
- * Escape text for safe inclusion in prompt output.
- */
+interface AvailableNudgesAndSkillsArgs {
+    agentPubkey: string;
+    projectDTag?: string;
+}
+
 function escapePromptText(value: string): string {
     return value
         .replace(/&/g, "&amp;")
@@ -14,32 +17,36 @@ function escapePromptText(value: string): string {
         .replace(/>/g, "&gt;");
 }
 
-/** Maximum description length for display in list items */
 const MAX_DESCRIPTION_LENGTH = 150;
 
-function formatItem(item: WhitelistItem): string {
-    const name = item.name || shortenEventId(item.eventId);
-    const description = item.description
-        ? item.description.replace(/\n/g, " ").substring(0, MAX_DESCRIPTION_LENGTH)
-        : "No description";
-    return `  - **${escapePromptText(name)}** (${shortenEventId(item.eventId)}): ${escapePromptText(description)}`;
+function summarizeContent(value?: string): string {
+    if (!value) {
+        return "No description";
+    }
+
+    return value.replace(/\n/g, " ").substring(0, MAX_DESCRIPTION_LENGTH);
 }
 
-/**
- * Fragment for displaying available nudges and skills to agents.
- * Reads directly from NudgeSkillWhitelistService — no args needed.
- *
- * - Shows subsection headers (### Nudges / ### Skills) when BOTH types are present.
- * - Omits the subsection header when only one type exists.
- * - Returns empty string when neither nudges nor skills are available.
- */
-export const availableNudgesAndSkillsFragment: PromptFragment<Record<string, never>> = {
+function formatNudgeItem(item: WhitelistItem): string {
+    const identifier = item.identifier ?? item.shortId ?? item.eventId;
+    return `  - \`${escapePromptText(identifier)}\`: ${escapePromptText(summarizeContent(item.description))}`;
+}
+
+function formatSkillItem(skill: SkillData): string {
+    const identifier = skill.identifier;
+    return `  - \`${escapePromptText(identifier)}\`: ${escapePromptText(summarizeContent(skill.description ?? skill.content))}`;
+}
+
+export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAndSkillsArgs> = {
     id: "available-nudges-and-skills",
-    priority: 13, // Before available-agents (15)
-    template: () => {
-        const service = NudgeSkillWhitelistService.getInstance();
-        const nudges = service.getWhitelistedNudges();
-        const skills = service.getWhitelistedSkills();
+    priority: 13,
+    template: async ({ agentPubkey, projectDTag }) => {
+        const whitelistService = NudgeSkillWhitelistService.getInstance();
+        const nudges = whitelistService.getWhitelistedNudges();
+        const skills = await SkillService.getInstance().listAvailableSkills({
+            agentPubkey,
+            projectDTag,
+        });
         const hasNudges = nudges.length > 0;
         const hasSkills = skills.length > 0;
 
@@ -52,16 +59,7 @@ export const availableNudgesAndSkillsFragment: PromptFragment<Record<string, nev
 
         sections.push("## Available Nudges and Skills");
         sections.push("");
-        sections.push(
-            "The following nudges and skills are available for use when delegating tasks. Pass their event IDs in the `nudges` parameter of the delegate tool to apply them to delegated agents."
-        );
-        sections.push("");
-        sections.push(
-            "Nudges can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context/instructions into the agent's system prompt."
-        );
-        sections.push(
-            "Skills provide transient capabilities and context without modifying tool availability."
-        );
+        sections.push("Use the IDs exactly as shown below.");
 
         if (hasNudges) {
             sections.push("");
@@ -69,7 +67,7 @@ export const availableNudgesAndSkillsFragment: PromptFragment<Record<string, nev
                 sections.push("### Nudges");
                 sections.push("");
             }
-            sections.push(nudges.map(formatItem).join("\n"));
+            sections.push(nudges.map(formatNudgeItem).join("\n"));
         }
 
         if (hasSkills) {
@@ -78,21 +76,8 @@ export const availableNudgesAndSkillsFragment: PromptFragment<Record<string, nev
                 sections.push("### Skills");
                 sections.push("");
             }
-            sections.push(skills.map(formatItem).join("\n"));
+            sections.push(skills.map(formatSkillItem).join("\n"));
         }
-
-        const exampleId = shortenEventId((hasNudges ? nudges[0] : skills[0]).eventId);
-        sections.push("");
-        sections.push("Example usage:");
-        sections.push("```");
-        sections.push("delegate({");
-        sections.push("  delegations: [{");
-        sections.push('    recipient: "agent-slug",');
-        sections.push('    prompt: "Your task here",');
-        sections.push(`    nudges: ["${exampleId}..."]`);
-        sections.push("  }]");
-        sections.push("})");
-        sections.push("```");
 
         return sections.join("\n");
     },
