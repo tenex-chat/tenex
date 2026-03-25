@@ -5,6 +5,7 @@ import {
 } from "@/agents/AgentStorage";
 import type { TelegramAgentConfig, TelegramChatBinding } from "@/agents/types";
 import { config as configService } from "@/services/ConfigService";
+import { getTelegramThreadTargetValidationError } from "@/utils/telegram-identifiers";
 import { inquirerTheme } from "@/utils/cli-theme";
 import chalk from "chalk";
 import { Command } from "commander";
@@ -383,7 +384,14 @@ async function manageChatBindings(draft: TelegramDraft): Promise<TelegramDraft> 
                     name: "chatId",
                     message: "Chat ID:",
                     theme: inquirerTheme,
-                    validate: (input: string) => input.trim().length > 0 || "Chat ID cannot be empty",
+                    validate: (input: string) => {
+                        const trimmed = input.trim();
+                        if (!trimmed) {
+                            return "Chat ID cannot be empty";
+                        }
+
+                        return getTelegramThreadTargetValidationError(trimmed) ?? true;
+                    },
                 },
                 {
                     type: "input",
@@ -399,11 +407,19 @@ async function manageChatBindings(draft: TelegramDraft): Promise<TelegramDraft> 
                 },
             ]);
 
+            const chatId = answers.chatId.trim();
+            const topicId = answers.topicId.trim() || undefined;
+            const bindingError = getTelegramThreadTargetValidationError(chatId, topicId);
+            if (bindingError) {
+                console.log(chalk.red(`  ${bindingError}`));
+                continue;
+            }
+
             nextDraft.chatBindings = [
                 ...bindings,
                 {
-                    chatId: answers.chatId.trim(),
-                    topicId: answers.topicId.trim() || undefined,
+                    chatId,
+                    topicId,
                     title: answers.title.trim() || undefined,
                 },
             ];

@@ -1,3 +1,6 @@
+const TELEGRAM_CHAT_ID_PATTERN = /^-?\d+$/;
+const TELEGRAM_MESSAGE_THREAD_ID_PATTERN = /^\d+$/;
+
 function normalizeNumericSegment(value: string | number): string {
     return String(value).replace(/^-/, "n").replace(/[^a-zA-Z0-9_]/g, "_");
 }
@@ -15,6 +18,39 @@ export function createTelegramChannelId(
         return `telegram:group:${normalizedChatId}:topic:${messageThreadId}`;
     }
     return `telegram:chat:${normalizedChatId}`;
+}
+
+export function getTelegramThreadTargetValidationError(
+    chatId: string | number,
+    messageThreadId?: string | number
+): string | undefined {
+    const normalizedChatId = String(chatId).trim();
+    if (!normalizedChatId) {
+        return "Telegram chat ID is required";
+    }
+
+    if (!TELEGRAM_CHAT_ID_PATTERN.test(normalizedChatId)) {
+        return `Invalid Telegram chat ID: ${normalizedChatId}`;
+    }
+
+    if (messageThreadId === undefined) {
+        return undefined;
+    }
+
+    const normalizedThreadId = String(messageThreadId).trim();
+    if (!normalizedThreadId) {
+        return undefined;
+    }
+
+    if (!TELEGRAM_MESSAGE_THREAD_ID_PATTERN.test(normalizedThreadId)) {
+        return `Invalid Telegram message thread ID: ${normalizedThreadId}. Thread IDs must be numeric.`;
+    }
+
+    if (!normalizedChatId.startsWith("-")) {
+        return `Invalid Telegram message thread target: chat ${normalizedChatId} is not a group chat.`;
+    }
+
+    return undefined;
 }
 
 export function parseTelegramChannelId(channelId: string): {

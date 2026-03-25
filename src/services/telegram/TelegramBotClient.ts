@@ -18,6 +18,7 @@ import type {
     TelegramSendVoiceParams,
 } from "@/services/telegram/types";
 import { withActiveTraceLogFields } from "@/telemetry/TelegramTelemetry";
+import { getTelegramThreadTargetValidationError } from "@/utils/telegram-identifiers";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
@@ -47,11 +48,27 @@ function safeSerialize(value: unknown): string {
 }
 
 async function parseTelegramResponse<T>(response: Response): Promise<T> {
-    if (!response.ok) {
-        throw new Error(`Telegram Bot API request failed with status ${response.status}`);
+    const bodyText = await response.text();
+    let parsed: { ok?: boolean; description?: string } | undefined;
+
+    if (bodyText) {
+        try {
+            parsed = JSON.parse(bodyText) as { ok?: boolean; description?: string };
+        } catch {
+            parsed = undefined;
+        }
     }
 
-    const parsed = await response.json() as { ok?: boolean; description?: string };
+    if (!response.ok) {
+        const description = parsed?.description?.trim();
+        const suffix = description ? `: ${description}` : "";
+        throw new Error(`Telegram Bot API request failed with status ${response.status}${suffix}`);
+    }
+
+    if (!parsed) {
+        throw new Error("Telegram Bot API returned a non-JSON response");
+    }
+
     if (!parsed.ok) {
         throw new Error(parsed.description || "Telegram Bot API returned ok=false");
     }
@@ -401,6 +418,14 @@ export class TelegramBotClient {
     }
 
     async sendMessage(params: TelegramSendMessageParams): Promise<TelegramSendMessageResponse["result"]> {
+        const threadTargetError = getTelegramThreadTargetValidationError(
+            params.chatId,
+            params.messageThreadId
+        );
+        if (threadTargetError) {
+            throw new Error(threadTargetError);
+        }
+
         const payload: Record<string, string | number | boolean | object> = {
             chat_id: params.chatId,
             text: params.text,
@@ -459,6 +484,14 @@ export class TelegramBotClient {
     }
 
     async sendVoice(params: TelegramSendVoiceParams): Promise<TelegramSendMessageResponse["result"]> {
+        const threadTargetError = getTelegramThreadTargetValidationError(
+            params.chatId,
+            params.messageThreadId
+        );
+        if (threadTargetError) {
+            throw new Error(threadTargetError);
+        }
+
         const fileName = basename(params.voicePath);
         const mimeType = params.mimeType ?? detectVoiceMimeType(params.voicePath);
         const voiceFile = new Blob([await readFile(params.voicePath)], {
@@ -530,6 +563,14 @@ export class TelegramBotClient {
     }
 
     async sendChatAction(params: TelegramSendChatActionParams): Promise<void> {
+        const threadTargetError = getTelegramThreadTargetValidationError(
+            params.chatId,
+            params.messageThreadId
+        );
+        if (threadTargetError) {
+            throw new Error(threadTargetError);
+        }
+
         const payload: Record<string, string | number> = {
             chat_id: params.chatId,
             action: params.action,

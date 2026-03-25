@@ -158,7 +158,7 @@ describe("TelegramBotClient", () => {
         });
 
         await client.sendMessage({
-            chatId: "1001",
+            chatId: "-1001",
             text: "hello",
             parseMode: "HTML",
             replyToMessageId: "7",
@@ -176,13 +176,41 @@ describe("TelegramBotClient", () => {
             },
         });
         expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
-            chat_id: "1001",
+            chat_id: "-1001",
             text: "hello",
             parse_mode: "HTML",
             allow_sending_without_reply: true,
             reply_to_message_id: 7,
             message_thread_id: 15,
         });
+    });
+
+    it("rejects invalid sendMessage thread targets before calling Telegram", async () => {
+        const fetchImpl = mock(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+            new Response(
+                JSON.stringify({
+                    ok: true,
+                    result: {
+                        message_id: 5,
+                        date: 123,
+                        chat: { id: 1001, type: "private" },
+                    },
+                }),
+                { status: 200 }
+            )
+        );
+        const client = new TelegramBotClient({
+            botToken: "test-token",
+            apiBaseUrl: "https://telegram.example",
+            fetchImpl,
+        });
+
+        await expect(client.sendMessage({
+            chatId: "5104033799",
+            text: "hello",
+            messageThreadId: "test",
+        })).rejects.toThrow("Invalid Telegram message thread ID: test. Thread IDs must be numeric.");
+        expect(fetchImpl).not.toHaveBeenCalled();
     });
 
     it("posts reply_markup with sendMessage payloads", async () => {
@@ -250,7 +278,7 @@ describe("TelegramBotClient", () => {
         });
 
         await client.sendChatAction({
-            chatId: "1001",
+            chatId: "-1001",
             action: "typing",
             messageThreadId: "15",
         });
@@ -260,7 +288,7 @@ describe("TelegramBotClient", () => {
             "https://telegram.example/bottest-token/sendChatAction"
         );
         expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
-            chat_id: "1001",
+            chat_id: "-1001",
             action: "typing",
             message_thread_id: 15,
         });
@@ -292,7 +320,7 @@ describe("TelegramBotClient", () => {
         });
 
         await client.sendVoice({
-            chatId: "1001",
+            chatId: "-1001",
             voicePath,
             replyToMessageId: "7",
             messageThreadId: "15",
@@ -310,7 +338,7 @@ describe("TelegramBotClient", () => {
         expect(body).toBeInstanceOf(FormData);
 
         const formData = body as FormData;
-        expect(formData.get("chat_id")).toBe("1001");
+        expect(formData.get("chat_id")).toBe("-1001");
         expect(formData.get("reply_to_message_id")).toBe("7");
         expect(formData.get("message_thread_id")).toBe("15");
         expect(formData.get("allow_sending_without_reply")).toBe("true");

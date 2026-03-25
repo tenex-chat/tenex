@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { tool } from "ai";
 import type { ToolExecutionContext, AISdkTool } from "@/tools/types";
-import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
+import {
+    getTelegramThreadTargetValidationError,
+    parseTelegramChannelId,
+} from "@/utils/telegram-identifiers";
 import { matchesTelegramChatBinding } from "@/services/telegram/telegram-gateway-utils";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
 
@@ -30,6 +33,14 @@ export function createSendMessageTool(context: ToolExecutionContext): AISdkTool 
             const parsed = parseTelegramChannelId(input.channelId);
             if (!parsed) {
                 return { error: `Invalid channel ID format: ${input.channelId}` };
+            }
+
+            const threadTargetError = getTelegramThreadTargetValidationError(
+                parsed.chatId,
+                parsed.messageThreadId
+            );
+            if (threadTargetError) {
+                return { error: `${threadTargetError} Channel: ${input.channelId}` };
             }
 
             if (!matchesTelegramChatBinding(telegramConfig.chatBindings, parsed.chatId, parsed.messageThreadId)) {
