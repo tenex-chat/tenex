@@ -9,7 +9,9 @@ import { tool } from "ai";
 import { z } from "zod";
 
 const lessonGetSchema = z.object({
-    eventId: z.string().describe("Nostr event ID of the lesson to retrieve."),
+    eventId: z.string().describe(
+        "Nostr event ID of the lesson to retrieve. Supports full 64-char hex ID, 12-char hex prefix, or NIP-19 formats (note1.../nevent1...)."
+    ),
 });
 
 type LessonGetInput = z.infer<typeof lessonGetSchema>;

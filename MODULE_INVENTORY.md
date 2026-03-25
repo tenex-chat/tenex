@@ -58,6 +58,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Tools System (`src/tools`)
 - **Implementations**: `implementations/*.ts` are the concrete actions agents can call (delegation, RAG management, scheduling, file access, shell, silent completion, etc.). They should delegate to `services/*` when stateful operations are required. The `fs_*` tools are thin TENEX adapters over the external `ai-sdk-fs-tools` package, with TENEX-only hooks for agent-home access, report protection, tool-result loading, and LLM-backed file analysis.
+- Context-injected tools still belong to the registry/tool layer: `send_message` is exposed only when an agent has Telegram chat bindings and delegates proactive delivery to `services/telegram/TelegramDeliveryService` rather than holding transport state itself.
 - **Registry & Runtime**: `registry.ts`, `utils.ts`, and executor/tests coordinate tool metadata, zod schemas, result marshalling, and permission enforcement.
 - **Dynamic Tools**: User-defined tool factories are loaded by `services/DynamicToolService` from `~/.tenex/tools` and surfaced through the tool registry. Tests live under `tools/__tests__`.
 - **Guideline**: Keep external I/O localized; when a tool needs long-lived resources (RAG DB, scheduler), call the relevant service rather than re-implementing logic.

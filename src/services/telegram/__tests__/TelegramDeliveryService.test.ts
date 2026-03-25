@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
+import type { RuntimeAgentRef } from "@/events/runtime/RuntimeAgent";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { EventContext } from "@/nostr/types";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
@@ -7,6 +8,8 @@ import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliverySer
 describe("TelegramDeliveryService", () => {
     const originalSendMessage = TelegramBotClient.prototype.sendMessage;
     const originalSendVoice = TelegramBotClient.prototype.sendVoice;
+    type SendMessageResult = Awaited<ReturnType<TelegramBotClient["sendMessage"]>>;
+    type SendVoiceResult = Awaited<ReturnType<TelegramBotClient["sendVoice"]>>;
 
     function createTelegramEnvelope(messageId: string): InboundEnvelope {
         return {
@@ -44,7 +47,7 @@ describe("TelegramDeliveryService", () => {
         const calls: Array<Record<string, unknown>> = [];
         TelegramBotClient.prototype.sendMessage = async function sendMessage(params) {
             calls.push(params as unknown as Record<string, unknown>);
-            return {} as any;
+            return {} as SendMessageResult;
         };
 
         const service = new TelegramDeliveryService();
@@ -54,7 +57,7 @@ describe("TelegramDeliveryService", () => {
                 telegram: {
                     botToken: "token",
                 },
-            } as any,
+            } as RuntimeAgentRef,
             {
                 conversationId: "conversation-1",
                 triggeringEnvelope: createTelegramEnvelope("5"),
@@ -78,7 +81,7 @@ describe("TelegramDeliveryService", () => {
             if (calls.length === 1) {
                 throw new Error("can't parse entities");
             }
-            return {} as any;
+            return {} as SendMessageResult;
         };
 
         const service = new TelegramDeliveryService();
@@ -88,7 +91,7 @@ describe("TelegramDeliveryService", () => {
                 telegram: {
                     botToken: "token",
                 },
-            } as any,
+            } as RuntimeAgentRef,
             {
                 conversationId: "conversation-2",
                 triggeringEnvelope: createTelegramEnvelope("6"),
@@ -114,11 +117,11 @@ describe("TelegramDeliveryService", () => {
         const messageCalls: Array<Record<string, unknown>> = [];
         TelegramBotClient.prototype.sendVoice = async function sendVoice(params) {
             voiceCalls.push(params as unknown as Record<string, unknown>);
-            return {} as any;
+            return {} as SendVoiceResult;
         };
         TelegramBotClient.prototype.sendMessage = async function sendMessage(params) {
             messageCalls.push(params as unknown as Record<string, unknown>);
-            return {} as any;
+            return {} as SendMessageResult;
         };
 
         const service = new TelegramDeliveryService();
@@ -128,7 +131,7 @@ describe("TelegramDeliveryService", () => {
                 telegram: {
                     botToken: "token",
                 },
-            } as any,
+            } as RuntimeAgentRef,
             {
                 conversationId: "conversation-3",
                 triggeringEnvelope: createTelegramEnvelope("8"),
@@ -150,5 +153,59 @@ describe("TelegramDeliveryService", () => {
             text: "Here is the voice summary.",
         });
         expect(String(messageCalls[0]?.text)).not.toContain("telegram_voice");
+    });
+
+    it("sends proactive channel messages with Telegram HTML parse mode", async () => {
+        const calls: Array<Record<string, unknown>> = [];
+        TelegramBotClient.prototype.sendMessage = async function sendMessage(params) {
+            calls.push(params as unknown as Record<string, unknown>);
+            return {} as SendMessageResult;
+        };
+
+        const service = new TelegramDeliveryService();
+        await service.sendToChannel({
+            botToken: "token",
+            chatId: "1001",
+            messageThreadId: "77",
+            content: "Hello **channel**",
+        });
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatchObject({
+            chatId: "1001",
+            messageThreadId: "77",
+            parseMode: "HTML",
+            text: "Hello <b>channel</b>",
+        });
+    });
+
+    it("falls back to plain text for proactive channel messages when Telegram rejects rendered HTML", async () => {
+        const calls: Array<Record<string, unknown>> = [];
+        TelegramBotClient.prototype.sendMessage = async function sendMessage(params) {
+            calls.push(params as unknown as Record<string, unknown>);
+            if (calls.length === 1) {
+                throw new Error("can't parse entities");
+            }
+            return {} as SendMessageResult;
+        };
+
+        const service = new TelegramDeliveryService();
+        await service.sendToChannel({
+            botToken: "token",
+            chatId: "1001",
+            content: "Hello **channel**",
+        });
+
+        expect(calls).toHaveLength(2);
+        expect(calls[0]).toMatchObject({
+            chatId: "1001",
+            parseMode: "HTML",
+            text: "Hello <b>channel</b>",
+        });
+        expect(calls[1]).toMatchObject({
+            chatId: "1001",
+            text: "Hello **channel**",
+        });
+        expect(calls[1]?.parseMode).toBeUndefined();
     });
 });

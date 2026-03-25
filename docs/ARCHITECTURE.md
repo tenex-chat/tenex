@@ -123,6 +123,8 @@ export function parseNostrUser(input: string): { pubkey: string } | null {
 
 **Purpose:** Business logic, state management, capabilities
 
+**Notes:** Tools stay stateless even when they are runtime-gated. Context-injected capabilities such as `send_message` belong in `src/tools/registry.ts` and must delegate transport work to services like `src/services/telegram/TelegramDeliveryService`.
+
 **Dependencies:** Everything below (layers 0-2)
 
 ---

@@ -11,7 +11,7 @@ import { z } from "zod";
 
 const lessonDeleteSchema = z.object({
     eventId: z.string().describe(
-        "Nostr event ID of the lesson to delete."
+        "Nostr event ID of the lesson to delete. Supports full 64-char hex ID, 12-char hex prefix, or NIP-19 formats (note1.../nevent1...)."
     ),
     reason: z.string().optional().describe(
         "Optional reason for deleting the lesson"

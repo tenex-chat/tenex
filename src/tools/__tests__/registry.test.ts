@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { createMockExecutionEnvironment } from "@/test-utils";
+import type { TelegramAgentConfig } from "@/agents/types";
+import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import type { ToolName } from "../types";
-import { getAllTools, getTool, getTools } from "../registry";
+import { getAllTools, getTool, getTools, getToolsObject } from "../registry";
 
 describe("Tool Registry", () => {
     const mockContext = createMockExecutionEnvironment();
@@ -84,6 +85,21 @@ describe("Tool Registry", () => {
                 // AI SDK tools have parameters in their schema
                 expect(tool.parameters || tool.inputSchema).toBeDefined();
             }
+        });
+    });
+
+    describe("getToolsObject", () => {
+        it("auto-injects send_message when the agent has Telegram chat bindings", () => {
+            const context = createMockExecutionEnvironment({
+                agent: createMockAgent({
+                    telegram: {
+                        chatBindings: [{ chatId: "1001", title: "Ops" }],
+                    } as TelegramAgentConfig,
+                }),
+            });
+
+            const tools = getToolsObject([], context);
+            expect(tools.send_message).toBeDefined();
         });
     });
 });

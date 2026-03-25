@@ -5,6 +5,7 @@ import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { matchesTelegramChatBinding } from "@/services/telegram/telegram-gateway-utils";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
 
+// Shared instance preserves the TelegramBotClient cache across tool executions.
 const deliveryService = new TelegramDeliveryService();
 
 const sendMessageSchema = z.object({
