@@ -10,6 +10,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type { SkillResult, SkillData, SkillFileInfo, SkillFileInstallResult } from "./types";
 import { shortenEventId } from "@/utils/conversation-id";
+import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
 
 const tracer = trace.getTracer("tenex.skill-service");
 
@@ -173,9 +174,18 @@ export class SkillService {
      */
     private async processSkillEvent(event: NDKEvent): Promise<SkillData | null> {
         const content = event.content.trim();
+        const dTag = event.tagValue("d") || undefined;
         const title = event.tagValue("title") || undefined;
         const name = event.tagValue("name") || undefined;
         const shortId = shortenEventId(event.id);
+        const identifier = assignCapabilityIdentifiers([
+            {
+                eventId: event.id,
+                dTag,
+                name,
+                title,
+            },
+        ]).get(event.id)?.identifier;
 
         // Extract e-tags that reference kind:1063 (NIP-94 file metadata) events
         const fileETags = this.extractFileETags(event);
@@ -183,8 +193,17 @@ export class SkillService {
         // Download and install attached files
         const installedFiles = await this.installSkillFiles(fileETags, shortId);
 
+        // Write skill content to SKILL.md and metadata to skill.json
+        const skillDir = await this.getSkillDir(shortId);
+        const skillMdPath = path.join(skillDir, "SKILL.md");
+        await fs.writeFile(skillMdPath, content);
+
+        const metadataPath = path.join(skillDir, `${shortId}.json`);
+        await fs.writeFile(metadataPath, JSON.stringify({ eventId: event.id }, null, 2));
+
         return {
             eventId: event.id,
+            identifier,
             content,
             title,
             name,
