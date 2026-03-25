@@ -177,6 +177,7 @@ export class SkillService {
         const dTag = event.tagValue("d") || undefined;
         const title = event.tagValue("title") || undefined;
         const name = event.tagValue("name") || undefined;
+        const description = event.tagValue("description") || undefined;
         const shortId = shortenEventId(event.id);
         const identifier = assignCapabilityIdentifiers([
             {
@@ -199,7 +200,7 @@ export class SkillService {
         await fs.writeFile(skillMdPath, content);
 
         const metadataPath = path.join(skillDir, `${shortId}.json`);
-        await fs.writeFile(metadataPath, JSON.stringify({ eventId: event.id }, null, 2));
+        await fs.writeFile(metadataPath, JSON.stringify({ eventId: event.id, description }, null, 2));
 
         return {
             eventId: event.id,
