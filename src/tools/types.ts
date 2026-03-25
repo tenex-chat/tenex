@@ -74,7 +74,8 @@ export type ToolName =
     | "kill"
     | "no_response"
     | "generate_image"
-    | "skills_set";
+    | "skills_set"
+    | "send_message";
 
 /**
  * AI SDK tool with optional transcript arg declaration and side effect declaration.
@@ -98,7 +99,7 @@ export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TO
  */
 export type ToolAgentInfo = Pick<
     AgentInstance,
-    "name" | "pubkey" | "slug" | "signer" | "sign" | "llmConfig" | "tools"
+    "name" | "pubkey" | "slug" | "signer" | "sign" | "llmConfig" | "tools" | "telegram"
 >;
 
 /**

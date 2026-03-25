@@ -671,6 +671,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         triggeringEnvelope,
     });
 
+    systemPromptBuilder.add("channel-bindings", { agent: agentForFragments });
+
     // Add meta-project context (other projects this agent belongs to)
     // This gives agents cross-project awareness without overwhelming them
     systemPromptBuilder.add("meta-project-context", {

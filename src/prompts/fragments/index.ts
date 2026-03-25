@@ -41,6 +41,7 @@ import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
 import { environmentContextFragment } from "./32-environment-context";
 import { telegramChatContextFragment } from "./33-telegram-chat-context";
 import { telegramDeliveryRulesFragment } from "./34-telegram-delivery-rules";
+import { channelBindingsFragment } from "./34-channel-bindings";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
 
@@ -93,6 +94,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(environmentContextFragment);
     fragmentRegistry.register(telegramChatContextFragment);
     fragmentRegistry.register(telegramDeliveryRulesFragment);
+    fragmentRegistry.register(channelBindingsFragment);
 }
 
 // Auto-register all fragments on import

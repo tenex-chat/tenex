@@ -189,36 +189,97 @@ export class TelegramDeliveryService {
         agentSlug: string,
         conversationId: string
     ): Promise<void> {
-        const rendered = renderTelegramMessage(content);
-
-        try {
-            await client.sendMessage({
-                chatId: telegramChatId,
-                text: rendered.text,
-                parseMode: rendered.parseMode,
-                replyToMessageId: telegramMessageId,
-                messageThreadId: telegramThreadId,
-            });
-        } catch (error) {
-            trace.getActiveSpan()?.addEvent("telegram.delivery.html_retry", {
-                "telegram.chat.id": telegramChatId,
-                "telegram.message.id": telegramMessageId ?? "",
-                "delivery.error": error instanceof Error ? error.message : String(error),
-            });
-            logger.warn("[TelegramDeliveryService] HTML rendering failed, retrying with plain text", withActiveTraceLogFields({
+        await this.sendMessageWithHtmlRetry({
+            client,
+            chatId: telegramChatId,
+            content,
+            replyToMessageId: telegramMessageId,
+            messageThreadId: telegramThreadId,
+            logFields: {
                 agentSlug,
                 conversationId,
-                chatId: telegramChatId,
-                messageId: telegramMessageId,
-                threadId: telegramThreadId,
-                error: error instanceof Error ? error.message : String(error),
+            },
+        });
+    }
+
+    async sendToChannel(params: {
+        botToken: string;
+        apiBaseUrl?: string;
+        chatId: string;
+        messageThreadId?: string;
+        content: string;
+    }): Promise<void> {
+        return tracer.startActiveSpan(
+            "tenex.telegram.delivery.channel",
+            async (span) => {
+                try {
+                    span.setAttributes({
+                        "telegram.chat.id": params.chatId,
+                        "telegram.chat.thread_id": params.messageThreadId ?? "",
+                        "telegram.message.content": params.content,
+                    });
+
+                    const client = this.getClient(params.botToken, params.apiBaseUrl);
+                    await this.sendMessageWithHtmlRetry({
+                        client,
+                        chatId: params.chatId,
+                        content: params.content,
+                        messageThreadId: params.messageThreadId,
+                    });
+                    span.setStatus({ code: SpanStatusCode.OK });
+                } catch (error) {
+                    span.recordException(error as Error);
+                    span.setStatus({
+                        code: SpanStatusCode.ERROR,
+                        message: error instanceof Error ? error.message : String(error),
+                    });
+                    throw error;
+                } finally {
+                    span.end();
+                }
+            }
+        );
+    }
+
+    private async sendMessageWithHtmlRetry(params: {
+        client: TelegramBotClient;
+        chatId: string;
+        content: string;
+        replyToMessageId?: string;
+        messageThreadId?: string;
+        logFields?: Record<string, unknown>;
+    }): Promise<void> {
+        const rendered = renderTelegramMessage(params.content);
+
+        try {
+            await params.client.sendMessage({
+                chatId: params.chatId,
+                text: rendered.text,
+                parseMode: rendered.parseMode,
+                replyToMessageId: params.replyToMessageId,
+                messageThreadId: params.messageThreadId,
+            });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            trace.getActiveSpan()?.addEvent("telegram.delivery.html_retry", {
+                "telegram.chat.id": params.chatId,
+                "telegram.message.id": params.replyToMessageId ?? "",
+                "delivery.error": errorMessage,
+            });
+            logger.warn("[TelegramDeliveryService] HTML rendering failed, retrying with plain text", withActiveTraceLogFields({
+                ...params.logFields,
+                chatId: params.chatId,
+                messageId: params.replyToMessageId,
+                threadId: params.messageThreadId,
+                error: errorMessage,
             }));
 
-            await client.sendMessage({
-                chatId: telegramChatId,
-                text: content,
-                replyToMessageId: telegramMessageId,
-                messageThreadId: telegramThreadId,
+            await params.client.sendMessage({
+                chatId: params.chatId,
+                text: params.content,
+                replyToMessageId: params.replyToMessageId,
+                messageThreadId: params.messageThreadId,
             });
         }
     }

@@ -93,6 +93,9 @@ import { createGenerateImageTool } from "./implementations/generate_image";
 // Skills tools
 import { createSkillsSetTool } from "./implementations/skills_set";
 
+// Channel messaging tools
+import { createSendMessageTool } from "./implementations/send_message";
+
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
 
@@ -281,6 +284,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
     change_model: createChangeModelTool as ToolFactory,
+
+    // Channel messaging tools (auto-injected when agent has chat bindings)
+    send_message: createSendMessageTool,
 
     // Home-scoped filesystem tools (for agents without fs_* tools)
     home_fs_read: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_read as AISdkTool,
@@ -558,6 +564,13 @@ export function getToolsObject(
                     regularTools.push(fallback);
                 }
             }
+        }
+    }
+
+    // Auto-inject send_message when agent has telegram chat bindings
+    if (hasConversation && "agent" in context && (context.agent?.telegram?.chatBindings?.length ?? 0) > 0) {
+        if (!regularTools.includes("send_message")) {
+            regularTools.push("send_message");
         }
     }
 
