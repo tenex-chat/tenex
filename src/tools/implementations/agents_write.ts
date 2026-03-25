@@ -1,6 +1,6 @@
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
-import { CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
+import { CONTEXT_INJECTED_TOOLS, CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getProjectContext } from "@/services/projects";
@@ -47,7 +47,7 @@ async function executeAgentsWrite(
         input;
 
     // Normalize and filter tools
-    const autoInjectedTools = new Set<string>([...CORE_AGENT_TOOLS, ...DELEGATE_TOOLS]);
+    const autoInjectedTools = new Set<string>([...CORE_AGENT_TOOLS, ...DELEGATE_TOOLS, ...CONTEXT_INJECTED_TOOLS]);
     const tools = rawTools === null ? null : rawTools
         // 1. Strip mcp__tenex__ prefix
         .map(t => t.startsWith("mcp__tenex__") ? t.slice("mcp__tenex__".length) : t)
