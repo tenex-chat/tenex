@@ -39,6 +39,36 @@ function toRecipient(agentPubkey: string, agentName: string): PrincipalRef {
     };
 }
 
+function buildContentWithMedia(
+    textContent: string,
+    mediaInfo?: { localPath: string; type: string; duration?: number; fileName?: string }
+): string {
+    if (!mediaInfo) return textContent;
+
+    let mediaTag: string;
+    switch (mediaInfo.type) {
+        case "voice":
+            mediaTag = `[voice message: ${mediaInfo.localPath}${mediaInfo.duration ? `, duration: ${mediaInfo.duration}s` : ""}]`;
+            break;
+        case "audio":
+            mediaTag = `[audio: ${mediaInfo.localPath}${mediaInfo.duration ? `, duration: ${mediaInfo.duration}s` : ""}]`;
+            break;
+        case "document":
+            mediaTag = `[document: ${mediaInfo.fileName ? `${mediaInfo.fileName} — ` : ""}${mediaInfo.localPath}]`;
+            break;
+        case "video":
+            mediaTag = `[video: ${mediaInfo.localPath}${mediaInfo.duration ? `, duration: ${mediaInfo.duration}s` : ""}]`;
+            break;
+        case "photo":
+            mediaTag = `[photo: ${mediaInfo.localPath}]`;
+            break;
+        default:
+            mediaTag = `[attachment: ${mediaInfo.localPath}]`;
+    }
+
+    return textContent ? `${textContent}\n${mediaTag}` : mediaTag;
+}
+
 export class TelegramInboundAdapter {
     toEnvelope(params: {
         update: TelegramUpdate;
@@ -46,6 +76,7 @@ export class TelegramInboundAdapter {
         projectBinding: string;
         replyToNativeMessageId?: string;
         botIdentity?: TelegramBotIdentity;
+        mediaInfo?: { localPath: string; type: string; duration?: number; fileName?: string };
         transportMetadata?: TelegramTransportMetadata;
     }): TelegramInboundEnvelopeResult {
         const message = normalizeTelegramMessage(params.update);
@@ -55,9 +86,10 @@ export class TelegramInboundAdapter {
 
         const principalId = `telegram:user:${message.from.id}`;
         const identityBinding = getIdentityBindingStore().getBinding(principalId);
-        const content = message.text?.trim() || message.caption?.trim();
+        const textContent = message.text?.trim() || message.caption?.trim() || "";
+        const content = buildContentWithMedia(textContent, params.mediaInfo);
         if (!content) {
-            throw new Error("Telegram update does not contain textual content");
+            throw new Error("Telegram update does not contain processable content");
         }
         const transportMetadata = params.transportMetadata ??
             buildTelegramTransportMetadata(

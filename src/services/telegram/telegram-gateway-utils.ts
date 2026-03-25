@@ -1,6 +1,7 @@
 import type { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import type { TelegramChatBinding } from "@/agents/types/storage";
 import type {
+    TelegramInboundMediaType,
     TelegramMessage,
     TelegramUpdate,
 } from "@/services/telegram/types";
@@ -27,6 +28,63 @@ export function sleep(ms: number): Promise<void> {
 
 export function isTextualTelegramMessage(message: TelegramMessage): boolean {
     return Boolean(message.text?.trim() || message.caption?.trim());
+}
+
+export function hasMediaAttachment(message: TelegramMessage): boolean {
+    return Boolean(message.voice || message.audio || message.document || message.photo || message.video);
+}
+
+export function isProcessableTelegramMessage(message: TelegramMessage): boolean {
+    return isTextualTelegramMessage(message) || hasMediaAttachment(message);
+}
+
+export interface TelegramMediaTarget {
+    fileId: string;
+    fileUniqueId: string;
+    mimeType: string | undefined;
+    mediaType: TelegramInboundMediaType;
+    duration: number | undefined;
+    fileName: string | undefined;
+}
+
+/**
+ * Extract the highest-priority media target from a Telegram message.
+ * Priority: voice → audio → document → video → largest photo.
+ * Returns undefined if no media attachment is present.
+ */
+export function extractTelegramMediaTarget(message: TelegramMessage): TelegramMediaTarget | undefined {
+    if (!hasMediaAttachment(message)) return undefined;
+
+    const media =
+        message.voice ??
+        message.audio ??
+        message.document ??
+        message.video ??
+        message.photo?.[message.photo.length - 1];
+
+    if (!media) return undefined;
+
+    const mediaType: TelegramInboundMediaType = message.voice
+        ? "voice"
+        : message.audio
+          ? "audio"
+          : message.document
+            ? "document"
+            : message.video
+              ? "video"
+              : "photo";
+
+    const mimeType =
+        "mime_type" in media ? media.mime_type : mediaType === "photo" ? "image/jpeg" : undefined;
+
+    return {
+        fileId: media.file_id,
+        fileUniqueId: media.file_unique_id,
+        mimeType,
+        mediaType,
+        duration: "duration" in media ? media.duration : undefined,
+        fileName: message.document?.file_name,
+    };
 }
 
 export function isSupportedTelegramChatType(message: TelegramMessage): boolean {

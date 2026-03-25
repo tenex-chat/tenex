@@ -1,5 +1,6 @@
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { AgentInstance } from "@/agents/types";
+import type { ConfigService } from "@/services/ConfigService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RuntimeIngressService } from "@/services/ingress/RuntimeIngressService";
 import {
@@ -33,9 +34,11 @@ import {
     TelegramConfigCommandService,
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
+import { TelegramMediaDownloadService } from "@/services/telegram/TelegramMediaDownloadService";
 import {
+    hasMediaAttachment,
     isSupportedTelegramChatType,
-    isTextualTelegramMessage,
+    isProcessableTelegramMessage,
     matchesTelegramChatBinding,
     normalizeTelegramChatId,
     normalizeTelegramMessage,
@@ -56,6 +59,7 @@ interface TelegramGatewayOptions {
     projectId: string;
     projectContext: ProjectContext;
     agentExecutor: AgentExecutor;
+    configService: ConfigService;
     runtimeIngressService?: Pick<RuntimeIngressService, "handleChatMessage">;
     channelSessionStore?: ChannelSessionStore;
     channelBindingStore?: Pick<TelegramChannelBindingStore, "getBinding" | "rememberBinding">;
@@ -63,6 +67,7 @@ interface TelegramGatewayOptions {
     bindingPersistenceService?: Pick<TelegramBindingPersistenceService, "rememberProjectBinding">;
     chatContextService?: Pick<TelegramChatContextService, "rememberChatContext">;
     inboundAdapter?: Pick<TelegramInboundAdapter, "toEnvelope">;
+    mediaDownloadService?: TelegramMediaDownloadService;
     clientFactory?: (binding: TelegramGatewayBinding) => TelegramBotClient;
     pollTimeoutSeconds?: number;
     pollLimit?: number;
@@ -109,6 +114,7 @@ export class TelegramGatewayService {
     private readonly chatContextService: Pick<TelegramChatContextService, "rememberChatContext">;
     private readonly configCommandService = new TelegramConfigCommandService();
     private readonly inboundAdapter: Pick<TelegramInboundAdapter, "toEnvelope">;
+    private readonly mediaDownloadService: TelegramMediaDownloadService;
     private readonly clientFactory: (binding: TelegramGatewayBinding) => TelegramBotClient;
     private readonly pollTimeoutSeconds: number;
     private readonly pollLimit: number;
@@ -132,6 +138,8 @@ export class TelegramGatewayService {
             options.bindingPersistenceService ?? new TelegramBindingPersistenceService();
         this.chatContextService = options.chatContextService ?? new TelegramChatContextService();
         this.inboundAdapter = options.inboundAdapter ?? new TelegramInboundAdapter();
+        this.mediaDownloadService =
+            options.mediaDownloadService ?? new TelegramMediaDownloadService(options.configService);
         this.clientFactory = options.clientFactory ?? ((binding) =>
             new TelegramBotClient({
                 botToken: binding.config.botToken,
@@ -273,8 +281,8 @@ export class TelegramGatewayService {
                 return;
             }
 
-            if (!isTextualTelegramMessage(normalizedMessage)) {
-                recordTelegramOutcome("dropped", "non_text_message", {
+            if (!isProcessableTelegramMessage(normalizedMessage)) {
+                recordTelegramOutcome("dropped", "non_processable_message", {
                     "telegram.message.id": String(normalizedMessage.message_id),
                 });
                 return;
@@ -459,12 +467,53 @@ export class TelegramGatewayService {
                 "telegram.session.conversation_id": session?.conversationId ?? "",
             });
 
+            let mediaInfo: { localPath: string; type: string; duration?: number; fileName?: string } | undefined;
+            if (hasMediaAttachment(normalizedMessage)) {
+                try {
+                    const client = this.clientFactory(binding);
+                    const media =
+                        normalizedMessage.voice ??
+                        normalizedMessage.audio ??
+                        normalizedMessage.document ??
+                        normalizedMessage.video ??
+                        normalizedMessage.photo?.[normalizedMessage.photo.length - 1];
+                    if (media) {
+                        const mediaType = normalizedMessage.voice
+                            ? "voice"
+                            : normalizedMessage.audio
+                              ? "audio"
+                              : normalizedMessage.document
+                                ? "document"
+                                : normalizedMessage.video
+                                  ? "video"
+                                  : "photo";
+                        const mimeType =
+                            "mime_type" in media ? media.mime_type : mediaType === "photo" ? "image/jpeg" : undefined;
+                        const { localPath } = await this.mediaDownloadService.download(
+                            client,
+                            media.file_id,
+                            media.file_unique_id,
+                            mimeType
+                        );
+                        mediaInfo = {
+                            localPath,
+                            type: mediaType,
+                            duration: "duration" in media ? media.duration : undefined,
+                            fileName: normalizedMessage.document?.file_name,
+                        };
+                    }
+                } catch (err) {
+                    logger.warn("Failed to download Telegram media attachment, forwarding without file", { err });
+                }
+            }
+
             const { envelope } = this.inboundAdapter.toEnvelope({
                 update,
                 binding,
                 projectBinding,
                 replyToNativeMessageId: session?.lastMessageId,
                 botIdentity,
+                mediaInfo,
                 transportMetadata: await this.buildTransportMetadata({
                     binding,
                     channelId,

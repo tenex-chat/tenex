@@ -14,9 +14,12 @@ import {
 import type {
     TelegramBotIdentity,
     TelegramGatewayBinding,
+    TelegramInboundMediaInfo,
     TelegramMessage,
     TelegramUpdate,
 } from "@/services/telegram/types";
+import { TelegramMediaDownloadService } from "@/services/telegram/TelegramMediaDownloadService";
+import { ConfigService } from "@/services/ConfigService";
 import { projectContextStore } from "@/services/projects";
 import { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
 import { TelegramChatContextService } from "@/services/telegram/TelegramChatContextService";
@@ -30,8 +33,9 @@ import {
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
 import {
+    extractTelegramMediaTarget,
+    isProcessableTelegramMessage,
     isSupportedTelegramChatType,
-    isTextualTelegramMessage,
     matchesTelegramChatBinding,
     normalizeTelegramChatId,
     normalizeTelegramMessage,
@@ -138,6 +142,7 @@ export class TelegramGatewayCoordinator {
     private readonly bindingPersistenceService = new TelegramBindingPersistenceService();
     private readonly chatContextService = new TelegramChatContextService();
     private readonly configCommandService = new TelegramConfigCommandService();
+    private readonly mediaDownloadService = new TelegramMediaDownloadService(new ConfigService());
     private readonly authorizedIdentityService: AuthorizedIdentityService =
         getAuthorizedIdentityService();
     private readonly pollTimeoutSeconds = 20;
@@ -404,8 +409,8 @@ export class TelegramGatewayCoordinator {
                 return;
             }
 
-            if (!isTextualTelegramMessage(message)) {
-                recordTelegramOutcome("dropped", "non_text_message", {
+            if (!isProcessableTelegramMessage(message)) {
+                recordTelegramOutcome("dropped", "unprocessable_message", {
                     "telegram.message.id": String(message.message_id),
                 });
                 return;
@@ -795,6 +800,37 @@ export class TelegramGatewayCoordinator {
             registration.binding.agent.pubkey,
             channelId
         );
+        let mediaInfo: TelegramInboundMediaInfo | undefined;
+        const mediaTarget = extractTelegramMediaTarget(message);
+        if (mediaTarget) {
+            try {
+                const { localPath } = await this.mediaDownloadService.download(
+                    client,
+                    mediaTarget.fileId,
+                    mediaTarget.fileUniqueId,
+                    mediaTarget.mimeType
+                );
+                mediaInfo = {
+                    localPath,
+                    type: mediaTarget.mediaType,
+                    duration: mediaTarget.duration,
+                    fileName: mediaTarget.fileName,
+                };
+            } catch (error) {
+                logger.warn(
+                    "[TelegramGatewayCoordinator] Failed to download Telegram media attachment",
+                    withActiveTraceLogFields({
+                        projectId: registration.projectId,
+                        projectTitle: registration.projectTitle,
+                        agentSlug: registration.binding.agent.slug,
+                        channelId,
+                        telegramMediaType: mediaTarget.mediaType,
+                        error: error instanceof Error ? error.message : String(error),
+                    })
+                );
+            }
+        }
+
         const transportMetadata = await this.buildTransportMetadata({
             registration,
             channelId,
@@ -809,6 +845,7 @@ export class TelegramGatewayCoordinator {
             projectBinding: registration.projectBinding,
             replyToNativeMessageId: session?.lastMessageId,
             botIdentity,
+            mediaInfo,
             transportMetadata,
         });
 

@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { basename, extname } from "node:path";
+
 import type {
     TelegramAnswerCallbackQueryParams,
     TelegramBotCommand,
@@ -5,12 +8,14 @@ import type {
     TelegramGetChatAdministratorsResponse,
     TelegramGetChatMemberCountResponse,
     TelegramGetChatResponse,
+    TelegramGetFileResponse,
     TelegramGetMeResponse,
     TelegramGetUpdatesResponse,
     TelegramMessage,
     TelegramSendChatActionParams,
     TelegramSendMessageParams,
     TelegramSendMessageResponse,
+    TelegramSendVoiceParams,
 } from "@/services/telegram/types";
 import { withActiveTraceLogFields } from "@/telemetry/TelegramTelemetry";
 import { logger } from "@/utils/logger";
@@ -54,6 +59,21 @@ async function parseTelegramResponse<T>(response: Response): Promise<T> {
     return parsed as T;
 }
 
+function detectVoiceMimeType(voicePath: string): string {
+    switch (extname(voicePath).toLowerCase()) {
+        case ".ogg":
+        case ".oga":
+        case ".opus":
+            return "audio/ogg";
+        case ".mp3":
+            return "audio/mpeg";
+        case ".m4a":
+            return "audio/mp4";
+        default:
+            return "application/octet-stream";
+    }
+}
+
 export class TelegramBotClient {
     private readonly apiBaseUrl: string;
     private readonly fetchImpl: typeof fetch;
@@ -74,10 +94,12 @@ export class TelegramBotClient {
             | "getChat"
             | "getChatAdministrators"
             | "getChatMemberCount"
+            | "getFile"
             | "getMe"
             | "getUpdates"
             | "setMyCommands"
             | "sendMessage"
+            | "sendVoice"
             | "sendChatAction";
         method: "GET" | "POST";
         requestBody?: unknown;
@@ -436,6 +458,77 @@ export class TelegramBotClient {
         });
     }
 
+    async sendVoice(params: TelegramSendVoiceParams): Promise<TelegramSendMessageResponse["result"]> {
+        const fileName = basename(params.voicePath);
+        const mimeType = params.mimeType ?? detectVoiceMimeType(params.voicePath);
+        const voiceFile = new Blob([await readFile(params.voicePath)], {
+            type: mimeType,
+        });
+        const form = new FormData();
+        form.set("chat_id", params.chatId);
+        form.set("voice", voiceFile, fileName);
+        form.set("allow_sending_without_reply", "true");
+
+        if (params.replyToMessageId) {
+            form.set("reply_to_message_id", params.replyToMessageId);
+        }
+
+        if (params.messageThreadId) {
+            form.set("message_thread_id", params.messageThreadId);
+        }
+
+        if (params.caption) {
+            form.set("caption", params.caption);
+        }
+
+        if (params.parseMode) {
+            form.set("parse_mode", params.parseMode);
+        }
+
+        return this.runApiCall({
+            operation: "sendVoice",
+            method: "POST",
+            requestBody: {
+                chat_id: params.chatId,
+                voice: fileName,
+                mime_type: mimeType,
+                allow_sending_without_reply: true,
+                reply_to_message_id: params.replyToMessageId ?? "",
+                message_thread_id: params.messageThreadId ?? "",
+                caption: params.caption ?? "",
+                parse_mode: params.parseMode ?? "",
+            },
+            attributes: {
+                "telegram.chat.id": params.chatId,
+                "telegram.chat.thread_id": params.messageThreadId ?? "",
+                "telegram.reply_to_message_id": params.replyToMessageId ?? "",
+                "telegram.voice.file_name": fileName,
+                "telegram.voice.mime_type": mimeType,
+            },
+            execute: async () => {
+                const response = await this.fetchImpl(
+                    `${this.apiBaseUrl}/bot${this.options.botToken}/sendVoice`,
+                    {
+                        method: "POST",
+                        body: form,
+                    }
+                );
+                const parsed = await parseTelegramResponse<TelegramSendMessageResponse>(response);
+                return {
+                    parsedBody: parsed,
+                    result: parsed.result,
+                };
+            },
+            responseAttributes: (result) => ({
+                "telegram.sent_message.id": String(result.message_id),
+                "telegram.chat.id": String(result.chat.id),
+                "telegram.chat.thread_id": result.message_thread_id
+                    ? String(result.message_thread_id)
+                    : "",
+            }),
+        });
+    }
+
     async sendChatAction(params: TelegramSendChatActionParams): Promise<void> {
         const payload: Record<string, string | number> = {
             chat_id: params.chatId,
@@ -561,5 +654,35 @@ export class TelegramBotClient {
                 };
             },
         });
+    }
+
+    async getFile(fileId: string): Promise<{ file_path: string }> {
+        const search = new URLSearchParams({ file_id: fileId });
+        return this.runApiCall({
+            operation: "getFile",
+            method: "GET",
+            requestQuery: Object.fromEntries(search),
+            attributes: {
+                "telegram.file.id": fileId,
+            },
+            execute: async () => {
+                const response = await this.fetchImpl(
+                    `${this.apiBaseUrl}/bot${this.options.botToken}/getFile?${search.toString()}`
+                );
+                const parsed = await parseTelegramResponse<TelegramGetFileResponse>(response);
+                const filePath = parsed.result?.file_path;
+                if (!filePath) {
+                    throw new Error(`getFile returned no file_path for file_id=${fileId}`);
+                }
+                return {
+                    parsedBody: parsed,
+                    result: { file_path: filePath },
+                };
+            },
+        });
+    }
+
+    getFileDownloadUrl(filePath: string): string {
+        return `${this.apiBaseUrl}/file/bot${this.options.botToken}/${filePath}`;
     }
 }

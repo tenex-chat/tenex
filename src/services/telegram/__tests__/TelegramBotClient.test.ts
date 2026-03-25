@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import { TELEGRAM_BOT_COMMANDS } from "@/services/telegram/TelegramConfigCommandService";
 
 describe("TelegramBotClient", () => {
+    const tempDirs: string[] = [];
+
     afterEach(() => {
         mock.restore();
+        for (const dir of tempDirs.splice(0)) {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it("requests updates with the expected query parameters", async () => {
@@ -256,6 +264,61 @@ describe("TelegramBotClient", () => {
             action: "typing",
             message_thread_id: 15,
         });
+    });
+
+    it("posts sendVoice payloads as multipart form data", async () => {
+        const fetchImpl = mock(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+            new Response(
+                JSON.stringify({
+                    ok: true,
+                    result: {
+                        message_id: 9,
+                        date: 123,
+                        chat: { id: 1001, type: "private" },
+                    },
+                }),
+                { status: 200 }
+            )
+        );
+        const tempDir = mkdtempSync(join(tmpdir(), "telegram-voice-"));
+        const voicePath = join(tempDir, "reply.ogg");
+        tempDirs.push(tempDir);
+        writeFileSync(voicePath, "voice-data");
+
+        const client = new TelegramBotClient({
+            botToken: "test-token",
+            apiBaseUrl: "https://telegram.example",
+            fetchImpl,
+        });
+
+        await client.sendVoice({
+            chatId: "1001",
+            voicePath,
+            replyToMessageId: "7",
+            messageThreadId: "15",
+        });
+
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+            "https://telegram.example/bottest-token/sendVoice"
+        );
+        expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
+            method: "POST",
+        });
+
+        const body = fetchImpl.mock.calls[0]?.[1]?.body;
+        expect(body).toBeInstanceOf(FormData);
+
+        const formData = body as FormData;
+        expect(formData.get("chat_id")).toBe("1001");
+        expect(formData.get("reply_to_message_id")).toBe("7");
+        expect(formData.get("message_thread_id")).toBe("15");
+        expect(formData.get("allow_sending_without_reply")).toBe("true");
+
+        const voice = formData.get("voice");
+        expect(voice).toBeInstanceOf(File);
+        expect((voice as File).name).toBe("reply.ogg");
+        expect((voice as File).type).toBe("audio/ogg");
     });
 
     it("posts editMessageText payloads in Telegram Bot API format", async () => {

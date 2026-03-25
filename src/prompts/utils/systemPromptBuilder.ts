@@ -664,6 +664,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     systemPromptBuilder.add("telegram-chat-context", {
         triggeringEnvelope,
     });
+    systemPromptBuilder.add("telegram-delivery-rules", {
+        triggeringEnvelope,
+    });
 
     // Add meta-project context (other projects this agent belongs to)
     // This gives agents cross-project awareness without overwhelming them

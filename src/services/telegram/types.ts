@@ -24,6 +24,49 @@ export interface TelegramChat {
     last_name?: string;
 }
 
+export interface TelegramVoice {
+    file_id: string;
+    file_unique_id: string;
+    duration: number;
+    mime_type?: string;
+    file_size?: number;
+}
+
+export interface TelegramAudio {
+    file_id: string;
+    file_unique_id: string;
+    duration: number;
+    mime_type?: string;
+    file_size?: number;
+    title?: string;
+}
+
+export interface TelegramDocument {
+    file_id: string;
+    file_unique_id: string;
+    file_name?: string;
+    mime_type?: string;
+    file_size?: number;
+}
+
+export interface TelegramPhotoSize {
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    file_size?: number;
+}
+
+export interface TelegramVideo {
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    duration: number;
+    mime_type?: string;
+    file_size?: number;
+}
+
 export interface TelegramMessage {
     message_id: number;
     date: number;
@@ -34,6 +77,21 @@ export interface TelegramMessage {
     message_thread_id?: number;
     reply_to_message?: {
         message_id: number;
+    };
+    voice?: TelegramVoice;
+    audio?: TelegramAudio;
+    document?: TelegramDocument;
+    photo?: TelegramPhotoSize[];
+    video?: TelegramVideo;
+}
+
+export interface TelegramGetFileResponse {
+    ok: boolean;
+    result: {
+        file_id: string;
+        file_unique_id: string;
+        file_size?: number;
+        file_path?: string;
     };
 }
 
@@ -119,6 +177,16 @@ export interface TelegramSendMessageParams {
     replyMarkup?: TelegramInlineKeyboardMarkup;
 }
 
+export interface TelegramSendVoiceParams {
+    chatId: string;
+    voicePath: string;
+    mimeType?: string;
+    replyToMessageId?: string;
+    messageThreadId?: string;
+    caption?: string;
+    parseMode?: "HTML" | "MarkdownV2";
+}
+
 export interface TelegramSendChatActionParams {
     chatId: string;
     action: "typing";
@@ -150,6 +218,15 @@ export interface TelegramChatContextSnapshot {
     chatUsername?: string;
     memberCount?: number;
     administrators?: TelegramChatAdministratorMetadata[];
+}
+
+export type TelegramInboundMediaType = 'voice' | 'audio' | 'document' | 'photo' | 'video';
+
+export interface TelegramInboundMediaInfo {
+    localPath: string;
+    type: TelegramInboundMediaType;
+    duration?: number;
+    fileName?: string;
 }
 
 export interface TelegramInboundEnvelopeResult {

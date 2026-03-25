@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { projectContextStore } from "@/services/projects";
 import type { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
@@ -82,6 +83,31 @@ function createPrivateUpdate(updateId: number, text: string) {
                 first_name: "Alice",
             },
             text,
+        },
+    };
+}
+
+function createPrivateVoiceUpdate(updateId: number) {
+    return {
+        update_id: updateId,
+        message: {
+            message_id: updateId + 40,
+            date: 123,
+            chat: {
+                id: 1001,
+                type: "private" as const,
+            },
+            from: {
+                id: 42,
+                is_bot: false as const,
+                first_name: "Alice",
+            },
+            voice: {
+                file_id: "voice-file-id",
+                file_unique_id: "voice-unique-id",
+                duration: 7,
+                mime_type: "audio/ogg",
+            },
         },
     };
 }
@@ -509,5 +535,80 @@ describe("TelegramGatewayCoordinator", () => {
         expect(coordinator.pendingBindingStore.clearPending).toHaveBeenCalledTimes(0);
         expect(coordinator.routeUpdateToRegistration).toHaveBeenCalledTimes(0);
         expect(sendMessage).toHaveBeenCalledTimes(0);
+    });
+
+    it("routes voice-only Telegram updates with downloaded media info", async () => {
+        const coordinator = TelegramGatewayCoordinator.getInstance() as any;
+        const registration = createRegistration("project-alpha", "Project Alpha");
+        let routedEnvelope: any;
+
+        coordinator.channelSessionStore = {
+            findSessionByAgentChannel: () => undefined,
+            rememberSession: mock(() => undefined),
+        };
+        coordinator.channelBindingStore = {
+            rememberBinding: mock(() => undefined),
+        };
+        coordinator.pendingBindingStore = {
+            clearPending: mock(() => undefined),
+        };
+        coordinator.mediaDownloadService = {
+            download: mock(async () => ({
+                localPath: "/tmp/telegram/media/voice-unique-id.ogg",
+            })),
+        };
+        coordinator.runtimeIngressService = {
+            handleChatMessage: mock(async ({ envelope }: { envelope: unknown }) => {
+                routedEnvelope = envelope;
+            }),
+        };
+
+        const conversationSpy = spyOn(ConversationStore, "findByEventId").mockReturnValue({
+            id: "conversation-voice",
+        } as any);
+
+        await coordinator.routeUpdateToRegistration(
+            registration,
+            createPrivateVoiceUpdate(101),
+            "telegram:chat:1001",
+            {
+                sendChatAction: mock(async () => undefined),
+            },
+            {
+                id: 101,
+                is_bot: true,
+                first_name: "test-bot",
+                username: "test_bot",
+            }
+        );
+
+        expect(coordinator.mediaDownloadService.download).toHaveBeenCalledWith(
+            expect.anything(),
+            "voice-file-id",
+            "voice-unique-id",
+            "audio/ogg"
+        );
+        expect(routedEnvelope.content).toBe(
+            "[voice message: /tmp/telegram/media/voice-unique-id.ogg, duration: 7s]"
+        );
+        expect(coordinator.runtimeIngressService.handleChatMessage).toHaveBeenCalledTimes(1);
+        expect(conversationSpy).toHaveBeenCalledWith("tg_1001_141");
+        expect(coordinator.channelSessionStore.rememberSession).toHaveBeenCalledWith(
+            expect.objectContaining({
+                conversationId: "conversation-voice",
+                lastMessageId: "tg_1001_141",
+            })
+        );
+        expect(coordinator.channelBindingStore.rememberBinding).toHaveBeenCalledWith(
+            expect.objectContaining({
+                agentPubkey: registration.binding.agent.pubkey,
+                channelId: "telegram:chat:1001",
+                projectId: registration.projectId,
+            })
+        );
+        expect(coordinator.pendingBindingStore.clearPending).toHaveBeenCalledWith(
+            registration.binding.agent.pubkey,
+            "telegram:chat:1001"
+        );
     });
 });
