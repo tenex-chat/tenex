@@ -184,6 +184,7 @@ export class SkillService {
         const installedFiles = await this.installSkillFiles(fileETags, shortId);
 
         return {
+            eventId: event.id,
             content,
             title,
             name,

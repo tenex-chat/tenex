@@ -1521,13 +1521,6 @@ describe("ConversationStore", () => {
             expect(store.getSelfAppliedSkillIds(AGENT2_PUBKEY)).toEqual(["skill-bbb"]);
         });
 
-        it("should use _default key when no pubkey provided", () => {
-            store.setSelfAppliedSkills(["skill-aaa"]);
-            expect(store.getSelfAppliedSkillIds()).toEqual(["skill-aaa"]);
-            // Different from agent-keyed skills
-            expect(store.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual([]);
-        });
-
         it("should persist skills across save/load cycles", async () => {
             store.setSelfAppliedSkills(["skill-aaa", "skill-bbb"], AGENT1_PUBKEY);
             await store.save();

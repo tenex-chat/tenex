@@ -44,6 +44,8 @@ export interface SkillFileInstallResult {
  * Individual skill data with content, title, and attached files
  */
 export interface SkillData {
+    /** The canonical Nostr event ID of this skill */
+    eventId: string;
     /** The skill content/instructions */
     content: string;
     /** The skill title (from "title" tag) */

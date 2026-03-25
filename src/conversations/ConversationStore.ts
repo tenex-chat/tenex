@@ -853,15 +853,13 @@ export class ConversationStore {
 
     // Self-Applied Skills Operations
 
-    setSelfAppliedSkills(skillEventIds: string[], agentPubkey?: string): void {
-        const key = agentPubkey ?? "_default";
+    setSelfAppliedSkills(skillEventIds: string[], agentPubkey: string): void {
         if (!this.state.selfAppliedSkills) this.state.selfAppliedSkills = {};
-        this.state.selfAppliedSkills[key] = [...skillEventIds];
+        this.state.selfAppliedSkills[agentPubkey] = [...skillEventIds];
     }
 
-    getSelfAppliedSkillIds(agentPubkey?: string): string[] {
-        const key = agentPubkey ?? "_default";
-        return this.state.selfAppliedSkills?.[key] ?? [];
+    getSelfAppliedSkillIds(agentPubkey: string): string[] {
+        return this.state.selfAppliedSkills?.[agentPubkey] ?? [];
     }
 
     // Envelope Message Operations

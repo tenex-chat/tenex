@@ -23,7 +23,7 @@ function escapeAttrValue(value: string): string {
  * Render a single skill with its title, content, and attached files.
  * Title is escaped to prevent XML injection.
  */
-function renderSkill(skill: SkillData): string {
+export function renderSkill(skill: SkillData): string {
     const parts: string[] = [];
 
     // Build attributes
