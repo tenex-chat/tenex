@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { agentEnvironmentService } from "@/services/AgentEnvironmentService";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -162,6 +163,18 @@ const shellSchema = z.object({
 type ShellInput = z.infer<typeof shellSchema>;
 type ShellOutput = string | ShellExpectedNonZeroResult | ShellErrorResult | ShellBackgroundResult;
 
+function buildShellErrorResult(command: string, error: string): ShellErrorResult {
+    return {
+        type: "shell-error",
+        command: command.substring(0, 200),
+        exitCode: null,
+        error,
+        stdout: "",
+        stderr: "",
+        signal: null,
+    };
+}
+
 /**
  * Core implementation of shell command execution
  * Shared between AI SDK and legacy Tool interfaces
@@ -174,6 +187,10 @@ type ShellOutput = string | ShellExpectedNonZeroResult | ShellErrorResult | Shel
  */
 async function executeShell(input: ShellInput, context: ToolExecutionContext): Promise<ShellOutput> {
     const { command, description, cwd, timeout = 30, run_in_background } = input;
+    const conversation = context.getConversation?.();
+    const projectId = typeof conversation?.getProjectId === "function"
+        ? conversation.getProjectId()
+        : null;
 
     // Resolve cwd: if provided and relative, resolve against context.workingDirectory
     // If not provided, use context.workingDirectory directly
@@ -224,6 +241,30 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         runInBackground: run_in_background ?? false,
     });
 
+    let resolvedEnv: NodeJS.ProcessEnv;
+    try {
+        resolvedEnv = await agentEnvironmentService.resolveShellEnvironment({
+            agentPubkey: context.agent.pubkey,
+            agentNsec: context.agent.signer.nsec,
+            projectDTag: projectId,
+            baseEnv: process.env,
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        span?.addEvent("shell.env_resolution_error", {
+            error: message.substring(0, 200),
+        });
+
+        logger.error("Failed to resolve shell environment", {
+            command,
+            agent: context.agent.name,
+            error: message,
+        });
+
+        return buildShellErrorResult(command, message);
+    }
+
     // Handle background execution
     if (run_in_background) {
         const taskId = generateTaskId();
@@ -236,11 +277,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
             shell: true,
             detached: true,
             stdio: ["ignore", "pipe", "pipe"],
-            env: {
-                ...process.env,
-                PATH: process.env.PATH,
-                HOME: process.env.HOME,
-            },
+            env: resolvedEnv,
         });
 
         // Write output to file
@@ -254,8 +291,6 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         }
 
         // Get project ID for isolation enforcement
-        const conversation = context.getConversation?.();
-        const projectId = conversation?.getProjectId();
         if (!projectId) {
             throw new Error("Cannot create background task: no project context available");
         }
@@ -308,11 +343,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         const { stdout, stderr } = await execAsync(command, {
             cwd: workingDir,
             timeout: timeout != null ? timeout * 1000 : undefined,
-            env: {
-                ...process.env,
-                PATH: process.env.PATH,
-                HOME: process.env.HOME,
-            },
+            env: resolvedEnv,
         });
 
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : "");
@@ -448,6 +479,7 @@ WHEN NOT TO USE SHELL:
 OTHER RESTRICTIONS:
 - NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
 - Commands run with timeout in seconds (default: 30s, max: 600s / 10 minutes)
+- Shell sessions auto-load env vars from TENEX .env files with precedence agent > project > global, and ~ resolves to your agent home directory.
 
 Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.
 - Time-based delays: Use shell(sleep N) to wait N seconds (e.g., shell(sleep 5) for 5 seconds).`,

@@ -5,6 +5,7 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 ## Root-Level Services
 
 - `ConfigService.ts` — Centralized config and path management (always use this, never construct paths manually)
+- `AgentEnvironmentService.ts` — Resolves agent/project/global shell `.env` overlays and bootstraps agent-home `~/.env`
 - `PubkeyService.ts` — Pubkey caching/lookup
 - `LLMOperationsRegistry.ts` — Request throttling
 - `CooldownRegistry.ts` — Cooldown tracking

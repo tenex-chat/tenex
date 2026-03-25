@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as agentHome from "@/lib/agent-home";
+import * as agentHomeEnv from "@/lib/agent-home-env";
 import type { InjectedFile } from "@/lib/agent-home";
 import { agentHomeDirectoryFragment, getAgentHomeDirectory } from "../02-agent-home-directory";
 
@@ -20,6 +21,9 @@ describe("agent-home-directory fragment", () => {
         slug: "test-agent",
         name: "Test Agent",
         role: "test",
+        signer: {
+            nsec: "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq26us3r",
+        },
     };
 
     describe("getAgentHomeDirectory", () => {
@@ -37,20 +41,27 @@ describe("agent-home-directory fragment", () => {
 
     describe("agentHomeDirectoryFragment.template", () => {
         let ensureAgentHomeSpy: ReturnType<typeof spyOn>;
+        let ensureAgentHomeEnvSpy: ReturnType<typeof spyOn>;
         let readdirSyncSpy: ReturnType<typeof spyOn>;
         let getInjectedFilesSpy: ReturnType<typeof spyOn>;
 
         beforeEach(() => {
             // Reset spies before each test
             ensureAgentHomeSpy = spyOn(agentHome, "ensureAgentHomeDirectory");
+            ensureAgentHomeEnvSpy = spyOn(agentHomeEnv, "ensureAgentHomeEnvFile");
             readdirSyncSpy = spyOn(fs, "readdirSync");
             getInjectedFilesSpy = spyOn(agentHome, "getAgentHomeInjectedFiles");
+            ensureAgentHomeEnvSpy.mockResolvedValue({
+                path: `${getAgentHomeDirectory(mockAgent.pubkey)}/.env`,
+                created: false,
+            });
             // Default to no injected files
             getInjectedFilesSpy.mockImplementation(() => []);
         });
 
         afterEach(() => {
             ensureAgentHomeSpy.mockRestore();
+            ensureAgentHomeEnvSpy.mockRestore();
             readdirSyncSpy.mockRestore();
             getInjectedFilesSpy.mockRestore();
         });
@@ -159,6 +170,9 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
+            expect(result).toContain("Shell env files:");
+            expect(result).toContain("precedence `agent > project > global`");
+            expect(result).toContain("`.env` contents are NOT injected into your prompt");
             expect(result).toContain("Auto-injected files:");
             expect(result).toContain("Files starting with `+`");
             expect(result).toContain("critical reminders");

@@ -1,5 +1,6 @@
 import { readdirSync } from "node:fs";
 import type { AgentInstance } from "@/agents/types/runtime";
+import { ensureAgentHomeEnvFile } from "@/lib/agent-home-env";
 import {
     ensureAgentHomeDirectory,
     getAgentHomeDirectory,
@@ -67,7 +68,13 @@ function buildHomeListing(homeDir: string, agentPubkey: string): string {
 export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> = {
     id: "agent-home-directory",
     priority: 2, // Right after agent-identity (priority 1)
-    template: ({ agent }) => {
+    template: async ({ agent }) => {
+        try {
+            await ensureAgentHomeEnvFile(agent.pubkey, agent.signer.nsec);
+        } catch (error) {
+            logger.warn("Failed to bootstrap agent home .env:", error);
+        }
+
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const listing = buildHomeListing(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
@@ -85,6 +92,15 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
         parts.push(
             "Feel free to use this space for notes, helper scripts, temporary files, or any personal workspace needs. " +
                 "Use descriptive names for your files so you can easily find them later."
+        );
+        parts.push("");
+        parts.push(
+            "**Shell env files:** Shell sessions automatically load environment variables from `.env` files with precedence `agent > project > global`. " +
+                "Your agent-specific file is `~/.env` inside this home directory."
+        );
+        parts.push("");
+        parts.push(
+            "`.env` contents are NOT injected into your prompt. Reference them in shell commands with normal shell expansion such as `$NSEC` or `$OPENAI_API_KEY`."
         );
         parts.push("");
         parts.push(

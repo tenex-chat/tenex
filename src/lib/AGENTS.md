@@ -14,3 +14,5 @@ Use `console.error` for errors, not the TENEX logger (which is in `utils/` and w
 - `time.ts` — Time/date utilities
 - `json-parser.ts` — Safe JSON parsing
 - `agent-home.ts` — Agent home directory resolution
+- `agent-home-env.ts` — Agent home `.env` bootstrap helpers
+- `parse-dotenv.ts` — Pure `.env` parser

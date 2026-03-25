@@ -1,12 +1,40 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { rmSync } from "node:fs";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { createShellTool } from "../shell";
-import { createMockExecutionEnvironment } from "@/test-utils";
+import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import { tmpdir } from "node:os";
+import * as path from "node:path";
+
+const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
+
+beforeEach(() => {
+    process.env.TENEX_BASE_DIR = path.join(
+        tmpdir(),
+        `tenex-shell-simple-${Math.random().toString(36).slice(2, 10)}`
+    );
+});
+
+afterEach(() => {
+    if (process.env.TENEX_BASE_DIR) {
+        rmSync(process.env.TENEX_BASE_DIR, { recursive: true, force: true });
+    }
+    if (originalTenexBaseDir === undefined) {
+        process.env.TENEX_BASE_DIR = undefined;
+    } else {
+        process.env.TENEX_BASE_DIR = originalTenexBaseDir;
+    }
+});
 
 describe("shellTool - simple test", () => {
+    const signer = NDKPrivateKeySigner.generate();
     // Create tool instance using factory with mock context
     // Use real tmpdir so shell commands can actually execute
     const mockContext = createMockExecutionEnvironment({
+        agent: createMockAgent({
+            pubkey: signer.pubkey,
+            signer,
+        }),
         workingDirectory: tmpdir(),
         projectBasePath: tmpdir(),
     });
@@ -59,8 +87,13 @@ describe("shellTool - simple test", () => {
     }
 
     it("should work with run_in_background without cwd or timeout", async () => {
+        const backgroundSigner = NDKPrivateKeySigner.generate();
         // Create a mock context with getConversation that returns getProjectId
         const backgroundMockContext = createMockExecutionEnvironment({
+            agent: createMockAgent({
+                pubkey: backgroundSigner.pubkey,
+                signer: backgroundSigner,
+            }),
             workingDirectory: tmpdir(),
             projectBasePath: tmpdir(),
             getConversation: () => ({
@@ -84,7 +117,12 @@ describe("shellTool - simple test", () => {
 });
 
 describe("shellTool - schema validation", () => {
+    const signer = NDKPrivateKeySigner.generate();
     const mockContext = createMockExecutionEnvironment({
+        agent: createMockAgent({
+            pubkey: signer.pubkey,
+            signer,
+        }),
         workingDirectory: tmpdir(),
         projectBasePath: tmpdir(),
     });
