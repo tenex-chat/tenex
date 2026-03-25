@@ -101,6 +101,35 @@ describe("NudgeSkillWhitelistService", () => {
     });
 
     describe("reactive cache population", () => {
+        it("notifies cache listeners after rebuilding", async () => {
+            const listener = mock();
+            service.onCacheUpdated(listener);
+
+            const skillEventId = "skill123";
+            const pubkey1 = "whitelist-pubkey-1";
+
+            service.initialize([pubkey1]);
+
+            mockFetchEvents.mockResolvedValueOnce(new Set([
+                {
+                    id: skillEventId,
+                    kind: NDKKind.AgentSkill,
+                    content: "Skill content",
+                    tags: [["title", "Poster Skill"]],
+                    tagValue: (tag: string) => tag === "title" ? "Poster Skill" : undefined,
+                },
+            ]));
+
+            await emitAndRebuild({
+                id: "whitelist1",
+                pubkey: pubkey1,
+                created_at: 1000,
+                tags: [["e", skillEventId]],
+            });
+
+            expect(listener).toHaveBeenCalledTimes(1);
+        });
+
         it("should populate cache when whitelist event arrives", async () => {
             const nudgeEventId = "nudge123";
             const pubkey1 = "whitelist-pubkey-1";
@@ -358,6 +387,43 @@ describe("NudgeSkillWhitelistService", () => {
             expect(service.getWhitelistedNudges().length).toBe(0);
             expect(service.getWhitelistedSkills().length).toBe(0);
             expect(service.getAllWhitelistedItems().length).toBe(0);
+        });
+
+        it("should use the description tag for whitelisted skills when available", async () => {
+            const skillEventId = "skill-with-description";
+            const pubkey1 = "pubkey1";
+
+            service.initialize([pubkey1]);
+            mockFetchEvents.mockResolvedValueOnce(new Set([
+                {
+                    id: skillEventId,
+                    kind: NDKKind.AgentSkill,
+                    content: "Full markdown skill body",
+                    tags: [
+                        ["title", "Skill With Description"],
+                        ["description", "Short summary from the description tag"],
+                    ],
+                    tagValue: (tag: string) => {
+                        if (tag === "title") return "Skill With Description";
+                        if (tag === "description") return "Short summary from the description tag";
+                        return undefined;
+                    },
+                },
+            ]));
+
+            await emitAndRebuild({
+                id: "whitelist-skill-description",
+                pubkey: pubkey1,
+                created_at: 1000,
+                tags: [["e", skillEventId]],
+            });
+
+            expect(service.getWhitelistedSkills()).toEqual([
+                expect.objectContaining({
+                    eventId: skillEventId,
+                    description: "Short summary from the description tag",
+                }),
+            ]);
         });
     });
 

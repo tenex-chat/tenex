@@ -15,6 +15,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
+import { NudgeIdentifierResolverService } from "@/services/nudge";
 import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
@@ -44,7 +45,7 @@ const delegationItemSchema = z.object({
   nudges: z
     .array(z.string())
     .optional()
-    .describe("Nudge event IDs to apply to this delegated agent. Nudges can modify tool availability and inject additional context."),
+    .describe("Nudge IDs to apply to this delegated agent. Use the IDs shown in the prompt; slugged IDs and short event IDs are resolved automatically."),
 });
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
@@ -156,8 +157,23 @@ async function executeDelegate(
       ...inheritedNudges,
       ...(delegation.nudges || []),
     ];
-    // Deduplicate nudges
-    const uniqueNudges = [...new Set(combinedNudges)];
+    const uniqueNudges = Array.from(
+      new Set(
+        combinedNudges
+          .map((nudgeIdentifier) => {
+            const trimmedIdentifier = nudgeIdentifier.trim();
+            if (!trimmedIdentifier) {
+              return null;
+            }
+
+            return (
+              NudgeIdentifierResolverService.getInstance().resolveNudgeIdentifier(trimmedIdentifier) ??
+              trimmedIdentifier
+            );
+          })
+          .filter((nudgeIdentifier): nudgeIdentifier is string => Boolean(nudgeIdentifier))
+      )
+    );
 
     const eventId = await context.agentPublisher.delegate({
       recipient: pubkey,
@@ -277,7 +293,7 @@ export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
 
 Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` on an individual delegation to bypass this check.
 
-Nudge support: Pass nudge event IDs in the \`nudges\` array to apply behavioral nudges to delegated agents. Nudges can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context. Nudge inheritance: any nudges active on the current agent are automatically forwarded to all delegated agents.`;
+Nudge support: Pass nudge IDs from the available-nudges list in the \`nudges\` array to apply behavioral nudges to delegated agents. Slugged IDs and short event IDs are resolved automatically before publishing. Nudges can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context. Nudge inheritance: any nudges active on the current agent are automatically forwarded to all delegated agents.`;
 
   const aiTool = tool({
     description,

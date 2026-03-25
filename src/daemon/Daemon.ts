@@ -41,6 +41,7 @@ import { Nip46SigningService } from "@/services/nip46";
 import { NudgeSkillWhitelistService } from "@/services/nudge";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
+import { SkillService } from "@/services/skill";
 import { RestartState } from "./RestartState";
 import { StatusFile } from "./StatusFile";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
@@ -108,6 +109,7 @@ export class Daemon {
     private staticEoseReceived = false;
     private fullyInitialized = false;
     private readyFired = false;
+    private removeWhitelistCacheListener: (() => void) | null = null;
 
     // Status file for `tenex daemon status`
     private statusFile: StatusFile | null = null;
@@ -278,7 +280,13 @@ export class Daemon {
             // 6d. Initialize NudgeSkillWhitelistService (global nudge/skill whitelist)
             // Nudges are user-scoped, not project-scoped — initialize once at daemon level
             // with the configured whitelisted user pubkeys, independent of 14199 publishing.
-            NudgeSkillWhitelistService.getInstance().initialize([...this.whitelistedPubkeys]);
+            const whitelistService = NudgeSkillWhitelistService.getInstance();
+            this.removeWhitelistCacheListener?.();
+            this.removeWhitelistCacheListener = whitelistService.onCacheUpdated(async () => {
+                await this.hydrateWhitelistedSkillsToLocalStore();
+            });
+            whitelistService.initialize([...this.whitelistedPubkeys]);
+            void this.hydrateWhitelistedSkillsToLocalStore();
 
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
@@ -381,6 +389,24 @@ export class Daemon {
 
             throw error;
         }
+    }
+
+    private async hydrateWhitelistedSkillsToLocalStore(): Promise<void> {
+        const whitelistedSkills = NudgeSkillWhitelistService
+            .getInstance()
+            .getWhitelistedSkills();
+
+        if (whitelistedSkills.length === 0) {
+            return;
+        }
+
+        const requestedSkillIds = [...new Set(whitelistedSkills.map((skill) => skill.eventId))];
+        const result = await SkillService.getInstance().fetchSkills(requestedSkillIds);
+
+        logger.info("[Daemon] Synced whitelisted skills to local store", {
+            requestedCount: requestedSkillIds.length,
+            loadedCount: result.skills.length,
+        });
     }
 
     /**
@@ -1967,6 +1993,12 @@ export class Daemon {
 
         // Stop owner agent list service
         OwnerAgentListService.getInstance().shutdown();
+
+        this.removeWhitelistCacheListener?.();
+        this.removeWhitelistCacheListener = null;
+
+        // Stop nudge/skill whitelist service
+        NudgeSkillWhitelistService.getInstance().shutdown();
 
         // Stop NIP-46 signing service
         await Nip46SigningService.getInstance().shutdown();

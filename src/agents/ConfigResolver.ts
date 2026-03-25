@@ -42,6 +42,8 @@ export interface ResolvedAgentConfig {
     tools?: string[];
     /** The effective Telegram transport configuration */
     telegram?: TelegramAgentConfig;
+    /** Skill IDs always active for this agent (agent-global, not project-scoped). Local skill directory IDs are authoritative. */
+    skills?: string[];
 }
 
 /**
@@ -117,6 +119,7 @@ export function resolveEffectiveConfig(
         model: effectiveModel,
         tools: effectiveTools,
         telegram: effectiveTelegram,
+        skills: defaultConfig.skills,
     };
 }
 

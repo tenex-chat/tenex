@@ -193,9 +193,11 @@ export class ProviderRegistry {
         // Report the failure to track key health
         keyManager.reportFailure(providerId, failedKey);
 
-        // Select a new key (KeyManager will avoid disabled keys)
-        const newKey = keyManager.selectKey(providerId);
-        if (!newKey || newKey === failedKey) {
+        // Select an explicit alternative key instead of re-rolling the full pool.
+        // The failed key may still be "healthy" until it crosses the disable threshold,
+        // but a retryable runtime failure should still move to a different configured key.
+        const newKey = keyManager.selectAlternativeKey(providerId, failedKey);
+        if (!newKey) {
             logger.warn(`[ProviderRegistry] No alternative key available for "${providerId}"`);
             return false;
         }

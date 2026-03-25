@@ -85,6 +85,34 @@ describe("KeyManager", () => {
         });
     });
 
+    describe("selectAlternativeKey", () => {
+        it("immediately excludes the failed key even before it is disabled", () => {
+            km.registerKeys("anthropic", ["sk-rate-limited", "sk-healthy"]);
+
+            km.reportFailure("anthropic", "sk-rate-limited");
+
+            for (let i = 0; i < 20; i++) {
+                expect(km.selectAlternativeKey("anthropic", "sk-rate-limited")).toBe("sk-healthy");
+            }
+        });
+
+        it("returns undefined when there is no other configured key", () => {
+            km.registerKeys("anthropic", ["sk-only"]);
+
+            expect(km.selectAlternativeKey("anthropic", "sk-only")).toBeUndefined();
+        });
+
+        it("falls back to disabled alternatives before retrying the failed key", () => {
+            km.registerKeys("anthropic", ["sk-rate-limited", "sk-disabled"]);
+
+            km.reportFailure("anthropic", "sk-disabled");
+            km.reportFailure("anthropic", "sk-disabled");
+            km.reportFailure("anthropic", "sk-disabled");
+
+            expect(km.selectAlternativeKey("anthropic", "sk-rate-limited")).toBe("sk-disabled");
+        });
+    });
+
     describe("reportFailure", () => {
         it("does not disable key below threshold", () => {
             km.registerKeys("openai", ["sk-a", "sk-b"]);

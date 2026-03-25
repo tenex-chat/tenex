@@ -13,3 +13,20 @@ export function toKebabCase(str: string): string {
         .replace(/[\s_]+/g, "-")
         .toLowerCase();
 }
+
+/**
+ * Sluggify free-form text into a stable, prompt-safe identifier.
+ *
+ * Unlike toKebabCase(), this also removes punctuation, trims separator runs,
+ * and normalizes diacritics so human-facing titles can be safely used as IDs.
+ */
+export function slugifyIdentifier(str: string): string {
+    return toKebabCase(
+        str
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^A-Za-z0-9]+/g, "-")
+    )
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, "");
+}

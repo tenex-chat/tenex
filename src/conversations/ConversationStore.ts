@@ -853,9 +853,9 @@ export class ConversationStore {
 
     // Self-Applied Skills Operations
 
-    setSelfAppliedSkills(skillEventIds: string[], agentPubkey: string): void {
+    setSelfAppliedSkills(skillIds: string[], agentPubkey: string): void {
         if (!this.state.selfAppliedSkills) this.state.selfAppliedSkills = {};
-        this.state.selfAppliedSkills[agentPubkey] = [...skillEventIds];
+        this.state.selfAppliedSkills[agentPubkey] = [...skillIds];
     }
 
     getSelfAppliedSkillIds(agentPubkey: string): string[] {

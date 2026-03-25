@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { ProviderRegistry } from "../registry/ProviderRegistry";
 import type { ILLMProvider, ProviderMetadata, ProviderRegistration } from "../types";
 
@@ -161,6 +161,49 @@ describe("ProviderRegistry", () => {
 
             expect(results.length).toBe(2);
             expect(results.every(r => r.success)).toBe(true);
+        });
+
+        it("tracks the active key for multi-key providers", async () => {
+            const originalRandom = Math.random;
+            Math.random = () => 0;
+
+            try {
+                const mockProvider = createMockProviderClass("anthropic");
+                registry.register(mockProvider);
+
+                await registry.initialize({
+                    anthropic: { apiKey: ["sk-a", "sk-b"] },
+                });
+
+                expect(registry.getActiveApiKey("anthropic")).toBe("sk-a");
+            } finally {
+                Math.random = originalRandom;
+            }
+        });
+    });
+
+    describe("key rotation", () => {
+        it("reinitializes with a different configured key after the first failed-key report", async () => {
+            const originalRandom = Math.random;
+            Math.random = () => 0;
+
+            try {
+                const mockProvider = createMockProviderClass("anthropic");
+                registry.register(mockProvider);
+
+                await registry.initialize({
+                    anthropic: { apiKey: ["sk-rate-limited", "sk-healthy"] },
+                });
+
+                expect(registry.getActiveApiKey("anthropic")).toBe("sk-rate-limited");
+
+                const rotated = await registry.reinitializeProvider("anthropic", "sk-rate-limited");
+
+                expect(rotated).toBe(true);
+                expect(registry.getActiveApiKey("anthropic")).toBe("sk-healthy");
+            } finally {
+                Math.random = originalRandom;
+            }
         });
     });
 

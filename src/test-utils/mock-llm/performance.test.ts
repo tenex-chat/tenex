@@ -124,7 +124,9 @@ describe("MockLLMService Performance Testing", () => {
         const history = mockLLM.getRequestHistory();
         expect(history).toHaveLength(1);
         expect(history[0].response.content).toBe("This is a slow response");
-        expect(history[0].messages[0].content).toBe("slow test");
+        expect(
+            history[0].messages.find((message) => message.role === "user")?.content
+        ).toBe("slow test");
     });
 
     it("should handle concurrent requests with different delays", async () => {

@@ -42,8 +42,10 @@ export interface NudgeToolPermissions {
  * Individual nudge data with content and title
  */
 export interface NudgeData {
-    /** Short event ID (first 8 chars) for identification */
+    /** Prompt-facing identifier derived from d-tag/name/title, falling back to shortId */
     id: string;
+    /** Short event ID kept locally for fallback mapping/debugging */
+    shortId?: string;
     /** The nudge content/prompt */
     content: string;
     /** The nudge title (from "title" tag) */

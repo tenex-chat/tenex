@@ -938,6 +938,7 @@ export class AgentStorage {
             model: agent.default?.model,
             tools: agent.default?.tools,
             telegram: agent.default?.telegram,
+            skills: agent.default?.skills,
         };
 
         const projectConfig = projectDTag
@@ -993,6 +994,14 @@ export class AgentStorage {
                 agent.default.telegram = undefined;
             }
 
+        }
+
+        if (updates.skills !== undefined) {
+            if (updates.skills.length > 0) {
+                agent.default.skills = updates.skills;
+            } else {
+                agent.default.skills = undefined;
+            }
         }
 
         // Clean up empty default block

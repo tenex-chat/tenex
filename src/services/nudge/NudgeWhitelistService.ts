@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { shortenOptionalEventId } from "@/utils/conversation-id";
+import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
 
 const tracer = trace.getTracer("tenex.nudge-whitelist-service");
 
@@ -13,6 +14,10 @@ const tracer = trace.getTracer("tenex.nudge-whitelist-service");
 export interface WhitelistItem {
     /** The event ID of the whitelisted nudge/skill */
     eventId: string;
+    /** Prompt-facing identifier derived from d-tag/name/title, falling back to shortId */
+    identifier?: string;
+    /** Short event ID kept locally for fallback mapping/debugging */
+    shortId?: string;
     /** The kind of the referenced event (4201 for nudge, 4202 for skill) */
     kind: typeof NDKKind.AgentNudge | typeof NDKKind.AgentSkill;
     /** The name of the nudge/skill (from title tag) */
@@ -21,6 +26,14 @@ export interface WhitelistItem {
     description?: string;
     /** Pubkeys that have whitelisted this item (multiple whitelist events can reference same item) */
     whitelistedBy: string[];
+}
+
+function getSkillDescription(event: NDKEvent): string {
+    return (
+        event.tagValue("description") ||
+        event.tagValue("summary") ||
+        event.content
+    );
 }
 
 /**
@@ -62,6 +75,7 @@ export class NudgeSkillWhitelistService {
     /** Debounce timer for coalescing rapid event bursts */
     private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
     private uninitializedReadMethods: Set<string> = new Set();
+    private cacheUpdatedListeners = new Set<() => void | Promise<void>>();
 
     private constructor() {}
 
@@ -70,6 +84,11 @@ export class NudgeSkillWhitelistService {
             NudgeSkillWhitelistService.instance = new NudgeSkillWhitelistService();
         }
         return NudgeSkillWhitelistService.instance;
+    }
+
+    onCacheUpdated(listener: () => void | Promise<void>): () => void {
+        this.cacheUpdatedListeners.add(listener);
+        return () => this.cacheUpdatedListeners.delete(listener);
     }
 
     /**
@@ -187,6 +206,7 @@ export class NudgeSkillWhitelistService {
             try {
                 if (this.latestWhitelistEvents.size === 0) {
                     this.cache = { nudges: [], skills: [], lastUpdated: Date.now() };
+                    await this.notifyCacheUpdated();
                     span.setStatus({ code: SpanStatusCode.OK });
                     span.end();
                     return;
@@ -208,6 +228,7 @@ export class NudgeSkillWhitelistService {
 
                 if (eventToWhitelisters.size === 0) {
                     this.cache = { nudges: [], skills: [], lastUpdated: Date.now() };
+                    await this.notifyCacheUpdated();
                     span.setAttributes({ "whitelist.item_count": 0 });
                     span.setStatus({ code: SpanStatusCode.OK });
                     span.end();
@@ -244,39 +265,95 @@ export class NudgeSkillWhitelistService {
                 }
 
                 // Build cache from referencedEventCache + whitelister tracking
-                const nudges: WhitelistItem[] = [];
-                const skills: WhitelistItem[] = [];
+                interface WhitelistDraft extends WhitelistItem {
+                    sourceDTag?: string;
+                    sourceName?: string;
+                    sourceTitle?: string;
+                }
+                const nudgeDrafts: WhitelistDraft[] = [];
+                const skillDrafts: WhitelistDraft[] = [];
 
                 for (const [eventId, whitelisters] of eventToWhitelisters) {
                     const event = this.referencedEventCache.get(eventId);
                     if (!event) continue;
 
                     const whitelistedBy = Array.from(whitelisters);
+                    const dTag = event.tagValue("d") || undefined;
+                    const title = event.tagValue("title") || undefined;
+                    const name = event.tagValue("name") || undefined;
+                    const shortId = event.id.substring(0, 12).toLowerCase();
 
                     if (event.kind === NDKKind.AgentNudge) {
-                        nudges.push({
+                        nudgeDrafts.push({
                             eventId: event.id,
                             kind: NDKKind.AgentNudge,
-                            name: event.tagValue("title") || event.tagValue("name"),
+                            name: title || name || dTag,
+                            shortId,
                             description: event.content,
                             whitelistedBy,
+                            sourceDTag: dTag,
+                            sourceName: name,
+                            sourceTitle: title,
                         });
                     } else if (event.kind === NDKKind.AgentSkill) {
-                        skills.push({
+                        skillDrafts.push({
                             eventId: event.id,
                             kind: NDKKind.AgentSkill,
-                            name: event.tagValue("title") || event.tagValue("name"),
-                            description: event.content,
+                            name: title || name || dTag,
+                            shortId,
+                            description: getSkillDescription(event),
                             whitelistedBy,
+                            sourceDTag: dTag,
+                            sourceName: name,
+                            sourceTitle: title,
                         });
                     }
                 }
+
+                const nudgeIdentifiers = assignCapabilityIdentifiers(
+                    nudgeDrafts.map((item) => ({
+                        eventId: item.eventId,
+                        dTag: item.sourceDTag,
+                        name: item.sourceName,
+                        title: item.sourceTitle,
+                    }))
+                );
+                const skillIdentifiers = assignCapabilityIdentifiers(
+                    skillDrafts.map((item) => ({
+                        eventId: item.eventId,
+                        dTag: item.sourceDTag,
+                        name: item.sourceName,
+                        title: item.sourceTitle,
+                    }))
+                );
+
+                const nudges: WhitelistItem[] = nudgeDrafts.map((draft) => ({
+                    eventId: draft.eventId,
+                    kind: draft.kind,
+                    name: draft.name,
+                    description: draft.description,
+                    whitelistedBy: draft.whitelistedBy,
+                    identifier:
+                        nudgeIdentifiers.get(draft.eventId)?.identifier ?? draft.shortId,
+                    shortId: nudgeIdentifiers.get(draft.eventId)?.shortId ?? draft.shortId,
+                }));
+                const skills: WhitelistItem[] = skillDrafts.map((draft) => ({
+                    eventId: draft.eventId,
+                    kind: draft.kind,
+                    name: draft.name,
+                    description: draft.description,
+                    whitelistedBy: draft.whitelistedBy,
+                    identifier:
+                        skillIdentifiers.get(draft.eventId)?.identifier ?? draft.shortId,
+                    shortId: skillIdentifiers.get(draft.eventId)?.shortId ?? draft.shortId,
+                }));
 
                 this.cache = {
                     nudges,
                     skills,
                     lastUpdated: Date.now(),
                 };
+                await this.notifyCacheUpdated();
 
                 span.setAttributes({
                     "whitelist.nudge_count": nudges.length,
@@ -332,6 +409,18 @@ export class NudgeSkillWhitelistService {
         }
         if (!this.cache) return [];
         return [...this.cache.nudges, ...this.cache.skills];
+    }
+
+    private async notifyCacheUpdated(): Promise<void> {
+        for (const listener of this.cacheUpdatedListeners) {
+            try {
+                await listener();
+            } catch (error) {
+                logger.warn("[NudgeSkillWhitelistService] Cache update listener failed", {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
     }
 
     private logUninitializedRead(methodName: string): void {
@@ -391,5 +480,6 @@ export class NudgeSkillWhitelistService {
         this.latestWhitelistEvents.clear();
         this.referencedEventCache.clear();
         this.uninitializedReadMethods.clear();
+        this.cacheUpdatedListeners.clear();
     }
 }

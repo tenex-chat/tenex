@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { toKebabCase } from "@/lib/string";
+import { slugifyIdentifier, toKebabCase } from "@/lib/string";
 
 describe("toKebabCase", () => {
     it("should convert camelCase to kebab-case", () => {
@@ -38,5 +38,23 @@ describe("toKebabCase", () => {
     it("should handle single characters", () => {
         expect(toKebabCase("a")).toBe("a");
         expect(toKebabCase("A")).toBe("a");
+    });
+});
+
+describe("slugifyIdentifier", () => {
+    it("should strip punctuation and normalize whitespace", () => {
+        expect(slugifyIdentifier("Make Poster! (v2)")).toBe("make-poster-v2");
+    });
+
+    it("should normalize accented characters", () => {
+        expect(slugifyIdentifier("Crème Brûlée")).toBe("creme-brulee");
+    });
+
+    it("should collapse repeated separators", () => {
+        expect(slugifyIdentifier("foo___bar   baz")).toBe("foo-bar-baz");
+    });
+
+    it("should return empty string when no slug characters remain", () => {
+        expect(slugifyIdentifier("!!!")).toBe("");
     });
 });

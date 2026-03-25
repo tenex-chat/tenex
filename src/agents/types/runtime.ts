@@ -63,6 +63,8 @@ export interface AgentInstance {
     projectOverrides?: Record<string, AgentProjectConfig>;
     /** Telegram transport configuration for this agent */
     telegram?: TelegramAgentConfig;
+    /** Skill IDs always active for this agent (from agent config, not conversation state). Local skill directory IDs are authoritative. */
+    alwaysSkills?: string[];
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;

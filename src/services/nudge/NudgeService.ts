@@ -5,6 +5,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { createFullEventId, shortenEventId } from "@/types/event-ids";
 import type { NudgeResult, NudgeToolPermissions, NudgeData } from "./types";
+import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
 
 const tracer = trace.getTracer("tenex.nudge-service");
 
@@ -134,11 +135,24 @@ export class NudgeService {
 
                 // Build nudge data array
                 const nudgeDataArray: NudgeData[] = nudges
-                    .map((nudge) => ({
-                        id: shortenEventId(createFullEventId(nudge.id)),
-                        content: nudge.content.trim(),
-                        title: nudge.tagValue("title") || undefined,
-                    }))
+                    .map((nudge) => {
+                        const shortId = shortenEventId(createFullEventId(nudge.id));
+                        const identifier = assignCapabilityIdentifiers([
+                            {
+                                eventId: nudge.id,
+                                dTag: nudge.tagValue("d"),
+                                name: nudge.tagValue("name"),
+                                title: nudge.tagValue("title"),
+                            },
+                        ]).get(nudge.id)?.identifier ?? shortId;
+
+                        return {
+                            id: identifier,
+                            shortId,
+                            content: nudge.content.trim(),
+                            title: nudge.tagValue("title") || undefined,
+                        };
+                    })
                     .filter((data) => data.content.length > 0);
 
                 // Concatenate content for backward compatibility

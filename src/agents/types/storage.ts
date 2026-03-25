@@ -35,6 +35,8 @@ export interface AgentDefaultConfig {
     tools?: string[];
     /** Telegram transport configuration for this agent */
     telegram?: TelegramAgentConfig;
+    /** Skill IDs that are always active for this agent across all conversations. Local skill directory IDs are authoritative. */
+    skills?: string[];
 }
 
 /**

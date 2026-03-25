@@ -178,6 +178,6 @@ export interface ConversationState {
     metaModelVariantOverride?: Record<string, string>; // agentPubkey -> variantName
     /** Per-agent context-management scratchpads used by middleware-managed prompt projection. */
     contextManagementScratchpads?: Record<string, ContextManagementScratchpadState>;
-    /** Skill event IDs that agents have applied to themselves mid-conversation. Keyed by agent pubkey. */
+    /** Authoritative local skill IDs that agents have applied to themselves mid-conversation. Keyed by agent pubkey. */
     selfAppliedSkills?: Record<string, string[]>;
 }

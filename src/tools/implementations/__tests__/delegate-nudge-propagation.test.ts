@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn, mock } from "bun:te
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import * as nostrModule from "@/nostr";
+import * as nudgeModule from "@/services/nudge";
 
 // Track delegate calls to verify nudge propagation
 const delegateCallArgs: Array<{ nudges?: string[] }> = [];
@@ -103,6 +104,38 @@ describe("Delegate Tool - Nudge Propagation", () => {
     });
 
     describe("nudge inheritance", () => {
+        it("should resolve prompt-facing nudge ids before delegating", async () => {
+            const resolvedNudgeId = "a".repeat(64);
+            const nudgeResolverSpy = spyOn(
+                nudgeModule.NudgeIdentifierResolverService,
+                "getInstance"
+            ).mockReturnValue({
+                resolveNudgeIdentifier: (identifier: string) =>
+                    identifier === "be-brief" ? resolvedNudgeId : null,
+            } as never);
+
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+            const context = createMockContext(ralNumber, []);
+            const delegateTool = createDelegateTool(context);
+
+            const result = await delegateTool.execute({
+                delegations: [
+                    {
+                        recipient: "other-agent",
+                        prompt: "Do something",
+                        nudges: ["be-brief"],
+                    }
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            expect(delegateCallArgs.length).toBe(1);
+            expect(delegateCallArgs[0].nudges).toEqual([resolvedNudgeId]);
+
+            nudgeResolverSpy.mockRestore();
+        });
+
         it("should inherit nudges from triggering event and pass to delegated agent", async () => {
             const inheritedNudge1 = "inherited-nudge-event-id-1";
             const inheritedNudge2 = "inherited-nudge-event-id-2";

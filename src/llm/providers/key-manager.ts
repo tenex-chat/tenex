@@ -109,10 +109,38 @@ export class KeyManager {
         if (healthy.length === 0) {
             logger.warn(`[KeyManager] No healthy keys available for provider "${providerId}", trying all keys`);
             // Fall back to all keys when everything is disabled — better than nothing
-            return keys[Math.floor(Math.random() * keys.length)];
+            return this.pickRandomKey(keys);
         }
 
-        return healthy[Math.floor(Math.random() * healthy.length)];
+        return this.pickRandomKey(healthy);
+    }
+
+    /**
+     * Select an alternative key for a provider, excluding the failed key.
+     * This is used during immediate failover after a key-specific runtime error,
+     * before the failed key necessarily crosses the disable threshold.
+     */
+    selectAlternativeKey(providerId: string, excludedKey: string): string | undefined {
+        const keys = this.keys.get(providerId);
+        if (!keys || keys.length === 0) {
+            return undefined;
+        }
+
+        const alternatives = keys.filter(key => key !== excludedKey);
+        if (alternatives.length === 0) {
+            return undefined;
+        }
+
+        const healthyAlternatives = alternatives.filter(key => this.isKeyHealthy(providerId, key));
+
+        if (healthyAlternatives.length === 0) {
+            logger.warn(
+                `[KeyManager] No healthy alternative keys available for provider "${providerId}", trying disabled alternatives`
+            );
+            return this.pickRandomKey(alternatives);
+        }
+
+        return this.pickRandomKey(healthyAlternatives);
     }
 
     /**
@@ -208,6 +236,10 @@ export class KeyManager {
      */
     private healthKey(providerId: string, apiKey: string): string {
         return `${providerId}:${apiKey}`;
+    }
+
+    private pickRandomKey(keys: string[]): string {
+        return keys[Math.floor(Math.random() * keys.length)];
     }
 }
 

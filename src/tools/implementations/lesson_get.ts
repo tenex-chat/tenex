@@ -9,7 +9,7 @@ import { tool } from "ai";
 import { z } from "zod";
 
 const lessonGetSchema = z.object({
-    eventId: z.string().describe("Nostr event ID of the lesson to retrieve. Supports full 64-char hex ID, 12-char hex prefix, or NIP-19 formats (note1.../nevent1...)."),
+    eventId: z.string().describe("Nostr event ID of the lesson to retrieve."),
 });
 
 type LessonGetInput = z.infer<typeof lessonGetSchema>;
@@ -81,11 +81,7 @@ async function executeLessonGet(
 export function createLessonGetTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Retrieve a lesson by its Nostr event ID. Supports multiple formats:\n" +
-            "- Full 64-character hex IDs\n" +
-            "- 12-character hex prefixes\n" +
-            "- NIP-19 formats: note1..., nevent1...\n" +
-            "- nostr: prefixed versions of all the above\n\n" +
+            "Retrieve a lesson by its Nostr event ID." +
             "Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented.",
         inputSchema: lessonGetSchema,
         execute: async (input: LessonGetInput) => {
