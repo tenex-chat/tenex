@@ -1,6 +1,9 @@
 import { formatAnyError } from "@/lib/error-formatter";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { fragmentRegistry } from "./FragmentRegistry";
 import type { FragmentConfig, PromptFragment } from "./types";
+
+const tracer = trace.getTracer("tenex.prompt-builder");
 
 export class PromptBuilder {
     private fragments: FragmentConfig[] = [];
@@ -30,6 +33,7 @@ export class PromptBuilder {
     }
 
     async build(): Promise<string> {
+        const parentSpan = trace.getActiveSpan();
         const fragmentsWithPriority = await Promise.all(
             this.fragments
                 .filter((config) => !config.condition || config.condition(config.args))
@@ -51,24 +55,69 @@ export class PromptBuilder {
                         );
                     }
 
-                    try {
-                        return {
-                            priority: fragment.priority || 50,
-                            content: await fragment.template(config.args),
-                        };
-                    } catch (error) {
-                        const errorMessage = formatAnyError(error);
-                        const receivedArgs = JSON.stringify(config.args, null, 2);
-                        throw new Error(
-                            `Error executing fragment "${config.fragmentId}":\n` +
-                                `${errorMessage}\n` +
-                                `Arguments provided: ${receivedArgs}\n` +
-                                `Expected: ${fragment.expectedArgs || "Check fragment definition"}`,
-                            { cause: error }
-                        );
-                    }
+                    return await tracer.startActiveSpan(
+                        `tenex.prompt.fragment.${config.fragmentId}`,
+                        async (span) => {
+                            const startedAt = performance.now();
+
+                            try {
+                                const content = await fragment.template(config.args);
+                                const priority = fragment.priority || 50;
+                                const durationMs = Math.round(performance.now() - startedAt);
+
+                                span.setAttributes({
+                                    "fragment.id": config.fragmentId,
+                                    "fragment.priority": priority,
+                                    "fragment.duration_ms": durationMs,
+                                    "fragment.content.length": content.length,
+                                    "fragment.content.empty": content.trim().length === 0,
+                                });
+
+                                return {
+                                    priority,
+                                    content,
+                                    telemetry: {
+                                        fragmentId: config.fragmentId,
+                                        durationMs,
+                                    },
+                                };
+                            } catch (error) {
+                                span.recordException(error as Error);
+                                span.setStatus({ code: SpanStatusCode.ERROR });
+                                span.setAttributes({
+                                    "fragment.id": config.fragmentId,
+                                    "fragment.duration_ms": Math.round(performance.now() - startedAt),
+                                    "error.message": formatAnyError(error),
+                                });
+
+                                const errorMessage = formatAnyError(error);
+                                const receivedArgs = JSON.stringify(config.args, null, 2);
+                                throw new Error(
+                                    `Error executing fragment "${config.fragmentId}":\n` +
+                                        `${errorMessage}\n` +
+                                        `Arguments provided: ${receivedArgs}\n` +
+                                        `Expected: ${fragment.expectedArgs || "Check fragment definition"}`,
+                                    { cause: error }
+                                );
+                            } finally {
+                                span.end();
+                            }
+                        }
+                    );
                 })
         );
+
+        if (fragmentsWithPriority.length > 0) {
+            const slowestFragment = fragmentsWithPriority.reduce((slowest, current) => {
+                return current.telemetry.durationMs > slowest.telemetry.durationMs ? current : slowest;
+            });
+
+            parentSpan?.addEvent("prompt.fragments_profiled", {
+                "fragment.count": fragmentsWithPriority.length,
+                "slowest.fragment.id": slowestFragment.telemetry.fragmentId,
+                "slowest.duration_ms": slowestFragment.telemetry.durationMs,
+            });
+        }
 
         return fragmentsWithPriority
             .sort((a, b) => a.priority - b.priority)
