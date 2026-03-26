@@ -470,8 +470,7 @@ export class TelegramGatewayCoordinator {
                             {
                                 id: principalId,
                                 linkedPubkey: identityBinding?.linkedPubkey,
-                            },
-                            registration.binding.config.authorizedIdentityIds
+                            }
                         )
                     );
                     if (dmCandidates.length === 0) {
@@ -549,7 +548,7 @@ export class TelegramGatewayCoordinator {
                 if (selected) {
                     if (
                         commandKind &&
-                        !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey, selected)
+                        !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey)
                     ) {
                         await sendUnauthorizedTelegramConfigReply(poller.client, message);
                         recordTelegramOutcome("dropped", "unauthorized_config_command");
@@ -588,7 +587,7 @@ export class TelegramGatewayCoordinator {
                 if (selected) {
                     if (
                         commandKind &&
-                        !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey, selected)
+                        !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey)
                     ) {
                         await sendUnauthorizedTelegramConfigReply(poller.client, message);
                         recordTelegramOutcome("dropped", "unauthorized_config_command");
@@ -623,18 +622,16 @@ export class TelegramGatewayCoordinator {
                         {
                             id: principalId,
                             linkedPubkey: identityBinding?.linkedPubkey,
-                        },
-                        registration.binding.config.authorizedIdentityIds
+                        }
                     )
                 );
             } else {
                 candidates = registrations;
                 if (commandKind) {
-                    candidates = candidates.filter((registration) =>
+                    candidates = candidates.filter(() =>
                         this.isAuthorizedConfigPrincipal(
                             principalId,
-                            identityBinding?.linkedPubkey,
-                            registration
+                            identityBinding?.linkedPubkey
                         )
                     );
                 }
@@ -767,15 +764,13 @@ export class TelegramGatewayCoordinator {
 
     private isAuthorizedConfigPrincipal(
         principalId: string,
-        linkedPubkey: string | undefined,
-        registration: TelegramRuntimeRegistration
+        linkedPubkey: string | undefined
     ): boolean {
         return this.authorizedIdentityService.isAuthorizedPrincipal(
             {
                 id: principalId,
                 linkedPubkey,
-            },
-            registration.binding.config.authorizedIdentityIds
+            }
         );
     }
 

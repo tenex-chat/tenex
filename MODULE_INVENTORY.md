@@ -15,7 +15,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Command Layer (`src/commands`)
 - **`agent/`**: User-facing subcommands for listing/removing/operating agents. Orchestrates `agents/` runtimes, `services/ConfigService`, and `nostr` publishers; no business logic should remain inside command handlers.
-- **`config/`**: Interactive settings editors for backend and transport configuration. `config/telegram.ts` is the operator-facing UI for per-agent Telegram bot tokens, DM allowlists, and chat/topic bindings backed by `AgentStorage` plus global `whitelistedIdentities`.
+- **`config/`**: Interactive settings editors for backend and transport configuration. `config/telegram.ts` is the operator-facing UI for single-bot-per-agent Telegram transport config plus the global Telegram DM allowlist, while remembered chat/topic-to-project bindings remain derived runtime state backed by `AgentStorage`, `TransportBindingStore`, and global `whitelistedIdentities`.
 - **`daemon.ts` + `daemon/`**: Starts the long-running orchestrator and UI loop by delegating to `src/daemon`.
 - **`doctor.ts`**: Diagnostics — agent refetch, orphan detection/purge.
 - **`setup/`**: Guided onboarding flows for LLM and embed providers (ties into `ConfigService` and `llm/LLMServiceFactory`).
@@ -58,7 +58,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Tools System (`src/tools`)
 - **Implementations**: `implementations/*.ts` are the concrete actions agents can call (delegation, RAG management, scheduling, file access, shell, silent completion, etc.). They should delegate to `services/*` when stateful operations are required. The `fs_*` tools are thin TENEX adapters over the external `ai-sdk-fs-tools` package, with TENEX-only hooks for agent-home access, report protection, tool-result loading, and LLM-backed file analysis. The `shell` tool now resolves TENEX-scoped `.env` overlays through `AgentEnvironmentService` before spawning subprocesses.
-- Context-injected tools still belong to the registry/tool layer: `send_message` is exposed only when an agent has Telegram chat bindings and delegates proactive delivery to `services/telegram/TelegramDeliveryService` rather than holding transport state itself.
+- Context-injected tools still belong to the registry/tool layer: `send_message` is exposed only when an agent has remembered Telegram transport bindings and delegates proactive delivery to `services/telegram/TelegramDeliveryService` rather than holding transport state itself.
 - **Registry & Runtime**: `registry.ts`, `utils.ts`, and executor/tests coordinate tool metadata, zod schemas, result marshalling, and permission enforcement.
 - **Dynamic Tools**: User-defined tool factories are loaded by `services/DynamicToolService` from `~/.tenex/tools` and surfaced through the tool registry. Tests live under `tools/__tests__`.
 - **Guideline**: Keep external I/O localized; when a tool needs long-lived resources (RAG DB, scheduler), call the relevant service rather than re-implementing logic.

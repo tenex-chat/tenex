@@ -287,7 +287,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
     change_model: createChangeModelTool as ToolFactory,
 
-    // Channel messaging tools (auto-injected when agent has chat bindings)
+    // Channel messaging tools (auto-injected when agent has remembered transport bindings)
     send_message: createSendMessageTool,
 
     // Home-scoped filesystem tools (for agents without fs_* tools)

@@ -66,7 +66,7 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "home_fs_glob",
     // MCP subscription stop (injected when agent has active MCP subscriptions)
     "mcp_subscription_stop",
-    // Send message (injected when agent has telegram chat bindings)
+    // Send message (injected when agent has remembered Telegram transport bindings)
     "send_message",
 ];
 

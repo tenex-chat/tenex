@@ -44,7 +44,7 @@ const MENU_SECTIONS: MenuSection[] = [
         entries: [
             { label: "Escalation", description: "Route ask() through an agent first", command: escalationCommand },
             { label: "Intervention", description: "Auto-review when you're idle", command: interventionCommand },
-            { label: "Telegram", description: "Bot tokens, DMs, and group bindings", command: telegramCommand },
+            { label: "Telegram", description: "Agent bot transport and global DM access", command: telegramCommand },
         ],
     },
     {

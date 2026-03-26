@@ -20,16 +20,9 @@ export class AuthorizedIdentityService {
     }
 
     isAuthorizedPrincipal(
-        principal: Pick<PrincipalRef, "id" | "linkedPubkey">,
-        additionalPrincipalIds: string[] = []
+        principal: Pick<PrincipalRef, "id" | "linkedPubkey">
     ): boolean {
         const configured = this.getConfiguredPrincipalIds();
-        for (const principalId of additionalPrincipalIds) {
-            const trimmed = principalId.trim();
-            if (trimmed) {
-                configured.add(trimmed);
-            }
-        }
 
         if (configured.has(principal.id)) {
             return true;

@@ -8,9 +8,7 @@ describe("AuthorizedIdentityService", () => {
     });
 
     it("authorizes explicitly whitelisted transport principals", () => {
-        spyOn(config, "getConfig").mockReturnValue({
-            whitelistedIdentities: ["telegram:user:42"],
-        } as ReturnType<typeof config.getConfig>);
+        spyOn(config, "getWhitelistedIdentities").mockReturnValue(["telegram:user:42"]);
         const service = new AuthorizedIdentityService();
 
         expect(
@@ -23,9 +21,7 @@ describe("AuthorizedIdentityService", () => {
 
     it("authorizes linked principals when the linked pubkey is whitelisted as a nostr principal", () => {
         const linkedPubkey = "f".repeat(64);
-        spyOn(config, "getConfig").mockReturnValue({
-            whitelistedPubkeys: [linkedPubkey],
-        } as ReturnType<typeof config.getConfig>);
+        spyOn(config, "getWhitelistedIdentities").mockReturnValue([`nostr:${linkedPubkey}`]);
         const service = new AuthorizedIdentityService();
 
         expect(
@@ -36,18 +32,15 @@ describe("AuthorizedIdentityService", () => {
         ).toBe(true);
     });
 
-    it("includes per-agent authorized identities in the authorization set", () => {
+    it("does not authorize unlisted principals", () => {
         spyOn(config, "getConfig").mockReturnValue({} as ReturnType<typeof config.getConfig>);
         const service = new AuthorizedIdentityService();
 
         expect(
-            service.isAuthorizedPrincipal(
-                {
-                    id: "telegram:user:77",
-                    linkedPubkey: undefined,
-                },
-                ["telegram:user:77"]
-            )
-        ).toBe(true);
+            service.isAuthorizedPrincipal({
+                id: "telegram:user:77",
+                linkedPubkey: undefined,
+            })
+        ).toBe(false);
     });
 });

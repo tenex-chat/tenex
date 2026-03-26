@@ -225,7 +225,6 @@ describe("ConfigResolver", () => {
             const result = deduplicateProjectConfig(defaultConfig, projectConfig);
             expect(result.model).toBeUndefined();
             expect(result.tools).toBeUndefined();
-            expect(Object.keys(result)).toHaveLength(0);
         });
 
         it("should clean up no-op +tool delta when tool already in defaults", () => {

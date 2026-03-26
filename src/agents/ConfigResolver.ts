@@ -32,7 +32,7 @@
  * resolver.resolveEffectiveConfig('projectB');
  */
 
-import type { AgentDefaultConfig, AgentProjectConfig, TelegramAgentConfig } from "@/agents/types";
+import type { AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
 export type { AgentDefaultConfig, AgentProjectConfig };
 
 export interface ResolvedAgentConfig {
@@ -40,8 +40,6 @@ export interface ResolvedAgentConfig {
     model?: string;
     /** The effective tools list (fully resolved, no +/- prefixes) */
     tools?: string[];
-    /** The effective Telegram transport configuration */
-    telegram?: TelegramAgentConfig;
     /** Skill IDs always active for this agent (agent-global, not project-scoped). Local skill directory IDs are authoritative. */
     skills?: string[];
 }
@@ -113,12 +111,10 @@ export function resolveEffectiveConfig(
 ): ResolvedAgentConfig {
     const effectiveModel = resolveEffectiveModel(defaultConfig.model, projectConfig?.model);
     const effectiveTools = resolveEffectiveTools(defaultConfig.tools, projectConfig?.tools);
-    const effectiveTelegram = projectConfig?.telegram ?? defaultConfig.telegram;
 
     return {
         model: effectiveModel,
         tools: effectiveTools,
-        telegram: effectiveTelegram,
         skills: defaultConfig.skills,
     };
 }
@@ -204,14 +200,6 @@ export function deduplicateProjectConfig(
             // Normalize: recompute the minimal delta from the fully-resolved tool list.
             cleaned.tools = computeToolsDelta(defaultToolsResolved, resolvedProjectTools ?? []);
         }
-    }
-
-    if (
-        cleaned.telegram &&
-        defaultConfig.telegram &&
-        JSON.stringify(cleaned.telegram) === JSON.stringify(defaultConfig.telegram)
-    ) {
-        cleaned.telegram = undefined;
     }
 
     return cleaned;

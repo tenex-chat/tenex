@@ -4,10 +4,8 @@ import type { AgentCategory } from "@/agents/role-categories";
 export interface TelegramAgentConfig {
     /** Bot API token for this agent's Telegram bot */
     botToken: string;
-    /** Allow direct messages to this bot from authorized identities */
+    /** Allow direct messages to this bot from globally authorized identities */
     allowDMs?: boolean;
-    /** Additional principal IDs allowed to DM this agent */
-    authorizedIdentityIds?: string[];
     /** Optional API base URL override for tests or self-hosted gateways */
     apiBaseUrl?: string;
 }
@@ -22,8 +20,6 @@ export interface AgentDefaultConfig {
     model?: string;
     /** Default tools list for this agent */
     tools?: string[];
-    /** Telegram transport configuration for this agent */
-    telegram?: TelegramAgentConfig;
     /** Skill IDs that are always active for this agent across all conversations. Local skill directory IDs are authoritative. */
     skills?: string[];
 }
@@ -48,8 +44,6 @@ export interface AgentProjectConfig {
      * Empty array or undefined means: use defaults.
      */
     tools?: string[];
-    /** Project-specific Telegram transport override */
-    telegram?: TelegramAgentConfig;
     /**
      * Project-scoped PM designation.
      * When true, this agent is designated as PM for this specific project.
@@ -106,6 +100,9 @@ export interface StoredAgentData {
      * Fields here are the global fallback when no project-specific override exists.
      */
     default?: AgentDefaultConfig;
+
+    /** Telegram transport configuration for this agent. One bot per agent. */
+    telegram?: TelegramAgentConfig;
 
     /**
      * Per-project configuration overrides.

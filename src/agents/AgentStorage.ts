@@ -27,10 +27,6 @@ export interface UpdateDefaultConfigOptions {
     clearProjectOverrides?: boolean;
 }
 
-function hasProp<T extends object>(value: T, key: PropertyKey): boolean {
-    return Object.prototype.hasOwnProperty.call(value, key);
-}
-
 function stripUndefinedValues<T extends object>(value: T): Partial<T> {
     return Object.fromEntries(
         Object.entries(value).filter(([, entry]) => entry !== undefined)
@@ -51,38 +47,64 @@ function sanitizeTelegramConfig(
     return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-function sanitizeStoredAgentForPersistence(agent: StoredAgent): StoredAgent {
-    const defaultConfig = agent.default
-        ? stripUndefinedValues({
-            ...agent.default,
-            telegram: sanitizeTelegramConfig(agent.default.telegram),
-        }) as AgentDefaultConfig
-        : undefined;
+function sanitizeDefaultConfig(
+    defaultConfig: AgentDefaultConfig | undefined
+): AgentDefaultConfig | undefined {
+    if (!defaultConfig) {
+        return undefined;
+    }
 
-    const projectOverrides = agent.projectOverrides
-        ? Object.fromEntries(
-            Object.entries(agent.projectOverrides)
-                .map(([projectId, override]) => {
-                    const sanitized = stripUndefinedValues({
-                        ...override,
-                        telegram: sanitizeTelegramConfig(override.telegram),
-                    }) as AgentProjectConfig;
+    const { telegram: _legacyTelegram, ...rest } = defaultConfig as AgentDefaultConfig & {
+        telegram?: TelegramAgentConfig;
+    };
+    const sanitized = stripUndefinedValues(rest) as AgentDefaultConfig;
+    return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
 
-                    return Object.keys(sanitized).length > 0
-                        ? [projectId, sanitized]
-                        : undefined;
-                })
-                .filter((entry): entry is [string, AgentProjectConfig] => Boolean(entry))
-        )
+function sanitizeProjectOverrides(
+    projectOverrides: Record<string, AgentProjectConfig> | undefined
+): Record<string, AgentProjectConfig> | undefined {
+    if (!projectOverrides) {
+        return undefined;
+    }
+
+    const sanitizedEntries = Object.entries(projectOverrides)
+        .map(([projectId, override]) => {
+            const { telegram: _legacyTelegram, ...rest } = override as AgentProjectConfig & {
+                telegram?: TelegramAgentConfig;
+            };
+            const sanitized = stripUndefinedValues(rest) as AgentProjectConfig;
+            return Object.keys(sanitized).length > 0
+                ? [projectId, sanitized]
+                : undefined;
+        })
+        .filter((entry): entry is [string, AgentProjectConfig] => Boolean(entry));
+
+    return sanitizedEntries.length > 0
+        ? Object.fromEntries(sanitizedEntries)
         : undefined;
+}
+
+function normalizeLoadedAgent(agent: StoredAgent): StoredAgent {
+    const topLevelTelegram = sanitizeTelegramConfig(agent.telegram);
+    const legacyDefaultTelegram = sanitizeTelegramConfig(
+        (agent.default as (AgentDefaultConfig & { telegram?: TelegramAgentConfig }) | undefined)?.telegram
+    );
 
     return {
         ...agent,
-        default: defaultConfig && Object.keys(defaultConfig).length > 0 ? defaultConfig : undefined,
-        projectOverrides:
-            projectOverrides && Object.keys(projectOverrides).length > 0
-                ? projectOverrides
-                : undefined,
+        telegram: topLevelTelegram ?? legacyDefaultTelegram,
+        default: sanitizeDefaultConfig(agent.default),
+        projectOverrides: sanitizeProjectOverrides(agent.projectOverrides),
+    };
+}
+
+function sanitizeStoredAgentForPersistence(agent: StoredAgent): StoredAgent {
+    return {
+        ...agent,
+        telegram: sanitizeTelegramConfig(agent.telegram),
+        default: sanitizeDefaultConfig(agent.default),
+        projectOverrides: sanitizeProjectOverrides(agent.projectOverrides),
     };
 }
 
@@ -166,25 +188,17 @@ export function createStoredAgent(config: {
     eventId?: string;
     mcpServers?: Record<string, MCPServerConfig>;
     pmOverrides?: Record<string, boolean>;
-    defaultConfig?: AgentDefaultConfig;
-    projectOverrides?: Record<string, AgentProjectConfig>;
+    defaultConfig?: AgentDefaultConfig & { telegram?: TelegramAgentConfig };
+    projectOverrides?: Record<string, AgentProjectConfig & { telegram?: TelegramAgentConfig }>;
     telegram?: TelegramAgentConfig;
     definitionDTag?: string;
     definitionAuthor?: string;
     definitionCreatedAt?: number;
 }): StoredAgent {
-    // `defaultConfig.telegram` wins when both shapes are supplied because callers using
-    // the structured default config have already chosen the persisted source of truth.
-    // The top-level `telegram` field only migrates older call sites into that shape.
-    const defaultTelegramConfig = sanitizeTelegramConfig(
-        config.defaultConfig?.telegram ?? config.telegram
+    const legacyDefaultTelegram = sanitizeTelegramConfig(
+        (config.defaultConfig as (AgentDefaultConfig & { telegram?: TelegramAgentConfig }) | undefined)?.telegram
     );
-    const defaultConfig = config.defaultConfig || defaultTelegramConfig
-        ? {
-            ...config.defaultConfig,
-            ...(defaultTelegramConfig ? { telegram: defaultTelegramConfig } : {}),
-        }
-        : undefined;
+    const defaultConfig = sanitizeDefaultConfig(config.defaultConfig);
 
     return {
         eventId: config.eventId,
@@ -200,6 +214,7 @@ export function createStoredAgent(config: {
         mcpServers: config.mcpServers,
         pmOverrides: config.pmOverrides,
         default: defaultConfig,
+        telegram: sanitizeTelegramConfig(config.telegram ?? legacyDefaultTelegram),
         projectOverrides: config.projectOverrides,
         definitionDTag: config.definitionDTag,
         definitionAuthor: config.definitionAuthor,
@@ -507,7 +522,7 @@ export class AgentStorage {
         try {
             const content = await fs.readFile(filePath, "utf-8");
             const agent: StoredAgent = JSON.parse(content);
-            return agent;
+            return normalizeLoadedAgent(agent);
         } catch (error) {
             logger.error(`Failed to load agent ${pubkey}`, { error });
             return null;
@@ -989,7 +1004,6 @@ export class AgentStorage {
         const defaultConfig: AgentDefaultConfig = {
             model: agent.default?.model,
             tools: agent.default?.tools,
-            telegram: agent.default?.telegram,
             skills: agent.default?.skills,
         };
 
@@ -1037,15 +1051,6 @@ export class AgentStorage {
             } else {
                 agent.default.tools = undefined;
             }
-        }
-
-        if (hasProp(updates, "telegram")) {
-            if (updates.telegram) {
-                agent.default.telegram = updates.telegram;
-            } else {
-                agent.default.telegram = undefined;
-            }
-
         }
 
         if (updates.skills !== undefined) {
@@ -1113,7 +1118,6 @@ export class AgentStorage {
             const defaultConfig: AgentDefaultConfig = {
                 model: agent.default?.model,
                 tools: agent.default?.tools,
-                telegram: agent.default?.telegram,
             };
 
             const deduplicated = stripUndefinedValues(
@@ -1145,16 +1149,8 @@ export class AgentStorage {
         return true;
     }
 
-    async updateDefaultTelegramConfig(
+    async updateAgentTelegramConfig(
         pubkey: string,
-        telegram?: TelegramAgentConfig
-    ): Promise<boolean> {
-        return this.updateDefaultConfig(pubkey, { telegram: sanitizeTelegramConfig(telegram) });
-    }
-
-    async updateProjectTelegramConfig(
-        pubkey: string,
-        projectDTag: string,
         telegram?: TelegramAgentConfig
     ): Promise<boolean> {
         const agent = await this.loadAgent(pubkey);
@@ -1163,16 +1159,12 @@ export class AgentStorage {
             return false;
         }
 
-        const existingOverride = agent.projectOverrides?.[projectDTag] ?? {};
-
-        return this.updateProjectOverride(
-            pubkey,
-            projectDTag,
-            {
-                ...existingOverride,
-                telegram: sanitizeTelegramConfig(telegram),
-            }
-        );
+        agent.telegram = sanitizeTelegramConfig(telegram);
+        await this.saveAgent(agent);
+        logger.info(`Updated Telegram transport for agent ${agent.name}`, {
+            enabled: Boolean(agent.telegram?.botToken),
+        });
+        return true;
     }
 
     /**

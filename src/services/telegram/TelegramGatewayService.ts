@@ -331,8 +331,7 @@ export class TelegramGatewayService {
                     {
                         id: principalId,
                         linkedPubkey: identityBinding?.linkedPubkey,
-                    },
-                    binding.config.authorizedIdentityIds
+                    }
                 );
 
                 if (!isAuthorized) {
@@ -348,8 +347,7 @@ export class TelegramGatewayService {
                         {
                             id: principalId,
                             linkedPubkey: identityBinding?.linkedPubkey,
-                        },
-                        binding.config.authorizedIdentityIds
+                        }
                     )
                 ) {
                     await sendUnauthorizedTelegramConfigReply(
