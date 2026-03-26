@@ -35,7 +35,6 @@ function createBinding(agent: any): TelegramGatewayBinding {
     return {
         agent,
         config: agent.telegram,
-        chatBindings: agent.telegram?.chatBindings ?? [],
     };
 }
 
@@ -218,7 +217,6 @@ describe("TelegramGatewayService", () => {
             pubkey: "a".repeat(64),
             telegram: {
                 botToken: "token",
-                chatBindings: [{ chatId: "-2001" }],
             },
         };
         const runtimeIngress = {
@@ -319,7 +317,6 @@ describe("TelegramGatewayService", () => {
             pubkey: "a".repeat(64),
             telegram: {
                 botToken: "token",
-                chatBindings: [{ chatId: "-9999", title: "Existing Group" }],
             },
         };
         const dynamicBindings = new Map<string, { projectId: string }>();
@@ -349,29 +346,13 @@ describe("TelegramGatewayService", () => {
         const rememberProjectBinding = mock(async ({
             binding,
             channelId,
-            message,
         }: {
             binding: TelegramGatewayBinding;
             channelId: string;
-            message: TelegramUpdate["message"];
         }) => {
             dynamicBindings.set(`${binding.agent.pubkey}::${channelId}`, {
                 projectId: "telegram-project",
             });
-            if (message?.chat.type !== "private") {
-                binding.chatBindings = [
-                    ...binding.chatBindings,
-                    {
-                        chatId: String(message?.chat.id),
-                        title: message?.chat.title,
-                    },
-                ];
-                binding.config = {
-                    ...binding.config,
-                    chatBindings: binding.chatBindings,
-                };
-            }
-
             return binding;
         });
         const gateway = new TelegramGatewayService({
@@ -453,7 +434,7 @@ describe("TelegramGatewayService", () => {
             }
         );
 
-        expect(rememberProjectBinding).toHaveBeenCalledTimes(1);
+        expect(rememberProjectBinding).toHaveBeenCalledTimes(2);
         expect(runtimeIngress.handleChatMessage).toHaveBeenCalledTimes(2);
     });
 

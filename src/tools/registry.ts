@@ -6,6 +6,8 @@
 
 import { config as configService } from "@/services/ConfigService";
 import { isMetaModelConfiguration } from "@/services/config/types";
+import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { NudgeToolPermissions } from "@/services/nudge";
 import { isOnlyToolMode } from "@/services/nudge";
 import type { Tool as CoreTool } from "ai";
@@ -567,9 +569,23 @@ export function getToolsObject(
         }
     }
 
-    // Auto-inject send_message when agent has telegram chat bindings
-    if (hasConversation && "agent" in context && (context.agent?.telegram?.chatBindings?.length ?? 0) > 0) {
-        if (!regularTools.includes("send_message")) {
+    // Auto-inject send_message when agent has remembered Telegram transport bindings
+    if (
+        hasConversation &&
+        "agent" in context &&
+        context.agent?.telegram?.botToken &&
+        isProjectContextInitialized()
+    ) {
+        const projectId = getProjectContext().project.dTag ?? getProjectContext().project.tagValue("d");
+        const hasTelegramBindings = Boolean(
+            projectId &&
+            context.agent.pubkey &&
+            getTransportBindingStore()
+                .listBindingsForAgentProject(context.agent.pubkey, projectId, "telegram")
+                .length > 0
+        );
+
+        if (hasTelegramBindings && !regularTools.includes("send_message")) {
             regularTools.push("send_message");
         }
     }

@@ -181,7 +181,6 @@ describe("TelegramGatewayService telemetry", () => {
             {
                 agent,
                 config: agent.telegram,
-                chatBindings: [],
             },
             {
                 update_id: 10,

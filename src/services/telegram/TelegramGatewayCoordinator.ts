@@ -23,7 +23,7 @@ import { ConfigService } from "@/services/ConfigService";
 import { projectContextStore } from "@/services/projects";
 import { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
 import { TelegramChatContextService } from "@/services/telegram/TelegramChatContextService";
-import { getTelegramChannelBindingStore } from "@/services/telegram/TelegramChannelBindingStoreService";
+import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { getTelegramPendingBindingStore } from "@/services/telegram/TelegramPendingBindingStoreService";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import {
@@ -36,7 +36,6 @@ import {
     extractTelegramMediaTarget,
     isProcessableTelegramMessage,
     isSupportedTelegramChatType,
-    matchesTelegramChatBinding,
     normalizeTelegramChatId,
     normalizeTelegramMessage,
     normalizeTelegramTopicId,
@@ -137,7 +136,7 @@ export class TelegramGatewayCoordinator {
     private readonly runtimeIngressService = new RuntimeIngressService();
     private readonly inboundAdapter = new TelegramInboundAdapter();
     private readonly channelSessionStore: ChannelSessionStore = getChannelSessionStore();
-    private readonly channelBindingStore = getTelegramChannelBindingStore();
+    private readonly channelBindingStore = getTransportBindingStore();
     private readonly pendingBindingStore = getTelegramPendingBindingStore();
     private readonly bindingPersistenceService = new TelegramBindingPersistenceService();
     private readonly chatContextService = new TelegramChatContextService();
@@ -192,7 +191,6 @@ export class TelegramGatewayCoordinator {
                 binding: {
                     agent,
                     config: agent.telegram,
-                    chatBindings: agent.telegram.chatBindings ?? [],
                 },
             };
 
@@ -630,10 +628,7 @@ export class TelegramGatewayCoordinator {
                     )
                 );
             } else {
-                const exactMatches = registrations.filter((registration) =>
-                    matchesTelegramChatBinding(registration.binding.chatBindings, chatId, topicId)
-                );
-                candidates = exactMatches.length > 0 ? exactMatches : registrations;
+                candidates = registrations;
                 if (commandKind) {
                     candidates = candidates.filter((registration) =>
                         this.isAuthorizedConfigPrincipal(
@@ -901,6 +896,7 @@ export class TelegramGatewayCoordinator {
                 lastMessageId: envelope.message.nativeId,
             });
             this.channelBindingStore.rememberBinding({
+                transport: "telegram",
                 agentPubkey: registration.binding.agent.pubkey,
                 channelId,
                 projectId: registration.projectId,

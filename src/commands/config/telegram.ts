@@ -3,9 +3,12 @@ import {
     deriveAgentPubkeyFromNsec,
     type StoredAgent,
 } from "@/agents/AgentStorage";
-import type { TelegramAgentConfig, TelegramChatBinding } from "@/agents/types";
+import type { TelegramAgentConfig } from "@/agents/types";
 import { config as configService } from "@/services/ConfigService";
-import { getTelegramThreadTargetValidationError } from "@/utils/telegram-identifiers";
+import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
+import { getIdentityBindingStore } from "@/services/identity";
+import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
+import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { inquirerTheme } from "@/utils/cli-theme";
 import chalk from "chalk";
 import { Command } from "commander";
@@ -19,17 +22,8 @@ type TelegramDraft = {
     botToken?: string;
     allowDMs?: boolean;
     authorizedIdentityIds?: string[];
-    chatBindings?: TelegramChatBinding[];
     apiBaseUrl?: string;
 };
-
-function cloneChatBindings(bindings: TelegramChatBinding[] | undefined): TelegramChatBinding[] | undefined {
-    if (!bindings) {
-        return undefined;
-    }
-
-    return bindings.map((binding) => ({ ...binding }));
-}
 
 function toDraft(config: TelegramAgentConfig | undefined): TelegramDraft | undefined {
     if (!config) {
@@ -40,17 +34,12 @@ function toDraft(config: TelegramAgentConfig | undefined): TelegramDraft | undef
         botToken: config.botToken,
         allowDMs: config.allowDMs,
         authorizedIdentityIds: config.authorizedIdentityIds ? [...config.authorizedIdentityIds] : undefined,
-        chatBindings: cloneChatBindings(config.chatBindings),
         apiBaseUrl: config.apiBaseUrl,
     };
 }
 
 function uniq(values: string[]): string[] {
     return Array.from(new Set(values));
-}
-
-function getChatBindingKey(binding: TelegramChatBinding): string {
-    return `${binding.chatId}:${binding.topicId ?? ""}:${binding.title ?? ""}`;
 }
 
 function normalizeTelegramDraft(draft: TelegramDraft | undefined): TelegramAgentConfig | undefined {
@@ -69,28 +58,10 @@ function normalizeTelegramDraft(draft: TelegramDraft | undefined): TelegramAgent
             .filter(Boolean)
     );
 
-    const seenChatBindings = new Set<string>();
-    const chatBindings = (draft.chatBindings ?? [])
-        .map((binding) => ({
-            chatId: binding.chatId.trim(),
-            topicId: binding.topicId?.trim() || undefined,
-            title: binding.title?.trim() || undefined,
-        }))
-        .filter((binding) => binding.chatId)
-        .filter((binding) => {
-            const key = getChatBindingKey(binding);
-            if (seenChatBindings.has(key)) {
-                return false;
-            }
-            seenChatBindings.add(key);
-            return true;
-        });
-
     return {
         botToken,
         allowDMs: draft.allowDMs,
         authorizedIdentityIds: authorizedIdentityIds.length > 0 ? authorizedIdentityIds : undefined,
-        chatBindings: chatBindings.length > 0 ? chatBindings : undefined,
         apiBaseUrl: draft.apiBaseUrl?.trim() || undefined,
     };
 }
@@ -101,17 +72,94 @@ function scopeLabel(scope: TelegramScope): string {
         : `Project override: ${scope.projectId}`;
 }
 
-function summarizeTelegramConfig(config: TelegramAgentConfig | undefined): string[] {
+function formatHandle(username: string | undefined): string {
+    return username ? ` (@${username})` : "";
+}
+
+function formatIdentityLabel(
+    displayName: string | undefined,
+    username: string | undefined,
+    fallback: string
+): string {
+    const base = displayName ?? username ?? fallback;
+    if (!username || base === username) {
+        return base;
+    }
+    return `${base}${formatHandle(username)}`;
+}
+
+function describeRememberedBinding(
+    pubkey: string,
+    projectId: string,
+    channelId: string
+): string | undefined {
+    const parsed = parseTelegramChannelId(channelId);
+    if (!parsed) {
+        return undefined;
+    }
+
+    if (!parsed.chatId.startsWith("-")) {
+        const identity = getIdentityBindingStore().getBinding(`telegram:user:${parsed.chatId}`);
+        return `Telegram DM with ${formatIdentityLabel(
+            identity?.displayName,
+            identity?.username,
+            parsed.chatId
+        )}`;
+    }
+
+    const chatContext = getTelegramChatContextStore().getContext(projectId, pubkey, channelId);
+    if (!chatContext?.chatTitle && !chatContext?.chatUsername) {
+        return parsed.messageThreadId ? "Telegram topic" : "Telegram chat";
+    }
+
+    const title = chatContext.chatTitle
+        ? `"${chatContext.chatTitle}"`
+        : chatContext.chatUsername
+          ? `@${chatContext.chatUsername}`
+          : undefined;
+    if (!title) {
+        return parsed.messageThreadId ? "Telegram topic" : "Telegram chat";
+    }
+
+    return parsed.messageThreadId
+        ? `Telegram topic in ${title}`
+        : `Telegram chat ${title}`;
+}
+
+function listRememberedBindings(pubkey: string, scope: TelegramScope): Array<{
+    channelId: string;
+    description?: string;
+}> {
+    if (scope.kind !== "project") {
+        return [];
+    }
+
+    return getTransportBindingStore()
+        .listBindingsForAgentProject(pubkey, scope.projectId, "telegram")
+        .map((binding) => ({
+            channelId: binding.channelId,
+            description: describeRememberedBinding(pubkey, scope.projectId, binding.channelId),
+        }));
+}
+
+function summarizeTelegramConfig(
+    config: TelegramAgentConfig | undefined,
+    scope: TelegramScope,
+    pubkey: string
+): string[] {
     if (!config) {
         return [chalk.dim("  Telegram is not configured for this scope.")];
     }
 
     const authorizedIdentityIds = config.authorizedIdentityIds ?? [];
+    const rememberedBindings = listRememberedBindings(pubkey, scope);
     const lines = [
         `  Bot token: ${maskToken(config.botToken)}`,
         `  DMs enabled: ${config.allowDMs === false ? "no" : "yes"}`,
         `  Authorized identities: ${authorizedIdentityIds.length}`,
-        `  Chat bindings: ${(config.chatBindings ?? []).length}`,
+        scope.kind === "project"
+            ? `  Remembered bindings: ${rememberedBindings.length}`
+            : `  Remembered bindings: ${chalk.dim("project-scoped")}`,
         `  API base URL: ${config.apiBaseUrl ?? chalk.dim("default")}`,
     ];
 
@@ -119,20 +167,14 @@ function summarizeTelegramConfig(config: TelegramAgentConfig | undefined): strin
         lines.push(`  Identity list: ${authorizedIdentityIds.join(", ")}`);
     }
 
-    if ((config.chatBindings?.length ?? 0) > 0) {
-        lines.push("  Bound chats:");
-        for (const binding of config.chatBindings ?? []) {
-            lines.push(`    ${formatChatBinding(binding)}`);
+    if (rememberedBindings.length > 0) {
+        lines.push("  Remembered channels:");
+        for (const binding of rememberedBindings) {
+            lines.push(`    ${binding.channelId}${binding.description ? ` [${binding.description}]` : ""}`);
         }
     }
 
     return lines;
-}
-
-function formatChatBinding(binding: TelegramChatBinding): string {
-    const topicSuffix = binding.topicId ? ` topic ${binding.topicId}` : "";
-    const titleSuffix = binding.title ? ` [${binding.title}]` : "";
-    return `${binding.chatId}${topicSuffix}${titleSuffix}`;
 }
 
 function maskToken(token: string): string {
@@ -341,116 +383,6 @@ async function manageAuthorizedIdentities(
     }
 }
 
-async function manageChatBindings(draft: TelegramDraft): Promise<TelegramDraft> {
-    const nextDraft: TelegramDraft = {
-        ...draft,
-        chatBindings: cloneChatBindings(draft.chatBindings) ?? [],
-    };
-
-    while (true) {
-        const bindings = nextDraft.chatBindings ?? [];
-        console.log();
-        console.log("  Bound Telegram chats/topics:");
-        if (bindings.length === 0) {
-            console.log(chalk.dim("    none"));
-        } else {
-            for (const binding of bindings) {
-                console.log(`    ${formatChatBinding(binding)}`);
-            }
-        }
-
-        const { action } = await inquirer.prompt([{
-            type: "select",
-            name: "action",
-            message: "Manage chat bindings",
-            choices: [
-                { name: "Add a chat binding", value: "add" },
-                { name: "Remove a chat binding", value: "remove" },
-                { name: "Clear all", value: "clear" },
-                { name: "Back", value: "back" },
-            ],
-            theme: inquirerTheme,
-            loop: false,
-        }]);
-
-        if (action === "back") {
-            return nextDraft;
-        }
-
-        if (action === "add") {
-            const answers = await inquirer.prompt([
-                {
-                    type: "input",
-                    name: "chatId",
-                    message: "Chat ID:",
-                    theme: inquirerTheme,
-                    validate: (input: string) => {
-                        const trimmed = input.trim();
-                        if (!trimmed) {
-                            return "Chat ID cannot be empty";
-                        }
-
-                        return getTelegramThreadTargetValidationError(trimmed) ?? true;
-                    },
-                },
-                {
-                    type: "input",
-                    name: "topicId",
-                    message: "Topic ID (optional):",
-                    theme: inquirerTheme,
-                },
-                {
-                    type: "input",
-                    name: "title",
-                    message: "Label/title (optional):",
-                    theme: inquirerTheme,
-                },
-            ]);
-
-            const chatId = answers.chatId.trim();
-            const topicId = answers.topicId.trim() || undefined;
-            const bindingError = getTelegramThreadTargetValidationError(chatId, topicId);
-            if (bindingError) {
-                console.log(chalk.red(`  ${bindingError}`));
-                continue;
-            }
-
-            nextDraft.chatBindings = [
-                ...bindings,
-                {
-                    chatId,
-                    topicId,
-                    title: answers.title.trim() || undefined,
-                },
-            ];
-            continue;
-        }
-
-        if (action === "remove") {
-            if (bindings.length === 0) {
-                continue;
-            }
-
-            const { bindingKey } = await inquirer.prompt([{
-                type: "select",
-                name: "bindingKey",
-                message: "Remove which binding?",
-                choices: bindings.map((binding) => ({
-                    name: formatChatBinding(binding),
-                    value: formatChatBinding(binding),
-                })),
-                theme: inquirerTheme,
-                loop: false,
-            }]);
-
-            nextDraft.chatBindings = bindings.filter((binding) => formatChatBinding(binding) !== bindingKey);
-            continue;
-        }
-
-        nextDraft.chatBindings = [];
-    }
-}
-
 async function configureAgentTelegram(): Promise<void> {
     while (true) {
         const selection = await chooseAgent();
@@ -474,7 +406,7 @@ async function configureAgentTelegram(): Promise<void> {
             const currentConfig = getScopedTelegramConfig(freshAgent, scope);
             console.log();
             console.log(chalk.bold(`${freshAgent.slug} — ${scopeLabel(scope)}`));
-            for (const line of summarizeTelegramConfig(currentConfig)) {
+            for (const line of summarizeTelegramConfig(currentConfig, scope, pubkey)) {
                 console.log(line);
             }
             console.log();
@@ -492,7 +424,6 @@ async function configureAgentTelegram(): Promise<void> {
                     { name: "Set or clear API base URL", value: "apiBaseUrl" },
                     { name: "Toggle DMs", value: "dms" },
                     { name: "Manage authorized identities", value: "identities" },
-                    { name: "Manage chat bindings", value: "bindings" },
                     { name: resetLabel, value: "reset" },
                     { name: "Back", value: "back" },
                 ],
@@ -532,12 +463,6 @@ async function configureAgentTelegram(): Promise<void> {
                     continue;
                 }
                 nextDraft = await manageAuthorizedIdentities(nextDraft);
-            } else if (action === "bindings") {
-                if (!nextDraft.botToken) {
-                    console.log(chalk.yellow("  Set a bot token first."));
-                    continue;
-                }
-                nextDraft = await manageChatBindings(nextDraft);
             }
 
             await saveScopedTelegramConfig(pubkey, scope, nextDraft);

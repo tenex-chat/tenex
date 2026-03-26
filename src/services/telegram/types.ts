@@ -5,7 +5,7 @@ import type {
 import type {
     RuntimeAgentRef,
 } from "@/events/runtime/RuntimeAgent";
-import type { TelegramAgentConfig, TelegramChatBinding } from "@/agents/types/storage";
+import type { TelegramAgentConfig } from "@/agents/types/storage";
 
 export interface TelegramUser {
     id: number;
@@ -210,7 +210,6 @@ export interface TelegramAnswerCallbackQueryParams {
 export interface TelegramGatewayBinding {
     agent: RuntimeAgentRef;
     config: TelegramAgentConfig;
-    chatBindings: TelegramChatBinding[];
 }
 
 export interface TelegramChatContextSnapshot {

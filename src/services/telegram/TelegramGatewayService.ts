@@ -14,9 +14,9 @@ import {
 } from "@/services/identity";
 import { projectContextStore, type ProjectContext } from "@/services/projects";
 import {
-    getTelegramChannelBindingStore,
-    type TelegramChannelBindingStore,
-} from "@/services/telegram/TelegramChannelBindingStoreService";
+    getTransportBindingStore,
+    type TransportBindingStore,
+} from "@/services/ingress/TransportBindingStoreService";
 import { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
 import { TelegramChatContextService } from "@/services/telegram/TelegramChatContextService";
 import {
@@ -39,7 +39,6 @@ import {
     hasMediaAttachment,
     isSupportedTelegramChatType,
     isProcessableTelegramMessage,
-    matchesTelegramChatBinding,
     normalizeTelegramChatId,
     normalizeTelegramMessage,
     normalizeTelegramTopicId,
@@ -62,7 +61,7 @@ interface TelegramGatewayOptions {
     configService: ConfigService;
     runtimeIngressService?: Pick<RuntimeIngressService, "handleChatMessage">;
     channelSessionStore?: ChannelSessionStore;
-    channelBindingStore?: Pick<TelegramChannelBindingStore, "getBinding" | "rememberBinding">;
+    channelBindingStore?: Pick<TransportBindingStore, "getBinding" | "rememberBinding">;
     authorizedIdentityService?: AuthorizedIdentityService;
     bindingPersistenceService?: Pick<TelegramBindingPersistenceService, "rememberProjectBinding">;
     chatContextService?: Pick<TelegramChatContextService, "rememberChatContext">;
@@ -105,7 +104,7 @@ export class TelegramGatewayService {
 
     private readonly runtimeIngressService: Pick<RuntimeIngressService, "handleChatMessage">;
     private readonly channelSessionStore: ChannelSessionStore;
-    private readonly channelBindingStore: Pick<TelegramChannelBindingStore, "getBinding" | "rememberBinding">;
+    private readonly channelBindingStore: Pick<TransportBindingStore, "getBinding" | "rememberBinding">;
     private readonly authorizedIdentityService: AuthorizedIdentityService;
     private readonly bindingPersistenceService: Pick<
         TelegramBindingPersistenceService,
@@ -131,7 +130,7 @@ export class TelegramGatewayService {
     constructor(private readonly options: TelegramGatewayOptions) {
         this.runtimeIngressService = options.runtimeIngressService ?? new RuntimeIngressService();
         this.channelSessionStore = options.channelSessionStore ?? getChannelSessionStore();
-        this.channelBindingStore = options.channelBindingStore ?? getTelegramChannelBindingStore();
+        this.channelBindingStore = options.channelBindingStore ?? getTransportBindingStore();
         this.authorizedIdentityService =
             options.authorizedIdentityService ?? getAuthorizedIdentityService();
         this.bindingPersistenceService =
@@ -361,11 +360,6 @@ export class TelegramGatewayService {
                     return;
                 }
 
-                const matchesStaticBinding = matchesTelegramChatBinding(
-                    binding.chatBindings,
-                    chatId,
-                    topicId
-                );
                 const matchesDynamicBinding = dynamicBinding?.projectId === this.options.projectId;
 
                 if (dynamicBinding && !matchesDynamicBinding) {
@@ -376,17 +370,16 @@ export class TelegramGatewayService {
                     return;
                 }
 
-                if (!matchesStaticBinding && !matchesDynamicBinding) {
-                    if (!isNewCommand) {
-                        await this.bindingPersistenceService.rememberProjectBinding({
-                            projectId: this.options.projectId,
-                            binding,
-                            channelId,
-                            message: normalizedMessage,
-                            projectContext: this.options.projectContext,
-                        });
-                    }
-                }
+            }
+
+            if (!isNewCommand) {
+                await this.bindingPersistenceService.rememberProjectBinding({
+                    projectId: this.options.projectId,
+                    binding,
+                    channelId,
+                    message: normalizedMessage,
+                    projectContext: this.options.projectContext,
+                });
             }
 
             const projectBinding = this.options.projectContext.project.tagReference()[1];
@@ -560,6 +553,7 @@ export class TelegramGatewayService {
                     lastMessageId: envelope.message.nativeId,
                 });
                 this.channelBindingStore.rememberBinding({
+                    transport: "telegram",
                     agentPubkey: binding.agent.pubkey,
                     channelId: envelope.channel.id,
                     projectId: this.options.projectId,
@@ -591,7 +585,6 @@ export class TelegramGatewayService {
             .map((agent) => ({
                 agent,
                 config: agent.telegram,
-                chatBindings: agent.telegram?.chatBindings ?? [],
             }));
     }
 

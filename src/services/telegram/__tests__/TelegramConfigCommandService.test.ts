@@ -17,15 +17,12 @@ function createBinding(): TelegramGatewayBinding {
             telegram: {
                 botToken: "token",
                 allowDMs: true,
-                chatBindings: [],
             },
         } as any,
         config: {
             botToken: "token",
             allowDMs: true,
-            chatBindings: [],
         },
-        chatBindings: [],
     };
 }
 

@@ -1,5 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import type { TelegramAgentConfig } from "@/agents/types";
+import * as transportBindingsModule from "@/services/ingress/TransportBindingStoreService";
+import { projectContextStore } from "@/services/projects";
 import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import type { ToolName } from "../types";
 import { getAllTools, getTool, getTools, getToolsObject } from "../registry";
@@ -89,17 +91,34 @@ describe("Tool Registry", () => {
     });
 
     describe("getToolsObject", () => {
-        it("auto-injects send_message when the agent has Telegram chat bindings", () => {
+        it("auto-injects send_message when the agent has remembered Telegram bindings", async () => {
             const context = createMockExecutionEnvironment({
                 agent: createMockAgent({
                     telegram: {
-                        chatBindings: [{ chatId: "1001", title: "Ops" }],
+                        botToken: "token",
                     } as TelegramAgentConfig,
                 }),
             });
 
-            const tools = getToolsObject([], context);
+            const storeSpy = spyOn(transportBindingsModule, "getTransportBindingStore").mockReturnValue({
+                listBindingsForAgentProject: () => [{
+                    transport: "telegram",
+                    agentPubkey: context.agent.pubkey,
+                    channelId: "telegram:chat:1001",
+                    projectId: "test-project",
+                    createdAt: 1,
+                    updatedAt: 1,
+                }],
+            } as any);
+            const tools = await projectContextStore.run({
+                project: {
+                    dTag: "test-project",
+                    tagValue: (name: string) => (name === "d" ? "test-project" : undefined),
+                },
+            } as any, async () => getToolsObject([], context));
+
             expect(tools.send_message).toBeDefined();
+            storeSpy.mockRestore();
         });
     });
 });

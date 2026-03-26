@@ -63,7 +63,6 @@ describe("TelegramInboundAdapter", () => {
                 config: {
                     botToken: "token",
                 },
-                chatBindings: [],
             },
             projectBinding: `31933:${"c".repeat(64)}:telegram-project`,
             replyToNativeMessageId: "tg_n2001_98",

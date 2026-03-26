@@ -10,10 +10,14 @@ import type { SkillData } from "@/services/skill";
 import { PromptCompilerService, type LessonComment } from "@/services/prompt-compiler";
 import { getNDK } from "@/nostr";
 import { config } from "@/services/ConfigService";
+import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
+import { getIdentityBindingStore } from "@/services/identity";
 import { getProjectContext } from "@/services/projects";
 import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
+import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
 import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
+import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -69,6 +73,76 @@ function applyCompilerUpdates(
  * List of scheduling-related tools that trigger the scheduled tasks context
  */
 const SCHEDULING_TOOLS = ["schedule_task", "schedule_task_cancel", "schedule_tasks_list"] as const;
+
+function formatHandle(username: string | undefined): string {
+    return username ? ` (@${username})` : "";
+}
+
+function formatIdentityLabel(
+    displayName: string | undefined,
+    username: string | undefined,
+    fallback: string
+): string {
+    const base = displayName ?? username ?? fallback;
+    if (!username || base === username) {
+        return base;
+    }
+    return `${base}${formatHandle(username)}`;
+}
+
+function describeTelegramChannelBinding(
+    projectId: string,
+    agentPubkey: string,
+    channelId: string
+): string | undefined {
+    const parsed = parseTelegramChannelId(channelId);
+    if (!parsed) {
+        return undefined;
+    }
+
+    if (!parsed.chatId.startsWith("-")) {
+        const identity = getIdentityBindingStore().getBinding(`telegram:user:${parsed.chatId}`);
+        return `Telegram DM with ${formatIdentityLabel(
+            identity?.displayName,
+            identity?.username,
+            parsed.chatId
+        )}`;
+    }
+
+    const chatContext = getTelegramChatContextStore().getContext(projectId, agentPubkey, channelId);
+    if (!chatContext?.chatTitle && !chatContext?.chatUsername) {
+        return parsed.messageThreadId ? "Telegram topic" : "Telegram chat";
+    }
+
+    const title = chatContext.chatTitle
+        ? `"${chatContext.chatTitle}"`
+        : chatContext.chatUsername
+          ? `@${chatContext.chatUsername}`
+          : undefined;
+    if (!title) {
+        return parsed.messageThreadId ? "Telegram topic" : "Telegram chat";
+    }
+
+    return parsed.messageThreadId
+        ? `Telegram topic in ${title}`
+        : `Telegram chat ${title}`;
+}
+
+function buildChannelBindingDisplayEntries(agent: AgentInstance, projectId: string): Array<{
+    channelId: string;
+    description?: string;
+}> {
+    if (!agent.pubkey || !agent.telegram?.botToken) {
+        return [];
+    }
+
+    return getTransportBindingStore()
+        .listBindingsForAgentProject(agent.pubkey, projectId, "telegram")
+        .map((binding) => ({
+            channelId: binding.channelId,
+            description: describeTelegramChannelBinding(projectId, agent.pubkey, binding.channelId),
+        }));
+}
 
 export interface BuildSystemPromptOptions {
     // Required data
@@ -671,7 +745,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         triggeringEnvelope,
     });
 
-    systemPromptBuilder.add("channel-bindings", { agent: agentForFragments });
+    systemPromptBuilder.add("channel-bindings", {
+        bindings: dTag ? buildChannelBindingDisplayEntries(agentForFragments, dTag) : [],
+    });
 
     // Add meta-project context (other projects this agent belongs to)
     // This gives agents cross-project awareness without overwhelming them

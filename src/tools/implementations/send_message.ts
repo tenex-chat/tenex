@@ -2,10 +2,14 @@ import { z } from "zod";
 import { tool } from "ai";
 import type { ToolExecutionContext, AISdkTool } from "@/tools/types";
 import {
+    getTransportBindingStore,
+    type TransportBindingStore,
+} from "@/services/ingress/TransportBindingStoreService";
+import { getProjectContext } from "@/services/projects";
+import {
     getTelegramThreadTargetValidationError,
     parseTelegramChannelId,
 } from "@/utils/telegram-identifiers";
-import { matchesTelegramChatBinding } from "@/services/telegram/telegram-gateway-utils";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
 
 // Shared instance preserves the TelegramBotClient cache across tool executions.
@@ -18,7 +22,13 @@ const sendMessageSchema = z.object({
 
 type SendMessageInput = z.infer<typeof sendMessageSchema>;
 
-export function createSendMessageTool(context: ToolExecutionContext): AISdkTool {
+export function createSendMessageTool(
+    context: ToolExecutionContext,
+    options: {
+        channelBindingStore?: Pick<TransportBindingStore, "getBinding">;
+    } = {}
+): AISdkTool {
+    const channelBindingStore = options.channelBindingStore ?? getTransportBindingStore();
     const aiTool = tool({
         description:
             "Send a proactive message to one of your bound channels. " +
@@ -43,8 +53,19 @@ export function createSendMessageTool(context: ToolExecutionContext): AISdkTool 
                 return { error: `${threadTargetError} Channel: ${input.channelId}` };
             }
 
-            if (!matchesTelegramChatBinding(telegramConfig.chatBindings, parsed.chatId, parsed.messageThreadId)) {
-                return { error: `Channel ${input.channelId} is not in your configured chat bindings` };
+            const projectId = getProjectContext().project.dTag
+                ?? getProjectContext().project.tagValue("d");
+            if (!projectId) {
+                return { error: "Project context is missing a project ID for transport binding lookup" };
+            }
+
+            const binding = channelBindingStore.getBinding(
+                context.agent.pubkey,
+                input.channelId,
+                "telegram"
+            );
+            if (!binding || binding.projectId !== projectId) {
+                return { error: `Channel ${input.channelId} is not in your remembered transport bindings` };
             }
 
             await deliveryService.sendToChannel({

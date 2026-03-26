@@ -1,5 +1,4 @@
 import type { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
-import type { TelegramChatBinding } from "@/agents/types/storage";
 import type {
     TelegramInboundMediaType,
     TelegramMessage,
@@ -91,29 +90,6 @@ export function isSupportedTelegramChatType(message: TelegramMessage): boolean {
     return message.chat.type === "private" ||
         message.chat.type === "group" ||
         message.chat.type === "supergroup";
-}
-
-export function matchesTelegramChatBinding(
-    chatBindings: TelegramChatBinding[] | undefined,
-    chatId: string,
-    topicId?: string
-): boolean {
-    const bindings = chatBindings ?? [];
-    if (bindings.length === 0) {
-        return false;
-    }
-
-    return bindings.some((chatBinding) => {
-        if (chatBinding.chatId !== chatId) {
-            return false;
-        }
-
-        if (!chatBinding.topicId) {
-            return true;
-        }
-
-        return chatBinding.topicId === topicId;
-    });
 }
 
 export async function sendUnauthorizedTelegramConfigReply(

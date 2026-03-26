@@ -1,15 +1,15 @@
-import type { AgentInstance } from "@/agents/types";
 import type { PromptFragment } from "../core/types";
-import { createTelegramChannelId } from "@/utils/telegram-identifiers";
 
 export const channelBindingsFragment: PromptFragment<{
-    agent: AgentInstance;
+    bindings: Array<{
+        channelId: string;
+        description?: string;
+    }>;
 }> = {
     id: "channel-bindings",
     priority: 5,
-    template: ({ agent }) => {
-        const bindings = agent.telegram?.chatBindings;
-        if (!bindings || bindings.length === 0) {
+    template: ({ bindings }) => {
+        if (bindings.length === 0) {
             return "";
         }
 
@@ -19,9 +19,9 @@ export const channelBindingsFragment: PromptFragment<{
         ];
 
         for (const binding of bindings) {
-            const channelId = createTelegramChannelId(binding.chatId, binding.topicId);
-            const label = binding.title ? ` — "${binding.title}"` : "";
-            lines.push(`- ${channelId}${label}`);
+            lines.push(
+                `- ${binding.channelId}${binding.description ? ` — ${binding.description}` : ""}`
+            );
         }
 
         return lines.join("\n");

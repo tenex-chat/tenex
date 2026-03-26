@@ -1015,7 +1015,7 @@ describe("AgentStorage", () => {
                     botToken: "project-token",
                     allowDMs: false,
                     chatBindings: [{ chatId: "-1001", title: "Ops" }],
-                }
+                } as any
             );
             expect(success).toBe(true);
 
@@ -1025,7 +1025,6 @@ describe("AgentStorage", () => {
                 telegram: {
                     botToken: "project-token",
                     allowDMs: false,
-                    chatBindings: [{ chatId: "-1001", title: "Ops" }],
                 },
             });
         });

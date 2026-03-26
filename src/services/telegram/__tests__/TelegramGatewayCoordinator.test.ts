@@ -21,7 +21,6 @@ function createRegistration(projectId: string, projectTitle: string) {
             botToken: "shared-token",
             apiBaseUrl: "https://telegram.example",
             allowDMs: true,
-            chatBindings: [],
         },
     };
     const projectContext = {
@@ -41,7 +40,6 @@ function createRegistration(projectId: string, projectTitle: string) {
         binding: {
             agent,
             config: agent.telegram,
-            chatBindings: agent.telegram.chatBindings ?? [],
         },
     };
 }
