@@ -110,6 +110,33 @@ type PreparedStepCacheEntry = {
     request: LLMModelRequest;
 };
 
+function resolvePreparedModelRef(options: {
+    model: LanguageModel | undefined;
+    fallbackProvider: string;
+    fallbackModelId: string;
+}): { provider: string; modelId: string } {
+    const { model, fallbackProvider, fallbackModelId } = options;
+
+    if (
+        model &&
+        typeof model !== "string" &&
+        "provider" in model &&
+        typeof model.provider === "string" &&
+        "modelId" in model &&
+        typeof model.modelId === "string"
+    ) {
+        return {
+            provider: model.provider,
+            modelId: model.modelId,
+        };
+    }
+
+    return {
+        provider: fallbackProvider,
+        modelId: fallbackModelId,
+    };
+}
+
 /**
  * Create the prepareStep callback for message rebuilding and dynamic model switching
  */
@@ -385,16 +412,16 @@ export function createPrepareStep(
             }
 
             const preparedModel = modelState.currentModel;
-            const preparedProvider = preparedModel?.provider ?? llmService.provider;
-            const preparedModelId = preparedModel?.modelId ?? llmService.model;
+            const preparedModelRef = resolvePreparedModelRef({
+                model: preparedModel,
+                fallbackProvider: llmService.provider,
+                fallbackModelId: llmService.model,
+            });
             const preparedRequest = await prepareLLMRequest({
                 messages: rebuiltMessages,
                 tools: toolsObject,
-                providerId: preparedProvider,
-                model: {
-                    provider: preparedProvider,
-                    modelId: preparedModelId,
-                },
+                providerId: preparedModelRef.provider,
+                model: preparedModelRef,
                 contextManagement,
             });
 

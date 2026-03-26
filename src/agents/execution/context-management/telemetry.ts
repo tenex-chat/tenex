@@ -161,7 +161,7 @@ function buildSystemPromptCachingSummary(payload: Extract<ContextManagementStrat
 }
 
 function buildToolResultDecaySummary(
-    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    _event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
     payload: Extract<ContextManagementStrategyPayload, { kind: "tool-result-decay" }> | undefined
 ): string {
     if (!payload) {
@@ -469,6 +469,8 @@ function buildTelemetryEventName(event: ContextManagementTelemetryEvent): string
         case "runtime-complete":
             return "context_management.runtime_complete";
     }
+
+    return "context_management.unknown";
 }
 
 export function createTelemetryCallback(): (event: ContextManagementTelemetryEvent) => void {

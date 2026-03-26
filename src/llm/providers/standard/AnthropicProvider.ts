@@ -32,6 +32,10 @@ const OAUTH_BETAS = [
  */
 const OAUTH_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
 
+type FetchWithPreconnect = typeof globalThis.fetch & {
+    preconnect?: (url: string | URL, options?: Record<string, unknown>) => unknown;
+};
+
 /**
  * Wraps fetch for OAuth token requests to inject the mandatory Claude Code system prompt.
  * The Anthropic API enforces this identity check for setup-token (sk-ant-oat*) auth.
@@ -57,9 +61,9 @@ const oauthFetch = (async (...[url, init]: Parameters<typeof globalThis.fetch>):
         }
     }
     return globalThis.fetch(url, init);
-}) as typeof globalThis.fetch;
+}) as FetchWithPreconnect;
 
-oauthFetch.preconnect = globalThis.fetch.preconnect;
+oauthFetch.preconnect = (globalThis.fetch as FetchWithPreconnect).preconnect;
 
 function isOAuthToken(key: string): boolean {
     return key.startsWith("sk-ant-oat");
