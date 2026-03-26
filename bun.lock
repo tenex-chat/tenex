@@ -26,7 +26,7 @@
         "ai": "^6.0.137",
         "ai-sdk-context-management": "^0.8.1",
         "ai-sdk-fs-tools": "^0.2.2",
-        "ai-sdk-message-sanitizer": "0.1.2",
+        "ai-sdk-message-sanitizer": "0.1.3",
         "ai-sdk-provider-codex-cli": "1.1.0",
         "ai-sdk-system-reminders": "0.3.0",
         "chalk": "^5.6.2",
@@ -670,7 +670,7 @@
 
     "ai-sdk-fs-tools": ["ai-sdk-fs-tools@0.2.2", "", { "dependencies": { "ai-sdk-system-reminders": "^0.2.0" }, "peerDependencies": { "ai": "^6.0.0", "zod": "^4.0.0" } }, "sha512-uoYIhFISNQ8GIPoYT0Tcw+PFUsG3l1zAx5xCM4uHWGeeks1uzu45Qr9HqRI8pGLGkneO2Uc6mFGywasyUhc3tA=="],
 
-    "ai-sdk-message-sanitizer": ["ai-sdk-message-sanitizer@0.1.2", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-iAMZ9LRahIL/6sqWnZxt3LTkBas61q0K0GJsJg2v4fMj3xaDhxC8WAG+a2THEbG3oVc48/HPwn6fCrVBS/eb4g=="],
+    "ai-sdk-message-sanitizer": ["ai-sdk-message-sanitizer@0.1.3", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-kcrJ6mT2JiQSWnwic7VaxlSmu5SktHjBIBxahZgO6QLPe9atCgptBMP1f70lsaqbyPbz7AZjOuQVzNkNmm9UOg=="],
 
     "ai-sdk-provider-codex-cli": ["ai-sdk-provider-codex-cli@1.1.0", "", { "dependencies": { "@ai-sdk/provider": "^3.0.0", "@ai-sdk/provider-utils": "^4.0.1", "jsonc-parser": "^3.3.1" }, "optionalDependencies": { "@openai/codex": "^0.105.0" }, "peerDependencies": { "zod": "^3.0.0 || ^4.0.0" } }, "sha512-l1ap+RAwCpdwEaLmB2cpQ4br+h2ut2IR0IvI88QvUMAAk5c3h2dSnx+vYZhwsOt1th3CS7FUQmvCTcnxqYshWg=="],
 
