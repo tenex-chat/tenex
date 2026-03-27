@@ -85,7 +85,7 @@ export class RAGOperationError extends Error {
  * Delegates vector storage to a VectorStore provider.
  */
 export class RAGOperations {
-    private static readonly BATCH_SIZE = 100;
+    private static readonly BATCH_SIZE = 20;
 
     constructor(
         private readonly vectorStore: VectorStore,
@@ -156,22 +156,24 @@ export class RAGOperations {
      * Process a batch of documents for insertion
      */
     private async processBatch(documents: RAGDocument[]): Promise<StoredDocument[]> {
-        return Promise.all(
-            documents.map(async (doc) => {
-                this.validateDocument(doc);
+        const results: StoredDocument[] = [];
 
-                const vector = doc.vector || (await this.embeddingProvider.embed(doc.content));
+        for (const doc of documents) {
+            this.validateDocument(doc);
 
-                return {
-                    id: doc.id || this.generateDocumentId(),
-                    content: doc.content,
-                    vector: Array.from(vector),
-                    metadata: JSON.stringify(doc.metadata || {}),
-                    timestamp: doc.timestamp || Date.now(),
-                    source: doc.source || "user",
-                };
-            })
-        );
+            const vector = doc.vector || (await this.embeddingProvider.embed(doc.content));
+
+            results.push({
+                id: doc.id || this.generateDocumentId(),
+                content: doc.content,
+                vector: Array.from(vector),
+                metadata: JSON.stringify(doc.metadata || {}),
+                timestamp: doc.timestamp || Date.now(),
+                source: doc.source || "user",
+            });
+        }
+
+        return results;
     }
 
     /**
