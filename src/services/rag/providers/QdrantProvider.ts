@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import { logger } from "@/utils/logger";
 import type { StoredDocument, VectorSearchResult, VectorStore, VectorStoreConfig } from "./types";
 
@@ -12,6 +13,46 @@ async function loadDependencies(): Promise<void> {
         const mod = await import("@qdrant/js-client-rest");
         QdrantClientClass = mod.QdrantClient;
     }
+}
+
+/**
+ * Qdrant requires point IDs to be either unsigned integers or UUIDs.
+ * Convert string IDs to deterministic UUIDs using SHA-256 hash.
+ */
+function stringToQdrantId(id: string): string {
+    // If already a valid UUID, return as-is
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(id)) {
+        return id;
+    }
+
+    // Create deterministic UUID from hash
+    // Take first 32 hex chars of SHA-256 and format as UUID v4
+    const hash = crypto.createHash("sha256").update(id).digest("hex");
+    return [
+        hash.substring(0, 8),
+        hash.substring(8, 12),
+        "4" + hash.substring(13, 16), // Version 4
+        hash.substring(16, 20),
+        hash.substring(20, 32),
+    ].join("-");
+}
+
+/**
+ * Reverse mapping is stored in payload to allow retrieval of original IDs
+ */
+function createPointFromDocument(doc: StoredDocument) {
+    return {
+        id: stringToQdrantId(doc.id),
+        vector: doc.vector,
+        payload: {
+            originalId: doc.id, // Store original ID for retrieval
+            content: doc.content,
+            metadata: doc.metadata,
+            timestamp: doc.timestamp,
+            source: doc.source,
+        },
+    };
 }
 
 type QdrantClient = InstanceType<typeof import("@qdrant/js-client-rest").QdrantClient>;
@@ -140,17 +181,7 @@ export class QdrantProvider implements VectorStore {
 
     async addDocuments(collection: string, documents: StoredDocument[]): Promise<void> {
         const client = this.ensureClient();
-
-        const points = documents.map((doc) => ({
-            id: doc.id,
-            vector: doc.vector,
-            payload: {
-                content: doc.content,
-                metadata: doc.metadata,
-                timestamp: doc.timestamp,
-                source: doc.source,
-            },
-        }));
+        const points = documents.map((doc) => createPointFromDocument(doc));
 
         await client.upsert(collection, { points });
         logger.debug(`Added ${documents.length} documents to Qdrant collection '${collection}'`);
@@ -174,16 +205,7 @@ export class QdrantProvider implements VectorStore {
             const batch = documents.slice(i, chunkEnd);
 
             try {
-                const points = batch.map((doc) => ({
-                    id: doc.id,
-                    vector: doc.vector,
-                    payload: {
-                        content: doc.content,
-                        metadata: doc.metadata,
-                        timestamp: doc.timestamp,
-                        source: doc.source,
-                    },
-                }));
+                const points = batch.map((doc) => createPointFromDocument(doc));
 
                 await client.upsert(collection, { points });
                 upsertedCount += batch.length;
@@ -203,7 +225,7 @@ export class QdrantProvider implements VectorStore {
     async deleteDocument(collection: string, documentId: string): Promise<void> {
         const client = this.ensureClient();
         await client.delete(collection, {
-            points: [documentId],
+            points: [stringToQdrantId(documentId)],
         });
         logger.debug(`Deleted document '${documentId}' from Qdrant collection '${collection}'`);
     }
@@ -243,7 +265,7 @@ export class QdrantProvider implements VectorStore {
         });
 
         return response.points.map((point) => ({
-            id: String(point.id),
+            id: (point.payload?.originalId as string) ?? String(point.id),
             content: (point.payload?.content as string) ?? "",
             vector: Array.from(point.vector as number[]),
             metadata: (point.payload?.metadata as string) ?? "{}",
@@ -274,7 +296,7 @@ export class QdrantProvider implements VectorStore {
 
         return results.map((point) => ({
             document: {
-                id: String(point.id),
+                id: (point.payload?.originalId as string) ?? String(point.id),
                 content: (point.payload?.content as string) ?? "",
                 vector: [],
                 metadata: (point.payload?.metadata as string) ?? "{}",
