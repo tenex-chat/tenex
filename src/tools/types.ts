@@ -49,8 +49,6 @@ export type ToolName =
     | "report_delete"
     | "schedule_task"
     | "schedule_task_once"
-    | "schedule_tasks_list"
-    | "schedule_task_cancel"
     | "upload_blob"
     | "rag_create_collection"
     | "rag_add_documents"

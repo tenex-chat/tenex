@@ -2,7 +2,7 @@
  * Nostr Fetch Tool
  *
  * Fetches any nostr event by ID and returns formatted or raw output.
- * Supports various ID formats: nevent, note, naddr, hex, with or without "nostr:" prefix.
+ * Accepts various ID formats transparently.
  */
 
 import type { ToolExecutionContext } from "@/tools/types";
@@ -22,7 +22,7 @@ const nostrFetchSchema = z.object({
     eventId: z
         .string()
         .describe(
-            "The event ID to fetch. Supports nevent, note, naddr, hex format, with or without 'nostr:' prefix"
+            "The event ID to fetch."
         ),
     format: z
         .enum(["raw", "display"])
@@ -106,9 +106,7 @@ async function executeNostrFetch(input: NostrFetchInput): Promise<string | null>
  */
 export function createNostrFetchTool(_context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
-        description:
-            "Fetches any nostr event by ID. Supports nevent, note, naddr, hex format, " +
-            "with or without 'nostr:' prefix. Returns either raw JSON or a human-readable display format.",
+        description: "Fetches any nostr event by ID. Returns either raw JSON or a human-readable display format.",
 
         inputSchema: nostrFetchSchema,
 

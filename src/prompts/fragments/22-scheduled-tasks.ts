@@ -144,7 +144,7 @@ You have ${summary} that will trigger automatically:
 
 ${sections.join("\n\n")}
 
-Use \`schedule_tasks_list\` to see all tasks or \`schedule_task_cancel\` to remove any by ID.`;
+Use \`kill\` to remove any task by ID.`;
 }
 
 // Scheduled tasks fragment - shows agent's scheduled tasks in system prompt

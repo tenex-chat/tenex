@@ -69,9 +69,7 @@ import { createReportReadTool } from "./implementations/report_read";
 import { createReportWriteTool } from "./implementations/report_write";
 import { createReportsListTool } from "./implementations/reports_list";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
-import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
 import { createScheduleTaskOnceTool } from "./implementations/schedule_task_once";
-import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 
@@ -234,10 +232,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     reports_list: createReportsListTool,
 
     // Schedule tools
-    schedule_task_cancel: createCancelScheduledTaskTool,
     schedule_task: createScheduleTaskTool,
     schedule_task_once: createScheduleTaskOnceTool,
-    schedule_tasks_list: createListScheduledTasksTool,
 
     // Conversation search
     conversation_search: createConversationSearchTool,

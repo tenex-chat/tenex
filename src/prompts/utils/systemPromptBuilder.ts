@@ -72,7 +72,7 @@ function applyCompilerUpdates(
 /**
  * List of scheduling-related tools that trigger the scheduled tasks context
  */
-const SCHEDULING_TOOLS = ["schedule_task", "schedule_task_cancel", "schedule_tasks_list"] as const;
+const SCHEDULING_TOOLS = ["schedule_task", "schedule_task_once"] as const;
 
 function formatHandle(username: string | undefined): string {
     return username ? ` (@${username})` : "";

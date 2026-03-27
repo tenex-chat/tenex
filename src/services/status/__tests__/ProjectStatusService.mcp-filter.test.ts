@@ -22,7 +22,6 @@ describe("ProjectStatusService mcp__tenex__ filtering", () => {
 
         it("should exclude mcp__tenex__ tools", () => {
             expect(filterMcpTenexTools("mcp__tenex__schedule_task")).toBe(false);
-            expect(filterMcpTenexTools("mcp__tenex__schedule_task_cancel")).toBe(false);
             expect(filterMcpTenexTools("mcp__tenex__lesson_learn")).toBe(false);
             expect(filterMcpTenexTools("mcp__tenex__report_write")).toBe(false);
             expect(filterMcpTenexTools("mcp__tenex__delegate")).toBe(false);
@@ -51,7 +50,6 @@ describe("ProjectStatusService mcp__tenex__ filtering", () => {
         it("should filter mcp__tenex__ tools when building from cached tools", () => {
             const cachedMcpTools: Record<string, unknown> = {
                 "mcp__tenex__schedule_task": {},
-                "mcp__tenex__schedule_task_cancel": {},
                 "mcp__tenex__delegate": {},
                 "mcp__github__issues": {},
                 "mcp__filesystem__read": {},
@@ -68,7 +66,6 @@ describe("ProjectStatusService mcp__tenex__ filtering", () => {
 
             // mcp__tenex__ tools should be excluded
             expect(toolAgentMap.has("mcp__tenex__schedule_task")).toBe(false);
-            expect(toolAgentMap.has("mcp__tenex__schedule_task_cancel")).toBe(false);
             expect(toolAgentMap.has("mcp__tenex__delegate")).toBe(false);
 
             // Other mcp tools should be included
