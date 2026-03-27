@@ -497,6 +497,21 @@ export class SkillService {
         return document?.metadata;
     }
 
+    private async isDirectoryEntry(entry: Dirent, parentDir: string): Promise<boolean> {
+        if (entry.isDirectory()) {
+            return true;
+        }
+        if (entry.isSymbolicLink?.()) {
+            try {
+                const resolved = await fs.stat(path.join(parentDir, entry.name));
+                return resolved.isDirectory();
+            } catch {
+                return false;
+            }
+        }
+        return false;
+    }
+
     private async listLocalSkillRecordsInDirectory(
         directory: SkillStoreDirectory
     ): Promise<LocalSkillRecord[]> {
@@ -513,7 +528,7 @@ export class SkillService {
         const records: LocalSkillRecord[] = [];
 
         for (const entry of entries) {
-            if (!entry.isDirectory()) {
+            if (!(await this.isDirectoryEntry(entry, directory.dir))) {
                 continue;
             }
 
@@ -604,7 +619,7 @@ export class SkillService {
             const entryPath = path.join(currentDir, entry.name);
             const relativePath = path.relative(skillDir, entryPath);
 
-            if (entry.isDirectory()) {
+            if (await this.isDirectoryEntry(entry, currentDir)) {
                 files.push(...await this.listLocalSkillFiles(skillDir, sourceEventId, entryPath));
                 continue;
             }

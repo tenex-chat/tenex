@@ -16,6 +16,7 @@ let mockFetch: ReturnType<typeof mock>;
 
 const files = new Map<string, Buffer>();
 const directories = new Set<string>();
+const symlinks = new Map<string, string>(); // symlink path -> target path
 const AGENT_PUBKEY = "a".repeat(64);
 const PROJECT_DTAG = "TENEX-ff3ssq";
 const LOOKUP_CONTEXT = {
@@ -43,6 +44,13 @@ function seedFile(target: string, content: string): void {
     const normalized = normalizePath(target);
     ensureMockDirectory(path.dirname(normalized));
     files.set(normalized, Buffer.from(content));
+}
+
+function seedSymlink(linkPath: string, targetPath: string): void {
+    const normalizedLink = normalizePath(linkPath);
+    const normalizedTarget = normalizePath(targetPath);
+    ensureMockDirectory(path.dirname(normalizedLink));
+    symlinks.set(normalizedLink, normalizedTarget);
 }
 
 function createSkillDocument({
@@ -73,28 +81,35 @@ function createSkillDocument({
     return lines.join("\n");
 }
 
-function listImmediateChildren(dir: string): Array<{ name: string; isDirectory: boolean }> {
+function listImmediateChildren(dir: string): Array<{ name: string; isDirectory: boolean; isSymlink: boolean }> {
     const normalizedDir = normalizePath(dir);
-    const children = new Map<string, boolean>();
+    const children = new Map<string, { isDirectory: boolean; isSymlink: boolean }>();
 
     for (const candidate of directories) {
         if (candidate === normalizedDir) continue;
         if (path.dirname(candidate) === normalizedDir) {
-            children.set(path.basename(candidate), true);
+            children.set(path.basename(candidate), { isDirectory: true, isSymlink: false });
         }
     }
 
     for (const candidate of files.keys()) {
         if (path.dirname(candidate) === normalizedDir) {
             if (!children.has(path.basename(candidate))) {
-                children.set(path.basename(candidate), false);
+                children.set(path.basename(candidate), { isDirectory: false, isSymlink: false });
             }
         }
     }
 
-    return Array.from(children.entries()).map(([name, isDirectory]) => ({
+    for (const candidate of symlinks.keys()) {
+        if (path.dirname(candidate) === normalizedDir) {
+            children.set(path.basename(candidate), { isDirectory: false, isSymlink: true });
+        }
+    }
+
+    return Array.from(children.entries()).map(([name, entry]) => ({
         name,
-        isDirectory,
+        isDirectory: entry.isDirectory,
+        isSymlink: entry.isSymlink,
     }));
 }
 
@@ -102,6 +117,7 @@ beforeEach(() => {
     SkillService.resetInstance();
     files.clear();
     directories.clear();
+    symlinks.clear();
     ensureMockDirectory("/tmp/test-tenex/skills");
 
     mockFetch = mock(() =>
@@ -135,7 +151,14 @@ beforeEach(() => {
         );
     });
     spyOn(fsPromises, "readFile").mockImplementation(async (target: fsPromises.PathLike, encoding?: any) => {
-        const normalized = normalizePath(String(target));
+        let normalized = normalizePath(String(target));
+        // Check if any parent component is a symlink (e.g., /dir/symlink/file)
+        for (const [linkPath, linkTarget] of symlinks) {
+            if (normalized.startsWith(linkPath + path.sep)) {
+                normalized = normalized.replace(linkPath, linkTarget);
+                break;
+            }
+        }
         const file = files.get(normalized);
         if (!file) {
             throw new Error(`ENOENT: ${normalized}`);
@@ -143,25 +166,44 @@ beforeEach(() => {
         return encoding === "utf-8" || encoding === "utf8" ? file.toString("utf-8") : file;
     });
     spyOn(fsPromises, "readdir").mockImplementation(async (target: fsPromises.PathLike, options?: any) => {
-        const normalized = normalizePath(String(target));
+        let normalized = normalizePath(String(target));
+        // Follow symlinks in path components
+        for (const [linkPath, linkTarget] of symlinks) {
+            if (normalized === linkPath || normalized.startsWith(linkPath + path.sep)) {
+                normalized = normalized.replace(linkPath, linkTarget);
+                break;
+            }
+        }
         const children = listImmediateChildren(normalized);
         if (options?.withFileTypes) {
             return children.map((child) => ({
                 name: child.name,
                 isDirectory: () => child.isDirectory,
-                isFile: () => !child.isDirectory,
+                isFile: () => !child.isDirectory && !child.isSymlink,
+                isSymbolicLink: () => child.isSymlink,
             })) as any;
         }
         return children.map((child) => child.name) as any;
     });
     spyOn(fsPromises, "access").mockImplementation(async (target: fsPromises.PathLike) => {
-        const normalized = normalizePath(String(target));
+        let normalized = normalizePath(String(target));
+        // Follow symlinks in path components
+        for (const [linkPath, linkTarget] of symlinks) {
+            if (normalized === linkPath || normalized.startsWith(linkPath + path.sep)) {
+                normalized = normalized.replace(linkPath, linkTarget);
+                break;
+            }
+        }
         if (!files.has(normalized) && !directories.has(normalized)) {
             throw new Error(`ENOENT: ${normalized}`);
         }
     });
     spyOn(fsPromises, "stat").mockImplementation(async (target: fsPromises.PathLike) => {
-        const normalized = normalizePath(String(target));
+        let normalized = normalizePath(String(target));
+        // Follow symlinks (stat resolves symlinks to their target)
+        if (symlinks.has(normalized)) {
+            normalized = symlinks.get(normalized)!;
+        }
         if (directories.has(normalized)) {
             return {
                 isDirectory: () => true,
@@ -387,6 +429,38 @@ describe("SkillService", () => {
         expect(skills[0].content).toBe("Agent skill");
         expect(result.skills).toHaveLength(1);
         expect(result.skills[0].content).toBe("Agent skill");
+    });
+
+    it("resolves symlinked skill directories in project-repo scope", async () => {
+        const projectRepoPath = "/path/to/my-project";
+        const symlinkTarget = "/elsewhere/shared-skills/notion-api";
+
+        // Seed the real skill content at the symlink target
+        seedFile(
+            `${symlinkTarget}/SKILL.md`,
+            createSkillDocument({
+                name: "notion-api",
+                description: "Notion API skill",
+                content: "Notion skill content",
+            })
+        );
+
+        // Create a symlink in the project-repo skills directory pointing to the target
+        seedSymlink(`${projectRepoPath}/skills/notion-api`, symlinkTarget);
+
+        const skills = await SkillService.getInstance().listAvailableSkills({
+            projectPath: projectRepoPath,
+        });
+        const result = await SkillService.getInstance().fetchSkills(
+            ["notion-api"],
+            { projectPath: projectRepoPath }
+        );
+
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("notion-api");
+        expect(skills[0].content).toBe("Notion skill content");
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Notion skill content");
     });
 
     it("loads legacy ~/.agents skills when no higher-precedence copy exists", async () => {
