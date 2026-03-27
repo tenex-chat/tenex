@@ -1,5 +1,4 @@
 import type { AgentInstance } from "@/agents/types";
-import { shortenConversationId } from "@/utils/conversation-id";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -16,8 +15,7 @@ interface AgentIdentityArgs {
      */
     workingDirectory?: string;
     /**
-     * Current conversation ID (full hex).
-     * First 12 characters are displayed as short ID in the system prompt.
+     * Current conversation ID as stored in the conversation system.
      */
     conversationId?: string;
 }
@@ -56,8 +54,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         }
         contextLines.push(`- User (Owner) pubkey: "${projectOwnerPubkey}"`);
         if (conversationId) {
-            const shortId = shortenConversationId(conversationId);
-            contextLines.push(`- Current Conversation (short): ${shortId}`);
+            contextLines.push(`- Current Conversation ID: ${conversationId}`);
         }
         parts.push(contextLines.join("\n"));
 

@@ -3,7 +3,6 @@ import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
-import { nip19 } from "nostr-tools";
 
 // Mock dependencies - must be before imports
 mock.module("@/utils/logger", () => ({
@@ -1446,12 +1445,8 @@ describe("conversation_get Tool", () => {
             expect(lines).toHaveLength(2);
         });
 
-        it("should accept NIP-19 note1 format", async () => {
-            // note1 encodes a full hex event ID
-            // For testing, we'll use a real note1 encoding
-            const hexEventId = "0000000000000000000000000000000000000000000000000000000000000001";
-            const note1Id = nip19.noteEncode(hexEventId);
-
+        it("should accept transport-native message IDs for untilId", async () => {
+            const transportMessageId = "tg_n2001_99";
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -1459,14 +1454,14 @@ describe("conversation_get Tool", () => {
                         messageType: "text",
                         content: "First",
                         pubkey: "user-pubkey",
-                        eventId: hexEventId,
+                        eventId: transportMessageId,
                         timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
-                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        eventId: "tg_n2001_100",
                         timestamp: 1700000001, // Unix seconds
                     },
                 ],
@@ -1475,49 +1470,7 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                untilId: note1Id,
-            });
-
-            const messages = (result.conversation as any).messages;
-            const lines = xmlToLegacyLines(messages);
-
-            expect(lines).toHaveLength(1);
-            expect(lines[0]).toContain("First");
-            expect(messages).not.toContain("Second");
-        });
-
-        it("should accept NIP-19 nevent1 format", async () => {
-            // nevent1 encodes an event with additional metadata (relay URLs, author, kind)
-            // For testing, we'll create a real nevent1 encoding using nip19.neventEncode
-            const hexEventId = "0000000000000000000000000000000000000000000000000000000000000002";
-            const nevent1Id = nip19.neventEncode({
-                id: hexEventId,
-            });
-
-            mockConversationData = {
-                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                messages: [
-                    {
-                        messageType: "text",
-                        content: "First",
-                        pubkey: "user-pubkey",
-                        eventId: hexEventId,
-                        timestamp: 1700000000, // Unix seconds
-                    },
-                    {
-                        messageType: "text",
-                        content: "Second",
-                        pubkey: "user-pubkey",
-                        eventId: "0000000000000000000000000000000000000000000000000000000000000003",
-                        timestamp: 1700000001, // Unix seconds
-                    },
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({
-                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                untilId: nevent1Id,
+                untilId: transportMessageId,
             });
 
             const messages = (result.conversation as any).messages;
@@ -1870,7 +1823,7 @@ describe("conversation_get Tool", () => {
     });
 
     describe("conversationId Format Support", () => {
-        it("should reject invalid conversationId format", async () => {
+        it("should reject blank conversationId values", async () => {
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [],
@@ -1878,11 +1831,11 @@ describe("conversation_get Tool", () => {
 
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
-                conversationId: "invalid-format", // Invalid format
+                conversationId: "   ",
             });
 
             expect(result.success).toBe(false);
-            expect(result.message).toContain("Could not resolve");
+            expect(result.message).toContain("conversationId is required");
         });
 
         it("should accept 18-char prefix for conversationId", async () => {
@@ -1960,6 +1913,45 @@ describe("conversation_get Tool", () => {
 
             expect(result.success).toBe(true);
             expect((result.conversation as any).messages).toContain("Hello");
+        });
+
+        it("should accept transport-native conversation IDs", async () => {
+            const transportConversationId = "tg_1001_77";
+            mockConversationData = {
+                id: transportConversationId,
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello from Telegram",
+                        pubkey: "",
+                        eventId: "tg_1001_77",
+                        timestamp: 1700000000,
+                    },
+                ],
+            };
+
+            mockGetConversation.mockImplementation((id?: string) => {
+                if (id === transportConversationId) {
+                    return mockConversationData ? {
+                        id: mockConversationData.id,
+                        title: mockConversationData.title,
+                        metadata: mockConversationData.metadata,
+                        executionTime: mockConversationData.executionTime,
+                        getAllMessages: mockGetAllMessages,
+                        getMessageCount: mockGetMessageCount,
+                    } : null;
+                }
+                return null;
+            });
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: transportConversationId,
+            });
+
+            expect(result.success).toBe(true);
+            expect((result.conversation as any).id).toBe(transportConversationId);
+            expect((result.conversation as any).messages).toContain("Hello from Telegram");
         });
     });
 

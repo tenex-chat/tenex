@@ -77,7 +77,7 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
 
         if (meta) {
           parts.push(`  - Created by: ${meta.createdBy.substring(0, SHORT_EVENT_ID_LENGTH)}`);
-          parts.push(`  - Conversation: ${meta.conversationId.substring(0, SHORT_EVENT_ID_LENGTH)}`);
+          parts.push(`  - Conversation ID: ${meta.conversationId}`);
           parts.push(`  - Parent branch: ${meta.parentBranch}`);
         }
       }

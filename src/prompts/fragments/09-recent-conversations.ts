@@ -1,7 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { formatRelativeTimeShort } from "@/lib/time";
-import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -31,6 +30,13 @@ const MAX_CONVERSATIONS = 10;
 const MAX_SUMMARY_LENGTH = 200;
 
 const ELLIPSIS = "...";
+
+function truncateConversationIdForDisplay(conversationId: string, maxLength = 12): string {
+    if (conversationId.length <= maxLength) {
+        return conversationId;
+    }
+    return `${conversationId.substring(0, maxLength)}${ELLIPSIS}`;
+}
 
 /**
  * Sanitize text for safe inclusion in system prompt.
@@ -135,17 +141,17 @@ export const recentConversationsFragment: PromptFragment<RecentConversationsArgs
         }
 
         const conversationLines = recentConversations.map((conv, index) => {
-            const title = conv.title || `Conversation ${shortenConversationId(conv.id)}...`;
+            const title = conv.title || `Conversation ${truncateConversationIdForDisplay(conv.id)}`;
             const relativeTime = formatRelativeTimeShort(conv.lastActivity);
             // Summary is already sanitized (no newlines), safe to include inline
             const summaryLine = conv.summary ? `\n   Summary: ${conv.summary}` : "";
 
-            return `${index + 1}. **${title}** (${relativeTime})${summaryLine}`;
+            return `${index + 1}. **${title}** (${relativeTime}) [id: ${conv.id}]${summaryLine}`;
         });
 
         return `## Recent Conversations (Past 24h)
 
-You participated in the following conversations recently. This context may help you understand ongoing work:
+You participated in the following conversations recently. This context may help you understand ongoing work. Use the exact \`id\` shown with \`conversation_get\` if you need to reopen one:
 
 ${conversationLines.join("\n\n")}
 

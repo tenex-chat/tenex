@@ -930,6 +930,7 @@ describe("activeConversationsFragment", () => {
             });
 
             expect(result).toMatch(/1\. \*\*Active Task\*\*/);
+            expect(result).toContain(`[id: ${entry.conversationId}]`);
         });
 
         it("should include duration since conversation started", () => {

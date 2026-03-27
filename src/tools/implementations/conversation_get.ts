@@ -8,64 +8,64 @@ import { logger } from "@/utils/logger";
 import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
 import { z } from "zod";
-import { nip19 } from "nostr-tools";
 
 /**
- * Normalizes various event ID formats to a canonical 64-char lowercase hex ID.
+ * Normalizes stored conversation/message IDs for lookup.
  *
- * Accepts:
- * - Full 64-character hex IDs
- * - 12-character hex prefixes (resolved via PrefixKVStore)
- * - NIP-19 formats: note1..., nevent1...
- * - nostr: prefixed versions of all the above
+ * Behavior:
+ * - Full 64-character hex IDs are canonicalized to lowercase
+ * - 12-character hex prefixes are resolved via PrefixKVStore when possible
+ * - Arbitrary transport-native IDs are preserved as-is
+ * - Legacy `nostr:` prefixes are stripped only when the remainder matches a hex ID/prefix
  *
- * @param input - The event ID in any supported format
- * @returns The normalized 64-char hex ID, or null if resolution fails
+ * @param input - The stored conversation/message ID in any supported format
+ * @returns The normalized lookup ID, or null if the input is blank
  */
-function normalizeEventId(input: string): string | null {
+function normalizeStoredId(input: string): string | null {
     const trimmed = input.trim();
-
-    // Strip nostr: prefix if present
-    const cleaned = trimmed.startsWith("nostr:") ? trimmed.slice(6) : trimmed;
-
-    // 1. Check for full 64-char hex ID
-    if (/^[0-9a-f]{64}$/i.test(cleaned)) {
-        return cleaned.toLowerCase();
+    if (!trimmed) {
+        return null;
     }
 
-    // 2. Check for 12-char hex prefix - resolve via PrefixKVStore
-    if (isHexPrefix(cleaned)) {
-        const resolved = resolvePrefixToId(cleaned);
-        return resolved; // Returns null if not found
-    }
+    const candidates = trimmed.startsWith("nostr:")
+        ? [trimmed.slice(6), trimmed]
+        : [trimmed];
 
-    // 3. Try NIP-19 decoding (note1..., nevent1...)
-    try {
-        const decoded = nip19.decode(cleaned);
-        if (decoded.type === "note") {
-            return (decoded.data as string).toLowerCase();
+    for (const candidate of candidates) {
+        if (/^[0-9a-f]{64}$/i.test(candidate)) {
+            return candidate.toLowerCase();
         }
-        if (decoded.type === "nevent") {
-            return (decoded.data as { id: string }).id.toLowerCase();
+
+        if (isHexPrefix(candidate)) {
+            return resolvePrefixToId(candidate) ?? candidate;
         }
-    } catch {
-        // Not a valid NIP-19 format, fall through
     }
 
-    // Invalid format or resolution failed
-    return null;
+    return trimmed;
+}
+
+function idsMatch(left: string | undefined, right: string | undefined): boolean {
+    if (!left || !right) {
+        return false;
+    }
+
+    const normalizedLeft = normalizeStoredId(left);
+    const normalizedRight = normalizeStoredId(right);
+    return normalizedLeft !== null && normalizedLeft === normalizedRight;
 }
 
 const conversationGetSchema = z.object({
     conversationId: z
         .string()
         .min(1, "conversationId is required")
-        .describe("The conversation ID to retrieve. Accepts full 64-char hex IDs (case-insensitive), 18-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format."),
+        .describe(
+            "The stored conversation ID to retrieve. Pass the exact ID returned by conversation_list or shown in prompt context. For legacy 64-char hex Nostr-backed conversation IDs, 12-character hex prefixes are also resolved when indexed."
+        ),
     untilId: z
         .string()
         .optional()
         .describe(
-            "Optional message ID to retrieve conversation slice up to and including this message. Accepts full 64-char hex IDs (case-insensitive), 18-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format. Useful for synthetic conversation forks where a new conversation references a parent conversation up to a specific message point."
+            "Optional stored message ID to retrieve the conversation slice up to and including that message. Pass the exact message/event ID from the transcript. For legacy 64-char hex Nostr-backed message IDs, 12-character hex prefixes are also resolved when indexed."
         ),
     prompt: z
         .string()
@@ -207,41 +207,42 @@ async function executeConversationGet(
     input: ConversationGetInput,
     context: ToolExecutionContext
 ): Promise<ConversationGetOutput> {
-    if (!input.conversationId) {
+    if (!input.conversationId.trim()) {
         return {
             success: false,
             message: "conversationId is required",
         };
     }
 
-    // Normalize conversation ID to full 64-char hex
-    const targetConversationId = normalizeEventId(input.conversationId);
+    const targetConversationId = normalizeStoredId(input.conversationId);
     if (!targetConversationId) {
         return {
             success: false,
+<<<<<<< HEAD
             message: `Could not resolve conversation ID "${input.conversationId}". Expected 64-char hex, 18-char hex prefix, or NIP-19 format (note1.../nevent1...).`,
+=======
+            message: "conversationId is required",
+>>>>>>> 33485298 (feat: make conversation ids transport-neutral)
         };
     }
 
-    // Normalize untilId if provided - graceful fallback for optional parameter
     let targetUntilId: string | undefined = undefined;
     if (input.untilId) {
-        const resolved = normalizeEventId(input.untilId);
-        targetUntilId = resolved ?? undefined;
-        if (!resolved) {
+        const normalized = normalizeStoredId(input.untilId);
+        targetUntilId = normalized ?? undefined;
+        if (!normalized) {
             logger.warn("Could not resolve untilId, proceeding without filtering", {
                 untilId: input.untilId,
                 conversationId: targetConversationId,
                 agent: context.agent.name,
             });
-            // Fall back to undefined - return unfiltered conversation
             targetUntilId = undefined;
         }
     }
 
     logger.info("📖 Retrieving conversation", {
         conversationId: targetConversationId,
-        isCurrentConversation: targetConversationId === context.conversationId,
+        isCurrentConversation: idsMatch(targetConversationId, context.conversationId),
         agent: context.agent.name,
     });
 
@@ -252,14 +253,14 @@ async function executeConversationGet(
     const contextConversationCandidate = resolveFromContext(targetConversationId);
     const contextConversation =
         contextConversationCandidate &&
-        String(contextConversationCandidate.id).toLowerCase() === targetConversationId
+        idsMatch(String(contextConversationCandidate.id), targetConversationId)
             ? contextConversationCandidate
             : undefined;
 
     // Get conversation from ConversationStore
     const conversation =
         contextConversation ??
-        (targetConversationId === context.conversationId
+        (idsMatch(targetConversationId, context.conversationId)
             ? context.getConversation()
             : ConversationStore.get(targetConversationId));
 
@@ -393,7 +394,7 @@ ${conversationText}`,
 export function createConversationGetTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation info (id, title, messageCount, executionTime) and an XML transcript string. XML includes absolute t0 on the root and per-entry relative time indicators via time=\"+seconds\", plus author/recipient attribution and short event ids.",
+            "Retrieve a conversation by its stored ID, including all messages/events in the conversation history. Pass the exact ID returned by conversation_list or shown in prompt context. Returns conversation info (id, title, messageCount, executionTime) and an XML transcript string. XML includes absolute t0 on the root and per-entry relative time indicators via time=\"+seconds\", plus author/recipient attribution and short event ids.",
 
         inputSchema: conversationGetSchema,
 

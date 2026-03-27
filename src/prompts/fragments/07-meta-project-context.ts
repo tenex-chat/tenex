@@ -29,6 +29,7 @@ interface OtherProjectInfo {
 }
 
 interface ActiveConversationSummary {
+    conversationId: string;
     title: string;
     agentName: string;
     status: string;      // "streaming", "running <tool>", "active"
@@ -39,6 +40,13 @@ const MAX_OTHER_PROJECTS = 5;
 const MAX_CONVS_PER_PROJECT = 5;
 const MAX_SUMMARY_LENGTH = 150;
 const ELLIPSIS = "...";
+
+function truncateConversationIdForDisplay(conversationId: string, maxLength = 12): string {
+    if (conversationId.length <= maxLength) {
+        return conversationId;
+    }
+    return `${conversationId.substring(0, maxLength)}${ELLIPSIS}`;
+}
 
 /**
  * Sanitize text for safe inclusion in system prompt.
@@ -150,7 +158,7 @@ async function loadOtherProjectsContext(
                 if (convCount >= MAX_CONVS_PER_PROJECT) break;
 
                 // Get conversation title
-                let title = `Conversation ${conversationId.substring(0, 8)}...`;
+                let title = `Conversation ${truncateConversationIdForDisplay(conversationId)}`;
                 const store = conversationRegistry.get(conversationId);
                 if (store) {
                     const metadata = store.getMetadata();
@@ -175,6 +183,7 @@ async function loadOtherProjectsContext(
                 const duration = formatDuration(entry.createdAt);
 
                 activeConversations.push({
+                    conversationId,
                     title,
                     agentName,
                     status,
@@ -212,7 +221,7 @@ export const metaProjectContextFragment: PromptFragment<MetaProjectContextArgs> 
         const projectSections = otherProjects.map(project => {
             const convSection = project.activeConversations.length > 0
                 ? `- Active conversations:\n${project.activeConversations.map(conv =>
-                    `  - "${conv.title}" - ${conv.agentName} (${conv.status}, ${conv.duration})`
+                    `  - "${conv.title}" - ${conv.agentName} (${conv.status}, ${conv.duration}) [id: ${conv.conversationId}]`
                 ).join("\n")}`
                 : "";
 
