@@ -34,78 +34,83 @@ export class PromptBuilder {
 
     async build(): Promise<string> {
         const parentSpan = trace.getActiveSpan();
-        const fragmentsWithPriority = await Promise.all(
-            this.fragments
-                .filter((config) => !config.condition || config.condition(config.args))
-                .map(async (config) => {
-                    const fragment = fragmentRegistry.get(config.fragmentId);
-                    if (!fragment) {
-                        throw new Error(`Fragment ${config.fragmentId} not found`);
-                    }
 
-                    // Validate arguments if validator is provided
-                    if (fragment.validateArgs && !fragment.validateArgs(config.args)) {
-                        const receivedArgs = JSON.stringify(config.args, null, 2);
-                        const expectedDesc =
-                            fragment.expectedArgs || "Check fragment definition for expected arguments";
-                        throw new Error(
-                            `Fragment "${config.fragmentId}" received invalid arguments.\n` +
-                                `Expected: ${expectedDesc}\n` +
-                                `Received: ${receivedArgs}`
-                        );
-                    }
-
-                    return await tracer.startActiveSpan(
-                        `tenex.prompt.fragment.${config.fragmentId}`,
-                        async (span) => {
-                            const startedAt = performance.now();
-
-                            try {
-                                const content = await fragment.template(config.args);
-                                const priority = fragment.priority || 50;
-                                const durationMs = Math.round(performance.now() - startedAt);
-
-                                span.setAttributes({
-                                    "fragment.id": config.fragmentId,
-                                    "fragment.priority": priority,
-                                    "fragment.duration_ms": durationMs,
-                                    "fragment.content.length": content.length,
-                                    "fragment.content.empty": content.trim().length === 0,
-                                });
-
-                                return {
-                                    priority,
-                                    content,
-                                    telemetry: {
-                                        fragmentId: config.fragmentId,
-                                        durationMs,
-                                    },
-                                };
-                            } catch (error) {
-                                span.recordException(error as Error);
-                                span.setStatus({ code: SpanStatusCode.ERROR });
-                                span.setAttributes({
-                                    "fragment.id": config.fragmentId,
-                                    "fragment.duration_ms": Math.round(performance.now() - startedAt),
-                                    "error.message": formatAnyError(error),
-                                });
-
-                                const errorMessage = formatAnyError(error);
-                                const receivedArgs = JSON.stringify(config.args, null, 2);
-                                throw new Error(
-                                    `Error executing fragment "${config.fragmentId}":\n` +
-                                        `${errorMessage}\n` +
-                                        `Arguments provided: ${receivedArgs}\n` +
-                                        `Expected: ${fragment.expectedArgs || "Check fragment definition"}`,
-                                    { cause: error }
-                                );
-                            } finally {
-                                span.end();
-                            }
-                        }
-                    );
-                })
+        // Generate fragments sequentially for deterministic execution order
+        const fragmentsWithPriority = [];
+        const filteredConfigs = this.fragments.filter(
+            (config) => !config.condition || config.condition(config.args)
         );
+
+        for (const config of filteredConfigs) {
+            const fragment = fragmentRegistry.get(config.fragmentId);
+            if (!fragment) {
+                throw new Error(`Fragment ${config.fragmentId} not found`);
+            }
+
+            // Validate arguments if validator is provided
+            if (fragment.validateArgs && !fragment.validateArgs(config.args)) {
+                const receivedArgs = JSON.stringify(config.args, null, 2);
+                const expectedDesc =
+                    fragment.expectedArgs || "Check fragment definition for expected arguments";
+                throw new Error(
+                    `Fragment "${config.fragmentId}" received invalid arguments.\n` +
+                        `Expected: ${expectedDesc}\n` +
+                        `Received: ${receivedArgs}`
+                );
+            }
+
+            const result = await tracer.startActiveSpan(
+                `tenex.prompt.fragment.${config.fragmentId}`,
+                async (span) => {
+                    const startedAt = performance.now();
+
+                    try {
+                        const content = await fragment.template(config.args);
+                        const priority = fragment.priority || 50;
+                        const durationMs = Math.round(performance.now() - startedAt);
+
+                        span.setAttributes({
+                            "fragment.id": config.fragmentId,
+                            "fragment.priority": priority,
+                            "fragment.duration_ms": durationMs,
+                            "fragment.content.length": content.length,
+                            "fragment.content.empty": content.trim().length === 0,
+                        });
+
+                        return {
+                            priority,
+                            content,
+                            telemetry: {
+                                fragmentId: config.fragmentId,
+                                durationMs,
+                            },
+                        };
+                    } catch (error) {
+                        span.recordException(error as Error);
+                        span.setStatus({ code: SpanStatusCode.ERROR });
+                        span.setAttributes({
+                            "fragment.id": config.fragmentId,
+                            "fragment.duration_ms": Math.round(performance.now() - startedAt),
+                            "error.message": formatAnyError(error),
+                        });
+
+                        const errorMessage = formatAnyError(error);
+                        const receivedArgs = JSON.stringify(config.args, null, 2);
+                        throw new Error(
+                            `Error executing fragment "${config.fragmentId}":\n` +
+                                `${errorMessage}\n` +
+                                `Arguments provided: ${receivedArgs}\n` +
+                                `Expected: ${fragment.expectedArgs || "Check fragment definition"}`,
+                            { cause: error }
+                        );
+                    } finally {
+                        span.end();
+                    }
+                }
+            );
+
+            fragmentsWithPriority.push(result);
+        }
 
         if (fragmentsWithPriority.length > 0) {
             const slowestFragment = fragmentsWithPriority.reduce((slowest, current) => {
