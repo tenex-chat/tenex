@@ -1,9 +1,10 @@
 /**
- * Unified kill tool - Abort agents or background shell processes
+ * Unified kill tool - Abort agents, background shell processes, or scheduled tasks
  *
  * This tool provides a unified interface for killing:
  * 1. Agent executions (by conversation_id) - with cascading abort support
  * 2. Background shell processes (by shell_id)
+ * 3. Scheduled tasks (by task ID, format: task-{timestamp}-{random})
  *
  * When killing an agent by conversation_id, this tool will:
  * - Abort the agent's execution in that conversation
@@ -17,6 +18,7 @@ import { killBackgroundTask, getBackgroundTaskInfo, getAllBackgroundTasks } from
 import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { SchedulerService } from "@/services/scheduling";
 import { tool } from "ai";
 import { z } from "zod";
 import { logger } from "@/utils/logger";
@@ -33,7 +35,8 @@ const killSchema = z.object({
         .describe(
             "The target to kill. Can be either:\n" +
             "- A conversation ID (to abort an agent and cascade to nested delegations)\n" +
-            "- A shell task ID (to terminate a background shell process)"
+            "- A shell task ID (to terminate a background shell process)\n" +
+            "- A scheduled task ID (to cancel a recurring or one-off scheduled task, format: task-{timestamp}-{random})"
         ),
     reason: z
         .string()
@@ -46,18 +49,12 @@ type KillInput = z.infer<typeof killSchema>;
 /**
  * Resolve a target ID from various formats to a canonical full ID.
  *
- * Supports:
- * - 64-char hex: Already a full ID, returned as-is
- * - 12-char hex: Resolve via PrefixKVStore or RALRegistry fallback
- * - 7-char alphanumeric: Shell task ID (returned as-is for separate handling)
- * - NIP-19 formats (nevent, note): Decode to 64-char hex
- *
  * @param input - The target identifier in any supported format
  * @returns Object with resolved ID and type, or null if resolution failed
  */
 async function resolveTargetId(input: string): Promise<{
     id: string;
-    type: 'conversation' | 'shell' | 'unknown';
+    type: 'conversation' | 'shell' | 'scheduled' | 'unknown';
     wasResolved: boolean;
 } | null> {
     const trimmed = input.trim().toLowerCase();
@@ -95,6 +92,11 @@ async function resolveTargetId(input: string): Promise<{
             prefix: trimmed,
         });
         return null;
+    }
+
+    // Scheduled task ID: task-{timestamp}-{random} format
+    if (/^task-\d+-[a-z0-9]+$/.test(trimmed)) {
+        return { id: trimmed, type: 'scheduled', wasResolved: false };
     }
 
     // 7-char alphanumeric: shell task ID (different ID space, use typed guard)
@@ -136,7 +138,7 @@ interface KillOutput {
     success: boolean;
     message: string;
     target: string;
-    targetType: "agent" | "shell";
+    targetType: "agent" | "shell" | "scheduled";
     /** For agent kills: number of agents aborted in cascade */
     cascadeAbortCount?: number;
     /** For agent kills: list of aborted conversation:agent tuples */
@@ -173,6 +175,10 @@ async function executeKill(input: KillInput, context: ToolExecutionContext): Pro
 
     if (resolved) {
         // Successfully resolved to a known format
+        if (resolved.type === 'scheduled') {
+            return killScheduledTask(resolved.id);
+        }
+
         if (resolved.type === 'shell') {
             // Shell task ID - check if it exists and handle
             const taskInfo = getBackgroundTaskInfo(resolved.id);
@@ -604,14 +610,52 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
 }
 
 /**
+ * Cancel a scheduled task (recurring or one-off)
+ */
+async function killScheduledTask(taskId: string): Promise<KillOutput> {
+    try {
+        const schedulerService = SchedulerService.getInstance();
+        const success = await schedulerService.removeTask(taskId);
+
+        if (!success) {
+            return {
+                success: false,
+                message: `Scheduled task ${taskId} not found or could not be removed`,
+                target: taskId,
+                targetType: "scheduled",
+            };
+        }
+
+        logger.info("[kill] Scheduled task cancelled", { taskId });
+
+        return {
+            success: true,
+            message: `Scheduled task ${taskId} cancelled successfully`,
+            target: taskId,
+            targetType: "scheduled",
+        };
+    } catch (error: unknown) {
+        logger.error("[kill] Failed to cancel scheduled task", { taskId, error });
+
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : "Failed to cancel scheduled task",
+            target: taskId,
+            targetType: "scheduled",
+        };
+    }
+}
+
+/**
  * Create an AI SDK tool for the unified kill command
  */
 export function createKillTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Terminate an agent execution or background shell process. " +
+            "Terminate an agent execution, background shell process, or scheduled task. " +
             "For agents: aborts the agent and all nested delegations with 15s cooldown. " +
             "For shells: terminates the background process. " +
+            "For scheduled tasks: cancels a recurring or one-off task by ID. " +
             "IMPORTANT: This tool blocks until all cascade aborts complete.",
 
         inputSchema: killSchema,

@@ -7,6 +7,7 @@ import { createKillTool } from "../kill";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
+import { SchedulerService } from "@/services/scheduling";
 import { prefixKVStore } from "@/services/storage";
 import type { ToolExecutionContext } from "@/tools/types";
 
@@ -792,6 +793,96 @@ describe("kill tool", () => {
             // Restore
             ConversationStore.has = originalHas;
             ConversationStore.get = originalGet;
+        });
+    });
+
+    describe("Scheduled task killing", () => {
+        test("should detect scheduled task ID format", async () => {
+            const scheduledTaskId = "task-1234567890-abc123def";
+
+            // Mock SchedulerService.getInstance().removeTask()
+            const mockRemoveTask = mock(async () => true);
+            const originalGetInstance = SchedulerService.getInstance;
+            SchedulerService.getInstance = mock(() => ({
+                removeTask: mockRemoveTask,
+            })) as any;
+
+            // Mock ConversationStore to not find this as a conversation
+            const originalHas = ConversationStore.has;
+            const originalGetAll = ConversationStore.getAll;
+            ConversationStore.has = mock(() => false);
+            ConversationStore.getAll = mock(() => []);
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: scheduledTaskId, reason: "test cancel" });
+
+            expect(result.success).toBe(true);
+            expect(result.targetType).toBe("scheduled");
+            expect(result.message).toContain("cancelled successfully");
+            expect(mockRemoveTask).toHaveBeenCalledWith(scheduledTaskId);
+
+            // Restore
+            SchedulerService.getInstance = originalGetInstance;
+            ConversationStore.has = originalHas;
+            ConversationStore.getAll = originalGetAll;
+        });
+
+        test("should return error when scheduled task not found", async () => {
+            const scheduledTaskId = "task-9999999999-nonexistent";
+
+            // Mock SchedulerService.getInstance().removeTask() returning false
+            const mockRemoveTask = mock(async () => false);
+            const originalGetInstance = SchedulerService.getInstance;
+            SchedulerService.getInstance = mock(() => ({
+                removeTask: mockRemoveTask,
+            })) as any;
+
+            // Mock ConversationStore to not find this as a conversation
+            const originalHas = ConversationStore.has;
+            const originalGetAll = ConversationStore.getAll;
+            ConversationStore.has = mock(() => false);
+            ConversationStore.getAll = mock(() => []);
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: scheduledTaskId, reason: "test cancel" });
+
+            expect(result.success).toBe(false);
+            expect(result.targetType).toBe("scheduled");
+            expect(result.message).toContain("not found or could not be removed");
+
+            // Restore
+            SchedulerService.getInstance = originalGetInstance;
+            ConversationStore.has = originalHas;
+            ConversationStore.getAll = originalGetAll;
+        });
+
+        test("should handle scheduler service errors gracefully", async () => {
+            const scheduledTaskId = "task-1234567890-errortask";
+
+            // Mock SchedulerService.getInstance().removeTask() throwing
+            const mockRemoveTask = mock(async () => { throw new Error("Scheduler unavailable"); });
+            const originalGetInstance = SchedulerService.getInstance;
+            SchedulerService.getInstance = mock(() => ({
+                removeTask: mockRemoveTask,
+            })) as any;
+
+            // Mock ConversationStore to not find this as a conversation
+            const originalHas = ConversationStore.has;
+            const originalGetAll = ConversationStore.getAll;
+            ConversationStore.has = mock(() => false);
+            ConversationStore.getAll = mock(() => []);
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: scheduledTaskId, reason: "test cancel" });
+
+            expect(result.success).toBe(false);
+            expect(result.targetType).toBe("scheduled");
+            expect(result.message).toContain("Scheduler unavailable");
+
+            // Restore
+            SchedulerService.getInstance = originalGetInstance;
+            ConversationStore.has = originalHas;
+            ConversationStore.getAll = originalGetAll;
         });
     });
 });
