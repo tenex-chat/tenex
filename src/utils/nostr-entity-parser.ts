@@ -361,7 +361,7 @@ export function normalizeLessonEventId(
         // Other NIP-19 types (npub, nprofile, naddr) are not valid event IDs
         return {
             success: false,
-            error: `Invalid lesson event ID format: "${input}". Got NIP-19 type "${decoded.type}" but expected "note" or "nevent".`,
+            error: `Invalid event ID format: "${input}".`,
             errorType: "invalid_format",
         };
     } catch {
@@ -371,7 +371,7 @@ export function normalizeLessonEventId(
     // 4. Invalid format
     return {
         success: false,
-        error: `Invalid lesson event ID format: "${input}". Expected 64-char hex, 12-char hex prefix, or NIP-19 (note1.../nevent1...).`,
+        error: `Invalid event ID format: "${input}".`,
         errorType: "invalid_format",
     };
 }

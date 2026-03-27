@@ -50,7 +50,7 @@ async function executeAgentsHire(
     if (!eventId) {
         return {
             success: false,
-            error: `Invalid event ID format: "${rawEventId}". Please provide a valid Nostr event ID in bech32 format (e.g., nevent1...) or hex format.`,
+            error: `Invalid event ID format: "${rawEventId}". Please provide a valid hex event ID.`,
         };
     }
 

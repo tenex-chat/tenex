@@ -65,9 +65,7 @@ async function executeAgentsDiscover(input: AgentsDiscoverInput): Promise<Agents
         searchText: searchText ?? undefined,
     });
 
-    // Format results with bech32 encoded IDs
     let results = agents.map((agent) => {
-        // Get bech32 encoded ID from the NDKAgentDefinition event
         const bech32Id = agent.encode();
 
         return {

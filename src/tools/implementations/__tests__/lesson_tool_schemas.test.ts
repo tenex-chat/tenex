@@ -6,15 +6,17 @@ import { createLessonGetTool } from "../lesson_get";
 describe("lesson tool schemas", () => {
     const mockContext = createMockExecutionEnvironment();
 
-    it("documents supported lesson ID formats for lesson_get", () => {
+    it("has concise event ID descriptions for lesson_get", () => {
         const tool = createLessonGetTool(mockContext);
-        expect(tool.inputSchema.shape.eventId.description).toContain("18-char hex prefix");
-        expect(tool.inputSchema.shape.eventId.description).toContain("note1.../nevent1...");
+        expect(tool.inputSchema.shape.eventId.description).toBe(
+            "The event ID of the lesson to retrieve."
+        );
     });
 
-    it("documents supported lesson ID formats for lesson_delete", () => {
+    it("has concise event ID descriptions for lesson_delete", () => {
         const tool = createLessonDeleteTool(mockContext);
-        expect(tool.inputSchema.shape.eventId.description).toContain("18-char hex prefix");
-        expect(tool.inputSchema.shape.eventId.description).toContain("note1.../nevent1...");
+        expect(tool.inputSchema.shape.eventId.description).toBe(
+            "The event ID of the lesson to delete."
+        );
     });
 });

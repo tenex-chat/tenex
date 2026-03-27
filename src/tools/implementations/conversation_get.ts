@@ -59,13 +59,13 @@ const conversationGetSchema = z.object({
         .string()
         .min(1, "conversationId is required")
         .describe(
-            "The stored conversation ID to retrieve. Pass the exact ID returned by conversation_list or shown in prompt context. For legacy 64-char hex Nostr-backed conversation IDs, 12-character hex prefixes are also resolved when indexed."
+            "The stored conversation ID to retrieve. Pass the exact ID returned by conversation_list or shown in prompt context."
         ),
     untilId: z
         .string()
         .optional()
         .describe(
-            "Optional stored message ID to retrieve the conversation slice up to and including that message. Pass the exact message/event ID from the transcript. For legacy 64-char hex Nostr-backed message IDs, 12-character hex prefixes are also resolved when indexed."
+            "Optional conversation event ID to retrieve the conversation slice up to and including that message. Pass the exact event ID from the transcript."
         ),
     prompt: z
         .string()
