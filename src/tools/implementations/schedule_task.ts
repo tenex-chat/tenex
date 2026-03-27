@@ -1,5 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { SchedulerService } from "@/services/scheduling";
+import { formatDelay, formatExecuteAt, parseRelativeDelay } from "@/services/scheduling/utils";
 import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
@@ -8,39 +9,28 @@ import * as cron from "node-cron";
 import { z } from "zod";
 
 /**
- * Creates a tool for scheduling tasks using cron notation
+ * Creates a unified tool for scheduling tasks — supports both cron (recurring) and relative delay (one-off).
  */
 export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Schedule a task using cron notation (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes)",
+            "Schedule a task using a cron expression for recurring tasks (e.g. '0 9 * * *') or a relative delay for one-off tasks (e.g. '5m', '2h', '1d')",
         inputSchema: z.object({
-            title: z
-                .string()
-                .optional()
-                .describe("A human-readable title for the scheduled task (e.g., 'Daily standup reminder')"),
             prompt: z.string().describe("The prompt to execute when the task runs"),
-            schedule: z
-                .string()
-                .describe(
-                    "Cron expression for scheduling (e.g., '0 9 * * *' for daily at 9am, '0 * * * *' for hourly)"
-                ),
+            when: z.string().describe(
+                "When to execute. Use a cron expression for recurring tasks (e.g. '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes), or a relative delay for one-off tasks (e.g. '5m', '2h', '1d')"
+            ),
+            title: z.string().optional().describe("A human-readable title for the task"),
             targetAgent: z
                 .string()
                 .nullable()
+                .optional()
                 .describe(
-                    "Target agent slug (e.g., 'architect', 'claude-code'). Only agent slugs are accepted."
+                    "Target agent slug (e.g., 'architect', 'claude-code'). Defaults to self."
                 ),
         }),
-        execute: async ({ title, prompt, schedule, targetAgent }) => {
-            // Validate cron expression - throw for invalid input (consistent with delegate tool)
-            if (!cron.validate(schedule)) {
-                throw new Error(
-                    `Invalid cron expression: ${schedule}. Examples: '0 9 * * *' (daily at 9am), '*/5 * * * *' (every 5 minutes), '0 0 * * 0' (weekly on Sunday)`
-                );
-            }
-
-            // Resolve target agent to pubkey if specified - throw for invalid slugs (consistent with delegate tool)
+        execute: async ({ prompt, when, title, targetAgent }) => {
+            // Resolve target agent
             let toPubkey: string;
             if (targetAgent) {
                 const resolution = resolveAgentSlug(targetAgent);
@@ -54,38 +44,75 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                 }
                 toPubkey = resolution.pubkey;
             } else {
-                // Default to self if no target specified
                 toPubkey = context.agent.pubkey;
             }
 
             const schedulerService = SchedulerService.getInstance();
-
-            // The agent scheduling the task is always the current agent
             const fromPubkey = context.agent.pubkey;
 
-            // Add task to scheduler with both pubkeys and optional title
-            const taskId = await schedulerService.addTask(
-                schedule,
-                prompt,
-                fromPubkey,
-                toPubkey,
-                undefined, // projectId - let it be resolved from context
-                title
-            );
+            // Try relative delay first
+            const delayMs = parseRelativeDelay(when);
+            if (delayMs !== null) {
+                const executeAt = new Date(Date.now() + delayMs);
+                const taskId = await schedulerService.addOneoffTask(
+                    executeAt,
+                    prompt,
+                    fromPubkey,
+                    toPubkey,
+                    undefined,
+                    title
+                );
 
-            logger.info(
-                `Successfully created scheduled task ${taskId} with cron schedule: ${schedule}`
-            );
+                logger.info(
+                    `Successfully created one-off task ${taskId} to execute at: ${executeAt.toISOString()}`
+                );
 
-            return {
-                success: true,
-                taskId,
-                message: `Task scheduled successfully with ID: ${taskId}`,
-                title,
-                schedule,
-                prompt,
-                targetAgent: targetAgent || "self",
-            };
+                return {
+                    success: true,
+                    taskId,
+                    type: "oneoff" as const,
+                    message: `One-off task scheduled successfully with ID: ${taskId}`,
+                    title,
+                    delay: when,
+                    delayHuman: formatDelay(when),
+                    executeAt: executeAt.toISOString(),
+                    executeAtFormatted: formatExecuteAt(executeAt.toISOString()),
+                    prompt,
+                    targetAgent: targetAgent || "self",
+                };
+            }
+
+            // Try cron
+            if (cron.validate(when)) {
+                const taskId = await schedulerService.addTask(
+                    when,
+                    prompt,
+                    fromPubkey,
+                    toPubkey,
+                    undefined,
+                    title
+                );
+
+                logger.info(
+                    `Successfully created scheduled task ${taskId} with cron schedule: ${when}`
+                );
+
+                return {
+                    success: true,
+                    taskId,
+                    type: "cron" as const,
+                    message: `Task scheduled successfully with ID: ${taskId}`,
+                    title,
+                    schedule: when,
+                    prompt,
+                    targetAgent: targetAgent || "self",
+                };
+            }
+
+            // Neither format matched
+            throw new Error(
+                `Invalid 'when' value: "${when}". Use a cron expression (e.g. '0 9 * * *' for daily at 9am) or a relative delay (e.g. '5m', '2h', '1d').`
+            );
         },
     });
 
