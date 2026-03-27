@@ -11,7 +11,7 @@ import { z } from "zod";
 
 const lessonDeleteSchema = z.object({
     eventId: z.string().describe(
-        "Nostr event ID of the lesson to delete. Supports full 64-char hex ID, 12-char hex prefix, or NIP-19 formats (note1.../nevent1...)."
+        "Nostr event ID of the lesson to delete. Supports full 64-char hex ID, 18-char hex prefix, or NIP-19 formats (note1.../nevent1...)."
     ),
     reason: z.string().optional().describe(
         "Optional reason for deleting the lesson"
@@ -142,7 +142,7 @@ export function createLessonDeleteTool(context: ToolExecutionContext): AISdkTool
             "to mark the lesson as deleted. Only lessons created by the calling agent can be deleted.\n\n" +
             "Supports multiple ID formats:\n" +
             "- Full 64-character hex IDs\n" +
-            "- 12-character hex prefixes\n" +
+            "- 18-character hex prefixes\n" +
             "- NIP-19 formats: note1..., nevent1...\n" +
             "- nostr: prefixed versions of all the above\n\n" +
             "Use when a lesson is no longer relevant, contains outdated information, or was recorded in error.",

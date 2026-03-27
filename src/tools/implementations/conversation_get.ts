@@ -60,12 +60,12 @@ const conversationGetSchema = z.object({
     conversationId: z
         .string()
         .min(1, "conversationId is required")
-        .describe("The conversation ID to retrieve. Accepts full 64-char hex IDs (case-insensitive), 12-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format."),
+        .describe("The conversation ID to retrieve. Accepts full 64-char hex IDs (case-insensitive), 18-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format."),
     untilId: z
         .string()
         .optional()
         .describe(
-            "Optional message ID to retrieve conversation slice up to and including this message. Accepts full 64-char hex IDs (case-insensitive), 12-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format. Useful for synthetic conversation forks where a new conversation references a parent conversation up to a specific message point."
+            "Optional message ID to retrieve conversation slice up to and including this message. Accepts full 64-char hex IDs (case-insensitive), 18-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format. Useful for synthetic conversation forks where a new conversation references a parent conversation up to a specific message point."
         ),
     prompt: z
         .string()
@@ -219,7 +219,7 @@ async function executeConversationGet(
     if (!targetConversationId) {
         return {
             success: false,
-            message: `Could not resolve conversation ID "${input.conversationId}". Expected 64-char hex, 12-char hex prefix, or NIP-19 format (note1.../nevent1...).`,
+            message: `Could not resolve conversation ID "${input.conversationId}". Expected 64-char hex, 18-char hex prefix, or NIP-19 format (note1.../nevent1...).`,
         };
     }
 

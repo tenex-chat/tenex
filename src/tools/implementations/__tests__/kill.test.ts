@@ -477,10 +477,10 @@ describe("kill tool", () => {
         });
     });
 
-    describe("12-char ID resolution", () => {
-        test("should resolve 12-char prefix to full conversation ID via PrefixKVStore", async () => {
+    describe("18-char ID resolution", () => {
+        test("should resolve 18-char prefix to full conversation ID via PrefixKVStore", async () => {
             const fullConversationId = "a1b2c3d4e5f61234567890abcdef1234567890abcdef1234567890abcdef1234";
-            const shortId = "a1b2c3d4e5f6"; // First 12 chars
+            const shortId = "a1b2c3d4e5f6123456"; // First 18 chars
             const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -535,9 +535,9 @@ describe("kill tool", () => {
             ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
-        test("should resolve 12-char prefix via RALRegistry when PrefixKVStore fails", async () => {
+        test("should resolve 18-char prefix via RALRegistry when PrefixKVStore fails", async () => {
             const fullConversationId = "b2c3d4e5f6a71234567890abcdef1234567890abcdef1234567890abcdef1234";
-            const shortId = "b2c3d4e5f6a7"; // First 12 chars
+            const shortId = "b2c3d4e5f6a7123456"; // First 18 chars
             const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -597,8 +597,8 @@ describe("kill tool", () => {
             ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
-        test("should return error when 12-char prefix cannot be resolved", async () => {
-            const shortId = "c3d4e5f6a7b8"; // Unknown prefix
+        test("should return error when 18-char prefix cannot be resolved", async () => {
+            const shortId = "c3d4e5f6a7b8c9d0e1"; // Unknown prefix (18 chars)
 
             // Mock PrefixKVStore to not find it
             const originalIsInitialized = prefixKVStore.isInitialized.bind(prefixKVStore);

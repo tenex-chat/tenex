@@ -1,12 +1,12 @@
 /**
  * PrefixKVStore - Centralized prefix-to-full-ID lookup store
  *
- * Provides O(1) lookups of event IDs and pubkeys by their 12-character hex prefix.
+ * Provides O(1) lookups of event IDs and pubkeys by their 18-character hex prefix.
  * Uses LMDB for fast, persistent storage.
  *
  * Storage location: ~/.tenex/data/prefix-kv/
  *
- * Key format: 12-char prefix -> 64-char full ID
+ * Key format: 18-char prefix -> 64-char full ID
  * Collision policy: First write wins (collisions are statistically irrelevant)
  *
  * LIFECYCLE: This store is GLOBAL across all projects and uses reference counting.
@@ -25,7 +25,7 @@
  *
  * CONCURRENCY NOTE: The first-write-wins policy uses check-then-put which is
  * not strictly atomic under concurrent writers. In practice, this is acceptable
- * because prefix collisions are extremely rare (1 in 2^48 for random IDs), and
+ * because prefix collisions are extremely rare (1 in 2^72 for random IDs), and
  * the worst case is that a later ID wins over an earlier one for the same prefix.
  */
 
@@ -34,7 +34,7 @@ import { join } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import { logger } from "@/utils/logger";
 
-const PREFIX_LENGTH = 12;
+const PREFIX_LENGTH = 18;
 const FULL_ID_LENGTH = 64;
 
 export class PrefixKVStore {

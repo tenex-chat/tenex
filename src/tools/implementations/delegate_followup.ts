@@ -129,7 +129,7 @@ const delegateFollowupSchema = z.object({
     .string()
     .describe(
       "The ID of the delegation to follow up on. Accepts: delegationConversationId (from delegate response), " +
-        "followupEventId (from delegate_followup response), full 64-char hex, 12-char prefix, or NIP-19 formats " +
+        "followupEventId (from delegate_followup response), full 64-char hex, 18-char prefix, or NIP-19 formats " +
         "(note1..., nevent1...) with or without 'nostr:' prefix. Followup IDs are automatically canonicalized " +
         "to the original delegation conversation ID."
     ),
@@ -162,7 +162,7 @@ async function executeDelegateFollowup(
     const resolved = resolveDelegationPrefix(inputConversationId);
     if (!resolved) {
       throw new Error(
-        `Could not resolve prefix "${inputConversationId}" to a delegation. Valid inputs include: delegationConversationId (from delegate response), followupEventId (from delegate_followup response), full 64-char hex IDs, 12-char prefixes, or NIP-19 formats (note1..., nevent1...) with or without 'nostr:' prefix. The prefix may be ambiguous or no matching delegation was found.`
+        `Could not resolve prefix "${inputConversationId}" to a delegation. Valid inputs include: delegationConversationId (from delegate response), followupEventId (from delegate_followup response), full 64-char hex IDs, 18-char prefixes, or NIP-19 formats (note1..., nevent1...) with or without 'nostr:' prefix. The prefix may be ambiguous or no matching delegation was found.`
       );
     }
     delegation_conversation_id = resolved;

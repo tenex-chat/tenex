@@ -10,7 +10,7 @@ import { z } from "zod";
 
 const lessonGetSchema = z.object({
     eventId: z.string().describe(
-        "Nostr event ID of the lesson to retrieve. Supports full 64-char hex ID, 12-char hex prefix, or NIP-19 formats (note1.../nevent1...)."
+        "Nostr event ID of the lesson to retrieve. Supports full 64-char hex ID, 18-char hex prefix, or NIP-19 formats (note1.../nevent1...)."
     ),
 });
 

@@ -149,26 +149,26 @@ describe("nostr-entity-parser", () => {
     });
 
     describe("isHexPrefix", () => {
-        it("should return true for valid 12-char hex prefix", () => {
-            expect(isHexPrefix("82341f882b6e")).toBe(true);
-            expect(isHexPrefix("abcdef123456")).toBe(true);
-            expect(isHexPrefix("000000000000")).toBe(true);
+        it("should return true for valid 18-char hex prefix", () => {
+            expect(isHexPrefix("82341f882b6eabcd2b")).toBe(true);
+            expect(isHexPrefix("abcdef123456789abc")).toBe(true);
+            expect(isHexPrefix("000000000000000000")).toBe(true);
         });
 
         it("should return true for uppercase hex prefix", () => {
-            expect(isHexPrefix("82341F882B6E")).toBe(true);
-            expect(isHexPrefix("ABCDEF123456")).toBe(true);
+            expect(isHexPrefix("82341F882B6EABCD2B")).toBe(true);
+            expect(isHexPrefix("ABCDEF123456789ABC")).toBe(true);
         });
 
-        it("should return false for non-12-char strings", () => {
-            expect(isHexPrefix("82341f882b")).toBe(false); // too short
-            expect(isHexPrefix("82341f882b6eab")).toBe(false); // too long
+        it("should return false for non-18-char strings", () => {
+            expect(isHexPrefix("82341f882b6e")).toBe(false); // too short (12 chars)
+            expect(isHexPrefix("82341f882b6eabcd2ba7")).toBe(false); // too long (20 chars)
             expect(isHexPrefix("82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2")).toBe(false); // full 64-char
         });
 
         it("should return false for non-hex characters", () => {
-            expect(isHexPrefix("ghijkl123456")).toBe(false);
-            expect(isHexPrefix("hello-world!")).toBe(false);
+            expect(isHexPrefix("ghijkl123456789abc")).toBe(false);
+            expect(isHexPrefix("hello-world!abcdef")).toBe(false);
         });
 
         it("should return false for empty/undefined input", () => {
@@ -177,7 +177,7 @@ describe("nostr-entity-parser", () => {
         });
 
         it("should handle whitespace trimming", () => {
-            expect(isHexPrefix("  82341f882b6e  ")).toBe(true);
+            expect(isHexPrefix("  82341f882b6eabcd2b  ")).toBe(true);
         });
     });
 
@@ -193,7 +193,7 @@ describe("nostr-entity-parser", () => {
         it("should return null when PrefixKVStore is not initialized", () => {
             isInitializedSpy = spyOn(prefixKVStore, "isInitialized").mockReturnValue(false);
 
-            const result = resolvePrefixToId("82341f882b6e");
+            const result = resolvePrefixToId("82341f882b6eabcd2b");
             expect(result).toBe(null);
         });
 
@@ -201,7 +201,7 @@ describe("nostr-entity-parser", () => {
             isInitializedSpy = spyOn(prefixKVStore, "isInitialized").mockReturnValue(true);
 
             expect(resolvePrefixToId("invalid")).toBe(null);
-            expect(resolvePrefixToId("82341f")).toBe(null); // too short
+            expect(resolvePrefixToId("82341f882b6e")).toBe(null); // too short (12 chars)
             expect(resolvePrefixToId("")).toBe(null);
             expect(resolvePrefixToId(undefined)).toBe(null);
         });
@@ -211,17 +211,17 @@ describe("nostr-entity-parser", () => {
             isInitializedSpy = spyOn(prefixKVStore, "isInitialized").mockReturnValue(true);
             lookupSpy = spyOn(prefixKVStore, "lookup").mockReturnValue(fullId);
 
-            const result = resolvePrefixToId("82341f882b6e");
+            const result = resolvePrefixToId("82341f882b6eabcd2b");
             expect(result).toBe(fullId);
-            expect(lookupSpy).toHaveBeenCalledWith("82341f882b6e");
+            expect(lookupSpy).toHaveBeenCalledWith("82341f882b6eabcd2b");
         });
 
         it("should normalize uppercase to lowercase before lookup", () => {
             isInitializedSpy = spyOn(prefixKVStore, "isInitialized").mockReturnValue(true);
             lookupSpy = spyOn(prefixKVStore, "lookup").mockReturnValue(null);
 
-            resolvePrefixToId("ABCDEF123456");
-            expect(lookupSpy).toHaveBeenCalledWith("abcdef123456");
+            resolvePrefixToId("ABCDEF123456789ABC");
+            expect(lookupSpy).toHaveBeenCalledWith("abcdef123456789abc");
         });
 
         it("should handle LMDB lookup errors gracefully", () => {
@@ -231,7 +231,7 @@ describe("nostr-entity-parser", () => {
             });
 
             // Should return null gracefully, not throw
-            const result = resolvePrefixToId("82341f882b6e");
+            const result = resolvePrefixToId("82341f882b6eabcd2b");
             expect(result).toBe(null);
         });
 
@@ -239,14 +239,14 @@ describe("nostr-entity-parser", () => {
             isInitializedSpy = spyOn(prefixKVStore, "isInitialized").mockReturnValue(true);
             lookupSpy = spyOn(prefixKVStore, "lookup").mockReturnValue(null);
 
-            const result = resolvePrefixToId("abcdef123456");
+            const result = resolvePrefixToId("abcdef123456789abc");
             expect(result).toBe(null);
         });
     });
 
     describe("normalizeLessonEventId", () => {
         const fullEventId = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-        const eventIdPrefix = "82341f882b6e";
+        const eventIdPrefix = "82341f882b6eabcd2b";
 
         let isInitializedSpy: ReturnType<typeof spyOn>;
         let lookupSpy: ReturnType<typeof spyOn>;
@@ -290,7 +290,7 @@ describe("nostr-entity-parser", () => {
             });
         });
 
-        describe("12-char hex prefixes", () => {
+        describe("18-char hex prefixes", () => {
             it("should resolve prefix via PrefixKVStore when initialized", () => {
                 isInitializedSpy = spyOn(prefixKVStore, "isInitialized").mockReturnValue(true);
                 lookupSpy = spyOn(prefixKVStore, "lookup").mockReturnValue(fullEventId);
@@ -337,7 +337,8 @@ describe("nostr-entity-parser", () => {
 
                 const mockLessons: NDKAgentLesson[] = [
                     { id: fullEventId, title: "Lesson 1", lesson: "content", content: "content" } as NDKAgentLesson,
-                    { id: "82341f882b6e9999999999999999999999999999999999999999999999999999", title: "Lesson 2", lesson: "content", content: "content" } as NDKAgentLesson,
+                    // Same 18-char prefix (82341f882b6eabcd2b) but different suffix
+                    { id: "82341f882b6eabcd2b9999999999999999999999999999999999999999999999", title: "Lesson 2", lesson: "content", content: "content" } as NDKAgentLesson,
                 ];
 
                 const result = normalizeLessonEventId(eventIdPrefix, mockLessons);

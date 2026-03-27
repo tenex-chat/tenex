@@ -10,7 +10,7 @@ import { isFullEventId, isShortEventId } from "@/types/event-ids";
  * The standard prefix length used for shortened hex IDs throughout the system.
  * Used for delegation IDs, conversation IDs, and other nostr identifiers.
  */
-export const PREFIX_LENGTH = 12;
+export const PREFIX_LENGTH = 18;
 
 /**
  * Parses various Nostr user identifier formats into a pubkey
@@ -146,24 +146,24 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
 }
 
 /**
- * Checks if a string looks like a 12-char hex prefix (potential shorthand ID).
+ * Checks if a string looks like an 18-char hex prefix (potential shorthand ID).
  * Note: This is a pure format check - it doesn't do any lookup.
  * For resolving prefixes to actual IDs, use the appropriate service.
  */
 export function isHexPrefix(input: string | undefined): boolean {
     if (!input) return false;
-    return /^[0-9a-fA-F]{12}$/.test(input.trim());
+    return /^[0-9a-fA-F]{18}$/.test(input.trim());
 }
 
 /**
- * Resolves a 12-character hex prefix to a full 64-character ID using PrefixKVStore.
+ * Resolves an 18-character hex prefix to a full 64-character ID using PrefixKVStore.
  * This enables shorthand references to event IDs and pubkeys.
  *
  * IMPORTANT: This function is TYPE-AGNOSTIC - it returns any matching ID without
  * validating whether it's an event ID or pubkey. For resolving specifically to
  * agent pubkeys, use `resolveAgentSlug` from the AgentResolution service.
  *
- * @param prefix - A 12-character hex string prefix
+ * @param prefix - An 18-character hex string prefix
  * @returns The full 64-character ID, or null if not found or invalid input
  */
 export function resolvePrefixToId(prefix: string | undefined): string | null {
@@ -171,8 +171,8 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
 
     const cleaned = prefix.trim().toLowerCase();
 
-    // Must be exactly 12 hex characters
-    if (!/^[0-9a-f]{12}$/.test(cleaned)) {
+    // Must be exactly 18 hex characters
+    if (!/^[0-9a-f]{18}$/.test(cleaned)) {
         return null;
     }
 

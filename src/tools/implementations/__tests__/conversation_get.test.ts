@@ -1338,7 +1338,7 @@ describe("conversation_get Tool", () => {
             expect(messages).not.toContain("Second");
         });
 
-        it("should accept and resolve 12-character hex prefixes via PrefixKVStore", async () => {
+        it("should accept and resolve 18-character hex prefixes via PrefixKVStore", async () => {
             const fullEventId = "abc123def456789012345678901234567890123456789012345678901234abcd";
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
@@ -1363,7 +1363,7 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                untilId: "abc123def456", // 12-char prefix
+                untilId: "abc123def456789012", // 18-char prefix
             });
 
             const messages = (result.conversation as any).messages;
@@ -1885,7 +1885,7 @@ describe("conversation_get Tool", () => {
             expect(result.message).toContain("Could not resolve");
         });
 
-        it("should accept 12-char prefix for conversationId", async () => {
+        it("should accept 18-char prefix for conversationId", async () => {
             const fullConvId = "abc123def456789012345678901234567890123456789012345678901234abcd";
             mockConversationData = {
                 id: fullConvId,
@@ -1902,7 +1902,7 @@ describe("conversation_get Tool", () => {
 
             // Override getConversation to handle prefix lookup
             mockGetConversation.mockImplementation((id?: string) => {
-                if (id === fullConvId || id === "abc123def456") {
+                if (id === fullConvId || id === "abc123def456789012") {
                     return mockConversationData ? {
                         id: mockConversationData.id,
                         title: mockConversationData.title,
@@ -1917,7 +1917,7 @@ describe("conversation_get Tool", () => {
 
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
-                conversationId: "abc123def456", // 12-char prefix
+                conversationId: "abc123def456789012", // 18-char prefix
             });
 
             expect(result.success).toBe(true);

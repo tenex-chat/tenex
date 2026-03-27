@@ -14,14 +14,15 @@ function shortenHexIdentifier(value: string | FullEventId): ShortEventId {
 
 /**
  * Shorten a conversation ID for Jaeger span attributes.
- * Uses the standard PREFIX_LENGTH (12 characters) for consistency across all traces.
+ * Uses the standard PREFIX_LENGTH (18 characters) for consistency across all traces.
  * This makes Jaeger UI more readable with reduced length and low collision risk.
  *
- * Note: 12 hex characters provides 48 bits of entropy (2^48 ≈ 281 trillion combinations),
- * which gives very low collision probability for typical conversation volumes.
+ * Note: 18 hex characters provides 72 bits of entropy (2^72 ≈ 4.7 sextillion combinations),
+ * which gives very low collision probability. This also preserves uniqueness for
+ * non-hex IDs like Telegram conversation IDs (e.g., tg_599309204_123).
  *
  * @param conversationId - Full conversation ID (can be typed FullEventId or plain string)
- * @returns Shortened ID (first 12 characters) as ShortEventId
+ * @returns Shortened ID (first 18 characters) as ShortEventId
  */
 export function shortenConversationId(conversationId: string | FullEventId): ShortEventId {
     return shortenHexIdentifier(conversationId);
