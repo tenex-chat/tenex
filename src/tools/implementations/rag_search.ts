@@ -131,7 +131,7 @@ export function createRAGSearchTool(context: ToolExecutionContext): AISdkTool {
             "additional RAG collections — using natural language semantic search. Returns ranked " +
             "results with metadata and retrieval instructions. Each result includes a `retrievalTool` " +
             "and `retrievalArg` that you can use to fetch the full document (e.g., call report_read " +
-            "with the slug, lesson_get with the event ID, or conversation_get with the conversation ID).\n\n" +
+            "with the slug, or conversation_get with the conversation ID).\n\n" +
             "Optionally provide a `prompt` parameter to have an LLM extract focused information " +
             "from the search results, rather than reviewing them manually.\n\n" +
             "This is the primary discovery tool for finding information across the project. Use " +

@@ -236,7 +236,7 @@ export class AgentDefinitionMonitor {
      * Bootstrap legacy agents that were installed before definitionDTag/definitionAuthor existed.
      *
      * For agents missing these fields but having an eventId (meaning they came from a kind:4199 event):
-     * - definitionDTag is inferred from the agent's slug (convention enforced by agents_publish)
+     * - definitionDTag is inferred from the agent's slug
      * - definitionAuthor is recovered by fetching the original event from relays
      *
      * Mutations are applied directly to the provided agent objects AND persisted to storage.

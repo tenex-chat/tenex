@@ -10,7 +10,7 @@
  * Contains enough metadata for the agent to:
  * 1. Understand what the result is about
  * 2. Retrieve the full document via the appropriate tool
- *    (report_read, lesson_get, conversation_get)
+ *    (report_read, conversation_get, rag_search)
  */
 export interface SearchResult {
     /** Source collection name (e.g., "reports", "conversations", "lessons") */
@@ -51,7 +51,7 @@ export interface SearchResult {
     tags?: string[];
 
     /** Which tool to use to retrieve full content */
-    retrievalTool: "report_read" | "lesson_get" | "conversation_get" | "rag_search";
+    retrievalTool: "report_read" | "conversation_get" | "rag_search";
 
     /** The argument to pass to the retrieval tool */
     retrievalArg: string;

@@ -27,8 +27,7 @@ const lessonLearnSchema = z.object({
 
 type LessonLearnInput = z.infer<typeof lessonLearnSchema>;
 type LessonLearnOutput = {
-    eventId: string;
-    hasDetailed: boolean;
+    ok: boolean;
 };
 
 // Core implementation - extracted from existing execute function
@@ -110,10 +109,7 @@ async function executeLessonLearn(
         agentName: context.agent.name,
     });
 
-    return {
-        eventId: lessonEvent.encodedId ?? lessonEvent.id,
-        hasDetailed: !!detailed,
-    };
+    return { ok: true };
 }
 
 // AI SDK tool factory
@@ -127,7 +123,7 @@ export function createLessonLearnTool(context: ToolExecutionContext): AISdkTool 
 - Performance patterns in your tool usage
 - Things to do differently in future work
 
-Use when the user instructs you to remember something about YOUR BEHAVIOR or PREFERENCES, or when the user instructs you to change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.
+Use when the user instructs you to remember something about YOUR BEHAVIOR or PREFERENCES, or when the user instructs you to change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery.
 
 **CRITICAL:** Only use this for content ABOUT YOUR BEHAVIOR. For content about the project itself, use report_write instead.
 

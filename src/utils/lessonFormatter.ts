@@ -1,5 +1,4 @@
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 
 /**
@@ -22,22 +21,12 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
             const content = lesson.lesson;
             const category = lesson.category;
             const hashtags = lesson.hashtags;
-            const hasDetailed = !!lesson.detailed;
-            // Get 12-char prefix for convenient lookup (lesson_get accepts prefixes)
-            const idPrefix = lesson.id ? shortenEventId(lesson.id) : null;
-
             // Build metadata line
             let metadata = "";
             if (category) metadata += ` [${category}]`;
-            if (hasDetailed) metadata += " [detailed available]";
             if (hashtags && hashtags.length > 0) metadata += ` #${hashtags.join(" #")}`;
 
-            // Create a concise format for each lesson
-            // Show ID prefix for lesson_get if detailed version available
-            const detailedHint = hasDetailed && idPrefix
-                ? `\n↳ Use lesson_get("${idPrefix}") for detailed version`
-                : "";
-            return `#${index + 1}: ${title} ${metadata}\n${content}${detailedHint}`;
+            return `#${index + 1}: ${title} ${metadata}\n${content}`;
         })
         .join("\n\n");
 

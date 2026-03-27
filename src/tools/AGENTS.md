@@ -11,7 +11,7 @@ Actions that agents can invoke. Tools delegate to services for all business logi
 
 ## Naming
 
-Files follow `<domain>_<action>.ts`: `rag_search.ts`, `delegation_create.ts`, `agents_list.ts`, `file_read.ts`, `shell_execute.ts`, etc.
+Files follow `<domain>_<action>.ts`: `rag_search.ts`, `delegate.ts`, `agents_write.ts`, `shell.ts`, etc.
 
 ## Rules
 

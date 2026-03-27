@@ -102,7 +102,6 @@ describe("Nudge Tool Permissions", () => {
                 expect(toolNames).toContain("shell");
                 // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
-                expect(toolNames).toContain("lesson_get");
                 expect(toolNames).toContain("todo_write");
                 // fs_read triggers auto-injection of fs_glob + fs_grep
                 expect(toolNames).toContain("fs_glob");
@@ -348,7 +347,6 @@ describe("Nudge Tool Permissions", () => {
 
                 // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
-                expect(toolNames).toContain("lesson_get");
                 expect(toolNames).toContain("todo_write");
                 // Home fs tools are also auto-injected when agent lacks fs_* tools
                 expect(toolNames).toContain("home_fs_read");

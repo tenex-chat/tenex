@@ -98,7 +98,6 @@ describe("CodexToolsAdapter", () => {
                 delegate_crossproject: mockTool,
                 ask: mockTool,
                 lesson_learn: mockTool,
-                lesson_get: mockTool,
                 report_write: mockTool,
                 report_read: mockTool,
                 reports_list: mockTool,

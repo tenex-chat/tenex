@@ -61,7 +61,7 @@ export class LessonSearchProvider implements SearchProvider {
             author: String(metadata.agentPubkey || ""),
             authorName: String(metadata.agentName || ""),
             tags: Array.isArray(metadata.hashtags) ? (metadata.hashtags as string[]) : undefined,
-            retrievalTool: "lesson_get" as const,
+            retrievalTool: "rag_search" as const,
             retrievalArg: result.document.id || "",
         };
     }

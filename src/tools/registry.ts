@@ -26,11 +26,6 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
 }
 import { logger } from "@/utils/logger";
 import { CORE_AGENT_TOOLS } from "@/agents/constants";
-import { createAgentsDiscoverTool } from "./implementations/agents_discover";
-import { createAgentsHireTool } from "./implementations/agents_hire";
-import { createAgentsListTool } from "./implementations/agents_list";
-import { createAgentsPublishTool } from "./implementations/agents_publish";
-import { createAgentsReadTool } from "./implementations/agents_read";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createConversationGetTool } from "./implementations/conversation_get";
@@ -46,9 +41,6 @@ import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
 import { synthesizeContent, executeReadToolResult } from "./implementations/fs-hooks";
 import { createKillTool } from "./implementations/kill";
 import { createLessonLearnTool } from "./implementations/learn";
-import { createLessonDeleteTool } from "./implementations/lesson_delete";
-import { createLessonGetTool } from "./implementations/lesson_get";
-import { createLessonsListTool } from "./implementations/lessons_list";
 import { createNoResponseTool } from "./implementations/no_response";
 import { createProjectListTool } from "./implementations/project_list";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
@@ -187,11 +179,6 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
  */
 const toolFactories: Record<ToolName, ToolFactory> = {
     // Agent tools
-    agents_publish: createAgentsPublishTool,
-    agents_discover: createAgentsDiscoverTool,
-    agents_hire: createAgentsHireTool,
-    agents_list: createAgentsListTool,
-    agents_read: createAgentsReadTool,
     agents_write: createAgentsWriteTool,
 
     // Ask tool
@@ -214,10 +201,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     delegate: createDelegateTool,
 
     // Lesson tools
-    lesson_delete: createLessonDeleteTool,
-    lesson_get: createLessonGetTool,
     lesson_learn: createLessonLearnTool,
-    lessons_list: createLessonsListTool,
 
     fs_read: (ctx) => getOrCreateTenexFsTools(ctx).fs_read as AISdkTool,
     fs_write: (ctx) => getOrCreateTenexFsTools(ctx).fs_write as AISdkTool,

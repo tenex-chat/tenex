@@ -280,8 +280,7 @@ export type NormalizeLessonEventIdResult =
  * - NIP-19 formats: note1..., nevent1...
  * - nostr: prefixed versions of all the above
  *
- * This bridges the contract mismatch between lesson_learn (which emits NIP-19 encoded IDs)
- * and lesson_get (which needs hex IDs for lookup).
+ * Normalizes NIP-19 encoded lesson event IDs to hex format.
  *
  * @param input - The event ID in any supported format
  * @param allLessons - Optional array of all lessons for in-memory prefix fallback

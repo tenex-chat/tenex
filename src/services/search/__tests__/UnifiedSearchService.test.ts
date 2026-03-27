@@ -32,7 +32,7 @@ function createMockResult(source: string, id: string, score: number): SearchResu
     const toolMap: Record<string, SearchResult["retrievalTool"]> = {
         reports: "report_read",
         conversations: "conversation_get",
-        lessons: "lesson_get",
+        lessons: "rag_search",
     };
     return {
         source,

@@ -96,7 +96,7 @@ describe("LessonSearchProvider", () => {
             author: "pubkey123",
             authorName: "test-agent",
             tags: ["debug", "tips"],
-            retrievalTool: "lesson_get",
+            retrievalTool: "rag_search",
             retrievalArg: "nevent1abc123",
         });
 
