@@ -80,6 +80,7 @@ export async function setupStreamExecution(
     const projectContext = getProjectContext();
     const skillLookupContext = {
         agentPubkey: context.agent.pubkey,
+        projectPath: context.projectBasePath || undefined,
         projectDTag: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
     };
 

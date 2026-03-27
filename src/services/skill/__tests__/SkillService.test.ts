@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import * as fsPromises from "node:fs/promises";
 import * as constantsModule from "@/constants";
@@ -206,7 +207,7 @@ describe("SkillService", () => {
 
     it("prefers project skills over global skills when identifiers conflict", async () => {
         seedFile(
-            "/Users/pablofernandez/.agents/skills/poster-kit/SKILL.md",
+            `${homedir()}/.agents/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "poster-kit",
                 description: "Legacy poster description",
@@ -247,7 +248,7 @@ describe("SkillService", () => {
 
     it("prefers agent skills over project and global skills when identifiers conflict", async () => {
         seedFile(
-            "/Users/pablofernandez/.agents/skills/poster-kit/SKILL.md",
+            `${homedir()}/.agents/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "poster-kit",
                 description: "Legacy poster description",
@@ -390,7 +391,7 @@ describe("SkillService", () => {
 
     it("loads legacy ~/.agents skills when no higher-precedence copy exists", async () => {
         seedFile(
-            "/Users/pablofernandez/.agents/skills/legacy-only/SKILL.md",
+            `${homedir()}/.agents/skills/legacy-only/SKILL.md`,
             createSkillDocument({
                 name: "legacy-only",
                 description: "Legacy only description",
@@ -411,7 +412,7 @@ describe("SkillService", () => {
 
     it("prefers global skills over legacy ~/.agents skills when identifiers conflict", async () => {
         seedFile(
-            "/Users/pablofernandez/.agents/skills/fallback-kit/SKILL.md",
+            `${homedir()}/.agents/skills/fallback-kit/SKILL.md`,
             createSkillDocument({
                 name: "fallback-kit",
                 description: "Legacy fallback description",
@@ -568,7 +569,7 @@ describe("SkillService", () => {
         const result = await SkillService.getInstance().fetchSkills(["d".repeat(64)]);
 
         expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].identifier).toBe("dddddddddddd");
+        expect(result.skills[0].identifier).toBe("dddddddddddddddddd");
     });
 
     it("fetchSkill returns only kind:4202 skill events", async () => {

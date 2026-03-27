@@ -6,25 +6,25 @@ import { shortenConversationId } from "@/utils/conversation-id";
  * This is a copy of the internal nostrIdToTraceId function logic
  */
 function nostrIdToTraceId(nostrId: string): string {
-    // Use shortened 12-char ID (consistent with span attributes)
+    // Use shortened 18-char ID (consistent with span attributes)
     const shortId = shortenConversationId(nostrId);
     // Pad to 32 chars with zeros (OTEL requirement)
     return shortId.padEnd(32, "0");
 }
 
 describe("Jaeger Trace ID Generation", () => {
-    test("should generate 12-char shortened trace IDs padded to 32 chars", () => {
+    test("should generate 18-char shortened trace IDs padded to 32 chars", () => {
         const fullConversationId = "83f83677f9c7211e1dcbcbf934e3884fab78dac59abfe0068c80db03715248dc";
         const traceId = nostrIdToTraceId(fullConversationId);
 
-        // Should start with 12-char shortened ID
-        expect(traceId.substring(0, 12)).toBe("83f83677f9c7");
+        // Should start with 18-char shortened ID
+        expect(traceId.substring(0, 18)).toBe("83f83677f9c7211e1d");
 
         // Should be padded to 32 chars total
         expect(traceId.length).toBe(32);
 
         // Should end with zeros (padding)
-        expect(traceId).toBe("83f83677f9c700000000000000000000");
+        expect(traceId).toBe("83f83677f9c7211e1d00000000000000");
     });
 
     test("should handle different conversation IDs consistently", () => {
@@ -34,8 +34,8 @@ describe("Jaeger Trace ID Generation", () => {
         const traceId1 = nostrIdToTraceId(conversationId1);
         const traceId2 = nostrIdToTraceId(conversationId2);
 
-        expect(traceId1).toBe("abcdef12345600000000000000000000");
-        expect(traceId2).toBe("123456789abc00000000000000000000");
+        expect(traceId1).toBe("abcdef123456789012000000000000000".substring(0, 32));
+        expect(traceId2).toBe("123456789abc000000000000000000000".substring(0, 32));
 
         // Both should be 32 chars
         expect(traceId1.length).toBe(32);
@@ -50,7 +50,7 @@ describe("Jaeger Trace ID Generation", () => {
         expect(/^[0-9a-f]{32}$/.test(traceId)).toBe(true);
 
         // Should start with shortened ID
-        expect(traceId.substring(0, 12)).toBe("deadbeef1234");
+        expect(traceId.substring(0, 18)).toBe("deadbeef1234567890");
     });
 
     test("Jaeger URL should use shortened trace ID", () => {
@@ -58,18 +58,15 @@ describe("Jaeger Trace ID Generation", () => {
         const traceId = nostrIdToTraceId(fullConversationId);
 
         // Jaeger URL format: /trace/{traceId}
-        // With old implementation: /trace/83f83677f9c7211e1dcbcbf934e3884f (first 32 chars)
-        // With new implementation: /trace/83f83677f9c700000000000000000000 (first 12 chars + padding)
-
         const jaegerUrl = `/trace/${traceId}`;
 
         // URL should contain the shortened ID at the start
-        expect(jaegerUrl).toContain("83f83677f9c7");
+        expect(jaegerUrl).toContain("83f83677f9c7211e1d");
 
         // Should NOT contain the full 32-char prefix from the original ID
         expect(jaegerUrl).not.toContain("83f83677f9c7211e1dcbcbf934e3884f");
 
-        // The recognizable part of the URL should be 12 chars (not 32)
-        expect(jaegerUrl).toBe("/trace/83f83677f9c700000000000000000000");
+        // The recognizable part of the URL should be 18 chars (not 32)
+        expect(jaegerUrl).toBe("/trace/83f83677f9c7211e1d00000000000000");
     });
 });

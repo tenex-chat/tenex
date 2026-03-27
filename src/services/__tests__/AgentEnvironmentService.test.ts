@@ -61,8 +61,10 @@ describe("AgentEnvironmentService", () => {
         expect(env.PROJECT_ONLY).toBe("yes");
         expect(env.AGENT_ONLY).toBe("yes");
         expect(env.LEVEL).toBe("agent");
-        expect(env.TENEX_HOST_HOME).toBe("/host/home");
-        expect(env.HOME).toBe(getAgentHomeDirectory(signer.pubkey));
+        // HOME should NOT be overwritten - tools like gh rely on user's home for credentials
+        expect(env.HOME).toBe("/host/home");
+        // Agent home is available via TENEX_AGENT_HOME for scripts that need it
+        expect(env.TENEX_AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
     });
 
     it("bootstraps the agent home env with a normalized bech32 NSEC and preserves existing files", async () => {
@@ -111,6 +113,43 @@ describe("AgentEnvironmentService", () => {
             baseEnv: { HOME: "/host/home" },
         });
         expect(secondEnv.VALUE).toBe("two");
+    });
+
+    it("should never allow HOME to be overridden by .env files", async () => {
+        const signer = NDKPrivateKeySigner.generate();
+        const service = new AgentEnvironmentService({
+            loadAgent: async () => ({ nsec: signer.nsec } as any),
+        } as any);
+
+        const originalHome = "/real/user/home";
+
+        // Write HOME overrides in ALL .env files (global, project, agent)
+        await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
+        await fs.mkdir(getAgentHomeDirectory(signer.pubkey), { recursive: true });
+        await fs.writeFile(path.join(tempDir, ".env"), "HOME=/fake/global/home\n", "utf-8");
+        await fs.writeFile(
+            path.join(tempDir, "projects", "proj-1", ".env"),
+            "HOME=/fake/project/home\n",
+            "utf-8"
+        );
+        await fs.writeFile(
+            path.join(getAgentHomeDirectory(signer.pubkey), ".env"),
+            "HOME=/fake/agent/home\n",
+            "utf-8"
+        );
+
+        const env = await service.resolveShellEnvironment({
+            agentPubkey: signer.pubkey,
+            agentNsec: signer.nsec,
+            projectDTag: "proj-1",
+            baseEnv: { HOME: originalHome },
+        });
+
+        // HOME MUST remain the original user home - never overridden
+        // This is critical for tools like `gh auth` that rely on ~/.config/gh/
+        expect(env.HOME).toBe(originalHome);
+        // Agent home should still be available via TENEX_AGENT_HOME
+        expect(env.TENEX_AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
     });
 
     it("skips project-scoped env resolution when no project id is available", async () => {

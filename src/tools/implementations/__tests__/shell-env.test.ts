@@ -50,12 +50,12 @@ describe("shellTool env resolution", () => {
         };
     }
 
-    it("bootstraps NSEC and runs shell commands with HOME set to the agent home", async () => {
+    it("bootstraps NSEC and provides TENEX_AGENT_HOME without overwriting HOME", async () => {
         const { signer, context } = createShellContext();
         const shellTool = createShellTool(context);
 
         const result = await shellTool.execute({
-            command: "printf '%s\\n%s\\n%s' \"$HOME\" \"$TENEX_HOST_HOME\" \"$NSEC\"",
+            command: "printf '%s\\n%s\\n%s' \"$HOME\" \"$TENEX_AGENT_HOME\" \"$NSEC\"",
             description: "Inspect shell environment",
         });
 
@@ -63,9 +63,11 @@ describe("shellTool env resolution", () => {
         const output = (result as string).trimEnd().split("\n");
         const agentHome = getAgentHomeDirectory(signer.pubkey);
 
-        expect(output[0]).toBe(agentHome);
-        expect(output[1].length).toBeGreaterThan(0);
-        expect(output[1]).not.toBe(agentHome);
+        // HOME should NOT be the agent home - tools like gh rely on user's real home
+        expect(output[0]).not.toBe(agentHome);
+        expect(output[0].length).toBeGreaterThan(0);
+        // TENEX_AGENT_HOME provides access to agent home for scripts that need it
+        expect(output[1]).toBe(agentHome);
         expect(output[2].startsWith("nsec1")).toBe(true);
 
         const bootstrappedEnv = await fs.readFile(path.join(agentHome, ".env"), "utf-8");

@@ -435,11 +435,13 @@ function addAgentFragments(
     agent: AgentInstance,
     availableAgents: AgentInstance[],
     projectManagerPubkey?: string,
-    projectDTag?: string
+    projectDTag?: string,
+    projectPath?: string
 ): void {
     // Add available nudges and skills for delegation (priority 13, before available-agents)
     builder.add("available-nudges-and-skills", {
         agentPubkey: agent.pubkey,
+        projectPath,
         projectDTag,
     });
 
@@ -876,7 +878,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         agentForFragments,
         availableAgents,
         options.projectManagerPubkey,
-        projectDTag
+        projectDTag,
+        options.projectBasePath
     );
 
     // Build and return the complete prompt with all fragments

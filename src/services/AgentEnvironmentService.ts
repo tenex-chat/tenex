@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import * as path from "node:path";
 import type { AgentStorage } from "@/agents/AgentStorage";
 import { agentStorage } from "@/agents/AgentStorage";
@@ -67,7 +66,9 @@ export class AgentEnvironmentService {
             }
         }
 
-        const hostHome = baseEnv.HOME ?? homedir();
+        // Capture original HOME before any .env merges - this MUST be preserved
+        const originalHome = baseEnv.HOME;
+
         const globalEnvPath = this.getGlobalEnvPath();
         const projectEnvPath = params.projectDTag
             ? this.getProjectEnvPath(params.projectDTag)
@@ -82,8 +83,14 @@ export class AgentEnvironmentService {
         }
         Object.assign(mergedEnv, await this.readEnvFile(agentEnvPath));
 
-        mergedEnv.TENEX_HOST_HOME = hostHome;
-        mergedEnv.HOME = path.dirname(agentEnvPath);
+        // PIN: HOME must never be overridden by .env files
+        // Tools like `gh auth` rely on the real user home for credentials (~/.config/gh/)
+        if (originalHome !== undefined) {
+            mergedEnv.HOME = originalHome;
+        }
+
+        // Provide agent home as a separate variable (TENEX_AGENT_HOME)
+        mergedEnv.TENEX_AGENT_HOME = path.dirname(agentEnvPath);
 
         return mergedEnv;
     }

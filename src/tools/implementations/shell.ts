@@ -479,7 +479,8 @@ WHEN NOT TO USE SHELL:
 OTHER RESTRICTIONS:
 - NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
 - Commands run with timeout in seconds (default: 30s, max: 600s / 10 minutes)
-- Shell sessions auto-load env vars from TENEX .env files with precedence agent > project > global, and ~ resolves to your agent home directory.
+- Shell sessions auto-load env vars from TENEX .env files with precedence agent > project > global.
+- \`~\` resolves to the user's real home directory (via $HOME). To access your agent home, use \`$TENEX_AGENT_HOME\`.
 
 Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.
 - Time-based delays: Use shell(sleep N) to wait N seconds (e.g., shell(sleep 5) for 5 seconds).`,

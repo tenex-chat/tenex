@@ -6,6 +6,7 @@ import type { PromptFragment } from "../core/types";
 
 interface AvailableNudgesAndSkillsArgs {
     agentPubkey: string;
+    projectPath?: string;
     projectDTag?: string;
 }
 
@@ -40,11 +41,12 @@ function formatSkillItem(skill: SkillData): string {
 export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAndSkillsArgs> = {
     id: "available-nudges-and-skills",
     priority: 13,
-    template: async ({ agentPubkey, projectDTag }) => {
+    template: async ({ agentPubkey, projectPath, projectDTag }) => {
         const whitelistService = NudgeSkillWhitelistService.getInstance();
         const nudges = whitelistService.getWhitelistedNudges();
         const skills = await SkillService.getInstance().listAvailableSkills({
             agentPubkey,
+            projectPath,
             projectDTag,
         });
         const hasNudges = nudges.length > 0;

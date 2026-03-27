@@ -179,6 +179,7 @@ export function createPrepareStep(
         const projectContext = getProjectContext();
         const skillLookupContext = {
             agentPubkey: context.agent.pubkey,
+            projectPath: context.projectBasePath || undefined,
             projectDTag: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
         };
         const conversation = context.getConversation();
