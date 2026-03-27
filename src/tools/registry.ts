@@ -62,23 +62,14 @@ import { createReportWriteTool } from "./implementations/report_write";
 import { createReportsListTool } from "./implementations/reports_list";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
 import { createShellTool } from "./implementations/shell";
-import { createUploadBlobTool } from "./implementations/upload_blob";
-
 // Todo tools
 import { createTodoWriteTool } from "./implementations/todo";
-
-// Web tools
-import { createWebFetchTool } from "./implementations/web_fetch";
-import { createWebSearchTool } from "./implementations/web_search";
 
 // Nostr tools
 import { createNostrPublishAsUserTool } from "./implementations/nostr_publish_as_user";
 
 // Unified RAG search tool
 import { createRAGSearchTool } from "./implementations/rag_search";
-
-// Image generation tools
-import { createGenerateImageTool } from "./implementations/generate_image";
 
 // Skills tools
 import { createSkillsSetTool } from "./implementations/skills_set";
@@ -226,9 +217,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     kill: createKillTool,
     no_response: createNoResponseTool,
 
-    // Upload tools
-    upload_blob: createUploadBlobTool,
-
     // RAG tools
     rag_create_collection: createRAGCreateCollectionTool,
     rag_add_documents: createRAGAddDocumentsTool,
@@ -249,15 +237,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Todo tools - require ConversationToolContext (filtered out when no conversation)
     todo_write: createTodoWriteTool as ToolFactory,
 
-    // Web tools
-    web_fetch: createWebFetchTool,
-    web_search: createWebSearchTool,
-
     // Nostr tools
     nostr_publish_as_user: createNostrPublishAsUserTool,
 
-    // Image generation
-    generate_image: createGenerateImageTool,
     skills_set: createSkillsSetTool as ToolFactory,
 
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)

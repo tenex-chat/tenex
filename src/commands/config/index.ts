@@ -1,7 +1,6 @@
 import { embedCommand } from "@/commands/config/embed";
 import { escalationCommand } from "@/commands/config/escalation";
 import { identityCommand } from "@/commands/config/identity";
-import { imageCommand } from "@/commands/config/image";
 import { interventionCommand } from "@/commands/config/intervention";
 import { llmCommand } from "@/commands/config/llm";
 import { loggingCommand } from "@/commands/config/logging";
@@ -36,7 +35,6 @@ const MENU_SECTIONS: MenuSection[] = [
             { label: "LLMs", description: "Model configurations", command: llmCommand },
             { label: "Roles", description: "Which model handles what task", command: rolesCommand },
             { label: "Embeddings", description: "Text embedding model", command: embedCommand },
-            { label: "Image Gen", description: "Image generation model", command: imageCommand },
         ],
     },
     {
@@ -136,7 +134,6 @@ export const configCommand = new Command("config")
     .addCommand(llmCommand)
     .addCommand(rolesCommand)
     .addCommand(embedCommand)
-    .addCommand(imageCommand)
     .addCommand(escalationCommand)
     .addCommand(interventionCommand)
     .addCommand(relaysCommand)

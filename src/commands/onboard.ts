@@ -14,7 +14,6 @@ import type { AnyLLMConfiguration, TenexLLMs, TenexProviders } from "@/services/
 import { isMetaModelConfiguration } from "@/services/config/types";
 import { config } from "@/services/ConfigService";
 import { type EmbeddingConfig, loadEmbeddingConfiguration, saveEmbeddingConfiguration } from "@/services/rag/EmbeddingProviderFactory";
-import { ImageGenerationService, OPENROUTER_IMAGE_MODELS, ASPECT_RATIOS, IMAGE_SIZES, type ImageConfig } from "@/services/image/ImageGenerationService";
 import { inquirerTheme } from "@/utils/cli-theme";
 import * as display from "@/commands/config/display";
 import { createPrompt, useState, useKeypress, usePrefix, makeTheme, isUpKey, isDownKey, isEnterKey, isBackspaceKey } from "@inquirer/core";
@@ -487,95 +486,6 @@ async function runEmbeddingSetup(providers: TenexProviders): Promise<void> {
     const embeddingConfig: EmbeddingConfig = { provider: chosenProvider, model: chosenModel };
     await saveEmbeddingConfiguration(embeddingConfig, "global");
     display.success(`Embeddings: ${chosenProvider} / ${chosenModel}`);
-}
-
-/**
- * Auto-select and confirm image generation model.
- * Only available when OpenRouter is configured.
- */
-async function runImageGenSetup(providers: TenexProviders): Promise<void> {
-    if (!providers.providers[PROVIDER_IDS.OPENROUTER]?.apiKey) {
-        display.hint("Image generation requires OpenRouter. Skipping.");
-        display.context("Run tenex config providers to add OpenRouter, then tenex config image.");
-        return;
-    }
-
-    const existing = await ImageGenerationService.loadConfiguration({ scope: "global" });
-    const defaultModel = existing?.model || "black-forest-labs/flux.2-pro";
-    const modelInfo = OPENROUTER_IMAGE_MODELS.find((m) => m.value === defaultModel);
-    const modelLabel = modelInfo ? modelInfo.name : defaultModel;
-
-    display.context(`Recommended: ${modelLabel}`);
-    display.blank();
-
-    const { action } = await inquirer.prompt([{
-        type: "select",
-        name: "action",
-        message: "Image generation model",
-        choices: [
-            { name: `Use ${modelLabel} (${defaultModel})`, value: "accept" },
-            { name: "Choose a different model", value: "change" },
-            { name: "Skip image generation", value: "skip" },
-        ],
-        theme: inquirerTheme,
-    }]);
-
-    if (action === "skip") {
-        display.hint("Skipped. Run tenex config image later to configure.");
-        return;
-    }
-
-    let selectedModel = defaultModel;
-    let selectedRatio = existing?.defaultAspectRatio || "1:1";
-    let selectedSize = existing?.defaultImageSize || "2K";
-
-    if (action === "change") {
-        const modelChoices = OPENROUTER_IMAGE_MODELS.map((m) => ({
-            name: `${m.name} — ${m.description}`,
-            value: m.value,
-        }));
-
-        const { model } = await inquirer.prompt([{
-            type: "select",
-            name: "model",
-            message: "Image generation model",
-            choices: modelChoices,
-            default: defaultModel,
-            theme: inquirerTheme,
-        }]);
-        selectedModel = model;
-
-        const { aspectRatio } = await inquirer.prompt([{
-            type: "select",
-            name: "aspectRatio",
-            message: "Default aspect ratio",
-            choices: ASPECT_RATIOS.map((r) => ({ name: r, value: r })),
-            default: selectedRatio,
-            theme: inquirerTheme,
-        }]);
-        selectedRatio = aspectRatio;
-
-        const { imageSize } = await inquirer.prompt([{
-            type: "select",
-            name: "imageSize",
-            message: "Default image size",
-            choices: IMAGE_SIZES.map((s) => ({ name: s, value: s })),
-            default: selectedSize,
-            theme: inquirerTheme,
-        }]);
-        selectedSize = imageSize;
-    }
-
-    const imageConfig: ImageConfig = {
-        provider: "openrouter",
-        model: selectedModel,
-        defaultAspectRatio: selectedRatio,
-        defaultImageSize: selectedSize,
-    };
-    await ImageGenerationService.saveConfiguration(imageConfig, "global");
-
-    const savedModelInfo = OPENROUTER_IMAGE_MODELS.find((m) => m.value === selectedModel);
-    display.success(`Image generation: ${savedModelInfo?.name || selectedModel}`);
 }
 
 // ─── LLM Config Seeding ──────────────────────────────────────────────────────
@@ -1282,7 +1192,7 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     // Quick OpenClaw detection so we can compute total steps upfront
     const earlyOpenClawDir = await detectOpenClawStateDir();
     // Steps: Identity, Communication, Providers, Models, Roles, Embeddings, Image Gen, Project & Agents
-    const totalSteps = 8;
+    const totalSteps = 7;
 
     // Welcome banner + Step 1: Identity
     if (!jsonMode) {
@@ -1543,15 +1453,9 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         display.blank();
         await runEmbeddingSetup(updatedProviders);
 
-        // Step 7: Image Generation
-        display.step(7, totalSteps, "Image Generation");
-        display.context("Configure image generation for your agents.");
-        display.blank();
-        await runImageGenSetup(updatedProviders);
-
-        // Step 8: Project & Agents
+        // Step 7: Project & Agents
         if (userPrivateKeyHex) {
-            display.step(8, totalSteps, "Project & Agents");
+            display.step(7, totalSteps, "Project & Agents");
             metaProjectCreated = await runProjectAndAgentsStep(
                 agentDiscovery,
                 userPrivateKeyHex,

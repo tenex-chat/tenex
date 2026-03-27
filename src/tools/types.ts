@@ -40,7 +40,6 @@ export type ToolName =
     | "reports_list"
     | "report_delete"
     | "schedule_task"
-    | "upload_blob"
     | "rag_create_collection"
     | "rag_add_documents"
     | "rag_search"
@@ -55,13 +54,10 @@ export type ToolName =
     | "mcp_subscription_stop"
     | "conversation_search"
     | "todo_write"
-    | "web_fetch"
-    | "web_search"
     | "nostr_publish_as_user"
     | "change_model"
     | "kill"
     | "no_response"
-    | "generate_image"
     | "skills_set"
     | "send_message";
 
