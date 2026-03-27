@@ -247,6 +247,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
             agentPubkey: context.agent.pubkey,
             agentNsec: context.agent.signer.nsec,
             projectDTag: projectId,
+            projectPath: context.projectBasePath || undefined,
             baseEnv: process.env,
         });
     } catch (error) {

@@ -9,6 +9,7 @@ import { config } from "@/services/ConfigService";
 export interface ResolveShellEnvironmentParams {
     agentPubkey: string;
     projectDTag?: string | null;
+    projectPath?: string | null;
     agentNsec?: string;
     baseEnv?: NodeJS.ProcessEnv;
 }
@@ -43,6 +44,10 @@ export class AgentEnvironmentService {
         return path.join(config.getConfigPath("projects"), projectDTag, ".env");
     }
 
+    getProjectRepoEnvPath(projectPath: string): string {
+        return path.join(projectPath, ".env");
+    }
+
     getAgentEnvPath(agentPubkey: string): string {
         return getAgentHomeEnvPath(agentPubkey);
     }
@@ -70,6 +75,9 @@ export class AgentEnvironmentService {
         const originalHome = baseEnv.HOME;
 
         const globalEnvPath = this.getGlobalEnvPath();
+        const projectRepoEnvPath = params.projectPath
+            ? this.getProjectRepoEnvPath(params.projectPath)
+            : null;
         const projectEnvPath = params.projectDTag
             ? this.getProjectEnvPath(params.projectDTag)
             : null;
@@ -77,7 +85,12 @@ export class AgentEnvironmentService {
         await this.ensureAgentHomeEnv(params);
         const agentEnvPath = this.getAgentEnvPath(params.agentPubkey);
 
+        // Merge order (lowest to highest priority):
+        // global < project-repo < project-metadata < agent
         Object.assign(mergedEnv, await this.readEnvFile(globalEnvPath));
+        if (projectRepoEnvPath) {
+            Object.assign(mergedEnv, await this.readEnvFile(projectRepoEnvPath));
+        }
         if (projectEnvPath) {
             Object.assign(mergedEnv, await this.readEnvFile(projectEnvPath));
         }

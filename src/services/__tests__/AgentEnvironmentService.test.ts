@@ -152,6 +152,64 @@ describe("AgentEnvironmentService", () => {
         expect(env.TENEX_AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
     });
 
+    it("loads .env from the project repo directory between global and project-metadata", async () => {
+        const signer = NDKPrivateKeySigner.generate();
+        const service = new AgentEnvironmentService({
+            loadAgent: async () => ({ nsec: signer.nsec } as any),
+        } as any);
+
+        const projectRepoDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-project-repo-"));
+
+        // Global .env
+        await fs.writeFile(path.join(tempDir, ".env"), "LEVEL=global\nGLOBAL_VAR=yes\n", "utf-8");
+        // Project repo .env (checked into the repo)
+        await fs.writeFile(path.join(projectRepoDir, ".env"), "LEVEL=project-repo\nREPO_VAR=yes\n", "utf-8");
+        // Project metadata .env (TENEX-managed)
+        await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
+        await fs.writeFile(
+            path.join(tempDir, "projects", "proj-1", ".env"),
+            "LEVEL=project-metadata\nMETA_VAR=yes\n",
+            "utf-8"
+        );
+
+        const env = await service.resolveShellEnvironment({
+            agentPubkey: signer.pubkey,
+            agentNsec: signer.nsec,
+            projectDTag: "proj-1",
+            projectPath: projectRepoDir,
+            baseEnv: { HOME: "/host/home" },
+        });
+
+        // Project-metadata overrides project-repo which overrides global
+        expect(env.LEVEL).toBe("project-metadata");
+        expect(env.GLOBAL_VAR).toBe("yes");
+        expect(env.REPO_VAR).toBe("yes");
+        expect(env.META_VAR).toBe("yes");
+
+        await fs.rm(projectRepoDir, { recursive: true, force: true });
+    });
+
+    it("loads project-repo .env even without a project metadata dTag", async () => {
+        const signer = NDKPrivateKeySigner.generate();
+        const service = new AgentEnvironmentService({
+            loadAgent: async () => ({ nsec: signer.nsec } as any),
+        } as any);
+
+        const projectRepoDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-project-repo-"));
+        await fs.writeFile(path.join(projectRepoDir, ".env"), "REPO_TOKEN=abc123\n", "utf-8");
+
+        const env = await service.resolveShellEnvironment({
+            agentPubkey: signer.pubkey,
+            agentNsec: signer.nsec,
+            projectPath: projectRepoDir,
+            baseEnv: { HOME: "/host/home" },
+        });
+
+        expect(env.REPO_TOKEN).toBe("abc123");
+
+        await fs.rm(projectRepoDir, { recursive: true, force: true });
+    });
+
     it("skips project-scoped env resolution when no project id is available", async () => {
         const signer = NDKPrivateKeySigner.generate();
         const service = new AgentEnvironmentService({
