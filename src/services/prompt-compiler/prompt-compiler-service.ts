@@ -566,7 +566,6 @@ export class PromptCompilerService {
                 lesson: lesson.lesson,
                 category: lesson.category,
                 hashtags: lesson.hashtags,
-                detailed: lesson.detailed,
                 comments: comments.map((c) => c.content),
             };
         });

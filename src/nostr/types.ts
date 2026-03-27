@@ -79,7 +79,6 @@ export interface ErrorIntent {
 export interface LessonIntent {
     title: string;
     lesson: string;
-    detailed?: string;
     category?: string;
     hashtags?: string[];
 }

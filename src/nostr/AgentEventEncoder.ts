@@ -494,9 +494,6 @@ export class AgentEventEncoder {
         lessonEvent.lesson = intent.lesson;
 
         // Set optional properties
-        if (intent.detailed) {
-            lessonEvent.detailed = intent.detailed;
-        }
         if (intent.category) {
             lessonEvent.category = intent.category;
         }

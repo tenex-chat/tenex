@@ -22,12 +22,13 @@ mock.module("@/services/rag/RAGService", () => ({
 import { createLessonLearnTool } from "../learn";
 
 describe("Learn Tool", () => {
-    let mockLessonEvent: { encode: () => string };
+    let mockLessonEvent: { encodedId: string; id: string };
     let mockAgentPublisher: { lesson: ReturnType<typeof mock> };
 
     const createMockContext = (overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext => {
         mockLessonEvent = {
-            encode: () => "mock-encoded-event",
+            encodedId: "mock-encoded-event",
+            id: "mock-event-id",
         };
 
         mockAgentPublisher = {
@@ -86,24 +87,8 @@ describe("Learn Tool", () => {
                 hashtags: [],
             });
 
-            expect(result.eventId).toBe("mock-encoded-event");
-            expect(result.hasDetailed).toBe(false);
+            expect(result.ok).toBe(true);
             expect(mockAgentPublisher.lesson).toHaveBeenCalled();
-        });
-
-        it("should handle detailed lesson version", async () => {
-            const context = createMockContext();
-            const tool = createLessonLearnTool(context);
-
-            const result = await tool.execute({
-                title: "Error Handling",
-                lesson: "Always handle async errors",
-                detailed: "When working with async/await, always wrap in try-catch blocks to handle potential errors gracefully.",
-                hashtags: [],
-            });
-
-            expect(result.eventId).toBe("mock-encoded-event");
-            expect(result.hasDetailed).toBe(true);
         });
 
         it("should handle category and hashtags", async () => {
@@ -117,8 +102,7 @@ describe("Learn Tool", () => {
                 hashtags: ["event-sourcing", "audit"],
             });
 
-            expect(result.eventId).toBe("mock-encoded-event");
-            expect(result.hasDetailed).toBe(false);
+            expect(result.ok).toBe(true);
         });
 
         // NOTE: Tests for missing agentPublisher/ralNumber removed - now enforced by ToolExecutionContext type

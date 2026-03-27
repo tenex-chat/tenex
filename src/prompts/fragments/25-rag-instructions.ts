@@ -213,7 +213,7 @@ lesson_learn({
 rag_add_documents({
   collection: "lessons",
   documents: [{
-    content: lesson.detailed || lesson.lesson,
+    content: lesson.lesson,
     metadata: {
       title: lesson.title,
       category: lesson.category,

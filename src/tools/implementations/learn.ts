@@ -8,11 +8,7 @@ import { z } from "zod";
 
 const lessonLearnSchema = z.object({
     title: z.string().describe("Brief title/description of what this lesson is about"),
-    lesson: z.string().describe("The key insight or lesson learned - be concise and actionable"),
-    detailed: z
-        .string()
-        .optional()
-        .describe("Detailed version with richer explanation when deeper context is needed"),
+    lesson: z.string().describe("The lesson learned — include all relevant context and detail"),
     category: z
         .string()
         .optional()
@@ -35,7 +31,7 @@ async function executeLessonLearn(
     input: LessonLearnInput,
     context: ToolExecutionContext
 ): Promise<LessonLearnOutput> {
-    const { title, lesson, detailed, category, hashtags } = input;
+    const { title, lesson, category, hashtags } = input;
 
     logger.info("Agent recording new lesson", {
         agent: context.agent.name,
@@ -49,7 +45,6 @@ async function executeLessonLearn(
     const intent: LessonIntent = {
         title,
         lesson,
-        detailed,
         category,
         hashtags,
     };
@@ -77,8 +72,6 @@ async function executeLessonLearn(
         await ragService.createCollection("lessons");
     }
 
-    const lessonContent = detailed || lesson;
-
     // Get projectId for project-scoped search isolation
     let projectId: string | undefined;
     if (isProjectContextInitialized()) {
@@ -88,7 +81,7 @@ async function executeLessonLearn(
     await ragService.addDocuments("lessons", [
         {
             id: lessonEvent.encodedId ?? lessonEvent.id,
-            content: lessonContent,
+            content: lesson,
             metadata: {
                 title,
                 category,
@@ -96,7 +89,6 @@ async function executeLessonLearn(
                 agentPubkey: context.agent.pubkey,
                 agentName: context.agent.name,
                 timestamp: Date.now(),
-                hasDetailed: !!detailed,
                 type: "lesson",
                 ...(projectId && { projectId }),
             },
@@ -123,7 +115,7 @@ export function createLessonLearnTool(context: ToolExecutionContext): AISdkTool 
 - Performance patterns in your tool usage
 - Things to do differently in future work
 
-Use when the user instructs you to remember something about YOUR BEHAVIOR or PREFERENCES, or when the user instructs you to change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery.
+Use when the user instructs you to remember something about YOUR BEHAVIOR or PREFERENCES, or when the user instructs you to change some behavior. Lessons persist across conversations and help build institutional memory. Categorize and tag appropriately for future discovery.
 
 **CRITICAL:** Only use this for content ABOUT YOUR BEHAVIOR. For content about the project itself, use report_write instead.
 
