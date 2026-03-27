@@ -173,9 +173,29 @@ export class QdrantProvider implements VectorStore {
     ): Promise<StoredDocument[]> {
         const client = this.ensureClient();
 
+        // Qdrant's scroll uses cursor-based pagination with point IDs, not numeric offsets.
+        // To support numeric offset: scroll from the beginning, skipping pages until we
+        // reach the desired offset. This is only used for migration, so performance is acceptable.
+        let cursor: string | number | Record<string, unknown> | undefined | null = undefined;
+        let skipped = 0;
+
+        while (skipped < offset) {
+            const skipBatch = Math.min(limit, offset - skipped);
+            const response = await client.scroll(collection, {
+                limit: skipBatch,
+                offset: cursor ?? undefined,
+                with_vector: false,
+                with_payload: false,
+            });
+            if (response.points.length === 0) return [];
+            cursor = response.next_page_offset;
+            skipped += response.points.length;
+            if (!cursor) return []; // No more pages
+        }
+
         const response = await client.scroll(collection, {
             limit,
-            offset,
+            offset: cursor ?? undefined,
             with_vector: true,
             with_payload: true,
         });
@@ -203,25 +223,27 @@ export class QdrantProvider implements VectorStore {
         // Translate SQL LIKE metadata filter to Qdrant filter
         const qdrantFilter = filter ? this.translateFilter(filter) : undefined;
 
-        const results = await client.query(collection, {
-            query: vector,
+        const results = await client.search(collection, {
+            vector,
             limit: topK,
             filter: qdrantFilter,
             with_payload: true,
         });
 
-        return results.points.map((point) => ({
+        return results.map((point) => ({
             document: {
                 id: String(point.id),
                 content: (point.payload?.content as string) ?? "",
-                vector: [], // Don't return vectors in search results
+                vector: [],
                 metadata: (point.payload?.metadata as string) ?? "{}",
                 timestamp: (point.payload?.timestamp as number) ?? Date.now(),
                 source: (point.payload?.source as string) ?? "",
             },
-            // Qdrant with Euclid distance: lower distance = more similar
-            // Score from query endpoint is already similarity (higher = better)
-            score: Math.max(0, Math.min(1, point.score ?? 0)),
+            // Qdrant search with Euclid returns score as negative distance (higher = closer)
+            // Normalize to 0-1: use 1/(1+abs(distance)) where distance = -score
+            score: point.score >= 0
+                ? Math.min(1, point.score)
+                : 1 / (1 + Math.abs(point.score)),
         }));
     }
 
