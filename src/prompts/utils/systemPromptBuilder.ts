@@ -852,6 +852,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         });
     }
 
+    // Add tool description guidance (universal — all agents benefit)
+    systemPromptBuilder.add("tool-description-guidance", {});
+
     // Add core agent fragments using shared composition
     t0 = performance.now();
     await addCoreAgentFragments(

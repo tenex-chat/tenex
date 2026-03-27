@@ -11,9 +11,7 @@ const ragDeleteCollectionSchema = z.object({
         .string()
         .trim()
         .min(1, "Description is required and cannot be empty")
-        .describe(
-            "REQUIRED: A clear, concise description of why you're deleting this collection (5-10 words). Helps provide human-readable context for the operation."
-        ),
+        .describe("Why you're deleting this collection"),
     name: z.string().describe("Name of the collection to delete"),
     confirm: z
         .boolean()

@@ -10,9 +10,7 @@ const ragListCollectionsSchema = z.object({
         .string()
         .trim()
         .min(1, "Description is required and cannot be empty")
-        .describe(
-            "REQUIRED: A clear, concise description of why you're listing collections (5-10 words). Helps provide human-readable context for the operation."
-        ),
+        .describe("Why you're listing collections"),
     include_stats: z
         .boolean()
         .nullable()

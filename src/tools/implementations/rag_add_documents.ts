@@ -35,9 +35,7 @@ const ragAddDocumentsSchema = z.object({
         .string()
         .trim()
         .min(1, "Description is required and cannot be empty")
-        .describe(
-            "REQUIRED: A clear, concise description of why you're adding these documents (5-10 words). Helps provide human-readable context for the operation."
-        ),
+        .describe("Why you're adding these documents"),
     collection: z.string().describe("Name of the collection to add documents to"),
     documents: z
         .array(
