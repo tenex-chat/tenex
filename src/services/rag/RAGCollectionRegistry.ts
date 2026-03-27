@@ -12,7 +12,7 @@
  */
 
 import { logger } from "@/utils/logger";
-import { getLanceDBDataDir } from "./rag-utils";
+import { getRAGDataDir } from "./rag-utils";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -51,7 +51,7 @@ export class RAGCollectionRegistry {
     private readonly filePath: string;
 
     private constructor() {
-        this.filePath = path.join(getLanceDBDataDir(), REGISTRY_FILENAME);
+        this.filePath = path.join(getRAGDataDir(), REGISTRY_FILENAME);
         this.data = this.load();
     }
 

@@ -15,7 +15,7 @@ The RAG system provides semantic search and vector-based retrieval capabilities 
 
 The RAG system follows clean architecture principles with clear separation of concerns:
 - **RAGService**: Facade that coordinates all operations
-- **RAGDatabaseService**: Handles database lifecycle and connections
+- **VectorStore providers**: Pluggable backends (LanceDB, SQLite-vec, Qdrant)
 - **RAGOperations**: Implements business logic for CRUD operations
 - **EmbeddingProvider**: Abstraction for embedding generation (local or cloud-based)
 

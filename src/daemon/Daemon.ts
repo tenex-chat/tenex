@@ -34,7 +34,7 @@ import type { DaemonStatus } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
-import { getLanceDBMaintenanceService } from "@/services/rag/LanceDBMaintenanceService";
+import { RAGService } from "@/services/rag/RAGService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { InterventionService, type AgentResolutionResult, type ActiveDelegationCheckerFn } from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
@@ -322,10 +322,6 @@ export class Daemon {
             // 10. Start automatic conversation indexing job
             getConversationIndexingJob().start();
             logger.info("Automatic conversation indexing job started");
-
-            // 10b. Start LanceDB maintenance service (periodic compaction)
-            getLanceDBMaintenanceService().start();
-            logger.info("LanceDB maintenance service started");
 
             // 11. Initialize InterventionService (after projects are loaded)
             // This must happen after subscriptions start so agent slugs can be resolved
@@ -1544,9 +1540,9 @@ export class Daemon {
                 logger.info("Stopping conversation indexing job...");
                 getConversationIndexingJob().stop();
 
-                // Stop LanceDB maintenance service
-                logger.info("Stopping LanceDB maintenance service...");
-                getLanceDBMaintenanceService().stop();
+                // Close RAG service (stops maintenance timer)
+                logger.info("Closing RAG service...");
+                await RAGService.closeInstance();
 
                 // Stop agent definition monitor
                 if (this.agentDefinitionMonitor) {
@@ -1985,8 +1981,8 @@ export class Daemon {
         // Stop conversation indexing job
         getConversationIndexingJob().stop();
 
-        // Stop LanceDB maintenance service
-        getLanceDBMaintenanceService().stop();
+        // Close RAG service (stops maintenance timer)
+        RAGService.closeInstance();
 
         // Stop intervention service
         InterventionService.getInstance().shutdown();

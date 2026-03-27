@@ -289,3 +289,44 @@ function resolveProjectBase(options?: EmbeddingConfigOptions): string | undefine
     }
     return undefined;
 }
+
+/**
+ * Load vector store configuration from embed.json.
+ * Reads the `vectorStore` field from the first embed.json found.
+ * Defaults to LanceDB if not configured.
+ */
+export async function loadVectorStoreConfig(
+    options?: EmbeddingConfigOptions
+): Promise<import("./providers/types").VectorStoreConfig> {
+    const { DEFAULT_VECTOR_STORE_CONFIG } = await import("./providers/types");
+
+    try {
+        const basePaths = resolveConfigBases(options);
+
+        for (const basePath of basePaths) {
+            const configPath = path.join(basePath, EMBED_CONFIG_FILE);
+            if (!(await fileExists(configPath))) continue;
+
+            const rawConfig = await readJsonFile<Record<string, unknown>>(configPath);
+            if (rawConfig && typeof rawConfig === "object" && "vectorStore" in rawConfig) {
+                const vs = rawConfig.vectorStore as Record<string, unknown>;
+                if (vs && typeof vs.provider === "string") {
+                    const provider = vs.provider as "lancedb" | "sqlite-vec" | "qdrant";
+                    logger.debug(`Loaded vector store config: ${provider}`);
+                    return {
+                        provider,
+                        path: typeof vs.path === "string" ? vs.path : undefined,
+                        url: typeof vs.url === "string" ? vs.url : undefined,
+                        apiKey: typeof vs.apiKey === "string" ? vs.apiKey : undefined,
+                    };
+                }
+            }
+        }
+
+        logger.debug("No vector store configuration found, using defaults (lancedb)");
+        return DEFAULT_VECTOR_STORE_CONFIG;
+    } catch (error) {
+        logger.warn("Failed to load vector store configuration, using defaults", { error });
+        return DEFAULT_VECTOR_STORE_CONFIG;
+    }
+}
