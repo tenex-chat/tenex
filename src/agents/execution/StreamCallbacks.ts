@@ -210,7 +210,7 @@ export function createPrepareStep(
                     messages: cachedPreparedStep.request.messages,
                     providerOptions: cachedPreparedStep.request.providerOptions,
                     experimental_context: cachedPreparedStep.request.experimentalContext,
-                    toolChoice: cachedPreparedStep.request.toolChoice,
+                    toolChoice: cachedPreparedStep.request.toolChoice ?? ("auto" as const),
                 };
             }
 
@@ -440,7 +440,7 @@ export function createPrepareStep(
                 messages: preparedRequest.messages,
                 providerOptions: preparedRequest.providerOptions,
                 experimental_context: preparedRequest.experimentalContext,
-                toolChoice: preparedRequest.toolChoice,
+                toolChoice: preparedRequest.toolChoice ?? ("auto" as const),
             };
         } catch (error) {
             logger.writeToWarnLog({
