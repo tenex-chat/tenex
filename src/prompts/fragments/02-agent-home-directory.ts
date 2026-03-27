@@ -96,11 +96,16 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
         parts.push("");
         parts.push(
             "**Shell env files:** Shell sessions automatically load environment variables from `.env` files with precedence `agent > project > global`. " +
-                "Your agent-specific file is `~/.env` inside this home directory."
+                `Your agent-specific file is \`$TENEX_AGENT_HOME/.env\` (i.e., \`${homeDir}/.env\`).`
         );
         parts.push("");
         parts.push(
             "`.env` contents are NOT injected into your prompt. Reference them in shell commands with normal shell expansion such as `$NSEC` or `$OPENAI_API_KEY`."
+        );
+        parts.push("");
+        parts.push(
+            "**Note on ~:** The shell `~` expands to the user's real home directory (via `$HOME`), NOT your agent home. " +
+                "To access your agent home directory in shell commands, use `$TENEX_AGENT_HOME`."
         );
         parts.push("");
         parts.push(
