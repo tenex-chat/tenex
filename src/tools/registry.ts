@@ -69,7 +69,6 @@ import { createReportReadTool } from "./implementations/report_read";
 import { createReportWriteTool } from "./implementations/report_write";
 import { createReportsListTool } from "./implementations/reports_list";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
-import { createScheduleTaskOnceTool } from "./implementations/schedule_task_once";
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 
@@ -81,7 +80,6 @@ import { createWebFetchTool } from "./implementations/web_fetch";
 import { createWebSearchTool } from "./implementations/web_search";
 
 // Nostr tools
-import { createNostrFetchTool } from "./implementations/nostr_fetch";
 import { createNostrPublishAsUserTool } from "./implementations/nostr_publish_as_user";
 
 // Unified RAG search tool
@@ -233,7 +231,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Schedule tools
     schedule_task: createScheduleTaskTool,
-    schedule_task_once: createScheduleTaskOnceTool,
 
     // Conversation search
     conversation_search: createConversationSearchTool,
@@ -273,7 +270,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     web_search: createWebSearchTool,
 
     // Nostr tools
-    nostr_fetch: createNostrFetchTool,
     nostr_publish_as_user: createNostrPublishAsUserTool,
 
     // Image generation
