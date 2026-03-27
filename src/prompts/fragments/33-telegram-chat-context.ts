@@ -86,6 +86,9 @@ export const telegramChatContextFragment: PromptFragment<{
         );
 
         if (telegram.threadId && triggeringEnvelope.channel.kind === "topic") {
+            if (telegram.topicTitle) {
+                lines.push(`- Topic: ${telegram.topicTitle}`);
+            }
             lines.push(`- Topic/thread ID: ${telegram.threadId}`);
         }
 

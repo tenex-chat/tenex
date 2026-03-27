@@ -123,9 +123,14 @@ function describeTelegramChannelBinding(
         return parsed.messageThreadId ? "Telegram topic" : "Telegram chat";
     }
 
-    return parsed.messageThreadId
-        ? `Telegram topic in ${title}`
-        : `Telegram chat ${title}`;
+    if (parsed.messageThreadId) {
+        const topicLabel = chatContext.topicTitle
+            ? `Telegram topic "${chatContext.topicTitle}" in ${title}`
+            : `Telegram topic in ${title}`;
+        return topicLabel;
+    }
+
+    return `Telegram chat ${title}`;
 }
 
 function buildChannelBindingDisplayEntries(agent: AgentInstance, projectId: string): Array<{

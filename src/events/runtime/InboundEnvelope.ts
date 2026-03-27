@@ -23,6 +23,7 @@ export interface TelegramTransportMetadata {
     isEditedMessage: boolean;
     senderUserId: string;
     chatTitle?: string;
+    topicTitle?: string;
     chatUsername?: string;
     memberCount?: number;
     administrators?: TelegramChatAdministratorMetadata[];

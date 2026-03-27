@@ -609,6 +609,7 @@ export class TelegramGatewayService {
             chatContext
                 ? {
                     chatTitle: chatContext.chatTitle,
+                    topicTitle: chatContext.topicTitle,
                     chatUsername: chatContext.chatUsername,
                     memberCount: chatContext.memberCount,
                     administrators: chatContext.administrators,

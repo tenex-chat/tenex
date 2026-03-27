@@ -24,6 +24,13 @@ export interface TelegramChat {
     last_name?: string;
 }
 
+export interface TelegramForumTopic {
+    message_thread_id: number;
+    name: string;
+    icon_color: number;
+    icon_custom_emoji_id?: string;
+}
+
 export interface TelegramVoice {
     file_id: string;
     file_unique_id: string;
@@ -168,6 +175,11 @@ export interface TelegramGetChatMemberCountResponse {
     result: number;
 }
 
+export interface TelegramGetForumTopicResponse {
+    ok: boolean;
+    result: TelegramForumTopic;
+}
+
 export interface TelegramSendMessageParams {
     chatId: string;
     text: string;
@@ -214,6 +226,7 @@ export interface TelegramGatewayBinding {
 
 export interface TelegramChatContextSnapshot {
     chatTitle?: string;
+    topicTitle?: string;
     chatUsername?: string;
     memberCount?: number;
     administrators?: TelegramChatAdministratorMetadata[];

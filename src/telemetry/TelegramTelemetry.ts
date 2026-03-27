@@ -31,7 +31,7 @@ export function buildTelegramTransportMetadata(
     botIdentity?: TelegramBotIdentity,
     context?: Pick<
         TelegramTransportMetadata,
-        "administrators" | "chatTitle" | "chatUsername" | "memberCount" | "seenParticipants"
+        "administrators" | "chatTitle" | "chatUsername" | "memberCount" | "seenParticipants" | "topicTitle"
     >
 ): TelegramTransportMetadata | undefined {
     const message = getMessage(update);
@@ -51,6 +51,7 @@ export function buildTelegramTransportMetadata(
         isEditedMessage: Boolean(update.edited_message),
         senderUserId: String(sender.id),
         chatTitle: (context?.chatTitle ?? message.chat.title?.trim()) || undefined,
+        topicTitle: context?.topicTitle,
         chatUsername: (context?.chatUsername ?? message.chat.username?.trim()) || undefined,
         memberCount: context?.memberCount,
         administrators: context?.administrators,

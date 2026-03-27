@@ -9,6 +9,7 @@ import type {
     TelegramGetChatMemberCountResponse,
     TelegramGetChatResponse,
     TelegramGetFileResponse,
+    TelegramGetForumTopicResponse,
     TelegramGetMeResponse,
     TelegramGetUpdatesResponse,
     TelegramMessage,
@@ -112,6 +113,7 @@ export class TelegramBotClient {
             | "getChatAdministrators"
             | "getChatMemberCount"
             | "getFile"
+            | "getForumTopic"
             | "getMe"
             | "getUpdates"
             | "setMyCommands"
@@ -325,6 +327,44 @@ export class TelegramBotClient {
             },
             responseAttributes: (result) => ({
                 "telegram.chat.member_count": result,
+            }),
+        });
+    }
+
+    async getForumTopic(params: {
+        chatId: string;
+        messageThreadId: string;
+    }): Promise<TelegramGetForumTopicResponse["result"]> {
+        const search = new URLSearchParams({
+            chat_id: params.chatId,
+            message_thread_id: params.messageThreadId,
+        });
+
+        return this.runApiCall({
+            operation: "getForumTopic",
+            method: "GET",
+            requestQuery: {
+                chat_id: params.chatId,
+                message_thread_id: params.messageThreadId,
+            },
+            attributes: {
+                "telegram.chat.id": params.chatId,
+                "telegram.message_thread_id": params.messageThreadId,
+            },
+            execute: async () => {
+                const response = await this.fetchImpl(
+                    `${this.apiBaseUrl}/bot${this.options.botToken}/getForumTopic?${search.toString()}`
+                );
+                const parsed = await parseTelegramResponse<TelegramGetForumTopicResponse>(
+                    response
+                );
+                return {
+                    parsedBody: parsed,
+                    result: parsed.result,
+                };
+            },
+            responseAttributes: (result) => ({
+                "telegram.forum_topic.name": result.name,
             }),
         });
     }

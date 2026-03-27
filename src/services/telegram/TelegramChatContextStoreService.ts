@@ -14,6 +14,7 @@ export interface TelegramChatContextRecord {
     chatId: string;
     topicId?: string;
     chatTitle?: string;
+    topicTitle?: string;
     chatUsername?: string;
     memberCount?: number;
     administrators: TelegramChatAdministratorMetadata[];

@@ -83,6 +83,7 @@ describe("TelegramChatContextService", () => {
                     },
                 ])),
                 getChatMemberCount: mock(async () => 14),
+                getForumTopic: mock(async () => ({ message_thread_id: 0, name: "", icon_color: 0 })),
             },
         });
 
@@ -162,6 +163,7 @@ describe("TelegramChatContextService", () => {
                 getChatMemberCount: mock(async () => {
                     throw new Error("member count lookup failed");
                 }),
+                getForumTopic: mock(async () => ({ message_thread_id: 0, name: "", icon_color: 0 })),
             },
         });
 
@@ -203,6 +205,7 @@ describe("TelegramChatContextService", () => {
                 getChat,
                 getChatAdministrators,
                 getChatMemberCount,
+                getForumTopic: mock(async () => ({ message_thread_id: 0, name: "", icon_color: 0 })),
             },
         });
 
@@ -216,6 +219,7 @@ describe("TelegramChatContextService", () => {
                 getChat,
                 getChatAdministrators,
                 getChatMemberCount,
+                getForumTopic: mock(async () => ({ message_thread_id: 0, name: "", icon_color: 0 })),
             },
         });
 
@@ -244,6 +248,7 @@ describe("TelegramChatContextService", () => {
             })),
             getChatAdministrators: mock(async () => []),
             getChatMemberCount: mock(async () => 99),
+            getForumTopic: mock(async () => ({ message_thread_id: 0, name: "", icon_color: 0 })),
         };
 
         for (let index = 0; index < 30; index++) {

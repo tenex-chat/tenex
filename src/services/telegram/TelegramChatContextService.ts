@@ -135,7 +135,7 @@ export class TelegramChatContextService {
         message: TelegramMessage;
         client: Pick<
             TelegramBotClient,
-            "getChat" | "getChatAdministrators" | "getChatMemberCount"
+            "getChat" | "getChatAdministrators" | "getChatMemberCount" | "getForumTopic"
         >;
     }): Promise<TelegramChatContextRecord> {
         const now = this.now();
@@ -153,6 +153,7 @@ export class TelegramChatContextService {
             chatId: normalizeChatId(params.message.chat.id),
             topicId: normalizeTopicId(params.message.message_thread_id),
             chatTitle: trimOrUndefined(params.message.chat.title) ?? existing?.chatTitle,
+            topicTitle: existing?.topicTitle,
             chatUsername: existing?.chatUsername ?? trimOrUndefined(params.message.chat.username),
             memberCount: existing?.memberCount,
             administrators: existing?.administrators ?? [],
@@ -196,6 +197,19 @@ export class TelegramChatContextService {
 
             if (memberCountResult.status === "fulfilled") {
                 nextRecord.memberCount = memberCountResult.value;
+            }
+
+            if (nextRecord.topicId) {
+                const topicResult = await Promise.allSettled([
+                    params.client.getForumTopic({
+                        chatId: nextRecord.chatId,
+                        messageThreadId: nextRecord.topicId,
+                    }),
+                ]);
+
+                if (topicResult[0].status === "fulfilled") {
+                    nextRecord.topicTitle = trimOrUndefined(topicResult[0].value.name);
+                }
             }
 
             if (
