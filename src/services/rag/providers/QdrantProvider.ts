@@ -16,6 +16,48 @@ async function loadDependencies(): Promise<void> {
 
 type QdrantClient = InstanceType<typeof import("@qdrant/js-client-rest").QdrantClient>;
 
+function stripOuterLikeWildcards(pattern: string): string {
+    let trimmed = pattern;
+    if (trimmed.startsWith("%")) {
+        trimmed = trimmed.slice(1);
+    }
+    if (trimmed.endsWith("%")) {
+        trimmed = trimmed.slice(0, -1);
+    }
+    return trimmed;
+}
+
+/**
+ * Decode the literal portion of a SQL LIKE fragment into the raw text that
+ * Qdrant should match against the stored metadata JSON string.
+ */
+function decodeSqlLikeLiteral(value: string): string {
+    let decoded = "";
+
+    for (let i = 0; i < value.length; i++) {
+        const char = value[i];
+
+        if (char === "'" && value[i + 1] === "'") {
+            decoded += "'";
+            i++;
+            continue;
+        }
+
+        if (char === "\\" && i + 1 < value.length) {
+            const next = value[i + 1];
+            if (next === "%" || next === "_" || next === '"' || next === "\\") {
+                decoded += next;
+                i++;
+                continue;
+            }
+        }
+
+        decoded += char;
+    }
+
+    return decoded;
+}
+
 /**
  * Qdrant implementation of the VectorStore interface.
  *
@@ -290,12 +332,12 @@ export class QdrantProvider implements VectorStore {
      */
     private translateFilter(filter: string): Record<string, unknown> {
         // Parse OR conditions
-        const orPattern = /metadata\s+LIKE\s+'%([^%]+)%'\s*(?:ESCAPE\s+'[^']*')?/gi;
+        const orPattern = /metadata\s+LIKE\s+'((?:''|\\.|[^'])*)'\s*(?:ESCAPE\s+'[^']*')?/gi;
         const conditions: Array<{ must: Array<{ key: string; match: { text: string } }> }> = [];
 
         let match: RegExpExecArray | null;
         while ((match = orPattern.exec(filter)) !== null) {
-            const substring = match[1];
+            const substring = decodeSqlLikeLiteral(stripOuterLikeWildcards(match[1]));
             conditions.push({
                 must: [{ key: "metadata", match: { text: substring } }],
             });

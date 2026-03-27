@@ -44,6 +44,10 @@ function getSqliteVecDataDir(customPath?: string): string {
     );
 }
 
+function qualifyMetadataFilter(filter: string, alias: string): string {
+    return filter.replace(/\bmetadata\b/g, `${alias}.metadata`);
+}
+
 /**
  * Metadata registry file tracking collection dimensions,
  * since vec0 virtual tables don't expose schema introspection.
@@ -293,60 +297,36 @@ export class SqliteVecProvider implements VectorStore {
         const db = this.ensureDb();
         const vectorBlob = float32ArrayToBlob(vector);
 
-        // KNN query on vec0 virtual table
-        // sqlite-vec returns L2 distance in the `distance` column
-        const vecResults = db.prepare(
-            `SELECT id, distance
-             FROM "vec_${collection}"
-             WHERE embedding MATCH ?
-             AND k = ?
-             ORDER BY distance`
-        ).all(vectorBlob, topK) as Array<{ id: string; distance: number }>;
-
-        if (vecResults.length === 0) return [];
-
-        // Fetch full documents for matched IDs
-        const placeholders = vecResults.map(() => "?").join(",");
-        let docQuery = `SELECT id, content, metadata, timestamp, source
-                        FROM "docs_${collection}"
-                        WHERE id IN (${placeholders})`;
-
-        // Apply metadata filter if provided (SQL LIKE pattern passes through directly)
+        let query = `SELECT d.id, d.content, d.metadata, d.timestamp, d.source, v.distance
+                     FROM "vec_${collection}" v
+                     JOIN "docs_${collection}" d ON d.id = v.id
+                     WHERE v.embedding MATCH ?
+                     AND k = ?`;
         if (filter) {
-            docQuery += ` AND ${filter}`;
+            query += ` AND ${qualifyMetadataFilter(filter, "d")}`;
         }
+        query += " ORDER BY v.distance";
 
-        const docRows = db.prepare(docQuery).all(
-            ...vecResults.map((r) => r.id)
-        ) as Array<{
+        const rows = db.prepare(query).all(vectorBlob, topK) as Array<{
             id: string;
             content: string;
             metadata: string;
             timestamp: number;
             source: string;
+            distance: number;
         }>;
 
-        const docMap = new Map(docRows.map((r) => [r.id, r]));
-
-        const results: VectorSearchResult[] = [];
-        for (const vecResult of vecResults) {
-            const doc = docMap.get(vecResult.id);
-            if (!doc) continue; // Filtered out by metadata filter
-
-            results.push({
-                document: {
-                    id: doc.id,
-                    content: doc.content,
-                    vector: [],
-                    metadata: doc.metadata,
-                    timestamp: doc.timestamp,
-                    source: doc.source,
-                },
-                score: 1 / (1 + vecResult.distance),
-            });
-        }
-
-        return results;
+        return rows.map((row) => ({
+            document: {
+                id: row.id,
+                content: row.content,
+                vector: [],
+                metadata: row.metadata,
+                timestamp: row.timestamp,
+                source: row.source,
+            },
+            score: 1 / (1 + row.distance),
+        }));
     }
 
     // -- Stats --
