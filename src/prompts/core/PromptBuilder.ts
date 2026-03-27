@@ -1,9 +1,7 @@
 import { formatAnyError } from "@/lib/error-formatter";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { trace } from "@opentelemetry/api";
 import { fragmentRegistry } from "./FragmentRegistry";
 import type { FragmentConfig, PromptFragment } from "./types";
-
-const tracer = trace.getTracer("tenex.prompt-builder");
 
 export class PromptBuilder {
     private fragments: FragmentConfig[] = [];
@@ -59,60 +57,42 @@ export class PromptBuilder {
                 );
             }
 
-            const result = await tracer.startActiveSpan(
-                `tenex.prompt.fragment.${config.fragmentId}`,
-                async (span) => {
-                    const startedAt = performance.now();
+            const startedAt = performance.now();
+            try {
+                const content = await fragment.template(config.args);
+                const priority = fragment.priority || 50;
+                const durationMs = Math.round(performance.now() - startedAt);
 
-                    try {
-                        const content = await fragment.template(config.args);
-                        const priority = fragment.priority || 50;
-                        const durationMs = Math.round(performance.now() - startedAt);
-
-                        span.setAttributes({
-                            "fragment.id": config.fragmentId,
-                            "fragment.priority": priority,
-                            "fragment.duration_ms": durationMs,
-                            "fragment.content.length": content.length,
-                            "fragment.content.empty": content.trim().length === 0,
-                        });
-
-                        return {
-                            priority,
-                            content,
-                            telemetry: {
-                                fragmentId: config.fragmentId,
-                                durationMs,
-                            },
-                        };
-                    } catch (error) {
-                        span.recordException(error as Error);
-                        span.setStatus({ code: SpanStatusCode.ERROR });
-                        span.setAttributes({
-                            "fragment.id": config.fragmentId,
-                            "fragment.duration_ms": Math.round(performance.now() - startedAt),
-                            "error.message": formatAnyError(error),
-                        });
-
-                        const errorMessage = formatAnyError(error);
-                        const receivedArgs = JSON.stringify(config.args, null, 2);
-                        throw new Error(
-                            `Error executing fragment "${config.fragmentId}":\n` +
-                                `${errorMessage}\n` +
-                                `Arguments provided: ${receivedArgs}\n` +
-                                `Expected: ${fragment.expectedArgs || "Check fragment definition"}`,
-                            { cause: error }
-                        );
-                    } finally {
-                        span.end();
-                    }
-                }
-            );
-
-            fragmentsWithPriority.push(result);
+                fragmentsWithPriority.push({
+                    priority,
+                    content,
+                    telemetry: {
+                        fragmentId: config.fragmentId,
+                        durationMs,
+                    },
+                });
+            } catch (error) {
+                const errorMessage = formatAnyError(error);
+                const receivedArgs = JSON.stringify(config.args, null, 2);
+                throw new Error(
+                    `Error executing fragment "${config.fragmentId}":\n` +
+                        `${errorMessage}\n` +
+                        `Arguments provided: ${receivedArgs}\n` +
+                        `Expected: ${fragment.expectedArgs || "Check fragment definition"}`,
+                    { cause: error }
+                );
+            }
         }
 
         if (fragmentsWithPriority.length > 0) {
+            // Emit per-fragment timing as events on the parent span
+            for (const entry of fragmentsWithPriority) {
+                parentSpan?.addEvent(`prompt.fragment.${entry.telemetry.fragmentId}`, {
+                    "fragment.duration_ms": entry.telemetry.durationMs,
+                    "fragment.content.length": entry.content.length,
+                });
+            }
+
             const slowestFragment = fragmentsWithPriority.reduce((slowest, current) => {
                 return current.telemetry.durationMs > slowest.telemetry.durationMs ? current : slowest;
             });

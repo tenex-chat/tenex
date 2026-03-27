@@ -14,7 +14,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { CompleteEvent } from "@/llm/types";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { NudgeService } from "@/services/nudge";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
@@ -89,29 +88,24 @@ export async function checkPostCompletion(
             return undefined;
         }).filter(Boolean) as string[] || []);
 
-    // Build the system prompt for context
+    // Reuse cached system prompt from initial compilation when available
     const conversation = context.getConversation();
-
-    // Fetch nudge content if triggering event has nudge tags
-    const nudgeEventIds = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
-    const nudgeContent = nudgeEventIds.length > 0
-        ? await NudgeService.getInstance().fetchNudges(nudgeEventIds)
-        : "";
-
-    const systemPromptMessages = conversation ? await buildSystemPromptMessages({
-        agent,
-        project: projectContext.project,
-        conversation,
-        triggeringEnvelope: context.triggeringEnvelope,
-        projectBasePath: context.projectBasePath,
-        workingDirectory: context.workingDirectory,
-        currentBranch: context.currentBranch,
-        availableAgents: Array.from(projectContext.agents.values()),
-        mcpManager: projectContext.mcpManager,
-        agentLessons: projectContext.agentLessons,
-        nudgeContent,
-    }) : [];
-    const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
+    const systemPrompt = context.cachedSystemPrompt
+        ?? (conversation
+            ? (await buildSystemPromptMessages({
+                agent,
+                project: projectContext.project,
+                conversation,
+                triggeringEnvelope: context.triggeringEnvelope,
+                projectBasePath: context.projectBasePath,
+                workingDirectory: context.workingDirectory,
+                currentBranch: context.currentBranch,
+                availableAgents: Array.from(projectContext.agents.values()),
+                mcpManager: projectContext.mcpManager,
+                agentLessons: projectContext.agentLessons,
+                nudgeContent: "",
+            })).map(m => m.message.content).join("\n\n")
+            : "");
 
     // Update known agent slugs for delegation heuristic
     updateKnownAgentSlugs(Array.from(projectContext.agents.values()).map(a => a.slug));

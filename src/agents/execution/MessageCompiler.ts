@@ -59,6 +59,7 @@ export interface MessageCompilerContext {
 
 export interface CompiledMessages {
     messages: ModelMessage[];
+    systemPrompt: string;
     counts: {
         systemPrompt: number;
         conversation: number;
@@ -91,6 +92,7 @@ export class MessageCompiler {
 
                 let t0 = performance.now();
                 const systemPromptMessages = await buildSystemPromptMessages(context);
+                const systemPromptText = systemPromptMessages.map(sm => sm.message.content).join("\n\n");
                 span.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
 
                 t0 = performance.now();
@@ -143,7 +145,7 @@ export class MessageCompiler {
                 span.setAttribute("counts.dynamic_context", counts.dynamicContext);
                 span.setAttribute("counts.total", counts.total);
 
-                return { messages, counts };
+                return { messages, systemPrompt: systemPromptText, counts };
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });

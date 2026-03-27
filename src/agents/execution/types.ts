@@ -87,6 +87,7 @@ export type FullRuntimeContext = Omit<ToolRegistryContext, "agent"> & {
     agent: AgentInstance;
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
+    cachedSystemPrompt?: string;
 };
 
 /**

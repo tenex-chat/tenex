@@ -263,7 +263,7 @@ export async function setupStreamExecution(
         ralNumber
     );
 
-    const { messages, counts } = await messageCompiler.compile({
+    const { messages, systemPrompt, counts } = await messageCompiler.compile({
         agent: context.agent,
         project: projectContext.project,
         conversation,
@@ -286,6 +286,9 @@ export async function setupStreamExecution(
         metaModelSystemPrompt,
         variantSystemPrompt,
     });
+
+    // Cache the compiled system prompt for reuse by supervision checks
+    context.cachedSystemPrompt = systemPrompt;
 
     // Initialize providers (idempotent) and set data for this execution
     initializeReminderProviders();

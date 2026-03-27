@@ -12,7 +12,6 @@ import {
 import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
 import type { Tool as CoreTool } from "ai";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { NudgeService } from "@/services/nudge";
 import { getProjectContext } from "@/services/projects";
 import { getToolsObject } from "@/tools/registry";
 import type { FullRuntimeContext } from "./types";
@@ -57,29 +56,23 @@ export function wrapToolsWithSupervision(
                     const conversation = context.getConversation();
                     const conversationStore = context.conversationStore;
 
-                    // Get system prompt and conversation history
+                    // Reuse cached system prompt from initial compilation when available
                     const projectContext = getProjectContext();
 
-                    // Fetch nudge content if triggering event has nudge tags
-                    const preToolNudgeEventIds = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
-                    const preToolNudgeContent = preToolNudgeEventIds.length > 0
-                        ? await NudgeService.getInstance().fetchNudges(preToolNudgeEventIds)
-                        : "";
-
-                    const systemPromptMessages = await buildSystemPromptMessages({
-                        agent: context.agent,
-                        project: projectContext.project,
-                        conversation,
-                        triggeringEnvelope: context.triggeringEnvelope,
-                        projectBasePath: context.projectBasePath,
-                        workingDirectory: context.workingDirectory,
-                        currentBranch: context.currentBranch,
-                        availableAgents: Array.from(projectContext.agents.values()),
-                        mcpManager: projectContext.mcpManager,
-                        agentLessons: projectContext.agentLessons,
-                        nudgeContent: preToolNudgeContent,
-                    });
-                    const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
+                    const systemPrompt = context.cachedSystemPrompt
+                        ?? (await buildSystemPromptMessages({
+                            agent: context.agent,
+                            project: projectContext.project,
+                            conversation,
+                            triggeringEnvelope: context.triggeringEnvelope,
+                            projectBasePath: context.projectBasePath,
+                            workingDirectory: context.workingDirectory,
+                            currentBranch: context.currentBranch,
+                            availableAgents: Array.from(projectContext.agents.values()),
+                            mcpManager: projectContext.mcpManager,
+                            agentLessons: projectContext.agentLessons,
+                            nudgeContent: "",
+                        })).map(m => m.message.content).join("\n\n");
 
                     // Build conversation history from ConversationStore.
                     // Pass all currently-executing tool call IDs as in-flight to suppress
