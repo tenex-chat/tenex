@@ -961,8 +961,7 @@ describe("LLMService stream()", () => {
             toolCommandCalls: 2,
             toolFileChangeCalls: 1,
             toolMcpCalls: 3,
-            toolWebSearchCalls: 1,
-            toolOtherCalls: 0,
+            toolOtherCalls: 1,
         });
     });
 

@@ -406,8 +406,10 @@ export class CodexProvider extends AgentProvider {
             toolCommandCalls: toolStats?.byType?.exec,
             toolFileChangeCalls: toolStats?.byType?.patch,
             toolMcpCalls: toolStats?.byType?.mcp,
-            toolWebSearchCalls: toolStats?.byType?.web_search,
-            toolOtherCalls: toolStats?.byType?.other,
+            toolOtherCalls:
+                toolStats?.byType?.other !== undefined || toolStats?.byType?.web_search !== undefined
+                    ? (toolStats?.byType?.other ?? 0) + (toolStats?.byType?.web_search ?? 0)
+                    : undefined,
         };
 
         return hasDefinedMetadata(normalizedMetadata) ? normalizedMetadata : undefined;

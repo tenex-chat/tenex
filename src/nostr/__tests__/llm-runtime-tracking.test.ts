@@ -179,8 +179,7 @@ describe("LLM Runtime Tracking", () => {
                         toolCommandCalls: 2,
                         toolFileChangeCalls: 1,
                         toolMcpCalls: 3,
-                        toolWebSearchCalls: 1,
-                        toolOtherCalls: 0,
+                        toolOtherCalls: 1,
                     },
                 },
                 context
@@ -193,8 +192,7 @@ describe("LLM Runtime Tracking", () => {
             expect(completionEvent.tags).toContainEqual(["llm-tool-command-calls", "2"]);
             expect(completionEvent.tags).toContainEqual(["llm-tool-file-change-calls", "1"]);
             expect(completionEvent.tags).toContainEqual(["llm-tool-mcp-calls", "3"]);
-            expect(completionEvent.tags).toContainEqual(["llm-tool-web-search-calls", "1"]);
-            expect(completionEvent.tags).toContainEqual(["llm-tool-other-calls", "0"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-other-calls", "1"]);
         });
     });
 

@@ -51,7 +51,6 @@ export interface LLMMetadata {
     toolCommandCalls?: number;
     toolFileChangeCalls?: number;
     toolMcpCalls?: number;
-    toolWebSearchCalls?: number;
     toolOtherCalls?: number;
 }
 

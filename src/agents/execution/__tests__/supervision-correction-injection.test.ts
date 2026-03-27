@@ -121,7 +121,7 @@ describe("Supervision Correction Message Injection", () => {
 
             // Step 3: Supervisor detects violation and queues correction message
             // This simulates what happens in AgentExecutor.ts lines 697-704
-            const correctionMessage = `You successfully launched the app and took a screenshot. However, you failed to upload the screenshot and embed it in your response as per Lesson #5: "Embed screenshots in markdown responses". Please upload the screenshot using upload_blob and then embed the returned URL in a markdown response.`;
+            const correctionMessage = `You successfully launched the app and took a screenshot. However, you failed to embed it in your response as per Lesson #5: "Embed screenshots in markdown responses". Please embed the screenshot path in a markdown image response.`;
 
             registry.queueUserMessage(
                 AGENT_PUBKEY,

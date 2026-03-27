@@ -178,8 +178,8 @@ describe("ConversationStore - Multimodal Support", () => {
                     {
                         type: "tool-call",
                         toolCallId: "call_1",
-                        toolName: "upload_blob",
-                        input: { input: "https://images.unsplash.com/image.jpg" },
+                        toolName: "report_write",
+                        input: { content: "https://images.unsplash.com/image.jpg" },
                     },
                 ],
             });
@@ -193,8 +193,8 @@ describe("ConversationStore - Multimodal Support", () => {
                     {
                         type: "tool-result",
                         toolCallId: "call_1",
-                        toolName: "upload_blob",
-                        output: { type: "text", value: "Upload complete" },
+                        toolName: "report_write",
+                        output: { type: "text", value: "Report written" },
                     },
                 ],
             });

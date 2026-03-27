@@ -458,9 +458,6 @@ export class AgentEventEncoder {
         if (metadata.toolMcpCalls !== undefined) {
             event.tag(["llm-tool-mcp-calls", String(metadata.toolMcpCalls)]);
         }
-        if (metadata.toolWebSearchCalls !== undefined) {
-            event.tag(["llm-tool-web-search-calls", String(metadata.toolWebSearchCalls)]);
-        }
         if (metadata.toolOtherCalls !== undefined) {
             event.tag(["llm-tool-other-calls", String(metadata.toolOtherCalls)]);
         }

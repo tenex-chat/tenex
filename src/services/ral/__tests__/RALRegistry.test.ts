@@ -478,14 +478,14 @@ describe("RALRegistry", () => {
 
       // Start two tools concurrently
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
 
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.activeTools.size).toBe(2);
       expect(state?.activeTools.has("tool-call-1")).toBe(true);
       expect(state?.activeTools.has("tool-call-2")).toBe(true);
       // currentTool should be set to the most recent tool
-      expect(state?.currentTool).toBe("web_fetch");
+      expect(state?.currentTool).toBe("shell");
     });
 
     it("should update currentTool to remaining tool when one completes", () => {
@@ -493,7 +493,7 @@ describe("RALRegistry", () => {
 
       // Start two tools
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
 
       // Complete the second tool (current one)
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
@@ -510,7 +510,7 @@ describe("RALRegistry", () => {
 
       // Start and complete two tools
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", false);
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
 
@@ -542,7 +542,7 @@ describe("RALRegistry", () => {
       setSystemTime(new Date((firstToolStartTime ?? Date.now()) + 2));
       try {
         // Start second tool
-        registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+        registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
 
         // Complete the second tool (current one)
         registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
@@ -570,7 +570,7 @@ describe("RALRegistry", () => {
 
       // Start two tools
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
 
       // Clear the second tool via fallback
       const cleared = registry.clearToolFallback(agentPubkey, conversationId, ralNumber, "tool-call-2");

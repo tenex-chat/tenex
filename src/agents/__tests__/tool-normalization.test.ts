@@ -31,8 +31,8 @@ describe("expandFsCapabilities", () => {
     });
 
     it("should not modify tools when neither fs_read nor fs_write is present", () => {
-        const result = expandFsCapabilities(["bash", "web_search"]);
-        expect(result).toEqual(["bash", "web_search"]);
+        const result = expandFsCapabilities(["shell", "rag_search"]);
+        expect(result).toEqual(["shell", "rag_search"]);
     });
 
     it("should return empty array for empty input", () => {
