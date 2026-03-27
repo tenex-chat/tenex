@@ -119,6 +119,7 @@ export class Daemon {
         this.routingLogger = new EventRoutingLogger();
     }
 
+
     /**
      * Set patterns for auto-booting projects on discovery
      * Projects whose d-tag contains any of these patterns will be auto-started
@@ -208,6 +209,8 @@ export class Daemon {
         if (this.readyFired || !this.readyCallback) return;
         if (this.fullyInitialized && this.staticEoseReceived && this.pendingAutoBootCount === 0) {
             this.readyFired = true;
+            // Reclaim transient allocations from the startup burst
+            (globalThis as { Bun?: { gc: (sync: boolean) => void } }).Bun?.gc(true);
             this.readyCallback();
         }
     }

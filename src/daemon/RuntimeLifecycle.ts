@@ -16,6 +16,12 @@ export class RuntimeLifecycle {
     private activeRuntimes = new Map<ProjectDTag, ProjectRuntime>();
     private startingRuntimes = new Map<ProjectDTag, Promise<ProjectRuntime>>();
 
+    // Serialization queue: ensures only one project boots at a time.
+    // Concurrent startup causes Bun's JSC engine to pre-allocate massive memory
+    // pools (~3.5GB) that are never released. Sequential startup with GC pauses
+    // between boots keeps RSS under ~300MB for the same workload.
+    private bootQueue: Promise<void> = Promise.resolve();
+
     constructor(private projectsBase: string) {}
 
     /**
@@ -75,29 +81,46 @@ export class RuntimeLifecycle {
             "project.title": projectTitle,
         });
 
-        // Create startup promise to prevent concurrent startups
-        const startupPromise = this.performStartup(project);
-        this.startingRuntimes.set(projectId, startupPromise);
+        // Serialize through the boot queue to prevent concurrent startup.
+        // Each boot appends to the queue chain so the next waits for the
+        // previous one to finish (and its GC cooldown to reclaim transient allocs).
+        let resolveRuntime!: (rt: ProjectRuntime) => void;
+        let rejectRuntime!: (err: unknown) => void;
+        const runtimePromise = new Promise<ProjectRuntime>((resolve, reject) => {
+            resolveRuntime = resolve;
+            rejectRuntime = reject;
+        });
+        this.startingRuntimes.set(projectId, runtimePromise);
 
-        try {
-            const runtime = await startupPromise;
-            this.activeRuntimes.set(projectId, runtime);
+        this.bootQueue = this.bootQueue.then(async () => {
+            try {
+                const runtime = await this.performStartup(project);
+                this.activeRuntimes.set(projectId, runtime);
 
-            trace.getActiveSpan()?.addEvent("runtime_lifecycle.started", {
-                "project.id": projectId,
-                "project.title": projectTitle,
-            });
+                trace.getActiveSpan()?.addEvent("runtime_lifecycle.started", {
+                    "project.id": projectId,
+                    "project.title": projectTitle,
+                });
 
-            return runtime;
-        } catch (error) {
-            logger.error(`Failed to start project runtime: ${projectId}`, {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            throw error;
-        } finally {
-            // Always clean up the starting promise
-            this.startingRuntimes.delete(projectId);
-        }
+                resolveRuntime(runtime);
+            } catch (error) {
+                logger.error(`Failed to start project runtime: ${projectId}`, {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                rejectRuntime(error);
+            } finally {
+                this.startingRuntimes.delete(projectId);
+            }
+
+            // GC cooldown: reclaim transient allocations before the next boot
+            // starts, preventing JSC from accumulating pre-allocated memory pools.
+            const gc = (globalThis as { Bun?: { gc: (sync: boolean) => void } }).Bun?.gc;
+            gc?.(true);
+            await new Promise(r => setTimeout(r, 200));
+            gc?.(true);
+        });
+
+        return runtimePromise;
     }
 
     /**

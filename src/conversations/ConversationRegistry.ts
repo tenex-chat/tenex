@@ -9,10 +9,10 @@
  *
  * Multi-project support:
  * initialize() accumulates per-project configs instead of overwriting.
- * Methods that need a project ID resolve it via three-tier strategy:
+ * Methods that need a project ID resolve it via:
  *   1. Explicit projectId parameter (if passed)
  *   2. AsyncLocalStorage projectContextStore lookup
- *   3. Legacy fallback (last initialized) with warning log
+ *   3. Single-project shortcut (unambiguous when only one project is initialized)
  *
  * The heavy lifting is delegated to individual ConversationStore instances.
  */
@@ -86,19 +86,13 @@ class ConversationRegistryImpl {
      */
     private _allAgentPubkeys: Set<string> = new Set();
 
-    /**
-     * Legacy fallback: the last projectId set via initialize().
-     * Used only when AsyncLocalStorage context is unavailable (backward compat).
-     */
-    private _legacyProjectId: ProjectDTag | null = null;
 
     get basePath(): string {
         return this._basePath;
     }
 
     /**
-     * Get the current project ID via three-tier resolution.
-     * Prefer resolveProjectId() for new code paths.
+     * Get the current project ID via resolution chain.
      */
     get projectId(): ProjectDTag | null {
         return this.resolveProjectId();
@@ -117,10 +111,14 @@ class ConversationRegistryImpl {
     }
 
     /**
-     * Resolve the current project ID via three-tier strategy:
+     * Resolve the current project ID:
      *   1. Explicit projectId parameter (if passed)
      *   2. AsyncLocalStorage projectContextStore lookup
-     *   3. Legacy fallback (last initialized) with warning log
+     *   3. Single-project shortcut (unambiguous when only one project is initialized)
+     *
+     * In multi-project mode without ALS context, returns null. Callers that
+     * need a project ID (getOrLoad, create) already throw on null. Callers that
+     * perform lookups (get, has) handle null by scanning all projects.
      *
      * @param explicitProjectId - Optional explicit project ID to use directly
      * @returns The resolved project ID, or null if none can be determined
@@ -147,19 +145,12 @@ class ConversationRegistryImpl {
             logger.debug("[ConversationRegistry] Failed to read AsyncLocalStorage context", { error });
         }
 
-        // Tier 3: Legacy fallback with warning
-        if (this._legacyProjectId) {
-            // Only warn if there are multiple projects (single project is expected)
-            if (this._projectConfigs.size > 1) {
-                logger.warn(
-                    "[ConversationRegistry] Using legacy projectId fallback — " +
-                    "this may resolve to the wrong project in multi-project mode",
-                    { projectId: this._legacyProjectId, knownProjects: this._projectConfigs.size }
-                );
-            }
-            return this._legacyProjectId;
+        // Tier 3: Single-project shortcut — unambiguous when exactly one project
+        if (this._projectConfigs.size === 1) {
+            return this._projectConfigs.keys().next().value!;
         }
 
+        // Multiple projects without ALS context: no safe resolution
         return null;
     }
 
@@ -234,9 +225,6 @@ class ConversationRegistryImpl {
 
         // Rebuild the union of all agent pubkeys
         this.rebuildAllAgentPubkeys();
-
-        // Track last initialized for legacy fallback
-        this._legacyProjectId = projectId;
 
         logger.info(`[ConversationRegistry] Initialized for project ${projectId}`, {
             totalProjects: this._projectConfigs.size,
@@ -739,7 +727,6 @@ class ConversationRegistryImpl {
         this._basePath = join(getTenexBasePath(), "projects");
         this._projectConfigs.clear();
         this._allAgentPubkeys.clear();
-        this._legacyProjectId = null;
     }
 }
 

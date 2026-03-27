@@ -1,10 +1,10 @@
 /**
- * Tests for ConversationRegistry.resolveProjectId three-tier resolution
+ * Tests for ConversationRegistry.resolveProjectId resolution chain
  *
  * Verifies the priority chain:
  *   1. Explicit projectId parameter
  *   2. AsyncLocalStorage context (projectContextStore)
- *   3. Legacy fallback (last initialized) with warning log
+ *   3. Single-project shortcut (unambiguous when only one project)
  *
  * Also tests that multiple initialize() calls accumulate entries.
  */
@@ -83,7 +83,7 @@ describe("ConversationRegistry.resolveProjectId", () => {
                 conversationRegistry.resolveProjectId()
             );
 
-            // Should fall through to Tier 3 (legacy fallback)
+            // Should fall through to single-project shortcut
             expect(result).toBe(PROJECT_A);
         });
 
@@ -99,52 +99,44 @@ describe("ConversationRegistry.resolveProjectId", () => {
                 conversationRegistry.resolveProjectId()
             );
 
-            // Should fall through to Tier 3 (legacy fallback)
+            // Should fall through to single-project shortcut
             expect(result).toBe(PROJECT_A);
         });
     });
 
-    describe("Tier 3: Legacy fallback", () => {
-        it("should use legacy fallback when ALS has no context", () => {
+    describe("Tier 3: Single-project shortcut", () => {
+        it("should return the sole project when only one is initialized", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
-            // Outside any ALS context — should fall back to last initialized
+            // Outside any ALS context — should return the only initialized project
             const result = conversationRegistry.resolveProjectId();
             expect(result).toBe(PROJECT_A);
         });
 
-        it("should warn when using legacy fallback with multiple projects", () => {
+        it("should return null when multiple projects are initialized without ALS context", () => {
+            conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
+            conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, []);
+
+            // Outside ALS context with 2 projects => no safe resolution
+            const result = conversationRegistry.resolveProjectId();
+            expect(result).toBeNull();
+        });
+
+        it("should not log any warnings in multi-project mode", () => {
             const warnSpy = spyOn(logger, "warn");
             warnSpy.mockClear();
 
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, []);
 
-            // Outside ALS context with 2 projects => should warn
-            const result = conversationRegistry.resolveProjectId();
-            expect(result).toBe(PROJECT_B); // last initialized
+            conversationRegistry.resolveProjectId();
 
-            const legacyFallbackCalls = warnSpy.mock.calls.filter(
+            // No legacy fallback warning should be emitted
+            const fallbackCalls = warnSpy.mock.calls.filter(
                 (call) =>
                     typeof call[0] === "string" && call[0].includes("legacy projectId fallback")
             );
-            expect(legacyFallbackCalls.length).toBeGreaterThan(0);
-        });
-
-        it("should NOT warn when using legacy fallback with single project", () => {
-            const warnSpy = spyOn(logger, "warn");
-            warnSpy.mockClear();
-
-            conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
-
-            const result = conversationRegistry.resolveProjectId();
-            expect(result).toBe(PROJECT_A);
-
-            const legacyFallbackCalls = warnSpy.mock.calls.filter(
-                (call) =>
-                    typeof call[0] === "string" && call[0].includes("legacy projectId fallback")
-            );
-            expect(legacyFallbackCalls).toHaveLength(0);
+            expect(fallbackCalls).toHaveLength(0);
         });
 
         it("should return null when no project has been initialized", () => {
@@ -242,13 +234,13 @@ describe("ConversationRegistry.resolveProjectId", () => {
             expect(conversationRegistry.isAgentPubkey("pubkey-b1")).toBe(true);
         });
 
-        it("should update legacy fallback to last initialized project", () => {
+        it("should return null outside ALS context with multiple projects", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, []);
 
-            // Outside ALS context, should resolve to last initialized
+            // Outside ALS context with multiple projects — no safe resolution
             const result = conversationRegistry.resolveProjectId();
-            expect(result).toBe(PROJECT_B);
+            expect(result).toBeNull();
         });
     });
 });

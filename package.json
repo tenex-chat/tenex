@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "start": "bun run ./src/index.ts",
+    "daemon": "bun --smol run ./src/index.ts daemon",
     "build": "bun scripts/build-bundled.js",
     "prepublishOnly": "bun run build",
     "test": "bun test",

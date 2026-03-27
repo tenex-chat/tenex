@@ -9,21 +9,44 @@ describe("SubscriptionFilterBuilder", () => {
             expect(filters).toEqual([]);
         });
 
-        test("returns project discovery + config update + agent deletion filter and lesson comment filter", () => {
+        test("returns three filters: project discovery, ops, and lesson comments", () => {
             const filters = buildStaticFilters(
                 new Set(["whitelist1", "whitelist2"])
             );
-            expect(filters).toHaveLength(2);
+            expect(filters).toHaveLength(3);
 
-            // First filter: project discovery + config updates + agent deletions
-            expect(filters[0].kinds).toEqual([31933, NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete]);
+            // First filter: project discovery (replaceable events, no since)
+            expect(filters[0].kinds).toEqual([31933]);
             expect(filters[0].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
+            expect(filters[0].since).toBeUndefined();
 
-            // Second filter: lesson comments (no #p filter)
-            expect(filters[1].kinds).toEqual([NDKKind.Comment]);
-            expect(filters[1]["#K"]).toEqual([String(NDKKind.AgentLesson)]);
+            // Second filter: config updates + agent deletions
+            expect(filters[1].kinds).toEqual([NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete]);
             expect(filters[1].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
-            expect(filters[1]["#p"]).toBeUndefined();
+
+            // Third filter: lesson comments (no #p filter)
+            expect(filters[2].kinds).toEqual([NDKKind.Comment]);
+            expect(filters[2]["#K"]).toEqual([String(NDKKind.AgentLesson)]);
+            expect(filters[2].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
+            expect(filters[2]["#p"]).toBeUndefined();
+        });
+
+        test("applies since to operational filters but not project discovery", () => {
+            const since = Math.floor(Date.now() / 1000);
+            const filters = buildStaticFilters(
+                new Set(["whitelist1"]),
+                since
+            );
+            expect(filters).toHaveLength(3);
+
+            // Project discovery: no since
+            expect(filters[0].since).toBeUndefined();
+
+            // Ops filter: has since
+            expect(filters[1].since).toBe(since);
+
+            // Lesson comments: has since
+            expect(filters[2].since).toBe(since);
         });
     });
 
@@ -71,6 +94,15 @@ describe("SubscriptionFilterBuilder", () => {
             expect(result).not.toBeNull();
             expect(result?.kinds).toEqual([30023]);
             expect(result?.["#a"]).toEqual(["31933:author:project"]);
+        });
+
+        test("applies since when provided", () => {
+            const since = Math.floor(Date.now() / 1000);
+            const result = buildReportFilter(
+                new Set(["31933:author:project"]),
+                since
+            );
+            expect(result?.since).toBe(since);
         });
     });
 

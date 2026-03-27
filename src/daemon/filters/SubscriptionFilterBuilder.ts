@@ -3,32 +3,53 @@ import type { Hexpubkey, NDKFilter } from "@nostr-dev-kit/ndk";
 
 /**
  * Build filters for the static subscription (created once at boot, never recreated).
- * Includes:
- * - Project discovery (kind 31933) from whitelisted pubkeys
- * - Agent config updates (kind 24020) from whitelisted pubkeys
- * - Lesson comments (kind 1111, #K: 4129) from whitelisted pubkeys
+ *
+ * Split into two groups to control historical data volume:
+ * - Project discovery (kind 31933, replaceable) — no `since`, relay returns latest per d-tag
+ * - Operational events (config updates, deletions, lesson comments) — bounded by `since`
+ *   because historical data is already loaded from local storage at boot
+ *
+ * @param whitelistedPubkeys - Pubkeys to monitor
+ * @param since - Unix timestamp (seconds) bounding operational events
  */
-export function buildStaticFilters(whitelistedPubkeys: Set<Hexpubkey>): NDKFilter[] {
+export function buildStaticFilters(whitelistedPubkeys: Set<Hexpubkey>, since?: number): NDKFilter[] {
     if (whitelistedPubkeys.size === 0) {
         return [];
     }
 
     const authors = Array.from(whitelistedPubkeys);
 
-    return [
-        // Project discovery + agent config updates + agent deletions
+    const filters: NDKFilter[] = [
+        // Project discovery — replaceable events, relay sends latest per d-tag
         {
-            kinds: [31933, NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete],
-            authors,
-        },
-        // Lesson comments from whitelisted authors
-        // No #p filter — the Daemon uses the E tag to route to the correct agent
-        {
-            kinds: [NDKKind.Comment],
-            "#K": [String(NDKKind.AgentLesson)],
+            kinds: [31933],
             authors,
         },
     ];
+
+    // Operational events — bounded by since to avoid replaying history
+    const opsFilter: NDKFilter = {
+        kinds: [NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete],
+        authors,
+    };
+    if (since !== undefined) {
+        opsFilter.since = since;
+    }
+    filters.push(opsFilter);
+
+    // Lesson comments from whitelisted authors
+    // No #p filter — the Daemon uses the E tag to route to the correct agent
+    const lessonFilter: NDKFilter = {
+        kinds: [NDKKind.Comment],
+        "#K": [String(NDKKind.AgentLesson)],
+        authors,
+    };
+    if (since !== undefined) {
+        lessonFilter.since = since;
+    }
+    filters.push(lessonFilter);
+
+    return filters;
 }
 
 /**
@@ -60,17 +81,24 @@ export function buildProjectTaggedFilter(knownProjects: Set<string>, since?: num
  * Build filter for report events (kind 30023 - NDKArticle)
  * Monitors reports tagged with our project
  * @param knownProjects - Set of project A-tags (format: "31933:authorPubkey:dTag")
+ * @param since - Optional Unix timestamp (seconds) to filter out historical events
  * @returns NDKFilter for report events or null if no projects
  */
-export function buildReportFilter(knownProjects: Set<string>): NDKFilter | null {
+export function buildReportFilter(knownProjects: Set<string>, since?: number): NDKFilter | null {
     if (knownProjects.size === 0) {
         return null;
     }
 
-    return {
+    const filter: NDKFilter = {
         kinds: [30023],
         "#a": Array.from(knownProjects),
     };
+
+    if (since !== undefined) {
+        filter.since = since;
+    }
+
+    return filter;
 }
 
 /**

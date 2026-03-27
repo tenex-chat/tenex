@@ -96,6 +96,14 @@ export async function setupStreamExecution(
         ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
         : { skills: [], content: "" };
 
+    // Ensure MCP servers are started before resolving tools.
+    // This is deferred from project boot to avoid spawning heavy child
+    // processes (e.g. Chrome for chrome-devtools-mcp) until an agent
+    // actually needs them.
+    if ("mcpManager" in context && context.mcpManager) {
+        await context.mcpManager.ensureReady();
+    }
+
     // Now get tools with nudge permissions applied
     // IMPORTANT: Always call getToolsObject even with empty base tools,
     // because nudge permissions (allow-tool, only-tool) can grant tools

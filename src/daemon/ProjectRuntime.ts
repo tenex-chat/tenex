@@ -25,6 +25,7 @@ import { RALRegistry } from "@/services/ral";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
+import { ActiveRalIndex } from "@/conversations/ActiveRalIndex";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -180,15 +181,10 @@ export class ProjectRuntime {
             const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);
             ConversationStore.initialize(this.metadataPath, agentPubkeys);
 
-            // Reconcile any orphaned RALs from a previous daemon run
-            await this.reconcileOrphanedRals();
-
-            // Warm user profile cache for whitelisted pubkeys and project owner
-            // This ensures getNameSync() returns real names instead of shortened pubkeys
-            // for message attribution in delegations.
-            // Must run within projectContextStore.run() since PubkeyService.getAgentSlug
-            // needs project context to filter out agent pubkeys.
+            // Reconcile orphaned RALs and warm user profile cache within ALS context
+            // so that resolveProjectId() can identify this project.
             await projectContextStore.run(this.context, async () => {
+                await this.reconcileOrphanedRals();
                 await this.warmUserProfileCache();
             });
 
@@ -502,12 +498,10 @@ export class ProjectRuntime {
             if (installedCount.success > 0) {
                 await this.mcpManager.initialize(this.metadataPath, this.projectBasePath);
 
-                const runningServers = this.mcpManager.getRunningServers();
-                const availableTools = Object.keys(this.mcpManager.getCachedTools());
+                const configuredServers = this.mcpManager.getRunningServers();
 
                 trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
-                    "mcp.running_servers": runningServers.length,
-                    "mcp.available_tools": availableTools.length,
+                    "mcp.configured_servers": configuredServers.length,
                 });
             } else {
                 logger.warn(
@@ -574,27 +568,27 @@ export class ProjectRuntime {
     }
 
     /**
-     * Scan all persisted conversations and reconcile orphaned RALs.
+     * Reconcile orphaned RALs using the active RAL index.
      * An orphaned RAL is one that's marked as "active" in ConversationStore
      * but doesn't exist in RALRegistry (because daemon was restarted).
+     *
+     * Uses ActiveRalIndex to look up only the conversations that had active
+     * RALs at the time of the last shutdown, instead of scanning all files.
      */
     private async reconcileOrphanedRals(): Promise<void> {
-        const conversationsDir = path.join(this.metadataPath, "conversations");
+        const index = ActiveRalIndex.getInstance(this.metadataPath);
+        const candidateIds = index.getConversationIds();
 
-        let files: string[];
-        try {
-            files = await fs.readdir(conversationsDir);
-        } catch {
-            return; // No conversations directory yet
+        if (candidateIds.length === 0) {
+            return;
         }
+
+        logger.info(`[ProjectRuntime] Reconciling ${candidateIds.length} conversation(s) with active RALs`);
 
         const ralRegistry = RALRegistry.getInstance();
         let totalReconciled = 0;
 
-        for (const file of files) {
-            if (!file.endsWith(".json")) continue;
-
-            const conversationId = file.replace(".json", "");
+        for (const conversationId of candidateIds) {
             const store = ConversationStore.getOrLoad(conversationId);
 
             const allActiveRals = store.getAllActiveRals();

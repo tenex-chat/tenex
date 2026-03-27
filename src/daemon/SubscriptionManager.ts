@@ -66,7 +66,10 @@ export class SubscriptionManager {
             whitelistedPubkeys: Array.from(this.whitelistedPubkeys).map((p) => p.slice(0, 8)),
         });
 
-        const filters = buildStaticFilters(this.whitelistedPubkeys);
+        // Bound operational events to boot time — historical config updates and
+        // lessons are already persisted locally, so only fetch live updates.
+        const bootSince = Math.floor(Date.now() / 1000);
+        const filters = buildStaticFilters(this.whitelistedPubkeys, bootSince);
         if (filters.length > 0) {
             this.staticSubscription = this.createSub(filters, "static", this.onStaticEoseCallback);
         }
@@ -104,7 +107,7 @@ export class SubscriptionManager {
         const taggedFilter = buildProjectTaggedFilter(knownProjects, since);
         if (taggedFilter) filters.push(taggedFilter);
 
-        const reportFilter = buildReportFilter(knownProjects);
+        const reportFilter = buildReportFilter(knownProjects, since);
         if (reportFilter) filters.push(reportFilter);
 
         if (filters.length > 0) {

@@ -59,6 +59,11 @@ export class MCPManager {
     /** Per-server list of notification handlers (dispatcher pattern to avoid clobbering) */
     private resourceNotificationHandlers: Map<string, ResourceNotificationHandler[]> = new Map();
 
+    /** Deferred config: servers are started lazily on first access */
+    private pendingConfig: TenexMCP | null = null;
+    private serversStarted = false;
+    private serverStartPromise: Promise<void> | null = null;
+
     /**
      * Convert an MCP tool (JSON Schema) to an AI SDK tool.
      * Uses `jsonSchema()` to pass the MCP JSON Schema directly to the AI SDK.
@@ -139,19 +144,60 @@ export class MCPManager {
                 return;
             }
 
+            // Store config for deferred startup — servers are spawned on first access
             if (mergedMCP.servers && Object.keys(mergedMCP.servers).length > 0) {
-                await this.startServers(mergedMCP);
-                await this.refreshToolCache();
+                this.pendingConfig = mergedMCP;
+                logger.info("MCP servers configured (deferred startup)", {
+                    servers: Object.keys(mergedMCP.servers),
+                });
             }
             this.isInitialized = true;
 
             trace.getActiveSpan()?.addEvent("mcp.initialized", {
-                "servers.count": this.clients.size,
+                "servers.configured": Object.keys(mergedMCP.servers).length,
             });
         } catch (error) {
             logger.error("Failed to initialize MCP manager:", error);
             // Don't throw - allow the system to continue without MCP
         }
+    }
+
+    /**
+     * Ensure MCP servers are started. Called lazily on first access.
+     * Concurrent calls share a single startup.
+     */
+    private async ensureServersStarted(): Promise<void> {
+        if (this.serversStarted || !this.pendingConfig) {
+            return;
+        }
+
+        if (this.serverStartPromise) {
+            await this.serverStartPromise;
+            return;
+        }
+
+        this.serverStartPromise = this.startDeferredServers();
+        try {
+            await this.serverStartPromise;
+        } finally {
+            this.serverStartPromise = null;
+        }
+    }
+
+    private async startDeferredServers(): Promise<void> {
+        const config = this.pendingConfig;
+        if (!config) return;
+
+        this.pendingConfig = null;
+        this.serversStarted = true;
+
+        logger.info("Starting MCP servers (first access)");
+        await this.startServers(config);
+        await this.refreshToolCache();
+
+        trace.getActiveSpan()?.addEvent("mcp.servers_started_lazy", {
+            "servers.count": this.clients.size,
+        });
     }
 
     private async startServers(mcpConfig: TenexMCP): Promise<void> {
@@ -316,14 +362,27 @@ export class MCPManager {
      * Refresh the tool cache
      */
     async refreshTools(): Promise<void> {
+        await this.ensureServersStarted();
         await this.refreshToolCache();
     }
 
     /**
-     * Get all cached MCP tools as an object keyed by tool name
+     * Get all cached MCP tools as an object keyed by tool name.
+     * Returns only tools from servers that have already been started.
+     * Does NOT trigger lazy server startup — callers that need tools
+     * for agent execution should call ensureReady() first.
      */
     getCachedTools(): MCPToolSet {
         return this.cachedTools;
+    }
+
+    /**
+     * Ensure MCP servers are started and tools are available.
+     * Call this before getCachedTools() when tools are actually needed
+     * for agent execution (not for telemetry/status reporting).
+     */
+    async ensureReady(): Promise<void> {
+        await this.ensureServersStarted();
     }
 
     async shutdown(): Promise<void> {
@@ -342,6 +401,9 @@ export class MCPManager {
         this.resourceTemplateInFlight.clear();
         // Clear notification handlers so reload() re-registers them on new clients
         this.resourceNotificationHandlers.clear();
+        this.pendingConfig = null;
+        this.serversStarted = false;
+        this.serverStartPromise = null;
         this.isInitialized = false;
     }
 
@@ -366,14 +428,19 @@ export class MCPManager {
     }
 
     /**
-     * Get list of running servers
+     * Get list of configured servers (running or pending lazy start).
      */
     getRunningServers(): string[] {
-        return Array.from(this.clients.keys());
+        const running = Array.from(this.clients.keys());
+        if (this.pendingConfig) {
+            const pending = Object.keys(this.pendingConfig.servers).filter(n => !this.clients.has(n));
+            return [...running, ...pending];
+        }
+        return running;
     }
 
     /**
-     * Get configuration for all running MCP servers.
+     * Get configuration for all MCP servers (running or pending).
      * Used to pass server configs to LLM providers with MCP support
      * that need to spawn their own instances of these servers.
      *
@@ -381,6 +448,9 @@ export class MCPManager {
      */
     getServerConfigs(): Record<string, MCPServerConfig> {
         const configs: Record<string, MCPServerConfig> = {};
+        if (this.pendingConfig) {
+            Object.assign(configs, this.pendingConfig.servers);
+        }
         for (const [name, entry] of this.clients) {
             configs[name] = entry.config;
         }
@@ -455,6 +525,7 @@ export class MCPManager {
         serverName: string,
         options: MCPListOptions = {}
     ): Promise<Resource[]> {
+        await this.ensureServersStarted();
         return this.fetchCachedMetadata<Resource>(
             serverName,
             this.resourceListCache,
@@ -472,6 +543,7 @@ export class MCPManager {
         serverName: string,
         options: MCPListOptions = {}
     ): Promise<ResourceTemplate[]> {
+        await this.ensureServersStarted();
         return this.fetchCachedMetadata<ResourceTemplate>(
             serverName,
             this.resourceTemplateCache,
@@ -518,6 +590,7 @@ export class MCPManager {
         serverName: string,
         uri: string
     ): Promise<ReadResourceResult> {
+        await this.ensureServersStarted();
         const entry = this.getClientEntry(serverName);
 
         try {

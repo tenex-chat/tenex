@@ -74,8 +74,10 @@ export class ConversationIndexingJob {
             projectsBasePath: this.projectsBasePath,
         });
 
-        // Run immediately on start
-        this.scheduleNextBatch(0);
+        // Defer first batch to avoid loading LanceDB + embedding model during
+        // the startup burst. Concurrent heavy allocations cause JSC to
+        // pre-allocate massive memory pools that are never released.
+        this.scheduleNextBatch(this.intervalMs);
     }
 
     /**

@@ -39,6 +39,7 @@ import type {
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
 import type { ProjectDTag } from "@/types/project-ids";
+import { ActiveRalIndex } from "./ActiveRalIndex";
 
 interface BuildMessagesOptions {
     includeMessageIds?: boolean;
@@ -465,6 +466,7 @@ export class ConversationStore {
             this.state.activeRal[agentPubkey] = [];
         }
         this.state.activeRal[agentPubkey].push({ id: nextNum });
+        this.syncActiveRalIndex();
         return nextNum;
     }
 
@@ -478,6 +480,7 @@ export class ConversationStore {
             if (ralNumber >= currentNext) {
                 this.state.nextRalNumber[agentPubkey] = ralNumber;
             }
+            this.syncActiveRalIndex();
         }
     }
 
@@ -486,6 +489,7 @@ export class ConversationStore {
         if (activeRals) {
             this.state.activeRal[agentPubkey] = activeRals.filter((r) => r.id !== ralNumber);
         }
+        this.syncActiveRalIndex();
     }
 
     isRalActive(agentPubkey: string, ralNumber: number): boolean {
@@ -506,6 +510,22 @@ export class ConversationStore {
             }
         }
         return result;
+    }
+
+    /**
+     * Sync this conversation's presence in the active RAL index.
+     * Adds the conversation if it has any active RALs, removes it if none remain.
+     */
+    private syncActiveRalIndex(): void {
+        if (!this.projectId || !this.conversationId) return;
+        const projectPath = join(this.basePath, this.projectId);
+        const index = ActiveRalIndex.getInstance(projectPath);
+        const hasActiveRals = Object.values(this.state.activeRal).some(rals => rals.length > 0);
+        if (hasActiveRals) {
+            index.add(this.conversationId);
+        } else {
+            index.remove(this.conversationId);
+        }
     }
 
     // Message Operations
