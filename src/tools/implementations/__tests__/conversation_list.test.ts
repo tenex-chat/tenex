@@ -3,7 +3,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
 import * as agentResolutionModule from "@/services/agents/AgentResolution";
 import * as nostrEntityParserModule from "@/utils/nostr-entity-parser";
-import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
+import { shortenPubkey } from "@/utils/conversation-id";
 
 // Mock dependencies - must be before imports
 mock.module("@/utils/logger", () => ({
@@ -353,8 +353,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            // ID is now shortened to 12 characters
-            expect(result.conversations[0].id).toBe(shortenConversationId("conv1"));
+            expect(result.conversations[0].id).toBe("conv1");
             expect(result.conversations[0].title).toBe("Current Project Conversation");
             // New fields: participants and delegations
             expect(result.conversations[0].participants).toBeDefined();
@@ -415,8 +414,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            // ID is now shortened to 12 characters
-            expect(result.conversations[0].id).toBe(shortenConversationId("conv2"));
+            expect(result.conversations[0].id).toBe("conv2");
         });
 
         it("should include projectId in ConversationSummary for external project", async () => {
@@ -494,10 +492,9 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(2);
 
-            // IDs are shortened but since they're short anyway, they remain the same
             const convIds = result.conversations.map(c => c.id);
-            expect(convIds).toContain(shortenConversationId("conv1"));
-            expect(convIds).toContain(shortenConversationId("conv2"));
+            expect(convIds).toContain("conv1");
+            expect(convIds).toContain("conv2");
         });
 
         it("should include correct projectId in each ConversationSummary", async () => {
@@ -517,9 +514,8 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
 
-            // IDs are shortened
-            const conv1 = result.conversations.find(c => c.id === shortenConversationId("conv1"));
-            const conv2 = result.conversations.find(c => c.id === shortenConversationId("conv2"));
+            const conv1 = result.conversations.find(c => c.id === "conv1");
+            const conv2 = result.conversations.find(c => c.id === "conv2");
 
             expect(conv1?.projectId).toBe("current-project");
             expect(conv2?.projectId).toBe("other-project");
@@ -546,12 +542,11 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(2);
 
-            // Most recent should be first (IDs are shortened)
-            expect(result.conversations[0].id).toBe(shortenConversationId("conv2"));
+            expect(result.conversations[0].id).toBe("conv2");
             expect(result.conversations[0].lastActivity).toBe(1700005000);
 
             // Older should be second
-            expect(result.conversations[1].id).toBe(shortenConversationId("conv1"));
+            expect(result.conversations[1].id).toBe("conv1");
             expect(result.conversations[1].lastActivity).toBe(1700000000);
         });
 
@@ -591,11 +586,10 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(4);
 
-            // Should be sorted by lastActivity descending (IDs are shortened)
-            expect(result.conversations[0].id).toBe(shortenConversationId("conv4")); // 1700004000
-            expect(result.conversations[1].id).toBe(shortenConversationId("conv3")); // 1700003000
-            expect(result.conversations[2].id).toBe(shortenConversationId("conv2")); // 1700002000
-            expect(result.conversations[3].id).toBe(shortenConversationId("conv1")); // 1700001000
+            expect(result.conversations[0].id).toBe("conv4"); // 1700004000
+            expect(result.conversations[1].id).toBe("conv3"); // 1700003000
+            expect(result.conversations[2].id).toBe("conv2"); // 1700002000
+            expect(result.conversations[3].id).toBe("conv1"); // 1700001000
         });
     });
 
@@ -619,7 +613,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            expect(result.conversations[0].id).toBe(shortenConversationId("conv2"));
+            expect(result.conversations[0].id).toBe("conv2");
         });
 
         it("should filter by toTime", async () => {
@@ -641,7 +635,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            expect(result.conversations[0].id).toBe(shortenConversationId("conv1"));
+            expect(result.conversations[0].id).toBe("conv1");
         });
     });
 
@@ -658,9 +652,8 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(2);
-            // Should return the 2 most recent (IDs are shortened)
-            expect(result.conversations[0].id).toBe(shortenConversationId("conv3"));
-            expect(result.conversations[1].id).toBe(shortenConversationId("conv2"));
+            expect(result.conversations[0].id).toBe("conv3");
+            expect(result.conversations[1].id).toBe("conv2");
         });
 
         it("should default limit to 50", async () => {
@@ -721,8 +714,7 @@ describe("conversation_list Tool", () => {
             expect(result.conversations).toHaveLength(1);
 
             const summary = result.conversations[0];
-            // ID is shortened to 12 characters
-            expect(summary.id).toBe(shortenConversationId("conv1"));
+            expect(summary.id).toBe("conv1");
             expect(summary.title).toBe("Test Conversation");
             expect(summary.summary).toBe("A test summary");
             expect(summary.messageCount).toBe(2);
@@ -789,7 +781,7 @@ describe("conversation_list Tool", () => {
             expect(summary.participants).toHaveLength(2);
         });
 
-        it("should include shortened delegation IDs", async () => {
+        it("should include exact delegation IDs", async () => {
             const delegationConvId = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
             mockStoreOverrides["current-project:conv1"] = {
                 messages: [
@@ -816,8 +808,7 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             const summary = result.conversations[0];
             expect(summary.delegations).toHaveLength(1);
-            // Should be shortened to 12 characters
-            expect(summary.delegations[0]).toBe(shortenConversationId(delegationConvId));
+            expect(summary.delegations[0]).toBe(delegationConvId);
         });
     });
 

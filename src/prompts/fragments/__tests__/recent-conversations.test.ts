@@ -345,6 +345,7 @@ describe("recentConversationsFragment", () => {
             });
 
             expect(result).toMatch(/1\. \*\*Recent Task 1\*\* \(\d+[hm] ago\)/);
+            expect(result).toContain(`[id: ${recentConversation1Preview.id}]`);
         });
 
         it("should use truncated conversation ID when title is missing", () => {

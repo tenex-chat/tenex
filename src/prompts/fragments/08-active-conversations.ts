@@ -4,7 +4,6 @@ import type { DelegationChainEntry } from "@/conversations/types";
 import { formatRelativeTimeShort } from "@/lib/time";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { getIdentityService } from "@/services/identity";
-import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -45,6 +44,13 @@ const MAX_CONVERSATIONS = 10;
 const MAX_SUMMARY_LENGTH = 200;
 const ELLIPSIS = "...";
 const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
+function truncateConversationIdForDisplay(conversationId: string, maxLength = 12): string {
+    if (conversationId.length <= maxLength) {
+        return conversationId;
+    }
+    return `${conversationId.substring(0, maxLength)}${ELLIPSIS}`;
+}
 
 /**
  * Sanitize text for safe inclusion in system prompt.
@@ -202,11 +208,11 @@ function sortNodeChildren(node: ConversationTreeNode): ConversationTreeNode {
  * Render a single conversation line in compact format.
  */
 function renderConversationLine(entry: ActiveConversationEntry): string {
-    const title = entry.title || `Conversation ${shortenConversationId(entry.conversationId)}...`;
+    const title = entry.title || `Conversation ${truncateConversationIdForDisplay(entry.conversationId)}`;
     const duration = formatDuration(entry.startedAt);
     const lastMsg = formatRelativeTimeShort(Math.floor(entry.lastActivityAt / 1000));
     const staleMarker = isStale(entry.lastActivityAt) ? " [stale]" : "";
-    return `**${title}** (${entry.agentName}) - ${duration}, last msg ${lastMsg}${staleMarker}`;
+    return `**${title}** (${entry.agentName}) - ${duration}, last msg ${lastMsg}${staleMarker} [id: ${entry.conversationId}]`;
 }
 
 /**
@@ -375,7 +381,7 @@ export const activeConversationsFragment: PromptFragment<ActiveConversationsArgs
 
         return `## Active Conversations
 
-The following conversations are currently active in this project (agents working):
+The following conversations are currently active in this project (agents working). Use the exact \`id\` shown with \`conversation_get\` if you need to inspect one:
 
 ${lines.join("\n")}
 

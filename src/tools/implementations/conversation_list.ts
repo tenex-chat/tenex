@@ -47,7 +47,7 @@ const conversationListSchema = z.object({
 type ConversationListInput = z.infer<typeof conversationListSchema>;
 
 interface ConversationSummary {
-    /** Shortened event ID (12 characters) */
+    /** Exact stored conversation ID, reusable with conversation_get */
     id: string;
     projectId?: string;
     title?: string;
@@ -58,7 +58,7 @@ interface ConversationSummary {
     lastActivity?: number;
     /** Names of participants in this conversation (resolved via stored identity or PubkeyService) */
     participants: string[];
-    /** Shortened event IDs of delegations that occurred in this conversation */
+    /** Exact stored IDs of delegations that occurred in this conversation */
     delegations: string[];
 }
 
@@ -66,13 +66,6 @@ interface ConversationListOutput {
     success: boolean;
     conversations: ConversationSummary[];
     total: number;
-}
-
-/**
- * Shorten a full 64-char event ID to the standard prefix length
- */
-function shortenEventId(fullId: string): string {
-    return fullId.substring(0, PREFIX_LENGTH);
 }
 
 /**
@@ -151,7 +144,7 @@ function summarizeConversation(conversation: ConversationStore, projectId?: stri
     const delegationIds = extractDelegationIds(conversation);
 
     return {
-        id: shortenEventId(conversation.id),
+        id: conversation.id,
         projectId,
         title: metadata.title ?? conversation.title,
         summary: metadata.summary,
@@ -159,7 +152,7 @@ function summarizeConversation(conversation: ConversationStore, projectId?: stri
         createdAt: firstMessage?.timestamp,
         lastActivity: lastMessage?.timestamp,
         participants: participantNames,
-        delegations: delegationIds.map(shortenEventId),
+        delegations: delegationIds,
     };
 }
 
@@ -306,7 +299,7 @@ async function executeConversationList(
         toTime,
         projectId: effectiveProjectId,
         with: withParam,
-        withPubkey: withPubkey ? shortenEventId(withPubkey) : undefined,
+        withPubkey: withPubkey ? withPubkey.substring(0, PREFIX_LENGTH) : undefined,
         agent: context.agent.name,
     });
 
@@ -370,7 +363,7 @@ async function executeConversationList(
 export function createConversationListTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "List conversations for this project with summary information including ID, title, summary, participants, delegations, message count, and timestamps. Results are sorted by most recent activity. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). Use the 'with' parameter to filter to conversations where a specific actor was active. Use this to discover available conversations before retrieving specific ones with conversation_get.",
+            "List conversations for this project with summary information including the exact stored conversation ID, title, summary, participants, delegations, message count, and timestamps. Results are sorted by most recent activity. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). Use the 'with' parameter to filter to conversations where a specific actor was active. Use the returned id values directly with conversation_get.",
 
         inputSchema: conversationListSchema,
 
