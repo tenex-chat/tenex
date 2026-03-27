@@ -5,32 +5,33 @@ export type {
     VectorStoreConfig,
 } from "./types";
 export { DEFAULT_VECTOR_STORE_CONFIG } from "./types";
-export { LanceDBProvider } from "./LanceDBProvider";
-export { SqliteVecProvider } from "./SqliteVecProvider";
-export { QdrantProvider } from "./QdrantProvider";
 
 import { logger } from "@/utils/logger";
-import { LanceDBProvider } from "./LanceDBProvider";
-import { QdrantProvider } from "./QdrantProvider";
-import { SqliteVecProvider } from "./SqliteVecProvider";
 import type { VectorStore, VectorStoreConfig } from "./types";
 import { DEFAULT_VECTOR_STORE_CONFIG } from "./types";
 
 /**
  * Create a VectorStore instance based on configuration.
+ * Uses dynamic imports to only load the configured provider.
  * Defaults to LanceDB if no config is provided.
  */
-export function createVectorStore(storeConfig?: VectorStoreConfig): VectorStore {
+export async function createVectorStore(storeConfig?: VectorStoreConfig): Promise<VectorStore> {
     const resolvedConfig = storeConfig ?? DEFAULT_VECTOR_STORE_CONFIG;
 
     logger.debug(`Creating vector store: ${resolvedConfig.provider}`);
 
     switch (resolvedConfig.provider) {
-        case "lancedb":
+        case "lancedb": {
+            const { LanceDBProvider } = await import("./LanceDBProvider");
             return new LanceDBProvider(resolvedConfig);
-        case "sqlite-vec":
+        }
+        case "sqlite-vec": {
+            const { SqliteVecProvider } = await import("./SqliteVecProvider");
             return new SqliteVecProvider(resolvedConfig);
-        case "qdrant":
+        }
+        case "qdrant": {
+            const { QdrantProvider } = await import("./QdrantProvider");
             return new QdrantProvider(resolvedConfig);
+        }
     }
 }

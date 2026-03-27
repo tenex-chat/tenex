@@ -43,7 +43,7 @@ export class RAGService {
 
             // Load vector store config and create provider
             const vectorStoreConfig = await loadVectorStoreConfig();
-            this.vectorStore = createVectorStore(vectorStoreConfig);
+            this.vectorStore = await createVectorStore(vectorStoreConfig);
             await this.vectorStore.initialize();
 
             // Create embedding provider
