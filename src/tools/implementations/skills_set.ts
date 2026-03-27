@@ -67,6 +67,7 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
             const projectContext = getProjectContext();
             const skillLookupContext = {
                 agentPubkey,
+                projectPath: context.projectBasePath || undefined,
                 projectDTag:
                     projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
             };

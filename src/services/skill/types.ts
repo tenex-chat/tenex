@@ -45,13 +45,16 @@ export interface SkillFileInstallResult {
  *
  * Resolution precedence is:
  * 1. agent home (`$TENEX_BASE_DIR/home/<agent-short-pubkey>/skills`)
- * 2. project metadata (`$TENEX_BASE_DIR/projects/<project-dTag>/skills`)
- * 3. global (`$TENEX_BASE_DIR/skills`)
- * 4. legacy shared skills (`~/.agents/skills`)
+ * 2. project repository (`<projectPath>/skills`)
+ * 3. project metadata (`$TENEX_BASE_DIR/projects/<project-dTag>/skills`)
+ * 4. global (`$TENEX_BASE_DIR/skills`)
+ * 5. legacy shared skills (`~/.agents/skills`)
  */
 export interface SkillLookupContext {
     /** Agent pubkey whose home-scoped skills should be considered */
     agentPubkey?: string;
+    /** Project repository base path for workspace-scoped skills */
+    projectPath?: string;
     /** Project d-tag whose project-scoped skills should be considered */
     projectDTag?: string;
 }

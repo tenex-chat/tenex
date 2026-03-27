@@ -49,7 +49,7 @@ interface LocalSkillRecord {
     metadata?: StoredSkillMetadata;
 }
 
-type SkillStoreScope = "agent" | "project" | "global" | "legacy-agents";
+type SkillStoreScope = "agent" | "project-repo" | "project" | "global" | "legacy-agents";
 
 interface SkillStoreDirectory {
     dir: string;
@@ -57,14 +57,14 @@ interface SkillStoreDirectory {
 }
 
 /**
- * Service for resolving the effective local skill set across agent, project,
- * global directories, plus the shared ~/.agents fallback.
+ * Service for resolving the effective local skill set across agent, project-repo,
+ * project, global directories, plus the shared ~/.agents fallback.
  *
  * Remote kind:4202 skills still hydrate into the global store at
  * $TENEX_BASE_DIR/skills/<id>/SKILL.md.
  *
  * When the same local skill ID exists in multiple scopes, precedence is:
- * agent > project > global > ~/.agents.
+ * agent > project-repo > project > global > ~/.agents.
  */
 export class SkillService {
     private static instance: SkillService;
@@ -119,6 +119,17 @@ export class SkillService {
         return skillsDir;
     }
 
+    private async getProjectRepoSkillsBaseDir(
+        projectPath: string,
+        ensureExists = false
+    ): Promise<string> {
+        const skillsDir = path.join(projectPath, "skills");
+        if (ensureExists) {
+            await ensureDirectory(skillsDir);
+        }
+        return skillsDir;
+    }
+
     private async getAgentSkillsBaseDir(
         agentPubkey: string,
         ensureExists = false
@@ -160,6 +171,13 @@ export class SkillService {
             directories.push({
                 scope: "agent",
                 dir: await this.getAgentSkillsBaseDir(lookupContext.agentPubkey),
+            });
+        }
+
+        if (lookupContext.projectPath) {
+            directories.push({
+                scope: "project-repo",
+                dir: await this.getProjectRepoSkillsBaseDir(lookupContext.projectPath),
             });
         }
 

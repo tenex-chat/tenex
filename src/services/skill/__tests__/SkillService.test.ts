@@ -292,6 +292,102 @@ describe("SkillService", () => {
         expect(result.skills[0].content).toBe("Agent poster skill");
     });
 
+    it("loads project-repo skills when projectPath is provided", async () => {
+        const projectRepoPath = "/path/to/my-project";
+        seedFile(
+            `${projectRepoPath}/skills/repo-skill/SKILL.md`,
+            createSkillDocument({
+                name: "repo-skill",
+                description: "Project repo skill description",
+                content: "Project repo skill content",
+            })
+        );
+
+        const skills = await SkillService.getInstance().listAvailableSkills({
+            projectPath: projectRepoPath,
+        });
+        const result = await SkillService.getInstance().fetchSkills(
+            ["repo-skill"],
+            { projectPath: projectRepoPath }
+        );
+
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("repo-skill");
+        expect(skills[0].content).toBe("Project repo skill content");
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Project repo skill content");
+    });
+
+    it("prefers project-repo skills over project-metadata skills when identifiers conflict", async () => {
+        const projectRepoPath = "/path/to/my-project";
+        seedFile(
+            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/conflict-skill/SKILL.md",
+            createSkillDocument({
+                name: "conflict-skill",
+                description: "Project metadata description",
+                content: "Project metadata skill",
+            })
+        );
+        seedFile(
+            `${projectRepoPath}/skills/conflict-skill/SKILL.md`,
+            createSkillDocument({
+                name: "conflict-skill",
+                description: "Project repo description",
+                content: "Project repo skill",
+            })
+        );
+
+        const skills = await SkillService.getInstance().listAvailableSkills({
+            projectPath: projectRepoPath,
+            projectDTag: PROJECT_DTAG,
+        });
+        const result = await SkillService.getInstance().fetchSkills(
+            ["conflict-skill"],
+            { projectPath: projectRepoPath, projectDTag: PROJECT_DTAG }
+        );
+
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("conflict-skill");
+        expect(skills[0].content).toBe("Project repo skill");
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Project repo skill");
+    });
+
+    it("prefers agent skills over project-repo skills when identifiers conflict", async () => {
+        const projectRepoPath = "/path/to/my-project";
+        seedFile(
+            `${projectRepoPath}/skills/agent-vs-repo/SKILL.md`,
+            createSkillDocument({
+                name: "agent-vs-repo",
+                description: "Project repo description",
+                content: "Project repo skill",
+            })
+        );
+        seedFile(
+            "/tmp/test-tenex/home/aaaaaaaa/skills/agent-vs-repo/SKILL.md",
+            createSkillDocument({
+                name: "agent-vs-repo",
+                description: "Agent skill description",
+                content: "Agent skill",
+            })
+        );
+
+        const skills = await SkillService.getInstance().listAvailableSkills({
+            agentPubkey: AGENT_PUBKEY,
+            projectPath: projectRepoPath,
+        });
+        const result = await SkillService.getInstance().fetchSkills(
+            ["agent-vs-repo"],
+            { agentPubkey: AGENT_PUBKEY, projectPath: projectRepoPath }
+        );
+
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("agent-vs-repo");
+        expect(skills[0].content).toBe("Agent skill");
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Agent skill");
+    });
+
     it("loads legacy ~/.agents skills when no higher-precedence copy exists", async () => {
         seedFile(
             "/Users/pablofernandez/.agents/skills/legacy-only/SKILL.md",
