@@ -4,6 +4,7 @@ import { ProjectAlreadyRunningError } from "./errors";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/projects";
+import { tryExtractDTagFromAddress } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -45,6 +46,14 @@ function truncatePubkey(pubkey: string): string {
     return pubkey.substring(0, 8);
 }
 
+/**
+ * Normalize persisted project identifiers to the daemon's internal d-tag form.
+ * Scheduled tasks historically stored NIP-33 project addresses.
+ */
+function normalizeProjectIdForRuntime(projectId: string): string {
+    return tryExtractDTagFromAddress(projectId) ?? projectId;
+}
+
 interface ScheduledTask {
     id: string;
     title?: string; // Human-readable title for the scheduled task
@@ -55,7 +64,7 @@ interface ScheduledTask {
     createdAt?: string; // When the task was created
     fromPubkey: string; // Who scheduled this task (the scheduler)
     toPubkey: string; // Target agent that should execute the task
-    projectId: string; // Project A-tag ID (format: "31933:authorPubkey:dTag")
+    projectId: string; // Usually a project a-tag address; runtime callbacks normalize it to a d-tag
     type?: "cron" | "oneoff"; // Task type - defaults to "cron" for backward compatibility
     executeAt?: string; // ISO timestamp for one-off tasks
 }
@@ -299,7 +308,10 @@ export class SchedulerService {
 
         // If projectId is provided, filter tasks by that project
         if (projectId) {
-            return allTasks.filter((task) => task.projectId === projectId);
+            const normalizedProjectId = normalizeProjectIdForRuntime(projectId);
+            return allTasks.filter(
+                (task) => normalizeProjectIdForRuntime(task.projectId) === normalizedProjectId
+            );
         }
 
         // Return all tasks if no filter specified
@@ -722,9 +734,11 @@ export class SchedulerService {
             return true;
         }
 
+        const runtimeProjectId = normalizeProjectIdForRuntime(projectId);
+
         try {
             // Check if project is already running
-            if (this.projectStateResolver(projectId)) {
+            if (this.projectStateResolver(runtimeProjectId)) {
                 // Project already running, nothing to do
                 return true;
             }
@@ -737,7 +751,7 @@ export class SchedulerService {
                 "project.id": projectId,
             });
 
-            await this.projectBootHandler(projectId);
+            await this.projectBootHandler(runtimeProjectId);
 
             // No delay needed - ProjectRuntime.start() completion IS the readiness signal.
             // When start() returns, isRunning=true and event handlers are initialized.
@@ -758,7 +772,7 @@ export class SchedulerService {
 
             if (isAlreadyRunning) {
                 // Re-check state - if running now, treat as success
-                if (this.projectStateResolver(projectId)) {
+                if (this.projectStateResolver(runtimeProjectId)) {
                     logger.debug("Project was already running (race condition, benign)", {
                         projectId,
                     });
@@ -781,7 +795,7 @@ export class SchedulerService {
             });
 
             // Final check: is the project running despite the error?
-            if (this.projectStateResolver(projectId)) {
+            if (this.projectStateResolver(runtimeProjectId)) {
                 return true;
             }
 
@@ -883,7 +897,10 @@ export class SchedulerService {
         }
 
         try {
-            const resolvedPubkey = this.targetPubkeyResolver(task.projectId, task.toPubkey);
+            const resolvedPubkey = this.targetPubkeyResolver(
+                normalizeProjectIdForRuntime(task.projectId),
+                task.toPubkey
+            );
 
             // Log if rerouted (pubkey changed)
             if (resolvedPubkey !== task.toPubkey) {

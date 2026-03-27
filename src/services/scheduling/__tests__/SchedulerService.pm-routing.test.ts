@@ -208,6 +208,23 @@ describe("SchedulerService PM Routing", () => {
             );
         });
 
+        it("should normalize NIP-33 project addresses before target resolution", () => {
+            const externalAgentPubkey = "external-agent-pubkey";
+            const pmPubkey = "pm-agent-pubkey";
+            const projectAddress = `31933:${"b".repeat(64)}:TENEX-ff3ssq`;
+            const projectDTag = "TENEX-ff3ssq";
+
+            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue(pmPubkey);
+
+            service.setCallbacks(vi.fn(), vi.fn(), mockTargetResolver);
+
+            const task = createTask({ toPubkey: externalAgentPubkey, projectId: projectAddress });
+            const result = service.testResolveTargetPubkey(task);
+
+            expect(result).toBe(pmPubkey);
+            expect(mockTargetResolver).toHaveBeenCalledWith(projectDTag, externalAgentPubkey);
+        });
+
         it("should return original toPubkey when resolver throws (graceful degradation)", () => {
             const task = createTask();
 

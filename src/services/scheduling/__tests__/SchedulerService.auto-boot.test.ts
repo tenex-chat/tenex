@@ -233,6 +233,26 @@ describe("SchedulerService Auto-Boot", () => {
             );
         });
 
+        it("should normalize NIP-33 project addresses before daemon callbacks", async () => {
+            const projectAddress = `31933:${"a".repeat(64)}:TENEX-ff3ssq`;
+            const projectDTag = "TENEX-ff3ssq";
+            const mockBootHandler = vi.fn().mockResolvedValue(undefined);
+            const mockStateResolver = vi.fn().mockReturnValue(false);
+            const mockTargetResolver = vi.fn();
+
+            service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
+
+            const result = await service.testEnsureProjectRunning(projectAddress);
+
+            expect(result).toBe(true);
+            expect(mockStateResolver).toHaveBeenCalledWith(projectDTag);
+            expect(mockBootHandler).toHaveBeenCalledWith(projectDTag);
+            expect(mockLogger.info).toHaveBeenCalledWith(
+                "Project not running, booting for scheduled task",
+                { projectId: projectAddress }
+            );
+        });
+
         it("should return false and log warning when boot handler fails and project still not running", async () => {
             const projectId = "31933:owner:test-project";
             const mockError = new Error("Failed to start runtime");
