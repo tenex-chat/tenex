@@ -218,7 +218,7 @@ async function executeConversationGet(
     if (!targetConversationId) {
         return {
             success: false,
-            message: `Could not resolve conversation ID "${input.conversationId}". Expected 64-char hex, 18-char hex prefix, or NIP-19 format (note1.../nevent1...).`,
+            message: "conversationId is required",
         };
     }
 
