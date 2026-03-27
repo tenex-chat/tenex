@@ -58,14 +58,14 @@ async function executeDeleteCollection(
 /**
  * Delete a RAG collection and all its documents
  */
-export function createRAGDeleteCollectionTool(context: ToolExecutionContext): AISdkTool {
+export function createRAGCollectionDeleteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Delete a RAG collection and all its documents. This action is permanent and requires confirmation.",
         inputSchema: ragDeleteCollectionSchema,
         execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
-                "rag_delete_collection",
+                "rag_collection_delete",
                 input as z.infer<typeof ragDeleteCollectionSchema>,
                 context,
                 executeDeleteCollection

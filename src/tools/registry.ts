@@ -44,9 +44,9 @@ import { createLessonLearnTool } from "./implementations/learn";
 import { createNoResponseTool } from "./implementations/no_response";
 import { createProjectListTool } from "./implementations/project_list";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
-import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
-import { createRAGDeleteCollectionTool } from "./implementations/rag_delete_collection";
-import { createRAGListCollectionsTool } from "./implementations/rag_list_collections";
+import { createRAGCollectionCreateTool } from "./implementations/rag_collection_create";
+import { createRAGCollectionDeleteTool } from "./implementations/rag_collection_delete";
+import { createRAGCollectionListTool } from "./implementations/rag_collection_list";
 
 import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscription_create";
 import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
@@ -218,10 +218,10 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     no_response: createNoResponseTool,
 
     // RAG tools
-    rag_create_collection: createRAGCreateCollectionTool,
+    rag_collection_create: createRAGCollectionCreateTool,
     rag_add_documents: createRAGAddDocumentsTool,
-    rag_delete_collection: createRAGDeleteCollectionTool,
-    rag_list_collections: createRAGListCollectionsTool,
+    rag_collection_delete: createRAGCollectionDeleteTool,
+    rag_collection_list: createRAGCollectionListTool,
 
     // RAG subscription tools
     rag_subscription_create: createRAGSubscriptionCreateTool,

@@ -44,11 +44,11 @@ The system supports:
 
 ## Available Tools
 
-### 1. rag_create_collection
+### 1. rag_collection_create
 Create a new vector database collection for storing embeddings.
 
 \`\`\`typescript
-rag_create_collection({
+rag_collection_create({
   name: "project_knowledge",  // Alphanumeric with underscores only
   schema: {                    // Optional custom schema
     category: "string"
@@ -90,21 +90,21 @@ rag_search({
 })
 \`\`\`
 
-### 4. rag_delete_collection
+### 4. rag_collection_delete
 Remove a collection and all its documents.
 
 \`\`\`typescript
-rag_delete_collection({
+rag_collection_delete({
   name: "project_knowledge",
   confirm: true  // Required safety flag
 })
 \`\`\`
 
-### 5. rag_list_collections
+### 5. rag_collection_list
 List all available collections with optional statistics.
 
 \`\`\`typescript
-rag_list_collections({
+rag_collection_list({
   include_stats: true  // Include document counts per collection
 })
 \`\`\`
@@ -155,7 +155,7 @@ Build persistent memory across conversations:
 
 \`\`\`typescript
 // Store insights and decisions
-rag_create_collection({ name: "agent_insights" })
+rag_collection_create({ name: "agent_insights" })
 
 rag_add_documents({
   collection: "agent_insights",
@@ -180,7 +180,7 @@ rag_search({
 Index project documentation and code:
 
 \`\`\`typescript
-rag_create_collection({ name: "project_docs" })
+rag_collection_create({ name: "project_docs" })
 
 // Index all markdown files
 rag_add_documents({
@@ -233,7 +233,7 @@ rag_search({
 Store and retrieve code patterns:
 
 \`\`\`typescript
-rag_create_collection({ name: "code_patterns" })
+rag_collection_create({ name: "code_patterns" })
 
 rag_add_documents({
   collection: "code_patterns",

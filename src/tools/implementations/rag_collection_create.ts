@@ -77,7 +77,7 @@ async function executeCreateCollection(
 /**
  * Create a new RAG collection for storing and retrieving vector embeddings
  */
-export function createRAGCreateCollectionTool(context: ToolExecutionContext): AISdkTool {
+export function createRAGCollectionCreateTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Create a new RAG collection (vector database) for storing documents with semantic search capabilities. " +
@@ -86,7 +86,7 @@ export function createRAGCreateCollectionTool(context: ToolExecutionContext): AI
         inputSchema: ragCreateCollectionSchema,
         execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
-                "rag_create_collection",
+                "rag_collection_create",
                 input as z.infer<typeof ragCreateCollectionSchema>,
                 context,
                 executeCreateCollection

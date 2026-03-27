@@ -23,9 +23,9 @@ mock.module("@/services/rag/RAGService", () => ({
     },
 }));
 
-import { createRAGListCollectionsTool } from "../rag_list_collections";
+import { createRAGCollectionListTool } from "../rag_collection_list";
 
-describe("rag_list_collections tool", () => {
+describe("rag_collection_list tool", () => {
     const MOCK_PUBKEY = "0".repeat(64);
 
     const createMockContext = (): ToolExecutionContext => {
@@ -68,7 +68,7 @@ describe("rag_list_collections tool", () => {
             ragServiceMocks.listCollections.mockResolvedValue(["coll_a", "coll_b"]);
 
             const context = createMockContext();
-            const tool = createRAGListCollectionsTool(context);
+            const tool = createRAGCollectionListTool(context);
             const result = parseResult(await tool.execute({ description: "List available collections" }));
 
             expect(result).toMatchObject({
@@ -84,7 +84,7 @@ describe("rag_list_collections tool", () => {
             ragServiceMocks.listCollections.mockResolvedValue([]);
 
             const context = createMockContext();
-            const tool = createRAGListCollectionsTool(context);
+            const tool = createRAGCollectionListTool(context);
             const result = parseResult(await tool.execute({ description: "List available collections" }));
 
             expect(result).toMatchObject({
@@ -103,7 +103,7 @@ describe("rag_list_collections tool", () => {
             ]);
 
             const context = createMockContext();
-            const tool = createRAGListCollectionsTool(context);
+            const tool = createRAGCollectionListTool(context);
             const result = parseResult(await tool.execute({ description: "List collections with stats", include_stats: true }));
 
             expect(result).toMatchObject({
@@ -140,7 +140,7 @@ describe("rag_list_collections tool", () => {
             ragServiceMocks.getAllCollectionStats.mockResolvedValue([]);
 
             const context = createMockContext();
-            const tool = createRAGListCollectionsTool(context);
+            const tool = createRAGCollectionListTool(context);
             const result = parseResult(await tool.execute({ description: "List collections with stats", include_stats: true }));
 
             expect(result).toMatchObject({
