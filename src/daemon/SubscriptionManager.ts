@@ -69,6 +69,8 @@ export class SubscriptionManager {
         // Bound operational events to boot time — historical config updates and
         // lessons are already persisted locally, so only fetch live updates.
         const bootSince = Math.floor(Date.now() / 1000);
+        this.lastProjectSubCreatedAt = bootSince;
+        this.lastAgentMentionsSubCreatedAt = bootSince;
         const filters = buildStaticFilters(this.whitelistedPubkeys, bootSince);
         if (filters.length > 0) {
             this.staticSubscription = this.createSub(filters, "static", this.onStaticEoseCallback);
