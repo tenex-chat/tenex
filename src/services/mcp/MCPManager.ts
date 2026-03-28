@@ -385,6 +385,48 @@ export class MCPManager {
         await this.ensureServersStarted();
     }
 
+    /**
+     * Start only the MCP servers that provide the given tools.
+     * Tool names follow the `mcp__{serverName}__{toolName}` convention.
+     * Servers already running are skipped; servers not needed are not started.
+     */
+    async ensureServersForTools(mcpToolNames: string[]): Promise<void> {
+        const neededServers = new Set<string>();
+        for (const name of mcpToolNames) {
+            const parts = name.split("__");
+            if (parts.length >= 3 && parts[0] === "mcp") {
+                neededServers.add(parts[1]);
+            }
+        }
+
+        if (neededServers.size === 0) return;
+
+        const config = this.pendingConfig;
+        if (!config) return;
+
+        // Start only the servers the agent needs
+        for (const serverName of neededServers) {
+            if (this.clients.has(serverName)) continue;
+            const serverConfig = config.servers[serverName];
+            if (!serverConfig) continue;
+
+            try {
+                await this.startServer(serverName, serverConfig);
+            } catch (error) {
+                logger.error(`Failed to start MCP server '${serverName}':`, formatAnyError(error));
+            }
+        }
+
+        // Mark fully started if all servers are now running
+        const allServerNames = Object.keys(config.servers);
+        if (allServerNames.every(name => this.clients.has(name))) {
+            this.pendingConfig = null;
+            this.serversStarted = true;
+        }
+
+        await this.refreshToolCache();
+    }
+
     async shutdown(): Promise<void> {
         const shutdownPromises: Promise<void>[] = [];
 

@@ -327,10 +327,17 @@ export class AgentDispatchService {
             return;
         }
 
+        if (targetAgents.length > 1) {
+            logger.warn("[dispatch] Multiple agents p-tagged, dispatching only to first", {
+                dispatching: targetAgents[0].slug,
+                skipped: targetAgents.slice(1).map(a => a.slug).join(", "),
+            });
+        }
+
         metadataDebounceManager.onAgentStart(conversation.id);
 
-        await this.dispatchToAgents({
-            targetAgents,
+        await this.dispatchToAgent({
+            targetAgent: targetAgents[0],
             envelope,
             conversationId: conversation.id,
             principalContext,
@@ -653,8 +660,8 @@ export class AgentDispatchService {
         return nextSequence;
     }
 
-    private async dispatchToAgents(params: {
-        targetAgents: AgentInstance[];
+    private async dispatchToAgent(params: {
+        targetAgent: AgentInstance;
         envelope: InboundEnvelope;
         conversationId: string;
         principalContext?: MessagePrincipalContext;
@@ -663,7 +670,7 @@ export class AgentDispatchService {
         parentSpan: ReturnType<typeof tracer.startSpan>;
     }): Promise<void> {
         const {
-            targetAgents,
+            targetAgent,
             envelope,
             conversationId,
             principalContext,
@@ -674,137 +681,115 @@ export class AgentDispatchService {
         const ralRegistry = RALRegistry.getInstance();
         const dispatchContext = trace.setSpan(getSafeContext(), parentSpan);
 
-        const dispatchStartTime = Date.now();
-        const currentActiveOps = llmOpsRegistry.getActiveOperationsCount();
-        parentSpan.addEvent("dispatch.concurrent_execution_starting", {
-            "concurrent.target_agents_count": targetAgents.length,
-            "concurrent.existing_active_ops": currentActiveOps,
-            "concurrent.total_after_dispatch": currentActiveOps + targetAgents.length,
-            "concurrent.dispatch_start_time": dispatchStartTime,
-        });
-
-        const executionPromises = targetAgents.map(async (targetAgent) => {
-            const agentSpan = tracer.startSpan(
-                "tenex.dispatch.agent",
-                {
-                    attributes: {
-                        "agent.slug": targetAgent.slug,
-                        "agent.pubkey": targetAgent.pubkey,
-                        "conversation.id": shortenConversationId(conversationId),
-                    },
+        const agentSpan = tracer.startSpan(
+            "tenex.dispatch.agent",
+            {
+                attributes: {
+                    "agent.slug": targetAgent.slug,
+                    "agent.pubkey": targetAgent.pubkey,
+                    "conversation.id": shortenConversationId(conversationId),
                 },
-                dispatchContext
+            },
+            dispatchContext
+        );
+
+        try {
+            const projectDTag = projectCtx.project.dTag;
+            if (!projectDTag) throw new Error("Project missing d-tag");
+            const isInCooldown = await this.checkAndBlockIfCooldown(
+                projectDTag,
+                conversationId,
+                targetAgent.pubkey,
+                targetAgent.slug,
+                agentSpan,
+                "routing"
             );
 
-            try {
-                const projectDTag = projectCtx.project.dTag;
-                if (!projectDTag) throw new Error("Project missing d-tag");
-                const isInCooldown = await this.checkAndBlockIfCooldown(
-                    projectDTag,
-                    conversationId,
-                    targetAgent.pubkey,
-                    targetAgent.slug,
-                    agentSpan,
-                    "routing"
-                );
-
-                if (isInCooldown) {
-                    return;
-                }
-
-                const activeRal = ralRegistry.getState(targetAgent.pubkey, conversationId);
-                agentSpan.setAttributes({
-                    "ral.is_active": !!activeRal,
-                    "ral.is_streaming": activeRal?.isStreaming ?? false,
-                    "ral.number": activeRal?.ralNumber ?? 0,
-                });
-
-                const shouldSkipExecution = await this.handleDeliveryInjection({
-                    activeRal,
-                    agent: targetAgent,
-                    conversationId,
-                    message: envelope.content,
-                    senderPubkey: envelope.principal.linkedPubkey,
-                    senderPrincipal: principalContext?.senderPrincipal,
-                    targetedPrincipals: principalContext?.targetedPrincipals,
-                    eventId: envelope.message.nativeId,
-                    agentSpan,
-                });
-
-                if (shouldSkipExecution) {
-                    agentSpan.addEvent("dispatch.execution_skipped_injection_queued");
-                    agentSpan.setStatus({ code: SpanStatusCode.OK });
-                    return;
-                }
-
-                let triggeringEnvelopeForContext = envelope;
-                const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversationId);
-
-                if (resumableRal?.originalTriggeringEventId) {
-                    const originalEnvelope = ConversationStore.getCachedEnvelope(
-                        resumableRal.originalTriggeringEventId
-                    );
-                    if (originalEnvelope) {
-                        triggeringEnvelopeForContext = originalEnvelope;
-                        getSafeActiveSpan()?.addEvent("reply.restored_original_trigger", {
-                            "agent.slug": targetAgent.slug,
-                            "original.event_id": resumableRal.originalTriggeringEventId,
-                            "resumption.event_id": envelope.message.nativeId,
-                        });
-                        agentSpan.addEvent("dispatch.restored_original_trigger", {
-                            "original.event_id": resumableRal.originalTriggeringEventId,
-                        });
-                    }
-                }
-
-                const executionContext = await createExecutionContext({
-                    agent: targetAgent,
-                    conversationId,
-                    projectBasePath: projectCtx.agentRegistry.getBasePath(),
-                    triggeringEnvelope: triggeringEnvelopeForContext,
-                    mcpManager: projectCtx.mcpManager,
-                });
-
-                await otelContext.with(trace.setSpan(otelContext.active(), agentSpan), async () => {
-                    await agentExecutor.execute(executionContext);
-                });
-
-                agentSpan.setStatus({ code: SpanStatusCode.OK });
-            } catch (error) {
-                agentSpan.recordException(error as Error);
-                agentSpan.setStatus({
-                    code: SpanStatusCode.ERROR,
-                    message: (error as Error).message,
-                });
-                logger.writeToWarnLog({
-                    timestamp: new Date().toISOString(),
-                    level: "error",
-                    component: "AgentDispatchService",
-                    message: "Agent execution failed during dispatch",
-                    context: {
-                        agentSlug: targetAgent.slug,
-                        conversationId,
-                        triggerEventId: envelope.message.nativeId,
-                    },
-                    error: error instanceof Error ? error.message : String(error),
-                    stack: error instanceof Error ? error.stack : undefined,
-                });
-                throw error;
-            } finally {
-                agentSpan.end();
+            if (isInCooldown) {
+                return;
             }
-        });
 
-        await Promise.all(executionPromises);
+            const activeRal = ralRegistry.getState(targetAgent.pubkey, conversationId);
+            agentSpan.setAttributes({
+                "ral.is_active": !!activeRal,
+                "ral.is_streaming": activeRal?.isStreaming ?? false,
+                "ral.number": activeRal?.ralNumber ?? 0,
+            });
 
-        const dispatchDuration = Date.now() - dispatchStartTime;
-        const finalActiveOps = llmOpsRegistry.getActiveOperationsCount();
-        parentSpan.addEvent("dispatch.concurrent_execution_completed", {
-            "concurrent.dispatch_duration_ms": dispatchDuration,
-            "concurrent.agents_executed": targetAgents.length,
-            "concurrent.final_active_ops": finalActiveOps,
-            "concurrent.avg_per_agent_ms": Math.round(dispatchDuration / targetAgents.length),
-        });
+            const shouldSkipExecution = await this.handleDeliveryInjection({
+                activeRal,
+                agent: targetAgent,
+                conversationId,
+                message: envelope.content,
+                senderPubkey: envelope.principal.linkedPubkey,
+                senderPrincipal: principalContext?.senderPrincipal,
+                targetedPrincipals: principalContext?.targetedPrincipals,
+                eventId: envelope.message.nativeId,
+                agentSpan,
+            });
+
+            if (shouldSkipExecution) {
+                agentSpan.addEvent("dispatch.execution_skipped_injection_queued");
+                agentSpan.setStatus({ code: SpanStatusCode.OK });
+                return;
+            }
+
+            let triggeringEnvelopeForContext = envelope;
+            const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversationId);
+
+            if (resumableRal?.originalTriggeringEventId) {
+                const originalEnvelope = ConversationStore.getCachedEnvelope(
+                    resumableRal.originalTriggeringEventId
+                );
+                if (originalEnvelope) {
+                    triggeringEnvelopeForContext = originalEnvelope;
+                    getSafeActiveSpan()?.addEvent("reply.restored_original_trigger", {
+                        "agent.slug": targetAgent.slug,
+                        "original.event_id": resumableRal.originalTriggeringEventId,
+                        "resumption.event_id": envelope.message.nativeId,
+                    });
+                    agentSpan.addEvent("dispatch.restored_original_trigger", {
+                        "original.event_id": resumableRal.originalTriggeringEventId,
+                    });
+                }
+            }
+
+            const executionContext = await createExecutionContext({
+                agent: targetAgent,
+                conversationId,
+                projectBasePath: projectCtx.agentRegistry.getBasePath(),
+                triggeringEnvelope: triggeringEnvelopeForContext,
+                mcpManager: projectCtx.mcpManager,
+            });
+
+            await otelContext.with(trace.setSpan(otelContext.active(), agentSpan), async () => {
+                await agentExecutor.execute(executionContext);
+            });
+
+            agentSpan.setStatus({ code: SpanStatusCode.OK });
+        } catch (error) {
+            agentSpan.recordException(error as Error);
+            agentSpan.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (error as Error).message,
+            });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "AgentDispatchService",
+                message: "Agent execution failed during dispatch",
+                context: {
+                    agentSlug: targetAgent.slug,
+                    conversationId,
+                    triggerEventId: envelope.message.nativeId,
+                },
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
+            throw error;
+        } finally {
+            agentSpan.end();
+        }
     }
 
     private async checkAndBlockIfCooldown(
