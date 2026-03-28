@@ -93,6 +93,14 @@ export class ConfigService {
         return path.join(projectPath, TENEX_DIR);
     }
 
+    getProjectMetadataPath(projectId: string): string {
+        return path.join(this.getConfigPath("projects"), projectId);
+    }
+
+    getConversationCatalogPath(projectId: string): string {
+        return path.join(this.getProjectMetadataPath(projectId), "conversation-catalog.db");
+    }
+
     /**
      * Get the base directory for all projects
      * Defaults to ~/tenex if not configured

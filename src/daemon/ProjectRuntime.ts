@@ -5,6 +5,7 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { checkSupervisionHealth, registerDefaultHeuristics } from "@/agents/supervision";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { EventHandler } from "@/event-handler";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
@@ -81,7 +82,7 @@ export class ProjectRuntime {
         this.projectBasePath = path.join(projectsBase, dTag);
 
         // TENEX metadata (hidden): ~/.tenex/projects/{dTag}
-        this.metadataPath = path.join(config.getConfigPath("projects"), dTag);
+        this.metadataPath = config.getProjectMetadataPath(this.projectId);
     }
 
     /**
@@ -129,6 +130,9 @@ export class ProjectRuntime {
             // Initialize components
             const agentRegistry = new AgentRegistry(this.projectBasePath, this.metadataPath);
             await agentRegistry.loadFromProject(this.project);
+            trace.getActiveSpan()?.addEvent("project_runtime.agents_loaded", {
+                "agent.count": agentRegistry.getAllAgents().length,
+            });
 
             // Verify supervision system health (fail-fast if misconfigured)
             await this.verifySupervisionHealth();
@@ -137,14 +141,21 @@ export class ProjectRuntime {
             this.context = new ProjectContext(this.project, agentRegistry);
 
             await this.bootstrapAgentHomeEnvironments();
+            trace.getActiveSpan()?.addEvent("project_runtime.agent_homes_bootstrapped", {
+                "agent.count": this.context.agents.size,
+            });
 
             // Initialize prefix KV store and index agent pubkeys
             // This is best-effort - indexing failures don't block project startup
             await prefixKVStore.initialize();
             this.prefixStoreInitialized = true;
+            trace.getActiveSpan()?.addEvent("project_runtime.prefix_store_initialized");
             const agentPubkeysForIndex = Array.from(this.context.agents.values()).map(a => a.pubkey);
             try {
                 await prefixKVStore.addBatch(agentPubkeysForIndex);
+                trace.getActiveSpan()?.addEvent("project_runtime.agent_prefix_indexed", {
+                    "agent.count": agentPubkeysForIndex.length,
+                });
             } catch (error) {
                 logger.warn("[ProjectRuntime] Failed to index agent pubkeys for prefix lookup", {
                     projectId: this.projectId,
@@ -183,6 +194,13 @@ export class ProjectRuntime {
             // Initialize conversation store with project path and agent pubkeys
             const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);
             ConversationStore.initialize(this.metadataPath, agentPubkeys);
+            const conversationCatalog = ConversationCatalogService.getInstance(
+                this.projectId,
+                this.metadataPath,
+                agentPubkeys
+            );
+            conversationCatalog.initialize();
+            conversationCatalog.reconcile();
 
             // Reconcile orphaned RALs and warm user profile cache within ALS context
             // so that resolveProjectId() can identify this project.
@@ -190,12 +208,14 @@ export class ProjectRuntime {
                 await this.reconcileOrphanedRals();
                 await this.warmUserProfileCache();
             });
+            trace.getActiveSpan()?.addEvent("project_runtime.context_warmup_complete");
 
             // Initialize backend pubkey cache for the pubkey gate.
             // Must happen before EventHandler is initialized so that
             // isTrustedEventSync() can recognize backend-signed events
             // without an async fallback (fail-closed gate).
             await getTrustPubkeyService().initializeBackendPubkeyCache();
+            trace.getActiveSpan()?.addEvent("project_runtime.backend_pubkey_cache_initialized");
 
             // Initialize event handler
             const telegramDeliveryService = new TelegramDeliveryService();
@@ -206,6 +226,7 @@ export class ProjectRuntime {
                 agentExecutor: this.agentExecutor,
             });
             await this.eventHandler.initialize();
+            trace.getActiveSpan()?.addEvent("project_runtime.event_handler_initialized");
 
             const context = this.context;
             const projectBinding = context.project.tagReference()[1];
@@ -223,6 +244,9 @@ export class ProjectRuntime {
                 agentExecutor: this.agentExecutor,
             });
             this.telegramGatewayRegistered = true;
+            trace.getActiveSpan()?.addEvent("project_runtime.telegram_gateway_registered", {
+                "agent.count": context.agents.size,
+            });
 
             // Start status publisher
             this.statusPublisher = new ProjectStatusService();
@@ -233,6 +257,7 @@ export class ProjectRuntime {
                     context
                 );
             });
+            trace.getActiveSpan()?.addEvent("project_runtime.status_publishing_started");
 
             // Start operations status publisher (uses RALRegistry for streaming-only semantics)
             // Pass projectId and context for multi-project isolation in daemon mode
@@ -242,6 +267,7 @@ export class ProjectRuntime {
                 this.context
             );
             this.operationsStatusPublisher.start();
+            trace.getActiveSpan()?.addEvent("project_runtime.operations_status_started");
 
             this.isRunning = true;
             this.startTime = new Date();
@@ -398,6 +424,7 @@ export class ProjectRuntime {
         // Save conversation state
         logger.info(`[ProjectRuntime] Saving conversations: ${this.projectId}`);
         await ConversationStore.cleanup();
+        ConversationCatalogService.closeProject(this.projectId, this.metadataPath);
 
         // Reset local report store
         logger.info(`[ProjectRuntime] Resetting report store: ${this.projectId}`);

@@ -1,4 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
+import { join } from "node:path";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { formatRelativeTimeShort } from "@/lib/time";
 import { logger } from "@/utils/logger";
@@ -74,60 +76,37 @@ function loadRecentConversations(
 ): RecentConversationEntry[] {
     const now = Math.floor(Date.now() / 1000);
     const cutoffTime = now - TWENTY_FOUR_HOURS_IN_SECONDS;
-
-    // Use project-specific listing if projectId is provided, otherwise fall back to current project
-    const conversationIds = projectId
-        ? ConversationStore.listConversationIdsFromDiskForProject(projectId)
-        : ConversationStore.listConversationIdsFromDisk();
-    const candidateEntries: RecentConversationEntry[] = [];
-
-    for (const conversationId of conversationIds) {
-        // Skip the current conversation
-        if (conversationId === currentConversationId) {
-            continue;
-        }
-
-        try {
-            // Single disk read: gets metadata + participation check together
-            // Use project-aware method when projectId is provided for full scoping
-            const preview = projectId
-                ? ConversationStore.readConversationPreviewForProject(conversationId, agentPubkey, projectId)
-                : ConversationStore.readConversationPreview(conversationId, agentPubkey);
-            if (!preview) continue;
-
-            // Skip conversations older than 24 hours
-            if (preview.lastActivity < cutoffTime) {
-                continue;
-            }
-
-            // Skip if agent didn't participate
-            if (!preview.agentParticipated) {
-                continue;
-            }
-
-            // Build summary - ONLY use generated summaries to prevent prompt injection
-            // Raw user text is NOT included in the system prompt
-            const summary = preview.summary
-                ? sanitizeForPrompt(preview.summary)
-                : "[No summary available]";
-
-            candidateEntries.push({
-                id: preview.id,
-                title: preview.title,
-                summary,
-                lastActivity: preview.lastActivity,
-            });
-        } catch (err) {
-            logger.debug("Failed to read conversation preview for recent-conversations fragment", {
-                conversationId,
-                error: err,
-            });
-        }
+    const effectiveProjectId = projectId ?? ConversationStore.getProjectId();
+    if (!effectiveProjectId) {
+        return [];
     }
 
-    // Sort by most recent activity first and limit to MAX_CONVERSATIONS
-    candidateEntries.sort((a, b) => b.lastActivity - a.lastActivity);
-    return candidateEntries.slice(0, MAX_CONVERSATIONS);
+    try {
+        return ConversationCatalogService.getInstance(
+            effectiveProjectId,
+            join(ConversationStore.getBasePath(), effectiveProjectId)
+        )
+            .queryRecentForParticipant({
+                participantPubkey: agentPubkey,
+                excludeConversationId: currentConversationId,
+                since: cutoffTime,
+                limit: MAX_CONVERSATIONS,
+            })
+            .map((preview) => ({
+                id: preview.id,
+                title: preview.title,
+                summary: preview.summary
+                    ? sanitizeForPrompt(preview.summary)
+                    : "[No summary available]",
+                lastActivity: preview.lastActivity,
+            }));
+    } catch (err) {
+        logger.debug("Failed to load recent conversations from catalog", {
+            projectId: effectiveProjectId,
+            error: err,
+        });
+        return [];
+    }
 }
 
 export const recentConversationsFragment: PromptFragment<RecentConversationsArgs> = {

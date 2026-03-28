@@ -123,7 +123,7 @@ export function parseNostrUser(input: string): { pubkey: string } | null {
 
 **Purpose:** Business logic, state management, capabilities
 
-**Notes:** Tools stay stateless even when they are runtime-gated. Context-injected capabilities such as `send_message` belong in `src/tools/registry.ts` and must delegate transport work to services like `src/services/telegram/TelegramDeliveryService`.
+**Notes:** Tools stay stateless even when they are runtime-gated. Context-injected capabilities such as `send_message` belong in `src/tools/registry.ts` and must delegate transport work to services like `src/services/telegram/TelegramDeliveryService`. Within the conversation domain, canonical transcripts remain JSON in `ConversationStore`, while metadata-style reads belong on the per-project SQLite catalog in `ConversationCatalogService`. Prompt and tool code should query that catalog or `ConversationRegistry` compatibility APIs instead of reparsing transcript files.
 
 **Dependencies:** Everything below (layers 0-2)
 
@@ -173,6 +173,18 @@ services/
 - Internal implementation details to hide
 
 **Small services (1-2 files):** Keep at top level until they grow.
+
+### Conversation Read Models
+
+TENEX conversation storage has two intentional layers:
+
+- `ConversationStore` is the canonical ledger. It owns full transcript JSON, scratchpads, and save/load semantics.
+- `ConversationCatalogService` is the per-project derived read model backed by `conversation-catalog.db`. It exists for prompt/tool metadata queries such as recent conversations, conversation previews, participant/delegation lookups, and durable embedding indexing state.
+
+When adding a new conversation-facing feature, decide explicitly which layer it belongs to:
+
+- If it needs the full transcript or mutates canonical conversation state, use `ConversationStore`.
+- If it only needs queryable metadata or list/filter behavior, use the catalog. Do not add new transcript-scanning helpers for those paths.
 
 ---
 

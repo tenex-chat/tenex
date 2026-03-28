@@ -1,10 +1,11 @@
 import type { ToolExecutionContext } from "@/tools/types";
-import { ConversationStore } from "@/conversations/ConversationStore";
-import type { ConversationRecord } from "@/conversations/types";
+import { join } from "node:path";
 import {
-    getConversationRecordAuthorPrincipalId,
-    getConversationRecordAuthorPubkey,
-} from "@/conversations/record-author";
+    ConversationCatalogService,
+    type ConversationCatalogListEntry,
+    type ConversationCatalogParticipant,
+} from "@/conversations/ConversationCatalogService";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -68,22 +69,6 @@ interface ConversationListOutput {
     total: number;
 }
 
-/**
- * Extract delegation conversation IDs from delegation markers
- */
-function extractDelegationIds(conversation: ConversationStore): string[] {
-    const messages = conversation.getAllMessages();
-    const delegationIds: string[] = [];
-
-    for (const message of messages) {
-        if (message.messageType === "delegation-marker" && message.delegationMarker) {
-            delegationIds.push(message.delegationMarker.delegationConversationId);
-        }
-    }
-
-    return delegationIds;
-}
-
 function shortenPrincipalId(principalId: string): string {
     const terminalSegment = principalId.split(":").pop();
     if (terminalSegment?.trim()) {
@@ -92,23 +77,22 @@ function shortenPrincipalId(principalId: string): string {
     return principalId.substring(0, PREFIX_LENGTH);
 }
 
-function resolveParticipantName(message: ConversationRecord): string {
-    const authorPubkey = getConversationRecordAuthorPubkey(message);
-    if (authorPubkey) {
-        return getPubkeyService().getNameSync(authorPubkey);
+function resolveParticipantName(participant: ConversationCatalogParticipant): string {
+    if (participant.linkedPubkey) {
+        return getPubkeyService().getNameSync(participant.linkedPubkey);
     }
 
-    const displayName = message.senderPrincipal?.displayName?.trim();
+    const displayName = participant.displayName?.trim();
     if (displayName) {
         return displayName;
     }
 
-    const username = message.senderPrincipal?.username?.trim();
+    const username = participant.username?.trim();
     if (username) {
         return username;
     }
 
-    const principalId = getConversationRecordAuthorPrincipalId(message);
+    const principalId = participant.principalId;
     if (principalId) {
         return shortenPrincipalId(principalId);
     }
@@ -116,83 +100,59 @@ function resolveParticipantName(message: ConversationRecord): string {
     return "Unknown";
 }
 
-function extractParticipantNames(conversation: ConversationStore): string[] {
-    const participants = new Map<string, string>();
-
-    for (const message of conversation.getAllMessages()) {
-        const participantKey =
-            getConversationRecordAuthorPrincipalId(message)
-            ?? getConversationRecordAuthorPubkey(message);
-        if (!participantKey || participants.has(participantKey)) {
-            continue;
-        }
-
-        participants.set(participantKey, resolveParticipantName(message));
-    }
-
-    return Array.from(participants.values());
+function extractParticipantNames(conversation: ConversationCatalogListEntry): string[] {
+    return conversation.participants.map((participant) => resolveParticipantName(participant));
 }
 
-function summarizeConversation(conversation: ConversationStore, projectId?: string): ConversationSummary {
-    const messages = conversation.getAllMessages();
-    const firstMessage = messages[0];
-    const lastMessage = messages[messages.length - 1];
-    const metadata = conversation.metadata;
-
-    // Extract participants and delegations
+function summarizeConversation(
+    conversation: ConversationCatalogListEntry,
+    projectId?: string
+): ConversationSummary {
     const participantNames = extractParticipantNames(conversation);
-    const delegationIds = extractDelegationIds(conversation);
 
     return {
         id: conversation.id,
         projectId,
-        title: metadata.title ?? conversation.title,
-        summary: metadata.summary,
-        messageCount: messages.length,
-        createdAt: firstMessage?.timestamp,
-        lastActivity: lastMessage?.timestamp,
+        title: conversation.title,
+        summary: conversation.summary,
+        messageCount: conversation.messageCount,
+        createdAt: conversation.createdAt,
+        lastActivity: conversation.lastActivity || undefined,
         participants: participantNames,
-        delegations: delegationIds,
+        delegations: conversation.delegationIds,
     };
 }
 
 interface LoadedConversation {
-    store: ConversationStore;
+    conversation: ConversationCatalogListEntry;
     projectId: ProjectDTag;
 }
 
 function loadConversationsForProject(
     projectId: ProjectDTag,
-    isCurrentProject: boolean
-): LoadedConversation[] {
-    const conversations: LoadedConversation[] = [];
-    const conversationIds = isCurrentProject
-        ? ConversationStore.listConversationIdsFromDisk()
-        : ConversationStore.listConversationIdsFromDiskForProject(projectId);
-
-    for (const id of conversationIds) {
-        try {
-            let store: ConversationStore;
-            if (isCurrentProject) {
-                // Use cached version for current project
-                store = ConversationStore.getOrLoad(id);
-            } else {
-                // Load fresh for external projects
-                store = new ConversationStore(ConversationStore.getBasePath());
-                store.load(projectId, id);
-            }
-            conversations.push({ store, projectId });
-        } catch (err) {
-            logger.debug("Failed to load conversation", { id, projectId, error: err });
-        }
+    filters: {
+        fromTime?: number;
+        toTime?: number;
+        withPubkey?: string | null;
     }
-    return conversations;
+): LoadedConversation[] {
+    try {
+        const catalog = ConversationCatalogService.getInstance(
+            projectId,
+            join(ConversationStore.getBasePath(), projectId)
+        );
+
+        return catalog.listConversations({
+            fromTime: filters.fromTime,
+            toTime: filters.toTime,
+            participantPubkey: filters.withPubkey ?? undefined,
+        }).map((conversation) => ({ conversation, projectId }));
+    } catch (err) {
+        logger.debug("Failed to load conversation catalog entries", { projectId, error: err });
+        return [];
+    }
 }
 
-/**
- * Check if a value looks like a pubkey (hex or npub format) rather than a slug.
- * This is used to determine if slug resolution should be attempted.
- */
 function looksLikePubkey(value: string): boolean {
     const trimmed = value.trim();
     // 64-char hex pubkey
@@ -252,19 +212,6 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
     );
 }
 
-/**
- * Check if a conversation has a specific pubkey as a participant
- */
-function conversationHasParticipant(conversation: ConversationStore, pubkey: string): boolean {
-    const messages = conversation.getAllMessages();
-    for (const message of messages) {
-        if (getConversationRecordAuthorPubkey(message) === pubkey) {
-            return true;
-        }
-    }
-    return false;
-}
-
 async function executeConversationList(
     input: ConversationListInput,
     context: ToolExecutionContext
@@ -310,43 +257,35 @@ async function executeConversationList(
         // Only load from all projects when explicitly requested with "ALL"
         const projectIds = ConversationStore.listProjectIdsFromDisk();
         for (const pid of projectIds) {
-            const isCurrentProject = pid === currentProjectId;
-            const projectConversations = loadConversationsForProject(pid, isCurrentProject);
+            const projectConversations = loadConversationsForProject(pid, {
+                fromTime,
+                toTime,
+                withPubkey,
+            });
             allConversations.push(...projectConversations);
         }
     } else if (effectiveProjectId) {
         // Load from specific project (current project by default)
-        const isCurrentProject = effectiveProjectId === currentProjectId;
-        allConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
-    }
-
-    // Filter by date range if specified
-    let filtered = allConversations;
-    if (fromTime !== undefined || toTime !== undefined) {
-        filtered = allConversations.filter(({ store }) => {
-            const lastActivity = store.getLastActivityTime();
-            if (fromTime !== undefined && lastActivity < fromTime) return false;
-            if (toTime !== undefined && lastActivity > toTime) return false;
-            return true;
+        allConversations = loadConversationsForProject(effectiveProjectId, {
+            fromTime,
+            toTime,
+            withPubkey,
         });
     }
 
-    // Filter by 'with' parameter if specified and resolved
-    if (withPubkey) {
-        filtered = filtered.filter(({ store }) => conversationHasParticipant(store, withPubkey));
-    }
-
     // Sort by last activity (most recent first)
-    const sorted = [...filtered].sort((a, b) => {
-        return b.store.getLastActivityTime() - a.store.getLastActivityTime();
+    const sorted = [...allConversations].sort((a, b) => {
+        return (b.conversation.lastActivity ?? 0) - (a.conversation.lastActivity ?? 0);
     });
 
     const limited = sorted.slice(0, limit);
-    const summaries = limited.map(({ store, projectId }) => summarizeConversation(store, projectId));
+    const summaries = limited.map(({ conversation, projectId }) =>
+        summarizeConversation(conversation, projectId)
+    );
 
     logger.info("✅ Conversations listed", {
         total: allConversations.length,
-        filtered: filtered.length,
+        filtered: allConversations.length,
         returned: summaries.length,
         projectId: effectiveProjectId,
         with: withParam,
@@ -356,7 +295,7 @@ async function executeConversationList(
     return {
         success: true,
         conversations: summaries,
-        total: filtered.length,
+        total: allConversations.length,
     };
 }
 

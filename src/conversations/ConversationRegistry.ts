@@ -21,6 +21,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 // Import directly from the module file (not the barrel) to avoid circular
@@ -63,6 +64,7 @@ function getConversationStoreClass(): typeof ConversationStore {
  */
 interface ProjectRegistryConfig {
     agentPubkeys: Set<string>;
+    metadataPath: string;
 }
 
 /**
@@ -165,7 +167,10 @@ class ConversationRegistryImpl {
 
         // Tier 4: Single-project shortcut — unambiguous when exactly one project
         if (this._projectConfigs.size === 1) {
-            return this._projectConfigs.keys().next().value!;
+            const singleProject = this._projectConfigs.keys().next();
+            if (!singleProject.done) {
+                return singleProject.value;
+            }
         }
 
         // Multiple projects without ALS context: no safe resolution
@@ -239,7 +244,8 @@ class ConversationRegistryImpl {
         const pubkeys = new Set(agentPubkeys ?? []);
 
         // Accumulate per-project config
-        this._projectConfigs.set(projectId, { agentPubkeys: pubkeys });
+        this._projectConfigs.set(projectId, { agentPubkeys: pubkeys, metadataPath });
+        ConversationCatalogService.getInstance(projectId, metadataPath, pubkeys);
 
         // Rebuild the union of all agent pubkeys
         this.rebuildAllAgentPubkeys();
@@ -551,6 +557,7 @@ class ConversationRegistryImpl {
             promises.push(store.save());
         }
         await Promise.all(promises);
+        ConversationCatalogService.flushAll();
     }
 
     /**
@@ -723,7 +730,7 @@ class ConversationRegistryImpl {
     readConversationPreview(conversationId: string, agentPubkey: string): ReturnType<typeof readConversationPreviewForProject> {
         const currentProjectId = this.resolveProjectId();
         if (!currentProjectId) return null;
-        return readConversationPreviewForProject(this._basePath, conversationId, agentPubkey, currentProjectId);
+        return this.readConversationPreviewForProject(conversationId, agentPubkey, currentProjectId);
     }
 
     /**
@@ -734,7 +741,20 @@ class ConversationRegistryImpl {
         agentPubkey: string,
         projectId: ProjectDTag
     ): ReturnType<typeof readConversationPreviewForProject> {
-        return readConversationPreviewForProject(this._basePath, conversationId, agentPubkey, projectId);
+        const catalog = this.getCatalogService(projectId);
+        catalog.reconcile();
+        const preview = catalog.getPreview(conversationId);
+        if (!preview) {
+            return null;
+        }
+
+        return {
+            id: preview.id,
+            lastActivity: preview.lastActivity,
+            title: preview.title,
+            summary: preview.summary,
+            agentParticipated: catalog.hasParticipant(conversationId, agentPubkey),
+        };
     }
 
     /**
@@ -747,6 +767,13 @@ class ConversationRegistryImpl {
         this._basePath = join(getTenexBasePath(), "projects");
         this._projectConfigs.clear();
         this._allAgentPubkeys.clear();
+        ConversationCatalogService.resetAll();
+    }
+
+    private getCatalogService(projectId: ProjectDTag): ConversationCatalogService {
+        const projectConfig = this._projectConfigs.get(projectId);
+        const metadataPath = projectConfig?.metadataPath ?? join(this._basePath, projectId);
+        return ConversationCatalogService.getInstance(projectId, metadataPath, projectConfig?.agentPubkeys);
     }
 }
 

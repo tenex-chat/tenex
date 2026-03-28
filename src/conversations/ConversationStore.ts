@@ -18,6 +18,7 @@ import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { NDKKind } from "@/nostr/kinds";
 import type { TodoItem } from "@/services/ral/types";
+import { ConversationCatalogService } from "./ConversationCatalogService";
 import { buildPromptMessagesFromRecords } from "./PromptBuilder";
 import { getConversationRecordAuthorPubkey } from "./record-author";
 import { ensureConversationRecord } from "./record-id";
@@ -455,6 +456,21 @@ export class ConversationStore {
         this.ensureDirectory();
         const filePath = this.getFilePath();
         await writeFile(filePath, JSON.stringify(this.state, null, 2));
+
+        if (this.projectId) {
+            try {
+                ConversationCatalogService.getInstance(
+                    this.projectId,
+                    join(this.basePath, this.projectId)
+                ).upsertFromStore(this);
+            } catch (error) {
+                logger.warn("[ConversationStore] Failed to update conversation catalog", {
+                    conversationId: this.conversationId,
+                    projectId: this.projectId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
     }
 
     // RAL Lifecycle

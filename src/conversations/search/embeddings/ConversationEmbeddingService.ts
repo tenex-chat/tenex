@@ -15,7 +15,9 @@
 import { logger } from "@/utils/logger";
 import { RAGService, type RAGDocument, type RAGQueryResult } from "@/services/rag/RAGService";
 import { buildProjectFilter } from "@/services/search/projectFilter";
+import { join } from "node:path";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { conversationRegistry } from "@/conversations/ConversationRegistry";
 import type { ProjectDTag } from "@/types/project-ids";
 
@@ -188,19 +190,22 @@ export class ConversationEmbeddingService {
         store?: ConversationStore
     ): BuildDocumentResult {
         try {
-            // Load store if not provided
-            const resolvedStore = store ?? conversationRegistry.get(conversationId);
-            if (!resolvedStore) {
-                // Not in registry means zero messages loaded — genuinely no content to embed
-                logger.debug(`Conversation ${conversationId.substring(0, 8)} not in registry, no content`);
-                return { kind: "noContent" };
+            const catalog = ConversationCatalogService.getInstance(
+                projectId as ProjectDTag,
+                join(conversationRegistry.basePath, projectId)
+            );
+            let preview = catalog.getPreview(conversationId);
+            if (!preview) {
+                catalog.reconcile();
+                preview = catalog.getPreview(conversationId);
             }
 
-            const messages = resolvedStore.getAllMessages();
-            const metadata = resolvedStore.metadata;
-            const title = metadata.title ?? resolvedStore.title;
-            const summary = metadata.summary;
-            const lastUserMessage = metadata.lastUserMessage;
+            const resolvedStore = store ?? conversationRegistry.get(conversationId);
+            const messages = resolvedStore?.getAllMessages() ?? [];
+            const metadata = resolvedStore?.metadata;
+            const title = preview?.title ?? metadata?.title ?? resolvedStore?.title;
+            const summary = preview?.summary ?? metadata?.summary;
+            const lastUserMessage = preview?.lastUserMessage ?? metadata?.lastUserMessage;
 
             // Build embedding content
             const embeddingContent = this.buildEmbeddingContent(title, summary, lastUserMessage);
@@ -210,9 +215,6 @@ export class ConversationEmbeddingService {
                 logger.debug(`No content to embed for conversation ${conversationId.substring(0, 8)}`);
                 return { kind: "noContent" };
             }
-
-            const firstMessage = messages[0];
-            const lastMessage = messages[messages.length - 1];
 
             const documentId = `conv_${projectId}_${conversationId}`;
 
@@ -226,11 +228,11 @@ export class ConversationEmbeddingService {
                         projectId,
                         title: title || "",
                         summary: summary || "",
-                        messageCount: messages.length,
-                        createdAt: firstMessage?.timestamp,
-                        lastActivity: lastMessage?.timestamp,
+                        messageCount: preview?.messageCount ?? messages.length,
+                        createdAt: preview?.createdAt ?? messages[0]?.timestamp,
+                        lastActivity: preview?.lastActivity ?? messages[messages.length - 1]?.timestamp,
                     },
-                    timestamp: lastMessage?.timestamp || Date.now(),
+                    timestamp: preview?.lastActivity || messages[messages.length - 1]?.timestamp || Date.now(),
                     source: "conversation",
                 },
             };

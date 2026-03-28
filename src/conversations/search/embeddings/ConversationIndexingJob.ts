@@ -19,6 +19,7 @@
 import { logger } from "@/utils/logger";
 import { getTenexBasePath } from "@/constants";
 import { join } from "node:path";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { getConversationEmbeddingService } from "./ConversationEmbeddingService";
 import type { BuildDocumentResult } from "./ConversationEmbeddingService";
 import { IndexingStateManager } from "./IndexingStateManager";
@@ -163,6 +164,11 @@ export class ConversationIndexingJob {
             const projectIds = listProjectIdsFromDisk(this.projectsBasePath);
 
             for (const projectId of projectIds) {
+                ConversationCatalogService.getInstance(
+                    projectId,
+                    join(this.projectsBasePath, projectId)
+                ).reconcile();
+
                 const conversationIds = listConversationIdsFromDiskForProject(
                     this.projectsBasePath,
                     projectId
