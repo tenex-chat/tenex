@@ -354,6 +354,7 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             result: event.result,
             error: event.error ?? false,
             agentPubkey: context.agent.pubkey,
+            conversationId: context.conversationId,
         });
 
         if (toolEventId) {

@@ -256,8 +256,8 @@ describe("TENEX context management integration", () => {
 
         const prepared = await prepareManagedRequest(contextManagement, prompt);
         const transformedJson = JSON.stringify(prepared?.messages);
-        expect(transformedJson).toContain("fs_read(tool:");
-        expect(transformedJson).toContain("\"toolCallId\":\"call-1\"");
+        expect(transformedJson).toContain("use fs_read(tool:");
+        expect(transformedJson).toContain("[fs_read was used, id: call-1");
         expect(transformedJson).toContain("\"toolCallId\":\"call-9\"");
     });
 

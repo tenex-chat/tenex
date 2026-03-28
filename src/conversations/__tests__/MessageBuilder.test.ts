@@ -860,7 +860,7 @@ describe("MessageBuilder", () => {
             expect(secondValue).toContain("[Image:");
             expect(secondValue).toContain("same.png");
             expect(secondValue).toContain("fs_read");
-            expect(secondValue).toContain("event-4");
+            expect(secondValue).toContain("call-2");
         });
 
         test("handles multiple different images in same tool result", async () => {

@@ -106,6 +106,7 @@ describe("ToolExecutionTracker", () => {
             expect(execution).toEqual({
                 toolCallId: "call-123",
                 toolName: "rag_search",
+                conversationId: "conv-123",
                 toolEventId: "mock-event-id-123",
                 input: { query: "test query" },
                 completed: false,
@@ -213,6 +214,7 @@ describe("ToolExecutionTracker", () => {
             expect(execution).toEqual({
                 toolCallId: "call-123",
                 toolName: "rag_search",
+                conversationId: "conv-123",
                 toolEventId: "mock-event-id-123",
                 input: { query: "test" },
                 output: result,
@@ -222,7 +224,7 @@ describe("ToolExecutionTracker", () => {
 
             // Verify filesystem persistence
             expect(mockStore).toHaveBeenCalledWith(
-                "mock-event-id-123",
+                "conv-123",
                 {
                     toolCallId: "call-123",
                     toolName: "rag_search",

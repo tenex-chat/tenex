@@ -338,8 +338,7 @@ async function entryToMessage(
         // First: Apply image placeholder strategy (tracks & replaces seen images)
         const imageProcessingResult = processToolResultWithImageTracking(
             entry.toolData as ToolResultPart[],
-            imageTracker,
-            entry.eventId ?? entry.id
+            imageTracker
         );
         const toolData = imageProcessingResult.processedParts;
 

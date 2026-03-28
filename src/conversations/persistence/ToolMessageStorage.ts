@@ -3,7 +3,6 @@ import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
-import { isShortEventId } from "@/types/event-ids";
 import type { ModelMessage } from "ai";
 
 /**
@@ -11,13 +10,33 @@ import type { ModelMessage } from "ai";
  * Single Responsibility: Persist and retrieve tool execution messages
  */
 export class ToolMessageStorage {
-    private readonly storageDir = config.getConfigPath("tool-messages");
+    constructor(
+        private readonly storageDir = config.getConfigPath("tool-messages")
+    ) {}
+
+    private encodePathSegment(value: string): string {
+        return encodeURIComponent(value);
+    }
+
+    private getConversationDir(conversationId: string): string {
+        return path.join(
+            this.storageDir,
+            this.encodePathSegment(conversationId)
+        );
+    }
+
+    private getMessagePath(conversationId: string, toolCallId: string): string {
+        return path.join(
+            this.getConversationDir(conversationId),
+            `${this.encodePathSegment(toolCallId)}.json`
+        );
+    }
 
     /**
      * Store tool messages for later reconstruction
      */
     async store(
-        eventId: string,
+        conversationId: string,
         toolCall: {
             toolCallId: string;
             toolName: string;
@@ -70,11 +89,16 @@ export class ToolMessageStorage {
                 },
             ];
 
-            await fs.mkdir(this.storageDir, { recursive: true });
+            const conversationDir = this.getConversationDir(conversationId);
+            await fs.mkdir(conversationDir, { recursive: true });
 
-            const filePath = path.join(this.storageDir, `${eventId}.json`);
+            const filePath = this.getMessagePath(
+                conversationId,
+                toolCall.toolCallId
+            );
             const data = {
-                eventId,
+                conversationId,
+                toolCallId: toolCall.toolCallId,
                 agentPubkey,
                 timestamp: Date.now(),
                 messages,
@@ -83,32 +107,28 @@ export class ToolMessageStorage {
             await fs.writeFile(filePath, JSON.stringify(data, null, 2));
 
             logger.debug("[ToolMessageStorage] Stored tool messages", {
-                eventId: eventId.substring(0, 8),
+                conversationId,
+                toolCallId: toolCall.toolCallId,
                 filePath,
             });
         } catch (error) {
             logger.error("[ToolMessageStorage] Failed to store tool messages", {
                 error: formatAnyError(error),
-                eventId,
+                conversationId,
+                toolCallId: toolCall.toolCallId,
             });
         }
     }
 
     /**
-     * Load tool messages from storage by event ID (full or short prefix).
+     * Load tool messages from storage by conversation ID and tool call ID.
      */
-    async load(eventId: string): Promise<ModelMessage[] | null> {
+    async load(
+        conversationId: string,
+        toolCallId: string
+    ): Promise<ModelMessage[] | null> {
         try {
-            let resolvedId = eventId;
-
-            if (isShortEventId(eventId)) {
-                const files = await fs.readdir(this.storageDir).catch(() => [] as string[]);
-                const match = files.find((f) => f.endsWith(".json") && f.startsWith(eventId));
-                if (!match) return null;
-                resolvedId = match.slice(0, -5); // strip .json
-            }
-
-            const filePath = path.join(this.storageDir, `${resolvedId}.json`);
+            const filePath = this.getMessagePath(conversationId, toolCallId);
             const data = await fs.readFile(filePath, "utf-8");
             const parsed = JSON.parse(data);
             return parsed.messages as ModelMessage[];
@@ -117,28 +137,53 @@ export class ToolMessageStorage {
         }
     }
 
+    private async cleanupDirectory(
+        dirPath: string,
+        olderThanMs: number,
+        now: number
+    ): Promise<void> {
+        const entries = await fs.readdir(dirPath, {
+            withFileTypes: true,
+        });
+
+        for (const entry of entries) {
+            const entryPath = path.join(dirPath, entry.name);
+
+            if (entry.isDirectory()) {
+                await this.cleanupDirectory(entryPath, olderThanMs, now);
+
+                const remainingEntries = await fs.readdir(entryPath);
+                if (remainingEntries.length === 0) {
+                    await fs.rmdir(entryPath);
+                }
+                continue;
+            }
+
+            if (!entry.name.endsWith(".json")) {
+                continue;
+            }
+
+            const stats = await fs.stat(entryPath);
+            if (now - stats.mtimeMs > olderThanMs) {
+                await fs.unlink(entryPath);
+                logger.debug(
+                    "[ToolMessageStorage] Cleaned up old tool message file",
+                    {
+                        filePath: entryPath,
+                        ageMs: now - stats.mtimeMs,
+                    }
+                );
+            }
+        }
+    }
+
     /**
      * Clean up old tool messages
      */
     async cleanup(olderThanMs: number = 24 * 60 * 60 * 1000): Promise<void> {
         try {
-            const files = await fs.readdir(this.storageDir);
             const now = Date.now();
-
-            for (const file of files) {
-                if (!file.endsWith(".json")) continue;
-
-                const filePath = path.join(this.storageDir, file);
-                const stats = await fs.stat(filePath);
-
-                if (now - stats.mtimeMs > olderThanMs) {
-                    await fs.unlink(filePath);
-                    logger.debug("[ToolMessageStorage] Cleaned up old tool message file", {
-                        file,
-                        ageMs: now - stats.mtimeMs,
-                    });
-                }
-            }
+            await this.cleanupDirectory(this.storageDir, olderThanMs, now);
         } catch (error) {
             logger.error("[ToolMessageStorage] Failed to cleanup", {
                 error: formatAnyError(error),

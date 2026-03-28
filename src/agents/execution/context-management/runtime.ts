@@ -19,7 +19,6 @@ import {
 } from "ai-sdk-context-management";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
@@ -133,10 +132,7 @@ function createConversationContextManagementRuntime(options: {
             estimator: managedBudgetProfile.estimator,
             maxPromptTokens: toolResultDecayThresholdTokens,
             placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
-                const toolCallEventIdMap = resolveToolCallEventIdMap(
-                    options.conversationStore.getAllMessages()
-                );
-                return buildDecayPlaceholder(toolName, toolCallId, toolCallEventIdMap);
+                return buildDecayPlaceholder(toolName, toolCallId);
             },
         })
     );

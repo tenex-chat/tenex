@@ -115,7 +115,8 @@ function createTenexFsToolsUncached(context: ToolExecutionContext): ReturnType<t
             }
         },
         analyzeContent: ({ content, prompt, source }) => synthesizeContent(content, prompt, source),
-        loadToolResult: executeReadToolResult,
+        loadToolResult: (toolCallId) =>
+            executeReadToolResult(context.conversationId, toolCallId),
     });
 
     attachTranscriptArgs(tools.fs_read as AISdkTool, [{ key: "path", attribute: "file_path" }]);

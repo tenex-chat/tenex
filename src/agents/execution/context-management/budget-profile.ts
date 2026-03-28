@@ -3,7 +3,6 @@ import type {
     PromptTokenEstimator,
 } from "ai-sdk-context-management";
 import type { LanguageModelV3Message, LanguageModelV3Prompt } from "@ai-sdk/provider";
-import { isFullEventId, shortenEventId } from "@/types/event-ids";
 
 export const MANAGED_CONTEXT_BUDGET_SCOPE = "managed-context";
 const MANAGED_CONTEXT_LABEL = "managed working budget";
@@ -63,11 +62,7 @@ export function normalizeProviderId(providerId: string): string {
 
 export function buildDecayPlaceholder(
     toolName: string,
-    toolCallId: string,
-    toolCallEventIdMap: Map<string, string>,
+    toolCallId: string
 ): string {
-    const eventId = toolCallEventIdMap.get(toolCallId);
-    const rawId = eventId ?? toolCallId;
-    const id = isFullEventId(rawId) ? shortenEventId(rawId) : rawId;
-    return `[${toolName} was used, id: ${id} -- use fs_read(tool: "${id}") to retrieve]`;
+    return `[${toolName} was used, id: ${toolCallId} -- use fs_read(tool: "${toolCallId}") to retrieve]`;
 }

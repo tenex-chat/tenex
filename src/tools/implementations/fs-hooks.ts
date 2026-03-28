@@ -4,18 +4,25 @@ import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 
-export async function executeReadToolResult(eventId: string): Promise<string> {
-    const messages = await toolMessageStorage.load(eventId);
+export async function executeReadToolResult(
+    conversationId: string,
+    toolCallId: string
+): Promise<string> {
+    const messages = await toolMessageStorage.load(conversationId, toolCallId);
 
     if (!messages) {
-        throw new Error(`No tool result found for event ID: ${eventId}`);
+        throw new Error(
+            `No tool result found for conversation ID: ${conversationId}, tool call ID: ${toolCallId}`
+        );
     }
 
     const assistantMessage = messages.find((message) => message.role === "assistant");
     const toolMessage = messages.find((message) => message.role === "tool");
 
     if (!assistantMessage || !toolMessage) {
-        throw new Error(`Invalid tool result format for event ID: ${eventId}`);
+        throw new Error(
+            `Invalid tool result format for conversation ID: ${conversationId}, tool call ID: ${toolCallId}`
+        );
     }
 
     const toolCallContent = Array.isArray(assistantMessage.content)
@@ -26,12 +33,16 @@ export async function executeReadToolResult(eventId: string): Promise<string> {
         : null;
 
     if (!toolCallContent || !toolResultContent) {
-        throw new Error(`Could not extract tool call/result for event ID: ${eventId}`);
+        throw new Error(
+            `Could not extract tool call/result for conversation ID: ${conversationId}, tool call ID: ${toolCallId}`
+        );
     }
 
     const toolName = "toolName" in toolCallContent ? toolCallContent.toolName : undefined;
     if (typeof toolName !== "string" || toolName.length === 0) {
-        throw new Error(`Missing tool name in tool call for event ID: ${eventId}`);
+        throw new Error(
+            `Missing tool name in tool call for conversation ID: ${conversationId}, tool call ID: ${toolCallId}`
+        );
     }
 
     const input = "input" in toolCallContent ? toolCallContent.input : {};
@@ -39,7 +50,10 @@ export async function executeReadToolResult(eventId: string): Promise<string> {
 
     let outputValue: string;
     if (output && typeof output === "object" && "value" in output) {
-        outputValue = String(output.value);
+        outputValue =
+            typeof output.value === "string"
+                ? output.value
+                : JSON.stringify(output.value, null, 2);
     } else if (typeof output === "string") {
         outputValue = output;
     } else {
@@ -48,7 +62,7 @@ export async function executeReadToolResult(eventId: string): Promise<string> {
 
     const inputStr = typeof input === "object" ? JSON.stringify(input, null, 2) : String(input);
 
-    return `Tool: ${toolName}\nEvent ID: ${eventId}\n\n--- Input ---\n${inputStr}\n\n--- Output ---\n${outputValue}`;
+    return `Tool: ${toolName}\nConversation ID: ${conversationId}\nTool Call ID: ${toolCallId}\n\n--- Input ---\n${inputStr}\n\n--- Output ---\n${outputValue}`;
 }
 
 export async function synthesizeContent(content: string, prompt: string, source: string): Promise<string> {

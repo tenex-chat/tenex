@@ -6,7 +6,7 @@
  *
  * 1. First appearance: Image is shown in full (agent can see/analyze it)
  * 2. Subsequent appearances: Image is replaced with a text placeholder
- *    that references fs_read(tool='<eventId>') for retrieval
+ *    that references fs_read(tool='<toolCallId>') for retrieval
  *
  * This reduces token costs by 95-99% for image-heavy conversations while
  * maintaining retrieval capability.
@@ -65,12 +65,12 @@ export function createImageTracker(): ImageTracker {
  * Create a placeholder text for an image that has been seen before.
  *
  * @param imageUrlOrName - The image URL or filename
- * @param eventId - The event ID for retrieval via fs_read
+ * @param toolCallId - The tool call ID for retrieval via fs_read
  * @returns Placeholder text with retrieval instructions
  */
 export function createImagePlaceholder(
     imageUrlOrName: string,
-    eventId: string | undefined
+    toolCallId: string | undefined
 ): string {
     // Extract filename from URL if it looks like a URL
     let filename = imageUrlOrName;
@@ -85,11 +85,11 @@ export function createImagePlaceholder(
         // Not a URL, use as-is
     }
 
-    if (eventId) {
-        return `${IMAGE_PLACEHOLDER_PREFIX} ${filename} - use fs_read(tool="${eventId}") to retrieve]`;
+    if (toolCallId) {
+        return `${IMAGE_PLACEHOLDER_PREFIX} ${filename} - use fs_read(tool="${toolCallId}") to retrieve]`;
     }
 
-    // Fallback when eventId is not available (shouldn't happen normally)
+    // Fallback when toolCallId is not available (shouldn't happen normally)
     return `${IMAGE_PLACEHOLDER_PREFIX} ${filename} - original context lost, cannot retrieve]`;
 }
 
@@ -184,13 +184,11 @@ export interface ProcessToolResultOutput {
  *
  * @param toolData - Array of tool result parts
  * @param tracker - Image tracker for the conversation
- * @param eventId - Event ID for retrieval reference
  * @returns Object with processed tool results and replacement statistics
  */
 export function processToolResultWithImageTracking(
     toolData: ToolResultPart[],
-    tracker: ImageTracker,
-    eventId: string | undefined
+    tracker: ImageTracker
 ): ProcessToolResultOutput {
     let totalReplacedCount = 0;
     const uniqueReplacedUrls = new Set<string>();
@@ -219,11 +217,12 @@ export function processToolResultWithImageTracking(
                     // Image already seen - replace with placeholder
                     totalReplacedCount++;
                     uniqueReplacedUrls.add(normalizedUrl);
-                    return createImagePlaceholder(normalizedUrl, eventId);
+                    return createImagePlaceholder(normalizedUrl, part.toolCallId);
                 }
-                    // First time seeing this image - mark as seen but preserve URL
-                    tracker.markAsSeen(normalizedUrl);
-                    return rawUrl;
+
+                // First time seeing this image - mark as seen but preserve URL
+                tracker.markAsSeen(normalizedUrl);
+                return rawUrl;
             }
         );
 

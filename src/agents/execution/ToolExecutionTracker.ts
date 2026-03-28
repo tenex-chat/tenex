@@ -50,6 +50,8 @@ interface TrackedExecution {
     toolCallId: string;
     /** Name of the tool being executed */
     toolName: string;
+    /** Conversation ID used to scope persisted tool results */
+    conversationId?: string;
     /** Nostr event ID published when tool started (empty string for delegation tools with delayed publishing) */
     toolEventId: string;
     /** Input arguments passed to the tool */
@@ -98,6 +100,8 @@ export interface CompleteExecutionOptions {
     error: boolean;
     /** Public key of the agent that executed the tool */
     agentPubkey: string;
+    /** Conversation ID that scopes persisted tool results */
+    conversationId?: string;
 }
 
 /**
@@ -159,6 +163,7 @@ export class ToolExecutionTracker {
         const execution: TrackedExecution = {
             toolCallId,
             toolName,
+            conversationId: eventContext.conversationId,
             toolEventId: "", // Will be updated after publish (empty for delayed delegation tools)
             input: args,
             completed: false,
@@ -249,6 +254,16 @@ export class ToolExecutionTracker {
             }
 
             return undefined;
+        }
+
+        const conversationId =
+            options.conversationId
+            ?? execution.conversationId
+            ?? execution.eventContext?.conversationId;
+        if (!conversationId) {
+            throw new Error(
+                `[ToolExecutionTracker] Missing conversation ID for tool ${execution.toolName} (${toolCallId}).`
+            );
         }
 
         // Log errors explicitly for visibility
@@ -352,7 +367,7 @@ export class ToolExecutionTracker {
         // Persist the complete tool message to filesystem
         // This enables conversation reconstruction and audit trails
         await toolMessageStorage.store(
-            execution.toolEventId,
+            conversationId,
             {
                 toolCallId,
                 toolName: execution.toolName,

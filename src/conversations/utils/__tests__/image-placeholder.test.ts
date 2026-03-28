@@ -3,10 +3,10 @@
  *
  * Images in tool results should:
  * 1. First appearance: Show full ImagePart for agent to see/analyze
- * 2. Subsequent appearances: Replace with text placeholder referencing eventId
+ * 2. Subsequent appearances: Replace with text placeholder referencing toolCallId
  *
  * This prevents token accumulation from screenshots (estimated ~1,600 tokens per image)
- * while preserving retrieval capability via fs_read(tool='<eventId>').
+ * while preserving retrieval capability via fs_read(tool='<toolCallId>').
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -23,25 +23,25 @@ import {
 
 describe("image-placeholder", () => {
     describe("createImagePlaceholder", () => {
-        it("should create placeholder text with eventId reference", () => {
-            const placeholder = createImagePlaceholder("screenshot.png", "event-123");
+        it("should create placeholder text with toolCallId reference", () => {
+            const placeholder = createImagePlaceholder("screenshot.png", "call-123");
 
             expect(placeholder).toContain("[Image:");
             expect(placeholder).toContain("screenshot.png");
-            expect(placeholder).toContain("fs_read(tool=\"event-123\")");
+            expect(placeholder).toContain("fs_read(tool=\"call-123\")");
         });
 
         it("should handle URLs by extracting filename", () => {
             const placeholder = createImagePlaceholder(
                 "https://example.com/uploads/screenshot.png?v=123",
-                "event-456"
+                "call-456"
             );
 
             expect(placeholder).toContain("screenshot.png");
-            expect(placeholder).toContain("fs_read(tool=\"event-456\")");
+            expect(placeholder).toContain("fs_read(tool=\"call-456\")");
         });
 
-        it("should handle missing eventId with graceful fallback", () => {
+        it("should handle missing toolCallId with graceful fallback", () => {
             const placeholder = createImagePlaceholder("image.jpg", undefined);
 
             expect(placeholder).toContain("[Image:");
@@ -199,8 +199,7 @@ describe("image-placeholder", () => {
 
             const { processedParts, replacedCount, uniqueReplacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-123"
+                tracker
             );
 
             // First appearance: should NOT be a placeholder
@@ -233,13 +232,12 @@ describe("image-placeholder", () => {
             // Second call - should create placeholder
             const { processedParts, replacedCount, uniqueReplacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-456"
+                tracker
             );
 
             const outputText = getOutputText(processedParts[0]);
             expect(outputText).toContain(IMAGE_PLACEHOLDER_PREFIX);
-            expect(outputText).toContain("fs_read(tool=\"event-456\")");
+            expect(outputText).toContain("fs_read(tool=\"call-1\")");
 
             // One replacement occurred
             expect(replacedCount).toBe(1);
@@ -262,8 +260,7 @@ describe("image-placeholder", () => {
 
             const { processedParts, replacedCount, uniqueReplacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-789"
+                tracker
             );
 
             const outputText = getOutputText(processedParts[0]);
@@ -299,8 +296,7 @@ describe("image-placeholder", () => {
 
             const { processedParts } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-1"
+                tracker
             );
 
             expect(processedParts[0].type).toBe("tool-result");
@@ -329,8 +325,7 @@ describe("image-placeholder", () => {
 
             const { processedParts, replacedCount, uniqueReplacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-multi"
+                tracker
             );
 
             expect(processedParts).toHaveLength(2);
@@ -338,6 +333,7 @@ describe("image-placeholder", () => {
             // First result has seen image - placeholder
             const output1 = getOutputText(processedParts[0]);
             expect(output1).toContain(IMAGE_PLACEHOLDER_PREFIX);
+            expect(output1).toContain("fs_read(tool=\"call-1\")");
 
             // Second result has new image - preserved
             const output2 = getOutputText(processedParts[1]);
@@ -362,8 +358,7 @@ describe("image-placeholder", () => {
 
             const { processedParts, replacedCount, uniqueReplacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-no-img"
+                tracker
             );
 
             const outputText = getOutputText(processedParts[0]);
@@ -389,8 +384,7 @@ describe("image-placeholder", () => {
             // (image tracking only applies to text content)
             const { processedParts, replacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-obj"
+                tracker
             );
 
             expect(processedParts[0].output).toEqual({
@@ -416,8 +410,7 @@ describe("image-placeholder", () => {
 
             const { processedParts, replacedCount, uniqueReplacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-dup"
+                tracker
             );
 
             const outputText = getOutputText(processedParts[0]);
@@ -454,8 +447,7 @@ describe("image-placeholder", () => {
 
             const { processedParts, replacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                "event-punct"
+                tracker
             );
 
             const outputText = getOutputText(processedParts[0]);
@@ -468,29 +460,28 @@ describe("image-placeholder", () => {
             expect(replacedCount).toBe(2);
         });
 
-        it("should handle missing eventId with graceful fallback in placeholder", () => {
+        it("should use the toolCallId from the repeated tool result placeholder", () => {
             const toolData: ToolResultPart[] = [{
                 type: "tool-result",
-                toolCallId: "call-1",
+                toolCallId: "call-repeat",
                 toolName: "screenshot",
                 output: {
                     type: "text",
-                    value: "Screenshot: https://example.com/no-event.png",
+                    value: "Screenshot: https://example.com/repeat.png",
                 },
             }];
 
-            tracker.markAsSeen("https://example.com/no-event.png");
+            tracker.markAsSeen("https://example.com/repeat.png");
 
             const { processedParts, replacedCount } = processToolResultWithImageTracking(
                 toolData,
-                tracker,
-                undefined // No eventId
+                tracker
             );
 
             const outputText = getOutputText(processedParts[0]);
 
             expect(outputText).toContain(IMAGE_PLACEHOLDER_PREFIX);
-            expect(outputText).toContain("original context lost");
+            expect(outputText).toContain("fs_read(tool=\"call-repeat\")");
             expect(replacedCount).toBe(1);
         });
     });
