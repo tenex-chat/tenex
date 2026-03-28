@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { projectContextStore } from "@/services/projects";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -100,15 +101,16 @@ mock.module("@opentelemetry/api", () => ({
 }));
 
 function createProjectContext(agent: any) {
-    const agents = new Map([[agent.slug, agent]]);
     return {
-        agents,
         agentRegistry: {
             getBasePath: () => "/tmp/project",
         },
+        agents: new Map([[agent.slug, agent]]),
+        mcpManager: undefined,
         project: {
             id: "project-event",
-            tagValue: (name: string) => (name === "d" ? "telegram-project" : undefined),
+            tagValue: (name: string) =>
+                name === "d" ? "telegram-project" : name === "title" ? "Telegram Project" : undefined,
             tagReference: () => ["a", `31933:${"f".repeat(64)}:telegram-project`],
         },
     } as any;
@@ -168,41 +170,69 @@ describe("TelegramGatewayService telemetry", () => {
         };
 
         const gateway = new TelegramGatewayService({
-            projectId: "telegram-project",
-            projectContext: createProjectContext(agent),
-            agentExecutor: {} as any,
             runtimeIngressService: runtimeIngress,
+            channelSessionStore: {
+                getSession: () => undefined,
+                findSessionByAgentChannel: () => undefined,
+                rememberSession: () => undefined,
+                clearSession: () => false,
+                clearSessionsByAgentChannel: () => 0,
+            } as any,
+            channelBindingStore: {
+                getBinding: () => undefined,
+                rememberBinding: () => undefined,
+                clearBinding: () => undefined,
+            } as any,
+            pendingBindingStore: {
+                getPending: () => undefined,
+                rememberPending: () => undefined,
+                clearPending: () => undefined,
+            } as any,
             authorizedIdentityService: {
                 isAuthorizedPrincipal: () => true,
             } as any,
-        });
-
-        await gateway.processUpdate(
-            {
+        }) as any;
+        gateway.registrations.set(agent.telegram.botToken, [{
+            projectId: "telegram-project",
+            projectTitle: "Telegram Project",
+            projectBinding: `31933:${"f".repeat(64)}:telegram-project`,
+            runInProjectContext: async <T>(operation: () => Promise<T>) =>
+                await projectContextStore.run(createProjectContext(agent), operation),
+            agentExecutor: {} as any,
+            binding: {
                 agent,
                 config: agent.telegram,
             },
-            {
-                update_id: 10,
-                message: {
-                    message_id: 5,
-                    date: 123,
-                    chat: { id: 1001, type: "private" },
-                    from: {
-                        id: 42,
-                        is_bot: false,
-                        first_name: "Alice",
-                    },
-                    text: "hello dm",
-                },
+        }]);
+
+        await gateway.processUpdate({
+            token: agent.telegram.botToken,
+            agentPubkey: agent.pubkey,
+            client: {
+                sendMessage: mock(async () => undefined),
+                sendChatAction: mock(async () => undefined),
             },
-            {
+            botIdentity: {
                 id: 777,
                 is_bot: true,
                 first_name: "Test Bot",
                 username: "test_bot",
-            }
-        );
+            },
+            loopPromise: Promise.resolve(),
+        }, {
+            update_id: 10,
+            message: {
+                message_id: 5,
+                date: 123,
+                chat: { id: 1001, type: "private" },
+                from: {
+                    id: 42,
+                    is_bot: false,
+                    first_name: "Alice",
+                },
+                text: "hello dm",
+            },
+        });
 
         const span = spans.find((entry) => entry.name === "tenex.telegram.update");
         expect(span).toBeDefined();
@@ -216,5 +246,81 @@ describe("TelegramGatewayService telemetry", () => {
         expect(span?.attributes["conversation.id"]).toBe("conversation-telemetry");
         expect(span?.attributes["telegram.update.outcome"]).toBe("routed");
         expect(span?.ended).toBe(true);
+    });
+
+    it("records the unified unprocessable-message reason", async () => {
+        const { TelegramGatewayService } = await import(`../TelegramGatewayService.ts?telemetry-drop-${Date.now()}`);
+        const agent = {
+            slug: "telegram-agent",
+            name: "Telegram Agent",
+            pubkey: "a".repeat(64),
+            telegram: {
+                botToken: "token",
+                allowDMs: true,
+            },
+        };
+        const gateway = new TelegramGatewayService({
+            channelSessionStore: {
+                getSession: () => undefined,
+                findSessionByAgentChannel: () => undefined,
+                rememberSession: () => undefined,
+                clearSession: () => false,
+                clearSessionsByAgentChannel: () => 0,
+            } as any,
+            channelBindingStore: {
+                getBinding: () => undefined,
+                rememberBinding: () => undefined,
+                clearBinding: () => undefined,
+            } as any,
+            pendingBindingStore: {
+                getPending: () => undefined,
+                rememberPending: () => undefined,
+                clearPending: () => undefined,
+            } as any,
+        }) as any;
+        gateway.registrations.set(agent.telegram.botToken, [{
+            projectId: "telegram-project",
+            projectTitle: "Telegram Project",
+            projectBinding: `31933:${"f".repeat(64)}:telegram-project`,
+            runInProjectContext: async <T>(operation: () => Promise<T>) =>
+                await projectContextStore.run(createProjectContext(agent), operation),
+            agentExecutor: {} as any,
+            binding: {
+                agent,
+                config: agent.telegram,
+            },
+        }]);
+
+        await gateway.processUpdate({
+            token: agent.telegram.botToken,
+            agentPubkey: agent.pubkey,
+            client: {
+                sendMessage: mock(async () => undefined),
+                sendChatAction: mock(async () => undefined),
+            },
+            botIdentity: {
+                id: 777,
+                is_bot: true,
+                first_name: "Test Bot",
+                username: "test_bot",
+            },
+            loopPromise: Promise.resolve(),
+        }, {
+            update_id: 11,
+            message: {
+                message_id: 6,
+                date: 124,
+                chat: { id: 1001, type: "private" },
+                from: {
+                    id: 42,
+                    is_bot: false,
+                    first_name: "Alice",
+                },
+            },
+        });
+
+        const span = spans.find((entry) => entry.name === "tenex.telegram.update");
+        expect(span?.attributes["telegram.update.outcome"]).toBe("dropped");
+        expect(span?.attributes["telegram.update.reason"]).toBe("unprocessable_message");
     });
 });
