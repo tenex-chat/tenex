@@ -5,7 +5,6 @@ import {
     getAgentHomeDirectory,
     getAgentHomeInjectedFiles,
 } from "@/lib/agent-home";
-import type { InjectedFile } from "@/lib/agent-home";
 
 // Re-export for convenience (used by tests)
 export { getAgentHomeDirectory } from "@/lib/agent-home";
@@ -17,18 +16,10 @@ import type { PromptFragment } from "../core/types";
  * Prevents prompt bloat if an agent has many files.
  */
 const MAX_LISTING_ENTRIES = 50;
-const HOME_PROMPT_CACHE_TTL_MS = 30_000;
-
-interface AgentHomePromptCacheEntry {
-    expiresAt: number;
-    injectedFiles: InjectedFile[];
-    listing: string;
-}
-
-const agentHomePromptCache = new Map<string, AgentHomePromptCacheEntry>();
 
 export function clearAgentHomePromptCache(): void {
-    agentHomePromptCache.clear();
+    // Agent home prompt data must reflect +file updates immediately between turns.
+    // Keep the helper as a no-op so existing tests can keep calling it.
 }
 
 /**
@@ -73,37 +64,6 @@ function buildHomeListing(homeDir: string, agentPubkey: string): string {
     }
 }
 
-function cloneInjectedFiles(files: InjectedFile[]): InjectedFile[] {
-    return files.map((file) => ({ ...file }));
-}
-
-function getCachedAgentHomePromptData(
-    agentPubkey: string
-): { injectedFiles: InjectedFile[]; listing: string } {
-    const cached = agentHomePromptCache.get(agentPubkey);
-    if (cached && cached.expiresAt > Date.now()) {
-        return {
-            listing: cached.listing,
-            injectedFiles: cloneInjectedFiles(cached.injectedFiles),
-        };
-    }
-
-    const homeDir = getAgentHomeDirectory(agentPubkey);
-    const listing = buildHomeListing(homeDir, agentPubkey);
-    const injectedFiles = getAgentHomeInjectedFiles(agentPubkey);
-
-    agentHomePromptCache.set(agentPubkey, {
-        expiresAt: Date.now() + HOME_PROMPT_CACHE_TTL_MS,
-        listing,
-        injectedFiles: cloneInjectedFiles(injectedFiles),
-    });
-
-    return {
-        listing,
-        injectedFiles,
-    };
-}
-
 /**
  * Agent home directory fragment.
  * Provides agents with a personal workspace directory for notes, scripts, and other files.
@@ -114,7 +74,8 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
     priority: 2, // Right after agent-identity (priority 1)
     template: async ({ agent }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
-        const { listing, injectedFiles } = getCachedAgentHomePromptData(agent.pubkey);
+        const listing = buildHomeListing(homeDir, agent.pubkey);
+        const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
 
         const parts: string[] = [];
 

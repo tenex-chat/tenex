@@ -235,6 +235,32 @@ describe("agent-home-directory fragment", () => {
 
             expect(result).not.toContain("### Injected File Contents");
         });
+
+        it("should reflect updated injected files and listing on consecutive renders", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy
+                .mockImplementationOnce(() => [
+                    { name: "+NOTES.md", isDirectory: () => false },
+                ])
+                .mockImplementationOnce(() => [
+                    { name: "+NOTES.md", isDirectory: () => false },
+                    { name: "fresh.txt", isDirectory: () => false },
+                ]);
+            getInjectedFilesSpy
+                .mockImplementationOnce(() => [
+                    { filename: "+NOTES.md", content: "Old note", truncated: false },
+                ])
+                .mockImplementationOnce(() => [
+                    { filename: "+NOTES.md", content: "Updated note", truncated: false },
+                ]);
+
+            const firstRender = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+            const secondRender = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+
+            expect(firstRender).toContain("Old note");
+            expect(secondRender).toContain("Updated note");
+            expect(secondRender).toContain("fresh.txt");
+        });
     });
 
     describe("fragment metadata", () => {

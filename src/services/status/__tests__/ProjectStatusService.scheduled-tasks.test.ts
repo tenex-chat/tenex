@@ -453,6 +453,47 @@ describe("ProjectStatusService skills", () => {
         ]);
     });
 
+    it("includes configured agent-scoped skills that are not project-visible", async () => {
+        const agents = new Map<string, AgentInstance>();
+        agents.set("agent1", createSkillTestAgent("agent1", ["agent-only"]));
+        agents.set("agent2", createSkillTestAgent("agent2"));
+
+        spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: async (lookupContext?: { agentPubkey?: string }) => {
+                if (lookupContext?.agentPubkey === "pubkey-agent1") {
+                    return [
+                        {
+                            identifier: "agent-only",
+                            content: "agent-local instructions",
+                            installedFiles: [],
+                        },
+                    ];
+                }
+
+                return [];
+            },
+        } as unknown as SkillService);
+
+        const service = new ProjectStatusService();
+        (service as unknown as { projectContext: ProjectContext }).projectContext =
+            createSkillProjectContext(agents);
+
+        const intent: StatusIntent = {
+            type: "status",
+            agents: [],
+            models: [],
+            tools: [],
+        };
+
+        await (service as unknown as {
+            gatherSkillInfo(intent: StatusIntent, projectPath: string): Promise<void>;
+        }).gatherSkillInfo(intent, "/tmp/demo-project");
+
+        expect(intent.skills).toEqual([
+            { id: "agent-only", agents: ["agent1"] },
+        ]);
+    });
+
     it("emits skill tags in the 24010 status event", () => {
         const service = new ProjectStatusService();
         (service as unknown as { projectContext: ProjectContext }).projectContext =

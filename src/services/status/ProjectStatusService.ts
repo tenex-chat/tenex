@@ -415,11 +415,29 @@ export class ProjectStatusService {
             }
 
             for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
+                const visibleAgentSkills = new Set(
+                    (
+                        await SkillService.getInstance().listAvailableSkills({
+                            agentPubkey: agent.pubkey,
+                            projectPath,
+                            projectDTag,
+                        })
+                    )
+                        .map((skill) => skill.identifier)
+                        .filter((identifier): identifier is string => Boolean(identifier))
+                );
+
                 for (const skillId of agent.alwaysSkills ?? []) {
-                    const configuredAgents = skillAgentMap.get(skillId);
-                    if (configuredAgents) {
-                        configuredAgents.add(agentSlug);
+                    if (!visibleAgentSkills.has(skillId)) {
+                        continue;
                     }
+
+                    let configuredAgents = skillAgentMap.get(skillId);
+                    if (!configuredAgents) {
+                        configuredAgents = new Set<string>();
+                        skillAgentMap.set(skillId, configuredAgents);
+                    }
+                    configuredAgents.add(agentSlug);
                 }
             }
 
