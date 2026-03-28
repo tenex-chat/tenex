@@ -166,7 +166,7 @@ function recordTelegramOutcome(
 }
 
 export class TelegramGatewayService {
-    private static instance: TelegramGatewayService;
+    private static instance: TelegramGatewayService | undefined;
 
     private readonly registrations = new Map<string, TelegramRuntimeRegistration[]>();
     private readonly pollers = new Map<string, TelegramPollerState>();
@@ -230,7 +230,7 @@ export class TelegramGatewayService {
     }
 
     static resetInstance(): void {
-        TelegramGatewayService.instance = undefined as unknown as TelegramGatewayService;
+        TelegramGatewayService.instance = undefined;
     }
 
     async registerRuntime(params: {
@@ -821,10 +821,6 @@ export class TelegramGatewayService {
             }
 
             const commandKind = params.commandKind;
-            if (!commandKind) {
-                return;
-            }
-
             await params.registration.runInProjectContext(async () => {
                 const projectContext = projectContextStore.getContextOrThrow();
                 const agent = params.registration.binding.agent as AgentInstance;
