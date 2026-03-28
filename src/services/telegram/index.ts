@@ -16,10 +16,9 @@ export {
     TelegramDeliveryService,
 } from "./TelegramDeliveryService";
 export {
-    TelegramGatewayCoordinator,
-    getTelegramGatewayCoordinator,
-} from "./TelegramGatewayCoordinator";
-export { TelegramGatewayService } from "./TelegramGatewayService";
+    TelegramGatewayService,
+    getTelegramGatewayService,
+} from "./TelegramGatewayService";
 export { TelegramInboundAdapter } from "./TelegramInboundAdapter";
 export {
     TelegramPendingBindingStore,

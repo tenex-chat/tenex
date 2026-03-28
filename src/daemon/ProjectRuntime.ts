@@ -22,7 +22,7 @@ import { OperationsStatusService } from "@/services/status/OperationsStatusServi
 import { prefixKVStore } from "@/services/storage";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
 import { createDefaultRuntimePublisherFactory } from "@/services/runtime/runtime-publisher-factory";
-import { getTelegramGatewayCoordinator } from "@/services/telegram/TelegramGatewayCoordinator";
+import { getTelegramGatewayService } from "@/services/telegram/TelegramGatewayService";
 import { RALRegistry } from "@/services/ral";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { getPubkeyService } from "@/services/PubkeyService";
@@ -245,7 +245,7 @@ export class ProjectRuntime {
                 throw new Error(`Project ${this.projectId} is missing a canonical tag reference`);
             }
 
-            await getTelegramGatewayCoordinator().registerRuntime({
+            await getTelegramGatewayService().registerRuntime({
                 projectId: this.projectId,
                 projectTitle: projectTitle,
                 projectBinding,
@@ -309,7 +309,7 @@ export class ProjectRuntime {
                 stack: error instanceof Error ? error.stack : undefined,
             });
             if (this.telegramGatewayRegistered) {
-                await getTelegramGatewayCoordinator().unregisterRuntime(this.projectId);
+                await getTelegramGatewayService().unregisterRuntime(this.projectId);
                 this.telegramGatewayRegistered = false;
             }
             throw error;
@@ -398,7 +398,7 @@ export class ProjectRuntime {
         // Stop status publisher
         if (this.telegramGatewayRegistered) {
             logger.info(`[ProjectRuntime] Unregistering Telegram runtime: ${this.projectId}`);
-            await getTelegramGatewayCoordinator().unregisterRuntime(this.projectId);
+            await getTelegramGatewayService().unregisterRuntime(this.projectId);
             this.telegramGatewayRegistered = false;
         }
 
