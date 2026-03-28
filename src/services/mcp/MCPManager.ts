@@ -167,20 +167,18 @@ export class MCPManager {
      * Concurrent calls share a single startup.
      */
     private async ensureServersStarted(): Promise<void> {
-        if (this.serversStarted || !this.pendingConfig) {
-            return;
-        }
+        while (!this.serversStarted && this.pendingConfig) {
+            if (this.serverStartPromise) {
+                await this.serverStartPromise;
+                continue;
+            }
 
-        if (this.serverStartPromise) {
-            await this.serverStartPromise;
-            return;
-        }
-
-        this.serverStartPromise = this.startDeferredServers();
-        try {
-            await this.serverStartPromise;
-        } finally {
-            this.serverStartPromise = null;
+            this.serverStartPromise = this.startDeferredServers();
+            try {
+                await this.serverStartPromise;
+            } finally {
+                this.serverStartPromise = null;
+            }
         }
     }
 
@@ -401,25 +399,47 @@ export class MCPManager {
 
         if (neededServers.size === 0) return;
 
+        while (this.pendingConfig) {
+            const missingServers = Array.from(neededServers).filter((name) => !this.clients.has(name));
+            if (missingServers.length === 0) {
+                return;
+            }
+
+            if (this.serverStartPromise) {
+                await this.serverStartPromise;
+                continue;
+            }
+
+            this.serverStartPromise = this.startDeferredServersForTools(missingServers);
+            try {
+                await this.serverStartPromise;
+            } finally {
+                this.serverStartPromise = null;
+            }
+        }
+    }
+
+    private async startDeferredServersForTools(serverNames: string[]): Promise<void> {
         const config = this.pendingConfig;
         if (!config) return;
 
-        // Start only the servers the agent needs
-        for (const serverName of neededServers) {
-            if (this.clients.has(serverName)) continue;
-            const serverConfig = config.servers[serverName];
-            if (!serverConfig) continue;
+        const serversToStart = Object.fromEntries(
+            serverNames
+                .filter((name) => !this.clients.has(name) && config.servers[name])
+                .map((name) => [name, config.servers[name]])
+        );
 
-            try {
-                await this.startServer(serverName, serverConfig);
-            } catch (error) {
-                logger.error(`Failed to start MCP server '${serverName}':`, formatAnyError(error));
-            }
+        if (Object.keys(serversToStart).length === 0) {
+            return;
         }
 
-        // Mark fully started if all servers are now running
+        await this.startServers({
+            enabled: config.enabled,
+            servers: serversToStart,
+        });
+
         const allServerNames = Object.keys(config.servers);
-        if (allServerNames.every(name => this.clients.has(name))) {
+        if (allServerNames.every((name) => this.clients.has(name))) {
             this.pendingConfig = null;
             this.serversStarted = true;
         }
