@@ -26,7 +26,7 @@
         "@qdrant/js-client-rest": "^1.17.0",
         "ai": "^6.0.137",
         "ai-sdk-context-management": "^0.8.3",
-        "ai-sdk-fs-tools": "^0.2.2",
+        "ai-sdk-fs-tools": "^0.3.0",
         "ai-sdk-message-sanitizer": "0.1.3",
         "ai-sdk-provider-codex-cli": "1.1.0",
         "ai-sdk-system-reminders": "0.3.0",
@@ -674,7 +674,7 @@
 
     "ai-sdk-context-management": ["ai-sdk-context-management@0.8.3", "", { "dependencies": { "ai-sdk-system-reminders": "^0.3.0" }, "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-Xorll2fCJtMse9ZdBXkDwY7NiWG3TiEAboeegNjoFkdviAuNjK7K1x2XVuvQrtuUlEvBKrOZPEaMd481oAseBw=="],
 
-    "ai-sdk-fs-tools": ["ai-sdk-fs-tools@0.2.2", "", { "dependencies": { "ai-sdk-system-reminders": "^0.2.0" }, "peerDependencies": { "ai": "^6.0.0", "zod": "^4.0.0" } }, "sha512-uoYIhFISNQ8GIPoYT0Tcw+PFUsG3l1zAx5xCM4uHWGeeks1uzu45Qr9HqRI8pGLGkneO2Uc6mFGywasyUhc3tA=="],
+    "ai-sdk-fs-tools": ["ai-sdk-fs-tools@0.3.0", "", { "dependencies": { "ai-sdk-system-reminders": "^0.2.0" }, "peerDependencies": { "ai": "^6.0.0", "zod": "^4.0.0" } }, "sha512-MwZ8OcXuFUv2GnIjixaM303v2t9hKEwDrvhst4Ycn8e0i5NbeUHm9Py7LKUW9AKcewqjk2B3cH/uBr8gEUH6Wg=="],
 
     "ai-sdk-message-sanitizer": ["ai-sdk-message-sanitizer@0.1.3", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-kcrJ6mT2JiQSWnwic7VaxlSmu5SktHjBIBxahZgO6QLPe9atCgptBMP1f70lsaqbyPbz7AZjOuQVzNkNmm9UOg=="],
 

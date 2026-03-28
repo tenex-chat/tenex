@@ -100,6 +100,7 @@ function createTenexFsToolsUncached(context: ToolExecutionContext): ReturnType<t
 
     const tools = createFsTools({
         workingDirectory: context.workingDirectory,
+        agentId: context.agent.pubkey,
         allowedRoots,
         agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory },
         formatOutsideRootsError: (path, wd) =>
@@ -134,6 +135,7 @@ function getOrCreateHomeFsTools(context: ToolExecutionContext): ReturnType<typeo
         ensureAgentHomeDirectory(context.agent.pubkey);
         tools = createFsTools({
             workingDirectory: homeDir,
+            agentId: context.agent.pubkey,
             namePrefix: "home_fs",
             strictContainment: true,
             agentsMd: false,

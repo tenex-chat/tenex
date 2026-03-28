@@ -10,6 +10,7 @@ const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slic
 function createTestFsTools(workingDirectory: string, agentPubkey: string): FsToolSet {
     return createFsTools({
         workingDirectory,
+        agentId: agentPubkey,
         allowedRoots: [getTestAgentHomeDir(agentPubkey)],
         agentsMd: false,
         formatOutsideRootsError: (p, wd) =>
@@ -31,10 +32,16 @@ describe("fs_edit tool", () => {
         await cleanupTempDir(testDir);
     });
 
+    // Helper: read file before editing (required by concurrency protection in v0.3.0+)
+    async function readBeforeEdit(filePath: string) {
+        await tools.fs_read.execute({ path: filePath, description: "read before edit" });
+    }
+
     describe("basic string replacement", () => {
         it("should replace a unique string successfully", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "Hello, World!", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -53,6 +60,7 @@ describe("fs_edit tool", () => {
     console.log("old");
 }`;
             writeFileSync(filePath, original, "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -72,6 +80,7 @@ line 2
 line 3
 line 4`;
             writeFileSync(filePath, original, "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -91,6 +100,7 @@ modified line 3`,
         it("should replace all occurrences when replace_all is true", async () => {
             const filePath = path.join(testDir, "multiple.txt");
             writeFileSync(filePath, "foo bar foo baz foo", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -107,6 +117,7 @@ modified line 3`,
         it("should return error-text when string is not unique and replace_all is false", async () => {
             const filePath = path.join(testDir, "duplicate.txt");
             writeFileSync(filePath, "test test test", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -124,6 +135,7 @@ modified line 3`,
         it("should handle special regex characters in replace_all", async () => {
             const filePath = path.join(testDir, "special.txt");
             writeFileSync(filePath, "a.b a.b a.b", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -142,6 +154,7 @@ modified line 3`,
         it("should return error-text when old_string is not found", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "Hello, World!", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -159,6 +172,7 @@ modified line 3`,
         it("should return error-text when old_string and new_string are identical", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "Hello, World!", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -195,15 +209,17 @@ modified line 3`,
                 new_string: "new",
                 description: "edit file",
             });
+            // With concurrency protection (v0.3.0+), editing without prior fs_read returns this error
             expect(result).toEqual({
                 type: "error-text",
-                text: expect.stringContaining("File or directory not found"),
+                text: expect.stringContaining("File must be read with fs_read before editing"),
             });
         });
 
         it("should return error-text when old_string appears multiple times", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "hello world hello world", "utf-8");
+            await readBeforeEdit(filePath);
             const result = await tools.fs_edit.execute({
                 path: filePath,
                 old_string: "hello",
@@ -221,6 +237,7 @@ modified line 3`,
         it("should handle empty string replacement", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "Hello, World!", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -236,6 +253,7 @@ modified line 3`,
         it("should handle unicode content", async () => {
             const filePath = path.join(testDir, "unicode.txt");
             writeFileSync(filePath, "你好世界 🌍", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -253,6 +271,7 @@ modified line 3`,
             const fs = await import("node:fs/promises");
             await fs.mkdir(path.dirname(filePath), { recursive: true });
             await fs.writeFile(filePath, "Test content", "utf-8");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -296,6 +315,7 @@ modified line 3`,
             writeFileSync(outsideFile, "original content");
 
             try {
+                await tools.fs_read.execute({ path: outsideFile, allowOutsideWorkingDirectory: true, description: "read before edit" });
                 const result = await tools.fs_edit.execute({
                     path: outsideFile,
                     old_string: "original",
@@ -314,6 +334,7 @@ modified line 3`,
         it("should allow editing files within working directory without flag", async () => {
             const filePath = path.join(testDir, "inside.txt");
             writeFileSync(filePath, "original content");
+            await readBeforeEdit(filePath);
 
             const result = await tools.fs_edit.execute({
                 path: filePath,
@@ -354,6 +375,7 @@ modified line 3`,
             mkdirSync(agentHomeDir, { recursive: true });
             const homeFile = path.join(agentHomeDir, "notes.txt");
             writeFileSync(homeFile, "original notes");
+            await tools.fs_read.execute({ path: homeFile, description: "read before edit" });
 
             try {
                 const result = await tools.fs_edit.execute({

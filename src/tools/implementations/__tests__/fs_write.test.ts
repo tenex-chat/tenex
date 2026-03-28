@@ -10,6 +10,7 @@ const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slic
 function createTestFsTools(workingDirectory: string, agentPubkey: string, reportsDir?: string): FsToolSet {
     return createFsTools({
         workingDirectory,
+        agentId: agentPubkey,
         allowedRoots: [getTestAgentHomeDir(agentPubkey)],
         agentsMd: false,
         formatOutsideRootsError: (p, wd) =>
@@ -182,6 +183,7 @@ describe("fs_write tool", () => {
         it("should overwrite existing files", async () => {
             const filePath = path.join(testDir, "existing.txt");
             writeFileSync(filePath, "old content");
+            await tools.fs_read.execute({ path: filePath, description: "read before overwrite" });
 
             const result = await tools.fs_write.execute({
                 path: filePath,
