@@ -6,6 +6,21 @@ import type { PromptFragment } from "../core/types";
 import { listWorktrees, loadWorktreeMetadata, type WorktreeMetadata } from "@/utils/git/worktree";
 import { logger } from "@/utils/logger";
 
+const WORKTREE_CONTEXT_CACHE_TTL_MS = 30_000;
+
+interface WorktreeSnapshot {
+  hasFeatureWorktrees: boolean;
+  metadata: Record<string, WorktreeMetadata>;
+  worktrees: Array<{ branch: string; path: string }>;
+}
+
+interface WorktreeSnapshotCacheEntry {
+  expiresAt: number;
+  snapshot: WorktreeSnapshot;
+}
+
+const worktreeSnapshotCache = new Map<string, WorktreeSnapshotCacheEntry>();
+
 /**
  * Worktree context for the fragment.
  */
@@ -28,6 +43,45 @@ interface WorktreeContextArgs {
   context: WorktreeContext;
 }
 
+async function getCachedWorktreeSnapshot(projectBasePath: string): Promise<WorktreeSnapshot> {
+  const cached = worktreeSnapshotCache.get(projectBasePath);
+  if (cached && cached.expiresAt > Date.now()) {
+    return {
+      hasFeatureWorktrees: cached.snapshot.hasFeatureWorktrees,
+      metadata: { ...cached.snapshot.metadata },
+      worktrees: cached.snapshot.worktrees.map((worktree) => ({ ...worktree })),
+    };
+  }
+
+  let worktrees: Array<{ branch: string; path: string }> = [];
+  let metadata: Record<string, WorktreeMetadata> = {};
+  let hasFeatureWorktrees = false;
+
+  try {
+    worktrees = await listWorktrees(projectBasePath);
+    metadata = await loadWorktreeMetadata(projectBasePath, config.getConfigPath("projects"));
+    hasFeatureWorktrees = worktrees.some(wt => wt.path.includes("/.worktrees/"));
+  } catch (error) {
+    logger.warn("Failed to list worktrees", { error });
+  }
+
+  const snapshot: WorktreeSnapshot = {
+    hasFeatureWorktrees,
+    metadata,
+    worktrees,
+  };
+  worktreeSnapshotCache.set(projectBasePath, {
+    expiresAt: Date.now() + WORKTREE_CONTEXT_CACHE_TTL_MS,
+    snapshot: {
+      hasFeatureWorktrees,
+      metadata: { ...metadata },
+      worktrees: worktrees.map((worktree) => ({ ...worktree })),
+    },
+  });
+
+  return snapshot;
+}
+
 export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
   id: "worktree-context",
   priority: 30,
@@ -39,19 +93,9 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
     const currentBranch = context.currentBranch;
 
     // List worktrees first to determine what to show
-    let worktrees: Array<{ branch: string; path: string }> = [];
-    let metadata: Record<string, WorktreeMetadata> = {};
-    let hasFeatureWorktrees = false;
-
-    try {
-      worktrees = await listWorktrees(context.projectBasePath);
-      metadata = await loadWorktreeMetadata(context.projectBasePath, config.getConfigPath("projects"));
-      // Check if there are worktrees in .worktrees/ directory (beyond the main repo)
-      hasFeatureWorktrees = worktrees.some(wt => wt.path.includes("/.worktrees/"));
-    } catch (error) {
-      // If we can't list worktrees (e.g., not a git repo yet), just skip
-      logger.warn("Failed to list worktrees", { error });
-    }
+    const { worktrees, metadata, hasFeatureWorktrees } = await getCachedWorktreeSnapshot(
+      context.projectBasePath
+    );
 
     parts.push("## Git Worktree Context\n");
     parts.push("This project uses git worktrees for parallel work on different branches.");
