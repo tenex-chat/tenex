@@ -69,6 +69,16 @@ describe("Git Worktree Operations", () => {
         expect(["main", "master"]).toContain(branch);
     });
 
+    test("getCurrentBranch returns branch name for linked worktrees", async () => {
+        const branchName = "feature/worktree-branch";
+        const currentBranch = await getCurrentBranch(projectPath);
+        const worktreePath = await createWorktree(projectPath, branchName, currentBranch);
+
+        const resolvedBranch = await getCurrentBranch(worktreePath);
+
+        expect(resolvedBranch).toBe(branchName);
+    });
+
     test("getCurrentBranchWithFallback returns branch in detached HEAD state", async () => {
         const originalBranch = await getCurrentBranch(projectPath);
         await execAsync("git checkout --detach HEAD", { cwd: projectPath });

@@ -27,6 +27,44 @@ function truncateOutput(output: string, maxLength = 160): string {
     return `${trimmed.slice(0, maxLength)}...`;
 }
 
+async function resolveGitDir(repoPath: string): Promise<string> {
+    const dotGitPath = path.join(repoPath, ".git");
+    const dotGitStat = await fs.stat(dotGitPath);
+
+    if (dotGitStat.isDirectory()) {
+        return dotGitPath;
+    }
+
+    const dotGitContents = (await fs.readFile(dotGitPath, "utf-8")).trim();
+    const gitDirMatch = dotGitContents.match(/^gitdir:\s*(.+)$/i);
+
+    if (!gitDirMatch?.[1]) {
+        throw new Error(`Unsupported .git file format at ${dotGitPath}`);
+    }
+
+    return path.resolve(repoPath, gitDirMatch[1]);
+}
+
+async function readCurrentBranchFromHead(repoPath: string): Promise<string | null> {
+    try {
+        const gitDir = await resolveGitDir(repoPath);
+        const headContents = (await fs.readFile(path.join(gitDir, "HEAD"), "utf-8")).trim();
+
+        if (!headContents.startsWith("ref: ")) {
+            return null;
+        }
+
+        const ref = headContents.slice("ref: ".length).trim();
+        if (!ref.startsWith("refs/heads/")) {
+            return null;
+        }
+
+        return ref.slice("refs/heads/".length);
+    } catch {
+        return null;
+    }
+}
+
 async function runGitCommandWithTelemetry(params: {
     command: string;
     cwd: string;
@@ -92,7 +130,8 @@ async function branchRefExists(params: {
     branch: string;
     span: Span;
 }): Promise<boolean> {
-    const refPath = path.join(params.projectPath, ".git", "refs", "heads", params.branch);
+    const gitDir = await resolveGitDir(params.projectPath);
+    const refPath = path.join(gitDir, "refs", "heads", params.branch);
     const startedAt = performance.now();
 
     params.span.addEvent("git.current_branch_fallback_check_started", {
@@ -293,6 +332,27 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
         span.setAttribute("git.repo_path", repoPath);
 
         try {
+            const headStartedAt = performance.now();
+            const branchFromHead = await readCurrentBranchFromHead(repoPath);
+            if (branchFromHead) {
+                const durationMs = Math.round(performance.now() - headStartedAt);
+
+                span.setAttributes({
+                    "git.branch": branchFromHead,
+                    "git.command.duration_ms": 0,
+                    "git.lookup.method": "head",
+                    "git.lookup.duration_ms": durationMs,
+                });
+                span.addEvent("git.current_branch_resolved", {
+                    "git.branch": branchFromHead,
+                    "duration_ms": durationMs,
+                    "branch.empty": false,
+                    "git.lookup.method": "head",
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return branchFromHead;
+            }
+
             const { stdout, durationMs } = await runGitCommandWithTelemetry({
                 command: "git branch --show-current",
                 cwd: repoPath,
@@ -302,11 +362,14 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
             span.setAttributes({
                 "git.branch": branch,
                 "git.command.duration_ms": durationMs,
+                "git.lookup.method": "command",
+                "git.lookup.duration_ms": durationMs,
             });
             span.addEvent("git.current_branch_resolved", {
                 "git.branch": branch,
                 "duration_ms": durationMs,
                 "branch.empty": branch.length === 0,
+                "git.lookup.method": "command",
             });
 
             if (!branch) {

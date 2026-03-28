@@ -1,6 +1,6 @@
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { trace } from "@opentelemetry/api";
+import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { ProjectAlreadyRunningError } from "@/services/scheduling/errors";
 import type { ProjectDTag } from "@/types/project-ids";
 import { ProjectRuntime } from "./ProjectRuntime";
@@ -76,6 +76,8 @@ export class RuntimeLifecycle {
         }
 
         const projectTitle = project.tagValue("title") || "Untitled";
+        const startupContext = otelContext.active();
+        const bootEnqueuedAt = Date.now();
         trace.getActiveSpan()?.addEvent("runtime_lifecycle.starting", {
             "project.id": projectId,
             "project.title": projectTitle,
@@ -94,30 +96,52 @@ export class RuntimeLifecycle {
 
         this.bootQueue = this.bootQueue.then(async () => {
             try {
-                const runtime = await this.performStartup(project);
-                this.activeRuntimes.set(projectId, runtime);
+                await otelContext.with(startupContext, async () => {
+                    const tracer = trace.getTracer("tenex.runtime-lifecycle");
 
-                trace.getActiveSpan()?.addEvent("runtime_lifecycle.started", {
-                    "project.id": projectId,
-                    "project.title": projectTitle,
-                });
+                    await tracer.startActiveSpan("tenex.runtime.startup", async (span) => {
+                        span.setAttributes({
+                            "project.id": projectId,
+                            "project.title": projectTitle,
+                            "runtime.boot_queue.wait_ms": Date.now() - bootEnqueuedAt,
+                        });
 
-                resolveRuntime(runtime);
-            } catch (error) {
-                logger.error(`Failed to start project runtime: ${projectId}`, {
-                    error: error instanceof Error ? error.message : String(error),
+                        try {
+                            const runtime = await this.performStartup(project);
+                            this.activeRuntimes.set(projectId, runtime);
+
+                            span.addEvent("runtime_lifecycle.started", {
+                                "project.id": projectId,
+                                "project.title": projectTitle,
+                            });
+                            span.setStatus({ code: SpanStatusCode.OK });
+                            resolveRuntime(runtime);
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+
+                            logger.error(`Failed to start project runtime: ${projectId}`, {
+                                error: errorMessage,
+                            });
+                            span.recordException(error as Error);
+                            span.setStatus({
+                                code: SpanStatusCode.ERROR,
+                                message: errorMessage,
+                            });
+                            rejectRuntime(error);
+                        } finally {
+                            this.startingRuntimes.delete(projectId);
+                            span.end();
+                        }
+                    });
                 });
-                rejectRuntime(error);
             } finally {
-                this.startingRuntimes.delete(projectId);
+                // GC cooldown: reclaim transient allocations before the next boot
+                // starts, preventing JSC from accumulating pre-allocated memory pools.
+                const gc = (globalThis as { Bun?: { gc: (sync: boolean) => void } }).Bun?.gc;
+                gc?.(true);
+                await new Promise(r => setTimeout(r, 200));
+                gc?.(true);
             }
-
-            // GC cooldown: reclaim transient allocations before the next boot
-            // starts, preventing JSC from accumulating pre-allocated memory pools.
-            const gc = (globalThis as { Bun?: { gc: (sync: boolean) => void } }).Bun?.gc;
-            gc?.(true);
-            await new Promise(r => setTimeout(r, 200));
-            gc?.(true);
         });
 
         return runtimePromise;
