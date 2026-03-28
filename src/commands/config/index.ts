@@ -1,9 +1,13 @@
+import { apnsCommand } from "@/commands/config/apns";
+import { contextManagementCommand } from "@/commands/config/context-management";
 import { embedCommand } from "@/commands/config/embed";
 import { escalationCommand } from "@/commands/config/escalation";
 import { identityCommand } from "@/commands/config/identity";
 import { interventionCommand } from "@/commands/config/intervention";
 import { llmCommand } from "@/commands/config/llm";
 import { loggingCommand } from "@/commands/config/logging";
+import { nip46Command } from "@/commands/config/nip46";
+import { pathsCommand } from "@/commands/config/paths";
 import { providersCommand } from "@/commands/config/providers";
 import { relaysCommand } from "@/commands/config/relays";
 import { rolesCommand } from "@/commands/config/roles";
@@ -55,6 +59,7 @@ const MENU_SECTIONS: MenuSection[] = [
         header: "Conversations",
         entries: [
             { label: "Summarization", description: "Auto-summary timing", command: summarizationCommand },
+            { label: "Context", description: "Context management settings", command: contextManagementCommand },
         ],
     },
     {
@@ -62,6 +67,9 @@ const MENU_SECTIONS: MenuSection[] = [
         entries: [
             { label: "Identity", description: "Authorized pubkeys", command: identityCommand },
             { label: "System Prompt", description: "Global prompt for all projects", command: systemPromptCommand },
+            { label: "Paths", description: "File paths and storage", command: pathsCommand },
+            { label: "APNs", description: "Apple push notifications", command: apnsCommand },
+            { label: "NIP-46", description: "Remote signing", command: nip46Command },
             { label: "Logging", description: "Log level and file path", command: loggingCommand },
             { label: "Telemetry", description: "OpenTelemetry tracing", command: telemetryCommand },
         ],
@@ -138,8 +146,12 @@ export const configCommand = new Command("config")
     .addCommand(interventionCommand)
     .addCommand(relaysCommand)
     .addCommand(summarizationCommand)
+    .addCommand(contextManagementCommand)
     .addCommand(telegramCommand)
     .addCommand(identityCommand)
     .addCommand(systemPromptCommand)
+    .addCommand(pathsCommand)
+    .addCommand(apnsCommand)
+    .addCommand(nip46Command)
     .addCommand(loggingCommand)
     .addCommand(telemetryCommand);
