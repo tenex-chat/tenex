@@ -40,7 +40,7 @@ export interface ResolvedAgentConfig {
     model?: string;
     /** The effective tools list (fully resolved, no +/- prefixes) */
     tools?: string[];
-    /** Skill IDs always active for this agent (agent-global, not project-scoped). Local skill directory IDs are authoritative. */
+    /** Skill IDs always active for this agent after default/project resolution. Local skill directory IDs are authoritative. */
     skills?: string[];
 }
 
@@ -103,6 +103,20 @@ export function resolveEffectiveModel(
 }
 
 /**
+ * Resolve the effective always-on skills for a project given defaults and a project override.
+ *
+ * Unlike tools, skills use direct replacement semantics for project overrides:
+ * - undefined project skills => use defaults
+ * - [] project skills => explicitly disable all always-on skills in this project
+ */
+export function resolveEffectiveSkills(
+    defaultSkills: string[] | undefined,
+    projectSkills: string[] | undefined
+): string[] | undefined {
+    return projectSkills ?? defaultSkills;
+}
+
+/**
  * Resolve the full effective config for an agent in a specific project context.
  */
 export function resolveEffectiveConfig(
@@ -111,11 +125,12 @@ export function resolveEffectiveConfig(
 ): ResolvedAgentConfig {
     const effectiveModel = resolveEffectiveModel(defaultConfig.model, projectConfig?.model);
     const effectiveTools = resolveEffectiveTools(defaultConfig.tools, projectConfig?.tools);
+    const effectiveSkills = resolveEffectiveSkills(defaultConfig.skills, projectConfig?.skills);
 
     return {
         model: effectiveModel,
         tools: effectiveTools,
-        skills: defaultConfig.skills,
+        skills: effectiveSkills,
     };
 }
 
@@ -199,6 +214,14 @@ export function deduplicateProjectConfig(
         } else {
             // Normalize: recompute the minimal delta from the fully-resolved tool list.
             cleaned.tools = computeToolsDelta(defaultToolsResolved, resolvedProjectTools ?? []);
+        }
+    }
+
+    // Dedup skills: a project-scoped skill list is redundant if it matches defaults.
+    if (cleaned.skills !== undefined) {
+        const defaultSkills = defaultConfig.skills ?? [];
+        if (arraysEqualUnordered(cleaned.skills, defaultSkills)) {
+            cleaned.skills = undefined;
         }
     }
 

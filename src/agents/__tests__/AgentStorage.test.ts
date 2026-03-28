@@ -856,6 +856,30 @@ describe("AgentStorage", () => {
             expect(config2.tools).toEqual(["fs_read", "shell"]);
         });
 
+        it("should resolve effective skills with project override", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { skills: ["make-posters"] },
+                projectOverrides: {
+                    "project-1": { skills: ["edit-videos"] },
+                    "project-2": { skills: [] },
+                },
+            });
+
+            const config1 = storage.getEffectiveConfig(agent, "project-1");
+            expect(config1.skills).toEqual(["edit-videos"]);
+
+            const config2 = storage.getEffectiveConfig(agent, "project-2");
+            expect(config2.skills).toEqual([]);
+
+            const config3 = storage.getEffectiveConfig(agent, "project-3");
+            expect(config3.skills).toEqual(["make-posters"]);
+        });
+
         it("should resolve effective isPM with priority order", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
@@ -906,6 +930,28 @@ describe("AgentStorage", () => {
 
             const loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("anthropic:claude-opus-4");
+        });
+
+        it("should update project override skills via updateProjectOverride", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { skills: ["make-posters"] },
+            });
+
+            await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                skills: ["edit-videos"],
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]?.skills).toEqual(["edit-videos"]);
         });
 
         it("should update project-scoped isPM via updateProjectScopedIsPM", async () => {

@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { ProjectStatusService } from "../ProjectStatusService";
 import type { ScheduledTaskInfo, StatusIntent } from "@/nostr/types";
+import * as ndkClientModule from "@/nostr/ndkClient";
 import type { ProjectContext } from "@/services/projects";
 import type { AgentInstance } from "@/agents/types";
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { projectContextStore } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling/SchedulerService";
+import { SkillService } from "@/services/skill/SkillService";
+import { config } from "@/services/ConfigService";
 
 const mockGetTasks = mock(() => Promise.resolve([]));
 
@@ -13,17 +16,24 @@ describe("ProjectStatusService scheduled task gathering", () => {
     function createMockProjectContext(options: {
         agents: Map<string, AgentInstance>;
         projectTagId?: string;
+        projectDTag?: string;
     }): ProjectContext {
         const mockAgentRegistry = {
             getAllAgentsMap: () => options.agents,
         } as unknown as AgentRegistry;
+
+        const projectDTag = options.projectDTag || "test-project";
 
         return {
             agentRegistry: mockAgentRegistry,
             mcpManager: { getCachedTools: () => ({}) },
             project: {
                 tags: [],
-                tagValue: () => undefined,
+                dTag: projectDTag,
+                tagValue: (tag: string) => {
+                    if (tag === "d") return projectDTag;
+                    return undefined;
+                },
                 tagReference: () => ["a", "test"],
                 tagId: () => options.projectTagId || "31933:pubkey123:test-project",
                 pubkey: "mock-pubkey",
@@ -63,6 +73,8 @@ describe("ProjectStatusService scheduled task gathering", () => {
         spyOn(SchedulerService, "getInstance").mockReturnValue({
             getTasks: mockGetTasks,
         } as any);
+        spyOn(config, "getWhitelistedPubkeys").mockReturnValue([]);
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
     });
 
     afterEach(() => {
@@ -357,5 +369,109 @@ describe("ProjectStatusService scheduled task gathering", () => {
 
         // Verify getTasks was called with the correct project tag ID
         expect(mockGetTasks).toHaveBeenCalledWith(projectTagId);
+    });
+});
+
+describe("ProjectStatusService skills", () => {
+    function createSkillProjectContext(agents: Map<string, AgentInstance>): ProjectContext {
+        return {
+            agentRegistry: {
+                getAllAgentsMap: () => agents,
+            },
+            project: {
+                tags: [],
+                dTag: "demo-project",
+                tagValue: (tag: string) => {
+                    if (tag === "d") return "demo-project";
+                    return undefined;
+                },
+                tagReference: () => ["a", "31933:owner:demo-project"],
+                pubkey: "owner-pubkey",
+            },
+        } as unknown as ProjectContext;
+    }
+
+    function createSkillTestAgent(slug: string, alwaysSkills?: string[]): AgentInstance {
+        return {
+            name: `Test ${slug}`,
+            pubkey: `pubkey-${slug}`,
+            slug,
+            tools: [],
+            llmConfig: "anthropic:claude-sonnet-4",
+            alwaysSkills,
+        } as unknown as AgentInstance;
+    }
+
+    beforeEach(() => {
+        spyOn(config, "getWhitelistedPubkeys").mockReturnValue([]);
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+    });
+
+    afterEach(() => {
+        mock.restore();
+    });
+
+    it("gathers all project-visible local skills and annotates configured agents", async () => {
+        const agents = new Map<string, AgentInstance>();
+        agents.set("agent1", createSkillTestAgent("agent1", ["make-posters", "missing-skill"]));
+        agents.set("agent2", createSkillTestAgent("agent2", ["make-posters"]));
+        agents.set("agent3", createSkillTestAgent("agent3"));
+
+        spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: async () => [
+                {
+                    identifier: "make-posters",
+                    content: "poster instructions",
+                    installedFiles: [],
+                },
+                {
+                    identifier: "edit-videos",
+                    content: "video instructions",
+                    installedFiles: [],
+                },
+            ],
+        } as unknown as SkillService);
+
+        const service = new ProjectStatusService();
+        (service as unknown as { projectContext: ProjectContext }).projectContext =
+            createSkillProjectContext(agents);
+
+        const intent: StatusIntent = {
+            type: "status",
+            agents: [],
+            models: [],
+            tools: [],
+        };
+
+        await (service as unknown as {
+            gatherSkillInfo(intent: StatusIntent, projectPath: string): Promise<void>;
+        }).gatherSkillInfo(intent, "/tmp/demo-project");
+
+        expect(intent.skills).toEqual([
+            { id: "edit-videos", agents: [] },
+            { id: "make-posters", agents: ["agent1", "agent2"] },
+        ]);
+    });
+
+    it("emits skill tags in the 24010 status event", () => {
+        const service = new ProjectStatusService();
+        (service as unknown as { projectContext: ProjectContext }).projectContext =
+            createSkillProjectContext(new Map());
+
+        const event = (service as unknown as {
+            createStatusEvent(intent: StatusIntent): { tags: string[][] };
+        }).createStatusEvent({
+            type: "status",
+            agents: [],
+            models: [],
+            tools: [],
+            skills: [
+                { id: "edit-videos", agents: [] },
+                { id: "make-posters", agents: ["agent1", "agent2"] },
+            ],
+        });
+
+        expect(event.tags).toContainEqual(["skill", "edit-videos"]);
+        expect(event.tags).toContainEqual(["skill", "make-posters", "agent1", "agent2"]);
     });
 });

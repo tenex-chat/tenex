@@ -27,6 +27,7 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { ActiveRalIndex } from "@/conversations/ActiveRalIndex";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
+import { agentEnvironmentService } from "@/services/AgentEnvironmentService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -134,6 +135,8 @@ export class ProjectRuntime {
 
             // Create project context directly (don't use global singleton)
             this.context = new ProjectContext(this.project, agentRegistry);
+
+            await this.bootstrapAgentHomeEnvironments();
 
             // Initialize prefix KV store and index agent pubkeys
             // This is best-effort - indexing failures don't block project startup
@@ -273,6 +276,34 @@ export class ProjectRuntime {
                 this.telegramGatewayRegistered = false;
             }
             throw error;
+        }
+    }
+
+    private async bootstrapAgentHomeEnvironments(): Promise<void> {
+        if (!this.context) {
+            return;
+        }
+
+        const bootstrapResults = await Promise.allSettled(
+            Array.from(this.context.agents.values()).map(async (agent) => {
+                await agentEnvironmentService.ensureAgentHomeEnv({
+                    agentPubkey: agent.pubkey,
+                    agentNsec: agent.signer.nsec,
+                });
+            })
+        );
+
+        for (const [index, result] of bootstrapResults.entries()) {
+            if (result.status === "fulfilled") {
+                continue;
+            }
+
+            const agent = Array.from(this.context.agents.values())[index];
+            logger.warn("[ProjectRuntime] Failed to bootstrap agent home .env", {
+                projectId: this.projectId,
+                agentPubkey: agent?.pubkey?.slice(0, 8),
+                error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+            });
         }
     }
 

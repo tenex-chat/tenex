@@ -195,6 +195,36 @@ export class NDKAgentDefinition extends NDKEvent {
     }
 
     /**
+     * Get kind:4202 skill event IDs from ["skill", "<event-id>"] tags.
+     *
+     * These tags reference remote skill events that should be hydrated into
+     * the local skill store and then persisted as local skill IDs.
+     *
+     * Empty values are ignored and duplicate IDs are removed while preserving
+     * the first-seen order from the event.
+     */
+    getSkillEventIds(): string[] {
+        const seen = new Set<string>();
+        const skillEventIds: string[] = [];
+
+        for (const tag of this.tags) {
+            if (tag[0] !== "skill") {
+                continue;
+            }
+
+            const eventId = tag[1]?.trim();
+            if (!eventId || seen.has(eventId)) {
+                continue;
+            }
+
+            seen.add(eventId);
+            skillEventIds.push(eventId);
+        }
+
+        return skillEventIds;
+    }
+
+    /**
      * Get e-tags with the "fork" marker.
      * These reference the source kind 4199 agent definition event that
      * this agent was forked from.

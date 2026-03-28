@@ -164,6 +164,40 @@ describe("NDKAgentDefinition", () => {
         });
     });
 
+    describe("getSkillEventIds", () => {
+        it("should return empty array when no skill tags are present", () => {
+            expect(agentDef.getSkillEventIds()).toEqual([]);
+        });
+
+        it("should extract skill event IDs in order", () => {
+            agentDef.tags = [
+                ["skill", "skill-event-2"],
+                ["title", "Test Agent"],
+                ["skill", "skill-event-1"],
+            ];
+
+            expect(agentDef.getSkillEventIds()).toEqual([
+                "skill-event-2",
+                "skill-event-1",
+            ]);
+        });
+
+        it("should trim empty values and dedupe by first occurrence", () => {
+            agentDef.tags = [
+                ["skill", " first-skill "],
+                ["skill", ""],
+                ["skill"],
+                ["skill", "first-skill"],
+                ["skill", "second-skill"],
+            ];
+
+            expect(agentDef.getSkillEventIds()).toEqual([
+                "first-skill",
+                "second-skill",
+            ]);
+        });
+    });
+
     describe("markdownDescription (content field)", () => {
         it("should return undefined when content is empty", () => {
             agentDef.content = "";

@@ -3,6 +3,7 @@ import {
     applyToolsDelta,
     resolveEffectiveTools,
     resolveEffectiveModel,
+    resolveEffectiveSkills,
     resolveEffectiveConfig,
     deduplicateProjectConfig,
     computeToolsDelta,
@@ -106,6 +107,22 @@ describe("ConfigResolver", () => {
         });
     });
 
+    describe("resolveEffectiveSkills", () => {
+        it("should return defaults when no project override exists", () => {
+            expect(resolveEffectiveSkills(["make-posters"], undefined)).toEqual(["make-posters"]);
+        });
+
+        it("should return project override when set", () => {
+            expect(resolveEffectiveSkills(["make-posters"], ["edit-videos"])).toEqual([
+                "edit-videos",
+            ]);
+        });
+
+        it("should allow project override to clear all skills", () => {
+            expect(resolveEffectiveSkills(["make-posters"], [])).toEqual([]);
+        });
+    });
+
     describe("resolveEffectiveConfig", () => {
         it("should resolve full example from requirements: projectA", () => {
             // agentA has: default: { model: 'modelA', tools: ['tool1', 'tool2'] }
@@ -134,6 +151,28 @@ describe("ConfigResolver", () => {
             const resolved = resolveEffectiveConfig(defaultConfig, undefined);
             expect(resolved.model).toBe("modelA");
             expect(resolved.tools).toEqual(["tool1"]);
+        });
+
+        it("should resolve project-scoped skills as a full replacement", () => {
+            const defaultConfig = {
+                model: "modelA",
+                tools: ["tool1"],
+                skills: ["make-posters"],
+            };
+            const projectConfig = { skills: ["edit-videos"] };
+            const resolved = resolveEffectiveConfig(defaultConfig, projectConfig);
+            expect(resolved.skills).toEqual(["edit-videos"]);
+        });
+
+        it("should allow project-scoped skills to disable defaults", () => {
+            const defaultConfig = {
+                model: "modelA",
+                tools: ["tool1"],
+                skills: ["make-posters"],
+            };
+            const projectConfig = { skills: [] };
+            const resolved = resolveEffectiveConfig(defaultConfig, projectConfig);
+            expect(resolved.skills).toEqual([]);
         });
     });
 
@@ -165,6 +204,20 @@ describe("ConfigResolver", () => {
             const projectConfig = { tools: ["+tool3"] };
             const result = deduplicateProjectConfig(defaultConfig, projectConfig);
             expect(result.tools).toEqual(["+tool3"]);
+        });
+
+        it("should remove skills override when it matches defaults", () => {
+            const defaultConfig = { skills: ["make-posters", "edit-videos"] };
+            const projectConfig = { skills: ["edit-videos", "make-posters"] };
+            const result = deduplicateProjectConfig(defaultConfig, projectConfig);
+            expect(result.skills).toBeUndefined();
+        });
+
+        it("should keep skills override when it differs from defaults", () => {
+            const defaultConfig = { skills: ["make-posters"] };
+            const projectConfig = { skills: [] };
+            const result = deduplicateProjectConfig(defaultConfig, projectConfig);
+            expect(result.skills).toEqual([]);
         });
 
         it("should dedup delta tools when they produce the same result as default", () => {

@@ -332,6 +332,10 @@ export class EventHandler {
             const rawToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
             // Expand FS capability groups: fs_read implies glob+grep, fs_write implies edit
             const newToolNames = expandFsCapabilities(rawToolNames);
+            const skillTagValues = event.tags
+                .filter((tag) => tag[0] === "skill")
+                .map((tag) => tag[1]?.trim())
+                .filter((skillId): skillId is string => Boolean(skillId));
             const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
             const hasResetTag = event.tags.some((tag) => tag[0] === "reset");
 
@@ -343,6 +347,7 @@ export class EventHandler {
                     projectDTag,
                     hasModel: !!newModel,
                     toolCount: newToolNames.length,
+                    skillCount: skillTagValues.length,
                     hasPM: hasPMTag,
                     hasReset: hasResetTag,
                 });
@@ -388,6 +393,13 @@ export class EventHandler {
                         }
                     }
 
+                    const hasSkillTags = event.tags.some((tag) => tag[0] === "skill");
+                    if (hasSkillTags) {
+                        // Skill tags are a full project-scoped snapshot.
+                        // Empty-valued tags intentionally clear the project override list.
+                        projectOverride.skills = skillTagValues;
+                    }
+
                     updated = await agentStorage.updateProjectOverride(
                         agentPubkey,
                         projectDTag,
@@ -426,6 +438,7 @@ export class EventHandler {
                     agentSlug: agent.slug,
                     hasModel: !!newModel,
                     toolCount: newToolNames.length,
+                    skillCount: skillTagValues.length,
                     hasPM: hasPMTag,
                 });
 
@@ -455,6 +468,14 @@ export class EventHandler {
                     defaultUpdates.tools = newToolNames;
                 }
                 // If no tool tags, leave defaultUpdates.tools unset → no change
+
+                const hasSkillTags = event.tags.some((tag) => tag[0] === "skill");
+                if (hasSkillTags) {
+                    // Skill tags are a full snapshot for agent-global always-on skills.
+                    // Empty-valued tags intentionally clear the stored list.
+                    defaultUpdates.skills = skillTagValues;
+                }
+                // If no skill tags, leave defaultUpdates.skills unset → no change
 
                 // Global config update clears all project overrides
                 // This makes semantic sense: a global config update without project specifier

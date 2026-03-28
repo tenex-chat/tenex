@@ -2,6 +2,7 @@ import type { StoredAgent } from "@/agents/AgentStorage";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { resolveCategory } from "@/agents/role-categories";
+import { SkillService } from "@/services/skill/SkillService";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
@@ -610,6 +611,44 @@ export class AgentDefinitionMonitor {
             }
             storedAgent.default.tools = newTools;
             changedFields.push("default.tools");
+        }
+
+        const skillEventIds = agentDef.getSkillEventIds();
+        let newSkills: string[] | undefined;
+        if (skillEventIds.length > 0) {
+            const skillResult = await SkillService.getInstance().fetchSkills(skillEventIds);
+            const resolvedSkillIds = skillResult.skills
+                .map((skill) => skill.identifier)
+                .filter((identifier): identifier is string => Boolean(identifier));
+            const resolvedEventIds = new Set(
+                skillResult.skills.map((skill) => skill.eventId).filter(Boolean)
+            );
+            const unresolvedSkillEventIds = skillEventIds.filter(
+                (skillEventId) => !resolvedEventIds.has(skillEventId)
+            );
+
+            if (unresolvedSkillEventIds.length > 0) {
+                logger.warn("[AgentDefinitionMonitor] Failed to resolve some attached skills", {
+                    agentSlug: monitoredAgent.slug,
+                    unresolvedSkillEventIds,
+                    resolvedSkillIds,
+                });
+            }
+
+            newSkills = resolvedSkillIds.length > 0 ? resolvedSkillIds : undefined;
+        }
+
+        const currentSkills = storedAgent.default?.skills;
+        if (JSON.stringify(newSkills) !== JSON.stringify(currentSkills)) {
+            if (!storedAgent.default) {
+                storedAgent.default = {};
+            }
+            storedAgent.default.skills = newSkills;
+            changedFields.push("default.skills");
+        }
+
+        if (storedAgent.default && Object.keys(storedAgent.default).length === 0) {
+            storedAgent.default = undefined;
         }
 
         // Update eventId to the new event

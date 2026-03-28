@@ -45,6 +45,13 @@ export interface AgentProjectConfig {
      */
     tools?: string[];
     /**
+     * Project-specific always-on skills.
+     * This is a full replacement list for the project context.
+     * - undefined: use default.skills
+     * - []: disable all always-on skills for this project
+     */
+    skills?: string[];
+    /**
      * Project-scoped PM designation.
      * When true, this agent is designated as PM for this specific project.
      * Set via kind 24020 event with ["pm"] tag and an a-tag.

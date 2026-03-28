@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AgentStorage, createStoredAgent } from "../../agents/AgentStorage";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { AgentDefinitionMonitor, type ActiveRuntimesProvider } from "../AgentDefinitionMonitor";
+import { SkillService } from "@/services/skill/SkillService";
 
 // Minimal mock NDK for testing
 function createMockNDK(fetchEventResult?: any) {
@@ -38,6 +39,7 @@ describe("AgentDefinitionMonitor", () => {
     });
 
     afterEach(async () => {
+        mock.restore();
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
@@ -298,6 +300,198 @@ describe("AgentDefinitionMonitor", () => {
             expect(ndk.subscribe).toHaveBeenCalled();
 
             monitor.stop();
+        });
+    });
+
+    describe("upgradeAgent skill handling", () => {
+        function createDefinitionEvent(params: {
+            id: string;
+            pubkey?: string;
+            createdAt?: number;
+            tags?: string[][];
+        }): NDKEvent {
+            const event = new NDKEvent();
+            event.id = params.id;
+            event.pubkey = params.pubkey ?? "definition-author";
+            event.created_at = params.createdAt ?? 1_700_000_000;
+            event.tags = params.tags ?? [["title", "Updated Agent"]];
+            return event;
+        }
+
+        it("overwrites stored skills with hydrated local IDs", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const storedAgent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "skill-bot",
+                name: "Skill Bot",
+                role: "assistant",
+                eventId: "old-event-id",
+                definitionDTag: "skill-bot",
+                definitionAuthor: "definition-author",
+                definitionCreatedAt: 1_600_000_000,
+                defaultConfig: {
+                    model: "anthropic:claude-sonnet-4",
+                    skills: ["old-skill"],
+                },
+            });
+            await storage.saveAgent(storedAgent);
+
+            const fetchSkills = mock(async () => ({
+                skills: [
+                    {
+                        identifier: "make-posters",
+                        eventId: "skill-event-1",
+                        content: "poster instructions",
+                        installedFiles: [],
+                    },
+                    {
+                        identifier: "edit-videos",
+                        eventId: "skill-event-2",
+                        content: "video instructions",
+                        installedFiles: [],
+                    },
+                ],
+                content: "",
+            }));
+            spyOn(SkillService, "getInstance").mockReturnValue({
+                fetchSkills,
+            } as unknown as SkillService);
+
+            const monitor = new AgentDefinitionMonitor(
+                createMockNDK(),
+                { whitelistedPubkeys: [] },
+                createNoopRuntimesProvider(),
+                storage,
+            );
+
+            await (monitor as any).upgradeAgent(
+                storedAgent,
+                {
+                    pubkey: signer.pubkey,
+                    slug: "skill-bot",
+                    definitionDTag: "skill-bot",
+                    definitionAuthor: "definition-author",
+                },
+                createDefinitionEvent({
+                    id: "new-event-id",
+                    tags: [
+                        ["title", "Skill Bot"],
+                        ["skill", "skill-event-1"],
+                        ["skill", "skill-event-2"],
+                    ],
+                })
+            );
+
+            const saved = await storage.loadAgent(signer.pubkey);
+            expect(saved?.default?.skills).toEqual([
+                "make-posters",
+                "edit-videos",
+            ]);
+        });
+
+        it("clears stored skills when a newer definition omits skill tags", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const storedAgent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "skill-bot",
+                name: "Skill Bot",
+                role: "assistant",
+                eventId: "old-event-id",
+                definitionDTag: "skill-bot",
+                definitionAuthor: "definition-author",
+                definitionCreatedAt: 1_600_000_000,
+                defaultConfig: {
+                    model: "anthropic:claude-sonnet-4",
+                    skills: ["old-skill"],
+                },
+            });
+            await storage.saveAgent(storedAgent);
+
+            const monitor = new AgentDefinitionMonitor(
+                createMockNDK(),
+                { whitelistedPubkeys: [] },
+                createNoopRuntimesProvider(),
+                storage,
+            );
+
+            await (monitor as any).upgradeAgent(
+                storedAgent,
+                {
+                    pubkey: signer.pubkey,
+                    slug: "skill-bot",
+                    definitionDTag: "skill-bot",
+                    definitionAuthor: "definition-author",
+                },
+                createDefinitionEvent({
+                    id: "new-event-id",
+                    tags: [["title", "Skill Bot"]],
+                })
+            );
+
+            const saved = await storage.loadAgent(signer.pubkey);
+            expect(saved?.default?.skills).toBeUndefined();
+            expect(saved?.default?.model).toBe("anthropic:claude-sonnet-4");
+        });
+
+        it("persists the resolved subset when some skill events fail to hydrate", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const storedAgent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "skill-bot",
+                name: "Skill Bot",
+                role: "assistant",
+                eventId: "old-event-id",
+                definitionDTag: "skill-bot",
+                definitionAuthor: "definition-author",
+                definitionCreatedAt: 1_600_000_000,
+                defaultConfig: {
+                    model: "anthropic:claude-sonnet-4",
+                },
+            });
+            await storage.saveAgent(storedAgent);
+
+            const fetchSkills = mock(async () => ({
+                skills: [
+                    {
+                        identifier: "make-posters",
+                        eventId: "skill-event-1",
+                        content: "poster instructions",
+                        installedFiles: [],
+                    },
+                ],
+                content: "",
+            }));
+            spyOn(SkillService, "getInstance").mockReturnValue({
+                fetchSkills,
+            } as unknown as SkillService);
+
+            const monitor = new AgentDefinitionMonitor(
+                createMockNDK(),
+                { whitelistedPubkeys: [] },
+                createNoopRuntimesProvider(),
+                storage,
+            );
+
+            await (monitor as any).upgradeAgent(
+                storedAgent,
+                {
+                    pubkey: signer.pubkey,
+                    slug: "skill-bot",
+                    definitionDTag: "skill-bot",
+                    definitionAuthor: "definition-author",
+                },
+                createDefinitionEvent({
+                    id: "new-event-id",
+                    tags: [
+                        ["title", "Skill Bot"],
+                        ["skill", "skill-event-1"],
+                        ["skill", "skill-event-2"],
+                    ],
+                })
+            );
+
+            const saved = await storage.loadAgent(signer.pubkey);
+            expect(saved?.default?.skills).toEqual(["make-posters"]);
         });
     });
 });

@@ -1118,6 +1118,7 @@ export class AgentStorage {
             const defaultConfig: AgentDefaultConfig = {
                 model: agent.default?.model,
                 tools: agent.default?.tools,
+                skills: agent.default?.skills,
             };
 
             const deduplicated = stripUndefinedValues(

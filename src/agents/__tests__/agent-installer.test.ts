@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AgentStorage, createStoredAgent } from "../AgentStorage";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { AgentStorage, agentStorage, createStoredAgent } from "../AgentStorage";
+import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
+import { installAgentFromNostrEvent } from "../agent-installer";
+import { SkillService } from "@/services/skill/SkillService";
 
 // We'll test the installAgentFromNostr function behavior through mocking
 describe("agent-installer", () => {
@@ -17,13 +19,19 @@ describe("agent-installer", () => {
 
         // Override config path for testing
         const configService = await import("@/services/ConfigService");
-        configService.config.getConfigPath = () => tempDir;
+        spyOn(configService.config, "getConfigPath").mockImplementation(() => tempDir);
 
         storage = new AgentStorage();
         await storage.initialize();
+
+        (agentStorage as any).agentsDir = tempDir;
+        (agentStorage as any).indexPath = path.join(tempDir, "index.json");
+        (agentStorage as any).index = null;
+        await agentStorage.initialize();
     });
 
     afterEach(async () => {
+        mock.restore();
         // Clean up temp directory
         await fs.rm(tempDir, { recursive: true, force: true });
     });
@@ -203,6 +211,53 @@ describe("agent-installer", () => {
             const finalProjects = await storage.getAgentProjects(signer.pubkey);
             expect(finalProjects).toContain("project-A");
             expect(finalProjects).toContain("project-B");
+        });
+    });
+
+    describe("skill hydration from 4199", () => {
+        it("stores resolved local skill IDs from skill event tags", async () => {
+            const fetchSkills = mock(async () => ({
+                skills: [
+                    {
+                        identifier: "make-posters",
+                        eventId: "skill-event-1",
+                        content: "poster instructions",
+                        installedFiles: [],
+                    },
+                    {
+                        identifier: "edit-videos",
+                        eventId: "skill-event-2",
+                        content: "video instructions",
+                        installedFiles: [],
+                    },
+                ],
+                content: "",
+            }));
+            spyOn(SkillService, "getInstance").mockReturnValue({
+                fetchSkills,
+            } as unknown as SkillService);
+
+            const event = new NDKEvent();
+            event.id = "agent-with-skills";
+            event.pubkey = "author-pubkey";
+            event.tags = [
+                ["title", "Skill Agent"],
+                ["role", "assistant"],
+                ["instructions", "Use skills when helpful"],
+                ["skill", "skill-event-1"],
+                ["skill", "skill-event-2"],
+            ];
+
+            const storedAgent = await installAgentFromNostrEvent(event, undefined, {} as any);
+
+            expect(fetchSkills).toHaveBeenCalledWith([
+                "skill-event-1",
+                "skill-event-2",
+            ]);
+            expect(storedAgent.default?.skills).toEqual([
+                "make-posters",
+                "edit-videos",
+            ]);
         });
     });
 });

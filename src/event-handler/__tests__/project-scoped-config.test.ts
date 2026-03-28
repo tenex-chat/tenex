@@ -277,6 +277,41 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
         expect(updateProjectScopedIsPMCalls.length).toBe(0);
     });
 
+    it("should store project-scoped skills when skill tags are present", async () => {
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["a", "31990:owner-pubkey:my-project"],
+            ["skill", "make-posters"],
+            ["skill", "edit-videos"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        expect(updateProjectOverrideCalls[0].override).toEqual({
+            skills: ["make-posters", "edit-videos"],
+        });
+    });
+
+    it("should clear project-scoped skills when raw skill tags are present with empty values", async () => {
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["a", "31990:owner-pubkey:my-project"],
+            ["skill", ""],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        expect(updateProjectOverrideCalls[0].override).toEqual({
+            skills: [],
+        });
+    });
+
     it("should call updateProjectOverride with reset when reset tag is present", async () => {
         const agentPubkey = "abc123def456";
 
@@ -451,6 +486,52 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
         // PM should still be set
         expect(updateGlobalIsPMCalls.length).toBe(1);
         expect(updateGlobalIsPMCalls[0].isPM).toBe(true);
+    });
+
+    it("should NOT update skills when no skill tags are present", async () => {
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["model", "anthropic:claude-opus-4"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        expect(updateDefaultConfigCalls[0].updates.skills).toBeUndefined();
+    });
+
+    it("should replace global skills when skill tags are present", async () => {
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["skill", " make-posters "],
+            ["skill", "edit-videos"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        expect(updateDefaultConfigCalls[0].updates.skills).toEqual([
+            "make-posters",
+            "edit-videos",
+        ]);
+    });
+
+    it('should clear global skills when raw skill tags are present with empty values', async () => {
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["skill", ""],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        expect(updateDefaultConfigCalls[0].updates.skills).toEqual([]);
     });
 });
 

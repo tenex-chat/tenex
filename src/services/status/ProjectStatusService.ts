@@ -7,6 +7,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { type ProjectContext, projectContextStore } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling/SchedulerService";
+import { SkillService } from "@/services/skill/SkillService";
 import { ProjectConfigOptionsService } from "@/services/status/ProjectConfigOptionsService";
 import { formatAnyError } from "@/lib/error-formatter";
 import { getDefaultBranchName } from "@/utils/git/initializeGitRepo";
@@ -148,6 +149,12 @@ export class ProjectStatusService {
             event.tag(["tool", tool.name, ...tool.agents]);
         }
 
+        if (intent.skills) {
+            for (const skill of intent.skills) {
+                event.tag(["skill", skill.id, ...skill.agents]);
+            }
+        }
+
         // Add worktree tags (default branch first)
         if (intent.worktrees && intent.worktrees.length > 0) {
             for (const branchName of intent.worktrees) {
@@ -230,6 +237,9 @@ export class ProjectStatusService {
 
             // Gather tool info
             await this.gatherToolInfo(intent);
+
+            // Gather skill info
+            await this.gatherSkillInfo(intent, projectPath);
 
             // Gather worktree info
             await this.gatherWorktreeInfo(intent, projectPath);
@@ -380,6 +390,49 @@ export class ProjectStatusService {
             }
         } catch (err) {
             logger.warn(`Could not add tool tags to status event: ${formatAnyError(err)}`);
+        }
+    }
+
+    private async gatherSkillInfo(intent: StatusIntent, projectPath: string): Promise<void> {
+        try {
+            if (!this.projectContext) {
+                logger.warn("ProjectContext not initialized for skill tags");
+                return;
+            }
+
+            const projectCtx = this.projectContext;
+            const projectDTag = projectCtx.project.dTag || projectCtx.project.tagValue("d") || undefined;
+            const availableSkills = await SkillService.getInstance().listAvailableSkills({
+                projectPath,
+                projectDTag,
+            });
+            const skillAgentMap = new Map<string, Set<string>>();
+
+            for (const skill of availableSkills) {
+                if (skill.identifier) {
+                    skillAgentMap.set(skill.identifier, new Set());
+                }
+            }
+
+            for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
+                for (const skillId of agent.alwaysSkills ?? []) {
+                    const configuredAgents = skillAgentMap.get(skillId);
+                    if (configuredAgents) {
+                        configuredAgents.add(agentSlug);
+                    }
+                }
+            }
+
+            const skills = Array.from(skillAgentMap.entries())
+                .sort(([left], [right]) => left.localeCompare(right))
+                .map(([id, agentSlugs]) => ({
+                    id,
+                    agents: Array.from(agentSlugs).sort(),
+                }));
+
+            intent.skills = skills;
+        } catch (err) {
+            logger.warn(`Could not add skill tags to status event: ${formatAnyError(err)}`);
         }
     }
 

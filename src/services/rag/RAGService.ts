@@ -9,6 +9,18 @@ import type { BulkUpsertResult, LanceDBSchema, RAGCollection, RAGDocument, RAGQu
 
 /** Default maintenance interval: 2 hours */
 const MAINTENANCE_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const COLLECTION_STATS_CACHE_TTL_MS = 30_000;
+
+interface CollectionStatsSnapshot {
+    agentDocCount: number;
+    name: string;
+    totalDocCount: number;
+}
+
+interface CollectionStatsCacheEntry {
+    expiresAt: number;
+    stats: CollectionStatsSnapshot[];
+}
 
 /**
  * Facade for RAG functionality.
@@ -21,6 +33,8 @@ export class RAGService {
     private embeddingProvider!: EmbeddingProvider;
     private maintenanceTimer: NodeJS.Timeout | null = null;
     private initializationPromise: Promise<void>;
+    private cachedCollectionStats = new Map<string, CollectionStatsCacheEntry>();
+    private inFlightCollectionStats = new Map<string, Promise<CollectionStatsSnapshot[]>>();
 
     private constructor() {
         this.initializationPromise = this.initialize();
@@ -78,17 +92,37 @@ export class RAGService {
         }, delayMs);
     }
 
+    private cloneCollectionStats(
+        stats: CollectionStatsSnapshot[]
+    ): Array<{ name: string; agentDocCount: number; totalDocCount: number }> {
+        return stats.map((entry) => ({ ...entry }));
+    }
+
+    private clearCollectionStatsCache(agentPubkey?: string): void {
+        if (agentPubkey) {
+            this.cachedCollectionStats.delete(agentPubkey);
+            this.inFlightCollectionStats.delete(agentPubkey);
+            return;
+        }
+
+        this.cachedCollectionStats.clear();
+        this.inFlightCollectionStats.clear();
+    }
+
     public async createCollection(
         name: string,
         schema?: Partial<LanceDBSchema>
     ): Promise<RAGCollection> {
         await this.ensureInitialized();
-        return this.operations.createCollection(name, schema);
+        const collection = await this.operations.createCollection(name, schema);
+        this.clearCollectionStatsCache();
+        return collection;
     }
 
     public async addDocuments(collectionName: string, documents: RAGDocument[]): Promise<void> {
         await this.ensureInitialized();
-        return this.operations.addDocuments(collectionName, documents);
+        await this.operations.addDocuments(collectionName, documents);
+        this.clearCollectionStatsCache();
     }
 
     public async query(
@@ -112,17 +146,21 @@ export class RAGService {
 
     public async bulkUpsert(collectionName: string, documents: RAGDocument[]): Promise<BulkUpsertResult> {
         await this.ensureInitialized();
-        return this.operations.bulkUpsert(collectionName, documents);
+        const result = await this.operations.bulkUpsert(collectionName, documents);
+        this.clearCollectionStatsCache();
+        return result;
     }
 
     public async deleteDocumentById(collectionName: string, documentId: string): Promise<void> {
         await this.ensureInitialized();
-        return this.operations.deleteDocumentById(collectionName, documentId);
+        await this.operations.deleteDocumentById(collectionName, documentId);
+        this.clearCollectionStatsCache();
     }
 
     public async deleteCollection(name: string): Promise<void> {
         await this.ensureInitialized();
-        return this.operations.deleteCollection(name);
+        await this.operations.deleteCollection(name);
+        this.clearCollectionStatsCache();
     }
 
     public async listCollections(): Promise<string[]> {
@@ -145,10 +183,44 @@ export class RAGService {
         return this.operations.getAllCollectionStats(agentPubkey);
     }
 
+    public async getCachedAllCollectionStats(
+        agentPubkey: string
+    ): Promise<Array<{ name: string; agentDocCount: number; totalDocCount: number }>> {
+        await this.ensureInitialized();
+
+        const cached = this.cachedCollectionStats.get(agentPubkey);
+        if (cached && cached.expiresAt > Date.now()) {
+            return this.cloneCollectionStats(cached.stats);
+        }
+
+        const inFlight = this.inFlightCollectionStats.get(agentPubkey);
+        if (inFlight) {
+            return this.cloneCollectionStats(await inFlight);
+        }
+
+        const loadPromise = this.operations.getAllCollectionStats(agentPubkey);
+        this.inFlightCollectionStats.set(agentPubkey, loadPromise);
+
+        try {
+            const stats = await loadPromise;
+            this.cachedCollectionStats.set(agentPubkey, {
+                expiresAt: Date.now() + COLLECTION_STATS_CACHE_TTL_MS,
+                stats: stats.map((entry) => ({ ...entry })),
+            });
+            return this.cloneCollectionStats(stats);
+        } finally {
+            const currentPromise = this.inFlightCollectionStats.get(agentPubkey);
+            if (currentPromise === loadPromise) {
+                this.inFlightCollectionStats.delete(agentPubkey);
+            }
+        }
+    }
+
     public async setEmbeddingProvider(provider: EmbeddingProvider): Promise<void> {
         await this.ensureInitialized();
         this.embeddingProvider = provider;
         this.operations = new RAGOperations(this.vectorStore, provider);
+        this.clearCollectionStatsCache();
         logger.info("Embedding provider updated");
     }
 
@@ -163,6 +235,7 @@ export class RAGService {
             clearTimeout(this.maintenanceTimer);
             this.maintenanceTimer = null;
         }
+        this.clearCollectionStatsCache();
         await this.vectorStore.close();
         logger.debug("RAGService closed");
     }
