@@ -1,11 +1,9 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { trace } from "@opentelemetry/api";
 import {
     type LanguageModel,
-    type LanguageModelMiddleware,
     type LanguageModelUsage,
     type ProviderRegistryProvider,
     type StepResult,
@@ -271,26 +269,16 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     /**
      * Wrap a base model with the standard middleware chain.
      * Used by both getLanguageModel() and createLanguageModelFromRegistry()
-     * so all call paths get devtools and reasoning extraction.
+     * so all call paths get reasoning extraction.
      */
     private wrapWithMiddleware(baseModel: LanguageModel): LanguageModel {
-        const middlewares: LanguageModelMiddleware[] = [];
-
-        // DevTools middleware — must be outermost to capture full request/response
-        middlewares.push(devToolsMiddleware() as LanguageModelMiddleware);
-
-        // Extract reasoning from thinking tags
-        middlewares.push(
-            extractReasoningMiddleware({
+        return wrapLanguageModel({
+            model: baseModel as Parameters<typeof wrapLanguageModel>[0]["model"],
+            middleware: extractReasoningMiddleware({
                 tagName: "thinking",
                 separator: "\n",
                 startWithReasoning: false,
-            })
-        );
-
-        return wrapLanguageModel({
-            model: baseModel as Parameters<typeof wrapLanguageModel>[0]["model"],
-            middleware: middlewares,
+            }),
         });
     }
 
