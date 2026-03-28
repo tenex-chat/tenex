@@ -1,4 +1,5 @@
-import { getRootAgentsMdContent, hasRootAgentsMd as hasProjectRootAgentsMd } from "ai-sdk-fs-tools";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
@@ -51,6 +52,15 @@ const inFlightCompilerPromises = new Map<string, Promise<PromptCompilerService |
  * Used to implement warn-once behavior and prevent log spam on hot paths.
  */
 const warnedMissingDTagProjects = new Set<string>();
+const ROOT_AGENTS_MD_CACHE_TTL_MS = 30_000;
+
+interface RootAgentsMdCacheEntry {
+    expiresAt: number;
+    hasRootAgentsMd: boolean;
+    rootAgentsMdContent?: string;
+}
+
+const rootAgentsMdCache = new Map<string, RootAgentsMdCacheEntry>();
 
 /**
  * Apply updates to an existing PromptCompilerService.
@@ -67,6 +77,47 @@ function applyCompilerUpdates(
     }
     // Update lessons - compiler detects staleness and triggers recompilation as needed
     compiler.updateLessons(lessons);
+}
+
+async function getCachedRootAgentsMd(
+    projectBasePath: string
+): Promise<{ hasRootAgentsMd: boolean; rootAgentsMdContent?: string }> {
+    const cached = rootAgentsMdCache.get(projectBasePath);
+    if (cached && cached.expiresAt > Date.now()) {
+        return {
+            hasRootAgentsMd: cached.hasRootAgentsMd,
+            rootAgentsMdContent: cached.rootAgentsMdContent,
+        };
+    }
+
+    const agentsMdPath = path.join(projectBasePath, "AGENTS.md");
+
+    try {
+        const rootAgentsMdContent = await fs.readFile(agentsMdPath, "utf-8");
+        const entry: RootAgentsMdCacheEntry = {
+            expiresAt: Date.now() + ROOT_AGENTS_MD_CACHE_TTL_MS,
+            hasRootAgentsMd: true,
+            rootAgentsMdContent,
+        };
+        rootAgentsMdCache.set(projectBasePath, entry);
+        return {
+            hasRootAgentsMd: true,
+            rootAgentsMdContent,
+        };
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            const entry: RootAgentsMdCacheEntry = {
+                expiresAt: Date.now() + ROOT_AGENTS_MD_CACHE_TTL_MS,
+                hasRootAgentsMd: false,
+            };
+            rootAgentsMdCache.set(projectBasePath, entry);
+            return {
+                hasRootAgentsMd: false,
+                rootAgentsMdContent: undefined,
+            };
+        }
+        throw error;
+    }
 }
 
 /**
@@ -342,7 +393,7 @@ async function addCoreAgentFragments(
     try {
         const t0 = performance.now();
         const ragService = RAGService.getInstance();
-        const collections = await ragService.getAllCollectionStats(agent.pubkey);
+        const collections = await ragService.getCachedAllCollectionStats(agent.pubkey);
         parentSpan?.addEvent("rag_collection_stats_fetched", { "duration_ms": Math.round(performance.now() - t0) });
 
         if (collections.length > 0) {
@@ -827,14 +878,11 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     if (projectBasePath) {
         try {
             t0 = performance.now();
-            const hasRootAgentsMd = await hasProjectRootAgentsMd(projectBasePath);
-            const rootContent = hasRootAgentsMd
-                ? await getRootAgentsMdContent(projectBasePath)
-                : null;
+            const { hasRootAgentsMd, rootAgentsMdContent } = await getCachedRootAgentsMd(projectBasePath);
             parentSpan?.addEvent("agents_md_read", { "duration_ms": Math.round(performance.now() - t0), "has_root_agents_md": hasRootAgentsMd });
             systemPromptBuilder.add("agents-md-guidance", {
                 hasRootAgentsMd,
-                rootAgentsMdContent: rootContent || undefined,
+                rootAgentsMdContent,
             });
         } catch (error) {
             // AGENTS lookup failed - add fragment with no AGENTS.md state
