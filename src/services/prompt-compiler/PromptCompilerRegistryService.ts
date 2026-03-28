@@ -12,6 +12,7 @@ import { PromptCompilerService } from "./prompt-compiler-service";
 export class PromptCompilerRegistryService {
     private readonly compilers = new Map<string, PromptCompilerService>();
     private readonly registrationPromises = new Map<string, Promise<PromptCompilerService>>();
+    private stopped = false;
 
     constructor(
         private readonly projectId: string,
@@ -45,6 +46,7 @@ export class PromptCompilerRegistryService {
                 agent.eventId,
                 this.projectContext.getCommentsForAgent(agent.pubkey)
             );
+            if (this.stopped) return compiler;
             compiler.triggerCompilation();
             this.compilers.set(agent.pubkey, compiler);
 
@@ -94,6 +96,8 @@ export class PromptCompilerRegistryService {
     }
 
     stop(): void {
+        this.stopped = true;
+
         for (const compiler of this.compilers.values()) {
             compiler.stop();
         }
