@@ -96,19 +96,14 @@ export async function setupStreamExecution(
         ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
         : { skills: [], content: "" };
 
-    // Ensure MCP servers are started before resolving tools.
-    // This is deferred from project boot to avoid spawning heavy child
-    // processes (e.g. Chrome for chrome-devtools-mcp) until an agent
-    // actually needs them.
-    if ("mcpManager" in context && context.mcpManager) {
-        await context.mcpManager.ensureReady();
-    }
-
-    // Now get tools with nudge permissions applied
-    // IMPORTANT: Always call getToolsObject even with empty base tools,
-    // because nudge permissions (allow-tool, only-tool) can grant tools
-    // to agents that have no default tools configured.
+    // Only start MCP servers that provide tools the agent actually uses.
+    // MCP startup is expensive (e.g. chrome-devtools-mcp launches a browser, ~6GB RSS).
     const toolNames = context.agent.tools || [];
+    const nudgeToolNames = Object.keys(nudgeResult.toolPermissions);
+    const mcpToolNames = [...toolNames, ...nudgeToolNames].filter(t => t.startsWith("mcp__"));
+    if (mcpToolNames.length > 0 && "mcpManager" in context && context.mcpManager) {
+        await context.mcpManager.ensureServersForTools(mcpToolNames);
+    }
     let toolsObject = getToolsObject(toolNames, context, nudgeResult.toolPermissions);
 
     const ralRegistry = RALRegistry.getInstance();

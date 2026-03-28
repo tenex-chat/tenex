@@ -167,20 +167,18 @@ export class MCPManager {
      * Concurrent calls share a single startup.
      */
     private async ensureServersStarted(): Promise<void> {
-        if (this.serversStarted || !this.pendingConfig) {
-            return;
-        }
+        while (!this.serversStarted && this.pendingConfig) {
+            if (this.serverStartPromise) {
+                await this.serverStartPromise;
+                continue;
+            }
 
-        if (this.serverStartPromise) {
-            await this.serverStartPromise;
-            return;
-        }
-
-        this.serverStartPromise = this.startDeferredServers();
-        try {
-            await this.serverStartPromise;
-        } finally {
-            this.serverStartPromise = null;
+            this.serverStartPromise = this.startDeferredServers();
+            try {
+                await this.serverStartPromise;
+            } finally {
+                this.serverStartPromise = null;
+            }
         }
     }
 
@@ -383,6 +381,70 @@ export class MCPManager {
      */
     async ensureReady(): Promise<void> {
         await this.ensureServersStarted();
+    }
+
+    /**
+     * Start only the MCP servers that provide the given tools.
+     * Tool names follow the `mcp__{serverName}__{toolName}` convention.
+     * Servers already running are skipped; servers not needed are not started.
+     */
+    async ensureServersForTools(mcpToolNames: string[]): Promise<void> {
+        const neededServers = new Set<string>();
+        for (const name of mcpToolNames) {
+            const parts = name.split("__");
+            if (parts.length >= 3 && parts[0] === "mcp") {
+                neededServers.add(parts[1]);
+            }
+        }
+
+        if (neededServers.size === 0) return;
+
+        while (this.pendingConfig) {
+            const missingServers = Array.from(neededServers).filter((name) => !this.clients.has(name));
+            if (missingServers.length === 0) {
+                return;
+            }
+
+            if (this.serverStartPromise) {
+                await this.serverStartPromise;
+                continue;
+            }
+
+            this.serverStartPromise = this.startDeferredServersForTools(missingServers);
+            try {
+                await this.serverStartPromise;
+            } finally {
+                this.serverStartPromise = null;
+            }
+        }
+    }
+
+    private async startDeferredServersForTools(serverNames: string[]): Promise<void> {
+        const config = this.pendingConfig;
+        if (!config) return;
+
+        const serversToStart = Object.fromEntries(
+            serverNames
+                .filter((name) => !this.clients.has(name) && config.servers[name])
+                .map((name) => [name, config.servers[name]])
+        );
+
+        if (Object.keys(serversToStart).length === 0) {
+            return;
+        }
+
+        await this.startServers({
+            enabled: config.enabled,
+            servers: serversToStart,
+        });
+
+        const allServerNames = Object.keys(config.servers);
+        if (allServerNames.every((name) => this.clients.has(name))) {
+            this.pendingConfig = null;
+            this.serversStarted = true;
+        }
+
+        await this.refreshToolCache();
     }
 
     async shutdown(): Promise<void> {
