@@ -15,6 +15,7 @@ import { MCPManager } from "@/services/mcp/MCPManager";
 import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { deliverMcpNotification } from "@/services/mcp/McpNotificationDelivery";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
+import { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import { createLocalReportStore, type LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
@@ -139,6 +140,16 @@ export class ProjectRuntime {
 
             // Create project context directly (don't use global singleton)
             this.context = new ProjectContext(this.project, agentRegistry);
+            this.context.promptCompilerRegistry = new PromptCompilerRegistryService(
+                this.projectId,
+                projectTitle,
+                this.context
+            );
+            await Promise.all(
+                Array.from(this.context.agents.values()).map(async (agent) => {
+                    await this.context?.promptCompilerRegistry?.registerAgent(agent);
+                })
+            );
 
             await this.bootstrapAgentHomeEnvironments();
             trace.getActiveSpan()?.addEvent("project_runtime.agent_homes_bootstrapped", {
@@ -425,6 +436,12 @@ export class ProjectRuntime {
         logger.info(`[ProjectRuntime] Saving conversations: ${this.projectId}`);
         await ConversationStore.cleanup();
         ConversationCatalogService.closeProject(this.projectId, this.metadataPath);
+
+        if (this.context?.promptCompilerRegistry) {
+            logger.info(`[ProjectRuntime] Stopping prompt compiler registry: ${this.projectId}`);
+            this.context.promptCompilerRegistry.stop();
+            this.context.promptCompilerRegistry = undefined;
+        }
 
         // Reset local report store
         logger.info(`[ProjectRuntime] Resetting report store: ${this.projectId}`);

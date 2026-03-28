@@ -20,7 +20,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { checkPostCompletion, type PostCompletionCheckerConfig } from "../PostCompletionChecker";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import * as AgentEventDecoder from "@/nostr/AgentEventDecoder";
 import { supervisorOrchestrator } from "@/agents/supervision";
 import { registerDefaultHeuristics, resetRegistrationForTesting } from "@/agents/supervision/registerHeuristics";
 import type { PendingDelegation } from "@/services/ral/types";
@@ -65,7 +65,6 @@ describe("PostCompletionChecker - True Integration Test", () => {
             },
             agents: new Map(),
             mcpManager: undefined,
-            agentLessons: [],
         } as ReturnType<typeof projectServices.getProjectContext>);
         buildSystemPromptMessagesSpy = spyOn(
             systemPromptBuilderModule,

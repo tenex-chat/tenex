@@ -549,7 +549,7 @@ export class Daemon {
         if (eventType === "lesson_comment") {
             addRoutingEvent(span, "lesson_comment_event", { reason: "kind_1111_K_4129" });
             await this.handleLessonCommentEvent(event);
-            await logDropped(this.routingLogger, event, "Lesson comment - routed to prompt compilers");
+            await logDropped(this.routingLogger, event, "Lesson comment - hydrated into active runtimes only");
             return;
         }
 
@@ -1387,7 +1387,7 @@ export class Daemon {
 
     /**
      * Handle lesson comment events (kind 1111 with #K: ["4129"])
-     * Routes comments to the appropriate PromptCompilerService for prompt refinement.
+     * Hydrates comments into the active runtime contexts for background recompilation.
      *
      * The static subscription receives ALL lesson comments from whitelisted authors
      * (no #p pre-filtering). We use the e-tag (lesson event ID) to find which

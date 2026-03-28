@@ -10,6 +10,6 @@
 
 export {
     PromptCompilerService,
-    type LessonComment,
     type EffectiveInstructionsCacheEntry,
 } from "./prompt-compiler-service";
+export { PromptCompilerRegistryService } from "./PromptCompilerRegistryService";

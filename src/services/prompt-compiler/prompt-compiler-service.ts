@@ -4,7 +4,7 @@
  * Compiles agent lessons with user comments into Effective Agent Instructions.
  * Uses LLM to intelligently merge:
  * - Base Agent Instructions (from agent.instructions in Kind 4199 event)
- * - Lessons (retrieved from ProjectContext, tagging the Agent Definition Event)
+ * - Lessons (synchronized from ProjectContext by the runtime registry)
  * - Comments on Lesson Events
  * - Optional additionalSystemPrompt
  *
@@ -13,7 +13,7 @@
  * - Effective Agent Instructions: Final compiled instructions = Base + Lessons + Comments
  *
  * Key behaviors:
- * - Retrieves lessons internally from ProjectContext (not passed as parameter)
+ * - Receives lesson/comment snapshots from the runtime registry
  * - Uses generateText (not generateObject) for natural prompt integration
  * - Returns only the Effective Agent Instructions string (not a structured object)
  * - On LLM failure: throws error (consumer handles fallback)
@@ -23,11 +23,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import type { NDKEvent, NDKSubscription, Hexpubkey } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey } from "@nostr-dev-kit/ndk";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import type NDK from "@nostr-dev-kit/ndk";
-import { NDKKind } from "@/nostr/kinds";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { LessonComment } from "@/events/LessonComment";
 import { publishCompiledInstructions } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { llmServiceFactory } from "@/llm";
@@ -37,22 +36,6 @@ import { trace, SpanStatusCode } from "@opentelemetry/api";
 // =====================================================================================
 // TYPES
 // =====================================================================================
-
-/**
- * A comment on a lesson (kind 1111 event per NIP-22)
- */
-export interface LessonComment {
-    /** The comment event ID */
-    id: string;
-    /** Author pubkey */
-    pubkey: Hexpubkey;
-    /** Comment content */
-    content: string;
-    /** The lesson event ID this comment references */
-    lessonEventId: string;
-    /** Unix timestamp */
-    createdAt: number;
-}
 
 /**
  * Cache entry for Effective Agent Instructions
@@ -97,23 +80,13 @@ export interface EffectiveInstructionsResult {
  * One instance per agent.
  */
 export class PromptCompilerService {
-    private ndk: NDK;
     private agentPubkey: Hexpubkey;
-    private whitelistedPubkeys: Set<Hexpubkey>;
 
     /** Lessons for this agent — set at initialization and refreshed on each triggerCompilation call */
     private lessons: NDKAgentLesson[] = [];
 
-    /** Subscription for kind 1111 (comment) events */
-    private subscription: NDKSubscription | null = null;
-
-    /** Comments collected from subscription, keyed by lesson event ID */
+    /** Comments for this agent, grouped by lesson event ID */
     private commentsByLesson: Map<string, LessonComment[]> = new Map();
-
-    /** EOSE tracking */
-    private eoseReceived = false;
-    private eosePromise: Promise<void> | null = null;
-    private eoseResolve: (() => void) | null = null;
 
     /** Cache directory */
     private cacheDir: string;
@@ -164,15 +137,12 @@ export class PromptCompilerService {
 
     constructor(
         agentPubkey: Hexpubkey,
-        whitelistedPubkeys: Hexpubkey[],
-        ndk: NDK
+        cacheScopeKey: string
     ) {
         this.agentPubkey = agentPubkey;
-        this.whitelistedPubkeys = new Set(whitelistedPubkeys);
-        this.ndk = ndk;
 
-        // Cache at ~/.tenex/agents/prompts/{agentPubkey}.json
-        this.cachePath = PromptCompilerService.getCachePathForAgent(agentPubkey);
+        // Cache at ~/.tenex/agents/prompts/{scopeKey}/{agentPubkey}.json
+        this.cachePath = PromptCompilerService.getCachePathForAgent(agentPubkey, cacheScopeKey);
         this.cacheDir = path.dirname(this.cachePath);
     }
 
@@ -197,110 +167,16 @@ export class PromptCompilerService {
         this.projectTitle = projectTitle;
     }
 
-    // =====================================================================================
-    // SUBSCRIPTION MANAGEMENT
-    // =====================================================================================
-
     /**
-     * Start subscribing to kind 1111 (comment) events for lessons authored by this agent.
-     * Filters by:
-     * - kind: 1111 (NIP-22 comments)
-     * - #K: ["4129"] (comments on lesson events)
-     * - authors: whitelisted pubkeys only
-     * - #p or #e referencing this agent's pubkey or lesson events
-     */
-    subscribe(): void {
-        if (this.subscription) {
-            logger.warn("PromptCompilerService: subscription already active", {
-                agentPubkey: this.agentPubkey.substring(0, 8),
-            });
-            return;
-        }
-
-        // Reset EOSE state for fresh subscription lifecycle
-        this.eoseReceived = false;
-        this.eoseResolve = null;
-
-        // Initialize EOSE promise
-        this.eosePromise = new Promise<void>((resolve) => {
-            this.eoseResolve = resolve;
-        });
-
-        // NIP-22 comment filter:
-        // - kind: NDKKind.Comment (1111)
-        // - #K: [NDKKind.AgentLesson] (referencing lesson events)
-        // - authors: whitelisted pubkeys only
-        // - #p: [agentPubkey] (comments mentioning the agent)
-        const filter = {
-            kinds: [NDKKind.Comment],
-            "#K": [String(NDKKind.AgentLesson)], // Comments on kind 4129 (lessons)
-            "#p": [this.agentPubkey], // Comments that mention this agent
-            authors: Array.from(this.whitelistedPubkeys),
-        };
-
-        logger.debug("PromptCompilerService: starting subscription", {
-            agentPubkey: this.agentPubkey.substring(0, 8),
-            whitelistSize: this.whitelistedPubkeys.size,
-            filter,
-        });
-
-        this.subscription = this.ndk.subscribe([filter], {
-            closeOnEose: false,
-            groupable: true,
-            onEvent: (event: NDKEvent) => {
-                this.handleCommentEvent(event);
-            },
-            onEose: () => {
-                logger.debug("PromptCompilerService: EOSE received", {
-                    agentPubkey: this.agentPubkey.substring(0, 8),
-                    commentsCount: this.getTotalCommentsCount(),
-                });
-                this.eoseReceived = true;
-                if (this.eoseResolve) {
-                    this.eoseResolve();
-                }
-            },
-        });
-    }
-
-    /**
-     * Block until EOSE is received from the subscription.
-     * Call this after subscribe() before calling compile().
-     */
-    async waitForEOSE(): Promise<void> {
-        if (this.eoseReceived) {
-            return;
-        }
-
-        if (!this.eosePromise) {
-            throw new Error("PromptCompilerService: waitForEOSE called before subscribe()");
-        }
-
-        await this.eosePromise;
-    }
-
-    /**
-     * Stop the subscription and reset EOSE state
+     * Stop any background compilation timers and pending follow-up triggers.
      */
     stop(): void {
-        if (this.subscription) {
-            this.subscription.stop();
-            this.subscription = null;
-        }
-
-        // Clear debounce timer to prevent post-shutdown compilation triggers
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
             this.debounceTimer = null;
         }
 
-        // Reset compilation state to ensure full quiescence
         this.pendingRecompile = false;
-
-        // Reset EOSE state so waitForEOSE is reliable after restart
-        this.eoseReceived = false;
-        this.eosePromise = null;
-        this.eoseResolve = null;
     }
 
     // =====================================================================================
@@ -308,102 +184,7 @@ export class PromptCompilerService {
     // =====================================================================================
 
     /**
-     * Add a comment directly (called by Daemon when routing comments)
-     * @param comment The lesson comment to add
-     */
-    addComment(comment: LessonComment): void {
-        // Add to our collection
-        const existing = this.commentsByLesson.get(comment.lessonEventId) || [];
-
-        // Check for duplicates
-        if (existing.some(c => c.id === comment.id)) {
-            return;
-        }
-
-        existing.push(comment);
-        this.commentsByLesson.set(comment.lessonEventId, existing);
-
-        logger.debug("PromptCompilerService: added comment", {
-            commentId: comment.id.substring(0, 8),
-            lessonEventId: comment.lessonEventId.substring(0, 8),
-            totalCommentsForLesson: existing.length,
-        });
-
-        // Trigger recompilation when a new comment arrives (debounced)
-        this.onCommentArrived();
-    }
-
-    /**
-     * Called when a new comment arrives for a lesson.
-     * Triggers recompilation in the background.
-     */
-    onCommentArrived(): void {
-        const tracer = trace.getTracer("tenex.prompt-compiler");
-        tracer.startActiveSpan("tenex.prompt_compilation.comment_trigger", (span) => {
-            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
-            span.setAttribute("trigger.source", "new_comment");
-            span.end();
-        });
-
-        logger.debug("PromptCompilerService: new comment arrived, triggering recompilation", {
-            agentPubkey: this.agentPubkey.substring(0, 8),
-        });
-        this.triggerCompilation();
-    }
-
-    /**
-     * Handle an incoming kind 1111 comment event from subscription.
-     * Delegates to addComment after parsing the event.
-     */
-    private handleCommentEvent(event: NDKEvent): void {
-        // Extract the lesson event ID using shared helper
-        const lessonEventId = this.extractLessonEventId(event);
-        if (!lessonEventId) {
-            logger.debug("PromptCompilerService: comment missing lesson event reference", {
-                eventId: event.id?.substring(0, 8),
-            });
-            return;
-        }
-
-        // Verify author is in whitelist
-        if (!this.whitelistedPubkeys.has(event.pubkey)) {
-            logger.debug("PromptCompilerService: comment from non-whitelisted author", {
-                eventId: event.id?.substring(0, 8),
-                author: event.pubkey.substring(0, 8),
-            });
-            return;
-        }
-
-        // Delegate to addComment for centralized storage with de-duplication
-        this.addComment({
-            id: event.id || "",
-            pubkey: event.pubkey,
-            content: event.content,
-            lessonEventId,
-            createdAt: event.created_at || 0,
-        });
-    }
-
-    /**
-     * Extract the lesson event ID from a kind 1111 comment event.
-     * Per NIP-22, the root 'e' tag references the target event.
-     */
-    private extractLessonEventId(event: NDKEvent): string | null {
-        // Look for 'e' tag with "root" marker, or first 'e' tag
-        const rootETag = event.tags.find(
-            (tag) => tag[0] === "e" && tag[3] === "root"
-        );
-        if (rootETag?.[1]) {
-            return rootETag[1];
-        }
-
-        // Fallback: first 'e' tag
-        const firstETag = event.tags.find((tag) => tag[0] === "e");
-        return firstETag?.[1] || null;
-    }
-
-    /**
-     * Get comments for a specific lesson
+     * Return comments for a specific lesson from the current synchronized snapshot.
      */
     getCommentsForLesson(lessonEventId: string): LessonComment[] {
         return this.commentsByLesson.get(lessonEventId) || [];
@@ -571,7 +352,24 @@ export class PromptCompilerService {
         });
 
         // Build compilation prompt with emphasis on natural integration
-        const systemPrompt = `You are a Technical Systems Architect responsible for compiling and upgrading the operating manuals (system instructions) for autonomous AI agents.Your Goal: Create a 'Single Source of Truth' instruction set that is rigorously executable, technically precise, and authoritative.## Input Data1. Base Agent Instructions (Current State)2. Lessons Learned (New requirements, fixes, and configuration changes)## Compilation Rules1. **Preserve Hard Data**: You must NEVER summarize, omit, or generalize specific technical values found in the lessons. If a lesson contains file paths, Hex keys, NSEC/NPUB credentials, or specific CLI flags, they MUST appear verbatim in the final output.2. **Strict Protocol Enforcement**: If a lesson dictates a mandatory workflow (e.g., \"Always do X first\"), this must be elevated to a top-level 'CRITICAL PROTOCOL' section, not buried in a bullet point.3. **Conflict Resolution**: Newer lessons represent the current reality. If a lesson contradicts the Base Instructions, delete the old instruction entirely and replace it with the new logic.4. **Structure for Utility**: Do not force all information into prose. Use dedicated sections for 'Configuration Constants', 'Reference Paths', and 'Forbidden Actions' to make the instructions scannable and executable.5. **Tone**: The output should be imperative and strict. Use 'MUST', 'NEVER', and 'REQUIRED' for constraints.## Output Requirements- Output ONLY the Effective Agent Instructions.- Do NOT add meta-commentary.- Do NOT summarize the compilation process.`;
+        const systemPrompt = `You are a Technical Systems Architect responsible for compiling and upgrading the operating manuals (system instructions) for autonomous AI agents.
+Your Goal: Create a "Single Source of Truth" instruction set that is rigorously executable, technically precise, and authoritative.
+
+## Input Data
+1. Base Agent Instructions (Current State)
+2. Lessons Learned (New requirements, fixes, and configuration changes)
+
+## Compilation Rules
+1. **Preserve Hard Data**: You must NEVER summarize, omit, or generalize specific technical values found in the lessons. If a lesson contains file paths, Hex keys, NSEC/NPUB credentials, or specific CLI flags, they MUST appear verbatim in the final output.
+2. **Strict Protocol Enforcement**: If a lesson dictates a mandatory workflow (e.g., "Always do X first"), this must be elevated to a top-level "CRITICAL PROTOCOL" section, not buried in a bullet point.
+3. **Conflict Resolution**: Newer lessons represent the current reality. If a lesson contradicts the Base Instructions, delete the old instruction entirely and replace it with the new logic.
+4. **Structure for Utility**: Do not force all information into prose. Use dedicated sections for "Configuration Constants", "Reference Paths", and "Forbidden Actions" to make the instructions scannable and executable.
+5. **Tone**: The output should be imperative and strict. Use "MUST", "NEVER", and "REQUIRED" for constraints.
+
+## Output Requirements
+- Output ONLY the Effective Agent Instructions.
+- Do NOT add meta-commentary.
+- Do NOT summarize the compilation process.`;
 
         // Build user prompt with all inputs
         let userPrompt = `## Base Agent Instructions
@@ -627,7 +425,8 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
     async initialize(
         baseAgentInstructions: string,
         lessons: NDKAgentLesson[],
-        agentDefinitionEventId?: string
+        agentDefinitionEventId?: string,
+        comments: LessonComment[] = []
     ): Promise<void> {
         const tracer = trace.getTracer("tenex.prompt-compiler");
 
@@ -637,6 +436,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
             this.baseAgentInstructions = baseAgentInstructions;
             this.lessons = lessons;
             this.agentDefinitionEventId = agentDefinitionEventId;
+            this.commentsByLesson = this.groupCommentsByLesson(comments);
             this.initialized = true;
 
             // Try to load existing cache from disk into memory
@@ -676,6 +476,59 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
 
             span.end();
         });
+    }
+
+    /**
+     * Synchronize the compiler's base-instruction inputs with the runtime's agent snapshot.
+     * If they changed, trigger a background recompilation.
+     */
+    syncBaseInstructions(baseAgentInstructions: string, agentDefinitionEventId?: string): void {
+        const baseChanged = this.baseAgentInstructions !== baseAgentInstructions;
+        const eventIdChanged = this.agentDefinitionEventId !== agentDefinitionEventId;
+
+        if (!baseChanged && !eventIdChanged) {
+            return;
+        }
+
+        this.baseAgentInstructions = baseAgentInstructions;
+        this.agentDefinitionEventId = agentDefinitionEventId;
+
+        logger.debug("PromptCompilerService: base instructions updated", {
+            agentPubkey: this.agentPubkey.substring(0, 8),
+            baseChanged,
+            eventIdChanged,
+        });
+
+        if (this.initialized) {
+            this.triggerCompilation();
+        }
+    }
+
+    /**
+     * Synchronize the compiler's lesson/comment inputs with the runtime's latest snapshot.
+     */
+    syncInputs(lessons: NDKAgentLesson[], comments: LessonComment[]): void {
+        const lessonsChanged = this.haveLessonsChanged(lessons);
+        const commentsChanged = this.haveCommentsChanged(comments);
+
+        if (!lessonsChanged && !commentsChanged) {
+            return;
+        }
+
+        this.lessons = lessons;
+        this.commentsByLesson = this.groupCommentsByLesson(comments);
+
+        logger.debug("PromptCompilerService: synchronized compiler inputs", {
+            agentPubkey: this.agentPubkey.substring(0, 8),
+            lessonsChanged,
+            commentsChanged,
+            lessonsCount: lessons.length,
+            commentsCount: comments.length,
+        });
+
+        if (this.initialized) {
+            this.triggerCompilation();
+        }
     }
 
     /**
@@ -764,21 +617,6 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 this.compilationStatus = "compiling";
 
                 const startTime = Date.now();
-
-                // Wait for EOSE with a timeout to ensure we have comments
-                try {
-                    await Promise.race([
-                        this.waitForEOSE(),
-                        new Promise<void>((_, reject) =>
-                            setTimeout(() => reject(new Error("EOSE timeout")), 5000)
-                        ),
-                    ]);
-                } catch {
-                    // Continue without all comments
-                    logger.debug("PromptCompilerService: EOSE timeout during eager compilation", {
-                        agentPubkey: this.agentPubkey.substring(0, 8),
-                    });
-                }
 
                 // Run the actual compilation
                 const effectiveInstructions = await this.compile(
@@ -994,78 +832,42 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
         return this.cachedEffectiveInstructions !== null;
     }
 
-    /**
-     * Called when a new lesson arrives for this agent.
-     * Triggers recompilation in the background.
-     */
-    onLessonArrived(): void {
-        const tracer = trace.getTracer("tenex.prompt-compiler");
-        tracer.startActiveSpan("tenex.prompt_compilation.lesson_trigger", (span) => {
-            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
-            span.setAttribute("trigger.source", "new_lesson");
-            span.end();
-        });
-
-        logger.debug("PromptCompilerService: new lesson arrived, triggering recompilation", {
-            agentPubkey: this.agentPubkey.substring(0, 8),
-        });
-        this.triggerCompilation();
-    }
-
-    /**
-     * Called when a lesson is deleted for this agent.
-     * Triggers recompilation in the background to remove the deleted lesson from compiled prompts.
-     */
-    onLessonDeleted(): void {
-        const tracer = trace.getTracer("tenex.prompt-compiler");
-        tracer.startActiveSpan("tenex.prompt_compilation.lesson_deleted_trigger", (span) => {
-            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
-            span.setAttribute("trigger.source", "lesson_deleted");
-            span.end();
-        });
-
-        logger.debug("PromptCompilerService: lesson deleted, triggering recompilation", {
-            agentPubkey: this.agentPubkey.substring(0, 8),
-        });
-        this.triggerCompilation();
-    }
-
-    /**
-     * Update the lessons for this compiler.
-     * Called by the cache system when lessons may have changed since the compiler was created.
-     * Triggers recompilation if the lesson set has changed.
-     *
-     * @param newLessons The updated set of lessons from ProjectContext
-     */
-    updateLessons(newLessons: NDKAgentLesson[]): void {
-        // Quick check: if counts differ, definitely changed
-        const previousCount = this.lessons.length;
-        if (newLessons.length !== previousCount) {
-            this.lessons = newLessons;
-            logger.debug("PromptCompilerService: lessons updated (count changed)", {
-                agentPubkey: this.agentPubkey.substring(0, 8),
-                previousCount,
-                newCount: newLessons.length,
-            });
-            this.triggerCompilation();
-            return;
+    private haveLessonsChanged(newLessons: NDKAgentLesson[]): boolean {
+        if (newLessons.length !== this.lessons.length) {
+            return true;
         }
 
-        // Deep check: compare lesson IDs (lessons are ordered most recent first)
-        const currentIds = new Set(this.lessons.map((l) => l.id));
-        const newIds = new Set(newLessons.map((l) => l.id));
+        const currentIds = new Set(this.lessons.map((lesson) => lesson.id));
+        const newIds = new Set(newLessons.map((lesson) => lesson.id));
 
-        const changed = newLessons.some((l) => !currentIds.has(l.id)) ||
-                        this.lessons.some((l) => !newIds.has(l.id));
+        return newLessons.some((lesson) => !currentIds.has(lesson.id))
+            || this.lessons.some((lesson) => !newIds.has(lesson.id));
+    }
 
-        if (changed) {
-            this.lessons = newLessons;
-            logger.debug("PromptCompilerService: lessons updated (IDs changed)", {
-                agentPubkey: this.agentPubkey.substring(0, 8),
-                lessonsCount: newLessons.length,
-            });
-            this.triggerCompilation();
+    private haveCommentsChanged(newComments: LessonComment[]): boolean {
+        if (newComments.length !== this.getTotalCommentsCount()) {
+            return true;
         }
+
+        const currentCommentIds = new Set(
+            Array.from(this.commentsByLesson.values())
+                .flat()
+                .map((comment) => comment.id)
+        );
+
+        return newComments.some((comment) => !currentCommentIds.has(comment.id));
+    }
+
+    private groupCommentsByLesson(comments: LessonComment[]): Map<string, LessonComment[]> {
+        const grouped = new Map<string, LessonComment[]>();
+
+        for (const comment of comments) {
+            const existing = grouped.get(comment.lessonEventId) || [];
+            existing.push(comment);
+            grouped.set(comment.lessonEventId, existing);
+        }
+
+        return grouped;
     }
 
     /**
@@ -1086,8 +888,8 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
      * Get the cache file path for a given agent pubkey.
      * Static variant for external consumers that need to read the cache directly.
      */
-    static getCachePathForAgent(agentPubkey: string): string {
-        const cacheDir = path.join(config.getConfigPath(), "agents", "prompts");
+    static getCachePathForAgent(agentPubkey: string, cacheScopeKey: string): string {
+        const cacheDir = path.join(config.getConfigPath(), "agents", "prompts", cacheScopeKey);
         return path.join(cacheDir, `${agentPubkey}.json`);
     }
 

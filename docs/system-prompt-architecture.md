@@ -1,84 +1,83 @@
-# TENEX System Prompt Construction: Architecture and Synthesis
+# TENEX System Prompt Construction
 
-This report provides a comprehensive technical overview of how TENEX constructs and synthesizes system prompts for its AI agents. The system follows a modular "Prompt Fragment" architecture that allows for dynamic, context-aware, and highly specialized agent behavior.
+This document describes the current system prompt architecture in TENEX. The key distinction is that lesson handling is no longer part of prompt assembly. Lessons and lesson comments are compiled ahead of time into each agent's Effective Agent Instructions, and the prompt builder only reads that compiled result.
 
-## 1. Fragment Architecture
+## 1. High-Level Flow
 
-TENEX uses a registry-based system to manage pieces of the system prompt. This allows the system to assemble complex instructions from smaller, reusable, and testable components.
+1. `ProjectRuntime.start()` creates a `ProjectContext` and a project-scoped `PromptCompilerRegistryService`.
+2. The registry registers every agent in that runtime and creates one `PromptCompilerService` per agent.
+3. Lesson and lesson-comment events are stored in `ProjectContext`.
+4. `ProjectContext` synchronizes the affected agent's lesson/comment snapshot into the registry.
+5. The per-agent compiler recompiles Effective Agent Instructions in the background.
+6. `buildSystemPromptMessages()` reads those compiled instructions synchronously and builds the rest of the prompt around them.
 
-### Core Data Structures (`src/prompts/core/types.ts`)
-- **`PromptFragment<T>`**: The atomic unit of the prompt system.
-  - `id`: Unique identifier (e.g., `"agent-identity"`).
-  - `priority`: Numeric value determining where the fragment appears (lower numbers appear earlier).
-  - `template`: A function that takes typed arguments and returns the prompt string.
-- **`FragmentConfig`**: A configuration object specifying which fragment to use, what arguments to pass, and an optional condition for rendering.
+The runtime never blocks an agent turn on compilation. If a recompile is in progress, TENEX serves the last good compiled instructions. If nothing has ever compiled yet, TENEX falls back to the base `agent.instructions`.
 
-### The Registry and Builder
-- **`FragmentRegistry`**: A singleton class that holds all available fragments. Fragments are registered at startup in `/src/prompts/fragments/index.ts`.
-- **`PromptBuilder`**: The engine that assembles the final prompt. It collects fragments, filters them based on conditions, sorts them by priority, and executes their templates.
+## 2. Ownership Boundaries
 
-## 2. The Synthesis Process
+### Runtime-owned compilation
+- **`src/daemon/ProjectRuntime.ts`** owns compiler lifecycle.
+- **`src/services/prompt-compiler/PromptCompilerRegistryService.ts`** is the project-scoped coordinator.
+- **`src/services/prompt-compiler/prompt-compiler-service.ts`** is the per-agent worker that performs LLM synthesis, debouncing, disk caching, and kind:0 publishing.
+- **`src/services/projects/ProjectContext.ts`** is the source of truth for lessons and lesson comments and triggers registry synchronization after mutations.
 
-The final system prompt is not a static string but a synthesized document.
+### Read-only prompt assembly
+- **`src/prompts/utils/systemPromptBuilder.ts`** does not construct prompt compilers, subscribe to lesson comments, or append raw lessons/comments.
+- It only resolves Effective Agent Instructions from `ProjectContext.promptCompilerRegistry` and injects them into the normal fragment pipeline by replacing `agent.instructions` for fragment rendering.
 
-1.  **Registration**: On initialization, all files in `src/prompts/fragments/` register themselves with the `fragmentRegistry`.
-2.  **Configuration**: The `buildSystemPrompt` utility defines a list of `FragmentConfig` objects needed for a standard agent.
-3.  **Context Gathering**: The system prepares a `BuildContext`, containing:
-    *   The specialized `AgentInstance` (name, role, instructions).
-    *   Project metadata (paths, timestamps, user pubkeys).
-    *   Dynamic data (active todos, retrieved lessons, available team members, current git worktrees).
-4.  **Assembly**: The `PromptBuilder` iterates through the configurations:
-    *   It checks the `condition` (e.g., only include "Voice Mode" if the user is using voice).
-    *   It retrieves the template from the registry.
-    *   It applies the arguments from the context.
-5.  **Ordering**: Fragments are joined with double newlines, ordered strictly by their `priority` property.
+## 3. Effective Agent Instructions
 
-## 3. Core Components of a Final System Prompt
+The Effective Agent Instructions are the compiled instruction set used by the agent at runtime. They contain only:
 
-A TENEX system prompt is composed of the following functional layers (ordered by standard priority):
+- Base Agent Instructions from `agent.instructions`
+- Agent lessons
+- Lesson comments
 
-### I. Identity and Environment (Priority 1-5)
-- **Agent Identity (01)**: Establishes the agent's name, role, specific instructions, and NSEC for tool usage.
-- **Home Directory (02)**: Injects the absolute path to the agent's private workspace.
+Project context, tools, nudges, MCP resources, worktree state, and the rest of the normal system prompt are still added later as prompt fragments. They are not part of the lesson compilation step.
 
-### II. Task Management (Priority 6-10)
-- **Todos (06)**: Lists pending, in-progress, and done items for the current session.
-- **Todo Guidance (06)**: Instructs the agent on how to use `todo_write` to maintain state.
-- **Referenced Article (10)**: If a specific spec or file is the subject of the conversation, its content is injected here.
+## 4. Prompt Builder Composition
 
-### III. System Awareness (Priority 11-20)
-- **Nudges (11)**: Behavioral guidance (e.g., "Don't be lazy," "Show your thinking").
-- **Available Agents (15)**: Lists all other agents in the project, their roles, and `useCriteria` to enable effective delegation.
-- **Voice Mode (20)**: Guidelines for TTS-friendly responses (natural language, no markdown tables, etc.).
+After resolving Effective Agent Instructions, the prompt builder assembles the normal fragment stack:
 
-### IV. Dynamic Knowledge (Priority 22-27)
-- **Scheduled Tasks (22)**: Lists any recurring tasks assigned to the agent.
-- **Retrieved Lessons (24)**: Injects relevant "Lessons Learned" retrieved via vector search based on the current context.
-- **RAG Instructions (25)**: Comprehensive documentation on how to use the RAG (Retrieval-Augmented Generation) tools.
-- **MCP Resources (26)**: Lists available Model Context Protocol resources.
-- **Memorized Reports (27)**: Injects relevant NDKArticle reports published by other agents.
+- Agent identity and home directory
+- System-reminder explanation
+- Global system prompt
+- Environment and transport context
+- Meta-project and conversation context
+- Nudges and skills
+- Worktree and AGENTS.md guidance
+- Core runtime fragments such as scheduled tasks, MCP resources, RAG collection stats, and memorized reports
+- Agent-specific fragments such as available agents and delegation guidance
 
-### V. Operational Context (Priority 30-95)
-- **Git Worktree Context (30)**: Informs the agent about the current branch and the structure of `.worktrees/`.
-- **Delegation Completion (95)**: A special fragment added when an agent "wakes up" after a delegated task finishes, providing a summary of the results.
+The old "retrieved lessons" fallback path is not part of normal prompt construction anymore. Lessons influence behavior through compiled instructions, not raw fragment injection.
 
-## 4. Key Fragment Details
+## 5. Cache and Freshness Model
 
-| Fragment ID | File | Priority | Role |
-| :--- | :--- | :--- | :--- |
-| `agent-identity` | `01-agent-identity.ts` | 1 | The "Soul" - defines WHO the agent is. |
-| `available-agents`| `15-available-agents.ts` | 15 | The "Team" - defines WHO they can ask for help. |
-| `rag-instructions`| `25-rag-instructions.ts` | 25 | The "Library" - how to use external knowledge. |
-| `worktree-context`| `30-worktree-context.ts` | 30 | The "Map" - where they are in the filesystem. |
+`PromptCompilerService` keeps a last-good compiled cache both in memory and on disk. Freshness is determined by:
 
-## 5. Summary of priority-based ordering
+- the latest `created_at` across synchronized lessons and lesson comments
+- the current base instructions and agent definition event ID
 
-The priority system ensures that the most fundamental information (Identity) is always at the top "Top-of-Mind", while transient operational updates (Delegation Status) or detailed tool manuals (RAG) appear later to avoid drowning out the agent's core mission.
+When those inputs change:
 
-- **0-10**: Core Identity & Task State
-- **11-20**: Social Context (Team) & Interface Guidelines
-- **21-30**: Knowledge Tools & Filesystem Context
-- **90+**: Reactive state updates (e.g. "Your delegated task just finished")
+- background recompilation is triggered
+- stale compiled instructions remain usable until the new compile completes
+- base instructions are used only if no compiled result exists yet
 
----
-*This report was synthesized by the HR Agent based on a deep-dive into the `/src/prompts` subsystem.*
+## 6. Event Ingestion
+
+Lesson and lesson-comment ingestion happens outside the compiler:
+
+- **`src/daemon/Daemon.ts`** hydrates incoming lesson and lesson-comment events into active runtimes
+- **`src/event-handler/index.ts`** stores runtime-local lesson events in `ProjectContext`
+
+The compiler does not own NDK subscriptions, EOSE coordination, or comment-event parsing.
+
+## 7. Design Intent
+
+This split keeps the lesson system adaptive without putting compiler lifecycle, cache management, and event-ingestion logic on the prompt hot path:
+
+- lesson/comment event arrives
+- runtime updates project state
+- runtime-owned compiler recompiles in background
+- future prompts read compiled instructions synchronously

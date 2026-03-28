@@ -2,22 +2,17 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { isOnlyToolMode, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
 import type { SkillData } from "@/services/skill";
-import { PromptCompilerService, type LessonComment } from "@/services/prompt-compiler";
-import { getNDK } from "@/nostr";
-import { config } from "@/services/ConfigService";
 import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { getIdentityBindingStore } from "@/services/identity";
 import { getProjectContext } from "@/services/projects";
 import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
 import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
-import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
 import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
@@ -30,28 +25,6 @@ import { trace } from "@opentelemetry/api";
 import "@/prompts/fragments"; // This auto-registers all fragments
 import { fetchAgentMcpResources } from "@/prompts/fragments/26-mcp-resources";
 
-/**
- * Module-level cache for PromptCompilerService instances per project+agent.
- * Prevents duplicate LLM calls when multiple system prompt builds occur for the same agent.
- * The cache holds compilers for the process lifetime — memory is bounded by agent count × projects.
- *
- * KEY FORMAT: `${projectCacheKey}:${agentPubkey}` to prevent cross-project contamination
- * when the same agent pubkey is active in multiple concurrent projects.
- */
-const promptCompilerCache = new Map<string, PromptCompilerService>();
-
-/**
- * In-flight promise cache to prevent race conditions when multiple concurrent
- * prompt builds try to create compilers simultaneously for the same project+agent.
- * This ensures only one compiler is created per project+agent combination.
- */
-const inFlightCompilerPromises = new Map<string, Promise<PromptCompilerService | undefined>>();
-
-/**
- * Set of project IDs that have already emitted a "missing d-tag" warning.
- * Used to implement warn-once behavior and prevent log spam on hot paths.
- */
-const warnedMissingDTagProjects = new Set<string>();
 const ROOT_AGENTS_MD_CACHE_TTL_MS = 30_000;
 
 interface RootAgentsMdCacheEntry {
@@ -61,23 +34,6 @@ interface RootAgentsMdCacheEntry {
 }
 
 const rootAgentsMdCache = new Map<string, RootAgentsMdCacheEntry>();
-
-/**
- * Apply updates to an existing PromptCompilerService.
- * Adds new comments and updates lessons, triggering recompilation if needed.
- */
-function applyCompilerUpdates(
-    compiler: PromptCompilerService,
-    comments: LessonComment[],
-    lessons: NDKAgentLesson[]
-): void {
-    // Add comments (de-duplicated internally by addComment)
-    for (const comment of comments) {
-        compiler.addComment(comment);
-    }
-    // Update lessons - compiler detects staleness and triggers recompilation as needed
-    compiler.updateLessons(lessons);
-}
 
 async function getCachedRootAgentsMd(
     projectBasePath: string
@@ -230,9 +186,6 @@ export interface BuildSystemPromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
-    agentLessons?: Map<string, NDKAgentLesson[]>;
-    /** Comments on agent lessons (kind 1111 NIP-22 comments) */
-    agentComments?: Map<string, LessonComment[]>;
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
     mcpManager?: MCPManager; // MCP manager for this project
@@ -258,25 +211,9 @@ export interface SystemMessage {
 }
 
 /**
- * Add lessons to the prompt using the simple fragment approach.
- * Called when PromptCompilerService is not yet ready (still compiling).
- */
-function addLessonsViaFragment(
-    builder: PromptBuilder,
-    agent: AgentInstance,
-    agentLessons?: Map<string, NDKAgentLesson[]>
-): void {
-    builder.add("retrieved-lessons", {
-        agent,
-        agentLessons: agentLessons || new Map(),
-    });
-}
-
-/**
  * Add core agent fragments.
- * NOTE: Lessons are NOT included here - they are handled separately via either:
- *   1. addLessonsViaFragment() - fallback when compiler not ready
- *   2. PromptCompilerService (TIN-10) - compiled into Effective Agent Instructions
+ * NOTE: Lessons are not added as raw fragments here. They are compiled into the
+ * agent's effective instructions by the runtime-owned prompt compiler registry.
  */
 async function addCoreAgentFragments(
     builder: PromptBuilder,
@@ -413,72 +350,6 @@ async function addCoreAgentFragments(
 }
 
 /**
- * Get Effective Agent Instructions SYNCHRONOUSLY using PromptCompilerService (TIN-10).
- *
- * EAGER COMPILATION: This function NEVER blocks on compilation.
- * - If compiled instructions are available (from cache or completed compilation), use them
- * - If compilation isn't ready yet (in progress or not started), use base instructions
- *
- * Compilation is triggered at project startup and runs in the background.
- * Agent execution always gets the "current best" instructions without waiting.
- *
- * @param compiler The PromptCompilerService for this agent
- * @param lessons The agent's lessons (used for fallback formatting if needed)
- * @param baseAgentInstructions The Base Agent Instructions (from agent.instructions)
- * @returns The Effective Agent Instructions (compiled if available, base otherwise)
- */
-function getEffectiveInstructionsSync(
-    compiler: PromptCompilerService,
-    lessons: NDKAgentLesson[],
-    baseAgentInstructions: string
-): string {
-    // Use the synchronous method - NEVER blocks on compilation
-    const result = compiler.getEffectiveInstructionsSync();
-
-    // No span needed here - this is called every RAL and the info is available
-    // on the parent agent.execute span or in logs. The instructions_source span
-    // was creating 18+ spans per conversation with no debugging value.
-
-    logger.debug("📋 Retrieved effective instructions synchronously", {
-        source: result.source,
-        isCompiled: result.isCompiled,
-        compiledAt: result.compiledAt,
-        instructionsLength: result.instructions.length,
-    });
-
-    // If we got compiled instructions, use them
-    if (result.isCompiled) {
-        return result.instructions;
-    }
-
-    // Not compiled yet - check if we have lessons to format as fallback
-    // This provides a better experience than raw base instructions when lessons exist
-    if (lessons.length > 0) {
-        logger.debug("📋 Using fallback lesson formatting (compilation not ready)", {
-            lessonsCount: lessons.length,
-            compilationStatus: result.source,
-        });
-        return formatFallbackLessons(lessons, baseAgentInstructions);
-    }
-
-    // No lessons and no compiled instructions - just use base
-    return baseAgentInstructions;
-}
-
-/**
- * Fallback lesson formatting: appends formatted lessons to Base Agent Instructions.
- * Used when PromptCompilerService cannot compile (no LLM config, LLM error, etc.)
- */
-function formatFallbackLessons(lessons: NDKAgentLesson[], baseAgentInstructions: string): string {
-    if (lessons.length === 0) {
-        return baseAgentInstructions;
-    }
-
-    const formattedSection = formatLessonsWithReminder(lessons);
-    return `${baseAgentInstructions}\n\n${formattedSection}`;
-}
-
-/**
  * Add agent-specific fragments
  */
 function addAgentFragments(
@@ -537,140 +408,14 @@ export async function buildSystemPromptMessages(
 }
 
 /**
- * Get or create a PromptCompilerService instance for an agent within a specific project.
- *
- * Uses a module-level cache to avoid duplicate LLM calls when multiple system prompt
- * builds occur for the same agent (e.g., across multiple RALs or conversations).
- *
- * This is the "lazy/on-demand instantiation" pattern:
- * - Returns cached compiler if available for this project+agent combination
- * - Creates new compiler on cache miss: reads disk cache, triggers background compilation
- * - Returns undefined if NDK is unavailable (fallback to simple lesson fragment)
- *
- * IMPORTANT: Cache is scoped by project cache key + agent pubkey to prevent cross-project
- * contamination when the same agent is active in multiple concurrent projects.
- *
- * @param projectCacheKey Cache key prefix for the project (typically dTag, but may be event ID or fallback value if dTag is missing)
- * @param agentPubkey Agent's public key (used as cache key suffix)
- * @param baseAgentInstructions The Base Agent Instructions from agent.instructions
- * @param agentEventId Optional event ID for the agent definition
- * @param lessons Current lessons for this agent
- * @param comments Current comments for this agent's lessons
- * @param agentSigner Optional signer for kind:0 publishing
- * @param agentName Optional agent name for kind:0 publishing
- * @param agentRole Optional agent role for kind:0 publishing
- * @param projectTitle Optional project title for kind:0 publishing
- */
-async function getOrCreatePromptCompiler(
-    projectCacheKey: string,
-    agentPubkey: string,
-    baseAgentInstructions: string,
-    agentEventId: string | undefined,
-    lessons: NDKAgentLesson[],
-    comments: LessonComment[],
-    agentSigner?: import("@nostr-dev-kit/ndk").NDKPrivateKeySigner,
-    agentName?: string,
-    agentRole?: string,
-    projectTitle?: string
-): Promise<PromptCompilerService | undefined> {
-    // Build cache key scoped by project + agent to prevent cross-project contamination
-    const cacheKey = `${projectCacheKey}:${agentPubkey}`;
-
-    // Check cache first
-    const cachedCompiler = promptCompilerCache.get(cacheKey);
-    if (cachedCompiler) {
-        // Update with any new comments/lessons that arrived since last call
-        applyCompilerUpdates(cachedCompiler, comments, lessons);
-
-        logger.debug("📋 Using cached PromptCompilerService", {
-            projectCacheKey,
-            agentPubkey: agentPubkey.substring(0, 8),
-            lessonsCount: lessons.length,
-            commentsCount: comments.length,
-        });
-
-        return cachedCompiler;
-    }
-
-    // Check if there's an in-flight creation for this project+agent (race condition guard)
-    const inFlightPromise = inFlightCompilerPromises.get(cacheKey);
-    if (inFlightPromise) {
-        logger.debug("📋 Waiting for in-flight compiler creation", {
-            projectCacheKey,
-            agentPubkey: agentPubkey.substring(0, 8),
-        });
-        // Await the in-flight promise, then apply this caller's comments/lessons
-        // to ensure concurrent callers' data is not silently lost
-        const compiler = await inFlightPromise;
-        if (compiler) {
-            applyCompilerUpdates(compiler, comments, lessons);
-        }
-        return compiler;
-    }
-
-    // Create new compiler with single-flight guard
-    const creationPromise = (async (): Promise<PromptCompilerService | undefined> => {
-        try {
-            const ndk = getNDK();
-            const { config: loadedConfig } = await config.loadConfig();
-            const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
-
-            const compiler = new PromptCompilerService(agentPubkey, whitelistArray, ndk);
-
-            // Set agent metadata for kind:0 publishing (gap 2 fix)
-            // This enables the compiler to publish kind:0 events with compiled instructions
-            if (agentSigner && agentName && projectTitle) {
-                compiler.setAgentMetadata(agentSigner, agentName, agentRole || "", projectTitle);
-            }
-
-            // Load pre-existing comments from ProjectContext
-            // This restores comment state that was accumulated by Daemon's handleLessonCommentEvent
-            for (const comment of comments) {
-                compiler.addComment(comment);
-            }
-
-            // Initialize: loads disk cache into memory and stores base instructions + lessons
-            await compiler.initialize(baseAgentInstructions, lessons, agentEventId);
-
-            // Trigger background compilation (fire and forget) — no-op if cache is fresh
-            compiler.triggerCompilation();
-
-            // Cache for future calls (using project-scoped key)
-            promptCompilerCache.set(cacheKey, compiler);
-
-            logger.debug("📋 Created and cached new PromptCompilerService", {
-                projectCacheKey,
-                agentPubkey: agentPubkey.substring(0, 8),
-                lessonsCount: lessons.length,
-                commentsCount: comments.length,
-            });
-
-            return compiler;
-        } catch (error) {
-            logger.debug("Could not create lazy PromptCompilerService:", error);
-            return undefined;
-        } finally {
-            // Remove from in-flight map once complete (success or failure)
-            inFlightCompilerPromises.delete(cacheKey);
-        }
-    })();
-
-    // Register in-flight promise to prevent duplicate concurrent creations
-    inFlightCompilerPromises.set(cacheKey, creationPromise);
-
-    return creationPromise;
-}
-
-/**
  * Builds the main system prompt content.
  *
- * Uses PromptCompilerService (TIN-10) when available to synthesize lessons + comments
- * into Effective Agent Instructions. The result (Base Agent Instructions + Lessons)
- * is then used when building fragments.
+ * Uses the runtime-owned PromptCompilerRegistryService when available to resolve
+ * Effective Agent Instructions. The result is then used when building fragments.
  *
  * IMPORTANT: The Effective Agent Instructions should contain ONLY:
  * - Base Agent Instructions (from agent.instructions in Kind 4199 event)
- * - Lessons learned (merged by LLM)
+ * - Lessons learned and lesson comments (merged by LLM)
  *
  * Fragments (project context, worktrees, available agents, etc.) are added AFTER compilation.
  */
@@ -684,8 +429,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         currentBranch,
         availableAgents = [],
         conversation,
-        agentLessons,
-        agentComments,
         mcpManager,
         nudgeContent,
         nudges,
@@ -695,72 +438,20 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         includeMcpResources = true,
     } = options;
 
-    // Lazily instantiate PromptCompilerService for this agent (TIN-10).
-    // Reads from disk cache as fast path; triggers LLM compilation in background on cache miss.
-    const lessons = agentLessons?.get(agent.pubkey) || [];
-    const comments = agentComments?.get(agent.pubkey) || [];
     const baseAgentInstructions = agent.instructions || "";
-
-    // Get project context and agent for kind:0 metadata
     const context = getProjectContext();
-    const projectTitle = project.tagValue("title") || "Untitled";
-    const agentInstance = context.getAgentByPubkey(agent.pubkey);
-    // Use project's dTag for cache key scoping. Fall back to event ID if no dTag to avoid
-    // cross-project collisions (using a generic "unknown" string would cause collisions).
     const rawDTag = project.dTag;
     const dTag: ProjectDTag | undefined = rawDTag ? createProjectDTag(rawDTag) : undefined;
-    let projectCacheKey: string;
-    if (dTag) {
-        projectCacheKey = dTag;
-    } else {
-        // Warn once per project to avoid log spam on hot path
-        const projectIdentifier = project.id || project.pubkey;
-        if (!projectIdentifier) {
-            throw new Error("[systemPromptBuilder] Project missing id and pubkey; cannot compute cache key.");
-        }
-        if (!warnedMissingDTagProjects.has(projectIdentifier)) {
-            warnedMissingDTagProjects.add(projectIdentifier);
-            logger.warn("⚠️ Project missing d-tag, using event ID for cache key. This may indicate a misconfigured project.", {
-                projectId: project.id?.substring(0, 8),
-                projectPubkey: project.pubkey?.substring(0, 8),
-            });
-        }
-        projectCacheKey = project.id || `fallback-${project.pubkey?.substring(0, 16)}`;
-    }
+    const effectiveAgentInstructions = context.promptCompilerRegistry
+        ? context.promptCompilerRegistry.getEffectiveInstructionsSync(agent.pubkey, baseAgentInstructions)
+        : baseAgentInstructions;
 
-    let t0 = performance.now();
-    const promptCompiler = await getOrCreatePromptCompiler(
-        projectCacheKey,
-        agent.pubkey,
-        baseAgentInstructions,
-        agent.eventId,
-        lessons,
-        comments,
-        agentInstance?.signer,
-        agentInstance?.name ?? agent.name,
-        agentInstance?.role ?? "",
-        projectTitle
-    );
-    parentSpan?.addEvent("prompt_compiler_ready", { "duration_ms": Math.round(performance.now() - t0) });
-    const usePromptCompiler = !!promptCompiler;
-
-    // If PromptCompilerService is available, get effective instructions SYNCHRONOUSLY
-    // EAGER COMPILATION: This NEVER blocks - uses cached compiled instructions or falls back to base
-    let effectiveAgentInstructions: string | undefined;
-    if (promptCompiler) {
-        // SYNCHRONOUS retrieval - NEVER waits for compilation
-        effectiveAgentInstructions = getEffectiveInstructionsSync(
-            promptCompiler,
-            lessons,
-            baseAgentInstructions
-        );
-
-        logger.debug("✅ Retrieved Effective Agent Instructions (sync)", {
-            agentName: agent.name,
-            baseInstructionsLength: baseAgentInstructions.length,
-            effectiveInstructionsLength: effectiveAgentInstructions.length,
-        });
-    }
+    logger.debug("✅ Retrieved Effective Agent Instructions (sync)", {
+        agentName: agent.name,
+        baseInstructionsLength: baseAgentInstructions.length,
+        effectiveInstructionsLength: effectiveAgentInstructions.length,
+        usedPromptCompilerRegistry: !!context.promptCompilerRegistry,
+    });
 
     // Create an agent copy with Effective Agent Instructions (if available)
     // This ensures fragments use the compiled version instead of raw Base Agent Instructions
@@ -769,6 +460,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         : agent;
 
     const systemPromptBuilder = new PromptBuilder();
+    let t0: number;
 
     // Add agent identity - use workingDirectory for "Absolute Path" (where the agent operates)
     // NOTE: Uses agentForFragments which has Effective Agent Instructions (lessons merged in)
@@ -915,13 +607,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         includeMcpResources
     );
     parentSpan?.addEvent("core_agent_fragments_added", { "duration_ms": Math.round(performance.now() - t0) });
-
-    // Handle lessons: ONLY add via fragment if NOT using PromptCompilerService
-    // When using compiler, lessons are already merged into Effective Agent Instructions
-    if (!usePromptCompiler) {
-        // No compiler available - add lessons via fragment
-        addLessonsViaFragment(systemPromptBuilder, agentForFragments, agentLessons);
-    }
 
     // Add agent-specific fragments
     const projectDTag = project.dTag || project.tagValue("d") || undefined;
