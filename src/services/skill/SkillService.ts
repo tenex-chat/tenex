@@ -26,6 +26,7 @@ const tracer = trace.getTracer("tenex.skill-service");
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const MAX_DOWNLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const SKILL_CONTENT_FILENAME = "SKILL.md";
+const AVAILABLE_SKILLS_CACHE_TTL_MS = 5_000;
 const FULL_EVENT_ID_REGEX = /^[0-9a-f]{64}$/;
 const FRONTMATTER_DELIMITER = "---";
 const FRONTMATTER_METADATA_FIELD = "metadata";
@@ -59,6 +60,7 @@ interface SkillStoreDirectory {
 interface AvailableSkillsCacheEntry {
     signature: string;
     skills: SkillData[];
+    expiresAt: number;
 }
 
 interface InFlightAvailableSkillsEntry {
@@ -1202,10 +1204,17 @@ export class SkillService {
 
     async listAvailableSkills(lookupContext: SkillLookupContext = {}): Promise<SkillData[]> {
         const cacheKey = this.buildAvailableSkillsCacheKey(lookupContext);
-        const signature = await this.buildAvailableSkillsSignature(lookupContext);
         const cached = this.availableSkillsCache.get(cacheKey);
+        const now = Date.now();
+
+        if (cached && cached.expiresAt > now) {
+            return this.cloneSkillDataArray(cached.skills);
+        }
+
+        const signature = await this.buildAvailableSkillsSignature(lookupContext);
 
         if (cached && cached.signature === signature) {
+            cached.expiresAt = Date.now() + AVAILABLE_SKILLS_CACHE_TTL_MS;
             return this.cloneSkillDataArray(cached.skills);
         }
 
@@ -1230,6 +1239,7 @@ export class SkillService {
             this.availableSkillsCache.set(cacheKey, {
                 signature,
                 skills,
+                expiresAt: Date.now() + AVAILABLE_SKILLS_CACHE_TTL_MS,
             });
 
             return this.cloneSkillDataArray(skills);
