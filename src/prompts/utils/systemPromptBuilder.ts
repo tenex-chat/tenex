@@ -849,8 +849,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         });
     }
 
-    // Add skill content if present (from kind:4202 events referenced by the triggering event)
-    // Skills provide transient capabilities and attached files, but do NOT modify tool permissions
+    // Add skill content if present. These can come from triggering-event skill tags,
+    // self-applied conversation state, or always-on agent config.
+    // Skills provide additional instructions and attached files, but do NOT modify tool permissions.
     if ((skills && skills.length > 0) || (skillContent && skillContent.trim().length > 0)) {
         systemPromptBuilder.add("skills", {
             skillContent,

@@ -23,13 +23,13 @@ describe("skillsFragment", () => {
             expect(result).toBe("");
         });
 
-        it("should wrap skillContent in transient-skills tags", () => {
+        it("should wrap skillContent in loaded-skills tags", () => {
             const result = skillsFragment.template({
                 skillContent: "Do something special",
             });
-            expect(result).toContain("<transient-skills>");
+            expect(result).toContain("<loaded-skills>");
             expect(result).toContain("Do something special");
-            expect(result).toContain("</transient-skills>");
+            expect(result).toContain("</loaded-skills>");
         });
     });
 
@@ -39,10 +39,10 @@ describe("skillsFragment", () => {
                 skills: [createSkill()],
             });
 
-            expect(result).toContain("<transient-skill");
+            expect(result).toContain("<loaded-skill");
             expect(result).toContain('id="poster-kit"');
             expect(result).toContain("This is the skill content");
-            expect(result).toContain("</transient-skill>");
+            expect(result).toContain("</loaded-skill>");
             expect(result).not.toContain("name=");
         });
 
@@ -90,12 +90,12 @@ describe("skillsFragment", () => {
             expect(result).toContain("Second skill content");
         });
 
-        it("should include header explaining loaded transient skills", () => {
+        it("should include header explaining loaded skills", () => {
             const result = skillsFragment.template({
                 skills: [createSkill({ content: "Skill content" })],
             });
 
-            expect(result).toContain("## Loaded Transient Skills");
+            expect(result).toContain("## Loaded Skills");
             expect(result).toContain("additional context and capabilities");
         });
     });

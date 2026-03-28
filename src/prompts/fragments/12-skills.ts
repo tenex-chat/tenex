@@ -34,7 +34,7 @@ export function renderSkill(skill: SkillData): string {
 
     const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
 
-    parts.push(`<transient-skill${attrStr}>`);
+    parts.push(`<loaded-skill${attrStr}>`);
     parts.push(skill.content);
 
     // List installed files if any
@@ -58,16 +58,16 @@ export function renderSkill(skill: SkillData): string {
         }
     }
 
-    parts.push("</transient-skill>");
+    parts.push("</loaded-skill>");
 
     return parts.join("\n");
 }
 
 /**
  * Fragment for injecting skill content into the system prompt.
- * Skills are kind:4202 events referenced via skill tags on the triggering event.
- * Their content is fetched, files are downloaded, and everything is injected
- * to provide transient capabilities/instructions.
+ * Skills may come from triggering-event skill tags, self-applied conversation state,
+ * or always-on agent config. Their content is fetched, files are downloaded,
+ * and everything is injected to provide additional instructions/context.
  *
  * Unlike nudges, skills do NOT have tool permissions.
  * Skills focus on providing context, instructions, and attached files.
@@ -78,7 +78,7 @@ export const skillsFragment: PromptFragment<SkillsArgs> = {
     template: ({ skillContent, skills }) => {
         // New rendering path: individual skills with their data
         if (skills && skills.length > 0) {
-            const header = `## Loaded Transient Skills
+            const header = `## Loaded Skills
 
 The following skills have been loaded for this conversation. These provide additional context and capabilities:
 `;
@@ -91,9 +91,9 @@ The following skills have been loaded for this conversation. These provide addit
             return "";
         }
 
-        return `<transient-skills>
+        return `<loaded-skills>
 ${skillContent}
-</transient-skills>`;
+</loaded-skills>`;
     },
     validateArgs: (args: unknown): args is SkillsArgs => {
         if (typeof args !== "object" || args === null) return false;

@@ -19,7 +19,7 @@ export const NDKKind = {
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
     AgentDefinition: 4199 as BaseNDKKind, // Agent Definition
     AgentNudge: 4201 as BaseNDKKind, // Agent Nudge - system prompt injection
-    AgentSkill: 4202 as BaseNDKKind, // Agent Skill - transient capability injection
+    AgentSkill: 4202 as BaseNDKKind, // Agent Skill - instruction bundle injection
     DelegationMarker: 4203 as BaseNDKKind, // Delegation Marker - lifecycle tracking
     NudgeSkillWhitelist: 14202 as BaseNDKKind, // Nudge/Skill Whitelist - NIP-51-like list of e-tagged nudges/skills
     ProjectAgentSnapshot: 14199 as BaseNDKKind, // Owner-agent declaration (replaceable, p-tags agents)

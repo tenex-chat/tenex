@@ -40,6 +40,7 @@ describe("skills_set tool", () => {
     const SKILL_LOOKUP_CONTEXT = {
         agentPubkey: AGENT_PUBKEY,
         projectDTag: PROJECT_DTAG,
+        projectPath: "/tmp/test",
     };
 
     const mockSetSelfAppliedSkills = mock();
@@ -163,7 +164,7 @@ describe("skills_set tool", () => {
         );
         expect(result.success).toBe(true);
         expect(result.activeSkills).toEqual(["brainstorming", "wikifreedia-writer"]);
-        expect(result.skillContent).toContain("<transient-skill");
+        expect(result.skillContent).toContain("<loaded-skill");
         expect(result.skillContent).toContain("content1");
         expect(result.skillContent).toContain("content2");
     });
@@ -341,14 +342,14 @@ describe("skills_set tool", () => {
         );
 
         expect(result.success).toBe(true);
-        expect(result.skillContent).toContain("<transient-skill");
+        expect(result.skillContent).toContain("<loaded-skill");
         expect(result.skillContent).toContain('name="Code Style"');
         expect(result.skillContent).toContain("Follow these patterns.");
         expect(result.skillContent).toContain("/tmp/skills/code-style/style.md");
         expect(result.skillContent).toContain("Installed Files");
         expect(result.skillContent).toContain("Failed File Downloads");
         expect(result.skillContent).toContain("Download failed");
-        expect(result.skillContent).toContain("</transient-skill>");
+        expect(result.skillContent).toContain("</loaded-skill>");
         expect(result.message).toContain("file paths");
     });
 
@@ -451,7 +452,7 @@ describe("skills_set tool", () => {
         );
         expect(result.success).toBe(true);
         expect(result.activeSkills).toEqual(["brainstorming", "wikifreedia-writer"]);
-        expect(result.skillContent).toContain("<transient-skill");
+        expect(result.skillContent).toContain("<loaded-skill");
     });
 
     it("should persist to agent config when always: true", async () => {

@@ -2,7 +2,7 @@
  * Skill Event Types
  *
  * Defines the structure for skill events (kind:4202).
- * Skills are transient capabilities that can be injected into agent system prompts.
+ * Skills are instruction bundles that can be injected into agent system prompts.
  *
  * Unlike nudges, skills do NOT have tool permissions (only-tool, allow-tool, deny-tool).
  * Skills are focused on providing additional context, instructions, and attached files.
