@@ -121,6 +121,7 @@ export class AgentExecutor {
         projectPath?: string
     ): Promise<LLMCompletionRequest> {
         const triggeringEnvelope = new NostrInboundAdapter().toEnvelope(originalEvent);
+        const projectContext = getProjectContext();
         const context: ToolRegistryContext = {
             agent: agent as ToolRegistryContext["agent"],
             triggeringEnvelope,
@@ -130,6 +131,7 @@ export class AgentExecutor {
             currentBranch: "main",
             agentPublisher: createSchemaOnlyPublisher(),
             ralNumber: 0,
+            projectContext,
             conversationStore: new Proxy({} as ConversationStore, {
                 get: (_, prop) => { throw new Error(`conversationStore.${String(prop)} called in schema-only context`); },
             }),
@@ -368,6 +370,7 @@ export class AgentExecutor {
             conversationStore,
             getConversation: () => conversationStore,
             mcpManager: projectContext.mcpManager,
+            projectContext,
             isDelegationCompletion: context.isDelegationCompletion,
             hasPendingDelegations: context.hasPendingDelegations,
         };

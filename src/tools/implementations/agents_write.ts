@@ -3,7 +3,7 @@ import { createAgentInstance } from "@/agents/agent-loader";
 import { CONTEXT_INJECTED_TOOLS, CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
-import { getProjectContext } from "@/services/projects";
+
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
@@ -68,10 +68,14 @@ async function executeAgentsWrite(
         };
     }
 
-    // Get project context
-    const projectContext = getProjectContext();
+    // Get project context from tool execution context (not ALS)
+    // This ensures correct project association during cross-project delegation
+    if (!context?.projectContext) {
+        throw new Error("ToolExecutionContext with projectContext is required for agents_write tool");
+    }
+    const projectContext = context.projectContext;
 
-    if (!context?.workingDirectory) {
+    if (!context.workingDirectory) {
         throw new Error("ToolExecutionContext with workingDirectory is required for agents_write tool");
     }
 

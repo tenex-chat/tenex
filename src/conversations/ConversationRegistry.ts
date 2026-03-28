@@ -113,23 +113,41 @@ class ConversationRegistryImpl {
     /**
      * Resolve the current project ID:
      *   1. Explicit projectId parameter (if passed)
-     *   2. AsyncLocalStorage projectContextStore lookup
-     *   3. Single-project shortcut (unambiguous when only one project is initialized)
+     *   2. Envelope's channel.projectBinding (a-tag) — critical for cross-project delegation
+     *   3. AsyncLocalStorage projectContextStore lookup
+     *   4. Single-project shortcut (unambiguous when only one project is initialized)
      *
      * In multi-project mode without ALS context, returns null. Callers that
      * need a project ID (getOrLoad, create) already throw on null. Callers that
      * perform lookups (get, has) handle null by scanning all projects.
      *
      * @param explicitProjectId - Optional explicit project ID to use directly
+     * @param envelope - Optional envelope to extract project from a-tag (for cross-project delegation)
      * @returns The resolved project ID, or null if none can be determined
      */
-    resolveProjectId(explicitProjectId?: ProjectDTag): ProjectDTag | null {
+    resolveProjectId(explicitProjectId?: ProjectDTag, envelope?: InboundEnvelope): ProjectDTag | null {
         // Tier 1: Explicit parameter
         if (explicitProjectId) {
             return explicitProjectId;
         }
 
-        // Tier 2: AsyncLocalStorage context
+        // Tier 2: Envelope's a-tag (projectBinding) — critical for cross-project delegation
+        // During cross-project delegation, ALS still has delegator's context, but the
+        // envelope's a-tag correctly identifies the target project.
+        if (envelope?.channel.projectBinding) {
+            const aTagValue = envelope.channel.projectBinding;
+            // a-tag format: "31933:<pubkey>:<d-tag>" — extract d-tag
+            const parts = aTagValue.split(":");
+            if (parts.length >= 3) {
+                const dTag = parts.slice(2).join(":"); // Handle d-tags with colons
+                const typedDTag = createProjectDTag(dTag);
+                if (this._projectConfigs.has(typedDTag)) {
+                    return typedDTag;
+                }
+            }
+        }
+
+        // Tier 3: AsyncLocalStorage context
         try {
             const context = projectContextStore.getContext();
             if (context) {
@@ -145,7 +163,7 @@ class ConversationRegistryImpl {
             logger.debug("[ConversationRegistry] Failed to read AsyncLocalStorage context", { error });
         }
 
-        // Tier 3: Single-project shortcut — unambiguous when exactly one project
+        // Tier 4: Single-project shortcut — unambiguous when exactly one project
         if (this._projectConfigs.size === 1) {
             return this._projectConfigs.keys().next().value!;
         }
@@ -355,7 +373,9 @@ class ConversationRegistryImpl {
             return existing;
         }
 
-        const currentProjectId = this.resolveProjectId();
+        // Pass envelope to resolveProjectId to extract target project from a-tag
+        // during cross-project delegation (ALS still has delegator's context)
+        const currentProjectId = this.resolveProjectId(undefined, envelope);
         if (!currentProjectId) {
             throw new Error("ConversationRegistry.initialize() must be called before create()");
         }

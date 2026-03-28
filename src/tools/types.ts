@@ -3,6 +3,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import type { Tool as CoreTool } from "ai";
 
 export interface ToolTranscriptArgSpec {
@@ -124,6 +125,11 @@ export interface ExecutionEnvironment {
 export interface ToolExecutionContext extends ExecutionEnvironment {
     agentPublisher: AgentRuntimePublisher;
     ralNumber: number;
+    /**
+     * Explicit project context for tools that need project association.
+     * Required to avoid ALS context bugs in cross-project delegation scenarios.
+     */
+    projectContext: ProjectContext;
 }
 
 /**
@@ -142,6 +148,11 @@ export interface ConversationToolContext extends ToolExecutionContext {
  */
 export interface ToolRegistryContext extends ConversationToolContext {
     mcpManager?: MCPManager;
+    /**
+     * Explicit project context for tools that need project association.
+     * Required to avoid ALS context bugs in cross-project delegation scenarios.
+     */
+    projectContext: ProjectContext;
 }
 
 export interface ToolError {
