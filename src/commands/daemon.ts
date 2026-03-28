@@ -171,8 +171,21 @@ daemonCommand
             // This enables Layer 3 (SchedulerService) to use Layer 4 (Daemon) functionality
             // without direct imports, maintaining architectural separation
             schedulerService.setProjectCallbacks(
-                // Boot handler: called when a scheduled task needs to boot a project
+                // Boot handler: called when a scheduled task needs to boot a project.
+                // When --boot patterns are set, only allow booting projects that match.
                 async (projectId: string) => {
+                    if (bootPatterns.length > 0) {
+                        const matches = bootPatterns.some((pattern) =>
+                            projectId.toLowerCase().includes(pattern.toLowerCase())
+                        );
+                        if (!matches) {
+                            logger.info("Scheduler boot rejected: project does not match auto-boot patterns", {
+                                projectId,
+                                patterns: bootPatterns,
+                            });
+                            throw new Error(`Project ${projectId} does not match auto-boot patterns`);
+                        }
+                    }
                     await daemon.startRuntime(projectId as import("@/types/project-ids").ProjectDTag);
                 },
                 // State resolver: called to check if a project is already running

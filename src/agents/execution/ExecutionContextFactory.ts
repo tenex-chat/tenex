@@ -4,7 +4,7 @@ import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { listWorktrees, createWorktree } from "@/utils/git/worktree";
-import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
+import { getCurrentBranchWithFallback, readCurrentBranchFromGitDir } from "@/utils/git/initializeGitRepo";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
@@ -128,7 +128,10 @@ export async function createExecutionContext(params: {
                 }
             } else {
                 workingDirectory = params.projectBasePath;
-                currentBranch = await getCurrentBranchWithFallback(params.projectBasePath);
+                // Read branch from .git/HEAD directly to avoid subprocess spawn.
+                // Bun/JSC pre-allocates ~9GB on first child_process.exec(); this avoids that.
+                currentBranch = await readCurrentBranchFromGitDir(params.projectBasePath)
+                    ?? await getCurrentBranchWithFallback(params.projectBasePath);
 
                 span.addEvent("execution_context.project_root_selected", {
                     "branch.current": currentBranch,

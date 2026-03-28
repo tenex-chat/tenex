@@ -286,6 +286,26 @@ export async function cloneGitRepository(
 }
 
 /**
+ * Read the current branch directly from .git/HEAD without spawning a subprocess.
+ * Returns null if the HEAD is detached or the file cannot be read.
+ */
+export async function readCurrentBranchFromGitDir(repoPath: string): Promise<string | null> {
+    try {
+        const headPath = path.join(repoPath, ".git", "HEAD");
+        const content = await fs.readFile(headPath, "utf-8");
+        const trimmed = content.trim();
+        const refPrefix = "ref: refs/heads/";
+        if (trimmed.startsWith(refPrefix)) {
+            return trimmed.slice(refPrefix.length);
+        }
+        // Detached HEAD (raw commit hash) — cannot determine branch name
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Get current git branch name
  */
 export async function getCurrentBranch(repoPath: string): Promise<string> {
