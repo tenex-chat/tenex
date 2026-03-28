@@ -17,12 +17,15 @@ let mockFetch: ReturnType<typeof mock>;
 const files = new Map<string, Buffer>();
 const directories = new Set<string>();
 const symlinks = new Map<string, string>(); // symlink path -> target path
+const fileMtimestamps = new Map<string, number>();
 const AGENT_PUBKEY = "a".repeat(64);
 const PROJECT_DTAG = "TENEX-ff3ssq";
 const LOOKUP_CONTEXT = {
     agentPubkey: AGENT_PUBKEY,
     projectDTag: PROJECT_DTAG,
 };
+let nextMockMtimeMs = 1;
+let readFileCallCount = 0;
 
 function normalizePath(target: string): string {
     return path.resolve(target);
@@ -44,6 +47,7 @@ function seedFile(target: string, content: string): void {
     const normalized = normalizePath(target);
     ensureMockDirectory(path.dirname(normalized));
     files.set(normalized, Buffer.from(content));
+    fileMtimestamps.set(normalized, nextMockMtimeMs++);
 }
 
 function seedSymlink(linkPath: string, targetPath: string): void {
@@ -118,6 +122,9 @@ beforeEach(() => {
     files.clear();
     directories.clear();
     symlinks.clear();
+    fileMtimestamps.clear();
+    nextMockMtimeMs = 1;
+    readFileCallCount = 0;
     ensureMockDirectory("/tmp/test-tenex/skills");
 
     mockFetch = mock(() =>
@@ -151,6 +158,7 @@ beforeEach(() => {
         );
     });
     spyOn(fsPromises, "readFile").mockImplementation(async (target: fsPromises.PathLike, encoding?: any) => {
+        readFileCallCount += 1;
         let normalized = normalizePath(String(target));
         // Check if any parent component is a symlink (e.g., /dir/symlink/file)
         for (const [linkPath, linkTarget] of symlinks) {
@@ -214,6 +222,8 @@ beforeEach(() => {
             return {
                 isDirectory: () => false,
                 isFile: () => true,
+                size: files.get(normalized)?.length ?? 0,
+                mtimeMs: fileMtimestamps.get(normalized) ?? 0,
             } as any;
         }
         throw new Error(`ENOENT: ${normalized}`);
@@ -245,6 +255,88 @@ describe("SkillService", () => {
         expect(skills[0].description).toBe("Frontmatter-backed local skill description");
         expect(skills[0].content).toBe("Local skill content");
         expect(skills[0].installedFiles.map((file) => file.relativePath)).toEqual(["helper.ts"]);
+    });
+
+    it("reuses cached available skills when the visible skill tree has not changed", async () => {
+        seedFile(
+            "/tmp/test-tenex/skills/cache-test/SKILL.md",
+            createSkillDocument({
+                name: "cache-test",
+                description: "Cache test description",
+                content: "Cache test content",
+            })
+        );
+
+        const firstSkills = await SkillService.getInstance().listAvailableSkills();
+        const readsAfterFirstCall = readFileCallCount;
+        const secondSkills = await SkillService.getInstance().listAvailableSkills();
+
+        expect(firstSkills.map((skill) => skill.identifier)).toEqual(["cache-test"]);
+        expect(secondSkills.map((skill) => skill.identifier)).toEqual(["cache-test"]);
+        expect(readsAfterFirstCall).toBeGreaterThan(0);
+        expect(readFileCallCount).toBe(readsAfterFirstCall);
+    });
+
+    it("refreshes cached available skills when a new skill appears on disk", async () => {
+        seedFile(
+            "/tmp/test-tenex/skills/existing-skill/SKILL.md",
+            createSkillDocument({
+                name: "existing-skill",
+                description: "Existing description",
+                content: "Existing content",
+            })
+        );
+
+        const initialSkills = await SkillService.getInstance().listAvailableSkills();
+        const readsAfterInitialLoad = readFileCallCount;
+
+        seedFile(
+            "/tmp/test-tenex/skills/new-skill/SKILL.md",
+            createSkillDocument({
+                name: "new-skill",
+                description: "New description",
+                content: "New content",
+            })
+        );
+
+        const refreshedSkills = await SkillService.getInstance().listAvailableSkills();
+
+        expect(initialSkills.map((skill) => skill.identifier)).toEqual(["existing-skill"]);
+        expect(refreshedSkills.map((skill) => skill.identifier)).toEqual([
+            "existing-skill",
+            "new-skill",
+        ]);
+        expect(readFileCallCount).toBeGreaterThan(readsAfterInitialLoad);
+    });
+
+    it("refreshes cached available skills when an existing SKILL.md changes on disk", async () => {
+        const initialDocument = createSkillDocument({
+            name: "mutable-skill",
+            description: "alpha-beta",
+            content: "abcdefghij",
+        });
+        const updatedDocument = createSkillDocument({
+            name: "mutable-skill",
+            description: "omega-beta",
+            content: "klmnopqrst",
+        });
+
+        expect(initialDocument.length).toBe(updatedDocument.length);
+
+        seedFile("/tmp/test-tenex/skills/mutable-skill/SKILL.md", initialDocument);
+
+        const initialSkills = await SkillService.getInstance().listAvailableSkills();
+        const readsAfterInitialLoad = readFileCallCount;
+
+        seedFile("/tmp/test-tenex/skills/mutable-skill/SKILL.md", updatedDocument);
+
+        const refreshedSkills = await SkillService.getInstance().listAvailableSkills();
+
+        expect(initialSkills[0]?.description).toBe("alpha-beta");
+        expect(initialSkills[0]?.content).toBe("abcdefghij");
+        expect(refreshedSkills[0]?.description).toBe("omega-beta");
+        expect(refreshedSkills[0]?.content).toBe("klmnopqrst");
+        expect(readFileCallCount).toBeGreaterThan(readsAfterInitialLoad);
     });
 
     it("prefers project skills over global skills when identifiers conflict", async () => {

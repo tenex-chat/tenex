@@ -56,6 +56,16 @@ interface SkillStoreDirectory {
     scope: SkillStoreScope;
 }
 
+interface AvailableSkillsCacheEntry {
+    signature: string;
+    skills: SkillData[];
+}
+
+interface InFlightAvailableSkillsEntry {
+    promise: Promise<SkillData[]>;
+    signature: string;
+}
+
 /**
  * Service for resolving the effective local skill set across agent, project-repo,
  * project, global directories, plus the shared ~/.agents fallback.
@@ -69,6 +79,8 @@ interface SkillStoreDirectory {
 export class SkillService {
     private static instance: SkillService;
     private static ndkProvider: typeof getNDK = getNDK;
+    private availableSkillsCache = new Map<string, AvailableSkillsCacheEntry>();
+    private inFlightAvailableSkills = new Map<string, InFlightAvailableSkillsEntry>();
 
     private constructor() {}
 
@@ -98,6 +110,80 @@ export class SkillService {
 
     private getNDK(): ReturnType<typeof getNDK> {
         return SkillService.ndkProvider();
+    }
+
+    private buildAvailableSkillsCacheKey(lookupContext: SkillLookupContext = {}): string {
+        return JSON.stringify({
+            agentPubkey: lookupContext.agentPubkey?.trim() || "",
+            projectDTag: lookupContext.projectDTag?.trim() || "",
+            projectPath: lookupContext.projectPath
+                ? path.resolve(lookupContext.projectPath)
+                : "",
+        });
+    }
+
+    private cloneSkillData(skill: SkillData): SkillData {
+        return {
+            ...skill,
+            installedFiles: skill.installedFiles.map((file) => ({ ...file })),
+        };
+    }
+
+    private cloneSkillDataArray(skills: SkillData[]): SkillData[] {
+        return skills.map((skill) => this.cloneSkillData(skill));
+    }
+
+    private invalidateAvailableSkillsCache(): void {
+        this.availableSkillsCache.clear();
+    }
+
+    private async buildAvailableSkillsSignature(
+        lookupContext: SkillLookupContext = {}
+    ): Promise<string> {
+        const directories = await this.getLookupDirectories(lookupContext);
+        const visibleSignatures = new Map<string, string>();
+
+        for (const directory of directories) {
+            let entries: Dirent[];
+            try {
+                entries = await fs.readdir(directory.dir, { withFileTypes: true });
+            } catch (error) {
+                if (this.isMissingDirectoryError(error)) {
+                    continue;
+                }
+                throw error;
+            }
+
+            entries.sort((a, b) => a.name.localeCompare(b.name));
+
+            for (const entry of entries) {
+                if (visibleSignatures.has(entry.name)) {
+                    continue;
+                }
+
+                if (!(await this.isDirectoryEntry(entry, directory.dir))) {
+                    continue;
+                }
+
+                const skillDir = path.join(directory.dir, entry.name);
+                try {
+                    const stats = await fs.stat(this.getSkillContentPath(skillDir));
+                    visibleSignatures.set(
+                        entry.name,
+                        [
+                            directory.scope,
+                            entry.name,
+                            stats.size,
+                            stats.mtimeMs,
+                        ].join(":")
+                    );
+                } catch {
+                    continue;
+                }
+            }
+        }
+
+        return Array.from(visibleSignatures.values()).join("|");
     }
 
     private async getGlobalSkillsBaseDir(ensureExists = true): Promise<string> {
@@ -1058,6 +1144,7 @@ export class SkillService {
             this.extractFileETags(event),
             skillId
         );
+        this.invalidateAvailableSkillsCache();
 
         const localSkill = await this.loadLocalSkillById(skillId);
         if (!localSkill) {
@@ -1114,9 +1201,44 @@ export class SkillService {
     }
 
     async listAvailableSkills(lookupContext: SkillLookupContext = {}): Promise<SkillData[]> {
-        const records = await this.listVisibleLocalSkillRecords(lookupContext);
-        const skills = await Promise.all(records.map((record) => this.loadLocalSkillRecord(record)));
-        return skills.filter((skill): skill is SkillData => skill !== null);
+        const cacheKey = this.buildAvailableSkillsCacheKey(lookupContext);
+        const signature = await this.buildAvailableSkillsSignature(lookupContext);
+        const cached = this.availableSkillsCache.get(cacheKey);
+
+        if (cached && cached.signature === signature) {
+            return this.cloneSkillDataArray(cached.skills);
+        }
+
+        const inFlight = this.inFlightAvailableSkills.get(cacheKey);
+        if (inFlight && inFlight.signature === signature) {
+            return this.cloneSkillDataArray(await inFlight.promise);
+        }
+
+        const loadPromise = (async () => {
+            const records = await this.listVisibleLocalSkillRecords(lookupContext);
+            const skills = await Promise.all(records.map((record) => this.loadLocalSkillRecord(record)));
+            return skills.filter((skill): skill is SkillData => skill !== null);
+        })();
+
+        this.inFlightAvailableSkills.set(cacheKey, {
+            promise: loadPromise,
+            signature,
+        });
+
+        try {
+            const skills = await loadPromise;
+            this.availableSkillsCache.set(cacheKey, {
+                signature,
+                skills,
+            });
+
+            return this.cloneSkillDataArray(skills);
+        } finally {
+            const currentInFlight = this.inFlightAvailableSkills.get(cacheKey);
+            if (currentInFlight?.promise === loadPromise) {
+                this.inFlightAvailableSkills.delete(cacheKey);
+            }
+        }
     }
 
     async fetchSkills(
