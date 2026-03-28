@@ -27,6 +27,10 @@ interface AgentHomePromptCacheEntry {
 
 const agentHomePromptCache = new Map<string, AgentHomePromptCacheEntry>();
 
+export function clearAgentHomePromptCache(): void {
+    agentHomePromptCache.clear();
+}
+
 /**
  * Arguments for the agent home directory fragment.
  */

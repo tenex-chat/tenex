@@ -284,8 +284,9 @@ export class ProjectRuntime {
             return;
         }
 
+        const agents = Array.from(this.context.agents.values());
         const bootstrapResults = await Promise.allSettled(
-            Array.from(this.context.agents.values()).map(async (agent) => {
+            agents.map(async (agent) => {
                 await agentEnvironmentService.ensureAgentHomeEnv({
                     agentPubkey: agent.pubkey,
                     agentNsec: agent.signer.nsec,
@@ -298,7 +299,7 @@ export class ProjectRuntime {
                 continue;
             }
 
-            const agent = Array.from(this.context.agents.values())[index];
+            const agent = agents[index];
             logger.warn("[ProjectRuntime] Failed to bootstrap agent home .env", {
                 projectId: this.projectId,
                 agentPubkey: agent?.pubkey?.slice(0, 8),

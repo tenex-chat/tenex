@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import * as fs from "node:fs";
 import * as agentHome from "@/lib/agent-home";
 import type { InjectedFile } from "@/lib/agent-home";
-import { agentHomeDirectoryFragment, getAgentHomeDirectory } from "../02-agent-home-directory";
+import {
+    agentHomeDirectoryFragment,
+    clearAgentHomePromptCache,
+    getAgentHomeDirectory,
+} from "../02-agent-home-directory";
 
 // Mock the logger to avoid console output during tests
 mock.module("@/utils/logger", () => ({
@@ -44,6 +48,7 @@ describe("agent-home-directory fragment", () => {
         let getInjectedFilesSpy: ReturnType<typeof spyOn>;
 
         beforeEach(() => {
+            clearAgentHomePromptCache();
             // Reset spies before each test
             ensureAgentHomeSpy = spyOn(agentHome, "ensureAgentHomeDirectory");
             readdirSyncSpy = spyOn(fs, "readdirSync");
@@ -53,6 +58,7 @@ describe("agent-home-directory fragment", () => {
         });
 
         afterEach(() => {
+            clearAgentHomePromptCache();
             ensureAgentHomeSpy.mockRestore();
             readdirSyncSpy.mockRestore();
             getInjectedFilesSpy.mockRestore();
