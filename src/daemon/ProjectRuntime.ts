@@ -432,6 +432,10 @@ export class ProjectRuntime {
             // Service may not be initialized
         }
 
+        // Shutdown MCP servers (kills child processes like nostr-explore-mcp)
+        logger.info(`[ProjectRuntime] Shutting down MCP servers: ${this.projectId}`);
+        await this.mcpManager.shutdown();
+
         // Save conversation state
         logger.info(`[ProjectRuntime] Saving conversations: ${this.projectId}`);
         await ConversationStore.cleanup();
