@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { PromptCompilerService, type LessonComment } from "../prompt-compiler-service";
-import type NDK from "@nostr-dev-kit/ndk";
+import { PromptCompilerService } from "../prompt-compiler-service";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { LessonComment } from "@/events/LessonComment";
 import { llmServiceFactory } from "@/llm";
 import { config } from "@/services/ConfigService";
 
@@ -17,15 +17,11 @@ const originalCreateService = llmServiceFactory.createService;
 
 describe("PromptCompilerService", () => {
     const agentPubkey = "abc123def456";
-    const whitelistedPubkeys = ["user123", "user456"];
-    let mockNdk: NDK;
-    let eoseCallbacks: Array<() => void> = [];
-    let eventCallbacks: Array<(event: unknown) => void> = [];
     let mockLessons: NDKAgentLesson[] = [];
     let createdServices: PromptCompilerService[] = [];
 
     const createService = (pubkey = agentPubkey): PromptCompilerService => {
-        const service = new PromptCompilerService(pubkey, whitelistedPubkeys, mockNdk);
+        const service = new PromptCompilerService(pubkey, "test-project");
         createdServices.push(service);
         return service;
     };
@@ -33,8 +29,6 @@ describe("PromptCompilerService", () => {
     beforeEach(() => {
         llmCallCount = 0;
         llmShouldFail = false;
-        eoseCallbacks = [];
-        eventCallbacks = [];
         mockLessons = [];
         createdServices = [];
 
@@ -62,27 +56,6 @@ describe("PromptCompilerService", () => {
                 };
             },
         })) as any;
-
-        mockNdk = {
-            subscribe: (
-                _filters: unknown,
-                options?: {
-                    onEose?: () => void;
-                    onEvent?: (event: unknown) => void;
-                }
-            ) => {
-                if (options?.onEose) {
-                    eoseCallbacks.push(options.onEose);
-                }
-                if (options?.onEvent) {
-                    eventCallbacks.push(options.onEvent);
-                }
-
-                return {
-                    stop: () => {},
-                };
-            },
-        } as unknown as NDK;
     });
 
     afterEach(() => {
@@ -100,71 +73,6 @@ describe("PromptCompilerService", () => {
         test("creates instance with correct properties", () => {
             const service = createService();
             expect(service).toBeDefined();
-        });
-    });
-
-    describe("addComment", () => {
-        test("adds comment to collection", () => {
-            const service = createService();
-
-            const comment: LessonComment = {
-                id: "comment1",
-                pubkey: "user123",
-                content: "This is a refinement",
-                lessonEventId: "lesson1",
-                createdAt: Date.now(),
-            };
-
-            service.addComment(comment);
-
-            const comments = service.getCommentsForLesson("lesson1");
-            expect(comments).toHaveLength(1);
-            expect(comments[0].content).toBe("This is a refinement");
-        });
-
-        test("prevents duplicate comments", () => {
-            const service = createService();
-
-            const comment: LessonComment = {
-                id: "comment1",
-                pubkey: "user123",
-                content: "This is a refinement",
-                lessonEventId: "lesson1",
-                createdAt: Date.now(),
-            };
-
-            service.addComment(comment);
-            service.addComment(comment); // duplicate
-
-            const comments = service.getCommentsForLesson("lesson1");
-            expect(comments).toHaveLength(1);
-        });
-
-        test("groups comments by lesson event ID", () => {
-            const service = createService();
-
-            const comment1: LessonComment = {
-                id: "c1",
-                pubkey: "user123",
-                content: "Comment on lesson 1",
-                lessonEventId: "lesson1",
-                createdAt: Date.now(),
-            };
-
-            const comment2: LessonComment = {
-                id: "c2",
-                pubkey: "user123",
-                content: "Comment on lesson 2",
-                lessonEventId: "lesson2",
-                createdAt: Date.now(),
-            };
-
-            service.addComment(comment1);
-            service.addComment(comment2);
-
-            expect(service.getCommentsForLesson("lesson1")).toHaveLength(1);
-            expect(service.getCommentsForLesson("lesson2")).toHaveLength(1);
-            expect(service.getCommentsForLesson("lesson3")).toHaveLength(0);
         });
     });
 
@@ -191,7 +99,7 @@ describe("PromptCompilerService", () => {
 
         test("persists base instructions to disk when no lessons exist so restart can reload compiled cache", async () => {
             const uniqueAgentPubkey = "no-lessons-cache-agent";
-            const cachePath = `/tmp/test-tenex/agents/prompts/${uniqueAgentPubkey}.json`;
+            const cachePath = `/tmp/test-tenex/agents/prompts/test-project/${uniqueAgentPubkey}.json`;
             await fs.rm(cachePath, { force: true });
 
             const baseAgentInstructions = "You are a helpful assistant.";
@@ -318,155 +226,100 @@ describe("PromptCompilerService", () => {
         });
     });
 
-    describe("EOSE lifecycle", () => {
-        test("waitForEOSE resolves when EOSE is received", async () => {
+    describe("input synchronization", () => {
+        test("groups synchronized comments by lesson ID", async () => {
             const service = createService();
-            service.subscribe();
+            await service.initialize("Base Agent Instructions", []);
 
-            // Simulate EOSE
-            const waitPromise = service.waitForEOSE();
-            for (const cb of eoseCallbacks) cb();
-
-            await expect(waitPromise).resolves.toBeUndefined();
-        });
-
-        test("waitForEOSE returns immediately if already received", async () => {
-            const service = createService();
-            service.subscribe();
-
-            // Trigger EOSE first
-            for (const cb of eoseCallbacks) cb();
-
-            // Should resolve immediately
-            await expect(service.waitForEOSE()).resolves.toBeUndefined();
-        });
-
-        test("waitForEOSE throws if called before subscribe", async () => {
-            const service = createService();
-
-            await expect(service.waitForEOSE()).rejects.toThrow(
-                "PromptCompilerService: waitForEOSE called before subscribe()"
-            );
-        });
-
-        test("EOSE state is reset on stop()", async () => {
-            const service = createService();
-            service.subscribe();
-
-            // Trigger EOSE
-            for (const cb of eoseCallbacks) cb();
-            await service.waitForEOSE();
-
-            // Stop clears EOSE state
-            service.stop();
-
-            // Should throw because subscription is stopped
-            await expect(service.waitForEOSE()).rejects.toThrow(
-                "PromptCompilerService: waitForEOSE called before subscribe()"
-            );
-        });
-
-        test("EOSE state is reset on subscribe() for fresh lifecycle", () => {
-            const service = createService();
-
-            // First subscription cycle
-            service.subscribe();
-            for (const cb of eoseCallbacks) cb();
-
-            // Stop and clear callbacks
-            service.stop();
-            eoseCallbacks = [];
-
-            // Second subscription should have fresh EOSE state
-            service.subscribe();
-
-            // New EOSE callback should be registered
-            expect(eoseCallbacks.length).toBe(1);
-        });
-    });
-
-    describe("comment routing", () => {
-        test("routes comment event to addComment via handleCommentEvent", () => {
-            const service = createService();
-            service.subscribe();
-
-            // Simulate a valid comment event
-            const mockEvent = {
-                id: "event123",
-                pubkey: "user123", // whitelisted
-                content: "This is a comment",
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [
-                    ["e", "lesson456", "", "root"],
-                    ["K", "4129"],
-                    ["p", agentPubkey],
-                ],
-                tagValue: (name: string) => {
-                    const tag = mockEvent.tags.find((t) => t[0] === name);
-                    return tag?.[1];
+            const comments: LessonComment[] = [
+                {
+                    id: "comment-1",
+                    pubkey: "user123",
+                    content: "Comment on lesson 1",
+                    lessonEventId: "lesson-1",
+                    createdAt: Date.now(),
                 },
-            };
+                {
+                    id: "comment-2",
+                    pubkey: "user123",
+                    content: "Comment on lesson 2",
+                    lessonEventId: "lesson-2",
+                    createdAt: Date.now(),
+                },
+            ];
 
-            // Trigger the event callback
-            for (const cb of eventCallbacks) cb(mockEvent);
+            service.syncInputs([], comments);
 
-            // Comment should be added
-            const comments = service.getCommentsForLesson("lesson456");
-            expect(comments).toHaveLength(1);
-            expect(comments[0].content).toBe("This is a comment");
+            expect(service.getCommentsForLesson("lesson-1")).toHaveLength(1);
+            expect(service.getCommentsForLesson("lesson-2")).toHaveLength(1);
+            expect(service.getCommentsForLesson("lesson-3")).toHaveLength(0);
         });
 
-        test("ignores comment from non-whitelisted author", () => {
+        test("syncBaseInstructions invalidates cached compilation when base instructions change", async () => {
+            mockLessons = [
+                {
+                    id: "lesson1",
+                    title: "Test Lesson",
+                    lesson: "Always be helpful",
+                    category: "behavior",
+                    hashtags: ["test"],
+                    created_at: Math.floor(Date.now() / 1000),
+                } as unknown as NDKAgentLesson,
+            ];
+
             const service = createService();
-            service.subscribe();
+            await service.initialize("Original Base Agent Instructions", mockLessons);
+            await service.compile("Original Base Agent Instructions");
+            expect(llmCallCount).toBe(1);
 
-            const mockEvent = {
-                id: "event123",
-                pubkey: "unauthorized_user", // NOT whitelisted
-                content: "This is a comment",
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [
-                    ["e", "lesson456", "", "root"],
-                    ["K", "4129"],
-                    ["p", agentPubkey],
-                ],
-                tagValue: (name: string) => {
-                    const tag = mockEvent.tags.find((t) => t[0] === name);
-                    return tag?.[1];
-                },
-            };
+            service.syncBaseInstructions("Changed Base Agent Instructions");
+            await service.waitForCompilation();
 
-            for (const cb of eventCallbacks) cb(mockEvent);
-
-            // Comment should NOT be added
-            const comments = service.getCommentsForLesson("lesson456");
-            expect(comments).toHaveLength(0);
+            expect(llmCallCount).toBe(2);
+            expect(service.getEffectiveInstructionsSync()).toMatchObject({
+                instructions: "Effective Agent Instructions from LLM",
+                isCompiled: true,
+            });
         });
 
-        test("ignores comment without lesson reference", () => {
+        test("syncInputs invalidates cached compilation when lessons or comments change", async () => {
+            const initialLessons = [
+                {
+                    id: "lesson-1",
+                    title: "Lesson One",
+                    lesson: "Do the first thing",
+                    created_at: 100,
+                } as unknown as NDKAgentLesson,
+            ];
             const service = createService();
-            service.subscribe();
+            await service.initialize("Base Agent Instructions", initialLessons);
+            await service.compile("Base Agent Instructions");
+            expect(llmCallCount).toBe(1);
 
-            const mockEvent = {
-                id: "event123",
-                pubkey: "user123",
-                content: "This is a comment",
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [
-                    // No 'e' tag referencing a lesson
-                    ["K", "4129"],
-                    ["p", agentPubkey],
-                ],
-                tagValue: (name: string) => {
-                    const tag = mockEvent.tags.find((t) => t[0] === name);
-                    return tag?.[1];
+            const updatedLessons = [
+                ...initialLessons,
+                {
+                    id: "lesson-2",
+                    title: "Lesson Two",
+                    lesson: "Do the second thing",
+                    created_at: 200,
+                } as unknown as NDKAgentLesson,
+            ];
+            const updatedComments: LessonComment[] = [
+                {
+                    id: "comment-1",
+                    pubkey: "user123",
+                    content: "Refinement",
+                    lessonEventId: "lesson-2",
+                    createdAt: 300,
                 },
-            };
+            ];
 
-            for (const cb of eventCallbacks) cb(mockEvent);
+            service.syncInputs(updatedLessons, updatedComments);
+            await service.waitForCompilation();
 
-            // No comments should be added
-            expect(service.getCommentsForLesson("lesson456")).toHaveLength(0);
+            expect(llmCallCount).toBe(2);
+            expect(service.getCommentsForLesson("lesson-2")).toHaveLength(1);
         });
     });
 
@@ -486,14 +339,13 @@ describe("PromptCompilerService", () => {
                 created_at: now - 100, // 100 seconds ago
             } as unknown as NDKAgentLesson;
 
-            // Add a comment that is newer than the lesson
-            service.addComment({
+            service.syncInputs([], [{
                 id: "comment1",
                 pubkey: "user123",
                 content: "Refinement",
                 lessonEventId: "lesson1",
                 createdAt: now, // Now (newer than lesson)
-            });
+            }]);
 
             // Comments should be retrievable and have correct timestamp
             const comments = service.getCommentsForLesson("lesson1");
@@ -506,23 +358,22 @@ describe("PromptCompilerService", () => {
             const service = createService();
             const now = Math.floor(Date.now() / 1000);
 
-            // Add older comment
-            service.addComment({
-                id: "comment1",
-                pubkey: "user123",
-                content: "Old refinement",
-                lessonEventId: "lesson1",
-                createdAt: now - 50,
-            });
-
-            // Add newer comment
-            service.addComment({
-                id: "comment2",
-                pubkey: "user123",
-                content: "New refinement",
-                lessonEventId: "lesson1",
-                createdAt: now,
-            });
+            service.syncInputs([], [
+                {
+                    id: "comment1",
+                    pubkey: "user123",
+                    content: "Old refinement",
+                    lessonEventId: "lesson1",
+                    createdAt: now - 50,
+                },
+                {
+                    id: "comment2",
+                    pubkey: "user123",
+                    content: "New refinement",
+                    lessonEventId: "lesson1",
+                    createdAt: now,
+                },
+            ]);
 
             const comments = service.getCommentsForLesson("lesson1");
             expect(comments).toHaveLength(2);
@@ -647,7 +498,7 @@ describe("PromptCompilerService", () => {
     });
 
     describe("stop", () => {
-        test("stops subscription gracefully", () => {
+        test("stops gracefully", () => {
             const service = createService();
 
             // Should not throw
@@ -656,7 +507,6 @@ describe("PromptCompilerService", () => {
 
         test("calling stop multiple times is safe", () => {
             const service = createService();
-            service.subscribe();
 
             // Should not throw when called multiple times
             service.stop();

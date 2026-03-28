@@ -1,9 +1,10 @@
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
+import type { LessonComment } from "@/events/LessonComment";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { NudgeWhitelistService, type WhitelistItem } from "@/services/nudge";
-import type { LessonComment } from "@/services/prompt-compiler";
+import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import type { LocalReportStore } from "@/services/reports/LocalReportStore";
 import type { ReportInfo } from "@/services/reports/ReportService";
 import { articleToReportInfo } from "@/services/reports/articleUtils";
@@ -214,6 +215,12 @@ export class ProjectContext {
     public mcpManager?: MCPManager;
 
     /**
+     * Project-scoped registry for prompt compilers.
+     * Attached by ProjectRuntime after startup wiring is complete.
+     */
+    public promptCompilerRegistry?: PromptCompilerRegistryService;
+
+    /**
      * Local report store for this project's report storage.
      * Each project has its own store to ensure isolation.
      */
@@ -331,6 +338,15 @@ export class ProjectContext {
      * Called by AgentRegistry.addAgent() when running within this context.
      */
     notifyAgentAdded(agent: AgentInstance): void {
+        if (this.promptCompilerRegistry) {
+            void this.promptCompilerRegistry.registerAgent(agent).catch((error) => {
+                logger.error("ProjectContext: failed to register prompt compiler for new agent", {
+                    agentPubkey: agent.pubkey.substring(0, 8),
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
+        }
+
         if (this.onAgentAddedCallback) {
             this.onAgentAddedCallback(agent);
         }
@@ -353,6 +369,7 @@ export class ProjectContext {
         const limitedLessons = updatedLessons.slice(0, 50);
 
         this.agentLessons.set(agentPubkey, limitedLessons);
+        this.syncPromptCompiler(agentPubkey);
     }
 
     /**
@@ -372,6 +389,7 @@ export class ProjectContext {
 
         const newLessons = [...lessons.slice(0, index), ...lessons.slice(index + 1)];
         this.agentLessons.set(agentPubkey, newLessons);
+        this.syncPromptCompiler(agentPubkey);
 
         logger.debug("ProjectContext: removed lesson from cache", {
             agentPubkey: agentPubkey.substring(0, 8),
@@ -424,6 +442,7 @@ export class ProjectContext {
         const limitedComments = updatedComments.slice(0, ProjectContext.MAX_COMMENTS_PER_AGENT);
 
         this.agentComments.set(agentPubkey, limitedComments);
+        this.syncPromptCompiler(agentPubkey);
 
         logger.debug("ProjectContext: added comment for agent", {
             agentPubkey: agentPubkey.substring(0, 8),
@@ -446,6 +465,28 @@ export class ProjectContext {
     getCommentsForLesson(agentPubkey: string, lessonEventId: string): LessonComment[] {
         const comments = this.agentComments.get(agentPubkey) || [];
         return comments.filter((c) => c.lessonEventId === lessonEventId);
+    }
+
+    /**
+     * Synchronize the runtime-owned prompt compiler for the given agent with the
+     * latest lesson/comment snapshot. This is fire-and-forget on purpose: prompt
+     * compilation runs in the background and should not block event ingestion.
+     */
+    syncPromptCompiler(agentPubkey: Hexpubkey): void {
+        if (!this.promptCompilerRegistry) {
+            return;
+        }
+
+        void this.promptCompilerRegistry.syncAgentInputs(
+            agentPubkey,
+            this.getLessonsForAgent(agentPubkey),
+            this.getCommentsForAgent(agentPubkey)
+        ).catch((error) => {
+            logger.error("ProjectContext: failed to synchronize prompt compiler", {
+                agentPubkey: agentPubkey.substring(0, 8),
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
     }
 
     // =====================================================================================

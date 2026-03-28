@@ -73,7 +73,6 @@ describe("MessageCompiler", () => {
             workingDirectory,
             currentBranch: "main",
             availableAgents: [agent],
-            agentLessons: new Map(),
             mcpManager: undefined,
             nudgeContent: "",
             pendingDelegations: [],

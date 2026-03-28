@@ -110,6 +110,32 @@ describe("ProjectContext", () => {
             expect(() => context.notifyAgentAdded(mockAgent)).not.toThrow();
         });
 
+        it("should register a prompt compiler when a new agent is added", async () => {
+            const context = new ProjectContext(mockProject, mockAgentRegistry);
+            const registerAgent = mock(async () => {});
+            context.promptCompilerRegistry = {
+                registerAgent,
+            } as any;
+
+            const mockAgent: AgentInstance = {
+                name: "Test Agent",
+                slug: "test-agent",
+                pubkey: "agent-pubkey-123",
+                role: "assistant",
+                llmConfig: "test-config",
+                tools: [],
+                signer: {} as any,
+                createMetadataStore: () => ({} as any),
+                createLLMService: () => ({} as any),
+                sign: async () => {},
+            };
+
+            context.notifyAgentAdded(mockAgent);
+            await Promise.resolve();
+
+            expect(registerAgent).toHaveBeenCalledWith(mockAgent);
+        });
+
         it("should allow replacing the callback", () => {
             const context = new ProjectContext(mockProject, mockAgentRegistry);
             let callback1Count = 0;
@@ -203,6 +229,50 @@ describe("ProjectContext", () => {
             expect(receivedAgents[0]).toBe(agents[0]);
             expect(receivedAgents[1]).toBe(agents[1]);
             expect(receivedAgents[2]).toBe(agents[2]);
+        });
+    });
+
+    describe("prompt compiler synchronization", () => {
+        it("should synchronize the prompt compiler when a lesson is added", () => {
+            const context = new ProjectContext(mockProject, mockAgentRegistry);
+            const syncAgentInputs = mock(async () => {});
+            context.promptCompilerRegistry = {
+                syncAgentInputs,
+            } as any;
+
+            context.addLesson("agent-pubkey-123", {
+                id: "lesson-1",
+                lesson: "Test lesson",
+                created_at: 123,
+            } as any);
+
+            expect(syncAgentInputs).toHaveBeenCalledWith(
+                "agent-pubkey-123",
+                expect.any(Array),
+                []
+            );
+        });
+
+        it("should synchronize the prompt compiler when a comment is added", () => {
+            const context = new ProjectContext(mockProject, mockAgentRegistry);
+            const syncAgentInputs = mock(async () => {});
+            context.promptCompilerRegistry = {
+                syncAgentInputs,
+            } as any;
+
+            context.addComment("agent-pubkey-123", {
+                id: "comment-1",
+                pubkey: "user-pubkey",
+                content: "Test comment",
+                lessonEventId: "lesson-1",
+                createdAt: 123,
+            });
+
+            expect(syncAgentInputs).toHaveBeenCalledWith(
+                "agent-pubkey-123",
+                [],
+                expect.any(Array)
+            );
         });
     });
 

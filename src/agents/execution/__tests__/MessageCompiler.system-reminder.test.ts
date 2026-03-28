@@ -80,7 +80,6 @@ describe("MessageCompiler and TENEX system reminders", () => {
             workingDirectory,
             currentBranch: "main",
             availableAgents: [agent],
-            agentLessons: new Map(),
             mcpManager: undefined,
             nudgeContent: "",
             pendingDelegations: [],

@@ -96,7 +96,6 @@ describe("TENEX system reminder middleware integration", () => {
             workingDirectory,
             currentBranch: "main",
             availableAgents: [agent],
-            agentLessons: new Map(),
             mcpManager: undefined,
             nudgeContent: "",
             pendingDelegations: [],

@@ -325,8 +325,6 @@ export function createPrepareStep(
                 currentBranch: context.currentBranch,
                 availableAgents: Array.from(projectContext.agents.values()),
                 mcpManager: projectContext.mcpManager,
-                agentLessons: projectContext.agentLessons,
-                agentComments: projectContext.agentComments,
                 nudgeContent,
                 nudges,
                 nudgeToolPermissions,
