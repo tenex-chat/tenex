@@ -630,22 +630,6 @@ export class Daemon {
                 return;
             }
 
-            // When auto-boot patterns are set, only allow cold-boot for matching projects
-            if (this.autoBootPatterns.length > 0) {
-                const matches = this.autoBootPatterns.some((pattern) =>
-                    projectId.toLowerCase().includes(pattern.toLowerCase())
-                );
-                if (!matches) {
-                    addRoutingEvent(span, "dropped", { reason: "project_not_matching_boot_patterns" });
-                    await logDropped(
-                        this.routingLogger,
-                        event,
-                        `Project ${projectId} not matching auto-boot patterns, skipping cold-boot`
-                    );
-                    return;
-                }
-            }
-
             // Start the project runtime
             try {
                 addRoutingEvent(span, "project_runtime_start", {
