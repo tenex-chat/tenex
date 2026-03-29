@@ -106,9 +106,12 @@ export function createAgentInstance(
                 {
                     tools: options?.tools ?? {},
                     agentName: storedAgent.name,
+                    agentSlug: storedAgent.slug,
+                    agentId: pubkey,
                     workingDirectory: options?.workingDirectory ?? registry.getBasePath(),
                     mcpConfig: mergedMcpConfig,
                     conversationId: options?.conversationId,
+                    projectId: projectDTag,
                     onStreamStart: options?.onStreamStart,
                 }
             );

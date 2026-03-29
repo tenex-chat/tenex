@@ -12,7 +12,7 @@ import {
     extractOpenRouterGenerationId,
     extractUsageMetadata,
 } from "./providers/usage-metadata";
-import type { LLMServiceEventMap } from "./types";
+import type { LLMServiceEventMap, LanguageModelUsageWithCostUsd } from "./types";
 
 export interface FinishHandlerConfig {
     provider: string;
@@ -31,6 +31,10 @@ export interface FinishHandlerOptions {
     onFinalStepInputTokens?: (
         actualInputTokens: number | null | undefined
     ) => Promise<void> | void;
+    onRequestComplete?: (params: {
+        usage: LanguageModelUsageWithCostUsd;
+        finishReason?: string;
+    }) => Promise<void> | void;
 }
 
 /**
@@ -120,6 +124,10 @@ export function createFinishHandler(
             );
 
             await options?.onFinalStepInputTokens?.(usage.inputTokens);
+            await options?.onRequestComplete?.({
+                usage,
+                finishReason: e.finishReason,
+            });
             const metadata = extractLLMMetadata(config.provider, latestProviderMetadata);
 
             // DIAGNOSTIC: Log right before emitting complete event

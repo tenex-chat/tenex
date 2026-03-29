@@ -39,6 +39,8 @@ function extractStandardUsage(
         inputTokens,
         outputTokens,
         totalTokens,
+        inputTokenDetails: totalUsage?.inputTokenDetails,
+        outputTokenDetails: totalUsage?.outputTokenDetails,
         cachedInputTokens: extendedUsage?.cachedInputTokens,
         reasoningTokens: extendedUsage?.reasoningTokens,
     } as LanguageModelUsageWithCostUsd;

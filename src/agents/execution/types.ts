@@ -5,6 +5,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { CompleteEvent } from "@/llm/types";
+import type { LLMRequestAnalysisSeed } from "@/llm/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { ToolRegistryContext } from "@/tools/types";
 import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
@@ -105,6 +106,7 @@ export interface LLMModelRequest {
     providerOptions?: ProviderOptions;
     experimentalContext?: unknown;
     toolChoice?: ToolChoice<Record<string, CoreTool>>;
+    analysisRequestSeed?: LLMRequestAnalysisSeed;
     reportContextManagementUsage?: (
         actualInputTokens: number | null | undefined
     ) => Promise<void>;

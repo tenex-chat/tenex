@@ -690,7 +690,10 @@ describe("LLMService telemetry configuration", () => {
             1000,
             undefined,
             undefined,
-            "test-agent"
+            "test-agent",
+            "conversation-123",
+            "project-456",
+            "agent-789"
         );
 
         const getTelemetryConfig = (service as any).getTelemetryConfig.bind(service);
@@ -699,6 +702,9 @@ describe("LLMService telemetry configuration", () => {
         expect(config.isEnabled).toBe(true);
         expect(config.functionId).toBe("test-agent.openrouter.gpt-4");
         expect(config.metadata["agent.slug"]).toBe("test-agent");
+        expect(config.metadata["agent.id"]).toBe("agent-789");
+        expect(config.metadata["conversation.id"]).toBe("conversation-123");
+        expect(config.metadata["project.id"]).toBe("project-456");
         expect(config.metadata["llm.provider"]).toBe("openrouter");
         expect(config.metadata["llm.model"]).toBe("gpt-4");
         expect(config.recordInputs).toBe(true);
@@ -748,7 +754,17 @@ describe("LLMService stream()", () => {
     });
 
     test("calls streamText with correct parameters", async () => {
-        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities, 0.7, 2000);
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            0.7,
+            2000,
+            undefined,
+            undefined,
+            "test-agent"
+        );
 
         const messages: ModelMessage[] = [
             { role: "user", content: [{ type: "text", text: "Hello" }] },
@@ -774,7 +790,9 @@ describe("LLMService stream()", () => {
             mockAgentCapabilities,
             undefined,
             undefined,
-            agentProvider
+            agentProvider,
+            undefined,
+            "test-agent"
         );
 
         const messages: ModelMessage[] = [
@@ -789,7 +807,17 @@ describe("LLMService stream()", () => {
     });
 
     test("emits complete event via onFinish callback", async () => {
-        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent"
+        );
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -817,7 +845,17 @@ describe("LLMService stream()", () => {
     });
 
     test("extracts OpenRouter usage metadata including token counts", async () => {
-        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent"
+        );
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -862,7 +900,17 @@ describe("LLMService stream()", () => {
     });
 
     test("falls back to AI SDK totalUsage when OpenRouter token counts unavailable", async () => {
-        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent"
+        );
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -909,7 +957,9 @@ describe("LLMService stream()", () => {
             mockAgentCapabilities,
             undefined,
             undefined,
-            agentProvider
+            agentProvider,
+            undefined,
+            "test-agent"
         );
 
         const completeSpy = mock(() => {});
@@ -966,7 +1016,17 @@ describe("LLMService stream()", () => {
     });
 
     test("respects custom onStopCheck callback", async () => {
-        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent"
+        );
 
         let capturedStopWhen: ((args: { steps: any[] }) => Promise<boolean>) | undefined;
 
@@ -1000,7 +1060,17 @@ describe("LLMService stream()", () => {
     });
 
     test("passes abort signal to streamText", async () => {
-        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent"
+        );
         const abortController = new AbortController();
 
         const messages: ModelMessage[] = [
@@ -1013,8 +1083,18 @@ describe("LLMService stream()", () => {
         expect(callArgs.abortSignal).toBe(abortController.signal);
     });
 
-    test("passes prepareStep to streamText", async () => {
-        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
+    test("passes a wrapped prepareStep to streamText", async () => {
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent"
+        );
         const prepareStep = mock(() => ({ messages: [] }));
 
         const messages: ModelMessage[] = [
@@ -1024,7 +1104,111 @@ describe("LLMService stream()", () => {
         await service.stream(messages, {}, { prepareStep });
 
         const callArgs = mockStreamText.mock.calls[0][0];
-        expect(callArgs.prepareStep).toBe(prepareStep);
+        expect(typeof callArgs.prepareStep).toBe("function");
+
+        const prepared = await callArgs.prepareStep({
+            messages,
+            stepNumber: 0,
+            steps: [],
+        });
+
+        expect(prepareStep).toHaveBeenCalled();
+        expect(prepared).toEqual({ messages: [] });
+    });
+
+    test("opens and finalizes analysis requests for each stream step", async () => {
+        const reportSuccesses = [mock(async () => {}), mock(async () => {})];
+        const reportErrors = [mock(async () => {}), mock(async () => {})];
+        const openRequest = mock(async ({ requestSeed }: { requestSeed?: { requestId: string } }) => {
+            const index = openRequest.mock.calls.length - 1;
+            return {
+                requestId: requestSeed?.requestId ?? `request-${index + 1}`,
+                telemetryMetadata: requestSeed
+                    ? { "analysis.request_id": requestSeed.requestId }
+                    : {},
+                reportSuccess: reportSuccesses[index],
+                reportError: reportErrors[index],
+            };
+        });
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent",
+            "conv-1",
+            "proj-1",
+            "agent-1",
+            { openRequest }
+        );
+        const prepareStep = mock(({ stepNumber }: { stepNumber: number }) => ({
+            messages: [
+                {
+                    role: "user" as const,
+                    content: [{ type: "text" as const, text: `step-${stepNumber}` }],
+                },
+            ],
+            analysisRequestSeed: {
+                requestId: `seed-${stepNumber}`,
+                telemetryMetadata: {
+                    "analysis.request_id": `seed-${stepNumber}`,
+                },
+            },
+        }));
+
+        mockStreamText.mockImplementation((options: any) => ({
+            fullStream: (async function* () {
+                await options.prepareStep({
+                    messages: options.messages,
+                    stepNumber: 0,
+                    steps: [],
+                });
+                await options.onStepFinish({
+                    stepNumber: 0,
+                    finishReason: "tool-calls",
+                    usage: { inputTokens: 11, outputTokens: 5, totalTokens: 16 },
+                    providerMetadata: undefined,
+                    model: { provider: "openrouter", modelId: "gpt-4" },
+                });
+                await options.prepareStep({
+                    messages: options.messages,
+                    stepNumber: 1,
+                    steps: [
+                        {
+                            toolCalls: [],
+                            text: "",
+                            usage: { inputTokens: 11, outputTokens: 5 },
+                        },
+                    ],
+                });
+                await options.onStepFinish({
+                    stepNumber: 1,
+                    finishReason: "stop",
+                    usage: { inputTokens: 29, outputTokens: 7, totalTokens: 36 },
+                    providerMetadata: undefined,
+                    model: { provider: "openrouter", modelId: "gpt-4" },
+                });
+                yield { type: "finish", finishReason: "stop" };
+            })(),
+        }));
+
+        await service.stream(
+            [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+            {},
+            { prepareStep }
+        );
+
+        expect(openRequest).toHaveBeenCalledTimes(2);
+        expect(openRequest.mock.calls[0][0].requestSeed?.requestId).toBe("seed-0");
+        expect(openRequest.mock.calls[1][0].requestSeed?.requestId).toBe("seed-1");
+        expect(reportSuccesses[0]).toHaveBeenCalled();
+        expect(reportSuccesses[1]).toHaveBeenCalled();
+        expect(reportErrors[0]).not.toHaveBeenCalled();
+        expect(reportErrors[1]).not.toHaveBeenCalled();
     });
 });
 
@@ -1394,6 +1578,12 @@ describe("LLMService handleStreamError", () => {
 
 describe("LLMService message preparation", () => {
     test("preserves messages when preparing request input", async () => {
+        mockStreamText.mockClear();
+        mockStreamText.mockImplementation(() => ({
+            fullStream: (async function* () {
+                yield { type: "finish", finishReason: "stop" };
+            })(),
+        }));
         const service = new LLMService(
             createMockAccessor(createMockRegistry()),
             "anthropic",
@@ -1443,6 +1633,9 @@ describe("LLMService key rotation retry", () => {
             mockCapabilities,
             undefined,
             undefined,
+            undefined,
+            undefined,
+            "test-agent",
             undefined,
             undefined,
             undefined,
@@ -1695,7 +1888,14 @@ describe("LLMService key rotation retry", () => {
             // Service without rotation handler
             const service = new LLMService(
                 createMockAccessor(mockRegistry, "test-key"),
-                "openrouter", "gpt-4", mockCapabilities
+                "openrouter",
+                "gpt-4",
+                mockCapabilities,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "test-agent"
             );
 
             await expect(

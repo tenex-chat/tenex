@@ -319,6 +319,12 @@ export async function setupStreamExecution(
             modelId: llmService.model,
         },
         contextManagement,
+        analysisContext: {
+            projectId: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
+            conversationId: context.conversationId,
+            agentSlug: context.agent.slug,
+            agentId: context.agent.pubkey,
+        },
     });
 
     return {

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, PROVIDERS_FILE, TENEX_DIR, getTenexBasePath } from "@/constants";
-import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
+import { ensureDirectory, fileExists, readJsonFile, resolvePath, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { resolveMetaModel, resolveToVariant, generateSystemPromptFragment, type MetaModelResolution } from "@/llm/meta";
 import { ensureCacheLoaded as ensureModelsDevCacheLoaded } from "@/llm/utils/models-dev-cache";
@@ -42,6 +42,16 @@ export interface MetaModelResolutionResult {
     isMetaModel: boolean;
     /** The variant name that was selected (if meta model) */
     variantName?: string;
+}
+
+export interface ResolvedAnalysisTelemetryConfig {
+    enabled: boolean;
+    dbPath: string;
+    retentionDays: number;
+    largeMessageThresholdTokens: number;
+    storeMessagePreviews: boolean;
+    maxPreviewChars: number;
+    storeFullMessageText: boolean;
 }
 
 /**
@@ -132,6 +142,32 @@ export class ConfigService {
 
     getContextManagementConfig(): TenexConfig["contextManagement"] | undefined {
         return this.loadedConfig?.config.contextManagement;
+    }
+
+    getAnalysisTelemetryConfig(): ResolvedAnalysisTelemetryConfig {
+        const analysis = this.loadedConfig?.config.telemetry?.analysis;
+
+        return {
+            enabled: analysis?.enabled ?? false,
+            dbPath: resolvePath(
+                analysis?.dbPath ?? path.join(this.getConfigPath("data"), "trace-analysis.db")
+            ),
+            retentionDays:
+                typeof analysis?.retentionDays === "number" && Number.isFinite(analysis.retentionDays)
+                    ? Math.max(1, Math.floor(analysis.retentionDays))
+                    : 14,
+            largeMessageThresholdTokens:
+                typeof analysis?.largeMessageThresholdTokens === "number"
+                    && Number.isFinite(analysis.largeMessageThresholdTokens)
+                    ? Math.max(1, Math.floor(analysis.largeMessageThresholdTokens))
+                    : 2000,
+            storeMessagePreviews: analysis?.storeMessagePreviews ?? true,
+            maxPreviewChars:
+                typeof analysis?.maxPreviewChars === "number" && Number.isFinite(analysis.maxPreviewChars)
+                    ? Math.max(1, Math.floor(analysis.maxPreviewChars))
+                    : 256,
+            storeFullMessageText: analysis?.storeFullMessageText ?? false,
+        };
     }
 
     getMCP(): TenexMCP {
@@ -499,12 +535,16 @@ export class ConfigService {
         context?: {
             tools?: Record<string, unknown>;
             agentName?: string;
+            agentSlug?: string;
+            agentId?: string;
             /** Working directory path for agent execution */
             workingDirectory?: string;
             /** Agent-specific MCP configuration to merge with project/global config */
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
+            /** Current project ID for telemetry correlation */
+            projectId?: string;
             /** Callback invoked when an agent stream exposes a message injector */
             onStreamStart?: OnStreamStartCallback;
         }
@@ -533,9 +573,24 @@ export class ConfigService {
             };
         }
 
+        // Lazily load analysis hooks to avoid a ConfigService <-> AnalysisTelemetryService
+        // module cycle during startup.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { analysisTelemetryService } = require("@/services/analysis/AnalysisTelemetryService");
+        const resolvedAgentSlug = context?.agentSlug
+            ?? (context?.agentName
+                ? context.agentName.toLowerCase().replace(/\s+/g, "-")
+                : undefined);
+
         return llmServiceFactory.createService(llmConfig, {
             ...context,
             mcpConfig: finalMcpConfig,
+            analysisHooks: analysisTelemetryService.createLLMAnalysisHooks({
+                projectId: context?.projectId,
+                conversationId: context?.conversationId,
+                agentSlug: resolvedAgentSlug,
+                agentId: context?.agentId,
+            }),
         } as Parameters<typeof llmServiceFactory.createService>[1]);
     }
 

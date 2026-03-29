@@ -103,6 +103,7 @@ type PreparedStepResult = {
     providerOptions?: ProviderOptions;
     experimental_context?: unknown;
     toolChoice?: ToolChoice<Record<string, CoreTool>>;
+    analysisRequestSeed?: LLMModelRequest["analysisRequestSeed"];
 };
 
 type PreparedStepCacheEntry = {
@@ -211,6 +212,7 @@ export function createPrepareStep(
                     providerOptions: cachedPreparedStep.request.providerOptions,
                     experimental_context: cachedPreparedStep.request.experimentalContext,
                     toolChoice: cachedPreparedStep.request.toolChoice ?? ("auto" as const),
+                    analysisRequestSeed: cachedPreparedStep.request.analysisRequestSeed,
                 };
             }
 
@@ -422,6 +424,15 @@ export function createPrepareStep(
                 providerId: preparedModelRef.provider,
                 model: preparedModelRef,
                 contextManagement,
+                analysisContext: {
+                    projectId:
+                        projectContext.project.dTag
+                        || projectContext.project.tagValue("d")
+                        || undefined,
+                    conversationId: context.conversationId,
+                    agentSlug: context.agent.slug,
+                    agentId: context.agent.pubkey,
+                },
             });
 
             execContext.accumulatedMessages = preparedRequest.messages;
@@ -439,6 +450,7 @@ export function createPrepareStep(
                 providerOptions: preparedRequest.providerOptions,
                 experimental_context: preparedRequest.experimentalContext,
                 toolChoice: preparedRequest.toolChoice ?? ("auto" as const),
+                analysisRequestSeed: preparedRequest.analysisRequestSeed,
             };
         } catch (error) {
             logger.writeToWarnLog({

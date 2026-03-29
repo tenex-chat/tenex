@@ -1,9 +1,23 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { context as otelContext, trace, type Span } from "@opentelemetry/api";
 import type {
     ContextManagementStrategyPayload,
     ContextManagementTelemetryEvent,
 } from "ai-sdk-context-management";
+import { analysisTelemetryService } from "@/services/analysis/AnalysisTelemetryService";
 import { MANAGED_CONTEXT_BUDGET_SCOPE } from "./budget-profile";
+
+interface ContextManagementAnalysisScope {
+    requestId: string;
+    projectId?: string;
+    conversationId?: string;
+    agentSlug?: string;
+    agentId?: string;
+    provider: string;
+    model: string;
+}
+
+const analysisScopeStorage = new AsyncLocalStorage<ContextManagementAnalysisScope>();
 
 function addAttribute(
     attributes: Record<string, string | number | boolean>,
@@ -479,6 +493,7 @@ export function createTelemetryCallback(): (event: ContextManagementTelemetryEve
     return (event: ContextManagementTelemetryEvent): void => {
         const attributes = buildTelemetryAttributes(event);
         const eventName = buildTelemetryEventName(event);
+        const analysisScope = analysisScopeStorage.getStore();
 
         if (event.type === "runtime-start") {
             runtimeSpan = tracer.startSpan(
@@ -495,6 +510,10 @@ export function createTelemetryCallback(): (event: ContextManagementTelemetryEve
             span.addEvent(eventName, attributes);
         }
 
+        if (analysisScope) {
+            analysisTelemetryService.recordContextManagementEvent(event, analysisScope);
+        }
+
         if (event.type === "runtime-complete" && runtimeSpan) {
             runtimeSpan.setAttribute(
                 "context_management.estimated_tokens_before",
@@ -508,4 +527,15 @@ export function createTelemetryCallback(): (event: ContextManagementTelemetryEve
             runtimeSpan = undefined;
         }
     };
+}
+
+export function withContextManagementAnalysisScope<T>(
+    scope: ContextManagementAnalysisScope | undefined,
+    fn: () => Promise<T>
+): Promise<T> {
+    if (!scope) {
+        return fn();
+    }
+
+    return analysisScopeStorage.run(scope, fn);
 }

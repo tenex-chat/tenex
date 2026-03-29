@@ -26,7 +26,14 @@ import { extractLastUserMessage, extractSystemContent } from "./MessageProcessor
 import { getDefaultProviderOptions, mergeProviderOptions } from "./provider-options";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
-import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
+import { extractUsageMetadata } from "./providers/usage-metadata";
+import type {
+    LLMAnalysisHooks,
+    LLMAnalysisRequestHandle,
+    LLMRequestAnalysisSeed,
+    LanguageModelUsageWithCostUsd,
+    LLMServiceEventMap,
+} from "./types";
 import { isRetryableKeyError } from "./retryable-key-errors";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { extractLastStepUsage } from "./utils/usage";
@@ -46,6 +53,15 @@ export type StandardProviderAccessor = () => {
  */
 export type KeyRotationHandler = (providerId: string, failedKey: string) => Promise<boolean>;
 
+type StreamPrepareStepResult = {
+    model?: LanguageModel;
+    messages?: ModelMessage[];
+    providerOptions?: ProviderOptions;
+    experimental_context?: unknown;
+    toolChoice?: ToolChoice<Record<string, CoreTool>>;
+    analysisRequestSeed?: LLMRequestAnalysisSeed;
+};
+
 /**
  * LLM Service for runtime execution with AI SDK providers
  * Pure runtime concerns - no configuration management
@@ -63,7 +79,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     ) => LanguageModel;
     private readonly agentBaseSettings?: Record<string, unknown>;
     private readonly agentSlug?: string;
+    private readonly agentId?: string;
     private readonly conversationId?: string;
+    private readonly projectId?: string;
+    private readonly analysisHooks?: LLMAnalysisHooks;
     private cachedContentForComplete = "";
     /** Usage from most recent completed LLM step, set via updateUsageFromSteps */
     private currentStepUsage?: LanguageModelUsageWithCostUsd;
@@ -87,6 +106,9 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         agentBaseSettings?: Record<string, unknown>,
         agentSlug?: string,
         conversationId?: string,
+        projectId?: string,
+        agentId?: string,
+        analysisHooks?: LLMAnalysisHooks,
         keyRotationHandler?: KeyRotationHandler
     ) {
         super();
@@ -100,6 +122,9 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         this.agentBaseSettings = agentBaseSettings;
         this.agentSlug = agentSlug;
         this.conversationId = conversationId;
+        this.projectId = projectId;
+        this.agentId = agentId;
+        this.analysisHooks = analysisHooks;
         this.keyRotationHandler = keyRotationHandler;
 
         if (!standardProviderAccessor && !agentProviderFunction) {
@@ -158,6 +183,30 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         return getContextWindow(this.provider, this.model);
     }
 
+    private resolveTelemetryModelIdentity(languageModel?: LanguageModel): {
+        provider: string;
+        model: string;
+    } {
+        if (
+            languageModel &&
+            typeof languageModel !== "string" &&
+            "provider" in languageModel &&
+            typeof languageModel.provider === "string" &&
+            "modelId" in languageModel &&
+            typeof languageModel.modelId === "string"
+        ) {
+            return {
+                provider: languageModel.provider,
+                model: languageModel.modelId,
+            };
+        }
+
+        return {
+            provider: this.provider,
+            model: this.model,
+        };
+    }
+
     /**
      * Create a wrapped AI SDK language model instance using this service's provider configuration.
      * Useful for callers that need to pass a model instance into other AI SDK helpers.
@@ -169,18 +218,27 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     /**
      * Get full telemetry configuration for the current service instance.
      */
-    private getTelemetryConfig(): ReturnType<typeof getFullTelemetryConfig> {
+    private getTelemetryConfig(
+        additionalMetadata?: Record<string, string | number | boolean>
+    ): ReturnType<typeof getFullTelemetryConfig> {
         return getFullTelemetryConfig({
             agentSlug: this.agentSlug,
+            agentId: this.agentId,
+            conversationId: this.conversationId,
+            projectId: this.projectId,
             provider: this.provider,
             model: this.model,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
             contextWindow: this.getModelContextWindow(),
+            additionalMetadata,
         });
     }
 
-    private getRequestProviderOptions(extra?: ProviderOptions): ProviderOptions | undefined {
+    private getRequestProviderOptions(
+        extra?: ProviderOptions,
+        additionalMetadata?: Record<string, string | number | boolean>
+    ): ProviderOptions | undefined {
         const defaults = mergeProviderOptions(
             getDefaultProviderOptions(this.provider),
             this.provider === "openrouter"
@@ -188,7 +246,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                       openrouter: {
                           usage: { include: true },
                           user: getTraceCorrelationId(),
-                          metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                          metadata: getOpenRouterMetadata(
+                              this.agentSlug,
+                              this.conversationId,
+                              this.projectId,
+                              additionalMetadata
+                          ),
                       },
                   }
                 : undefined
@@ -290,26 +353,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             providerOptions?: ProviderOptions;
             experimentalContext?: unknown;
             toolChoice?: ToolChoice<Record<string, CoreTool>>;
+            analysisRequestSeed?: LLMRequestAnalysisSeed;
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
-            }) =>
-                | PromiseLike<{
-                      model?: LanguageModel;
-                      messages?: ModelMessage[];
-                      providerOptions?: ProviderOptions;
-                      experimental_context?: unknown;
-                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
-                  } | undefined>
-                | {
-                      model?: LanguageModel;
-                      messages?: ModelMessage[];
-                      providerOptions?: ProviderOptions;
-                      experimental_context?: unknown;
-                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
-                  }
-                | undefined;
+            }) => PromiseLike<StreamPrepareStepResult | undefined> | StreamPrepareStepResult | undefined;
             /** Custom stopWhen callback that wraps the default progress monitor check */
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
             onFinalStepInputTokens?: (
@@ -317,14 +366,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             ) => Promise<void> | void;
         }
     ): Promise<void> {
+        const startTime = Date.now();
         const attempt = this.createStandardAttemptContext(messages);
         const attemptKey = attempt.failedKey;
         const model = attempt.model;
 
         // Extract last user message for logging
         this.lastUserMessage = extractLastUserMessage(messages);
-
-        const startTime = Date.now();
 
         // First attempt: suppress stream-error to allow retry
         const firstResult = await this.runStreamAttempt(
@@ -408,26 +456,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             providerOptions?: ProviderOptions;
             experimentalContext?: unknown;
             toolChoice?: ToolChoice<Record<string, CoreTool>>;
+            analysisRequestSeed?: LLMRequestAnalysisSeed;
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
-            }) =>
-                | PromiseLike<{
-                      model?: LanguageModel;
-                      messages?: ModelMessage[];
-                      providerOptions?: ProviderOptions;
-                      experimental_context?: unknown;
-                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
-                  } | undefined>
-                | {
-                      model?: LanguageModel;
-                      messages?: ModelMessage[];
-                      providerOptions?: ProviderOptions;
-                      experimental_context?: unknown;
-                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
-                  }
-                | undefined;
+            }) => PromiseLike<StreamPrepareStepResult | undefined> | StreamPrepareStepResult | undefined;
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
             onFinalStepInputTokens?: (
                 actualInputTokens: number | null | undefined
@@ -515,6 +549,93 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         // Capture errors from onError — the AI SDK swallows them and doesn't re-throw
         // in fullStream, so we need to capture them here to propagate correctly.
         let onErrorCapture: unknown = undefined;
+        const stepAnalysisHandles = new Map<number, LLMAnalysisRequestHandle>();
+        const finalizedAnalysisSteps = new Set<number>();
+        const finalizeOpenStepErrors = async (error: unknown): Promise<void> => {
+            const completedAt = Date.now();
+            for (const [stepNumber, handle] of stepAnalysisHandles.entries()) {
+                if (finalizedAnalysisSteps.has(stepNumber)) {
+                    continue;
+                }
+                finalizedAnalysisSteps.add(stepNumber);
+                await handle.reportError({ completedAt, error });
+            }
+        };
+        const openStepAnalysis = async (params: {
+            stepNumber: number;
+            startedAt: number;
+            messages: ModelMessage[];
+            providerOptions?: ProviderOptions;
+            toolChoice?: ToolChoice<Record<string, CoreTool>>;
+            requestSeed?: LLMRequestAnalysisSeed;
+            model?: LanguageModel;
+        }): Promise<void> => {
+            if (!this.analysisHooks || stepAnalysisHandles.has(params.stepNumber)) {
+                return;
+            }
+
+            const modelIdentity = this.resolveTelemetryModelIdentity(params.model);
+            const handle = await this.analysisHooks.openRequest({
+                operationKind: "stream",
+                startedAt: params.startedAt,
+                provider: modelIdentity.provider,
+                model: modelIdentity.model,
+                messages: params.messages,
+                providerOptions: params.providerOptions,
+                toolChoice: params.toolChoice,
+                requestSeed: params.requestSeed,
+            });
+
+            if (handle) {
+                stepAnalysisHandles.set(params.stepNumber, handle);
+            }
+        };
+        const wrappedPrepareStep = options?.prepareStep
+            ? async (step: {
+                messages: ModelMessage[];
+                stepNumber: number;
+                steps: StepResult<Record<string, AISdkTool>>[];
+            }) => {
+                const prepared = await options.prepareStep?.(step);
+                const preparedProviderOptions = prepared?.analysisRequestSeed?.telemetryMetadata
+                    ? this.getRequestProviderOptions(
+                        prepared.providerOptions,
+                        prepared.analysisRequestSeed.telemetryMetadata
+                    )
+                    : prepared?.providerOptions;
+                await openStepAnalysis({
+                    stepNumber: step.stepNumber,
+                    startedAt: Date.now(),
+                    messages: prepared?.messages ?? step.messages,
+                    providerOptions: preparedProviderOptions ?? options?.providerOptions,
+                    toolChoice: prepared?.toolChoice ?? options?.toolChoice,
+                    requestSeed: prepared?.analysisRequestSeed,
+                    model: prepared?.model ?? model,
+                });
+
+                if (!prepared) {
+                    return undefined;
+                }
+
+                const { analysisRequestSeed: _ignoredAnalysisSeed, ...sdkPrepared } = prepared;
+                return {
+                    ...sdkPrepared,
+                    providerOptions: preparedProviderOptions,
+                };
+            }
+            : undefined;
+
+        if (!wrappedPrepareStep) {
+            await openStepAnalysis({
+                stepNumber: 0,
+                startedAt: Date.now(),
+                messages: preparedMessages,
+                providerOptions: options?.providerOptions,
+                toolChoice: options?.toolChoice,
+                requestSeed: options?.analysisRequestSeed,
+                model,
+            });
+        }
 
         const { fullStream } = streamText({
             model,
@@ -525,15 +646,42 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
-            prepareStep: options?.prepareStep,
+            prepareStep: wrappedPrepareStep,
             abortSignal: options?.abortSignal,
             experimental_context: options?.experimentalContext,
 
-            experimental_telemetry: this.getTelemetryConfig(),
+            experimental_telemetry: this.getTelemetryConfig(
+                options?.analysisRequestSeed?.telemetryMetadata
+            ),
 
-            providerOptions: this.getRequestProviderOptions(options?.providerOptions),
+            providerOptions: this.getRequestProviderOptions(
+                options?.providerOptions,
+                options?.analysisRequestSeed?.telemetryMetadata
+            ),
 
             onChunk: (event) => this.chunkHandler.handleChunk(event),
+            onStepFinish: async (stepResult) => {
+                const handle = stepAnalysisHandles.get(stepResult.stepNumber);
+                if (!handle || finalizedAnalysisSteps.has(stepResult.stepNumber)) {
+                    return;
+                }
+
+                finalizedAnalysisSteps.add(stepResult.stepNumber);
+                const stepModelIdentity = this.resolveTelemetryModelIdentity(
+                    stepResult.model as LanguageModel | undefined
+                );
+                const usage = extractUsageMetadata(
+                    stepModelIdentity.provider,
+                    stepModelIdentity.model,
+                    stepResult.usage,
+                    stepResult.providerMetadata as Record<string, unknown> | undefined
+                );
+                await handle.reportSuccess({
+                    completedAt: Date.now(),
+                    usage,
+                    finishReason: stepResult.finishReason,
+                });
+            },
             onFinish: createFinishHandler(this, finishConfig, finishState, {
                 onFinalStepInputTokens: options?.onFinalStepInputTokens,
             }),
@@ -709,11 +857,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 } else {
                     activeSpan?.addEvent("llm.stream_loop_retry_candidate", errorEventAttributes);
                 }
+                await finalizeOpenStepErrors(onErrorCapture);
                 return { success: false, error: onErrorCapture, chunkCount, lastChunkType };
             }
 
             return { success: true };
         } catch (error) {
+            await finalizeOpenStepErrors(error);
             const errorEventAttributes = {
                 "error.message": error instanceof Error ? error.message : String(error),
                 "error.type": error instanceof Error ? error.constructor.name : typeof error,
@@ -797,8 +947,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         messages: ModelMessage[],
         schema: z.ZodSchema<T>,
         tools: Record<string, AISdkTool> | undefined,
-        providerOptions?: ProviderOptions
-    ): Promise<{ object: T; usage: LanguageModelUsage }> {
+        providerOptions?: ProviderOptions,
+        telemetryMetadata?: Record<string, string | number | boolean>
+    ): Promise<{
+        object: T;
+        usage: LanguageModelUsage;
+        providerMetadata?: Record<string, unknown>;
+    }> {
         return await generateObject({
             model: languageModel,
             messages,
@@ -808,9 +963,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             ...(tools && Object.keys(tools).length > 0 ? { tools } : {}),
 
             // ✨ Enable full AI SDK telemetry
-            experimental_telemetry: this.getTelemetryConfig(),
+            experimental_telemetry: this.getTelemetryConfig(telemetryMetadata),
 
-            providerOptions: this.getRequestProviderOptions(providerOptions),
+            providerOptions: this.getRequestProviderOptions(
+                providerOptions,
+                telemetryMetadata
+            ),
         });
     }
 
@@ -821,9 +979,21 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         messages: ModelMessage[],
         schema: z.ZodSchema<T>,
         tools?: Record<string, AISdkTool>,
-        options?: { providerOptions?: ProviderOptions }
+        options?: {
+            providerOptions?: ProviderOptions;
+            analysisRequestSeed?: LLMRequestAnalysisSeed;
+        }
     ): Promise<{ object: T; usage: LanguageModelUsageWithCostUsd }> {
         const startTime = Date.now();
+        const analysisHandle = await this.analysisHooks?.openRequest({
+            operationKind: "generate-object",
+            startedAt: startTime,
+            provider: this.provider,
+            model: this.model,
+            messages,
+            providerOptions: options?.providerOptions,
+            requestSeed: options?.analysisRequestSeed,
+        });
 
         return this.withErrorHandling(
             async () => {
@@ -840,7 +1010,8 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                             messages,
                             schema,
                             tools,
-                            options?.providerOptions
+                            options?.providerOptions,
+                            analysisHandle?.telemetryMetadata
                         )
                 );
 
@@ -852,13 +1023,25 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     "llm.duration_ms": duration,
                 });
 
+                const usage = extractUsageMetadata(
+                    this.provider,
+                    this.model,
+                    result.usage,
+                    result.providerMetadata as Record<string, unknown> | undefined
+                );
+                await analysisHandle?.reportSuccess({
+                    completedAt: Date.now(),
+                    usage,
+                });
+
                 return {
                     object: result.object,
-                    usage: result.usage,
+                    usage,
                 };
             },
             "Generate structured object",
-            startTime
+            startTime,
+            analysisHandle
         );
     }
 
@@ -868,9 +1051,21 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
      */
     async generateText(
         messages: ModelMessage[],
-        options?: { providerOptions?: ProviderOptions }
+        options?: {
+            providerOptions?: ProviderOptions;
+            analysisRequestSeed?: LLMRequestAnalysisSeed;
+        }
     ): Promise<{ text: string; usage: LanguageModelUsageWithCostUsd }> {
         const startTime = Date.now();
+        const analysisHandle = await this.analysisHooks?.openRequest({
+            operationKind: "generate-text",
+            startedAt: startTime,
+            provider: this.provider,
+            model: this.model,
+            messages,
+            providerOptions: options?.providerOptions,
+            requestSeed: options?.analysisRequestSeed,
+        });
 
         return this.withErrorHandling(
             async () => {
@@ -887,9 +1082,14 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                         temperature: this.temperature,
                         maxOutputTokens: this.maxTokens,
 
-                        experimental_telemetry: this.getTelemetryConfig(),
+                        experimental_telemetry: this.getTelemetryConfig(
+                            analysisHandle?.telemetryMetadata
+                        ),
 
-                        providerOptions: this.getRequestProviderOptions(options?.providerOptions),
+                        providerOptions: this.getRequestProviderOptions(
+                            options?.providerOptions,
+                            analysisHandle?.telemetryMetadata
+                        ),
                     })
                 );
 
@@ -902,13 +1102,25 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     "text.length": result.text.length,
                 });
 
+                const usage = extractUsageMetadata(
+                    this.provider,
+                    this.model,
+                    result.usage,
+                    result.providerMetadata as Record<string, unknown> | undefined
+                );
+                await analysisHandle?.reportSuccess({
+                    completedAt: Date.now(),
+                    usage,
+                });
+
                 return {
                     text: result.text,
-                    usage: result.usage,
+                    usage,
                 };
             },
             "Generate text",
-            startTime
+            startTime,
+            analysisHandle
         );
     }
 
@@ -949,12 +1161,17 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     private async withErrorHandling<T>(
         operation: () => Promise<T>,
         operationName: string,
-        startTime: number
+        startTime: number,
+        analysisHandle?: LLMAnalysisRequestHandle
     ): Promise<T> {
         try {
             return await operation();
         } catch (error) {
             const duration = Date.now() - startTime;
+            await analysisHandle?.reportError({
+                completedAt: Date.now(),
+                error,
+            });
             logger.error(`[LLMService] ${operationName} failed`, {
                 provider: this.provider,
                 model: this.model,

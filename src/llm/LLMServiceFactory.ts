@@ -12,6 +12,7 @@ import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { LanguageModel, ProviderRegistryProvider } from "ai";
+import type { LLMAnalysisHooks } from "./types";
 
 import { LLMService } from "./service";
 import {
@@ -96,14 +97,20 @@ export class LLMServiceFactory {
         context?: {
             tools?: Record<string, AISdkTool>;
             agentName?: string;
+            agentSlug?: string;
+            agentId?: string;
             /** Working directory path for agent execution */
             workingDirectory?: string;
             /** MCP configuration - passed from services layer to providers */
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
+            /** Project ID for telemetry correlation */
+            projectId?: string;
             /** Callback invoked when an agent stream exposes a message injector */
             onStreamStart?: OnStreamStartCallback;
+            /** Optional analysis hooks for local telemetry capture */
+            analysisHooks?: LLMAnalysisHooks;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -111,9 +118,10 @@ export class LLMServiceFactory {
         }
 
         // Convert agent name to slug format for telemetry
-        const agentSlug = context?.agentName
-            ? context.agentName.toLowerCase().replace(/\s+/g, "-")
-            : undefined;
+        const agentSlug = context?.agentSlug
+            ?? (context?.agentName
+                ? context.agentName.toLowerCase().replace(/\s+/g, "-")
+                : undefined);
 
         if (!agentSlug) {
             throw new Error("[LLMServiceFactory] Missing required agentName for LLM service creation.");
@@ -161,7 +169,10 @@ export class LLMServiceFactory {
                 modelResult.providerFunction as (model: string, options?: Record<string, unknown>) => LanguageModel,
                 modelResult.agentSettings as Record<string, unknown>,
                 agentSlug,
-                context?.conversationId
+                context?.conversationId,
+                context?.projectId,
+                context?.agentId,
+                context?.analysisHooks
             );
         }
 
@@ -188,6 +199,9 @@ export class LLMServiceFactory {
             undefined,
             agentSlug,
             context?.conversationId,
+            context?.projectId,
+            context?.agentId,
+            context?.analysisHooks,
             keyRotationHandler
         );
     }

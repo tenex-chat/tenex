@@ -27,7 +27,9 @@ export function shortenConversationIdForSpan(conversationId: string): string {
  */
 export function getOpenRouterMetadata(
     agentSlug?: string,
-    conversationId?: string
+    conversationId?: string,
+    projectId?: string,
+    additionalMetadata?: Record<string, string | number | boolean>
 ): Record<string, string> {
     const metadata: Record<string, string> = {};
 
@@ -40,6 +42,10 @@ export function getOpenRouterMetadata(
 
     if (agentSlug) metadata.tenex_agent = agentSlug;
     if (conversationId) metadata.tenex_conversation = conversationId;
+    if (projectId) metadata.tenex_project = projectId;
+    for (const [key, value] of Object.entries(additionalMetadata ?? {})) {
+        metadata[key.replace(/\./g, "_")] = String(value);
+    }
 
     return metadata;
 }
@@ -50,11 +56,15 @@ export function getOpenRouterMetadata(
  */
 export function getFullTelemetryConfig(config: {
     agentSlug?: string;
+    agentId?: string;
+    conversationId?: string;
+    projectId?: string;
     provider: string;
     model: string;
     temperature?: number;
     maxTokens?: number;
     contextWindow?: number;
+    additionalMetadata?: Record<string, string | number | boolean>;
 }): TelemetrySettings {
     if (!config.agentSlug) {
         throw new Error("[TracingUtils] Missing required agentSlug for telemetry.");
@@ -67,11 +77,15 @@ export function getFullTelemetryConfig(config: {
         // Metadata for debugging context
         metadata: {
             "agent.slug": config.agentSlug,
+            ...(config.agentId ? { "agent.id": config.agentId } : {}),
+            ...(config.conversationId ? { "conversation.id": config.conversationId } : {}),
+            ...(config.projectId ? { "project.id": config.projectId } : {}),
             "llm.provider": config.provider,
             "llm.model": config.model,
             "llm.temperature": config.temperature ?? 0,
             "llm.max_tokens": config.maxTokens ?? 0,
             "llm.context_window": config.contextWindow ?? 0,
+            ...(config.additionalMetadata ?? {}),
         },
 
         // FULL DATA - no privacy filters for debugging

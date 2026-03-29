@@ -4,6 +4,7 @@ import type { DefaultEventMap } from "tseep";
 export type {
     ModelMessage,
     Tool as CoreTool,
+    ToolChoice,
     GenerateTextResult,
     StreamTextResult,
     // Multimodal content types
@@ -15,7 +16,8 @@ export type {
 
 // Export execution context type
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { LanguageModelUsage } from "ai";
+import type { LanguageModelUsage, ModelMessage, Tool as CoreTool, ToolChoice } from "ai";
+import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 export type { ExecutionContext };
 
@@ -59,6 +61,45 @@ export interface LLMMetadata {
  * @param delivered - true if the message was successfully delivered to the stream
  */
 export type MessageInjectionCallback = (delivered: boolean) => void;
+
+export interface LLMRequestContextMetrics {
+    preContextEstimatedInputTokens?: number;
+    sentEstimatedInputTokens?: number;
+    estimatedInputTokensSaved?: number;
+}
+
+export interface LLMRequestAnalysisSeed {
+    requestId: string;
+    telemetryMetadata: Record<string, string | number | boolean>;
+    contextMetrics?: LLMRequestContextMetrics;
+}
+
+export interface LLMAnalysisRequestHandle {
+    requestId: string;
+    telemetryMetadata: Record<string, string | number | boolean>;
+    reportSuccess: (params: {
+        completedAt: number;
+        usage?: LanguageModelUsageWithCostUsd;
+        finishReason?: string;
+    }) => Promise<void> | void;
+    reportError: (params: {
+        completedAt: number;
+        error: unknown;
+    }) => Promise<void> | void;
+}
+
+export interface LLMAnalysisHooks {
+    openRequest: (params: {
+        operationKind: "stream" | "generate-text" | "generate-object";
+        startedAt: number;
+        provider: string;
+        model: string;
+        messages: ModelMessage[];
+        providerOptions?: ProviderOptions;
+        toolChoice?: ToolChoice<Record<string, CoreTool>>;
+        requestSeed?: LLMRequestAnalysisSeed;
+    }) => Promise<LLMAnalysisRequestHandle | undefined> | LLMAnalysisRequestHandle | undefined;
+}
 
 /**
  * Interface for providers that support mid-stream message injection.

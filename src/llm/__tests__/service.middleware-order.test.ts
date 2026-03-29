@@ -1,12 +1,20 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { getSystemReminderContext } from "../system-reminder-context";
 import { prepareLLMRequest } from "@/agents/execution/request-preparation";
 import { CONTEXT_MANAGEMENT_KEY } from "@/agents/execution/context-management";
 import type { ExecutionContextManagement } from "@/agents/execution/context-management";
+import { config as configService } from "@/services/ConfigService";
 
 describe("explicit request preparation order", () => {
+    let getAnalysisTelemetryConfigSpy: ReturnType<typeof spyOn> | undefined;
+
     beforeEach(() => {
         getSystemReminderContext().clear();
+    });
+
+    afterEach(() => {
+        getAnalysisTelemetryConfigSpy?.mockRestore();
+        getAnalysisTelemetryConfigSpy = undefined;
     });
 
     test("applies context management before sanitization and reminders", async () => {
@@ -176,5 +184,70 @@ describe("explicit request preparation order", () => {
             toolChoice: undefined,
             tools: {},
         });
+    });
+
+    test("records analysis seed and request-level context metrics when analysis is enabled", async () => {
+        getAnalysisTelemetryConfigSpy = spyOn(
+            configService,
+            "getAnalysisTelemetryConfig"
+        ).mockReturnValue({
+            enabled: true,
+            dbPath: "/tmp/test-analysis.db",
+            retentionDays: 14,
+            largeMessageThresholdTokens: 2000,
+            storeMessagePreviews: true,
+            maxPreviewChars: 256,
+            storeFullMessageText: false,
+        });
+
+        const contextManagement: ExecutionContextManagement = {
+            optionalTools: {},
+            requestContext: {
+                conversationId: "conv-1",
+                agentId: "agent-1",
+            },
+            prepareRequest: async () => ({
+                messages: [
+                    {
+                        role: "user",
+                        content: [{ type: "text", text: "Shortened prompt" }],
+                    },
+                ],
+                providerOptions: undefined,
+                toolChoice: undefined,
+                reportActualUsage: async () => {},
+            }),
+        };
+
+        const request = await prepareLLMRequest({
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: `Long prompt ${"x".repeat(200)}` }],
+                },
+            ],
+            tools: {},
+            providerId: "openrouter",
+            contextManagement,
+            analysisContext: {
+                conversationId: "conv-1",
+                agentSlug: "executor",
+                agentId: "agent-1",
+                projectId: "project-1",
+            },
+        });
+
+        expect(request.analysisRequestSeed?.requestId).toBeDefined();
+        expect(request.analysisRequestSeed?.telemetryMetadata["analysis.request_id"]).toBe(
+            request.analysisRequestSeed?.requestId
+        );
+        expect(
+            request.analysisRequestSeed?.contextMetrics?.preContextEstimatedInputTokens
+        ).toBeGreaterThan(
+            request.analysisRequestSeed?.contextMetrics?.sentEstimatedInputTokens ?? 0
+        );
+        expect(
+            request.analysisRequestSeed?.contextMetrics?.estimatedInputTokensSaved
+        ).toBeGreaterThan(0);
     });
 });

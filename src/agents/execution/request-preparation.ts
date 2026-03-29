@@ -2,6 +2,7 @@ import {
     CONTEXT_MANAGEMENT_KEY,
     type ContextManagementModelRef,
     type PrepareContextManagementRequestOptions,
+    createDefaultPromptTokenEstimator,
 } from "ai-sdk-context-management";
 import type {
     ModelMessage,
@@ -18,12 +19,15 @@ import { prepareMessagesForRequest } from "@/llm/MessageProcessor";
 import { createMessageSanitizerMiddleware } from "@/llm/middleware/message-sanitizer";
 import { createTenexSystemRemindersMiddleware } from "@/llm/middleware/system-reminders";
 import type { AISdkTool } from "@/tools/types";
+import { analysisTelemetryService } from "@/services/analysis/AnalysisTelemetryService";
 import type { ExecutionContextManagement } from "./context-management";
 import { normalizeMessagesForContextManagement } from "./context-management/normalize-messages";
+import { withContextManagementAnalysisScope } from "./context-management/telemetry";
 import type { LLMModelRequest } from "./types";
 
 const messageSanitizer = createMessageSanitizerMiddleware();
 const systemReminders = createTenexSystemRemindersMiddleware();
+const promptEstimator = createDefaultPromptTokenEstimator();
 
 function buildMiddlewareModel(
     model: ContextManagementModelRef | undefined,
@@ -74,7 +78,21 @@ export async function prepareLLMRequest(options: {
     contextManagement?: ExecutionContextManagement;
     providerOptions?: ProviderOptions;
     toolChoice?: ToolChoice<Record<string, CoreTool>>;
+    analysisContext?: {
+        projectId?: string;
+        conversationId?: string;
+        agentSlug?: string;
+        agentId?: string;
+    };
 }): Promise<LLMModelRequest> {
+    const estimatePromptTokens = (messages: ModelMessage[]): number =>
+        Math.max(
+            0,
+            promptEstimator.estimatePrompt(messages as never)
+                + (promptEstimator.estimateTools?.(
+                    options.tools as unknown as PrepareContextManagementRequestOptions["tools"]
+                ) ?? 0)
+        );
     const model = buildMiddlewareModel(options.model, options.providerId);
     let preparedMessages = normalizeMessagesForContextManagement(options.messages);
     let preparedProviderOptions = options.providerOptions;
@@ -82,22 +100,46 @@ export async function prepareLLMRequest(options: {
     let reportContextManagementUsage:
         | LLMModelRequest["reportContextManagementUsage"]
         | undefined;
+    const preContextEstimatedInputTokens = estimatePromptTokens(preparedMessages);
+    const analysisRequestSeed = analysisTelemetryService.createRequestSeed({
+        contextMetrics: {
+            preContextEstimatedInputTokens,
+        },
+    });
 
     if (options.contextManagement) {
-        const contextManagedRequest =
-            await options.contextManagement.prepareRequest({
-                messages: preparedMessages,
-                // ai-sdk-context-management resolves its own nested `ai` types, so this
-                // boundary needs an explicit cast despite the runtime tool shape matching.
-                tools:
-                    options.tools as unknown as Omit<
-                        PrepareContextManagementRequestOptions,
-                        "requestContext"
-                    >["tools"],
-                toolChoice: preparedToolChoice,
-                providerOptions: preparedProviderOptions,
-                model: options.model,
-            });
+        const contextManagement = options.contextManagement;
+        const contextManagedRequest = await withContextManagementAnalysisScope(
+            analysisRequestSeed
+                ? {
+                      requestId: analysisRequestSeed.requestId,
+                      projectId: options.analysisContext?.projectId,
+                      conversationId:
+                          options.analysisContext?.conversationId
+                          ?? contextManagement.requestContext.conversationId,
+                      agentSlug: options.analysisContext?.agentSlug,
+                      agentId:
+                          options.analysisContext?.agentId
+                          ?? contextManagement.requestContext.agentId,
+                      provider: options.model?.provider ?? options.providerId,
+                      model: options.model?.modelId ?? "prepared-request",
+                  }
+                : undefined,
+            async () =>
+                await contextManagement.prepareRequest({
+                    messages: preparedMessages,
+                    // ai-sdk-context-management resolves its own nested `ai` types, so this
+                    // boundary needs an explicit cast despite the runtime tool shape matching.
+                    tools:
+                        options.tools as unknown as Omit<
+                            PrepareContextManagementRequestOptions,
+                            "requestContext"
+                        >["tools"],
+                    toolChoice: preparedToolChoice,
+                    providerOptions: preparedProviderOptions,
+                    model: options.model,
+                })
+        );
 
         preparedMessages = contextManagedRequest.messages;
         preparedProviderOptions = contextManagedRequest.providerOptions;
@@ -127,6 +169,7 @@ export async function prepareLLMRequest(options: {
     }));
 
     preparedMessages = prepareMessagesForRequest(preparedMessages, options.providerId);
+    const sentEstimatedInputTokens = estimatePromptTokens(preparedMessages);
 
     return {
         messages: preparedMessages,
@@ -137,6 +180,19 @@ export async function prepareLLMRequest(options: {
               }
             : undefined,
         toolChoice: preparedToolChoice,
+        analysisRequestSeed: analysisRequestSeed
+            ? {
+                  ...analysisRequestSeed,
+                  contextMetrics: {
+                      preContextEstimatedInputTokens,
+                      sentEstimatedInputTokens,
+                      estimatedInputTokensSaved: Math.max(
+                          0,
+                          preContextEstimatedInputTokens - sentEstimatedInputTokens
+                      ),
+                  },
+              }
+            : undefined,
         reportContextManagementUsage,
     };
 }

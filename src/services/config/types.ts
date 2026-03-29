@@ -43,6 +43,15 @@ export interface TenexConfig {
         enabled?: boolean; // Enable OpenTelemetry tracing (default: true)
         serviceName?: string; // OTL trace service name (default: 'tenex-daemon')
         endpoint?: string; // OTLP HTTP endpoint URL (default: http://localhost:4318/v1/traces)
+        analysis?: {
+            enabled?: boolean; // Enable local analysis telemetry store (default: false)
+            dbPath?: string; // SQLite DB path (default: ~/.tenex/data/trace-analysis.db)
+            retentionDays?: number; // Retain rows for this many days (default: 14)
+            largeMessageThresholdTokens?: number; // Threshold for carry tracking (default: 2000)
+            storeMessagePreviews?: boolean; // Store short prompt previews (default: true)
+            maxPreviewChars?: number; // Preview length cap (default: 256)
+            storeFullMessageText?: boolean; // Store full prompt text in analysis DB (default: false)
+        };
     };
 
     // Global system prompt configuration
@@ -124,6 +133,17 @@ export const TenexConfigSchema = z.object({
             enabled: z.boolean().optional(),
             serviceName: z.string().optional(),
             endpoint: z.string().optional(),
+            analysis: z
+                .object({
+                    enabled: z.boolean().optional(),
+                    dbPath: z.string().optional(),
+                    retentionDays: z.number().int().positive().optional(),
+                    largeMessageThresholdTokens: z.number().int().positive().optional(),
+                    storeMessagePreviews: z.boolean().optional(),
+                    maxPreviewChars: z.number().int().positive().optional(),
+                    storeFullMessageText: z.boolean().optional(),
+                })
+                .optional(),
         })
         .optional(),
     globalSystemPrompt: z

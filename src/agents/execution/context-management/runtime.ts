@@ -23,6 +23,7 @@ import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import {
     buildDecayPlaceholder,
@@ -54,9 +55,14 @@ function createSummarizationModel(options: {
 }): LanguageModel | undefined {
     try {
         const configName = configService.getSummarizationModelName();
+        const projectContext = isProjectContextInitialized()
+            ? getProjectContext()
+            : undefined;
         const llmService = configService.createLLMService(configName, {
             agentName: "context-summarizer",
+            agentSlug: "context-summarizer",
             conversationId: options.conversationId,
+            projectId: projectContext?.project.dTag ?? projectContext?.project.tagValue("d"),
         });
         return llmService.createLanguageModel();
     } catch {

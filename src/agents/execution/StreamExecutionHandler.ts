@@ -205,6 +205,7 @@ export class StreamExecutionHandler {
                 providerOptions: request.providerOptions,
                 experimentalContext: request.experimentalContext,
                 toolChoice: request.toolChoice,
+                analysisRequestSeed: request.analysisRequestSeed,
                 onFinalStepInputTokens: async (actualInputTokens) => {
                     const reporter = this.execContext.pendingContextManagementUsageReporter;
                     this.execContext.pendingContextManagementUsageReporter = undefined;
