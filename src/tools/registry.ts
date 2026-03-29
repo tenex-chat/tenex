@@ -100,7 +100,6 @@ function createTenexFsToolsUncached(context: ToolExecutionContext): ReturnType<t
 
     const tools = createFsTools({
         workingDirectory: context.workingDirectory,
-        agentId: context.agent.pubkey,
         allowedRoots,
         agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory },
         formatOutsideRootsError: (path, wd) =>
@@ -135,7 +134,6 @@ function getOrCreateHomeFsTools(context: ToolExecutionContext): ReturnType<typeo
         ensureAgentHomeDirectory(context.agent.pubkey);
         tools = createFsTools({
             workingDirectory: homeDir,
-            agentId: context.agent.pubkey,
             namePrefix: "home_fs",
             strictContainment: true,
             agentsMd: false,
@@ -259,6 +257,14 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     home_fs_grep: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_grep as AISdkTool,
 };
 
+function isToolAvailableInContext(name: ToolName, context: ToolExecutionContext): boolean {
+    if (name === "no_response") {
+        return context.triggeringEnvelope.transport === "telegram";
+    }
+
+    return true;
+}
+
 /**
  * Get a single tool by name
  * @param name - The tool name
@@ -269,6 +275,10 @@ export function getTool(
     name: ToolName,
     context: ToolExecutionContext
 ): AISdkTool<unknown, unknown> | undefined {
+    if (!isToolAvailableInContext(name, context)) {
+        return undefined;
+    }
+
     const factory = toolFactories[name];
     const ret = factory ? factory(context) : undefined;
     return ret;
@@ -549,6 +559,14 @@ export function getToolsObject(
         if (hasTelegramBindings && !regularTools.includes("send_message")) {
             regularTools.push("send_message");
         }
+    }
+
+    if (
+        hasConversation &&
+        context.triggeringEnvelope.transport === "telegram" &&
+        !regularTools.includes("no_response")
+    ) {
+        regularTools.push("no_response");
     }
 
     // Auto-inject mcp_subscription_stop when agent has active MCP subscriptions

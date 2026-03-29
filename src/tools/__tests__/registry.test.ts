@@ -16,8 +16,21 @@ describe("Tool Registry", () => {
             expect(tool?.description).toContain("Read a file");
         });
 
-        it("should expose the no_response tool", () => {
+        it("should not expose the no_response tool outside Telegram", () => {
             const tool = getTool("no_response", mockContext);
+            expect(tool).toBeUndefined();
+        });
+
+        it("should expose the no_response tool in Telegram context", () => {
+            const tool = getTool(
+                "no_response",
+                createMockExecutionEnvironment({
+                    triggeringEnvelope: {
+                        transport: "telegram",
+                    } as any,
+                })
+            );
+
             expect(tool).toBeDefined();
             expect(tool?.description).toContain("silent completion");
         });
@@ -119,6 +132,20 @@ describe("Tool Registry", () => {
 
             expect(tools.send_message).toBeDefined();
             storeSpy.mockRestore();
+        });
+
+        it("auto-injects no_response only for Telegram-triggered turns", async () => {
+            const nonTelegramTools = await getToolsObject([], mockContext);
+            expect(nonTelegramTools.no_response).toBeUndefined();
+
+            const telegramContext = createMockExecutionEnvironment({
+                triggeringEnvelope: {
+                    transport: "telegram",
+                } as any,
+            });
+
+            const telegramTools = await getToolsObject([], telegramContext);
+            expect(telegramTools.no_response).toBeDefined();
         });
     });
 });

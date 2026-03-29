@@ -87,13 +87,12 @@ describe("agent-home-directory fragment", () => {
 
             expect(result).toContain("data.json");
             expect(result).toContain("notes.txt");
-            expect(result).toContain("scripts/");
+            expect(result).toContain("scripts");
         });
 
-        it("should cap listing at 50 entries and show overflow count", async () => {
+        it("should cap listing at 20 visible entries and show a tidy-up note", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
-            // Create 60 mock entries
-            const manyEntries = Array.from({ length: 60 }, (_, i) => ({
+            const manyEntries = Array.from({ length: 30 }, (_, i) => ({
                 name: `file-${String(i).padStart(2, "0")}.txt`,
                 isDirectory: () => false,
             }));
@@ -101,12 +100,23 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("...and 10 more");
-            // Should have first 50 files
             expect(result).toContain("file-00.txt");
-            expect(result).toContain("file-49.txt");
-            // Should NOT have files beyond 50
-            expect(result).not.toContain("file-50.txt");
+            expect(result).toContain("file-19.txt");
+            expect(result).not.toContain("file-20.txt");
+            expect(result).toContain("too many files in your home directory root");
+        });
+
+        it("should hide dotfiles so the listing matches plain ls output", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => [
+                { name: ".env", isDirectory: () => false },
+                { name: "notes.txt", isDirectory: () => false },
+            ]);
+
+            const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+
+            expect(result).toContain("notes.txt");
+            expect(result).not.toContain("```" + "\n" + ".env");
         });
 
         it("should handle directory creation failure gracefully", async () => {
@@ -155,7 +165,7 @@ describe("agent-home-directory fragment", () => {
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
             const alphaIndex = result.indexOf("alpha.txt");
-            const betaIndex = result.indexOf("beta/");
+            const betaIndex = result.indexOf("beta");
             const zebraIndex = result.indexOf("zebra.txt");
 
             expect(alphaIndex).toBeLessThan(betaIndex);
@@ -170,6 +180,7 @@ describe("agent-home-directory fragment", () => {
 
             expect(result).toContain("Shell env files:");
             expect(result).toContain("precedence `agent > project > global`");
+            expect(result).toContain("Your nsec is in your home directory's `.env` file as `NSEC`");
             expect(result).toContain("`.env` contents are NOT injected into your prompt");
             expect(result).toContain("Auto-injected files:");
             expect(result).toContain("Files starting with `+`");

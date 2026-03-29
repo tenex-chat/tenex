@@ -356,6 +356,7 @@ function addAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     availableAgents: AgentInstance[],
+    triggeringEnvelope?: BuildSystemPromptOptions["triggeringEnvelope"],
     projectManagerPubkey?: string,
     projectDTag?: string,
     projectPath?: string
@@ -381,7 +382,11 @@ function addAgentFragments(
     builder.add("todo-before-delegation", {});
 
     // Add explicit guidance for turns where the user wants no reply.
-    builder.add("no-response-guidance", {});
+    if (triggeringEnvelope?.transport === "telegram") {
+        builder.add("no-response-guidance", {
+            triggeringEnvelope,
+        });
+    }
 }
 
 /**
@@ -485,9 +490,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // Add global system prompt if configured (ordered by fragment priority)
     systemPromptBuilder.add("global-system-prompt", {});
 
-    // Add environment context (relay, PID, uptime, CPU/memory usage)
-    systemPromptBuilder.add("environment-context", {});
-
     systemPromptBuilder.add("telegram-chat-context", {
         triggeringEnvelope,
     });
@@ -497,13 +499,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
 
     systemPromptBuilder.add("channel-bindings", {
         bindings: dTag ? buildChannelBindingDisplayEntries(agentForFragments, dTag) : [],
-    });
-
-    // Add meta-project context (other projects this agent belongs to)
-    // This gives agents cross-project awareness without overwhelming them
-    systemPromptBuilder.add("meta-project-context", {
-        agent: agentForFragments,
-        currentProjectId: dTag,
     });
 
     // Add active conversations context (currently running agents in the project)
@@ -614,6 +609,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         systemPromptBuilder,
         agentForFragments,
         availableAgents,
+        triggeringEnvelope,
         options.projectManagerPubkey,
         projectDTag,
         options.projectBasePath

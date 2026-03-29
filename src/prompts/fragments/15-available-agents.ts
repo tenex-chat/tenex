@@ -15,7 +15,7 @@ interface AvailableAgentsArgs {
 export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
     id: "available-agents",
     priority: 15,
-    template: ({ agents, currentAgent, projectManagerPubkey }) => {
+    template: ({ agents, currentAgent }) => {
         // Filter out current agent
         const coworkers = agents.filter((agent) => agent.pubkey !== currentAgent.pubkey);
 
@@ -25,10 +25,7 @@ export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
 
         const agentList = coworkers
             .map((agent) => {
-                // Check if this agent is the current PM of the project
-                const isPM = projectManagerPubkey && agent.pubkey === projectManagerPubkey;
-                const roleDisplay = isPM ? `${agent.role} [PM]` : agent.role;
-                const parts = [`(${agent.slug})`, `  Role: ${roleDisplay}`];
+                const parts = [`(${agent.slug})`];
 
                 if (agent.useCriteria) {
                     parts.push(`  Use Criteria: ${agent.useCriteria}`);
@@ -41,11 +38,10 @@ export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
             .join("\n\n");
 
         return `## Available Agents
-You are part of a multi-agent system, these are agents immediately available in the system:
+You are part of a multi-agent system.
 
 ${agentList}
-
-The PM of this project only has knowledge of *this* project.`;
+`;
     },
 };
 

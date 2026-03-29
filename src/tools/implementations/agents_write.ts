@@ -183,7 +183,7 @@ async function executeAgentsWrite(
 export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. Core tools are automatically injected (lessons, reports, todos, conversation tools, kill, no_response). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
+            "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. Core tools are automatically injected (lessons, reports, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Telegram-triggered turns also get the context-sensitive `no_response` tool automatically. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
         inputSchema: agentsWriteSchema,
         execute: async (input: AgentsWriteInput) => {
             try {

@@ -169,4 +169,42 @@ describe("systemPromptBuilder", () => {
 
         expect(agentIdentityFragment?.args.agent.instructions).toBe("Base instructions");
     });
+
+    it("does not add environment or cross-project fragments to the main prompt", async () => {
+        currentProjectContext = {};
+
+        await buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+        });
+
+        expect(addedFragments.some((fragment) => fragment.id === "environment-context")).toBe(false);
+        expect(addedFragments.some((fragment) => fragment.id === "meta-project-context")).toBe(false);
+    });
+
+    it("only adds no-response guidance for Telegram-triggered turns", async () => {
+        currentProjectContext = {};
+
+        await buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+        });
+
+        expect(addedFragments.some((fragment) => fragment.id === "no-response-guidance")).toBe(false);
+
+        addedFragments.length = 0;
+
+        await buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+            triggeringEnvelope: {
+                transport: "telegram",
+            } as any,
+        });
+
+        expect(addedFragments.some((fragment) => fragment.id === "no-response-guidance")).toBe(true);
+    });
 });

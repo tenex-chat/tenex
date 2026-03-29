@@ -31,7 +31,6 @@ export const memorizedReportsFragment: PromptFragment<MemorizedReportsArgs> = {
         // Add team-wide reports first (if any)
         if (teamReports.length > 0) {
             parts.push("### Team-Wide Knowledge\n");
-            parts.push("*The following knowledge is shared across ALL agents in this project:*\n");
 
             for (const report of teamReports) {
                 parts.push(`#### ${report.title || report.slug}`);
@@ -49,7 +48,6 @@ export const memorizedReportsFragment: PromptFragment<MemorizedReportsArgs> = {
         if (agentReports.length > 0) {
             if (teamReports.length > 0) {
                 parts.push("### Agent-Specific Knowledge\n");
-                parts.push("*The following knowledge is specific to your role:*\n");
             } else {
                 parts.push(
                     "The following reports have been memorized and represent persistent knowledge for your role:\n"
