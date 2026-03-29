@@ -14,8 +14,7 @@ export const interventionCommand = new Command("intervention")
 
             console.log(`  Enabled: ${intervention.enabled ?? false}`);
             if (intervention.agent) console.log(`  Agent: ${intervention.agent}`);
-            console.log(`  Review timeout: ${intervention.timeout ?? 300000}ms`);
-            console.log(`  Skip if active within: ${intervention.conversationInactivityTimeoutSeconds ?? 120}s\n`);
+            console.log(`  Review timeout: ${intervention.timeoutSeconds ?? 300}s\n`);
 
             const { enabled } = await inquirer.prompt([{
                 type: "confirm",
@@ -36,17 +35,9 @@ export const interventionCommand = new Command("intervention")
                     },
                     {
                         type: "input",
-                        name: "timeout",
-                        message: "Review timeout (ms):",
-                        default: String(intervention.timeout ?? 300000),
-                        theme: inquirerTheme,
-                        validate: (input: string) => /^\d+$/.test(input) || "Must be a number",
-                    },
-                    {
-                        type: "input",
-                        name: "skipWithin",
-                        message: "Skip if active within (seconds):",
-                        default: String(intervention.conversationInactivityTimeoutSeconds ?? 120),
+                        name: "timeoutSeconds",
+                        message: "Review timeout (seconds):",
+                        default: String(intervention.timeoutSeconds ?? 300),
                         theme: inquirerTheme,
                         validate: (input: string) => /^\d+$/.test(input) || "Must be a number",
                     },
@@ -55,8 +46,7 @@ export const interventionCommand = new Command("intervention")
                 existingConfig.intervention = {
                     enabled: true,
                     agent: answers.agent || undefined,
-                    timeout: Number.parseInt(answers.timeout),
-                    conversationInactivityTimeoutSeconds: Number.parseInt(answers.skipWithin),
+                    timeoutSeconds: Number.parseInt(answers.timeoutSeconds),
                 };
             } else {
                 existingConfig.intervention = {

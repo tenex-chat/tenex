@@ -11,21 +11,21 @@ export const summarizationCommand = new Command("summarization")
             const globalPath = configService.getGlobalPath();
             const existingConfig = await configService.loadTenexConfig(globalPath);
             const summ = existingConfig.summarization || {};
-            const currentTimeout = summ.inactivityTimeout ?? 300000;
+            const currentTimeoutSeconds = summ.inactivityTimeoutSeconds ?? 300;
 
-            console.log(`  Inactivity timeout: ${currentTimeout}ms (${Math.round(currentTimeout / 60000)}min)\n`);
+            console.log(`  Inactivity timeout: ${currentTimeoutSeconds}s (${Math.round(currentTimeoutSeconds / 60)}min)\n`);
 
-            const { timeout } = await inquirer.prompt([{
+            const { timeoutSeconds } = await inquirer.prompt([{
                 type: "input",
-                name: "timeout",
-                message: "Inactivity timeout (ms):",
-                default: String(currentTimeout),
+                name: "timeoutSeconds",
+                message: "Inactivity timeout (seconds):",
+                default: String(currentTimeoutSeconds),
                 theme: inquirerTheme,
                 validate: (input: string) => /^\d+$/.test(input) || "Must be a number",
             }]);
 
             existingConfig.summarization = {
-                inactivityTimeout: Number.parseInt(timeout),
+                inactivityTimeoutSeconds: Number.parseInt(timeoutSeconds),
             };
 
             await configService.saveGlobalConfig(existingConfig);

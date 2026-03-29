@@ -27,7 +27,7 @@ export interface TenexConfig {
 
     // Summarization configuration
     summarization?: {
-        inactivityTimeout?: number; // Milliseconds to wait after last activity before generating summary (default: 300000 = 5 minutes)
+        inactivityTimeoutSeconds?: number; // Seconds to wait after last activity before generating summary (default: 300 = 5 minutes)
     };
 
     // Context-management configuration
@@ -63,8 +63,7 @@ export interface TenexConfig {
     intervention?: {
         enabled?: boolean; // Enable intervention monitoring (default: false)
         agent?: string; // Agent slug to notify when user doesn't respond (required if enabled)
-        timeout?: number; // Milliseconds to wait for user response (default: 300000 = 5 minutes)
-        conversationInactivityTimeoutSeconds?: number; // Seconds since last user message to skip intervention (default: 120 = 2 minutes). If user was active within this window when agent tags them, skip intervention entirely.
+        timeoutSeconds?: number; // Seconds to wait for user response (default: 300 = 5 minutes)
     };
 
     // APNs push notification configuration
@@ -109,7 +108,7 @@ export const TenexConfigSchema = z.object({
         .optional(),
     summarization: z
         .object({
-            inactivityTimeout: z.number().optional(),
+            inactivityTimeoutSeconds: z.number().optional(),
         })
         .optional(),
     contextManagement: z
@@ -142,8 +141,7 @@ export const TenexConfigSchema = z.object({
         .object({
             enabled: z.boolean().optional(),
             agent: z.string().optional(),
-            timeout: z.number().optional(),
-            conversationInactivityTimeoutSeconds: z.number().optional(),
+            timeoutSeconds: z.number().optional(),
         })
         .optional(),
     apns: z

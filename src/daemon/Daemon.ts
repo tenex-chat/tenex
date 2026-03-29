@@ -787,31 +787,12 @@ export class Daemon {
             const pTagsRootAuthor = pTags.includes(rootAuthorPubkey);
 
             if (pTagsRootAuthor) {
-                // Agent completed work and notified the user
-                // Find the last user message timestamp in the conversation
-                // This is used to determine if the user was recently active
-                // We look for messages from the root author (conversation owner), not all whitelisted users
-                const messages = conversation.getAllMessages();
-                let lastUserMessageTime: number | undefined;
-                for (let i = messages.length - 1; i >= 0; i--) {
-                    const msg = messages[i];
-                    if (msg.pubkey === rootAuthorPubkey) {
-                        if (msg.timestamp) {
-                            // Convert from seconds to ms
-                            lastUserMessageTime = msg.timestamp * 1000;
-                            break;
-                        }
-                        // Message from root author without timestamp - continue searching
-                    }
-                }
-
                 interventionService.onAgentCompletion(
                     conversationId,
                     eventTimestamp,
                     event.pubkey,
                     rootAuthorPubkey,
                     projectId,
-                    lastUserMessageTime
                 );
             }
         }
