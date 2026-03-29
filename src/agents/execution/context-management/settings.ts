@@ -4,7 +4,6 @@ export const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
 export const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 export const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 export const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
-export const DEFAULT_TOOL_RESULT_DECAY_THRESHOLD_PERCENT = 85;
 
 export interface ContextManagementSettings {
     tokenBudget: number;

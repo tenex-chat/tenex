@@ -31,7 +31,6 @@ import {
 } from "./budget-profile";
 import { normalizeMessagesForContextManagement } from "./normalize-messages";
 import {
-    DEFAULT_TOOL_RESULT_DECAY_THRESHOLD_PERCENT,
     getContextManagementSettings,
 } from "./settings";
 import {
@@ -87,10 +86,6 @@ function createConversationContextManagementRuntime(options: {
         requestEstimator
     );
     const scratchpadEnabled = options.scratchpadAvailable;
-    const toolResultDecayThresholdTokens = Math.floor(
-        settings.tokenBudget
-            * (DEFAULT_TOOL_RESULT_DECAY_THRESHOLD_PERCENT / 100)
-    );
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
@@ -130,7 +125,6 @@ function createConversationContextManagementRuntime(options: {
     strategies.push(
         new ToolResultDecayStrategy({
             estimator: managedBudgetProfile.estimator,
-            maxPromptTokens: toolResultDecayThresholdTokens,
             placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
                 return buildDecayPlaceholder(toolName, toolCallId);
             },

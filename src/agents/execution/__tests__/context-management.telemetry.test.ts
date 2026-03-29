@@ -335,7 +335,7 @@ describe("TENEX context management telemetry", () => {
         );
     });
 
-    test("tool-result decay threshold uses the managed working budget gate", async () => {
+    test("tool-result decay no longer uses a managed working budget gate", async () => {
         getContextManagementConfigSpy.mockReturnValue(
             buildContextManagementConfig({
                 tokenBudget: 100,
@@ -379,13 +379,11 @@ describe("TENEX context management telemetry", () => {
 
         expect(decayEvent).toBeDefined();
         expect(decayEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
-        expect(decayEvent?.attributes?.["context_management.reason"]).toBe(
-            "below-token-threshold"
-        );
+        expect(decayEvent?.attributes?.["context_management.reason"]).toBe("no-tool-exchanges");
         expect(decayEvent?.attributes?.["context_management.current_prompt_tokens"]).toBeLessThan(
             20
         );
-        expect(decayEvent?.attributes?.["context_management.working_token_budget"]).toBe(85);
+        expect(decayEvent?.attributes?.["context_management.working_token_budget"]).toBeUndefined();
     });
 
 });
