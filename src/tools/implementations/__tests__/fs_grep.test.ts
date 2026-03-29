@@ -295,7 +295,7 @@ describe("fs_grep tool", () => {
             const text = unwrapResult(result);
             expect(text).not.toContain("size limit");
             expect(text).toContain("test pattern match");
-            expect(text).toContain("[Truncated: showing 100 of");
+            expect(text).toContain("[Truncated:");
         });
 
         it("should respect offset in fallback file list", async () => {

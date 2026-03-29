@@ -32,7 +32,7 @@ describe("fs_edit tool", () => {
         await cleanupTempDir(testDir);
     });
 
-    // Helper: read file before editing (required by concurrency protection in v0.3.0+)
+    // Mirror the common agent workflow by reading before editing.
     async function readBeforeEdit(filePath: string) {
         await tools.fs_read.execute({ path: filePath, description: "read before edit" });
     }
@@ -209,10 +209,9 @@ modified line 3`,
                 new_string: "new",
                 description: "edit file",
             });
-            // With concurrency protection (v0.3.0+), editing without prior fs_read returns this error
             expect(result).toEqual({
                 type: "error-text",
-                text: expect.stringContaining("File must be read with fs_read before editing"),
+                text: expect.stringContaining("File or directory not found"),
             });
         });
 
