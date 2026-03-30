@@ -26,8 +26,10 @@ function createBunDatabase(dbPath: string): BunDatabase {
 
 type Primitive = string | number | boolean | null;
 
-const ANALYSIS_SCHEMA_VERSION = "1";
+const ANALYSIS_SCHEMA_VERSION = "2";
 const RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+const PENDING_RUNTIME_METRICS_TTL_MS = 15 * 60 * 1000;
+const MAX_PENDING_RUNTIME_METRICS = 2048;
 const RATE_LIMIT_PATTERNS = [
     /\brate.?limit/i,
     /too many requests/i,
@@ -73,6 +75,13 @@ interface OpenRequestParams {
     provider: string;
     model: string;
     baseContext: AnalysisBaseContext;
+}
+
+interface PendingRuntimeMetrics {
+    estimatedInputTokensBefore: number;
+    estimatedInputTokensAfter: number;
+    estimatedInputTokensSaved: number;
+    observedAt: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -363,18 +372,25 @@ function buildThreadKey(
     return agentKey ? `${conversationId}::${agentKey}` : undefined;
 }
 
+function getStatementChanges(result: unknown): number {
+    const resultRecord = asLooseRecord(result);
+    const changes = resultRecord?.changes;
+    return typeof changes === "number" && Number.isFinite(changes) ? changes : 0;
+}
+
 export class AnalysisTelemetryService {
     private db: BunDatabase | null = null;
     private initialized = false;
     private dbPath: string | null = null;
     private lastRetentionSweepAt = 0;
+    private pendingRuntimeMetrics = new Map<string, PendingRuntimeMetrics>();
 
     public isEnabled(): boolean {
         return configService.getAnalysisTelemetryConfig().enabled;
     }
 
     public createRequestSeed(params: {
-        contextMetrics?: LLMRequestAnalysisSeed["contextMetrics"];
+        preparedPromptMetrics?: LLMRequestAnalysisSeed["preparedPromptMetrics"];
     }): LLMRequestAnalysisSeed | undefined {
         if (!this.isEnabled()) {
             return undefined;
@@ -386,7 +402,7 @@ export class AnalysisTelemetryService {
             telemetryMetadata: {
                 "analysis.request_id": requestId,
             },
-            contextMetrics: params.contextMetrics,
+            preparedPromptMetrics: params.preparedPromptMetrics,
         };
     }
 
@@ -416,7 +432,8 @@ export class AnalysisTelemetryService {
             ...(params.requestSeed?.telemetryMetadata ?? {}),
             "analysis.request_id": requestId,
         };
-        const contextMetrics = params.requestSeed?.contextMetrics;
+        const preparedPromptMetrics = params.requestSeed?.preparedPromptMetrics;
+        const runtimeMetrics = this.consumePendingRuntimeMetrics(requestId);
         const context = {
             projectId: params.baseContext.projectId,
             conversationId: params.baseContext.conversationId,
@@ -436,7 +453,7 @@ export class AnalysisTelemetryService {
         db.exec("BEGIN");
         try {
             db.prepare(`
-                INSERT OR REPLACE INTO llm_requests (
+                INSERT INTO llm_requests (
                     request_id,
                     project_id,
                     conversation_id,
@@ -449,8 +466,36 @@ export class AnalysisTelemetryService {
                     status,
                     pre_context_estimated_input_tokens,
                     sent_estimated_input_tokens,
-                    estimated_input_tokens_saved
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    estimated_input_tokens_saved,
+                    context_runtime_estimated_input_tokens_before,
+                    context_runtime_estimated_input_tokens_after,
+                    context_runtime_estimated_input_tokens_saved
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(request_id) DO UPDATE SET
+                    project_id = excluded.project_id,
+                    conversation_id = excluded.conversation_id,
+                    agent_slug = excluded.agent_slug,
+                    agent_id = excluded.agent_id,
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    operation_kind = excluded.operation_kind,
+                    started_at_ms = excluded.started_at_ms,
+                    status = excluded.status,
+                    pre_context_estimated_input_tokens = excluded.pre_context_estimated_input_tokens,
+                    sent_estimated_input_tokens = excluded.sent_estimated_input_tokens,
+                    estimated_input_tokens_saved = excluded.estimated_input_tokens_saved,
+                    context_runtime_estimated_input_tokens_before = COALESCE(
+                        excluded.context_runtime_estimated_input_tokens_before,
+                        llm_requests.context_runtime_estimated_input_tokens_before
+                    ),
+                    context_runtime_estimated_input_tokens_after = COALESCE(
+                        excluded.context_runtime_estimated_input_tokens_after,
+                        llm_requests.context_runtime_estimated_input_tokens_after
+                    ),
+                    context_runtime_estimated_input_tokens_saved = COALESCE(
+                        excluded.context_runtime_estimated_input_tokens_saved,
+                        llm_requests.context_runtime_estimated_input_tokens_saved
+                    )
             `).run(
                 requestId,
                 context.projectId ?? null,
@@ -462,9 +507,12 @@ export class AnalysisTelemetryService {
                 params.operationKind,
                 params.startedAt,
                 "started",
-                contextMetrics?.preContextEstimatedInputTokens ?? null,
-                contextMetrics?.sentEstimatedInputTokens ?? null,
-                contextMetrics?.estimatedInputTokensSaved ?? null
+                preparedPromptMetrics?.preContextEstimatedInputTokens ?? null,
+                preparedPromptMetrics?.sentEstimatedInputTokens ?? null,
+                preparedPromptMetrics?.estimatedInputTokensSaved ?? null,
+                runtimeMetrics?.estimatedInputTokensBefore ?? null,
+                runtimeMetrics?.estimatedInputTokensAfter ?? null,
+                runtimeMetrics?.estimatedInputTokensSaved ?? null
             );
 
             db.prepare("DELETE FROM llm_request_messages WHERE request_id = ?").run(requestId);
@@ -550,6 +598,7 @@ export class AnalysisTelemetryService {
 
         const db = this.ensureDb();
         const payload = this.extractContextManagementPayload(event);
+        const createdAt = Date.now();
 
         try {
             db.prepare(`
@@ -635,8 +684,19 @@ export class AnalysisTelemetryService {
                 payload.newFactor ?? null,
                 payload.sampleCount ?? null,
                 stringifyJson(payload.payloadJson),
-                Date.now()
+                createdAt
             );
+            if (event.type === "runtime-complete") {
+                this.recordRuntimeMetrics(scope.requestId, {
+                    estimatedInputTokensBefore: Math.max(0, event.estimatedTokensBefore),
+                    estimatedInputTokensAfter: Math.max(0, event.estimatedTokensAfter),
+                    estimatedInputTokensSaved: Math.max(
+                        0,
+                        event.estimatedTokensBefore - event.estimatedTokensAfter
+                    ),
+                    observedAt: createdAt,
+                });
+            }
         } catch (error) {
             logger.warn("[AnalysisTelemetryService] Failed to write context-management row", {
                 error: formatAnyError(error),
@@ -665,10 +725,62 @@ export class AnalysisTelemetryService {
         this.db = null;
         this.initialized = false;
         this.dbPath = null;
+        this.pendingRuntimeMetrics.clear();
     }
 
     public resetForTests(): void {
         this.close();
+    }
+
+    private consumePendingRuntimeMetrics(requestId: string): PendingRuntimeMetrics | undefined {
+        this.prunePendingRuntimeMetrics();
+        const metrics = this.pendingRuntimeMetrics.get(requestId);
+        if (metrics) {
+            this.pendingRuntimeMetrics.delete(requestId);
+        }
+        return metrics;
+    }
+
+    private recordRuntimeMetrics(requestId: string, metrics: PendingRuntimeMetrics): void {
+        const db = this.ensureDb();
+        const result = db.prepare(`
+            UPDATE llm_requests
+            SET
+                context_runtime_estimated_input_tokens_before = ?,
+                context_runtime_estimated_input_tokens_after = ?,
+                context_runtime_estimated_input_tokens_saved = ?
+            WHERE request_id = ?
+        `).run(
+            metrics.estimatedInputTokensBefore,
+            metrics.estimatedInputTokensAfter,
+            metrics.estimatedInputTokensSaved,
+            requestId
+        );
+
+        if (getStatementChanges(result) > 0) {
+            this.pendingRuntimeMetrics.delete(requestId);
+            return;
+        }
+
+        this.pendingRuntimeMetrics.set(requestId, metrics);
+        this.prunePendingRuntimeMetrics(metrics.observedAt);
+    }
+
+    private prunePendingRuntimeMetrics(now = Date.now()): void {
+        for (const [requestId, metrics] of this.pendingRuntimeMetrics) {
+            if (now - metrics.observedAt <= PENDING_RUNTIME_METRICS_TTL_MS) {
+                break;
+            }
+            this.pendingRuntimeMetrics.delete(requestId);
+        }
+
+        while (this.pendingRuntimeMetrics.size > MAX_PENDING_RUNTIME_METRICS) {
+            const oldest = this.pendingRuntimeMetrics.keys().next().value;
+            if (!oldest) {
+                break;
+            }
+            this.pendingRuntimeMetrics.delete(oldest);
+        }
     }
 
     private finalizeRequestSuccess(
@@ -788,6 +900,20 @@ export class AnalysisTelemetryService {
             throw new Error("[AnalysisTelemetryService] Database not initialized.");
         }
 
+        this.createBaseSchema();
+        const previousVersion = this.getSchemaVersion();
+        this.migrateSchema(previousVersion);
+        this.createIndexes();
+        this.recreateViews();
+        this.setSchemaVersion(ANALYSIS_SCHEMA_VERSION);
+    }
+
+    private createBaseSchema(): void {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
+        }
+
         db.exec(`
             CREATE TABLE IF NOT EXISTS analysis_meta (
                 key TEXT PRIMARY KEY,
@@ -822,7 +948,10 @@ export class AnalysisTelemetryService {
                 cost_usd REAL,
                 pre_context_estimated_input_tokens INTEGER,
                 sent_estimated_input_tokens INTEGER,
-                estimated_input_tokens_saved INTEGER
+                estimated_input_tokens_saved INTEGER,
+                context_runtime_estimated_input_tokens_before INTEGER,
+                context_runtime_estimated_input_tokens_after INTEGER,
+                context_runtime_estimated_input_tokens_saved INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS llm_request_messages (
@@ -909,7 +1038,16 @@ export class AnalysisTelemetryService {
                 is_open INTEGER NOT NULL DEFAULT 1,
                 dropped INTEGER NOT NULL DEFAULT 0
             );
+        `);
+    }
 
+    private createIndexes(): void {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
+        }
+
+        db.exec(`
             CREATE INDEX IF NOT EXISTS idx_llm_requests_started_at
                 ON llm_requests (started_at_ms);
             CREATE INDEX IF NOT EXISTS idx_llm_requests_grouping
@@ -934,8 +1072,23 @@ export class AnalysisTelemetryService {
                 ON message_carry_runs (thread_key, is_open);
             CREATE INDEX IF NOT EXISTS idx_message_carry_runs_started_at
                 ON message_carry_runs (first_request_started_at_ms);
+        `);
+    }
 
-            CREATE VIEW IF NOT EXISTS analysis_usage_rows AS
+    private recreateViews(): void {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
+        }
+
+        db.exec(`
+            DROP VIEW IF EXISTS analysis_usage_rows;
+            DROP VIEW IF EXISTS analysis_context_impact_rows;
+            DROP VIEW IF EXISTS analysis_rate_limit_rows;
+            DROP VIEW IF EXISTS analysis_message_carry_rows;
+            DROP VIEW IF EXISTS analysis_unfinalized_request_rows;
+
+            CREATE VIEW analysis_usage_rows AS
                 SELECT
                     request_id,
                     project_id,
@@ -962,12 +1115,21 @@ export class AnalysisTelemetryService {
                     cached_input_tokens,
                     reasoning_tokens,
                     cost_usd,
+                    context_runtime_estimated_input_tokens_before,
+                    context_runtime_estimated_input_tokens_after,
+                    context_runtime_estimated_input_tokens_saved,
                     pre_context_estimated_input_tokens,
                     sent_estimated_input_tokens,
-                    estimated_input_tokens_saved
+                    pre_context_estimated_input_tokens AS prepared_prompt_estimated_input_tokens_before,
+                    sent_estimated_input_tokens AS prepared_prompt_estimated_input_tokens_after,
+                    estimated_input_tokens_saved AS prepared_prompt_estimated_input_tokens_saved,
+                    COALESCE(
+                        context_runtime_estimated_input_tokens_saved,
+                        estimated_input_tokens_saved
+                    ) AS estimated_input_tokens_saved
                 FROM llm_requests;
 
-            CREATE VIEW IF NOT EXISTS analysis_context_impact_rows AS
+            CREATE VIEW analysis_context_impact_rows AS
                 SELECT
                     id,
                     request_id,
@@ -1011,11 +1173,11 @@ export class AnalysisTelemetryService {
                     created_at_ms
                 FROM context_management_events;
 
-            CREATE VIEW IF NOT EXISTS analysis_rate_limit_rows AS
+            CREATE VIEW analysis_rate_limit_rows AS
                 SELECT * FROM analysis_usage_rows
                 WHERE rate_limit = 1;
 
-            CREATE VIEW IF NOT EXISTS analysis_message_carry_rows AS
+            CREATE VIEW analysis_message_carry_rows AS
                 SELECT
                     run_id,
                     project_id,
@@ -1039,18 +1201,135 @@ export class AnalysisTelemetryService {
                     is_open,
                     dropped
                 FROM message_carry_runs;
+
+            CREATE VIEW analysis_unfinalized_request_rows AS
+                SELECT *
+                FROM analysis_usage_rows
+                WHERE status = 'started';
         `);
+    }
+
+    private getSchemaVersion(): string | undefined {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
+        }
 
         const version = db.prepare(
             "SELECT value FROM analysis_meta WHERE key = ?"
         ).get("schema_version") as { value?: string } | null;
-        if (!version || version.value !== ANALYSIS_SCHEMA_VERSION) {
-            db.prepare(`
-                INSERT INTO analysis_meta (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            `).run("schema_version", ANALYSIS_SCHEMA_VERSION);
+        return version?.value;
+    }
+
+    private setSchemaVersion(version: string): void {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
         }
+
+        db.prepare(`
+            INSERT INTO analysis_meta (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `).run("schema_version", version);
+    }
+
+    private migrateSchema(previousVersion: string | undefined): void {
+        const addedRuntimeColumns = this.ensureRequestRuntimeColumns();
+        if (addedRuntimeColumns || previousVersion !== ANALYSIS_SCHEMA_VERSION) {
+            this.backfillRuntimeMetricsFromContextEvents();
+        }
+    }
+
+    private ensureRequestRuntimeColumns(): boolean {
+        let addedColumns = false;
+
+        if (!this.hasColumn("llm_requests", "context_runtime_estimated_input_tokens_before")) {
+            this.addColumn(
+                "llm_requests",
+                "context_runtime_estimated_input_tokens_before INTEGER"
+            );
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "context_runtime_estimated_input_tokens_after")) {
+            this.addColumn(
+                "llm_requests",
+                "context_runtime_estimated_input_tokens_after INTEGER"
+            );
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "context_runtime_estimated_input_tokens_saved")) {
+            this.addColumn(
+                "llm_requests",
+                "context_runtime_estimated_input_tokens_saved INTEGER"
+            );
+            addedColumns = true;
+        }
+
+        return addedColumns;
+    }
+
+    private hasColumn(tableName: string, columnName: string): boolean {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
+        }
+
+        const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: string }>;
+        return columns.some((column) => column.name === columnName);
+    }
+
+    private addColumn(tableName: string, columnDefinition: string): void {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
+        }
+
+        db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnDefinition}`);
+    }
+
+    private backfillRuntimeMetricsFromContextEvents(): void {
+        const db = this.db;
+        if (!db) {
+            throw new Error("[AnalysisTelemetryService] Database not initialized.");
+        }
+
+        db.exec(`
+            UPDATE llm_requests
+            SET
+                context_runtime_estimated_input_tokens_before = (
+                    SELECT estimated_tokens_before
+                    FROM context_management_events
+                    WHERE request_id = llm_requests.request_id
+                      AND event_type = 'runtime-complete'
+                    ORDER BY id DESC
+                    LIMIT 1
+                ),
+                context_runtime_estimated_input_tokens_after = (
+                    SELECT estimated_tokens_after
+                    FROM context_management_events
+                    WHERE request_id = llm_requests.request_id
+                      AND event_type = 'runtime-complete'
+                    ORDER BY id DESC
+                    LIMIT 1
+                ),
+                context_runtime_estimated_input_tokens_saved = (
+                    SELECT estimated_tokens_saved
+                    FROM context_management_events
+                    WHERE request_id = llm_requests.request_id
+                      AND event_type = 'runtime-complete'
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+            WHERE EXISTS (
+                SELECT 1
+                FROM context_management_events
+                WHERE request_id = llm_requests.request_id
+                  AND event_type = 'runtime-complete'
+            )
+        `);
     }
 
     private maybeSweepRetention(retentionDays: number): void {

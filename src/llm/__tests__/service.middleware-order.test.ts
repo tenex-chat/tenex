@@ -242,12 +242,12 @@ describe("explicit request preparation order", () => {
             request.analysisRequestSeed?.requestId
         );
         expect(
-            request.analysisRequestSeed?.contextMetrics?.preContextEstimatedInputTokens
+            request.analysisRequestSeed?.preparedPromptMetrics?.preContextEstimatedInputTokens
         ).toBeGreaterThan(
-            request.analysisRequestSeed?.contextMetrics?.sentEstimatedInputTokens ?? 0
+            request.analysisRequestSeed?.preparedPromptMetrics?.sentEstimatedInputTokens ?? 0
         );
         expect(
-            request.analysisRequestSeed?.contextMetrics?.estimatedInputTokensSaved
+            request.analysisRequestSeed?.preparedPromptMetrics?.estimatedInputTokensSaved
         ).toBeGreaterThan(0);
     });
 });

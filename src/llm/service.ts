@@ -561,6 +561,15 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 await handle.reportError({ completedAt, error });
             }
         };
+        const countUnfinalizedStepHandles = (): number => {
+            let count = 0;
+            for (const stepNumber of stepAnalysisHandles.keys()) {
+                if (!finalizedAnalysisSteps.has(stepNumber)) {
+                    count++;
+                }
+            }
+            return count;
+        };
         const openStepAnalysis = async (params: {
             stepNumber: number;
             startedAt: number;
@@ -859,6 +868,31 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 }
                 await finalizeOpenStepErrors(onErrorCapture);
                 return { success: false, error: onErrorCapture, chunkCount, lastChunkType };
+            }
+
+            const remainingStepHandles = countUnfinalizedStepHandles();
+            if (!finishPartSeen || remainingStepHandles > 0) {
+                const reasons: string[] = [];
+                if (!finishPartSeen) {
+                    reasons.push("missing finish part");
+                }
+                if (remainingStepHandles > 0) {
+                    reasons.push(`missing step finish for ${remainingStepHandles} analysis step(s)`);
+                }
+
+                const incompleteError = new Error(
+                    `[LLMService] Incomplete stream: ${reasons.join("; ")}.`
+                );
+                activeSpan?.addEvent("llm.stream_incomplete_error", {
+                    "error.message": incompleteError.message,
+                    "stream.chunk_count": chunkCount,
+                    "stream.last_chunk_type": lastChunkType ?? "none",
+                    "stream.finish_part_seen": finishPartSeen,
+                    "stream.unfinalized_step_handles": remainingStepHandles,
+                    "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
+                });
+                await finalizeOpenStepErrors(incompleteError);
+                return { success: false, error: incompleteError, chunkCount, lastChunkType };
             }
 
             return { success: true };

@@ -157,7 +157,7 @@ export class AnalysisQueryService {
 
         return db.prepare(`
             SELECT
-                request_id,
+                request_id AS requestId,
                 project_id AS projectId,
                 conversation_id AS conversationId,
                 agent_slug AS agentSlug,
@@ -215,6 +215,125 @@ export class AnalysisQueryService {
             WHERE ${clauses.join(" AND ")}
             ${groupByClause}
             ORDER BY rateLimitCount DESC
+        `).all(...values) as Array<Record<string, number | string | null>>;
+    }
+
+    public listUnfinalizedRequests(options: {
+        since: number;
+        until?: number;
+        olderThanMs?: number;
+        projectIds?: string[];
+        providers?: string[];
+        agentSlugs?: string[];
+        includeUnscopedProjects?: boolean;
+        limit?: number;
+    }): Array<Record<string, number | string | null>> {
+        const db = this.ensureDb();
+        if (!db) {
+            return [];
+        }
+
+        const now = Date.now();
+        const clauses = [
+            "started_at_ms >= ?",
+        ];
+        const values: Array<string | number> = [now, options.since];
+
+        if (options.until !== undefined) {
+            clauses.push("started_at_ms <= ?");
+            values.push(options.until);
+        }
+
+        if (options.olderThanMs !== undefined) {
+            clauses.push("started_at_ms <= ?");
+            values.push(now - options.olderThanMs);
+        }
+
+        addInClause(clauses, values, "project_id", options.projectIds);
+        addInClause(clauses, values, "provider", options.providers);
+        addInClause(clauses, values, "agent_slug", options.agentSlugs);
+
+        if (!options.includeUnscopedProjects) {
+            clauses.push("project_id IS NOT NULL");
+        }
+
+        const limit = options.limit ?? 100;
+        values.push(limit);
+
+        return db.prepare(`
+            SELECT
+                request_id AS requestId,
+                project_id AS projectId,
+                conversation_id AS conversationId,
+                agent_slug AS agentSlug,
+                provider,
+                model,
+                operation_kind AS operationKind,
+                started_at_ms AS startedAt,
+                (? - started_at_ms) AS ageMs
+            FROM analysis_unfinalized_request_rows
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY started_at_ms ASC
+            LIMIT ?
+        `).all(...values) as Array<Record<string, number | string | null>>;
+    }
+
+    public listMessageCarryRuns(options: {
+        since: number;
+        until?: number;
+        projectIds?: string[];
+        agentSlugs?: string[];
+        includeSystem?: boolean;
+        openOnly?: boolean;
+        limit?: number;
+    }): Array<Record<string, number | string | null>> {
+        const db = this.ensureDb();
+        if (!db) {
+            return [];
+        }
+
+        const clauses = [
+            "last_request_started_at_ms >= ?",
+        ];
+        const values: Array<string | number> = [options.since];
+
+        if (options.until !== undefined) {
+            clauses.push("last_request_started_at_ms <= ?");
+            values.push(options.until);
+        }
+
+        addInClause(clauses, values, "project_id", options.projectIds);
+        addInClause(clauses, values, "agent_slug", options.agentSlugs);
+
+        if (!options.includeSystem) {
+            clauses.push("classification != 'system'");
+        }
+
+        if (options.openOnly) {
+            clauses.push("is_open = 1");
+        }
+
+        const limit = options.limit ?? 100;
+        values.push(limit);
+
+        return db.prepare(`
+            SELECT
+                run_id AS runId,
+                project_id AS projectId,
+                conversation_id AS conversationId,
+                agent_slug AS agentSlug,
+                classification,
+                estimated_tokens AS estimatedTokens,
+                carry_request_count AS carryRequestCount,
+                is_open AS isOpen,
+                dropped,
+                preview,
+                first_request_started_at_ms AS firstRequestStartedAt,
+                last_request_started_at_ms AS lastRequestStartedAt
+            FROM analysis_message_carry_rows
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY carry_request_count DESC, estimated_tokens DESC
+            LIMIT ?
         `).all(...values) as Array<Record<string, number | string | null>>;
     }
 
@@ -287,6 +406,12 @@ export class AnalysisQueryService {
                 SUM(COALESCE(input_no_cache_tokens, 0)) AS noCacheInputTokens,
                 SUM(COALESCE(input_cache_read_tokens, 0)) AS cacheReadInputTokens,
                 SUM(COALESCE(input_cache_write_tokens, 0)) AS cacheWriteInputTokens,
+                SUM(COALESCE(context_runtime_estimated_input_tokens_before, 0)) AS contextRuntimeEstimatedInputTokensBefore,
+                SUM(COALESCE(context_runtime_estimated_input_tokens_after, 0)) AS contextRuntimeEstimatedInputTokensAfter,
+                SUM(COALESCE(context_runtime_estimated_input_tokens_saved, 0)) AS contextRuntimeEstimatedInputTokensSaved,
+                SUM(COALESCE(prepared_prompt_estimated_input_tokens_before, 0)) AS preparedPromptEstimatedInputTokensBefore,
+                SUM(COALESCE(prepared_prompt_estimated_input_tokens_after, 0)) AS preparedPromptEstimatedInputTokensAfter,
+                SUM(COALESCE(prepared_prompt_estimated_input_tokens_saved, 0)) AS preparedPromptEstimatedInputTokensSaved,
                 SUM(COALESCE(estimated_input_tokens_saved, 0)) AS estimatedInputTokensSaved
             FROM analysis_usage_rows
             WHERE ${clauses.join(" AND ")}

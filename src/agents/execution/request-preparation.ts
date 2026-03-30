@@ -102,7 +102,7 @@ export async function prepareLLMRequest(options: {
         | undefined;
     const preContextEstimatedInputTokens = estimatePromptTokens(preparedMessages);
     const analysisRequestSeed = analysisTelemetryService.createRequestSeed({
-        contextMetrics: {
+        preparedPromptMetrics: {
             preContextEstimatedInputTokens,
         },
     });
@@ -183,7 +183,7 @@ export async function prepareLLMRequest(options: {
         analysisRequestSeed: analysisRequestSeed
             ? {
                   ...analysisRequestSeed,
-                  contextMetrics: {
+                  preparedPromptMetrics: {
                       preContextEstimatedInputTokens,
                       sentEstimatedInputTokens,
                       estimatedInputTokensSaved: Math.max(

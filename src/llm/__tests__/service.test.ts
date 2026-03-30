@@ -1210,6 +1210,98 @@ describe("LLMService stream()", () => {
         expect(reportErrors[0]).not.toHaveBeenCalled();
         expect(reportErrors[1]).not.toHaveBeenCalled();
     });
+
+    test("treats a stream without a finish part as an error and finalizes open analysis steps", async () => {
+        const reportSuccess = mock(async () => {});
+        const reportError = mock(async () => {});
+        const openRequest = mock(async () => ({
+            requestId: "request-1",
+            telemetryMetadata: {},
+            reportSuccess,
+            reportError,
+        }));
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent",
+            "conv-1",
+            "proj-1",
+            "agent-1",
+            { openRequest }
+        );
+
+        mockStreamText.mockImplementation((options: any) => ({
+            fullStream: (async function* () {
+                await options.prepareStep?.({
+                    messages: options.messages,
+                    stepNumber: 0,
+                    steps: [],
+                });
+                yield { type: "text-delta", textDelta: "hello" };
+            })(),
+        }));
+
+        await expect(service.stream(
+            [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+            {},
+            {}
+        )).rejects.toThrow("Incomplete stream");
+
+        expect(reportSuccess).not.toHaveBeenCalled();
+        expect(reportError).toHaveBeenCalledTimes(1);
+    });
+
+    test("treats a stream with a finish part but missing step finish as an error", async () => {
+        const reportSuccess = mock(async () => {});
+        const reportError = mock(async () => {});
+        const openRequest = mock(async () => ({
+            requestId: "request-1",
+            telemetryMetadata: {},
+            reportSuccess,
+            reportError,
+        }));
+        const service = new LLMService(
+            createMockAccessor(mockRegistry),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent",
+            "conv-1",
+            "proj-1",
+            "agent-1",
+            { openRequest }
+        );
+
+        mockStreamText.mockImplementation((options: any) => ({
+            fullStream: (async function* () {
+                await options.prepareStep?.({
+                    messages: options.messages,
+                    stepNumber: 0,
+                    steps: [],
+                });
+                yield { type: "finish", finishReason: "stop" };
+            })(),
+        }));
+
+        await expect(service.stream(
+            [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+            {},
+            {}
+        )).rejects.toThrow("Incomplete stream");
+
+        expect(reportSuccess).not.toHaveBeenCalled();
+        expect(reportError).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe("LLMService createFinishHandler", () => {

@@ -6,10 +6,10 @@ import { config as configService } from "@/services/ConfigService";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SqliteDatabase = any;
 
-function createReadonlyDb(dbPath: string): SqliteDatabase {
+function createDb(dbPath: string, readonly = false): SqliteDatabase {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Database } = require("bun:sqlite");
-    return new Database(dbPath, { readonly: true });
+    return new Database(dbPath, readonly ? { readonly: true } : undefined);
 }
 
 function buildUserMessage(text: string, id: string, eventId: string) {
@@ -19,6 +19,251 @@ function buildUserMessage(text: string, id: string, eventId: string) {
         eventId,
         content: [{ type: "text" as const, text }],
     };
+}
+
+function buildSystemMessage(text: string, id: string, eventId: string) {
+    return {
+        role: "system" as const,
+        id,
+        eventId,
+        content: text,
+    };
+}
+
+function recordRuntimeComplete(params: {
+    requestId: string;
+    projectId: string;
+    conversationId: string;
+    agentSlug: string;
+    agentId: string;
+    provider: string;
+    model: string;
+    before: number;
+    after: number;
+}): void {
+    analysisTelemetryService.recordContextManagementEvent(
+        {
+            type: "runtime-complete",
+            estimatedTokensBefore: params.before,
+            estimatedTokensAfter: params.after,
+            removedToolExchangesTotal: 0,
+            pinnedToolCallIdsTotal: 0,
+            messageCountBefore: 4,
+            messageCountAfter: 3,
+            payloads: [],
+        } as never,
+        {
+            requestId: params.requestId,
+            projectId: params.projectId,
+            conversationId: params.conversationId,
+            agentSlug: params.agentSlug,
+            agentId: params.agentId,
+            provider: params.provider,
+            model: params.model,
+        }
+    );
+}
+
+function recordStrategyComplete(params: {
+    requestId: string;
+    projectId: string;
+    conversationId: string;
+    agentSlug: string;
+    agentId: string;
+    provider: string;
+    model: string;
+    strategyName: string;
+    before: number;
+    after: number;
+    forcedToolChoice?: boolean;
+}): void {
+    analysisTelemetryService.recordContextManagementEvent(
+        {
+            type: "strategy-complete",
+            strategyName: params.strategyName,
+            outcome: "applied",
+            reason: "test",
+            estimatedTokensBefore: params.before,
+            estimatedTokensAfter: params.after,
+            workingTokenBudget: 200_000,
+            removedToolExchangesDelta: 0,
+            removedToolExchangesTotal: 0,
+            pinnedToolCallIdsDelta: 0,
+            messageCountBefore: 4,
+            messageCountAfter: 3,
+            strategyPayload: {
+                kind: "scratchpad",
+                forcedToolChoice: params.forcedToolChoice ?? false,
+                currentTokens: params.after,
+            },
+        } as never,
+        {
+            requestId: params.requestId,
+            projectId: params.projectId,
+            conversationId: params.conversationId,
+            agentSlug: params.agentSlug,
+            agentId: params.agentId,
+            provider: params.provider,
+            model: params.model,
+        }
+    );
+}
+
+function createLegacyV1Database(dbPath: string, startedAt: number): void {
+    const db = createDb(dbPath);
+
+    db.exec(`
+        CREATE TABLE analysis_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE llm_requests (
+            request_id TEXT PRIMARY KEY,
+            project_id TEXT,
+            conversation_id TEXT,
+            agent_slug TEXT,
+            agent_id TEXT,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            operation_kind TEXT NOT NULL,
+            started_at_ms INTEGER NOT NULL,
+            completed_at_ms INTEGER,
+            status TEXT NOT NULL,
+            finish_reason TEXT,
+            error_message TEXT,
+            rate_limit INTEGER NOT NULL DEFAULT 0,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            total_tokens INTEGER,
+            input_no_cache_tokens INTEGER,
+            input_cache_read_tokens INTEGER,
+            input_cache_write_tokens INTEGER,
+            output_text_tokens INTEGER,
+            output_reasoning_tokens INTEGER,
+            cached_input_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            cost_usd REAL,
+            pre_context_estimated_input_tokens INTEGER,
+            sent_estimated_input_tokens INTEGER,
+            estimated_input_tokens_saved INTEGER
+        );
+
+        CREATE TABLE context_management_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT,
+            project_id TEXT,
+            conversation_id TEXT,
+            agent_slug TEXT,
+            agent_id TEXT,
+            provider TEXT,
+            model TEXT,
+            event_type TEXT NOT NULL,
+            strategy_name TEXT,
+            tool_name TEXT,
+            tool_call_id TEXT,
+            outcome TEXT,
+            reason TEXT,
+            estimated_tokens_before INTEGER,
+            estimated_tokens_after INTEGER,
+            estimated_tokens_saved INTEGER,
+            working_token_budget INTEGER,
+            removed_tool_exchanges_delta INTEGER,
+            removed_tool_exchanges_total INTEGER,
+            pinned_tool_call_ids_delta INTEGER,
+            pinned_tool_call_ids_total INTEGER,
+            message_count_before INTEGER,
+            message_count_after INTEGER,
+            placeholder_tool_result_count INTEGER,
+            placeholder_tool_input_count INTEGER,
+            messages_summarized_count INTEGER,
+            summary_char_count INTEGER,
+            entry_count INTEGER,
+            entry_char_count INTEGER,
+            forced_tool_choice INTEGER,
+            current_prompt_tokens INTEGER,
+            warning_threshold_tokens INTEGER,
+            utilization_percent REAL,
+            raw_estimate INTEGER,
+            actual_tokens INTEGER,
+            previous_factor REAL,
+            new_factor REAL,
+            sample_count INTEGER,
+            payload_json TEXT,
+            created_at_ms INTEGER NOT NULL
+        );
+    `);
+
+    db.prepare("INSERT INTO analysis_meta (key, value) VALUES (?, ?)").run(
+        "schema_version",
+        "1"
+    );
+
+    db.prepare(`
+        INSERT INTO llm_requests (
+            request_id,
+            project_id,
+            conversation_id,
+            agent_slug,
+            agent_id,
+            provider,
+            model,
+            operation_kind,
+            started_at_ms,
+            completed_at_ms,
+            status,
+            pre_context_estimated_input_tokens,
+            sent_estimated_input_tokens,
+            estimated_input_tokens_saved
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        "legacy-request-1",
+        "project-legacy",
+        "conversation-legacy",
+        "executor",
+        "agent-legacy",
+        "anthropic",
+        "claude-opus",
+        "stream",
+        startedAt,
+        startedAt + 200,
+        "success",
+        120,
+        110,
+        10
+    );
+
+    db.prepare(`
+        INSERT INTO context_management_events (
+            request_id,
+            project_id,
+            conversation_id,
+            agent_slug,
+            agent_id,
+            provider,
+            model,
+            event_type,
+            estimated_tokens_before,
+            estimated_tokens_after,
+            estimated_tokens_saved,
+            created_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        "legacy-request-1",
+        "project-legacy",
+        "conversation-legacy",
+        "executor",
+        "agent-legacy",
+        "anthropic",
+        "claude-opus",
+        "runtime-complete",
+        300,
+        180,
+        120,
+        startedAt + 10
+    );
+
+    db.close(false);
 }
 
 describe("Analysis telemetry services", () => {
@@ -53,7 +298,7 @@ describe("Analysis telemetry services", () => {
         await rm(testDir, { recursive: true, force: true });
     });
 
-    test("persists request, context, carry, and rate-limit rows", async () => {
+    test("persists canonical runtime metrics separately from prepared prompt metrics", async () => {
         const baseTime = Date.now();
         const baseContext = {
             projectId: "project-alpha",
@@ -62,6 +307,15 @@ describe("Analysis telemetry services", () => {
             agentId: "agent-pubkey-1",
         };
         const largeMessage = buildUserMessage(`Large prompt ${"x".repeat(400)}`, "msg-1", "evt-1");
+
+        recordRuntimeComplete({
+            requestId: "request-1",
+            provider: "anthropic",
+            model: "claude-opus",
+            before: 140,
+            after: 100,
+            ...baseContext,
+        });
 
         const handle1 = analysisTelemetryService.openRequest({
             operationKind: "stream",
@@ -74,44 +328,25 @@ describe("Analysis telemetry services", () => {
                 telemetryMetadata: {
                     "analysis.request_id": "request-1",
                 },
-                contextMetrics: {
+                preparedPromptMetrics: {
                     preContextEstimatedInputTokens: 120,
-                    sentEstimatedInputTokens: 80,
-                    estimatedInputTokensSaved: 40,
+                    sentEstimatedInputTokens: 90,
+                    estimatedInputTokensSaved: 30,
                 },
             },
             baseContext,
         });
 
-        expect(handle1?.requestId).toBe("request-1");
-
-        analysisTelemetryService.recordContextManagementEvent(
-            {
-                type: "strategy-complete",
-                strategyName: "scratchpad",
-                outcome: "applied",
-                reason: "forced-threshold",
-                estimatedTokensBefore: 120,
-                estimatedTokensAfter: 80,
-                workingTokenBudget: 200,
-                removedToolExchangesDelta: 1,
-                removedToolExchangesTotal: 1,
-                pinnedToolCallIdsDelta: 0,
-                messageCountBefore: 4,
-                messageCountAfter: 3,
-                strategyPayload: {
-                    kind: "scratchpad",
-                    forcedToolChoice: true,
-                    currentTokens: 120,
-                },
-            } as never,
-            {
-                requestId: "request-1",
-                provider: "anthropic",
-                model: "claude-opus",
-                ...baseContext,
-            }
-        );
+        recordStrategyComplete({
+            requestId: "request-1",
+            provider: "anthropic",
+            model: "claude-opus",
+            strategyName: "scratchpad",
+            before: 140,
+            after: 100,
+            forcedToolChoice: true,
+            ...baseContext,
+        });
 
         await handle1?.reportSuccess({
             completedAt: baseTime + 1_500,
@@ -144,8 +379,22 @@ describe("Analysis telemetry services", () => {
                 telemetryMetadata: {
                     "analysis.request_id": "request-2",
                 },
+                preparedPromptMetrics: {
+                    preContextEstimatedInputTokens: 200,
+                    sentEstimatedInputTokens: 170,
+                    estimatedInputTokensSaved: 30,
+                },
             },
             baseContext,
+        });
+
+        recordRuntimeComplete({
+            requestId: "request-2",
+            provider: "anthropic",
+            model: "claude-opus",
+            before: 220,
+            after: 150,
+            ...baseContext,
         });
 
         await handle2?.reportError({
@@ -180,7 +429,7 @@ describe("Analysis telemetry services", () => {
             },
         });
 
-        const db = createReadonlyDb(dbPath);
+        const db = createDb(dbPath, true);
 
         const requestRows = db.prepare(`
             SELECT
@@ -188,41 +437,99 @@ describe("Analysis telemetry services", () => {
                 provider,
                 status,
                 rate_limit,
-                input_cache_write_tokens,
                 pre_context_estimated_input_tokens,
-                estimated_input_tokens_saved
+                sent_estimated_input_tokens,
+                estimated_input_tokens_saved,
+                context_runtime_estimated_input_tokens_before,
+                context_runtime_estimated_input_tokens_after,
+                context_runtime_estimated_input_tokens_saved,
+                input_cache_write_tokens
             FROM llm_requests
             ORDER BY started_at_ms
         `).all() as Array<Record<string, number | string | null>>;
-        expect(requestRows).toHaveLength(3);
-        expect(requestRows[0]).toMatchObject({
+        expect(requestRows).toEqual([
+            {
+                request_id: "request-1",
+                provider: "anthropic",
+                status: "success",
+                rate_limit: 0,
+                pre_context_estimated_input_tokens: 120,
+                sent_estimated_input_tokens: 90,
+                estimated_input_tokens_saved: 30,
+                context_runtime_estimated_input_tokens_before: 140,
+                context_runtime_estimated_input_tokens_after: 100,
+                context_runtime_estimated_input_tokens_saved: 40,
+                input_cache_write_tokens: 70,
+            },
+            {
+                request_id: "request-2",
+                provider: "anthropic",
+                status: "error",
+                rate_limit: 1,
+                pre_context_estimated_input_tokens: 200,
+                sent_estimated_input_tokens: 170,
+                estimated_input_tokens_saved: 30,
+                context_runtime_estimated_input_tokens_before: 220,
+                context_runtime_estimated_input_tokens_after: 150,
+                context_runtime_estimated_input_tokens_saved: 70,
+                input_cache_write_tokens: null,
+            },
+            {
+                request_id: "request-3",
+                provider: "openrouter",
+                status: "success",
+                rate_limit: 0,
+                pre_context_estimated_input_tokens: null,
+                sent_estimated_input_tokens: null,
+                estimated_input_tokens_saved: null,
+                context_runtime_estimated_input_tokens_before: null,
+                context_runtime_estimated_input_tokens_after: null,
+                context_runtime_estimated_input_tokens_saved: null,
+                input_cache_write_tokens: null,
+            },
+        ]);
+
+        const messageRows = db.prepare(`
+            SELECT request_id, classification, source_event_id, preview, full_text
+            FROM llm_request_messages
+            ORDER BY request_id, message_index
+        `).all() as Array<Record<string, number | string | null>>;
+        expect(messageRows[0]).toMatchObject({
             request_id: "request-1",
-            provider: "anthropic",
-            status: "success",
-            input_cache_write_tokens: 70,
-            pre_context_estimated_input_tokens: 120,
-            estimated_input_tokens_saved: 40,
+            classification: "user",
+            source_event_id: "evt-1",
+            full_text: null,
         });
-        expect(requestRows[1]).toMatchObject({
-            request_id: "request-2",
-            status: "error",
-            rate_limit: 1,
-        });
+        expect(String(messageRows[0]?.preview)).toContain("Large prompt");
 
         const contextRows = db.prepare(`
-            SELECT strategy_name, estimated_tokens_saved, forced_tool_choice
+            SELECT request_id, event_type, strategy_name, estimated_tokens_saved
             FROM context_management_events
+            ORDER BY id
         `).all() as Array<Record<string, number | string | null>>;
         expect(contextRows).toEqual([
             {
+                request_id: "request-1",
+                event_type: "runtime-complete",
+                strategy_name: null,
+                estimated_tokens_saved: 40,
+            },
+            {
+                request_id: "request-1",
+                event_type: "strategy-complete",
                 strategy_name: "scratchpad",
                 estimated_tokens_saved: 40,
-                forced_tool_choice: 1,
+            },
+            {
+                request_id: "request-2",
+                event_type: "runtime-complete",
+                strategy_name: null,
+                estimated_tokens_saved: 70,
             },
         ]);
 
         const carryRows = db.prepare(`
-            SELECT carry_request_count, dropped, is_open, agent_slug
+            SELECT carry_request_count, dropped, is_open, classification, agent_slug
             FROM message_carry_runs
         `).all() as Array<Record<string, number | string | null>>;
         expect(carryRows).toEqual([
@@ -230,19 +537,15 @@ describe("Analysis telemetry services", () => {
                 carry_request_count: 2,
                 dropped: 1,
                 is_open: 0,
+                classification: "user",
                 agent_slug: "executor",
             },
         ]);
 
-        const viewCount = db.prepare("SELECT COUNT(*) AS count FROM analysis_usage_rows").get() as {
-            count: number;
-        };
-        expect(viewCount.count).toBe(3);
-
         db.close(false);
     });
 
-    test("aggregates usage, savings, and rate limits over explicit windows", async () => {
+    test("aggregates canonical runtime savings separately from prepared prompt savings", async () => {
         const baseTime = Date.now();
         const records = [
             {
@@ -251,9 +554,13 @@ describe("Analysis telemetry services", () => {
                 model: "claude-opus",
                 projectId: "project-alpha",
                 agentSlug: "executor",
+                agentId: "executor-pubkey",
                 startedAt: baseTime + 1_000,
                 usage: { inputTokens: 100, outputTokens: 40, totalTokens: 140 },
-                saved: 40,
+                runtimeBefore: 150,
+                runtimeAfter: 100,
+                preparedBefore: 135,
+                preparedAfter: 100,
                 strategy: "scratchpad",
             },
             {
@@ -262,9 +569,13 @@ describe("Analysis telemetry services", () => {
                 model: "gpt-4.1",
                 projectId: "project-alpha",
                 agentSlug: "executor",
+                agentId: "executor-pubkey",
                 startedAt: baseTime + 2_000,
                 usage: { inputTokens: 60, outputTokens: 20, totalTokens: 80 },
-                saved: 10,
+                runtimeBefore: 70,
+                runtimeAfter: 60,
+                preparedBefore: 67,
+                preparedAfter: 60,
                 strategy: "tool-result-decay",
             },
             {
@@ -273,68 +584,73 @@ describe("Analysis telemetry services", () => {
                 model: "claude-opus",
                 projectId: "project-beta",
                 agentSlug: "reviewer",
+                agentId: "reviewer-pubkey",
                 startedAt: baseTime + 3_000,
                 usage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 },
-                saved: 15,
+                runtimeBefore: 45,
+                runtimeAfter: 30,
+                preparedBefore: 39,
+                preparedAfter: 30,
                 strategy: "scratchpad",
             },
         ] as const;
 
         for (const record of records) {
+            recordRuntimeComplete({
+                requestId: record.requestId,
+                projectId: record.projectId,
+                conversationId: `${record.projectId}-conversation`,
+                agentSlug: record.agentSlug,
+                agentId: record.agentId,
+                provider: record.provider,
+                model: record.model,
+                before: record.runtimeBefore,
+                after: record.runtimeAfter,
+            });
+
             const handle = analysisTelemetryService.openRequest({
                 operationKind: "stream",
                 startedAt: record.startedAt,
                 provider: record.provider,
                 model: record.model,
-                messages: [buildUserMessage(`prompt-${record.requestId}`, record.requestId, record.requestId) as never],
+                messages: [
+                    buildUserMessage(
+                        `prompt-${record.requestId}`,
+                        record.requestId,
+                        `${record.requestId}-event`
+                    ) as never,
+                ],
                 requestSeed: {
                     requestId: record.requestId,
                     telemetryMetadata: {
                         "analysis.request_id": record.requestId,
                     },
-                    contextMetrics: {
-                        preContextEstimatedInputTokens: record.usage.inputTokens + record.saved,
-                        sentEstimatedInputTokens: record.usage.inputTokens,
-                        estimatedInputTokensSaved: record.saved,
+                    preparedPromptMetrics: {
+                        preContextEstimatedInputTokens: record.preparedBefore,
+                        sentEstimatedInputTokens: record.preparedAfter,
+                        estimatedInputTokensSaved: record.preparedBefore - record.preparedAfter,
                     },
                 },
                 baseContext: {
                     projectId: record.projectId,
                     conversationId: `${record.projectId}-conversation`,
                     agentSlug: record.agentSlug,
-                    agentId: `${record.agentSlug}-pubkey`,
+                    agentId: record.agentId,
                 },
             });
 
-            analysisTelemetryService.recordContextManagementEvent(
-                {
-                    type: "strategy-complete",
-                    strategyName: record.strategy,
-                    outcome: "applied",
-                    reason: "test",
-                    estimatedTokensBefore: record.usage.inputTokens + record.saved,
-                    estimatedTokensAfter: record.usage.inputTokens,
-                    workingTokenBudget: 200,
-                    removedToolExchangesDelta: 0,
-                    removedToolExchangesTotal: 0,
-                    pinnedToolCallIdsDelta: 0,
-                    messageCountBefore: 3,
-                    messageCountAfter: 2,
-                    strategyPayload: {
-                        kind: "scratchpad",
-                        forcedToolChoice: false,
-                    },
-                } as never,
-                {
-                    requestId: record.requestId,
-                    projectId: record.projectId,
-                    conversationId: `${record.projectId}-conversation`,
-                    agentSlug: record.agentSlug,
-                    agentId: `${record.agentSlug}-pubkey`,
-                    provider: record.provider,
-                    model: record.model,
-                }
-            );
+            recordStrategyComplete({
+                requestId: record.requestId,
+                projectId: record.projectId,
+                conversationId: `${record.projectId}-conversation`,
+                agentSlug: record.agentSlug,
+                agentId: record.agentId,
+                provider: record.provider,
+                model: record.model,
+                strategyName: record.strategy,
+                before: record.runtimeBefore,
+                after: record.runtimeAfter,
+            });
 
             await handle?.reportSuccess({
                 completedAt: record.startedAt + 500,
@@ -369,6 +685,7 @@ describe("Analysis telemetry services", () => {
 
         const since = baseTime;
         const until = baseTime + 10_000;
+
         const usageByProvider = analysisQueryService.getUsageTotals({
             since,
             until,
@@ -379,12 +696,16 @@ describe("Analysis telemetry services", () => {
                 provider: "anthropic",
                 requestCount: 3,
                 inputTokens: 130,
-                estimatedInputTokensSaved: 55,
+                contextRuntimeEstimatedInputTokensSaved: 65,
+                preparedPromptEstimatedInputTokensSaved: 44,
+                estimatedInputTokensSaved: 65,
             }),
             expect.objectContaining({
                 provider: "openrouter",
                 requestCount: 1,
                 inputTokens: 60,
+                contextRuntimeEstimatedInputTokensSaved: 10,
+                preparedPromptEstimatedInputTokensSaved: 7,
                 estimatedInputTokensSaved: 10,
             }),
         ]);
@@ -399,11 +720,13 @@ describe("Analysis telemetry services", () => {
                 projectId: "project-alpha",
                 agentSlug: "executor",
                 inputTokens: 160,
+                estimatedInputTokensSaved: 60,
             }),
             expect.objectContaining({
                 projectId: "project-beta",
                 agentSlug: "reviewer",
                 inputTokens: 30,
+                estimatedInputTokensSaved: 15,
             }),
         ]);
 
@@ -416,7 +739,7 @@ describe("Analysis telemetry services", () => {
             expect.objectContaining({
                 strategyName: "scratchpad",
                 provider: "anthropic",
-                estimatedInputTokensSaved: 55,
+                estimatedInputTokensSaved: 65,
             }),
             expect.objectContaining({
                 strategyName: "tool-result-decay",
@@ -443,10 +766,194 @@ describe("Analysis telemetry services", () => {
         });
         expect(rateLimitEvents).toEqual([
             expect.objectContaining({
-                request_id: "req-d",
+                requestId: "req-d",
                 provider: "anthropic",
                 errorMessage: "This account is rate limited",
             }),
         ]);
+    });
+
+    test("lists unfinalized requests and excludes system carry rows by default", async () => {
+        const now = Date.now();
+        const baseContext = {
+            projectId: "project-alpha",
+            conversationId: "conversation-carry",
+            agentSlug: "executor",
+            agentId: "executor-pubkey",
+        };
+        const largeSystemMessage = buildSystemMessage(
+            `System prompt ${"s".repeat(400)}`,
+            "sys-1",
+            "sys-evt-1"
+        );
+        const largeUserMessage = buildUserMessage(
+            `User prompt ${"u".repeat(400)}`,
+            "usr-1",
+            "usr-evt-1"
+        );
+
+        const firstHandle = analysisTelemetryService.openRequest({
+            operationKind: "stream",
+            startedAt: now - 20_000,
+            provider: "anthropic",
+            model: "claude-opus",
+            messages: [largeSystemMessage as never, largeUserMessage as never],
+            requestSeed: {
+                requestId: "carry-request-1",
+                telemetryMetadata: {
+                    "analysis.request_id": "carry-request-1",
+                },
+            },
+            baseContext,
+        });
+        await firstHandle?.reportSuccess({
+            completedAt: now - 19_500,
+            finishReason: "stop",
+            usage: {
+                inputTokens: 90,
+                outputTokens: 20,
+                totalTokens: 110,
+            },
+        });
+
+        analysisTelemetryService.openRequest({
+            operationKind: "stream",
+            startedAt: now - 10_000,
+            provider: "anthropic",
+            model: "claude-opus",
+            messages: [largeSystemMessage as never, largeUserMessage as never],
+            requestSeed: {
+                requestId: "carry-request-2",
+                telemetryMetadata: {
+                    "analysis.request_id": "carry-request-2",
+                },
+            },
+            baseContext,
+        });
+
+        const unfinalized = analysisQueryService.listUnfinalizedRequests({
+            since: now - 60_000,
+            olderThanMs: 1_000,
+        });
+        expect(unfinalized).toEqual([
+            expect.objectContaining({
+                requestId: "carry-request-2",
+                projectId: "project-alpha",
+                agentSlug: "executor",
+                provider: "anthropic",
+            }),
+        ]);
+        expect(Number(unfinalized[0]?.ageMs)).toBeGreaterThanOrEqual(9_000);
+
+        const carryRowsDefault = analysisQueryService.listMessageCarryRuns({
+            since: now - 60_000,
+            openOnly: true,
+        });
+        expect(carryRowsDefault).toEqual([
+            expect.objectContaining({
+                conversationId: "conversation-carry",
+                classification: "user",
+                carryRequestCount: 2,
+                isOpen: 1,
+            }),
+        ]);
+
+        const carryRowsWithSystem = analysisQueryService.listMessageCarryRuns({
+            since: now - 60_000,
+            openOnly: true,
+            includeSystem: true,
+        });
+        expect(carryRowsWithSystem).toHaveLength(2);
+        expect(
+            carryRowsWithSystem
+                .map((row) => String(row.classification))
+                .sort()
+        ).toEqual(["system", "user"]);
+    });
+
+    test("migrates v1 databases and backfills canonical runtime metrics from runtime-complete rows", async () => {
+        const startedAt = Date.now() - 5_000;
+        createLegacyV1Database(dbPath, startedAt);
+
+        const handle = analysisTelemetryService.openRequest({
+            operationKind: "stream",
+            startedAt: startedAt + 1_000,
+            provider: "openrouter",
+            model: "gpt-4.1",
+            messages: [buildUserMessage("hello", "new-msg", "new-evt") as never],
+            requestSeed: {
+                requestId: "new-request",
+                telemetryMetadata: {
+                    "analysis.request_id": "new-request",
+                },
+            },
+            baseContext: {
+                projectId: "project-new",
+                conversationId: "conversation-new",
+                agentSlug: "executor",
+                agentId: "agent-new",
+            },
+        });
+        await handle?.reportSuccess({
+            completedAt: startedAt + 1_200,
+            finishReason: "stop",
+            usage: {
+                inputTokens: 12,
+                outputTokens: 4,
+                totalTokens: 16,
+            },
+        });
+
+        const db = createDb(dbPath, true);
+
+        const columns = db.prepare("PRAGMA table_info(llm_requests)").all() as Array<{ name: string }>;
+        expect(columns.map((column) => column.name)).toEqual(
+            expect.arrayContaining([
+                "context_runtime_estimated_input_tokens_before",
+                "context_runtime_estimated_input_tokens_after",
+                "context_runtime_estimated_input_tokens_saved",
+            ])
+        );
+
+        const legacyRow = db.prepare(`
+            SELECT
+                pre_context_estimated_input_tokens,
+                sent_estimated_input_tokens,
+                estimated_input_tokens_saved,
+                context_runtime_estimated_input_tokens_before,
+                context_runtime_estimated_input_tokens_after,
+                context_runtime_estimated_input_tokens_saved
+            FROM llm_requests
+            WHERE request_id = ?
+        `).get("legacy-request-1") as Record<string, number | null>;
+        expect(legacyRow).toEqual({
+            pre_context_estimated_input_tokens: 120,
+            sent_estimated_input_tokens: 110,
+            estimated_input_tokens_saved: 10,
+            context_runtime_estimated_input_tokens_before: 300,
+            context_runtime_estimated_input_tokens_after: 180,
+            context_runtime_estimated_input_tokens_saved: 120,
+        });
+
+        const migratedViewRow = db.prepare(`
+            SELECT
+                estimated_input_tokens_saved,
+                prepared_prompt_estimated_input_tokens_saved
+            FROM analysis_usage_rows
+            WHERE request_id = ?
+        `).get("legacy-request-1") as Record<string, number | null>;
+        expect(migratedViewRow).toEqual({
+            estimated_input_tokens_saved: 120,
+            prepared_prompt_estimated_input_tokens_saved: 10,
+        });
+
+        const schemaVersion = db.prepare(`
+            SELECT value
+            FROM analysis_meta
+            WHERE key = ?
+        `).get("schema_version") as { value: string };
+        expect(schemaVersion.value).toBe("2");
+
+        db.close(false);
     });
 });

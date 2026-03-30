@@ -62,7 +62,7 @@ export interface LLMMetadata {
  */
 export type MessageInjectionCallback = (delivered: boolean) => void;
 
-export interface LLMRequestContextMetrics {
+export interface LLMPreparedPromptMetrics {
     preContextEstimatedInputTokens?: number;
     sentEstimatedInputTokens?: number;
     estimatedInputTokensSaved?: number;
@@ -71,7 +71,7 @@ export interface LLMRequestContextMetrics {
 export interface LLMRequestAnalysisSeed {
     requestId: string;
     telemetryMetadata: Record<string, string | number | boolean>;
-    contextMetrics?: LLMRequestContextMetrics;
+    preparedPromptMetrics?: LLMPreparedPromptMetrics;
 }
 
 export interface LLMAnalysisRequestHandle {
