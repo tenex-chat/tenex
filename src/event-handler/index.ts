@@ -1,20 +1,17 @@
 import { NDKKind } from "@/nostr/kinds";
-import { getToolTags } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/lib/error-formatter";
 import { type NDKEvent, NDKArticle, NDKProject } from "@nostr-dev-kit/ndk";
-import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
-import { computeToolsDelta } from "@/agents/ConfigResolver";
-import { expandFsCapabilities } from "@/agents/tool-normalization";
-import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationStore } from "../conversations/ConversationStore";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
+import { AgentConfigUpdateService } from "@/services/agents";
 import { getProjectContext } from "@/services/projects";
 import { getLocalReportStore } from "@/services/reports";
 import { config } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
 import { prefixKVStore } from "@/services/storage";
+import { tryExtractDTagFromAddress } from "@/types/project-ids";
 import { logger } from "../utils/logger";
 import { shortenConversationId, shortenOptionalEventId } from "@/utils/conversation-id";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
@@ -63,6 +60,7 @@ const IGNORED_EVENT_KINDS = [
 export class EventHandler {
     private agentExecutor!: AgentExecutor;
     private isUpdatingProject = false;
+    private readonly agentConfigUpdateService = new AgentConfigUpdateService();
 
     constructor(private readonly options: { agentExecutor?: AgentExecutor } = {}) {}
 
@@ -282,19 +280,15 @@ export class EventHandler {
             const projectContext = getProjectContext();
 
             // Extract the project a-tag if present
-            // Format: ["a", "31990:<pubkey>:<d-tag>"] or just the d-tag portion
+            // Format: ["a", "31933:<pubkey>:<d-tag>"] or just the d-tag portion
             // When present, config is scoped to that project only
             const aTag = event.tagValue("a");
             let projectDTag: string | undefined;
             if (aTag) {
-                // Parse the a-tag - format is "kind:pubkey:d-tag"
-                const parts = aTag.split(":");
-                if (parts.length >= 3) {
-                    // The d-tag is the third part (and may contain colons)
-                    projectDTag = parts.slice(2).join(":");
-                } else {
-                    // If not in standard format, treat the whole value as d-tag
-                    projectDTag = aTag;
+                projectDTag = tryExtractDTagFromAddress(aTag) ?? undefined;
+                if (!projectDTag) {
+                    const parts = aTag.split(":");
+                    projectDTag = parts.length >= 3 ? parts.slice(2).join(":") : aTag;
                 }
 
                 // Validate that the a-tag matches the current project
@@ -320,197 +314,26 @@ export class EventHandler {
                 return;
             }
 
-            // Get the agent registry from ProjectContext (single source of truth)
-            const agentRegistry = projectContext.agentRegistry;
+            const updateResult = await this.agentConfigUpdateService.applyEvent(event, { projectDTag });
+            const configUpdated = updateResult.configUpdated || updateResult.pmUpdated;
 
-            // Track if any update was made
-            let configUpdated = false;
-
-            // Extract configuration values from the event
-            const newModel = event.tagValue("model");
-            const toolTags = getToolTags(event);
-            const rawToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
-            // Expand FS capability groups: fs_read implies glob+grep, fs_write implies edit
-            const newToolNames = expandFsCapabilities(rawToolNames);
-            const skillTagValues = event.tags
-                .filter((tag) => tag[0] === "skill")
-                .map((tag) => tag[1]?.trim())
-                .filter((skillId): skillId is string => Boolean(skillId));
-            const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
-            const hasResetTag = event.tags.some((tag) => tag[0] === "reset");
-
-            if (projectDTag !== undefined) {
-                // PROJECT-SCOPED CONFIG UPDATE (new schema)
-                // Uses updateProjectOverride() which handles dedup and delta tools
-                logger.info("Processing project-scoped agent config update", {
+            logger.info(
+                updateResult.scope === "project"
+                    ? "Processing project-scoped agent config update"
+                    : "Processing global agent config update",
+                {
                     agentSlug: agent.slug,
                     projectDTag,
-                    hasModel: !!newModel,
-                    toolCount: newToolNames.length,
-                    skillCount: skillTagValues.length,
-                    hasPM: hasPMTag,
-                    hasReset: hasResetTag,
-                });
-
-                let updated: boolean;
-
-                if (hasResetTag) {
-                    // Reset tag: clear entire project override
-                    updated = await agentStorage.updateProjectOverride(
-                        agentPubkey,
-                        projectDTag,
-                        {},
-                        true // reset=true
-                    );
-                } else {
-                    // Build the project-scoped override.
-                    // Kind 24020 events carry a FULL tool list (no delta notation in events).
-                    // The storage layer stores DELTA notation for project overrides.
-                    // We must convert the full list from the event into a delta against defaults.
-                    const projectOverride: AgentProjectConfig = {};
-
-                    if (newModel) {
-                        projectOverride.model = newModel;
-                    }
-
-                    // Tool tags represent the exhaustive desired list for this project.
-                    // We convert it to a delta against the agent's default tools for compact storage.
-                    // Use RAW TAG PRESENCE (event.tags.some) not TagExtractor output length:
-                    // getToolTags() filters out empty tool names, so when an event
-                    // carries ["tool", ""] to "clear all tools", toolTags.length would be 0 and
-                    // the guard would silently skip delta computation. By checking the raw event
-                    // tags we correctly detect "tool tag is present" regardless of the name value.
-                    const hasRawToolTags = event.tags.some((tag) => tag[0] === "tool");
-                    if (hasRawToolTags) {
-                        const storedAgent = await agentStorage.loadAgent(agentPubkey);
-                        const defaultTools = storedAgent?.default?.tools ?? [];
-                        const toolsDelta = computeToolsDelta(defaultTools, newToolNames);
-                        // If delta is non-empty, store it. An empty delta means desired == defaults,
-                        // so no override is needed. Note: "desired = empty list" with non-empty
-                        // defaults produces removal entries (non-empty delta), so that IS stored.
-                        if (toolsDelta.length > 0) {
-                            projectOverride.tools = toolsDelta;
-                        }
-                    }
-
-                    const hasSkillTags = event.tags.some((tag) => tag[0] === "skill");
-                    if (hasSkillTags) {
-                        // Skill tags are a full project-scoped snapshot.
-                        // Empty-valued tags intentionally clear the project override list.
-                        projectOverride.skills = skillTagValues;
-                    }
-
-                    updated = await agentStorage.updateProjectOverride(
-                        agentPubkey,
-                        projectDTag,
-                        projectOverride
-                    );
+                    hasModel: updateResult.hasModel,
+                    toolCount: updateResult.toolCount,
+                    skillCount: updateResult.skillCount,
+                    hasPM: updateResult.hasPM,
+                    hasReset: updateResult.hasReset,
                 }
+            );
 
-                if (updated) {
-                    await agentRegistry.reloadAgent(agentPubkey);
-                    configUpdated = true;
-                    logger.info("Updated project-scoped config for agent", {
-                        agentSlug: agent.slug,
-                        projectDTag,
-                        reset: hasResetTag,
-                    });
-                }
-
-                // PM designation is handled separately from projectOverrides.
-                // - reset tag: always clears project-scoped PM (full project config wipe)
-                // - pm tag present: sets project-scoped PM to true
-                // - no pm tag (and no reset): no change to PM
-                if (hasResetTag) {
-                    // A reset clears ALL project config including PM designation
-                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag, undefined);
-                    await agentRegistry.reloadAgent(agentPubkey);
-                    configUpdated = true;
-                } else if (hasPMTag) {
-                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag, true);
-                    await agentRegistry.reloadAgent(agentPubkey);
-                    configUpdated = true;
-                }
-            } else {
-                // GLOBAL (DEFAULT) CONFIG UPDATE
-                // A 24020 with no a-tag writes to the agent's default config block
-                logger.info("Processing global agent config update", {
-                    agentSlug: agent.slug,
-                    hasModel: !!newModel,
-                    toolCount: newToolNames.length,
-                    skillCount: skillTagValues.length,
-                    hasPM: hasPMTag,
-                });
-
-                // Build the default config to write.
-                // Non-a-tagged 24020 events use PARTIAL UPDATE semantics:
-                // - Only fields explicitly present in the event are updated
-                // - Omitting a field means "no change" (not "clear")
-                // This is consistent with how project-scoped overrides work.
-                // Note: PM designation uses authoritative snapshot semantics (absence clears it)
-                // because it's a boolean flag, not a config value.
-                const defaultUpdates: AgentDefaultConfig = {};
-
-                // Only update model if a model tag is explicitly present AND has a non-empty value.
-                // event.tagValue("model") returns "" for ["model", ""], which would persist an
-                // empty string into agent.default.model if not guarded. We treat an empty model
-                // tag as a no-op so clients can safely omit/blank the model without clearing it.
-                const hasModelTag = event.tags.some((tag) => tag[0] === "model");
-                if (hasModelTag && newModel) {
-                    defaultUpdates.model = newModel;
-                }
-                // If no model tag (or empty value), leave defaultUpdates.model unset → no change
-
-                // Only update tools if tool tags are explicitly present in the event
-                const hasToolTags = event.tags.some((tag) => tag[0] === "tool");
-                if (hasToolTags) {
-                    // newToolNames may be empty (e.g. tool tags with no values), which clears defaults
-                    defaultUpdates.tools = newToolNames;
-                }
-                // If no tool tags, leave defaultUpdates.tools unset → no change
-
-                const hasSkillTags = event.tags.some((tag) => tag[0] === "skill");
-                if (hasSkillTags) {
-                    // Skill tags are a full snapshot for agent-global always-on skills.
-                    // Empty-valued tags intentionally clear the stored list.
-                    defaultUpdates.skills = skillTagValues;
-                }
-                // If no skill tags, leave defaultUpdates.skills unset → no change
-
-                // Global config update clears all project overrides
-                // This makes semantic sense: a global config update without project specifier
-                // resets the agent to have no project-specific overrides
-                const defaultUpdated = await agentStorage.updateDefaultConfig(agentPubkey, defaultUpdates, { clearProjectOverrides: true });
-
-                if (defaultUpdated) {
-                    await agentRegistry.reloadAgent(agentPubkey);
-                    configUpdated = true;
-                } else {
-                    logger.warn("Failed to update default config", {
-                        agentName: agent.slug,
-                        agentPubkey: agent.pubkey,
-                    });
-                }
-
-                // Check for PM designation tag: ["pm"] (no value, just the tag itself)
-                // Kind 24020 events are authoritative snapshots - presence of ["pm"] tag sets isPM=true,
-                // absence clears it (sets isPM=false).
-                const pmUpdated = await agentStorage.updateAgentIsPM(agentPubkey, hasPMTag);
-
-                if (pmUpdated) {
-                    await agentRegistry.reloadAgent(agentPubkey);
-                    configUpdated = true;
-                    logger.info(hasPMTag ? "Set PM designation for agent via kind 24020 event" : "Cleared PM designation for agent via kind 24020 event", {
-                        agentSlug: agent.slug,
-                        agentPubkey: agentPubkey.substring(0, 8),
-                    });
-                } else {
-                    logger.warn("Failed to update PM designation", {
-                        agentSlug: agent.slug,
-                        agentPubkey: agentPubkey.substring(0, 8),
-                        newValue: hasPMTag,
-                    });
-                }
+            if (configUpdated) {
+                await projectContext.agentRegistry.reloadAgent(agentPubkey);
             }
 
             // Immediately publish updated project status if config was changed

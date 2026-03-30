@@ -1,13 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
-import type { AgentInstance, AgentDefaultConfig } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getReplyTarget, classifyForDaemon, isConfigUpdate } from "@/nostr/AgentEventDecoder";
-import { getToolTags } from "@/nostr/TagExtractor";
 import { publishBackendProfile } from "@/nostr/AgentProfilePublisher";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
+import { AgentConfigUpdateService } from "@/services/agents";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
 import { Lockfile } from "@/utils/lockfile";
@@ -72,6 +72,7 @@ export class Daemon {
 
     // Runtime management delegated to RuntimeLifecycle
     private runtimeLifecycle: RuntimeLifecycle | null = null;
+    private readonly agentConfigUpdateService = new AgentConfigUpdateService();
 
     // Project management — keyed by d-tag (ProjectDTag)
     private knownProjects = new Map<ProjectDTag, NDKProject>();
@@ -1050,33 +1051,8 @@ export class Daemon {
             return;
         }
 
-        // Extract config from event tags
-        const newModel = event.tagValue("model");
-        const toolTags = getToolTags(event);
-        const newToolNames = toolTags.map((tool) => tool.name).filter(Boolean);
-        const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
-
-        // Build default config update (partial update semantics)
-        const defaultUpdates: AgentDefaultConfig = {};
-
-        const hasModelTag = event.tags.some((tag) => tag[0] === "model");
-        if (hasModelTag && newModel) {
-            defaultUpdates.model = newModel;
-        }
-
-        const hasToolTags = event.tags.some((tag) => tag[0] === "tool");
-        if (hasToolTags) {
-            defaultUpdates.tools = newToolNames;
-        }
-
-        let configUpdated = false;
-
-        const defaultUpdated = await agentStorage.updateDefaultConfig(agentPubkey, defaultUpdates);
-        if (defaultUpdated) configUpdated = true;
-
-        // PM designation uses authoritative snapshot semantics
-        const pmUpdated = await agentStorage.updateAgentIsPM(agentPubkey, hasPMTag);
-        if (pmUpdated) configUpdated = true;
+        const updateResult = await this.agentConfigUpdateService.applyEvent(event);
+        const configUpdated = updateResult.configUpdated || updateResult.pmUpdated;
 
         if (!configUpdated) {
             logger.info("No config changes for global agent config update", {
@@ -1089,9 +1065,10 @@ export class Daemon {
         logger.info("Applied global agent config update", {
             agentSlug: storedAgent.slug,
             agentPubkey: agentPubkey.substring(0, 8),
-            hasModel: !!newModel,
-            toolCount: newToolNames.length,
-            hasPM: hasPMTag,
+            hasModel: updateResult.hasModel,
+            toolCount: updateResult.toolCount,
+            skillCount: updateResult.skillCount,
+            hasPM: updateResult.hasPM,
         });
 
         // Reload agent in all running runtimes that have it
