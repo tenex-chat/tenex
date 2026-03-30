@@ -2,9 +2,10 @@ import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
 import { publishAgentProfile, publishProjectAgentSnapshot } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
+import { getConfiguredEscalationAgent } from "@/services/agents/EscalationService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
-import { agentStorage } from "./AgentStorage";
+import { agentStorage, deriveAgentPubkeyFromNsec } from "./AgentStorage";
 
 /**
  * AgentRegistry - In-memory runtime instances for a specific project
@@ -160,6 +161,28 @@ export class AgentRegistry {
                     `${failedPubkeys.length} assigned agent(s) could not be loaded but continuing with available agents`,
                     { failedPubkeys }
                 );
+            }
+        }
+
+        // Auto-add escalation agent if configured (regardless of 31933 p-tags)
+        const escalationSlug = getConfiguredEscalationAgent();
+        if (escalationSlug && !this.agents.has(escalationSlug)) {
+            try {
+                const storedAgent = await agentStorage.getAgentBySlug(escalationSlug);
+                if (storedAgent) {
+                    const escalationPubkey = deriveAgentPubkeyFromNsec(storedAgent.nsec);
+                    await loadStoredAgentIntoRegistry(escalationPubkey, this);
+                    logger.info(`Auto-loaded escalation agent ${escalationSlug} for project ${this.projectDTag}`);
+                } else {
+                    logger.warn(`Escalation agent ${escalationSlug} configured but not found in storage`, {
+                        projectDTag: this.projectDTag,
+                    });
+                }
+            } catch (error) {
+                logger.warn(`Failed to auto-load escalation agent ${escalationSlug}`, {
+                    projectDTag: this.projectDTag,
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         }
 
