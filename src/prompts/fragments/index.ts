@@ -24,6 +24,7 @@ import { availableAgentsFragment } from "./15-available-agents";
 import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
 import { noResponseGuidanceFragment } from "./18-no-response-guidance";
+import { delegationAsyncFragment } from "./19-delegation-async";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
 import { nudgesFragment } from "./11-nudges";
@@ -31,14 +32,12 @@ import { skillsFragment } from "./12-skills";
 import { availableNudgesAndSkillsFragment } from "./13-available-nudges";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
-import { ragInstructionsFragment } from "./25-rag-instructions";
 import { mcpResourcesFragment } from "./26-mcp-resources";
 import { memorizedReportsFragment } from "./27-memorized-reports";
 import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
 import { ragCollectionsFragment } from "./29-rag-collections";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
-import { environmentContextFragment } from "./32-environment-context";
 import { telegramChatContextFragment } from "./33-telegram-chat-context";
 import { telegramDeliveryRulesFragment } from "./34-telegram-delivery-rules";
 import { channelBindingsFragment } from "./34-channel-bindings";
@@ -72,6 +71,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(stayInYourLaneFragment);
     fragmentRegistry.register(TodoUsageFragment);
     fragmentRegistry.register(noResponseGuidanceFragment);
+    fragmentRegistry.register(delegationAsyncFragment);
 
     // Behavioral guidance
     // voice-mode and referenced-article are registered via side effects
@@ -84,14 +84,12 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(scheduledTasksFragment);
 
     // Context and learning
-    fragmentRegistry.register(ragInstructionsFragment);
     fragmentRegistry.register(mcpResourcesFragment);
     fragmentRegistry.register(memorizedReportsFragment);
     fragmentRegistry.register(agentDirectedMonitoringFragment);
     fragmentRegistry.register(ragCollectionsFragment);
     fragmentRegistry.register(worktreeContextFragment);
     fragmentRegistry.register(agentsMdGuidanceFragment);
-    fragmentRegistry.register(environmentContextFragment);
     fragmentRegistry.register(telegramChatContextFragment);
     fragmentRegistry.register(telegramDeliveryRulesFragment);
     fragmentRegistry.register(channelBindingsFragment);

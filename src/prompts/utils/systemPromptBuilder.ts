@@ -381,6 +381,9 @@ function addAgentFragments(
     // Add todo-before-delegation requirement (priority 17, after stay-in-your-lane)
     builder.add("todo-before-delegation", {});
 
+    // Add delegation async pattern guidance (priority 19)
+    builder.add("delegation-async", {});
+
     // Add explicit guidance for turns where the user wants no reply.
     if (triggeringEnvelope?.transport === "telegram") {
         builder.add("no-response-guidance", {
