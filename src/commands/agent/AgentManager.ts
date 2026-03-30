@@ -16,6 +16,7 @@ import { agentStorage, deriveAgentPubkeyFromNsec, type StoredAgent } from "@/age
 import * as display from "@/commands/config/display";
 import { deleteStoredAgent, installAgentFromDefinitionEventId } from "@/services/agents/AgentProvisioningService";
 import { projectMembershipPublishService } from "@/services/agents/ProjectMembershipPublishService";
+import { config } from "@/services/ConfigService";
 import { initNDK } from "@/nostr/ndkClient";
 import { inquirerTheme } from "@/utils/cli-theme";
 
@@ -252,6 +253,7 @@ export class AgentManager {
     private duplicateMergePromptDismissed = false;
 
     async showMainMenu(): Promise<void> {
+        await config.loadConfig();
         let agents = await this.loadAgents();
         agents = await this.offerAutoMergeForDuplicateSlugs(agents);
 
