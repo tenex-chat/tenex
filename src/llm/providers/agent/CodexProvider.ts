@@ -1,10 +1,12 @@
 import {
     createCodexAppServer,
     type CodexAppServerProvider as CodexAppServerInstance,
+    type CodexAppServerRequestHandlers,
     type CodexAppServerSession,
     type CodexAppServerSettings,
 } from "ai-sdk-provider-codex-cli";
 import type { LanguageModelUsage } from "ai";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type {
@@ -24,6 +26,26 @@ import { PROVIDER_IDS } from "../provider-ids";
 const CODEX_APP_SERVER_METADATA_KEY = "codex-app-server";
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const INTERNAL_TENEX_MCP_SERVER_BASENAME = "tenex";
+const CODEX_COMMAND_REMINDER_TYPE = "codex-native-command-disabled";
+const CODEX_FILE_CHANGE_REMINDER_TYPE = "codex-native-file-change-disabled";
+const CODEX_SKILL_REMINDER_TYPE = "codex-native-skill-disabled";
+const CODEX_TENEX_TOOL_ROUTING_GUIDANCE = [
+    "Prefer TENEX tools over native Codex actions in TENEX.",
+    "Do not use native Codex command execution, file changes, or skill loading.",
+    "Use `shell` for commands, `fs_read`/`fs_write`/`fs_edit`/`fs_glob`/`fs_grep` for filesystem work, and attached MCP tools for browser, web, and specialized tasks.",
+].join(" ");
+const CODEX_COMMAND_FALLBACK_GUIDANCE = [
+    CODEX_TENEX_TOOL_ROUTING_GUIDANCE,
+    "Your native command execution request was rejected. Retry with the TENEX `shell` tool instead.",
+].join(" ");
+const CODEX_FILE_CHANGE_FALLBACK_GUIDANCE = [
+    CODEX_TENEX_TOOL_ROUTING_GUIDANCE,
+    "Your native file change request was rejected. Retry with TENEX filesystem tools such as `fs_read`, `fs_edit`, `fs_write`, `fs_glob`, or `fs_grep` instead.",
+].join(" ");
+const CODEX_SKILL_FALLBACK_GUIDANCE = [
+    CODEX_TENEX_TOOL_ROUTING_GUIDANCE,
+    "Your native Codex skill request was rejected. Use TENEX-provided MCP tools, filesystem tools, and shell tooling instead of Codex-native skills.",
+].join(" ");
 
 type CodexEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type CodexSummary = "auto" | "concise" | "detailed" | "none";
@@ -175,6 +197,114 @@ function hasDefinedMetadata(metadata: LLMMetadata): boolean {
     return Object.values(metadata).some((value) => value !== undefined);
 }
 
+function buildCodexDeveloperInstructions(
+    developerInstructions: string | undefined
+): string | undefined {
+    if (developerInstructions?.includes(CODEX_TENEX_TOOL_ROUTING_GUIDANCE)) {
+        return developerInstructions;
+    }
+
+    return developerInstructions
+        ? `${CODEX_TENEX_TOOL_ROUTING_GUIDANCE}\n\n${developerInstructions}`
+        : CODEX_TENEX_TOOL_ROUTING_GUIDANCE;
+}
+
+function createTenexToolRoutingHandlers(options: {
+    agentName?: string;
+    getActiveSession: () => CodexAppServerSession | null;
+}): Pick<CodexAppServerRequestHandlers, "onCommandExecutionApproval" | "onFileChangeApproval" | "onSkillApproval"> {
+    const remindedRequestKeys = new Set<string>();
+
+    const queueReminder = async (key: string, reminderType: string, reminderContent: string): Promise<void> => {
+        if (remindedRequestKeys.has(key)) {
+            return;
+        }
+        remindedRequestKeys.add(key);
+
+        getSystemReminderContext().queue({
+            type: reminderType,
+            content: reminderContent,
+        });
+
+        const session = options.getActiveSession();
+        if (session) {
+            try {
+                await session.injectMessage(reminderContent);
+            } catch (error) {
+                logger.warn("[CodexProvider] Failed to inject TENEX tool routing guidance", {
+                    error: error instanceof Error ? error.message : String(error),
+                    threadId: session.threadId,
+                });
+            }
+        }
+    };
+
+    return {
+        onCommandExecutionApproval: async (request) => {
+            const turnKey = `command:${request.params.turnId ?? request.params.itemId ?? String(request.id)}`;
+            const command = request.params.command?.trim();
+            const reminderContent = command
+                ? `${CODEX_COMMAND_FALLBACK_GUIDANCE} Rejected native command: ${command}.`
+                : CODEX_COMMAND_FALLBACK_GUIDANCE;
+
+            await queueReminder(turnKey, CODEX_COMMAND_REMINDER_TYPE, reminderContent);
+
+            logger.info("[CodexProvider] Rejected native command execution request", {
+                agentName: options.agentName,
+                command: command ?? "(unknown)",
+                turnId: request.params.turnId ?? undefined,
+            });
+            trace.getActiveSpan()?.addEvent("codex.native_command_rejected", {
+                "agent.name": options.agentName ?? "",
+                "command.value": command ?? "",
+                "turn.id": request.params.turnId ?? "",
+            });
+
+            return { decision: "decline" };
+        },
+        onFileChangeApproval: async (request) => {
+            const turnKey = `file-change:${request.params.turnId ?? request.params.itemId ?? String(request.id)}`;
+            const reason = request.params.reason?.trim();
+            const reminderContent = reason
+                ? `${CODEX_FILE_CHANGE_FALLBACK_GUIDANCE} Rejected native file change reason: ${reason}.`
+                : CODEX_FILE_CHANGE_FALLBACK_GUIDANCE;
+
+            await queueReminder(turnKey, CODEX_FILE_CHANGE_REMINDER_TYPE, reminderContent);
+
+            logger.info("[CodexProvider] Rejected native file change request", {
+                agentName: options.agentName,
+                turnId: request.params.turnId ?? undefined,
+                grantRoot: request.params.grantRoot ?? undefined,
+            });
+            trace.getActiveSpan()?.addEvent("codex.native_file_change_rejected", {
+                "agent.name": options.agentName ?? "",
+                "turn.id": request.params.turnId ?? "",
+                "grant_root": request.params.grantRoot ?? "",
+            });
+
+            return { decision: "decline" };
+        },
+        onSkillApproval: async (request) => {
+            const turnKey = `skill:${request.params.itemId}`;
+            const reminderContent =
+                `${CODEX_SKILL_FALLBACK_GUIDANCE} Rejected native skill: ${request.params.skillName}.`;
+
+            await queueReminder(turnKey, CODEX_SKILL_REMINDER_TYPE, reminderContent);
+
+            logger.info("[CodexProvider] Rejected native skill request", {
+                agentName: options.agentName,
+                skillName: request.params.skillName,
+            });
+            trace.getActiveSpan()?.addEvent("codex.native_skill_rejected", {
+                "agent.name": options.agentName ?? "",
+                "skill.name": request.params.skillName,
+            });
+
+            return { decision: "decline" };
+        },
+    };
+}
+
 export class CodexProvider extends AgentProvider {
     static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
         PROVIDER_IDS.CODEX,
@@ -294,24 +424,45 @@ export class CodexProvider extends AgentProvider {
         }
 
         const idleTimeoutMs = providerConfig.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+        let activeSession: CodexAppServerSession | null = null;
+
+        const serverRequests: CodexAppServerRequestHandlers = createTenexToolRoutingHandlers({
+            agentName: context.agentName,
+            getActiveSession: () => activeSession,
+        });
+
+        const approvalPolicy: CodexApprovalPolicy = "on-request";
+
+        if (providerConfig.approvalPolicy && providerConfig.approvalPolicy !== "on-request") {
+            logger.warn("[CodexProvider] Overriding Codex approval policy to enforce TENEX tool routing", {
+                requestedApprovalPolicy: providerConfig.approvalPolicy,
+                enforcedApprovalPolicy: approvalPolicy,
+            });
+            trace.getActiveSpan()?.addEvent("codex.approval_policy_overridden", {
+                "approval.requested": providerConfig.approvalPolicy,
+                "approval.enforced": approvalPolicy,
+            });
+        }
 
         const settings: CodexAppServerSettings = {
             cwd: context.workingDirectory,
-            approvalPolicy: providerConfig.approvalPolicy ?? "on-failure",
+            approvalPolicy,
             sandboxPolicy: providerConfig.sandboxPolicy ?? "workspace-write",
             threadMode: "stateless",
             effort: providerConfig.effort,
             summary: providerConfig.summary,
             personality: providerConfig.personality,
-            developerInstructions: providerConfig.developerInstructions,
+            developerInstructions: buildCodexDeveloperInstructions(providerConfig.developerInstructions),
             baseInstructions: providerConfig.baseInstructions,
             mcpServers: Object.keys(mcpServersConfig).length > 0 ? mcpServersConfig : undefined,
             rmcpClient: providerConfig.rmcpClient,
             configOverrides: normalizedConfigOverrides,
+            serverRequests,
             idleTimeoutMs,
             verbose: false,
             logger: createCodexLogger(),
             onSessionCreated: async (session: CodexAppServerSession) => {
+                activeSession = session;
                 logger.info("[CodexProvider] Session created", {
                     threadId: session.threadId,
                     effort: providerConfig.effort,

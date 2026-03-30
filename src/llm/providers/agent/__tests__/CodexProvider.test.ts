@@ -36,9 +36,16 @@ const loggerMocks = {
     info: mock(() => {}),
     debug: mock(() => {}),
 };
+const queueReminderMock = mock(() => {});
 
 mock.module("@/utils/logger", () => ({
     logger: loggerMocks,
+}));
+
+mock.module("@/llm/system-reminder-context", () => ({
+    getSystemReminderContext: () => ({
+        queue: queueReminderMock,
+    }),
 }));
 
 const addEventMock = mock(() => {});
@@ -116,6 +123,7 @@ describe("CodexProvider", () => {
         loggerMocks.info.mockClear();
         loggerMocks.debug.mockClear();
         addEventMock.mockClear();
+        queueReminderMock.mockClear();
     });
 
     it("avoids internal MCP server name collisions and normalizes legacy bearer_token overrides", async () => {
@@ -168,5 +176,160 @@ describe("CodexProvider", () => {
 
         expect(loggerMocks.warn).toHaveBeenCalled();
         expect(addEventMock).toHaveBeenCalled();
+    });
+
+    it("rejects native exec approvals and injects TENEX tool guidance by default", async () => {
+        const provider = new CodexProvider();
+        await provider.initialize({});
+
+        const result = provider.createModel("gpt-5.4", {
+            agentName: "Test Agent",
+            providerConfig: {},
+        });
+
+        const agentSettings = result.agentSettings as {
+            approvalPolicy?: string;
+            developerInstructions?: string;
+            serverRequests?: {
+                onCommandExecutionApproval?: (request: {
+                    id: string;
+                    method: string;
+                    params: {
+                        threadId: string;
+                        turnId: string;
+                        itemId: string;
+                        command?: string | null;
+                    };
+                }) => Promise<{ decision: string } | undefined>;
+                onFileChangeApproval?: (request: {
+                    id: string;
+                    method: string;
+                    params: {
+                        threadId: string;
+                        turnId: string;
+                        itemId: string;
+                        reason?: string | null;
+                        grantRoot?: string | null;
+                    };
+                }) => Promise<{ decision: string } | undefined>;
+                onSkillApproval?: (request: {
+                    id: string;
+                    method: string;
+                    params: {
+                        itemId: string;
+                        skillName: string;
+                    };
+                }) => Promise<{ decision: string } | undefined>;
+            };
+            onSessionCreated?: (session: {
+                threadId: string;
+                injectMessage: (content: string) => Promise<void>;
+            }) => Promise<void>;
+        };
+
+        expect(agentSettings.developerInstructions).toContain(
+            "Prefer TENEX tools over native Codex actions in TENEX."
+        );
+        expect(agentSettings.approvalPolicy).toBe("on-request");
+        expect(agentSettings.serverRequests?.onCommandExecutionApproval).toBeDefined();
+        expect(agentSettings.serverRequests?.onFileChangeApproval).toBeDefined();
+        expect(agentSettings.serverRequests?.onSkillApproval).toBeDefined();
+
+        const injectMessageMock = mock(async () => undefined);
+        await agentSettings.onSessionCreated?.({
+            threadId: "thread-1",
+            injectMessage: injectMessageMock,
+        });
+
+        const response = await agentSettings.serverRequests?.onCommandExecutionApproval?.({
+            id: "approval-1",
+            method: "item/commandExecution/requestApproval",
+            params: {
+                threadId: "thread-1",
+                turnId: "turn-1",
+                itemId: "item-1",
+                command: "playwright-cli",
+            },
+        });
+
+        const fileResponse = await agentSettings.serverRequests?.onFileChangeApproval?.({
+            id: "approval-2",
+            method: "item/fileChange/requestApproval",
+            params: {
+                threadId: "thread-1",
+                turnId: "turn-2",
+                itemId: "item-2",
+                reason: "apply patch",
+                grantRoot: "/tmp/project",
+            },
+        });
+
+        const skillResponse = await agentSettings.serverRequests?.onSkillApproval?.({
+            id: "approval-3",
+            method: "skill/requestApproval",
+            params: {
+                itemId: "item-3",
+                skillName: "browser-debugging",
+            },
+        });
+
+        expect(response).toEqual({ decision: "decline" });
+        expect(fileResponse).toEqual({ decision: "decline" });
+        expect(skillResponse).toEqual({ decision: "decline" });
+        expect(injectMessageMock).toHaveBeenCalledTimes(3);
+        expect(String(injectMessageMock.mock.calls[0]?.[0])).toContain(
+            "Retry with the TENEX `shell` tool instead"
+        );
+        expect(String(injectMessageMock.mock.calls[1]?.[0])).toContain(
+            "TENEX filesystem tools"
+        );
+        expect(String(injectMessageMock.mock.calls[2]?.[0])).toContain(
+            "Codex-native skills"
+        );
+        expect(queueReminderMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("prepends TENEX routing guidance while preserving custom developer instructions", async () => {
+        const provider = new CodexProvider();
+        await provider.initialize({});
+
+        const result = provider.createModel("gpt-5.4", {
+            agentName: "Test Agent",
+            providerConfig: {
+                developerInstructions: "Custom instructions",
+            },
+        });
+
+        const agentSettings = result.agentSettings as {
+            approvalPolicy?: string;
+            developerInstructions?: string;
+            serverRequests?: Record<string, unknown>;
+        };
+
+        expect(agentSettings.approvalPolicy).toBe("on-request");
+        expect(agentSettings.developerInstructions).toContain(
+            "Prefer TENEX tools over native Codex actions in TENEX."
+        );
+        expect(agentSettings.developerInstructions).toContain("Custom instructions");
+        expect(agentSettings.serverRequests).toBeDefined();
+    });
+
+    it("overrides explicit approval policies when TENEX tool routing is enabled", async () => {
+        const provider = new CodexProvider();
+        await provider.initialize({});
+
+        const result = provider.createModel("gpt-5.4", {
+            agentName: "Test Agent",
+            providerConfig: {
+                approvalPolicy: "never",
+            },
+        });
+
+        const agentSettings = result.agentSettings as {
+            approvalPolicy?: string;
+        };
+
+        expect(agentSettings.approvalPolicy).toBe("on-request");
+        expect(loggerMocks.warn).toHaveBeenCalled();
     });
 });
