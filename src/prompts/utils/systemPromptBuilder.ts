@@ -504,21 +504,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         bindings: dTag ? buildChannelBindingDisplayEntries(agentForFragments, dTag) : [],
     });
 
-    // Add active conversations context (currently running agents in the project)
-    systemPromptBuilder.add("active-conversations", {
-        agent: agentForFragments,
-        currentConversationId: conversation.getId(),
-        projectId: dTag,
-    });
-
-    // Add recent conversations context (short-term memory)
-    // NOTE: Use dTag (not tagId) — disk directories use the d-tag, not the NIP-33 address
-    systemPromptBuilder.add("recent-conversations", {
-        agent: agentForFragments,
-        currentConversationId: conversation.getId(),
-        projectId: dTag,
-    });
-
     // Add delegation chain if present (shows agent their position in multi-agent workflow)
     // The chain entries already have full conversation IDs stored - no need to pass currentConversationId
     if (conversation?.metadata?.delegationChain && conversation.metadata.delegationChain.length > 0) {

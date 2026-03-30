@@ -16,6 +16,7 @@ export interface TenexReminderData {
     respondingToPrincipal: PrincipalRef;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
+    conversationsContent?: string;
 }
 
 async function todoListProvider(
@@ -80,11 +81,19 @@ async function delegationsProvider(
     };
 }
 
+async function conversationsProvider(
+    data: TenexReminderData | undefined
+): Promise<SystemReminderDescriptor | null> {
+    if (!data?.conversationsContent) return null;
+    return { type: "conversations", content: data.conversationsContent };
+}
+
 export function initializeReminderProviders(): void {
     const ctx = getSystemReminderContext();
     ctx.registerProvider("todo-list", todoListProvider);
     ctx.registerProvider("response-routing", responseRoutingProvider);
     ctx.registerProvider("delegations", delegationsProvider);
+    ctx.registerProvider("conversations", conversationsProvider);
 }
 
 export function updateReminderData(data: TenexReminderData): void {
