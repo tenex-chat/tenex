@@ -290,7 +290,7 @@ function scheduleProjectEventUpdate(
 }
 
 /**
- * Publish an updated kind 31933 project event with deleted agent tags removed.
+ * Publish an updated kind 31933 project event with deleted agent pubkeys removed.
  *
  * Follows the NIP-46 signing pattern from OwnerAgentListService:
  * 1. Build updated event from current project state
@@ -314,17 +314,13 @@ async function publishUpdatedProjectEvent(
 
     // Get current agents in registry (post-deletion)
     const currentAgents = projectContext.agentRegistry.getAllAgents();
-    const currentAgentEventIds = new Set(
-        currentAgents
-            .map((a) => a.eventId)
-            .filter((id): id is string => !!id)
-    );
+    const currentAgentPubkeys = new Set(currentAgents.map((agent) => agent.pubkey));
 
-    // Rebuild the project event tags, filtering out removed agent tags
+    // Rebuild the project event tags, filtering out removed agent pubkeys
     const updatedTags = currentProject.tags.filter((tag) => {
-        if (tag[0] === "agent") {
-            // Keep only agent tags that reference agents still in the registry
-            return tag[1] && currentAgentEventIds.has(tag[1]);
+        if (tag[0] === "p") {
+            // Keep only agent membership tags that reference agents still in the registry
+            return tag[1] && currentAgentPubkeys.has(tag[1]);
         }
         return true;
     });
@@ -357,7 +353,7 @@ async function publishUpdatedProjectEvent(
                     ownerPubkey: shortenPubkey(ownerPubkey),
                     projectDTag,
                     eventId: shortenOptionalEventId(updatedEvent.id),
-                    agentTagCount: updatedTags.filter((t) => t[0] === "agent").length,
+                    agentTagCount: updatedTags.filter((t) => t[0] === "p").length,
                 });
             } catch (error) {
                 logger.warn("[AgentDeletion] Failed to publish 31933 update", {

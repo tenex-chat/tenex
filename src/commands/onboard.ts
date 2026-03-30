@@ -3,7 +3,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ensureDirectory } from "@/lib/fs";
 import { agentStorage } from "@/agents/AgentStorage";
-import { installAgentFromNostrEvent } from "@/agents/agent-installer";
 import { detectOpenClawStateDir, readOpenClawCredentials, readOpenClawAgents } from "@/commands/agent/import/openclaw-reader";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
@@ -29,6 +28,7 @@ import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 import { nip19 } from "nostr-tools";
+import { installAgentFromDefinitionEvent } from "@/services/agents/AgentProvisioningService";
 
 type RelayItem =
     | { type: "choice"; name: string; value: string; description?: string }
@@ -835,7 +835,7 @@ function resolveAgentDiscovery(discovery: AgentDiscovery): FetchResults {
  * 2. Ask about creating a Meta project
  * 3. Discover/select Nostr teams and individual agents
  * 4. Install selected agents locally (best-effort)
- * 5. Publish kind 31933 project event with final ["agent", "<event-id>"] tags
+ * 5. Publish kind 31933 project event with final lowercase `p` agent pubkeys
  */
 async function runProjectAndAgentsStep(
     discovery: AgentDiscovery,
@@ -850,6 +850,7 @@ async function runProjectAndAgentsStep(
     // ── Part A: OpenClaw agents (if detected) ───────────────────────────────
     let installedCount = 0;
     const selectedNostrAgentEventIds = new Set<string>();
+    const selectedAgentPubkeys = new Set<string>();
     let openClawImportInFlight = false;
     let openClawImportPromise: Promise<{
         importedCount: number;
@@ -1039,7 +1040,10 @@ async function runProjectAndAgentsStep(
                     let installedNow = 0;
                     for (const agent of selectedAgents) {
                         try {
-                            await installAgentFromNostrEvent(agent.event, undefined, ndk);
+                            const result = await installAgentFromDefinitionEvent(agent.event, {
+                                ndk,
+                            });
+                            selectedAgentPubkeys.add(result.pubkey);
                             installedNow++;
                             installedCount++;
                         } catch (err) {
@@ -1080,7 +1084,10 @@ async function runProjectAndAgentsStep(
             let installedNow = 0;
             for (const agent of teamAgents) {
                 try {
-                    await installAgentFromNostrEvent(agent.event, undefined, ndk);
+                    const result = await installAgentFromDefinitionEvent(agent.event, {
+                        ndk,
+                    });
+                    selectedAgentPubkeys.add(result.pubkey);
                     installedNow++;
                     installedCount++;
                 } catch (err) {
@@ -1097,9 +1104,20 @@ async function runProjectAndAgentsStep(
         }
     }
 
+    await waitForOpenClawImportIfNeeded();
+
+    // Include locally created/imported agents directly in the authoritative 31933 membership.
+    const allStoredAgents = await agentStorage.getAllStoredAgents();
+    for (const agent of allStoredAgents) {
+        const signer = new NDKPrivateKeySigner(agent.nsec);
+        if (!agent.eventId) {
+            selectedAgentPubkeys.add(signer.pubkey);
+        }
+    }
+
     // ── Part D: Publish kind 31933 project event ──────────────────────────
     // The daemon handles directory creation, git init, and agent loading on boot.
-    // We just publish the event with agent tags — the daemon discovers it from relays.
+    // We just publish the event with authoritative agent pubkeys.
     try {
         const signer = new NDKPrivateKeySigner(userPrivateKeyHex);
         ndk.signer = signer;
@@ -1110,8 +1128,8 @@ async function runProjectAndAgentsStep(
         project.title = "Meta";
         project.tags.push(["client", "tenex-setup"]);
 
-        for (const eid of selectedNostrAgentEventIds) {
-            project.tags.push(["agent", eid]);
+        for (const pubkey of selectedAgentPubkeys) {
+            project.tags.push(["p", pubkey]);
         }
 
         await project.sign();
@@ -1124,18 +1142,6 @@ async function runProjectAndAgentsStep(
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         display.context(`Could not publish project event (${message}) — the daemon will pick it up later.`);
-    }
-
-    await waitForOpenClawImportIfNeeded();
-
-    // Locally associate non-Nostr agents (e.g. OpenClaw imports) with the meta project.
-    // These don't have event IDs so they aren't referenced in the project event's agent tags;
-    // the daemon needs the local storage association to find them.
-    const allStoredAgents = await agentStorage.getAllStoredAgents();
-    for (const agent of allStoredAgents) {
-        if (agent.eventId) continue; // Nostr agents are associated via project event tags
-        const signer = new NDKPrivateKeySigner(agent.nsec);
-        await agentStorage.addAgentToProject(signer.pubkey, "meta");
     }
 
     if (installedCount > 0) {

@@ -47,6 +47,8 @@ import { StatusFile } from "./StatusFile";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 import { APNsService } from "@/services/apns";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
+import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
+import { installAgentFromDefinitionEventId } from "@/services/agents/AgentProvisioningService";
 const lessonTracer = trace.getTracer("tenex.lessons");
 
 /**
@@ -64,6 +66,7 @@ export class Daemon {
     private subscriptionManager: SubscriptionManager | null = null;
     private routingLogger: EventRoutingLogger;
     private whitelistedPubkeys: Hexpubkey[] = [];
+    private backendPubkey: Hexpubkey | null = null;
     private projectsBase = "";
     private daemonDir = "";
     private isRunning = false;
@@ -115,6 +118,7 @@ export class Daemon {
     // Status file for `tenex daemon status`
     private statusFile: StatusFile | null = null;
     private statusInterval: NodeJS.Timeout | null = null;
+    private installedAgentListPublisher: InstalledAgentListService | null = null;
 
     constructor() {
         this.routingLogger = new EventRoutingLogger();
@@ -266,6 +270,7 @@ export class Daemon {
             logger.debug("Publishing backend profile");
             const backendSigner = await config.getBackendSigner();
             this.ndk.signer = backendSigner;
+            this.backendPubkey = backendSigner.pubkey;
             const backendName = loadedConfig.backendName || "tenex backend";
             await publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
 
@@ -322,6 +327,10 @@ export class Daemon {
             logger.debug("Starting subscription manager");
             await this.subscriptionManager.start();
             logger.debug("Subscription manager started");
+
+            this.installedAgentListPublisher = new InstalledAgentListService();
+            await this.installedAgentListPublisher.startPublishing();
+            logger.debug("Installed-agent inventory publisher started");
 
             // 10. Start automatic conversation indexing job
             getConversationIndexingJob().start();
@@ -477,7 +486,8 @@ export class Daemon {
                 this.knownProjects,
                 knownAgentPubkeys,
                 this.whitelistedPubkeys,
-                activeRuntimes
+                activeRuntimes,
+                this.backendPubkey ?? undefined
             )
         ) {
             // Not our event - drop silently without creating a span
@@ -551,6 +561,13 @@ export class Daemon {
             addRoutingEvent(span, "lesson_comment_event", { reason: "kind_1111_K_4129" });
             await this.handleLessonCommentEvent(event);
             await logDropped(this.routingLogger, event, "Lesson comment - hydrated into active runtimes only");
+            return;
+        }
+
+        if (eventType === "agent_create") {
+            addRoutingEvent(span, "agent_create", { reason: "kind_24001" });
+            await this.handleAgentCreateRequest(event);
+            await logDropped(this.routingLogger, event, "Handled backend-targeted agent create request");
             return;
         }
 
@@ -1088,6 +1105,52 @@ export class Daemon {
         }
     }
 
+    private async handleAgentCreateRequest(event: NDKEvent): Promise<void> {
+        if (!this.backendPubkey) {
+            logger.warn("[Daemon] Ignoring agent create request before backend pubkey is initialized", {
+                eventId: event.id,
+            });
+            return;
+        }
+
+        const targetedBackendPubkeys = event.tags
+            .filter((tag) => tag[0] === "p" && tag[1])
+            .map((tag) => tag[1]);
+        if (!targetedBackendPubkeys.includes(this.backendPubkey)) {
+            return;
+        }
+
+        if (!this.whitelistedPubkeys.includes(event.pubkey)) {
+            logger.warn("[Daemon] Unauthorized agent create request", {
+                author: event.pubkey.slice(0, 8),
+                eventId: event.id,
+            });
+            return;
+        }
+
+        const definitionEventId = event.tags.find((tag) => tag[0] === "e" && tag[1])?.[1];
+        if (!definitionEventId) {
+            logger.warn("[Daemon] Agent create request missing definition e-tag", {
+                eventId: event.id,
+            });
+            return;
+        }
+
+        const slugOverride = event.tags.find((tag) => tag[0] === "slug" && tag[1])?.[1];
+        const result = await installAgentFromDefinitionEventId(definitionEventId, {
+            slugOverride,
+            ndk: this.ndk || undefined,
+        });
+
+        logger.info("[Daemon] Processed agent create request", {
+            author: event.pubkey.slice(0, 8),
+            definitionEventId: definitionEventId.slice(0, 8),
+            agentPubkey: result.pubkey.slice(0, 8),
+            slug: result.storedAgent.slug,
+            created: result.created,
+        });
+    }
+
     /**
      * Handle project creation/update events
      */
@@ -1520,6 +1583,12 @@ export class Daemon {
                 logger.info("Stopping owner agent list service...");
                 OwnerAgentListService.getInstance().shutdown();
 
+                if (this.installedAgentListPublisher) {
+                    logger.info("Stopping installed-agent inventory publisher...");
+                    this.installedAgentListPublisher.stopPublishing();
+                    this.installedAgentListPublisher = null;
+                }
+
                 // Stop NIP-46 signing service
                 logger.info("Stopping NIP-46 signing service...");
                 await Nip46SigningService.getInstance().shutdown();
@@ -1776,7 +1845,7 @@ export class Daemon {
         // Count total agents across all known projects
         let totalAgents = 0;
         for (const project of this.knownProjects.values()) {
-            const agentTags = project.tags.filter((t) => t[0] === "agent");
+            const agentTags = project.tags.filter((t) => t[0] === "p");
             totalAgents += agentTags.length;
         }
 

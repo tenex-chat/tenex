@@ -125,6 +125,64 @@ export function createAgentInstance(
 }
 
 /**
+ * Load an already-installed agent by pubkey into the registry.
+ *
+ * This is the authoritative project-membership path used for kind:31933
+ * lowercase `p` tags. It never mutates project associations in storage.
+ */
+export async function loadStoredAgentIntoRegistry(
+    pubkey: string,
+    registry: AgentRegistry
+): Promise<AgentInstance> {
+    const existingAgent = registry.getAgentByPubkey(pubkey);
+    if (existingAgent) {
+        logger.debug(`Agent ${pubkey.substring(0, 8)} already loaded in registry as ${existingAgent.slug}`);
+        return existingAgent;
+    }
+
+    const storedAgent = await agentStorage.loadAgent(pubkey);
+    if (!storedAgent) {
+        throw new Error(`Agent ${pubkey} not found in storage`);
+    }
+
+    const projectDTag = registry.getProjectDTag();
+    const instance = createAgentInstance(storedAgent, registry, projectDTag);
+    registry.addAgent(instance);
+
+    const ndkProject = registry.getNDKProject();
+    if (ndkProject) {
+        try {
+            const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
+            const whitelistedPubkeys = config.getWhitelistedPubkeys();
+            const signer = new NDKPrivateKeySigner(storedAgent.nsec);
+
+            publishAgentProfile(
+                signer,
+                storedAgent.name,
+                storedAgent.role,
+                projectTitle,
+                ndkProject,
+                storedAgent.eventId,
+                {
+                    description: storedAgent.description,
+                    instructions: storedAgent.instructions,
+                    useCriteria: storedAgent.useCriteria,
+                },
+                whitelistedPubkeys
+            );
+        } catch (error) {
+            logger.warn(`Failed to publish kind:0 profile for agent ${storedAgent.name}`, { error });
+        }
+    }
+
+    logger.info(
+        `Loaded agent "${instance.name}" (${instance.slug}) into registry for project ${projectDTag}`
+    );
+
+    return instance;
+}
+
+/**
  * Load an agent by eventId into the registry.
  * This is the ONLY function needed for loading agents.
  *

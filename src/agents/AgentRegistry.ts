@@ -1,7 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
-import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
+import { createAgentInstance, loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
 import { publishAgentProfile, publishProjectAgentSnapshot } from "@/nostr/AgentProfilePublisher";
-import { loadEscalationAgentIntoRegistry } from "@/services/agents/EscalationService";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
@@ -99,11 +98,11 @@ export class AgentRegistry {
     }
 
     /**
-     * Load agents for a project from unified storage (~/.tenex/agents/) and Nostr.
-     * Complete agent loading workflow:
-     * 1. Load agents from unified ~/.tenex/agents/ storage by event ID
-     * 2. For missing agents, fetch from Nostr and install to unified storage
-     * 3. Load newly installed agents and associate with this project
+     * Load agents for a project from authoritative project pubkey membership.
+     *
+     * Lowercase `p` tags on kind:31933 are the sole source of truth for
+     * project membership. Storage mirrors those pubkeys for runtime boot and
+     * non-running trust checks, but membership is never inferred from local state.
      */
     async loadFromProject(ndkProject: NDKProject): Promise<void> {
         this.ndkProject = ndkProject;
@@ -121,72 +120,48 @@ export class AgentRegistry {
         // Initialize storage
         await agentStorage.initialize();
 
-        // Get agent event IDs from project tags
-        const agentEventIds = ndkProject.tags
-            .filter((t) => t[0] === "agent" && t[1])
+        // Lowercase `p` tags are assigned agent pubkeys.
+        const assignedAgentPubkeys = ndkProject.tags
+            .filter((t) => t[0] === "p" && t[1])
             .map((t) => t[1])
             .filter(Boolean) as string[];
 
-        logger.info(`Loading ${agentEventIds.length} agents for project ${this.projectDTag}`);
+        const { assignedPubkeys, skippedPubkeys } = await agentStorage.syncProjectAgents(
+            this.projectDTag,
+            assignedAgentPubkeys
+        );
 
-        const failedAgents: string[] = [];
+        logger.info(`Loading ${assignedPubkeys.length} agents for project ${this.projectDTag}`, {
+            requestedCount: assignedAgentPubkeys.length,
+            skippedCount: skippedPubkeys.length,
+        });
 
-        // Load each agent using the new loader (no redundant checks!)
-        for (const eventId of agentEventIds) {
+        const failedPubkeys: string[] = [];
+
+        for (const pubkey of assignedPubkeys) {
             try {
-                await loadAgentIntoRegistry(eventId, this);
+                await loadStoredAgentIntoRegistry(pubkey, this);
             } catch (error) {
-                logger.error(`Failed to load agent ${eventId}`, { error });
-                failedAgents.push(eventId);
+                logger.error(`Failed to load agent ${pubkey}`, { error });
+                failedPubkeys.push(pubkey);
             }
         }
 
         // Log failed agents but don't block project boot
-        if (failedAgents.length > 0) {
-            const pmEventId = agentEventIds[0];
-            if (failedAgents.includes(pmEventId)) {
+        if (failedPubkeys.length > 0) {
+            const pmPubkey = assignedPubkeys[0];
+            if (pmPubkey && failedPubkeys.includes(pmPubkey)) {
                 logger.error(
-                    `PM agent (first in tags) failed to load — project will boot without a PM. Agent event ID ${pmEventId} could not be fetched. This might be due to network issues or the event not being available on the configured relays.`,
-                    { pmEventId, failedAgents }
+                    "PM agent (first lowercase p-tag) failed to load — project will boot without a PM.",
+                    { pmPubkey, failedPubkeys }
                 );
             } else {
                 logger.warn(
-                    `${failedAgents.length} agent(s) could not be installed but continuing with available agents`,
-                    { failedAgents }
+                    `${failedPubkeys.length} assigned agent(s) could not be loaded but continuing with available agents`,
+                    { failedPubkeys }
                 );
             }
         }
-
-        // Load locally-associated agents from storage
-        const localAgents = await agentStorage.getProjectAgents(this.projectDTag);
-        logger.info(`Found ${localAgents.length} locally-associated agents in storage for project ${this.projectDTag}`);
-
-        for (const storedAgent of localAgents) {
-            // Skip if already loaded (by eventId or slug)
-            const existingBySlug = this.agents.get(storedAgent.slug);
-            const existingByEventId = storedAgent.eventId
-                ? this.getAgentByEventId(storedAgent.eventId)
-                : undefined;
-
-            if (existingBySlug || existingByEventId) {
-                logger.debug(`Agent ${storedAgent.slug} already in registry, skipping`);
-                continue;
-            }
-
-            // Load this locally-associated agent
-            try {
-                // Pass projectDTag for project-scoped config resolution
-                const agentInstance = createAgentInstance(storedAgent, this, this.projectDTag);
-                this.addAgent(agentInstance);
-                logger.info(`Loaded locally-associated agent ${storedAgent.slug} into registry`);
-            } catch (error) {
-                logger.error(`Failed to load agent ${storedAgent.slug}`, { error });
-            }
-        }
-
-        // Proactively load escalation agent if configured
-        // This ensures the escalation agent appears in "Available Agents" for all projects
-        await loadEscalationAgentIntoRegistry(this, this.projectDTag);
 
         logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
 
@@ -321,13 +296,13 @@ export class AgentRegistry {
     getProjectPM(): AgentInstance | undefined {
         if (!this.ndkProject) return undefined;
 
-        const firstAgentEventId = this.ndkProject.tags.find((t) => t[0] === "agent" && t[1])?.[1];
+        const firstAgentPubkey = this.ndkProject.tags.find((t) => t[0] === "p" && t[1])?.[1];
 
-        if (!firstAgentEventId) return undefined;
+        if (!firstAgentPubkey) return undefined;
 
-        // Find agent with this eventId
+        // Find agent with this pubkey
         for (const agent of this.agents.values()) {
-            if (agent.eventId === firstAgentEventId) {
+            if (agent.pubkey === firstAgentPubkey) {
                 return agent;
             }
         }
