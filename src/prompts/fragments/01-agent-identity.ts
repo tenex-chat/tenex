@@ -28,7 +28,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
 
         // Identity
         parts.push("# Your Identity\n");
-        parts.push(`Your name: ${agent.name} (${agent.slug})`);
+        parts.push(`Your name: ${agent.slug}`);
         parts.push(`Your npub: ${agent.signer.npub}`);
         parts.push("Your nsec is stored in your home directory's `.env` file as `NSEC`.");
         parts.push("");
