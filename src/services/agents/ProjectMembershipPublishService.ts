@@ -1,4 +1,4 @@
-import { NDKEvent as NDKEventClass } from "@nostr-dev-kit/ndk";
+import { NDKEvent as NDKEventClass, type NDKFilter } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "@/agents/AgentStorage";
 import { collectEvents } from "@/nostr/collectEvents";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
@@ -11,6 +11,12 @@ type ProjectMembershipSyncResult = {
     projectDTag: string;
     outcome: "published" | "project_not_found" | "signing_failed" | "publish_failed" | "signing_disabled";
 };
+
+export type ProjectVisibilityStatus = "active" | "deleted" | "unknown";
+
+function getProjectDTag(event: NDKEventClass): string | null {
+    return event.tags.find((tag) => tag[0] === "d")?.[1] ?? null;
+}
 
 function selectLatestProjectEvent(events: NDKEventClass[]): NDKEventClass | null {
     if (events.length === 0) {
@@ -26,13 +32,59 @@ function selectLatestProjectEvent(events: NDKEventClass[]): NDKEventClass | null
     })[0] ?? null;
 }
 
+export function isDeletedProjectEvent(event: NDKEventClass): boolean {
+    return event.tags.some((tag) => tag[0] === "deleted");
+}
+
 export class ProjectMembershipPublishService {
+    async listAssignableProjectDTags(): Promise<string[]> {
+        await initNDK();
+        await agentStorage.initialize();
+
+        const latestProjectEvents = await this.fetchLatestProjectEvents();
+        const assignableProjectIds = new Set<string>();
+
+        for (const projectEvent of latestProjectEvents) {
+            const dTag = getProjectDTag(projectEvent);
+            if (!dTag || isDeletedProjectEvent(projectEvent)) {
+                continue;
+            }
+
+            assignableProjectIds.add(dTag);
+        }
+
+        const storedProjectIds = await agentStorage.getAllProjectDTags();
+        for (const projectId of storedProjectIds) {
+            if (assignableProjectIds.has(projectId)) {
+                continue;
+            }
+
+            const visibility = await this.getProjectVisibility(projectId);
+            if (visibility !== "deleted") {
+                assignableProjectIds.add(projectId);
+            }
+        }
+
+        return [...assignableProjectIds].sort((a, b) => a.localeCompare(b));
+    }
+
+    async getProjectVisibility(projectDTag: string): Promise<ProjectVisibilityStatus> {
+        await initNDK();
+
+        const projectEvent = await this.fetchProjectEvent(projectDTag);
+        if (!projectEvent) {
+            return "unknown";
+        }
+
+        return isDeletedProjectEvent(projectEvent) ? "deleted" : "active";
+    }
+
     async syncProjectMembership(projectDTag: string): Promise<ProjectMembershipSyncResult> {
         await initNDK();
         await agentStorage.initialize();
 
         const projectEvent = await this.fetchProjectEvent(projectDTag);
-        if (!projectEvent) {
+        if (!projectEvent || isDeletedProjectEvent(projectEvent)) {
             logger.warn("[ProjectMembershipPublishService] Could not find project event for membership sync", {
                 projectDTag,
             });
@@ -116,18 +168,60 @@ export class ProjectMembershipPublishService {
     }
 
     private async fetchProjectEvent(projectDTag: string): Promise<NDKEventClass | null> {
-        const ndk = getNDK();
-        const whitelistedPubkeys = config.getWhitelistedPubkeys();
-        const filter = whitelistedPubkeys.length > 0
-            ? { kinds: [31933], "#d": [projectDTag], authors: whitelistedPubkeys }
-            : { kinds: [31933], "#d": [projectDTag] };
+        const events = await this.fetchProjectEventsByFilter(
+            this.buildProjectFilter({ "#d": [projectDTag] }),
+        );
 
+        return selectLatestProjectEvent(events);
+    }
+
+    private async fetchLatestProjectEvents(): Promise<NDKEventClass[]> {
+        const events = await this.fetchProjectEventsByFilter(
+            this.buildProjectFilter({}),
+        );
+        const latestByDTag = new Map<string, NDKEventClass>();
+
+        for (const event of events) {
+            const dTag = getProjectDTag(event);
+            if (!dTag) {
+                continue;
+            }
+
+            const current = latestByDTag.get(dTag);
+            if (!current) {
+                latestByDTag.set(dTag, event);
+                continue;
+            }
+
+            const preferred = selectLatestProjectEvent([current, event]);
+            if (preferred) {
+                latestByDTag.set(dTag, preferred);
+            }
+        }
+
+        return [...latestByDTag.values()];
+    }
+
+    private buildProjectFilter(extraFilter: Partial<NDKFilter>): NDKFilter {
+        const whitelistedPubkeys = config.getWhitelistedPubkeys();
+        const baseFilter: NDKFilter = whitelistedPubkeys.length > 0
+            ? { kinds: [31933], authors: whitelistedPubkeys }
+            : { kinds: [31933] };
+
+        return {
+            ...baseFilter,
+            ...extraFilter,
+        };
+    }
+
+    private async fetchProjectEventsByFilter(filter: NDKFilter): Promise<NDKEventClass[]> {
+        const ndk = getNDK();
         const events = await collectEvents(ndk, filter, {
             timeoutMs: 10_000,
             subOpts: { groupable: false },
         });
 
-        return selectLatestProjectEvent(events as NDKEventClass[]);
+        return events as NDKEventClass[];
     }
 }
 

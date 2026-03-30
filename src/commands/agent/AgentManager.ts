@@ -116,11 +116,6 @@ const agentSelectPrompt = createPrompt<AgentManagerPromptResult, MenuConfig>((co
                     ? selectedPubkeys.filter((pubkey) => pubkey !== item.pubkey)
                     : [...selectedPubkeys, item.pubkey],
             );
-        } else if (key.name === "d" && active > doneIndex) {
-            const item = items[active - doneIndex - 1];
-            if (item?.pubkey) {
-                done({ action: "delete-selected", selectedPubkeys: [item.pubkey] });
-            }
         } else {
             const match = actions.find((action) => action.key === key.name);
             if (match) {
@@ -174,7 +169,6 @@ const agentSelectPrompt = createPrompt<AgentManagerPromptResult, MenuConfig>((co
         `${chalk.bold("↑↓")} ${chalk.dim("navigate")}`,
         `${chalk.bold("space")} ${chalk.dim("select")}`,
         `${chalk.bold("⏎")} ${chalk.dim("select")}`,
-        `${chalk.bold("d")} ${chalk.dim("delete")}`,
     ];
     lines.push(chalk.dim(`  ${helpParts.join(chalk.dim(" • "))}`));
 
@@ -320,14 +314,28 @@ export class AgentManager {
         await agentStorage.initialize();
         const storedAgents = await agentStorage.getAllStoredAgents();
         const managedAgents: ManagedAgent[] = [];
+        const projectVisibility = new Map<string, boolean>();
 
         for (const storedAgent of storedAgents) {
             const pubkey = deriveAgentPubkeyFromNsec(storedAgent.nsec);
             const projects = await agentStorage.getAgentProjects(pubkey);
+            const visibleProjects: string[] = [];
+
+            for (const projectId of projects) {
+                if (!projectVisibility.has(projectId)) {
+                    const visibility = await projectMembershipPublishService.getProjectVisibility(projectId);
+                    projectVisibility.set(projectId, visibility !== "deleted");
+                }
+
+                if (projectVisibility.get(projectId)) {
+                    visibleProjects.push(projectId);
+                }
+            }
+
             managedAgents.push({
                 storedAgent,
                 pubkey,
-                projects,
+                projects: visibleProjects,
             });
         }
 
@@ -365,14 +373,14 @@ export class AgentManager {
     }
 
     private async showAgentDetail(pubkey: string): Promise<void> {
-        const entry = await this.getManagedAgent(pubkey);
-        if (!entry) {
-            display.blank();
-            display.hint("Agent no longer exists.");
-            return;
-        }
-
         while (true) {
+            const entry = await this.getManagedAgent(pubkey);
+            if (!entry) {
+                display.blank();
+                display.hint("Agent no longer exists.");
+                return;
+            }
+
             display.blank();
             display.step(0, 0, entry.storedAgent.slug);
             display.context(`Name: ${entry.storedAgent.name}`);
@@ -385,6 +393,7 @@ export class AgentManager {
                 name: "action",
                 message: "Agent",
                 choices: [
+                    { name: "Assign to projects", value: "assign-projects" },
                     { name: "Delete permanently", value: "delete" },
                     { name: "Back", value: "back" },
                 ],
@@ -395,11 +404,78 @@ export class AgentManager {
                 return;
             }
 
+            if (action === "assign-projects") {
+                await this.assignAgentToProjects(pubkey);
+                continue;
+            }
+
             if (action === "delete") {
                 await this.confirmAndDelete(pubkey);
                 return;
             }
         }
+    }
+
+    private async assignAgentToProjects(pubkey: string): Promise<void> {
+        const entry = await this.getManagedAgent(pubkey);
+        if (!entry) {
+            display.blank();
+            display.hint("Agent no longer exists.");
+            return;
+        }
+
+        const availableProjects = await projectMembershipPublishService.listAssignableProjectDTags();
+        const currentProjects = new Set(entry.projects);
+        const choices = Array.from(new Set([...availableProjects, ...entry.projects]))
+            .sort((a, b) => a.localeCompare(b))
+            .map((projectId) => ({
+                name: projectId,
+                value: projectId,
+                checked: currentProjects.has(projectId),
+            }));
+
+        if (choices.length === 0) {
+            display.blank();
+            display.hint("No projects available to assign.");
+            return;
+        }
+
+        const { selectedProjects } = await inquirer.prompt([{
+            type: "checkbox",
+            name: "selectedProjects",
+            message: "Assigned to projects",
+            pageSize: getAgentListHeight(),
+            choices,
+            theme: inquirerTheme,
+        }]);
+
+        const selectedProjectIds = selectedProjects as string[];
+        const selectedProjectSet = new Set(selectedProjectIds);
+        const projectIdsToAdd = selectedProjectIds.filter((projectId) => !currentProjects.has(projectId));
+        const projectIdsToRemove = entry.projects.filter((projectId) => !selectedProjectSet.has(projectId));
+
+        if (projectIdsToAdd.length === 0 && projectIdsToRemove.length === 0) {
+            display.blank();
+            display.hint("No project changes.");
+            return;
+        }
+
+        for (const projectId of projectIdsToAdd) {
+            await agentStorage.addAgentToProject(pubkey, projectId);
+        }
+
+        for (const projectId of projectIdsToRemove) {
+            await agentStorage.removeAgentFromProject(pubkey, projectId);
+        }
+
+        await projectMembershipPublishService.syncManyProjectMemberships([
+            ...projectIdsToAdd,
+            ...projectIdsToRemove,
+        ]);
+
+        display.blank();
+        display.success(`Updated projects for ${entry.storedAgent.slug}`);
+        display.context(`Projects: ${formatProjects(selectedProjectIds)}`);
     }
 
     private async bulkDeleteAgents(agents: ManagedAgent[], selectedPubkeys: string[]): Promise<void> {

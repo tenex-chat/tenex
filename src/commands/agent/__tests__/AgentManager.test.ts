@@ -8,6 +8,7 @@ import {
     getVisibleWindow,
     pickMergeSurvivor,
 } from "@/commands/agent/AgentManager";
+import { isDeletedProjectEvent } from "@/services/agents/ProjectMembershipPublishService";
 import type { StoredAgent } from "@/agents/AgentStorage";
 
 function createAgent(overrides: Partial<StoredAgent> = {}): StoredAgent {
@@ -125,5 +126,14 @@ describe("AgentManager helpers", () => {
 
         expect(groups).toHaveLength(1);
         expect(groups[0]?.map((entry) => entry.pubkey)).toEqual(["a", "b"]);
+    });
+
+    it("detects deleted project events via deleted tag", () => {
+        expect(isDeletedProjectEvent({
+            tags: [["d", "proj-a"], ["deleted", "true"]],
+        } as never)).toBe(true);
+        expect(isDeletedProjectEvent({
+            tags: [["d", "proj-a"]],
+        } as never)).toBe(false);
     });
 });
