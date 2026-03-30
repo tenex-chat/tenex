@@ -23,7 +23,7 @@ import { PROVIDER_IDS } from "../provider-ids";
 
 const CODEX_APP_SERVER_METADATA_KEY = "codex-app-server";
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
-const INTERNAL_TENEX_MCP_SERVER_BASENAME = "tenex_local_tools";
+const INTERNAL_TENEX_MCP_SERVER_BASENAME = "tenex";
 
 type CodexEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type CodexSummary = "auto" | "concise" | "detailed" | "none";
