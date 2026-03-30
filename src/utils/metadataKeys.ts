@@ -2,7 +2,7 @@
  * Canonical metadata key variants for RAG document filtering.
  *
  * Documents ingested via different code-paths use different key conventions:
- *   - Specialized services (reports, lessons, conversations) write **camelCase**.
+ *   - Specialized services (lessons, conversations) write **camelCase**.
  *   - The generic `rag_add_documents` tool historically wrote **snake_case**.
  *
  * Every SQL LIKE filter that matches on these keys must check BOTH variants

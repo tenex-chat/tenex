@@ -8,25 +8,25 @@ import {
     installMCPServerFromEvent,
     removeMCPServerByEventId,
 } from "../services/mcp/mcpInstaller";
-import { installAgentFromNostr } from "../agents/agent-installer";
 import { logger } from "../utils/logger";
 import { trace } from "@opentelemetry/api";
 
 /**
- * Handles project update events by syncing agent and MCP tool definitions.
+ * Handles project update events by syncing authoritative membership and MCP tools.
  * When a project event is received, this function:
  * 1. Checks if the event is for the currently loaded project
- * 2. Identifies new agents and MCP tools that have been added to the project
- * 3. Fetches definitions from Nostr for new agents and MCP tools
+ * 2. Mirrors lowercase `p` agent membership into storage/registry
+ * 3. Fetches definitions for new MCP tools
  * 4. Saves definitions to disk and registers them
  * 5. Updates the ProjectContext with the new configuration
  */
 export async function handleProjectEvent(event: NDKEvent): Promise<void> {
     const title = getTagValue(event, "title") || "Untitled";
 
-    // Extract agent event IDs from the project
-    const agentEventIds = getTagValues(event, "agent")
-        .filter((id): id is string => typeof id === "string");
+    const agentPubkeys = event.tags
+        .filter((tag) => tag[0] === "p" && tag[1])
+        .map((tag) => tag[1])
+        .filter((pubkey): pubkey is string => typeof pubkey === "string");
 
     // Extract MCP tool event IDs from the project
     const mcpEventIds = getTagValues(event, "mcp")
@@ -34,7 +34,7 @@ export async function handleProjectEvent(event: NDKEvent): Promise<void> {
 
     trace.getActiveSpan()?.addEvent("project.update_received", {
         "project.title": title,
-        "project.agent_count": agentEventIds.length,
+        "project.agent_count": agentPubkeys.length,
         "project.mcp_count": mcpEventIds.length,
     });
 
@@ -52,60 +52,8 @@ export async function handleProjectEvent(event: NDKEvent): Promise<void> {
 
         const ndkProject = event as NDKProject;
 
-        // Track which agents need to be added or updated
-        const currentAgentEventIds = new Set<string>();
-        for (const agent of currentContext.agents.values()) {
-            if (agent.eventId) {
-                currentAgentEventIds.add(agent.eventId);
-            }
-        }
-
-        // Find new agents that need to be fetched
-        const newAgentEventIds = agentEventIds.filter(
-            (id) => !!id && !currentAgentEventIds.has(id)
-        );
-
-        // Find agents that need to be removed (exist locally but not in the project)
-        const newAgentEventIdsSet = new Set(agentEventIds);
-        const agentsToRemove = Array.from(currentAgentEventIds).filter(
-            (id) => !newAgentEventIdsSet.has(id)
-        );
-
-        // Handle agent removals first
-        if (agentsToRemove.length > 0) {
-            const agentRegistry = currentContext.agentRegistry;
-
-            for (const eventId of agentsToRemove) {
-                // Find agent by eventId
-                const agent = Array.from(currentContext.agents.values()).find(
-                    (a) => a.eventId === eventId
-                );
-
-                if (agent) {
-                    try {
-                        await agentRegistry.removeAgentFromProject(agent.slug);
-                    } catch (error) {
-                        logger.error(`Error removing agent ${agent.slug}`, { error });
-                    }
-                }
-            }
-        }
-
         // Process agent and MCP tool changes
         const ndk = getNDK();
-
-        // Fetch and install new agent definitions using shared function
-        if (newAgentEventIds.length > 0) {
-            for (const eventId of newAgentEventIds) {
-                try {
-                    await installAgentFromNostr(eventId, undefined, ndk);
-                } catch (error) {
-                    logger.error("Failed to install agent from event", { eventId, error });
-                }
-            }
-            // Reload the agent registry to pick up new agents
-            await currentContext.agentRegistry.loadFromProject(ndkProject);
-        }
 
         // Process MCP tool changes
 
@@ -155,8 +103,6 @@ export async function handleProjectEvent(event: NDKEvent): Promise<void> {
 
         trace.getActiveSpan()?.addEvent("project.updated", {
             "project.total_agents": currentContext.agents.size,
-            "project.agents_added": newAgentEventIds.length,
-            "project.agents_removed": agentsToRemove.length,
             "project.mcp_added": newMCPEventIds.length,
             "project.mcp_removed": mcpToolsToRemove.length,
         });

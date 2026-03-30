@@ -7,17 +7,13 @@ import type { ToolName } from "@/tools/types";
  */
 export const CORE_AGENT_TOOLS: ToolName[] = [
     "lesson_learn", // All agents should be able to learn
-    "reports_list", // All agents should see available reports
-    "report_read", // All agents should read reports
-    "report_write", // All agents should be able to write reports
-    "report_delete", // All agents should be able to delete reports
     // Todo tool for task tracking
     "todo_write", // All agents should be able to write/update todos
     // Conversation tools for project introspection
     "conversation_get", // All agents should access conversation details
     "conversation_list", // All agents should list conversations
     // RAG tools for knowledge management
-    "rag_search", // All agents should be able to search across reports, conversations, and lessons
+    "rag_search", // All agents should be able to search across project knowledge
     "rag_collection_create", // All agents should be able to create RAG collections
     "rag_add_documents", // All agents should be able to add documents to collections
     "rag_collection_delete", // All agents should be able to delete RAG collections

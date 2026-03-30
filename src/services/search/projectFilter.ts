@@ -2,7 +2,7 @@
  * Centralized SQL project filter for RAG queries.
  *
  * Shared utility for project-scoped metadata filtering across all RAG collections
- * (reports, conversations, lessons, and generic collections).
+ * (conversations, lessons, and generic collections).
  *
  * Applied DURING vector search (prefilter) to ensure proper project isolation.
  *

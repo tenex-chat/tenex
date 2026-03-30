@@ -31,7 +31,6 @@ import { availableNudgesAndSkillsFragment } from "./13-available-nudges";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { mcpResourcesFragment } from "./26-mcp-resources";
-import { memorizedReportsFragment } from "./27-memorized-reports";
 import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
 import { ragCollectionsFragment } from "./29-rag-collections";
 import { worktreeContextFragment } from "./30-worktree-context";
@@ -81,7 +80,6 @@ export function registerAllFragments(): void {
 
     // Context and learning
     fragmentRegistry.register(mcpResourcesFragment);
-    fragmentRegistry.register(memorizedReportsFragment);
     fragmentRegistry.register(agentDirectedMonitoringFragment);
     fragmentRegistry.register(ragCollectionsFragment);
     fragmentRegistry.register(worktreeContextFragment);

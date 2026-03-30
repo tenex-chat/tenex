@@ -30,7 +30,6 @@ import type { SearchProvider, SearchResult } from "../types";
 
 function createMockResult(source: string, id: string, score: number): SearchResult {
     const toolMap: Record<string, SearchResult["retrievalTool"]> = {
-        reports: "report_read",
         conversations: "conversation_get",
         lessons: "rag_search",
     };
@@ -132,9 +131,9 @@ describe("UnifiedSearchService", () => {
     it("queries all providers and merges results by relevance", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
-            createMockProvider("reports", [
-                createMockResult("reports", "report-1", 0.9),
-                createMockResult("reports", "report-2", 0.7),
+            createMockProvider("knowledge", [
+                createMockResult("knowledge", "note-1", 0.9),
+                createMockResult("knowledge", "note-2", 0.7),
             ])
         );
         registry.register(
@@ -152,11 +151,11 @@ describe("UnifiedSearchService", () => {
 
         expect(result.success).toBe(true);
         expect(result.totalResults).toBe(4);
-        expect(result.collectionsSearched).toEqual(["reports", "conversations"]);
+        expect(result.collectionsSearched).toEqual(["knowledge", "conversations"]);
 
         // Results should be sorted by relevance (highest first)
         expect(result.results[0].relevanceScore).toBe(0.9);
-        expect(result.results[0].id).toBe("report-1");
+        expect(result.results[0].id).toBe("note-1");
         expect(result.results[1].relevanceScore).toBe(0.85);
         expect(result.results[1].id).toBe("conv-1");
         expect(result.results[2].relevanceScore).toBe(0.7);
@@ -166,10 +165,10 @@ describe("UnifiedSearchService", () => {
     it("respects limit parameter", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
-            createMockProvider("reports", [
-                createMockResult("reports", "r1", 0.9),
-                createMockResult("reports", "r2", 0.8),
-                createMockResult("reports", "r3", 0.7),
+            createMockProvider("knowledge", [
+                createMockResult("knowledge", "r1", 0.9),
+                createMockResult("knowledge", "r2", 0.8),
+                createMockResult("knowledge", "r3", 0.7),
             ])
         );
 
@@ -187,7 +186,7 @@ describe("UnifiedSearchService", () => {
     it("gracefully degrades when a provider fails", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
-            createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+            createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
         registry.register(createFailingProvider("conversations"));
 
@@ -199,7 +198,7 @@ describe("UnifiedSearchService", () => {
 
         expect(result.success).toBe(true);
         expect(result.totalResults).toBe(1);
-        expect(result.collectionsSearched).toEqual(["reports"]);
+        expect(result.collectionsSearched).toEqual(["knowledge"]);
         expect(result.collectionsErrored).toEqual(["conversations"]);
         expect(result.warnings).toBeDefined();
         expect(result.warnings?.[0]).toContain("conversations");
@@ -208,7 +207,7 @@ describe("UnifiedSearchService", () => {
     it("filters by specified collections", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
-            createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+            createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
         registry.register(
             createMockProvider("conversations", [createMockResult("conversations", "c1", 0.8)])
@@ -221,10 +220,10 @@ describe("UnifiedSearchService", () => {
         const result = await service.search({
             query: "test",
             projectId: "test-project",
-            collections: ["reports", "lessons"],
+            collections: ["knowledge", "lessons"],
         });
 
-        expect(result.collectionsSearched).toEqual(["reports", "lessons"]);
+        expect(result.collectionsSearched).toEqual(["knowledge", "lessons"]);
         expect(result.totalResults).toBe(2);
         // Should NOT include conversations
         expect(result.results.every((r) => r.source !== "conversations")).toBe(true);
@@ -233,7 +232,7 @@ describe("UnifiedSearchService", () => {
     it("performs LLM extraction when prompt is provided and model is configured", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
-            createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+            createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
 
         mockSearchModelName = "test-search-model";
@@ -258,7 +257,7 @@ describe("UnifiedSearchService", () => {
     it("returns results without extraction when LLM is not configured", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
-            createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+            createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
 
         // No LLM config
@@ -281,7 +280,7 @@ describe("UnifiedSearchService", () => {
     it("handles LLM extraction failure gracefully", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
-            createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+            createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
 
         mockSearchModelName = "test-model";
@@ -306,7 +305,7 @@ describe("UnifiedSearchService", () => {
 
     it("handles all providers failing", async () => {
         const registry = SearchProviderRegistry.getInstance();
-        registry.register(createFailingProvider("reports"));
+        registry.register(createFailingProvider("knowledge"));
         registry.register(createFailingProvider("conversations"));
 
         const service = UnifiedSearchService.getInstance();
@@ -326,12 +325,16 @@ describe("UnifiedSearchService", () => {
             // Register a specialized provider (with collectionName mapping to its RAG collection)
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+                createMockProvider(
+                    "project_notes",
+                    [createMockResult("project_notes", "r1", 0.9)],
+                    "project_notes"
+                )
             );
 
             // RAG returns specialized + extra collections
             mockListCollections = async () => [
-                "project_reports",          // covered by specialized "reports" provider
+                "project_notes",            // covered by the specialized provider
                 "conversation_embeddings",  // covered by specialized "conversations" provider
                 "lessons",                  // covered by specialized "lessons" provider
                 "custom_knowledge",         // NOT covered — should get a generic provider
@@ -360,8 +363,8 @@ describe("UnifiedSearchService", () => {
             });
 
             expect(result.success).toBe(true);
-            // Should include both specialized (reports) and generic (custom_knowledge)
-            expect(result.collectionsSearched).toContain("reports");
+            // Should include both specialized (project_notes) and generic (custom_knowledge)
+            expect(result.collectionsSearched).toContain("project_notes");
             expect(result.collectionsSearched).toContain("custom_knowledge");
             expect(result.totalResults).toBe(2);
 
@@ -375,7 +378,11 @@ describe("UnifiedSearchService", () => {
         it("does not create generic providers for specialized collection names", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+                createMockProvider(
+                    "project_notes",
+                    [createMockResult("project_notes", "r1", 0.9)],
+                    "project_notes"
+                )
             );
             registry.register(
                 createMockProvider("conversations", [], "conversation_embeddings")
@@ -386,7 +393,7 @@ describe("UnifiedSearchService", () => {
 
             // Only return collections covered by specialized providers
             mockListCollections = async () => [
-                "project_reports",
+                "project_notes",
                 "conversation_embeddings",
                 "lessons",
             ];
@@ -398,17 +405,21 @@ describe("UnifiedSearchService", () => {
             });
 
             // Only the registered specialized providers should be queried — no generic duplicates
-            expect(result.collectionsSearched).toEqual(["reports", "conversations", "lessons"]);
+            expect(result.collectionsSearched).toEqual(["project_notes", "conversations", "lessons"]);
             expect(result.totalResults).toBe(1);
         });
 
         it("filters dynamic collections via the collections parameter", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+                createMockProvider(
+                    "project_notes",
+                    [createMockResult("project_notes", "r1", 0.9)],
+                    "project_notes"
+                )
             );
 
-            mockListCollections = async () => ["project_reports", "custom_a", "custom_b"];
+            mockListCollections = async () => ["project_notes", "custom_a", "custom_b"];
 
             mockQueryWithFilter = async (name: string) => [
                 {
@@ -428,7 +439,7 @@ describe("UnifiedSearchService", () => {
                 collections: ["custom_a"],
             });
 
-            // Should only search custom_a, not reports or custom_b
+            // Should only search custom_a, not project_notes or custom_b
             expect(result.collectionsSearched).toEqual(["custom_a"]);
             expect(result.totalResults).toBe(1);
             expect(result.results[0].source).toBe("custom_a");
@@ -437,7 +448,11 @@ describe("UnifiedSearchService", () => {
         it("degrades gracefully when RAG collection discovery fails", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+                createMockProvider(
+                    "project_notes",
+                    [createMockResult("project_notes", "r1", 0.9)],
+                    "project_notes"
+                )
             );
 
             // RAGService.listCollections() throws
@@ -453,17 +468,21 @@ describe("UnifiedSearchService", () => {
 
             // Should still work with just the specialized providers
             expect(result.success).toBe(true);
-            expect(result.collectionsSearched).toEqual(["reports"]);
+            expect(result.collectionsSearched).toEqual(["project_notes"]);
             expect(result.totalResults).toBe(1);
         });
 
         it("gracefully handles a failing generic provider among healthy ones", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+                createMockProvider(
+                    "project_notes",
+                    [createMockResult("project_notes", "r1", 0.9)],
+                    "project_notes"
+                )
             );
 
-            mockListCollections = async () => ["project_reports", "good_collection", "bad_collection"];
+            mockListCollections = async () => ["project_notes", "good_collection", "bad_collection"];
 
             mockQueryWithFilter = async (name: string) => {
                 if (name === "bad_collection") {
@@ -488,10 +507,10 @@ describe("UnifiedSearchService", () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.collectionsSearched).toContain("reports");
+            expect(result.collectionsSearched).toContain("project_notes");
             expect(result.collectionsSearched).toContain("good_collection");
             expect(result.collectionsErrored).toContain("bad_collection");
-            // reports (1) + good_collection (1) = 2
+            // project_notes (1) + good_collection (1) = 2
             expect(result.totalResults).toBe(2);
         });
     });
@@ -500,17 +519,21 @@ describe("UnifiedSearchService", () => {
         it("uses RAGCollectionRegistry to filter collections by scope", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+                createMockProvider(
+                    "project_notes",
+                    [createMockResult("project_notes", "r1", 0.9)],
+                    "project_notes"
+                )
             );
 
             // RAG lists all collections
             mockListCollections = async () => [
-                "project_reports",
+                "project_notes",
                 "project_coll",     // matches scope
                 "other_project",    // excluded by scope
             ];
 
-            // Scope filter: only include project_reports and project_coll
+            // Scope filter: only include project_notes and project_coll
             mockGetMatchingCollections = (allCollections, _projectId, _agentPubkey) => {
                 return allCollections.filter((c) => c !== "other_project");
             };
@@ -533,9 +556,9 @@ describe("UnifiedSearchService", () => {
                 agentPubkey: "agent-pubkey",
             });
 
-            // Should include reports (specialized) and project_coll (scope-matched generic)
+            // Should include project_notes (specialized) and project_coll (scope-matched generic)
             // Should NOT include other_project (excluded by scope)
-            expect(result.collectionsSearched).toContain("reports");
+            expect(result.collectionsSearched).toContain("project_notes");
             expect(result.collectionsSearched).toContain("project_coll");
             expect(result.collectionsSearched).not.toContain("other_project");
         });
@@ -543,12 +566,16 @@ describe("UnifiedSearchService", () => {
         it("bypasses scope filtering when collections parameter is explicit", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+                createMockProvider(
+                    "project_notes",
+                    [createMockResult("project_notes", "r1", 0.9)],
+                    "project_notes"
+                )
             );
 
             // RAG lists all collections
             mockListCollections = async () => [
-                "project_reports",
+                "project_notes",
                 "scoped_out_coll",  // Would be excluded by scope
             ];
 

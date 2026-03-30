@@ -50,6 +50,14 @@ export function getAgentHomeDirectory(agentPubkey: string): string {
 }
 
 /**
+ * Get the project-specific memory directory for an agent.
+ * Project memory lives inside the agent home so home_fs_* tools can write to it directly.
+ */
+export function getAgentProjectMemoryDirectory(agentPubkey: string, projectDTag: string): string {
+    return join(getAgentHomeDirectory(agentPubkey), "projects", projectDTag, "docs");
+}
+
+/**
  * Normalize and resolve a path to prevent path traversal attacks.
  * Resolves .., ., and normalizes the path to an absolute form.
  * @param inputPath - The path to normalize (should be absolute)
@@ -170,6 +178,16 @@ export function ensureAgentHomeDirectory(agentPubkey: string): boolean {
     }
 }
 
+function ensureDirectory(path: string): boolean {
+    try {
+        mkdirSync(path, { recursive: true });
+        return true;
+    } catch (error) {
+        console.error("Failed to create directory:", error);
+        return false;
+    }
+}
+
 /**
  * Maximum file size to read for injected files (prevents memory spikes).
  * We only need first MAX_INJECTED_FILE_LENGTH chars, so read slightly more to detect truncation.
@@ -253,16 +271,13 @@ function safeReadBoundedFile(
  * @param agentPubkey - The agent's pubkey
  * @returns Array of injected file objects with filename, content, and truncated flag
  */
-export function getAgentHomeInjectedFiles(agentPubkey: string): InjectedFile[] {
-    const homeDir = getAgentHomeDirectory(agentPubkey);
-
-    // Ensure directory exists
-    if (!ensureAgentHomeDirectory(agentPubkey)) {
+function getInjectedFilesFromDirectory(directory: string): InjectedFile[] {
+    if (!ensureDirectory(directory)) {
         return [];
     }
 
     try {
-        const entries = readdirSync(homeDir, { withFileTypes: true });
+        const entries = readdirSync(directory, { withFileTypes: true });
 
         // Filter for +prefixed entries that appear to be files
         // Note: We re-validate each file before reading due to TOCTOU concerns
@@ -274,10 +289,10 @@ export function getAgentHomeInjectedFiles(agentPubkey: string): InjectedFile[] {
         const injectedFiles: InjectedFile[] = [];
 
         for (const entry of plusCandidates) {
-            const filePath = join(homeDir, entry.name);
+            const filePath = join(directory, entry.name);
 
             // Use safe bounded read with TOCTOU protection
-            const result = safeReadBoundedFile(filePath, homeDir, MAX_INJECTED_FILE_READ_SIZE);
+            const result = safeReadBoundedFile(filePath, directory, MAX_INJECTED_FILE_READ_SIZE);
             if (!result) {
                 continue; // Skip files that couldn't be safely read
             }
@@ -298,6 +313,24 @@ export function getAgentHomeInjectedFiles(agentPubkey: string): InjectedFile[] {
         logger.warn("Failed to scan agent home for injected files:", error);
         return [];
     }
+}
+
+export function getAgentHomeInjectedFiles(agentPubkey: string): InjectedFile[] {
+    const homeDir = getAgentHomeDirectory(agentPubkey);
+    if (!ensureAgentHomeDirectory(agentPubkey)) {
+        return [];
+    }
+
+    return getInjectedFilesFromDirectory(homeDir);
+}
+
+export function getAgentProjectInjectedFiles(agentPubkey: string, projectDTag: string): InjectedFile[] {
+    const projectMemoryDir = getAgentProjectMemoryDirectory(agentPubkey, projectDTag);
+    if (!ensureAgentHomeDirectory(agentPubkey)) {
+        return [];
+    }
+
+    return getInjectedFilesFromDirectory(projectMemoryDir);
 }
 
 /**

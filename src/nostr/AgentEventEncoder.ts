@@ -589,14 +589,6 @@ export class AgentEventEncoder {
             }
         }
 
-        // Add a-tags for referenced addressable events (e.g., NDKArticle reports)
-        // Format: "30023:pubkey:d-tag" for kind 30023 addressable events
-        if (intent.referencedAddressableEvents) {
-            for (const addressableRef of intent.referencedAddressableEvents) {
-                event.tag(["a", addressableRef]);
-            }
-        }
-
         // Add standard metadata
         this.addStandardTags(event, context);
 

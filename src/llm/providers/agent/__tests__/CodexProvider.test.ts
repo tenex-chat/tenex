@@ -130,7 +130,7 @@ describe("CodexProvider", () => {
             mcpConfig: {
                 enabled: true,
                 servers: {
-                    tenex_local_tools: {
+                    tenex: {
                         command: "node",
                         args: ["server.js"],
                     },
@@ -156,8 +156,8 @@ describe("CodexProvider", () => {
         };
 
         expect(agentSettings.mcpServers).toBeDefined();
-        expect(Object.keys(agentSettings.mcpServers ?? {})).toContain("tenex_local_tools_2");
-        expect(Object.keys(agentSettings.mcpServers ?? {})).not.toContain("tenex");
+        expect(Object.keys(agentSettings.mcpServers ?? {})).toContain("tenex_2");
+        expect(Object.keys(agentSettings.mcpServers ?? {})).toContain("tenex");
 
         const normalizedTenexOverride = agentSettings.configOverrides?.mcp_servers?.tenex;
         expect(normalizedTenexOverride).toBeDefined();

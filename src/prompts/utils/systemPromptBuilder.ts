@@ -10,7 +10,6 @@ import type { SkillData } from "@/services/skill";
 import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { getIdentityBindingStore } from "@/services/identity";
 import { getProjectContext } from "@/services/projects";
-import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
 import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
 import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
@@ -254,63 +253,6 @@ async function addCoreAgentFragments(
         builder.add("todo-usage-guidance", {});
     }
 
-    // Add memorized reports - retrieved from cache (no async fetch needed)
-    // This includes both:
-    // 1. Agent-specific memorized reports (memorize=true) - only for the authoring agent
-    // 2. Team-memorized reports (memorize_team=true) - for ALL agents in the project
-    try {
-        const reportService = new ReportService();
-
-        // Get agent's own memorized reports
-        const agentMemorizedReports = reportService.getMemorizedReportsForAgent(agent.pubkey);
-
-        // Get team-memorized reports (visible to ALL agents)
-        const teamMemorizedReports = reportService.getTeamMemorizedReports();
-
-        // Combine and deduplicate by slug with scope-aware semantics:
-        // 1. Team memos ALWAYS take precedence (they must appear for ALL agents)
-        // 2. Within each scope (team vs agent), latest publishedAt wins
-        // 3. Agent-only reports are only included if no team memo exists with the same slug
-
-        // Step 1: Deduplicate team reports by slug (latest wins within team scope)
-        const teamBySlug = new Map<string, typeof teamMemorizedReports[0]>();
-        for (const report of teamMemorizedReports) {
-            const existing = teamBySlug.get(report.slug);
-            if (!existing || (report.publishedAt || 0) > (existing.publishedAt || 0)) {
-                teamBySlug.set(report.slug, report);
-            }
-        }
-
-        // Step 2: Deduplicate agent reports by slug (latest wins within agent scope)
-        const agentBySlug = new Map<string, typeof agentMemorizedReports[0]>();
-        for (const report of agentMemorizedReports) {
-            const existing = agentBySlug.get(report.slug);
-            if (!existing || (report.publishedAt || 0) > (existing.publishedAt || 0)) {
-                agentBySlug.set(report.slug, report);
-            }
-        }
-
-        // Step 3: Combine - team memos first, then agent-only (excluding slugs already in team)
-        const combinedReports = [
-            ...Array.from(teamBySlug.values()),
-            ...Array.from(agentBySlug.values()).filter(r => !teamBySlug.has(r.slug)),
-        ];
-
-        if (combinedReports.length > 0) {
-            builder.add("memorized-reports", { reports: combinedReports });
-            logger.debug("📚 Added memorized reports to system prompt (from cache)", {
-                agent: agent.name,
-                agentReportsCount: agentMemorizedReports.length,
-                teamReportsCount: teamMemorizedReports.length,
-                totalCount: combinedReports.length,
-            });
-        }
-    } catch (error) {
-        // Report service might fail if no project context
-        logger.debug("Could not get memorized reports from cache:", error);
-    }
-
-
     // Add MCP resources if agent has any MCP tools and mcpManager is available
     if (includeMcpResources && mcpManager) {
         const t0 = performance.now();
@@ -481,7 +423,11 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     });
 
     // Add agent home directory context
-    systemPromptBuilder.add("agent-home-directory", { agent: agentForFragments });
+    systemPromptBuilder.add("agent-home-directory", {
+        agent: agentForFragments,
+        projectDTag: dTag,
+        projectDocsPath: projectBasePath ? path.join(projectBasePath, "tenex", "docs") : undefined,
+    });
 
     // Explain <system-reminder> tags before agents encounter them
     systemPromptBuilder.add("system-reminders-explanation", {});

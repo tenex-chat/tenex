@@ -17,7 +17,7 @@ export function createSdkMcpServer(
     context: { agentName?: string; serverName?: string }
 ): SdkMcpServer | undefined {
     const localTools = Object.entries(tools);
-    const serverName = context.serverName ?? "tenex_local_tools";
+    const serverName = context.serverName ?? "tenex";
 
     logger.debug("[CodexToolsAdapter] Input tools analysis:", {
         totalTools: Object.keys(tools).length,

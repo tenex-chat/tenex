@@ -196,21 +196,21 @@ export class ProjectStatusService {
 
             // Gather agent info - preserve order from NDKProject
             {
-                // Get agent tags from project in their original order
+                // Get assigned agent pubkeys from project in their original order
                 const projectAgentTags = projectCtx.project.tags.filter(
-                    (tag) => tag[0] === "agent" && tag[1]
+                    (tag) => tag[0] === "p" && tag[1]
                 );
 
                 // Track which agents we've already added (by slug)
                 const addedAgentSlugs = new Set<string>();
 
-                // First, add agents that have eventIds in the order they appear in the project
+                // First, add agents in the order they appear in the project
                 for (const agentTag of projectAgentTags) {
-                    const eventId = agentTag[1];
+                    const pubkey = agentTag[1];
 
-                    // Find agent with matching eventId
+                    // Find agent with matching pubkey
                     for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
-                        if (agent.eventId === eventId) {
+                        if (agent.pubkey === pubkey) {
                             intent.agents.push({
                                 pubkey: agent.pubkey,
                                 slug: agentSlug,

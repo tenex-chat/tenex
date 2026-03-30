@@ -5,12 +5,9 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { NudgeWhitelistService, type WhitelistItem } from "@/services/nudge";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
-import type { LocalReportStore } from "@/services/reports/LocalReportStore";
-import type { ReportInfo } from "@/services/reports/ReportService";
-import { articleToReportInfo } from "@/services/reports/articleUtils";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
-import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
 
 /**
  * Resolve the Project Manager for a project.
@@ -19,8 +16,8 @@ import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
  * 1. Global PM designation via kind 24020 event ["pm"] tag without a-tag (highest priority)
  * 2. Project-scoped PM designation via kind 24020 event ["pm"] tag WITH a-tag (projectOverrides[dTag].isPM)
  * 3. Local PM override for this specific project (pmOverrides) - legacy, for backward compatibility
- * 4. Explicit PM designation in 31933 project tags (role="pm")
- * 5. First agent from project tags
+ * 4. Explicit PM designation in 31933 lowercase `p` tags (tag[2] === "pm")
+ * 5. First lowercase `p` project tag
  * 6. First agent in registry (fallback for projects with no agent tags)
  *
  * @param project - The NDKProject event
@@ -89,43 +86,43 @@ export function resolveProjectManager(
 
     // Step 4: Check for explicit "pm" role in project tags
     const pmAgentTag = project.tags.find(
-        (tag: string[]) => tag[0] === "agent" && tag[2] === "pm"
+        (tag: string[]) => tag[0] === "p" && tag[2] === "pm"
     );
 
     if (pmAgentTag?.[1]) {
-        const pmEventId = pmAgentTag[1];
-        logger.debug("Found explicit PM designation in project tags", { pmEventId });
+        const pmPubkey = pmAgentTag[1];
+        logger.debug("Found explicit PM designation in project tags", { pmPubkey });
 
         for (const agent of agents.values()) {
-            if (agent.eventId === pmEventId) {
+            if (agent.pubkey === pmPubkey) {
                 return agent;
             }
         }
 
         logger.warn("PM agent designated in project tags not loaded in registry yet, falling through", {
-            pmEventId,
-            loadedEventIds: Array.from(agents.values()).map(a => a.eventId),
+            pmPubkey,
+            loadedPubkeys: Array.from(agents.values()).map((a) => a.pubkey),
         });
     }
 
     // Step 5: Fallback to first agent from project tags
     const firstAgentTag = project.tags.find(
-        (tag: string[]) => tag[0] === "agent" && tag[1]
+        (tag: string[]) => tag[0] === "p" && tag[1]
     );
 
     if (firstAgentTag?.[1]) {
-        const pmEventId = firstAgentTag[1];
+        const pmPubkey = firstAgentTag[1];
         logger.debug("No explicit PM found, using first agent from project tags");
 
         for (const agent of agents.values()) {
-            if (agent.eventId === pmEventId) {
+            if (agent.pubkey === pmPubkey) {
                 return agent;
             }
         }
 
         logger.warn("First agent from project tags not loaded in registry yet, falling through", {
-            pmEventId,
-            loadedEventIds: Array.from(agents.values()).map(a => a.eventId),
+            pmPubkey,
+            loadedPubkeys: Array.from(agents.values()).map((a) => a.pubkey),
         });
     }
 
@@ -193,18 +190,6 @@ export class ProjectContext {
     public readonly agentComments: Map<string, LessonComment[]>;
 
     /**
-     * Reports cache for this project
-     * Key: compound key "author:slug", Value: ReportInfo object
-     * Using compound key allows efficient lookup by both slug and author
-     */
-    public readonly reports: Map<string, ReportInfo>;
-
-    /**
-     * Maximum number of reports to cache per project (memory efficiency)
-     */
-    private static readonly MAX_REPORTS_CACHE_SIZE = 200;
-
-    /**
      * Status publisher for immediately publishing project status updates
      */
     public statusPublisher?: ProjectStatusService;
@@ -219,12 +204,6 @@ export class ProjectContext {
      * Attached by ProjectRuntime after startup wiring is complete.
      */
     public promptCompilerRegistry?: PromptCompilerRegistryService;
-
-    /**
-     * Local report store for this project's report storage.
-     * Each project has its own store to ensure isolation.
-     */
-    public localReportStore?: LocalReportStore;
 
     /**
      * @deprecated Nudge whitelist is now user-scoped, not project-scoped.
@@ -272,7 +251,6 @@ export class ProjectContext {
 
         this.agentLessons = new Map();
         this.agentComments = new Map();
-        this.reports = new Map();
 
         // Reference the daemon-scoped nudge whitelist singleton
         this.nudgeWhitelist = NudgeWhitelistService.getInstance();
@@ -487,180 +465,6 @@ export class ProjectContext {
                 error: error instanceof Error ? error.message : String(error),
             });
         });
-    }
-
-    // =====================================================================================
-    // REPORT MANAGEMENT
-    // =====================================================================================
-
-    /**
-     * Generate a compound key for report storage
-     */
-    private static reportKey(authorPubkey: string, slug: string): string {
-        return `${authorPubkey}:${slug}`;
-    }
-
-    /**
-     * Add or update a report in the cache
-     * @param report The report info to add/update
-     */
-    addReport(report: ReportInfo): void {
-        // Get author hex pubkey from report
-        const authorPubkey = this.extractPubkeyFromReport(report);
-        if (!authorPubkey) {
-            logger.warn("Cannot add report without author pubkey", { slug: report.slug });
-            return;
-        }
-
-        const key = ProjectContext.reportKey(authorPubkey, report.slug);
-
-        // Check if this is a deleted report
-        if (report.isDeleted) {
-            // Remove from cache instead of adding
-            this.reports.delete(key);
-            logger.debug("📰 Removed deleted report from cache", {
-                slug: report.slug,
-                author: authorPubkey.substring(0, 8),
-            });
-            return;
-        }
-
-        // Add/update the report
-        this.reports.set(key, report);
-
-        // Enforce cache size limit (LRU-style: oldest entries first based on Map insertion order)
-        if (this.reports.size > ProjectContext.MAX_REPORTS_CACHE_SIZE) {
-            const oldestKey = this.reports.keys().next().value;
-            if (oldestKey) {
-                this.reports.delete(oldestKey);
-                logger.debug("📰 Evicted oldest report from cache due to size limit");
-            }
-        }
-
-        logger.debug("📰 Added/updated report in cache", {
-            slug: report.slug,
-            author: authorPubkey.substring(0, 8),
-            cacheSize: this.reports.size,
-        });
-    }
-
-    /**
-     * Add a report directly from an NDKArticle event
-     * Converts the article to ReportInfo and adds to cache
-     */
-    addReportFromArticle(article: NDKArticle): void {
-        const report = articleToReportInfo(article);
-        this.addReport(report);
-    }
-
-    /**
-     * Get a report by slug for a specific agent
-     */
-    getReport(agentPubkey: string, slug: string): ReportInfo | undefined {
-        const key = ProjectContext.reportKey(agentPubkey, slug);
-        return this.reports.get(key);
-    }
-
-    /**
-     * Get a report by slug (searches all authors)
-     * Returns the first match found
-     */
-    getReportBySlug(slug: string): ReportInfo | undefined {
-        for (const report of this.reports.values()) {
-            if (report.slug === slug) {
-                return report;
-            }
-        }
-        return undefined;
-    }
-
-    /**
-     * Get all reports from the cache
-     */
-    getAllReports(): ReportInfo[] {
-        return Array.from(this.reports.values());
-    }
-
-    /**
-     * Get reports for a specific agent by pubkey
-     */
-    getReportsForAgent(agentPubkey: string): ReportInfo[] {
-        const reports: ReportInfo[] = [];
-        const prefix = `${agentPubkey}:`;
-        for (const [key, report] of this.reports) {
-            if (key.startsWith(prefix)) {
-                reports.push(report);
-            }
-        }
-        return reports;
-    }
-
-    /**
-     * Get all memorized reports (reports tagged with memorize=true)
-     */
-    getMemorizedReports(): ReportInfo[] {
-        return Array.from(this.reports.values()).filter((report) => report.isMemorized);
-    }
-
-    /**
-     * Get memorized reports for a specific agent
-     */
-    getMemorizedReportsForAgent(agentPubkey: string): ReportInfo[] {
-        return this.getReportsForAgent(agentPubkey).filter((report) => report.isMemorized);
-    }
-
-    /**
-     * Get all team-memorized reports (reports tagged with memorize_team=true).
-     * These reports are injected into ALL agents' system prompts.
-     */
-    getTeamMemorizedReports(): ReportInfo[] {
-        return Array.from(this.reports.values()).filter((report) => report.isMemorizedTeam);
-    }
-
-    /**
-     * Get reports by hashtag
-     */
-    getReportsByHashtag(hashtag: string): ReportInfo[] {
-        return Array.from(this.reports.values()).filter(
-            (report) => report.hashtags?.includes(hashtag)
-        );
-    }
-
-    /**
-     * Get report cache statistics
-     */
-    getReportCacheStats(): { total: number; memorized: number; byAuthor: Record<string, number> } {
-        const byAuthor: Record<string, number> = {};
-        let memorized = 0;
-
-        for (const report of this.reports.values()) {
-            const author = this.extractPubkeyFromReport(report);
-            if (!author) {
-                throw new Error("[ProjectContext] Missing author pubkey in report cache.");
-            }
-            byAuthor[author.substring(0, 8)] = (byAuthor[author.substring(0, 8)] || 0) + 1;
-            if (report.isMemorized) memorized++;
-        }
-
-        return {
-            total: this.reports.size,
-            memorized,
-            byAuthor,
-        };
-    }
-
-    /**
-     * Clear all reports from cache
-     */
-    clearReports(): void {
-        this.reports.clear();
-    }
-
-    /**
-     * Extract pubkey from report. Author is stored as hex pubkey.
-     */
-    private extractPubkeyFromReport(report: ReportInfo): string | undefined {
-        return report.author;
     }
 
     /**

@@ -51,11 +51,11 @@ describe("CodexToolsAdapter", () => {
             const server = createSdkMcpServer(tools, { agentName: "test" });
             const config = await server?._start();
             const callArgs = createLocalMcpServerCalls[0];
-            expect(callArgs.name).toBe("tenex_local_tools");
+            expect(callArgs.name).toBe("tenex");
             expect(callArgs.tools).toHaveLength(Object.keys(tools).length);
             expect(config).toEqual({
                 transport: "http",
-                url: "http://127.0.0.1/tenex_local_tools",
+                url: "http://127.0.0.1/tenex",
                 httpHeaders: {
                     Authorization: "Bearer test-token",
                 },
@@ -98,9 +98,6 @@ describe("CodexToolsAdapter", () => {
                 delegate_crossproject: mockTool,
                 ask: mockTool,
                 lesson_learn: mockTool,
-                report_write: mockTool,
-                report_read: mockTool,
-                reports_list: mockTool,
                 conversation_get: mockTool,
                 conversation_list: mockTool,
                 project_list: mockTool,
@@ -148,12 +145,12 @@ describe("CodexToolsAdapter", () => {
 
             const server = createSdkMcpServer(tools, {
                 agentName: "test",
-                serverName: "tenex_local_tools_2",
+                serverName: "tenex_2",
             });
             await server?._start();
 
             expect(createLocalMcpServerCalls).toHaveLength(1);
-            expect(createLocalMcpServerCalls[0].name).toBe("tenex_local_tools_2");
+            expect(createLocalMcpServerCalls[0].name).toBe("tenex_2");
         });
 
         it("should handle empty tools object", () => {

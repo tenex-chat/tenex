@@ -837,6 +837,18 @@ export class AgentStorage {
     }
 
     /**
+     * Get the raw pubkeys currently associated with a project in the local index.
+     *
+     * This returns the exact byProject membership without canonical slug filtering.
+     * Use it when you need to mirror authoritative project membership into storage.
+     */
+    async getProjectAgentPubkeys(projectDTag: string): Promise<string[]> {
+        if (!this.index) await this.loadIndex();
+        if (!this.index) return [];
+        return [...(this.index.byProject[projectDTag] || [])];
+    }
+
+    /**
      * Get all projects for an agent (reverse lookup by pubkey via index)
      */
     async getAgentProjects(pubkey: string): Promise<string[]> {
@@ -914,6 +926,57 @@ export class AgentStorage {
         if (wasInactive) {
             logger.info(`Reactivated agent ${agent.slug} (${pubkey.substring(0, 8)}) for project ${projectDTag}`);
         }
+    }
+
+    /**
+     * Mirror authoritative project membership into local storage.
+     *
+     * Unknown pubkeys are skipped and logged; they are not added to storage.
+     * Membership order is preserved in the returned assignedPubkeys array.
+     */
+    async syncProjectAgents(
+        projectDTag: string,
+        desiredPubkeys: string[]
+    ): Promise<{
+        assignedPubkeys: string[];
+        skippedPubkeys: string[];
+        removedPubkeys: string[];
+    }> {
+        const dedupedDesiredPubkeys = Array.from(
+            new Set(desiredPubkeys.filter((pubkey): pubkey is string => Boolean(pubkey)))
+        );
+        const currentPubkeys = new Set(await this.getProjectAgentPubkeys(projectDTag));
+        const desiredPubkeySet = new Set(dedupedDesiredPubkeys);
+        const removedPubkeys: string[] = [];
+        const assignedPubkeys: string[] = [];
+        const skippedPubkeys: string[] = [];
+
+        for (const pubkey of currentPubkeys) {
+            if (desiredPubkeySet.has(pubkey)) continue;
+            await this.removeAgentFromProject(pubkey, projectDTag);
+            removedPubkeys.push(pubkey);
+        }
+
+        for (const pubkey of dedupedDesiredPubkeys) {
+            const storedAgent = await this.loadAgent(pubkey);
+            if (!storedAgent) {
+                skippedPubkeys.push(pubkey);
+                logger.warn("Skipping unknown assigned agent pubkey", {
+                    projectDTag,
+                    agentPubkey: pubkey.substring(0, 8),
+                });
+                continue;
+            }
+
+            await this.addAgentToProject(pubkey, projectDTag);
+            assignedPubkeys.push(pubkey);
+        }
+
+        return {
+            assignedPubkeys,
+            skippedPubkeys,
+            removedPubkeys,
+        };
     }
 
     /**

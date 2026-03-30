@@ -23,7 +23,7 @@ describe("ProjectStatusService mcp__tenex__ filtering", () => {
         it("should exclude mcp__tenex__ tools", () => {
             expect(filterMcpTenexTools("mcp__tenex__schedule_task")).toBe(false);
             expect(filterMcpTenexTools("mcp__tenex__lesson_learn")).toBe(false);
-            expect(filterMcpTenexTools("mcp__tenex__report_write")).toBe(false);
+            expect(filterMcpTenexTools("mcp__tenex__project_list")).toBe(false);
             expect(filterMcpTenexTools("mcp__tenex__delegate")).toBe(false);
             expect(filterMcpTenexTools("mcp__tenex__ask")).toBe(false);
         });
@@ -79,7 +79,7 @@ describe("ProjectStatusService mcp__tenex__ filtering", () => {
         it("should filter mcp__tenex__ tools when adding from agent tools", () => {
             const agentTools = [
                 "mcp__tenex__lesson_learn",
-                "mcp__tenex__report_write",
+                "mcp__tenex__project_list",
                 "mcp__tenex__ask",
                 "mcp__slack__post_message",
                 "mcp__linear__create_issue",
@@ -103,7 +103,7 @@ describe("ProjectStatusService mcp__tenex__ filtering", () => {
 
             // mcp__tenex__ tools should be excluded
             expect(toolAgentMap.has("mcp__tenex__lesson_learn")).toBe(false);
-            expect(toolAgentMap.has("mcp__tenex__report_write")).toBe(false);
+            expect(toolAgentMap.has("mcp__tenex__project_list")).toBe(false);
             expect(toolAgentMap.has("mcp__tenex__ask")).toBe(false);
 
             // Other mcp tools should be included with agent association
@@ -467,7 +467,7 @@ describe("ProjectStatusService.gatherToolInfo integration", () => {
             "mcp__tenex__delegate",
             "mcp__tenex__ask",
             "mcp__tenex__lesson_learn",
-            "mcp__tenex__report_write",
+            "mcp__tenex__project_list",
         ]));
 
         // Simulate MCPManager having all TENEX tools (as would happen in real system)
@@ -475,7 +475,7 @@ describe("ProjectStatusService.gatherToolInfo integration", () => {
             "mcp__tenex__delegate": {},
             "mcp__tenex__ask": {},
             "mcp__tenex__lesson_learn": {},
-            "mcp__tenex__report_write": {},
+            "mcp__tenex__project_list": {},
             "mcp__tenex__todo_write": {},
         };
 

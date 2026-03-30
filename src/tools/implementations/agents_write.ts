@@ -1,11 +1,9 @@
-import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
-import { createAgentInstance } from "@/agents/agent-loader";
+import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
 import { CONTEXT_INJECTED_TOOLS, CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
-import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
+import { createLocalAgent } from "@/services/agents/AgentProvisioningService";
 
 import { logger } from "@/utils/logger";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 // Define the input schema
@@ -75,15 +73,12 @@ async function executeAgentsWrite(
     }
     const projectContext = context.projectContext;
 
-    if (!context.workingDirectory) {
-        throw new Error("ToolExecutionContext with workingDirectory is required for agents_write tool");
-    }
-
     // Check if agent exists by slug
     const existingAgent = await agentStorage.getAgentBySlug(slug);
 
     if (existingAgent) {
         logger.info(`Updating existing agent: ${slug}`);
+        const existingPubkey = deriveAgentPubkeyFromNsec(existingAgent.nsec);
 
         // Update fields
         existingAgent.name = name;
@@ -99,79 +94,44 @@ async function executeAgentsWrite(
         // Save to storage
         await agentStorage.saveAgent(existingAgent);
 
-        // Reload project context to pick up changes
-        await projectContext.updateProjectData(projectContext.project);
-
-        const agent = projectContext.getAgent(slug);
-        if (!agent) {
-            return {
-                success: false,
-                error: `Agent ${slug} updated in storage but not found in project context`,
-            };
+        // Reload the current project only if this agent is actually assigned there.
+        if (projectContext.getAgentByPubkey(existingPubkey)) {
+            await projectContext.updateProjectData(projectContext.project);
         }
 
         logger.info(`Successfully updated agent "${name}" (${slug})`);
-        logger.info(`  Pubkey: ${agent.pubkey}`);
+        logger.info(`  Pubkey: ${existingPubkey}`);
 
         return {
             success: true,
             agent: {
                 slug,
                 name,
-                pubkey: agent.pubkey,
+                pubkey: existingPubkey,
             },
         };
     }
-    logger.info(`Creating new agent: ${slug}`);
+    logger.info(`Creating new agent identity: ${slug}`);
 
-    // Generate a new private key for this agent
-    const signer = NDKPrivateKeySigner.generate();
-
-    // Get project d-tag for consistent storage keys
-    // AgentRegistry uses dTag to lookup agents, so we must use the same key format
-    const projectDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
-    if (!projectDTag) {
-        throw new Error(
-            "Project is missing d-tag. Cannot associate agent with project without a valid d-tag identifier."
-        );
-    }
-
-    // Create StoredAgent using factory
-    const storedAgent = createStoredAgent({
-        nsec: signer.nsec,
+    const result = await createLocalAgent({
         slug,
         name,
         role,
         instructions,
         useCriteria,
-        defaultConfig: {
-            model: llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-            tools: tools ?? undefined,
-        },
-        eventId: undefined, // Locally created agents don't have event IDs
+        llmConfig,
+        tools,
     });
 
-    // Save to storage, then associate with project
-    await agentStorage.saveAgent(storedAgent);
-    await agentStorage.addAgentToProject(signer.pubkey, projectDTag);
-
-    // Create instance and add to registry
-    // Pass projectDTag for project-scoped config resolution
-    const agent = createAgentInstance(storedAgent, projectContext.agentRegistry, projectDTag);
-    projectContext.agentRegistry.addAgent(agent);
-
-    // Notify context that a new agent was added (for Daemon routing synchronization)
-    projectContext.notifyAgentAdded(agent);
-
     logger.info(`Successfully created agent "${name}" (${slug})`);
-    logger.info(`  Pubkey: ${agent.pubkey}`);
+    logger.info(`  Pubkey: ${result.pubkey}`);
 
     return {
         success: true,
         agent: {
             slug,
             name,
-            pubkey: agent.pubkey,
+            pubkey: result.pubkey,
         },
     };
 }
@@ -183,7 +143,7 @@ async function executeAgentsWrite(
 export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. Core tools are automatically injected (lessons, reports, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Telegram-triggered turns also get the context-sensitive `no_response` tool automatically. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
+            "Write or update agent configuration and tools. Creates or updates backend-local agent identities. Core tools are automatically injected (lessons, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Telegram-triggered turns also get the context-sensitive `no_response` tool automatically. Newly created agents are installed in the backend, but they are not assigned to the current project until the user publishes a 31933 event that p-tags the agent pubkey.",
         inputSchema: agentsWriteSchema,
         execute: async (input: AgentsWriteInput) => {
             try {

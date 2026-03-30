@@ -13,7 +13,7 @@ Actions that agents can invoke. Tools own validation, call into services or lowe
 
 - Agent orchestration: `agents_write`, `ask`, `delegate`, `delegate_crossproject`, `delegate_followup`
 - Project and conversation context: `project_list`, `conversation_get`, `conversation_list`, `conversation_search`, `todo_write`, `lesson_learn`
-- Reports and knowledge: `report_write`, `report_read`, `report_delete`, `reports_list`, `rag_*`
+- Knowledge and indexing: `rag_*`, `skills_set`
 - Execution control: `shell`, `kill`, `schedule_task`, `no_response` (Telegram-triggered turns only)
 - Integrations: `mcp_*`, `nostr_publish_as_user`, `skills_set`, `send_message`
 - Filesystem access: `fs_*` and `home_fs_*` are instantiated in `registry.ts` via `ai-sdk-fs-tools`, not dedicated per-tool files

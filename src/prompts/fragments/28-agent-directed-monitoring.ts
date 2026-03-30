@@ -27,6 +27,6 @@ Most delegations complete and return results automatically. Active monitoring is
 
 export const agentDirectedMonitoringFragment: PromptFragment = {
     id: "agent-directed-monitoring",
-    priority: 28, // After memorized reports (27), before worktree context (30)
+    priority: 28, // Before worktree context (30)
     template: () => MONITORING_GUIDANCE,
 };

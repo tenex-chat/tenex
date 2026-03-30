@@ -17,6 +17,7 @@ const NEVER_ROUTE_EVENT_KINDS = [
     NDKKind.Contacts, // kind:3 - contact list
     NDKKind.ProjectAgentSnapshot,
     NDKKind.TenexProjectStatus,
+    NDKKind.TenexInstalledAgentList,
     NDKKind.TenexOperationsStatus,
     NDKKind.TenexStreamTextDelta,
 ];
@@ -298,11 +299,12 @@ export function extractProjectATags(event: NDKEvent): string[] {
  */
 export function classifyForDaemon(
     event: NDKEvent
-): "never_route" | "project" | "lesson" | "lesson_comment" | "conversation" | "boot" | "config_update" | "other" {
+): "never_route" | "project" | "lesson" | "lesson_comment" | "conversation" | "boot" | "agent_create" | "config_update" | "other" {
     if (isNeverRouteKind(event)) return "never_route";
     if (isProjectEvent(event)) return "project";
     if (isLessonEvent(event)) return "lesson";
     if (isLessonCommentEvent(event)) return "lesson_comment";
+    if (isAgentCreateRequest(event)) return "agent_create";
     if (isConfigUpdate(event)) return "config_update";
     if (event.kind === NDKKind.Text || event.kind === NDKKind.EventMetadata) {
         return "conversation";
@@ -332,6 +334,10 @@ export function isLessonCommentEvent(event: NDKEvent): boolean {
  */
 export function isConfigUpdate(event: NDKEvent): boolean {
     return event.kind === NDKKind.TenexAgentConfigUpdate;
+}
+
+export function isAgentCreateRequest(event: NDKEvent): boolean {
+    return event.kind === NDKKind.TenexAgentCreate;
 }
 
 /**
