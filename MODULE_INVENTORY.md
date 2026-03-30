@@ -14,7 +14,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`src/tenex.ts`, `src/cli.ts`, `src/index.ts`**: Wire telemetry, Commander commands, and `tenex` binary exports. They must stay dependency-light and only delegate to `commands/*`. Any new runtime flags belong here, not inside domain modules.
 
 ### Command Layer (`src/commands`)
-- **`agent/`**: User-facing subcommands for listing/removing/operating agents. Orchestrates `agents/` runtimes, `services/ConfigService`, and `nostr` publishers; no business logic should remain inside command handlers.
+- **`agent/`**: User-facing subcommands for listing/removing/operating agents, including the interactive installed-agent manager for 4199 installs and permanent deletions. Orchestrates `agents/` runtimes, `services/ConfigService`, and `nostr` publishers; no business logic should remain inside command handlers.
 - **`config/`**: Interactive settings editors for backend and transport configuration. `config/telegram.ts` is the operator-facing UI for single-bot-per-agent Telegram transport config plus the global Telegram DM allowlist, while remembered chat/topic-to-project bindings remain derived runtime state backed by `AgentStorage`, `TransportBindingStore`, and global `whitelistedIdentities`.
 - **`daemon.ts` + `daemon/`**: Starts the long-running orchestrator and UI loop by delegating to `src/daemon`.
 - **`doctor.ts`**: Diagnostics — agent refetch, orphan detection/purge.

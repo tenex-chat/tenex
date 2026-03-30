@@ -3,10 +3,12 @@ import chalk from "chalk";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { initNDK } from "@/nostr/ndkClient";
 import {
+    deleteStoredAgent,
     installAgentFromDefinitionEvent,
     installAgentFromDefinitionEventId,
 } from "@/services/agents/AgentProvisioningService";
 import { importCommand } from "./import/index";
+import { AgentManager } from "./AgentManager";
 
 // ─── tenex agent add ─────────────────────────────────────────────────────────
 
@@ -52,6 +54,20 @@ async function addAgent(options: {
     console.log(chalk.gray(`  pubkey: ${result.pubkey}`));
 }
 
+async function manageAgents(): Promise<void> {
+    const manager = new AgentManager();
+    await manager.showMainMenu();
+}
+
+async function deleteAgent(pubkey: string): Promise<void> {
+    const deleted = await deleteStoredAgent(pubkey);
+    if (!deleted) {
+        console.error(chalk.red(`Error: agent ${pubkey} not found`));
+        process.exit(1);
+    }
+    console.log(chalk.green(`✓ Deleted agent ${pubkey}`));
+}
+
 // ─── Command registration ────────────────────────────────────────────────────
 
 const addCommand = new Command("add")
@@ -62,7 +78,25 @@ const addCommand = new Command("add")
         await addAgent(options);
     });
 
+const manageCommand = new Command("manage")
+    .description("Open the interactive agent manager")
+    .action(async () => {
+        await manageAgents();
+    });
+
+const deleteCommand = new Command("delete")
+    .description("Permanently delete a stored agent")
+    .argument("<pubkey>", "Agent public key")
+    .action(async (pubkey: string) => {
+        await deleteAgent(pubkey);
+    });
+
 export const agentCommand = new Command("agent")
     .description("Manage TENEX agents")
+    .action(async () => {
+        await manageAgents();
+    })
     .addCommand(importCommand)
-    .addCommand(addCommand);
+    .addCommand(addCommand)
+    .addCommand(deleteCommand)
+    .addCommand(manageCommand);

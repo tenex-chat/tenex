@@ -698,13 +698,20 @@ export class AgentStorage {
      *
      * @param pubkey - Agent's public key to delete
      */
-    async deleteAgent(pubkey: string): Promise<void> {
+    async deleteAgent(
+        pubkey: string,
+        options?: {
+            quiet?: boolean;
+        }
+    ): Promise<void> {
         const agent = await this.loadAgent(pubkey);
         if (!agent) return;
 
-        logger.warn(
-            `deleteAgent called for ${agent.slug} (${pubkey.substring(0, 8)}) - this permanently destroys agent identity. Consider using removeAgentFromProject instead.`
-        );
+        if (!options?.quiet) {
+            logger.warn(
+                `deleteAgent called for ${agent.slug} (${pubkey.substring(0, 8)}) - this permanently destroys agent identity. Consider using removeAgentFromProject instead.`
+            );
+        }
 
         // Delete file
         const filePath = path.join(this.agentsDir, `${pubkey}.json`);
@@ -737,7 +744,9 @@ export class AgentStorage {
         }
 
         await this.saveIndex();
-        logger.info(`Deleted agent ${agent.slug} (${pubkey})`);
+        if (!options?.quiet) {
+            logger.info(`Deleted agent ${agent.slug} (${pubkey})`);
+        }
     }
 
     /**
