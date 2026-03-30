@@ -6,7 +6,7 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getReplyTarget, classifyForDaemon, isConfigUpdate } from "@/nostr/AgentEventDecoder";
 import { publishBackendProfile } from "@/nostr/AgentProfilePublisher";
-import { getNDK, initNDK } from "@/nostr/ndkClient";
+import { getNDK } from "@/nostr/ndkClient";
 import { AgentConfigUpdateService } from "@/services/agents";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
@@ -262,9 +262,7 @@ export class Daemon {
                 throw new Error("No whitelisted pubkeys configured. Run 'tenex onboard' first.");
             }
 
-            // 5. Initialize NDK
-            logger.debug("Initializing NDK (again)");
-            await initNDK();
+            // 5. Get NDK instance (already initialized by daemon command)
             this.ndk = getNDK();
 
             // 6. Set backend signer on NDK for NIP-42 relay auth + publish profile

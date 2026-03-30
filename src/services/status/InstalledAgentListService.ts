@@ -2,7 +2,7 @@ const STATUS_INTERVAL_MS = 30_000;
 
 import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
-import { getNDK, initNDK } from "@/nostr/ndkClient";
+import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -31,7 +31,6 @@ export class InstalledAgentListService {
 
     async publishImmediately(): Promise<void> {
         await agentStorage.initialize();
-        await initNDK();
 
         const event = await this.createInventoryEvent();
         const backendSigner = await config.getBackendSigner();

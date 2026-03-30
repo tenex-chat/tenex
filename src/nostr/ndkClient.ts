@@ -13,13 +13,10 @@ let ndk: NDK | undefined;
  * Proceeds even if relay connection fails (daemon can still function locally)
  */
 export async function initNDK(): Promise<void> {
+    // If already initialized, don't reinitialize
     if (ndk) {
-        // Disconnect existing instance
-        if (ndk.pool?.relays) {
-            for (const relay of ndk.pool.relays.values()) {
-                relay.disconnect();
-            }
-        }
+        logger.debug("NDK already initialized, skipping");
+        return;
     }
 
     const relays = getRelayUrls();
@@ -33,6 +30,15 @@ export async function initNDK(): Promise<void> {
 
     // Auto-authenticate with relays that require NIP-42 auth
     ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk });
+
+    // Listen for relay connection events
+    ndk.pool?.on("relay:connect", (relay) => {
+        logger.info("Relay connected", { url: relay.url });
+    });
+
+    ndk.pool?.on("relay:disconnect", (relay) => {
+        logger.warn("Relay disconnected", { url: relay.url });
+    });
 
     // Connect with timeout - don't block daemon startup if relays are unreachable
     const connectionTimeout = 5000; // 5 seconds
