@@ -2,8 +2,8 @@
  * RAG Search Tool
  *
  * Single search tool that queries across ALL accessible RAG collections.
- * Specialized providers handle well-known collections (reports, conversations,
- * lessons) with smart filtering, while dynamically discovered collections are
+ * Specialized providers handle well-known collections (conversations, lessons)
+ * with smart filtering, while dynamically discovered collections are
  * queried via generic providers with basic project-scoped filtering.
  *
  * Supports optional prompt-based LLM extraction for focused information retrieval.
@@ -19,7 +19,7 @@ import { z } from "zod";
 const ragSearchSchema = z.object({
     query: z.string().describe(
         "Natural language search query. Searches across all project knowledge " +
-        "including reports, conversations, lessons, and any additional RAG collections. " +
+        "including conversations, lessons, and any additional RAG collections. " +
         "Use descriptive natural language for best results."
     ),
     prompt: z
@@ -43,7 +43,7 @@ const ragSearchSchema = z.object({
             "Filter by provider name. When omitted, searches all collections matching the " +
             "agent's scope (global + project + personal). When provided, searches exactly " +
             "those collections (no scope filtering — the agent explicitly chose them). " +
-            "Well-known provider names: 'reports', 'conversations', 'lessons'. " +
+            "Well-known provider names: 'conversations', 'lessons'. " +
             "Dynamically discovered RAG collections use their collection name as the " +
             "provider name (e.g., 'custom_knowledge')."
         ),
@@ -127,11 +127,11 @@ async function executeRAGSearch(
 export function createRAGSearchTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Search across ALL project knowledge — reports, conversations, lessons, and any " +
+            "Search across indexed project knowledge — conversations, lessons, and any " +
             "additional RAG collections — using natural language semantic search. Returns ranked " +
             "results with metadata and retrieval instructions. Each result includes a `retrievalTool` " +
-            "and `retrievalArg` that you can use to fetch the full document (e.g., call report_read " +
-            "with the slug, or conversation_get with the conversation ID).\n\n" +
+            "and `retrievalArg` that you can use to fetch the full document (e.g., call " +
+            "conversation_get with the conversation ID, or rag_search against a specific collection).\n\n" +
             "Optionally provide a `prompt` parameter to have an LLM extract focused information " +
             "from the search results, rather than reviewing them manually.\n\n" +
             "This is the primary discovery tool for finding information across the project. Use " +

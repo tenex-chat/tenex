@@ -17,10 +17,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-mock.module("@/services/reports/articleUtils", () => ({
-    articleToReportInfo: () => ({}),
-}));
-
 // Import after mocking
 import { ProjectContext, resolveProjectManager } from "../ProjectContext";
 import type { AgentRegistry } from "@/agents/AgentRegistry";
@@ -351,11 +347,9 @@ describe("ProjectContext", () => {
         it("should fall back to project tag designation when no overrides exist", () => {
             const agent1 = createMockAgent({
                 slug: "agent-1",
-                eventId: "event-id-1",
             });
             const agent2 = createMockAgent({
                 slug: "agent-2",
-                eventId: "event-id-2",
             });
 
             const agents = new Map<string, AgentInstance>([
@@ -365,7 +359,7 @@ describe("ProjectContext", () => {
 
             // Project with explicit PM designation in tags
             const project = {
-                tags: [["agent", "event-id-2", "pm"]], // agent-2 designated as PM
+                tags: [["p", agent2.pubkey, "pm"]], // agent-2 designated as PM
                 dTag: "test-project",
                 tagValue: () => "test-project",
             } as unknown as NDKProject;
@@ -605,7 +599,6 @@ describe("ProjectContext", () => {
             // First agent in project tags has eventId "missing-event-id" which is NOT in the registry
             const agent1 = createMockAgent({
                 slug: "agent-1",
-                eventId: "loaded-event-id",
             });
 
             const agents = new Map<string, AgentInstance>([
@@ -613,7 +606,7 @@ describe("ProjectContext", () => {
             ]);
 
             const project = {
-                tags: [["agent", "missing-event-id"]], // Not in registry
+                tags: [["p", "missing-pubkey"]], // Not in registry
                 dTag: "test-project",
                 tagValue: () => "test-project",
             } as unknown as NDKProject;
@@ -634,7 +627,6 @@ describe("ProjectContext", () => {
         it("should fall through gracefully when explicit PM tag agent is not in registry", () => {
             const agent1 = createMockAgent({
                 slug: "agent-1",
-                eventId: "loaded-event-id",
             });
 
             const agents = new Map<string, AgentInstance>([
@@ -643,7 +635,7 @@ describe("ProjectContext", () => {
 
             // Explicit PM designation for a missing agent
             const project = {
-                tags: [["agent", "missing-pm-event-id", "pm"]],
+                tags: [["p", "missing-pubkey", "pm"]],
                 dTag: "test-project",
                 tagValue: () => "test-project",
             } as unknown as NDKProject;
@@ -672,7 +664,7 @@ describe("ProjectContext", () => {
 
             // Project tags designate agent-2 as first agent
             const project = {
-                tags: [["agent", "event-agent-2"]],
+                tags: [["p", agent2.pubkey]],
                 dTag: "test-project", // Not "other-project"
                 tagValue: () => "test-project",
             } as unknown as NDKProject;

@@ -1,7 +1,7 @@
 import { NDKKind } from "@/nostr/kinds";
 import { getToolTags } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/lib/error-formatter";
-import { type NDKEvent, NDKArticle, NDKProject } from "@nostr-dev-kit/ndk";
+import { type NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
 import { computeToolsDelta } from "@/agents/ConfigResolver";
 import { expandFsCapabilities } from "@/agents/tool-normalization";
@@ -11,7 +11,6 @@ import { ConversationStore } from "../conversations/ConversationStore";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/projects";
-import { getLocalReportStore } from "@/services/reports";
 import { config } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
 import { prefixKVStore } from "@/services/storage";
@@ -208,10 +207,6 @@ export class EventHandler {
 
             case NDKKind.AgentLesson:
                 await this.handleLessonEvent(event);
-                break;
-
-            case 30023: // NDKArticle - Reports
-                await this.handleReportEvent(event);
                 break;
 
             default:
@@ -653,112 +648,6 @@ export class EventHandler {
                 error: formatAnyError(error),
             });
         }
-    }
-
-    private async handleReportEvent(event: NDKEvent): Promise<void> {
-        try {
-            const projectCtx = getProjectContext();
-
-            // Verify this report belongs to our project by checking a-tag
-            const projectTagId = projectCtx.project.tagId();
-            const reportProjectTag = event.tags.find(
-                (tag: string[]) => tag[0] === "a" && tag[1] === projectTagId
-            );
-
-            if (!reportProjectTag) {
-                // Report doesn't belong to our project, ignore
-                return;
-            }
-
-            // Convert to NDKArticle
-            const article = NDKArticle.from(event);
-
-            // Check if report is deleted
-            const isDeleted = article.tags.some((tag: string[]) => tag[0] === "deleted");
-
-            // Add to project context cache
-            projectCtx.addReportFromArticle(article);
-
-            // Hydrate local storage if this event is newer than local copy
-            // Skip deleted reports - we don't want to hydrate them
-            if (!isDeleted && article.dTag && article.content) {
-                const localStore = getLocalReportStore();
-                const eventCreatedAt = event.created_at || Math.floor(Date.now() / 1000);
-
-                // Format content for local storage (matching report_write format)
-                const formattedContent = this.formatReportForLocalStorage(article);
-
-                // Construct addressable reference in NIP-33 format: kind:pubkey:d-tag
-                const addressableRef = `${event.kind}:${event.pubkey}:${article.dTag}`;
-
-                const hydrated = await localStore.hydrateFromNostr(
-                    article.dTag,
-                    formattedContent,
-                    addressableRef,
-                    eventCreatedAt
-                );
-
-                if (hydrated) {
-                    trace.getActiveSpan()?.addEvent("event_handler.report_hydrated", {
-                        "report.slug": article.dTag,
-                        "report.addressableRef": addressableRef.substring(0, 20),
-                    });
-                }
-            }
-
-            trace.getActiveSpan()?.addEvent("event_handler.report_cached", {
-                "report.slug": article.dTag || "",
-                "report.author": event.pubkey.substring(0, 8),
-                "report.isDeleted": isDeleted,
-                "report.isMemorized": article.tags.some(
-                    (tag: string[]) => tag[0] === "t" && tag[1] === "memorize"
-                ),
-            });
-        } catch (error) {
-            logger.error("Failed to handle report event", {
-                eventId: event.id,
-                error: formatAnyError(error),
-            });
-        }
-    }
-
-    /**
-     * Format an NDKArticle for local storage
-     */
-    private formatReportForLocalStorage(article: NDKArticle): string {
-        const lines: string[] = [];
-
-        // Add title
-        if (article.title) {
-            lines.push(`# ${article.title}`);
-            lines.push("");
-        }
-
-        // Add summary
-        if (article.summary) {
-            lines.push(`> ${article.summary}`);
-            lines.push("");
-        }
-
-        // Extract hashtags (excluding memorize tag)
-        const hashtags = article.tags
-            .filter((tag: string[]) => tag[0] === "t" && tag[1] !== "memorize")
-            .map((tag: string[]) => tag[1]);
-
-        if (hashtags.length > 0) {
-            lines.push(`**Tags:** ${hashtags.map((t) => `#${t}`).join(" ")}`);
-            lines.push("");
-        }
-
-        lines.push("---");
-        lines.push("");
-
-        // Add content
-        if (article.content) {
-            lines.push(article.content);
-        }
-
-        return lines.join("\n");
     }
 
     private handleDefaultEvent(_event: NDKEvent): void {

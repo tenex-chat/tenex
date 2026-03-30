@@ -87,14 +87,14 @@ describe("SqliteVecProvider.search", () => {
         (provider as unknown as { db: unknown }).db = db;
 
         const results = await provider.search(
-            "reports",
+            "project_notes",
             [0.1, 0.2],
             5,
             buildProjectFilter("project-a")
         );
 
         expect(queries).toHaveLength(1);
-        expect(queries[0]).toContain("JOIN \"docs_reports\" d ON d.id = v.id");
+        expect(queries[0]).toContain("JOIN \"docs_project_notes\" d ON d.id = v.id");
         expect(queries[0]).toContain("d.metadata LIKE");
         expect(results).toEqual([
             {

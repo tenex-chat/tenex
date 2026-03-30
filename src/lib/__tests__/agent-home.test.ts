@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
     getAgentHomeDirectory,
     getAgentHomeInjectedFiles,
+    getAgentProjectInjectedFiles,
+    getAgentProjectMemoryDirectory,
     HomeScopeViolationError,
     isPathWithinDirectory,
     isWithinAgentHome,
@@ -135,6 +137,15 @@ describe("agent-home utilities", () => {
             const homeDir1 = getAgentHomeDirectory("test1234abcd");
             const homeDir2 = getAgentHomeDirectory("test1234abcd");
             expect(homeDir1).toBe(homeDir2);
+        });
+    });
+
+    describe("getAgentProjectMemoryDirectory", () => {
+        it("should place project memory under the agent home directory", () => {
+            const projectDir = getAgentProjectMemoryDirectory("abcdefgh12345678", "acme-app");
+            expect(projectDir).toBe(
+                `${TEST_BASE_PATH}/home/abcdefgh/projects/acme-app/docs`
+            );
         });
     });
 
@@ -289,6 +300,39 @@ describe("agent-home utilities", () => {
             expect(result[0].truncated).toBe(true);
             // Content should be truncated to MAX_INJECTED_FILE_LENGTH
             expect(result[0].content.length).toBe(1500);
+        });
+    });
+
+    describe("getAgentProjectInjectedFiles", () => {
+        const testPubkey = "projtest1234567890";
+        const projectDTag = "acme-app";
+
+        beforeEach(() => {
+            mkdirSync(getAgentProjectMemoryDirectory(testPubkey, projectDTag), { recursive: true });
+        });
+
+        afterEach(() => {
+            try {
+                rmSync(getAgentHomeDirectory(testPubkey), { recursive: true, force: true });
+            } catch {
+                // Ignore cleanup errors
+            }
+        });
+
+        it("should return empty array when no project +files exist", () => {
+            const result = getAgentProjectInjectedFiles(testPubkey, projectDTag);
+            expect(result).toEqual([]);
+        });
+
+        it("should return +prefixed files from the project memory directory", () => {
+            const projectDir = getAgentProjectMemoryDirectory(testPubkey, projectDTag);
+            writeFileSync(join(projectDir, "+PROJECT.md"), "Project-specific note");
+            writeFileSync(join(projectDir, "regular.txt"), "ignored");
+
+            const result = getAgentProjectInjectedFiles(testPubkey, projectDTag);
+            expect(result).toHaveLength(1);
+            expect(result[0].filename).toBe("+PROJECT.md");
+            expect(result[0].content).toBe("Project-specific note");
         });
     });
 

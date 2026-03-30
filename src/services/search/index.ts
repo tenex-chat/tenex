@@ -1,8 +1,8 @@
 /**
  * Unified Search Module
  *
- * Provides cross-collection semantic search across reports,
- * conversations, and lessons within project boundaries.
+ * Provides cross-collection semantic search across conversations,
+ * lessons, and generic RAG collections within project boundaries.
  */
 
 export { buildProjectFilter } from "./projectFilter";
@@ -16,13 +16,11 @@ export type {
 } from "./types";
 
 // Providers
-export { ReportSearchProvider } from "./providers/ReportSearchProvider";
 export { ConversationSearchProvider } from "./providers/ConversationSearchProvider";
 export { LessonSearchProvider } from "./providers/LessonSearchProvider";
 export { GenericCollectionSearchProvider } from "./providers/GenericCollectionSearchProvider";
 
 import { SearchProviderRegistry } from "./SearchProviderRegistry";
-import { ReportSearchProvider } from "./providers/ReportSearchProvider";
 import { ConversationSearchProvider } from "./providers/ConversationSearchProvider";
 import { LessonSearchProvider } from "./providers/LessonSearchProvider";
 
@@ -33,10 +31,6 @@ import { LessonSearchProvider } from "./providers/LessonSearchProvider";
  */
 export function bootstrapSearchProviders(): void {
     const registry = SearchProviderRegistry.getInstance();
-
-    if (!registry.has("reports")) {
-        registry.register(new ReportSearchProvider());
-    }
 
     if (!registry.has("conversations")) {
         registry.register(new ConversationSearchProvider());

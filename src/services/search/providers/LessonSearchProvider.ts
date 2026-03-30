@@ -2,8 +2,8 @@
  * LessonSearchProvider - Search provider for lessons.
  *
  * Queries the `lessons` RAG collection directly via RAGService
- * since lessons don't have a dedicated embedding service like
- * reports and conversations do.
+ * since lessons do not have a separate embedding service like
+ * conversations do.
  */
 
 import { logger } from "@/utils/logger";

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
-import { createFsTools, type FsToolName, type FsToolSet } from "ai-sdk-fs-tools";
+import { createFsTools, type FsToolSet } from "ai-sdk-fs-tools";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
 
 const TEST_HOME_BASE = "/tmp/tenex/home";
 const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slice(0, 8)}`;
 
-function createTestFsTools(workingDirectory: string, agentPubkey: string, reportsDir?: string): FsToolSet {
+function createTestFsTools(workingDirectory: string, agentPubkey: string): FsToolSet {
     return createFsTools({
         workingDirectory,
         agentId: agentPubkey,
@@ -15,18 +15,6 @@ function createTestFsTools(workingDirectory: string, agentPubkey: string, report
         agentsMd: false,
         formatOutsideRootsError: (p, wd) =>
             `Path "${p}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
-        beforeExecute: reportsDir
-            ? (toolName: FsToolName, input: Record<string, unknown>) => {
-                const p = input.path as string | undefined;
-                if (p && (toolName === "fs_write" || toolName === "fs_edit")) {
-                    if (p.startsWith(`${reportsDir}/`) || p === reportsDir) {
-                        throw new Error(
-                            `Cannot write to reports directory directly. Path "${p}" is within the protected reports directory. Use the report_write tool instead.`
-                        );
-                    }
-                }
-            }
-            : undefined,
     });
 }
 
@@ -233,62 +221,4 @@ describe("fs_write tool", () => {
         });
     });
 
-    describe("reports directory protection", () => {
-        it("should block writes to the reports directory", async () => {
-            const reportsDir = path.join(testDir, "reports");
-            mkdirSync(reportsDir, { recursive: true });
-            const protectedTools = createTestFsTools(testDir, agentPubkey, reportsDir);
-            const reportsFile = path.join(reportsDir, "my-report.md");
-
-            const result = await protectedTools.fs_write.execute({
-                path: reportsFile,
-                content: "Trying to bypass report_write",
-                allowOutsideWorkingDirectory: true,
-                description: "test write",
-            });
-
-            expect(result).toEqual({
-                type: "error-text",
-                text: expect.stringContaining("Cannot write to reports directory directly"),
-            });
-        });
-
-        it("should block writes to subdirectories within reports", async () => {
-            const reportsDir = path.join(testDir, "reports");
-            mkdirSync(reportsDir, { recursive: true });
-            const protectedTools = createTestFsTools(testDir, agentPubkey, reportsDir);
-            const nestedReportsFile = path.join(reportsDir, "subdir", "deep-report.md");
-
-            const result = await protectedTools.fs_write.execute({
-                path: nestedReportsFile,
-                content: "Nested bypass attempt",
-                allowOutsideWorkingDirectory: true,
-                description: "test write",
-            });
-
-            expect(result).toEqual({
-                type: "error-text",
-                text: expect.stringContaining("Cannot write to reports directory directly"),
-            });
-        });
-
-        it("should include helpful error message pointing to report_write", async () => {
-            const reportsDir = path.join(testDir, "reports");
-            mkdirSync(reportsDir, { recursive: true });
-            const protectedTools = createTestFsTools(testDir, agentPubkey, reportsDir);
-            const reportsFile = path.join(reportsDir, "test.md");
-
-            const result = await protectedTools.fs_write.execute({
-                path: reportsFile,
-                content: "test",
-                allowOutsideWorkingDirectory: true,
-                description: "test write",
-            });
-
-            expect(result).toEqual({
-                type: "error-text",
-                text: expect.stringContaining("report_write"),
-            });
-        });
-    });
 });

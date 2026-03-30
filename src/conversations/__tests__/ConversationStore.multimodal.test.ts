@@ -178,7 +178,7 @@ describe("ConversationStore - Multimodal Support", () => {
                     {
                         type: "tool-call",
                         toolCallId: "call_1",
-                        toolName: "report_write",
+                        toolName: "fs_write",
                         input: { content: "https://images.unsplash.com/image.jpg" },
                     },
                 ],
@@ -193,8 +193,8 @@ describe("ConversationStore - Multimodal Support", () => {
                     {
                         type: "tool-result",
                         toolCallId: "call_1",
-                        toolName: "report_write",
-                        output: { type: "text", value: "Report written" },
+                        toolName: "fs_write",
+                        output: { type: "text", value: "File written" },
                     },
                 ],
             });

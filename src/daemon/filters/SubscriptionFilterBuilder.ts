@@ -29,7 +29,11 @@ export function buildStaticFilters(whitelistedPubkeys: Set<Hexpubkey>, since?: n
 
     // Operational events — bounded by since to avoid replaying history
     const opsFilter: NDKFilter = {
-        kinds: [NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete],
+        kinds: [
+            NDKKind.TenexAgentCreate,
+            NDKKind.TenexAgentConfigUpdate,
+            NDKKind.TenexAgentDelete,
+        ],
         authors,
     };
     if (since !== undefined) {
@@ -68,30 +72,6 @@ export function buildProjectTaggedFilter(knownProjects: Set<string>, since?: num
     const filter: NDKFilter = {
         "#a": Array.from(knownProjects),
         limit: 0,
-    };
-
-    if (since !== undefined) {
-        filter.since = since;
-    }
-
-    return filter;
-}
-
-/**
- * Build filter for report events (kind 30023 - NDKArticle)
- * Monitors reports tagged with our project
- * @param knownProjects - Set of project A-tags (format: "31933:authorPubkey:dTag")
- * @param since - Optional Unix timestamp (seconds) to filter out historical events
- * @returns NDKFilter for report events or null if no projects
- */
-export function buildReportFilter(knownProjects: Set<string>, since?: number): NDKFilter | null {
-    if (knownProjects.size === 0) {
-        return null;
-    }
-
-    const filter: NDKFilter = {
-        kinds: [30023],
-        "#a": Array.from(knownProjects),
     };
 
     if (since !== undefined) {

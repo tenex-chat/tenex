@@ -34,9 +34,8 @@ import { createConversationSearchTool } from "./implementations/conversation_sea
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
-import { createFsTools, type FsToolName } from "ai-sdk-fs-tools";
+import { createFsTools } from "ai-sdk-fs-tools";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
-import { getLocalReportStore } from "@/services/reports";
 import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
 import { synthesizeContent, executeReadToolResult } from "./implementations/fs-hooks";
 import { createKillTool } from "./implementations/kill";
@@ -56,10 +55,6 @@ import { createMcpResourceReadTool } from "./implementations/mcp_resource_read";
 import { createMcpSubscribeTool } from "./implementations/mcp_subscribe";
 import { createMcpSubscriptionStopTool } from "./implementations/mcp_subscription_stop";
 import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
-import { createReportDeleteTool } from "./implementations/report_delete";
-import { createReportReadTool } from "./implementations/report_read";
-import { createReportWriteTool } from "./implementations/report_write";
-import { createReportsListTool } from "./implementations/reports_list";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
 import { createShellTool } from "./implementations/shell";
 // Todo tools
@@ -104,16 +99,6 @@ function createTenexFsToolsUncached(context: ToolExecutionContext): ReturnType<t
         agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory },
         formatOutsideRootsError: (path, wd) =>
             `Path "${path}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
-        beforeExecute: (toolName: FsToolName, input: Record<string, unknown>) => {
-            const path = input.path as string | undefined;
-            if (path && (toolName === "fs_write" || toolName === "fs_edit")) {
-                if (getLocalReportStore().isPathInReportsDir(path)) {
-                    throw new Error(
-                        `Cannot write to reports directory directly. Path "${path}" is within the protected reports directory. Use the report_write tool instead to create or update reports.`
-                    );
-                }
-            }
-        },
         analyzeContent: ({ content, prompt, source }) => synthesizeContent(content, prompt, source),
         loadToolResult: (toolCallId) =>
             executeReadToolResult(context.conversationId, toolCallId),
@@ -198,13 +183,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     fs_read: (ctx) => getOrCreateTenexFsTools(ctx).fs_read as AISdkTool,
     fs_write: (ctx) => getOrCreateTenexFsTools(ctx).fs_write as AISdkTool,
     fs_edit: (ctx) => getOrCreateTenexFsTools(ctx).fs_edit as AISdkTool,
-
-    // Report tools
-    report_delete: createReportDeleteTool,
-    report_read: createReportReadTool,
-    report_write: createReportWriteTool,
-    reports_list: createReportsListTool,
-
     // Schedule tools
     schedule_task: createScheduleTaskTool,
 

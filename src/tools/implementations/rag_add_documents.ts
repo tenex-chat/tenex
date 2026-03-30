@@ -388,7 +388,7 @@ function computeBaseProvenance(context: ToolExecutionContext): DocumentMetadata 
 
     // Auto-inject projectId if available (uses NIP-33 address format)
     // NOTE: Must use camelCase "projectId" to match buildProjectFilter() and
-    // all specialized services (ReportEmbeddingService, ConversationEmbeddingService, learn.ts)
+    // all specialized indexing flows (conversation embeddings, lessons, and generic RAG ingestion)
     if (isProjectContextInitialized()) {
         try {
             const projectCtx = getProjectContext();
