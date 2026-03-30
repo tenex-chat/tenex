@@ -108,7 +108,6 @@ export interface ToolUseIntent {
     content: string; // e.g., "Reading $path"
     args?: unknown; // Tool arguments to be serialized
     referencedEventIds?: string[]; // Event IDs to reference with q-tags (e.g., delegation event IDs)
-    referencedAddressableEvents?: string[]; // Addressable event references with a-tags (e.g., "30023:pubkey:d-tag")
     usage?: LanguageModelUsageWithCostUsd; // Cumulative usage from previous steps
 }
 

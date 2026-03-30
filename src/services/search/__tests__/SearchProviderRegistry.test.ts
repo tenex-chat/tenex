@@ -28,12 +28,12 @@ describe("SearchProviderRegistry", () => {
 
     it("registers and retrieves a provider", () => {
         const registry = SearchProviderRegistry.getInstance();
-        const provider = createMockProvider("reports");
+        const provider = createMockProvider("knowledge");
 
         registry.register(provider);
 
-        expect(registry.get("reports")).toBe(provider);
-        expect(registry.has("reports")).toBe(true);
+        expect(registry.get("knowledge")).toBe(provider);
+        expect(registry.has("knowledge")).toBe(true);
     });
 
     it("returns undefined for unregistered provider", () => {
@@ -44,29 +44,29 @@ describe("SearchProviderRegistry", () => {
 
     it("returns all registered providers", () => {
         const registry = SearchProviderRegistry.getInstance();
-        registry.register(createMockProvider("reports"));
+        registry.register(createMockProvider("knowledge"));
         registry.register(createMockProvider("conversations"));
         registry.register(createMockProvider("lessons"));
 
         const all = registry.getAll();
         expect(all).toHaveLength(3);
-        expect(registry.getNames()).toEqual(["reports", "conversations", "lessons"]);
+        expect(registry.getNames()).toEqual(["knowledge", "conversations", "lessons"]);
     });
 
     it("filters providers by names", () => {
         const registry = SearchProviderRegistry.getInstance();
-        registry.register(createMockProvider("reports"));
+        registry.register(createMockProvider("knowledge"));
         registry.register(createMockProvider("conversations"));
         registry.register(createMockProvider("lessons"));
 
-        const filtered = registry.getByNames(["reports", "lessons"]);
+        const filtered = registry.getByNames(["knowledge", "lessons"]);
         expect(filtered).toHaveLength(2);
-        expect(filtered.map((p) => p.name)).toEqual(["reports", "lessons"]);
+        expect(filtered.map((p) => p.name)).toEqual(["knowledge", "lessons"]);
     });
 
     it("returns all providers when no filter names provided", () => {
         const registry = SearchProviderRegistry.getInstance();
-        registry.register(createMockProvider("reports"));
+        registry.register(createMockProvider("knowledge"));
         registry.register(createMockProvider("conversations"));
 
         expect(registry.getByNames()).toHaveLength(2);
@@ -75,16 +75,16 @@ describe("SearchProviderRegistry", () => {
 
     it("skips unknown names in filter", () => {
         const registry = SearchProviderRegistry.getInstance();
-        registry.register(createMockProvider("reports"));
+        registry.register(createMockProvider("knowledge"));
 
-        const filtered = registry.getByNames(["reports", "nonexistent"]);
+        const filtered = registry.getByNames(["knowledge", "nonexistent"]);
         expect(filtered).toHaveLength(1);
-        expect(filtered[0].name).toBe("reports");
+        expect(filtered[0].name).toBe("knowledge");
     });
 
     it("resets instance cleanly", () => {
         const registry = SearchProviderRegistry.getInstance();
-        registry.register(createMockProvider("reports"));
+        registry.register(createMockProvider("knowledge"));
 
         SearchProviderRegistry.resetInstance();
 

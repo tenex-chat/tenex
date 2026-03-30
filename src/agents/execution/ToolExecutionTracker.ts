@@ -10,7 +10,7 @@
  * - Persistence: Stores tool messages for conversation history
  */
 
-import { formatMcpToolName, isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
+import { formatMcpToolName, isDelegateToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import type {
     AgentRuntimePublisher,
@@ -23,23 +23,12 @@ import { trace } from "@opentelemetry/api";
 import { extractErrorDetails } from "./ToolResultUtils";
 
 /**
- * Tools that publish addressable events and need delayed tool use event publishing.
- * These tools return results containing addressable event references that should be
- * tagged with 'a' tags on the tool use event.
+ * Delegation tools need delayed tool use event publishing so the delegation
+ * event IDs can be attached as q-tags after the tool finishes.
  */
-const ADDRESSABLE_EVENT_TOOLS = ["report_write"];
-
-/**
- * Check if a tool publishes addressable events that need delayed publishing.
- * This includes both direct tool names and MCP-wrapped versions.
- */
-function isAddressableEventTool(toolName: string): boolean {
-    const baseToolName = unwrapMcpToolName(toolName);
-    return ADDRESSABLE_EVENT_TOOLS.includes(baseToolName);
-}
 
 function needsDelayedPublishing(toolName: string): boolean {
-    return isDelegateToolName(toolName) || isAddressableEventTool(toolName);
+    return isDelegateToolName(toolName);
 }
 
 /**
@@ -171,16 +160,15 @@ export class ToolExecutionTracker {
 
         this.executions.set(toolCallId, execution);
 
-        // For tools that need delayed publishing (delegation tools, addressable event tools),
-        // delay publishing until completion so we have the event IDs/references
+        // For delegation tools, delay publishing until completion so we have
+        // the delegation event IDs to reference.
         if (needsDelayedPublishing(toolName)) {
             // Store context for delayed publishing in completeExecution
             execution.humanContent = humanContent;
             execution.eventContext = eventContext;
             execution.agentPublisher = agentPublisher;
 
-            const toolType = isDelegateToolName(toolName) ? "delegation" : "addressable event";
-            logger.debug(`[ToolExecutionTracker] ${toolType} tool tracked (delayed publishing)`, {
+            logger.debug("[ToolExecutionTracker] Delegation tool tracked (delayed publishing)", {
                 toolCallId,
                 toolName,
                 totalTracked: this.executions.size,
@@ -305,17 +293,11 @@ export class ToolExecutionTracker {
         // For tools with delayed publishing, publish the tool use event now with references
         if (execution.toolEventId === "" && execution.agentPublisher && execution.eventContext) {
             let referencedEventIds: string[] = [];
-            let referencedAddressableEvents: string[] = [];
 
             const conversationId = execution.eventContext?.conversationId;
-            if (conversationId) {
-                if (isDelegateToolName(execution.toolName)) {
-                    // Consume delegation event IDs from registry (registered in AgentPublisher.ask/delegate)
-                    referencedEventIds = PendingDelegationsRegistry.consume(agentPubkey, conversationId);
-                } else if (isAddressableEventTool(execution.toolName)) {
-                    // Consume addressable event references from registry (registered in report_write tool)
-                    referencedAddressableEvents = PendingDelegationsRegistry.consumeAddressable(agentPubkey, conversationId);
-                }
+            if (conversationId && isDelegateToolName(execution.toolName)) {
+                // Consume delegation event IDs from registry (registered in AgentPublisher.ask/delegate)
+                referencedEventIds = PendingDelegationsRegistry.consume(agentPubkey, conversationId);
             }
 
             // Publish the delayed tool use event with references
@@ -325,7 +307,6 @@ export class ToolExecutionTracker {
                     content: execution.humanContent || `Executed ${execution.toolName}`,
                     args: execution.input,
                     referencedEventIds,
-                    referencedAddressableEvents,
                 },
                 execution.eventContext
             );
@@ -339,9 +320,6 @@ export class ToolExecutionTracker {
             };
             if (referencedEventIds.length > 0) {
                 logDetails.referencedEventIds = referencedEventIds;
-            }
-            if (referencedAddressableEvents.length > 0) {
-                logDetails.referencedAddressableEvents = referencedAddressableEvents;
             }
 
             logger.debug("[ToolExecutionTracker] Tool event published with references", logDetails);

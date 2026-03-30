@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { buildStaticFilters, buildProjectTaggedFilter, buildReportFilter, buildAgentMentionsFilter, buildLessonFilter } from "../SubscriptionFilterBuilder";
+import { buildStaticFilters, buildProjectTaggedFilter, buildAgentMentionsFilter, buildLessonFilter } from "../SubscriptionFilterBuilder";
 import { NDKKind } from "@/nostr/kinds";
 
 describe("SubscriptionFilterBuilder", () => {
@@ -20,8 +20,12 @@ describe("SubscriptionFilterBuilder", () => {
             expect(filters[0].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
             expect(filters[0].since).toBeUndefined();
 
-            // Second filter: config updates + agent deletions
-            expect(filters[1].kinds).toEqual([NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete]);
+            // Second filter: agent create/config updates + deletions
+            expect(filters[1].kinds).toEqual([
+                NDKKind.TenexAgentCreate,
+                NDKKind.TenexAgentConfigUpdate,
+                NDKKind.TenexAgentDelete,
+            ]);
             expect(filters[1].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
 
             // Third filter: lesson comments (no #p filter)
@@ -78,31 +82,6 @@ describe("SubscriptionFilterBuilder", () => {
                 new Set(["31933:author:project"])
             );
             expect(result?.since).toBeUndefined();
-        });
-    });
-
-    describe("buildReportFilter", () => {
-        test("returns null when no projects", () => {
-            const result = buildReportFilter(new Set());
-            expect(result).toBeNull();
-        });
-
-        test("returns filter with kind 30023 and #a tags", () => {
-            const result = buildReportFilter(
-                new Set(["31933:author:project"])
-            );
-            expect(result).not.toBeNull();
-            expect(result?.kinds).toEqual([30023]);
-            expect(result?.["#a"]).toEqual(["31933:author:project"]);
-        });
-
-        test("applies since when provided", () => {
-            const since = Math.floor(Date.now() / 1000);
-            const result = buildReportFilter(
-                new Set(["31933:author:project"]),
-                since
-            );
-            expect(result?.since).toBe(since);
         });
     });
 

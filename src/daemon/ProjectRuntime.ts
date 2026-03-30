@@ -16,7 +16,6 @@ import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { deliverMcpNotification } from "@/services/mcp/McpNotificationDelivery";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
-import { createLocalReportStore, type LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
@@ -60,7 +59,6 @@ export class ProjectRuntime {
     private operationsStatusPublisher: OperationsStatusService | null = null;
     private telegramGatewayRegistered = false;
     private mcpManager: MCPManager = new MCPManager();
-    private localReportStore: LocalReportStore = createLocalReportStore();
 
     private isRunning = false;
     private startTime: Date | null = null;
@@ -194,10 +192,6 @@ export class ProjectRuntime {
                 });
                 await mcpSubService.initialize();
             });
-
-            // Initialize and set local report store on context for project-scoped storage
-            this.localReportStore.initialize(this.metadataPath);
-            this.context.localReportStore = this.localReportStore;
 
             // NOTE: Nudge whitelist is initialized at daemon level (user-scoped, not project-scoped).
             // See Daemon.ts step 6d.
@@ -446,10 +440,6 @@ export class ProjectRuntime {
             this.context.promptCompilerRegistry.stop();
             this.context.promptCompilerRegistry = undefined;
         }
-
-        // Reset local report store
-        logger.info(`[ProjectRuntime] Resetting report store: ${this.projectId}`);
-        this.localReportStore.reset();
 
         // Release our reference to the prefix KV store (but don't close it -
         // it's a daemon-global resource that outlives individual project runtimes)

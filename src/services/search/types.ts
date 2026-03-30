@@ -2,7 +2,7 @@
  * Unified Search Type Definitions
  *
  * Interfaces for the search provider pattern that enables querying
- * across multiple RAG collections (reports, conversations, lessons).
+ * across multiple RAG collections (conversations, lessons, and generic collections).
  */
 
 /**
@@ -10,14 +10,13 @@
  * Contains enough metadata for the agent to:
  * 1. Understand what the result is about
  * 2. Retrieve the full document via the appropriate tool
- *    (report_read, conversation_get, rag_search)
+ *    (conversation_get, rag_search)
  */
 export interface SearchResult {
-    /** Source collection name (e.g., "reports", "conversations", "lessons") */
+    /** Source collection name (e.g., "conversations", "lessons", "custom_knowledge") */
     source: string;
 
     /** Identifier for retrieving the full document.
-     * - Reports: slug
      * - Lessons: nevent/note encoded ID
      * - Conversations: conversation ID
      */
@@ -51,7 +50,7 @@ export interface SearchResult {
     tags?: string[];
 
     /** Which tool to use to retrieve full content */
-    retrievalTool: "report_read" | "conversation_get" | "rag_search";
+    retrievalTool: "conversation_get" | "rag_search";
 
     /** The argument to pass to the retrieval tool */
     retrievalArg: string;
@@ -81,7 +80,7 @@ export interface SearchOptions {
 
     /**
      * Filter by **provider name** (defaults to all).
-     * Well-known provider names: "reports", "conversations", "lessons".
+     * Well-known provider names: "conversations", "lessons".
      * Dynamically discovered RAG collections use their collection name as provider name
      * (e.g., "custom_knowledge").
      *

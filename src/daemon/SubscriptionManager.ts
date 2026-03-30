@@ -2,7 +2,7 @@ import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
-import { buildStaticFilters, buildProjectTaggedFilter, buildReportFilter, buildAgentMentionsFilter, buildLessonFilter } from "./filters/SubscriptionFilterBuilder";
+import { buildStaticFilters, buildProjectTaggedFilter, buildAgentMentionsFilter, buildLessonFilter } from "./filters/SubscriptionFilterBuilder";
 import { shortenEventId } from "@/utils/conversation-id";
 
 /**
@@ -108,9 +108,6 @@ export class SubscriptionManager {
 
         const taggedFilter = buildProjectTaggedFilter(knownProjects, since);
         if (taggedFilter) filters.push(taggedFilter);
-
-        const reportFilter = buildReportFilter(knownProjects, since);
-        if (reportFilter) filters.push(reportFilter);
 
         if (filters.length > 0) {
             this.projectSubscription = this.createSub(filters, "projects");

@@ -4,6 +4,8 @@ import {
     ensureAgentHomeDirectory,
     getAgentHomeDirectory,
     getAgentHomeInjectedFiles,
+    getAgentProjectInjectedFiles,
+    getAgentProjectMemoryDirectory,
 } from "@/lib/agent-home";
 
 // Re-export for convenience (used by tests)
@@ -27,6 +29,8 @@ export function clearAgentHomePromptCache(): void {
  */
 interface AgentHomeDirectoryArgs {
     agent: AgentInstance;
+    projectDTag?: string;
+    projectDocsPath?: string;
 }
 
 /**
@@ -75,10 +79,16 @@ function buildHomeListing(homeDir: string, agentPubkey: string): HomeListing {
 export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> = {
     id: "agent-home-directory",
     priority: 2, // Right after agent-identity (priority 1)
-    template: async ({ agent }) => {
+    template: async ({ agent, projectDTag, projectDocsPath }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const listing = buildHomeListing(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
+        const projectInjectedFiles = projectDTag
+            ? getAgentProjectInjectedFiles(agent.pubkey, projectDTag)
+            : [];
+        const projectMemoryDir = projectDTag
+            ? getAgentProjectMemoryDirectory(agent.pubkey, projectDTag)
+            : undefined;
 
         const parts: string[] = [];
 
@@ -113,13 +123,43 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
             "**Auto-injected files:** Files starting with `+` (e.g., `+NOTES.md`) are automatically injected into your system prompt. " +
                 "Use these for: critical reminders, preferences, or frequently-referenced notes."
         );
+        if (projectMemoryDir) {
+            parts.push("");
+            parts.push(
+                `**Project-specific memory:** For private persistent notes for this project, use \`${projectMemoryDir}/+<slug>.md\`. ` +
+                "Those `+` files are injected separately from your home-root memory files."
+            );
+        }
+        if (projectDocsPath) {
+            parts.push("");
+            parts.push(
+                `**Project docs:** Write shared, git-tracked project docs in \`${projectDocsPath}\`. ` +
+                "Use the root `AGENTS.md` for team-wide conventions that every agent should follow."
+            );
+        }
 
         // Inject +prefixed file contents
         if (injectedFiles.length > 0) {
             parts.push("");
-            parts.push("### Injected File Contents\n");
+            parts.push("### Injected Home Files\n");
 
             for (const file of injectedFiles) {
+                parts.push(`**${file.filename}:**`);
+                if (file.truncated) {
+                    parts.push("*(truncated to 1500 characters)*");
+                }
+                parts.push("```");
+                parts.push(file.content);
+                parts.push("```");
+                parts.push("");
+            }
+        }
+
+        if (projectInjectedFiles.length > 0) {
+            parts.push("");
+            parts.push("### Injected Project Files\n");
+
+            for (const file of projectInjectedFiles) {
                 parts.push(`**${file.filename}:**`);
                 if (file.truncated) {
                     parts.push("*(truncated to 1500 characters)*");

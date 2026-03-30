@@ -27,18 +27,6 @@ mock.module("@/services/projects", () => ({
     getProjectContext: () => currentProjectContext,
 }));
 
-mock.module("@/services/reports", () => ({
-    ReportService: class {
-        getMemorizedReportsForAgent(): [] {
-            return [];
-        }
-
-        getTeamMemorizedReports(): [] {
-            return [];
-        }
-    },
-}));
-
 mock.module("@/services/rag/RAGService", () => ({
     RAGService: {
         getInstance: () => ({

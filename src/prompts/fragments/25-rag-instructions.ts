@@ -78,14 +78,14 @@ rag_add_documents({
 \`\`\`
 
 ### 3. rag_search
-Search across ALL project knowledge — reports, conversations, lessons, and any
+Search across indexed project knowledge — conversations, lessons, and any
 additional RAG collections — using natural language semantic search.
 
 \`\`\`typescript
 rag_search({
   query: "How does authentication work?",
   limit: 10,  // Maximum results (default: 10)
-  collections: ["reports", "lessons"],  // Optional: filter to specific collections
+  collections: ["lessons", "project_docs"],  // Optional: filter to specific collections
   prompt: "Summarize the auth approach"  // Optional: LLM extraction
 })
 \`\`\`
@@ -279,18 +279,16 @@ delegate({
 })
 \`\`\`
 
-### With report_write
-Store reports for easy retrieval:
+### With project docs
+Index git-tracked project docs after writing them to \`tenex/docs/\`:
 \`\`\`typescript
-report_write({ title: "Performance Analysis", content: "..." })
-
 rag_add_documents({
-  collection: "reports",
+  collection: "project_docs",
   documents: [{
-    content: report.content,
+    file_path: "./tenex/docs/performance-analysis.md",
     metadata: { 
-      title: report.title,
-      type: "report",
+      title: "Performance Analysis",
+      type: "project_doc",
       created_at: Date.now()
     }
   }]

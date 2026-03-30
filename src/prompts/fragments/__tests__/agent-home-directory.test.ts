@@ -46,6 +46,7 @@ describe("agent-home-directory fragment", () => {
         let ensureAgentHomeSpy: ReturnType<typeof spyOn>;
         let readdirSyncSpy: ReturnType<typeof spyOn>;
         let getInjectedFilesSpy: ReturnType<typeof spyOn>;
+        let getProjectInjectedFilesSpy: ReturnType<typeof spyOn>;
 
         beforeEach(() => {
             clearAgentHomePromptCache();
@@ -53,8 +54,10 @@ describe("agent-home-directory fragment", () => {
             ensureAgentHomeSpy = spyOn(agentHome, "ensureAgentHomeDirectory");
             readdirSyncSpy = spyOn(fs, "readdirSync");
             getInjectedFilesSpy = spyOn(agentHome, "getAgentHomeInjectedFiles");
+            getProjectInjectedFilesSpy = spyOn(agentHome, "getAgentProjectInjectedFiles");
             // Default to no injected files
             getInjectedFilesSpy.mockImplementation(() => []);
+            getProjectInjectedFilesSpy.mockImplementation(() => []);
         });
 
         afterEach(() => {
@@ -62,6 +65,7 @@ describe("agent-home-directory fragment", () => {
             ensureAgentHomeSpy.mockRestore();
             readdirSyncSpy.mockRestore();
             getInjectedFilesSpy.mockRestore();
+            getProjectInjectedFilesSpy.mockRestore();
         });
 
         it("should show empty directory message when no files exist", async () => {
@@ -199,7 +203,7 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("### Injected File Contents");
+            expect(result).toContain("### Injected Home Files");
             expect(result).toContain("**+NOTES.md:**");
             expect(result).toContain("Remember to test everything!");
         });
@@ -244,7 +248,44 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).not.toContain("### Injected File Contents");
+            expect(result).not.toContain("### Injected Home Files");
+            expect(result).not.toContain("### Injected Project Files");
+        });
+
+        it("should document project-specific memory and git-tracked docs when project context is present", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => []);
+
+            const result = await agentHomeDirectoryFragment.template({
+                agent: mockAgent,
+                projectDTag: "acme-app",
+                projectDocsPath: "/repo/acme-app/tenex/docs",
+            } as never);
+
+            expect(result).toContain("/home/abcd1234/projects/acme-app/docs");
+            expect(result).toContain("/repo/acme-app/tenex/docs");
+            expect(result).toContain("root `AGENTS.md`");
+        });
+
+        it("should inject project-scoped +files separately from home files", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => []);
+            getInjectedFilesSpy.mockImplementation(() => [
+                { filename: "+HOME.md", content: "Home memory", truncated: false },
+            ]);
+            getProjectInjectedFilesSpy.mockImplementation(() => [
+                { filename: "+PROJECT.md", content: "Project memory", truncated: false },
+            ]);
+
+            const result = await agentHomeDirectoryFragment.template({
+                agent: mockAgent,
+                projectDTag: "acme-app",
+            } as never);
+
+            expect(result).toContain("### Injected Home Files");
+            expect(result).toContain("Home memory");
+            expect(result).toContain("### Injected Project Files");
+            expect(result).toContain("Project memory");
         });
 
         it("should reflect updated injected files and listing on consecutive renders", async () => {

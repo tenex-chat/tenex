@@ -23,7 +23,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `embedding/` — Embedding provider wrappers
 - `scheduling/` — Cron-like scheduling
 - `status/` — Progress event broadcasting
-- `reports/` — Task reports
 - `nudge/` — Stalled agent reminders
 - `prompt-compiler/` — Lesson + comment synthesis
 - `search/` — Unified search
