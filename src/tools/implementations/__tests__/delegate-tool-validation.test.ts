@@ -786,7 +786,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
     });
 });
 
-describe("delegate_followup - Full ID canonicalization", () => {
+describe("delegate_followup - ID handling", () => {
     const conversationId = "test-conversation-id";
     const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
@@ -853,94 +853,41 @@ describe("delegate_followup - Full ID canonicalization", () => {
         expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId)); // Shortened canonical ID
     });
 
-    it("should canonicalize nostr:nevent1 NIP-19 format to canonical delegation ID", async () => {
+    it("should reject nostr:nevent1 bech32 IDs", async () => {
         const agentPubkey = "agent-pubkey-123";
         const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-
-        // Use a real-ish 64-char hex ID that we can encode
-        const canonicalId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        const followupId = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-
-        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
-            type: "followup",
-            delegationConversationId: canonicalId,
-            followupEventId: followupId,
-            recipientPubkey: "recipient-agent-pubkey",
-            senderPubkey: agentPubkey,
-            prompt: "Original prompt",
-            ralNumber,
-        }]);
-
         const context = createMockContext(ralNumber);
         const followupTool = createDelegateFollowupTool(context);
 
-        // Import nip19 to encode the followup ID as nevent
-        const { nip19 } = await import("nostr-tools");
-        const neventEncoded = nip19.neventEncode({ id: followupId });
-
         const input = {
-            delegation_conversation_id: `nostr:${neventEncoded}`, // NIP-19 nevent format with nostr: prefix
-            message: "Follow-up via NIP-19",
+            delegation_conversation_id: "nostr:nevent1qqsqxpc6z8pc8qursw3ur5xupzqfsp3n2m3ck8w",
+            message: "Follow-up via nostr:nevent1",
         };
 
-        const result = await followupTool.execute(input);
-        expect(result.success).toBe(true);
-        expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId));
+        try {
+            await followupTool.execute(input);
+            expect(true).toBe(false);
+        } catch (error: any) {
+            expect(error.message).toContain("does not accept note1/nevent1 bech32 IDs");
+        }
     });
 
-    it("should canonicalize note1 NIP-19 format to canonical delegation ID", async () => {
+    it("should reject note1 bech32 IDs", async () => {
         const agentPubkey = "agent-pubkey-123";
         const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-
-        const canonicalId = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-        const followupId = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-
-        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
-            type: "followup",
-            delegationConversationId: canonicalId,
-            followupEventId: followupId,
-            recipientPubkey: "recipient-agent-pubkey",
-            senderPubkey: agentPubkey,
-            prompt: "Original prompt",
-            ralNumber,
-        }]);
-
         const context = createMockContext(ralNumber);
         const followupTool = createDelegateFollowupTool(context);
 
-        // Import nip19 to encode the followup ID as note
-        const { nip19 } = await import("nostr-tools");
-        const noteEncoded = nip19.noteEncode(followupId);
-
         const input = {
-            delegation_conversation_id: noteEncoded, // NIP-19 note format (no nostr: prefix)
+            delegation_conversation_id: "note1qqsqxpc6z8pc8qursw3ur5xupzqfsp3n2m3ck8w",
             message: "Follow-up via note1",
         };
 
-        const result = await followupTool.execute(input);
-        expect(result.success).toBe(true);
-        expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId));
-    });
-
-    it("should handle invalid NIP-19 format gracefully", async () => {
-        const agentPubkey = "agent-pubkey-123";
-        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-        const context = createMockContext(ralNumber);
-        const followupTool = createDelegateFollowupTool(context);
-
-        const input = {
-            delegation_conversation_id: "nostr:note1invalid_bech32_characters!!!", // Invalid NIP-19
-            message: "This should fail gracefully",
-        };
-
-        // Should fall through to unknown format handling and eventually fail
-        // because no delegation matches the malformed input
         try {
             await followupTool.execute(input);
-            expect(true).toBe(false); // Should not reach here
+            expect(true).toBe(false);
         } catch (error: any) {
-            // With NDK mocked to return null, should get "Could not fetch" error
-            expect(error.message).toContain("Could not fetch delegation conversation");
+            expect(error.message).toContain("does not accept note1/nevent1 bech32 IDs");
         }
     });
 
