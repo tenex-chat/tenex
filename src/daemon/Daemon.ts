@@ -17,7 +17,7 @@ import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
-import { context as otelContext, trace, type Span } from "@opentelemetry/api";
+import { SpanStatusCode, context as otelContext, trace, type Span } from "@opentelemetry/api";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
 import { shutdownTelemetry } from "@/telemetry/setup";
 import type { RoutingDecision } from "./routing/DaemonRouter";
@@ -50,6 +50,7 @@ import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
 import { installAgentFromDefinitionEventId } from "@/services/agents/AgentProvisioningService";
 const lessonTracer = trace.getTracer("tenex.lessons");
+const daemonTracer = trace.getTracer("tenex.daemon");
 
 /**
  * Main daemon that manages all projects in a single process.
@@ -902,64 +903,94 @@ export class Daemon {
         projectId: ProjectDTag,
         runtime: ProjectRuntime
     ): Promise<void> {
-        if (!this.subscriptionManager) return;
+        const subscriptionManager = this.subscriptionManager;
+        if (!subscriptionManager) return;
 
-        try {
-            const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } =
-                this.collectAgentData();
+        await daemonTracer.startActiveSpan(
+            "tenex.daemon.update_agent_subscriptions",
+            async (span) => {
+                span.setAttribute("project.id", projectId);
 
-            // Rebuild the routing map from scratch
-            this.agentPubkeyToProjects.clear();
+                try {
+                    const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } =
+                        this.collectAgentData();
 
-            // Track which projects each agent belongs to
-            const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
-            for (const [pid, rt] of activeRuntimes) {
-                const context = rt.getContext();
-                if (!context) {
-                    throw new Error(
-                        `Runtime for project ${pid} has no context during subscription update`
-                    );
-                }
+                    span.setAttributes({
+                        "agents.pubkeys.total": allAgentPubkeys.size,
+                        "agents.definition_ids.total": allAgentDefinitionIds.size,
+                    });
 
-                const agents = context.agentRegistry.getAllAgents();
-                for (const agent of agents) {
-                    if (!this.agentPubkeyToProjects.has(agent.pubkey)) {
-                        this.agentPubkeyToProjects.set(agent.pubkey, new Set());
+                    // Rebuild the routing map from scratch
+                    this.agentPubkeyToProjects.clear();
+
+                    // Track which projects each agent belongs to
+                    const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+                    span.setAttribute("projects.active_count", activeRuntimes.size);
+                    for (const [pid, rt] of activeRuntimes) {
+                        const context = rt.getContext();
+                        if (!context) {
+                            throw new Error(
+                                `Runtime for project ${pid} has no context during subscription update`
+                            );
+                        }
+
+                        const agents = context.agentRegistry.getAllAgents();
+                        for (const agent of agents) {
+                            if (!this.agentPubkeyToProjects.has(agent.pubkey)) {
+                                this.agentPubkeyToProjects.set(agent.pubkey, new Set());
+                            }
+
+                            const projectSet = this.agentPubkeyToProjects.get(agent.pubkey);
+                            if (!projectSet) {
+                                throw new Error(
+                                    `Agent pubkey ${agent.pubkey.slice(0, 8)} missing from agentPubkeyToProjects after set`
+                                );
+                            }
+                            projectSet.add(pid);
+                        }
                     }
 
-                    const projectSet = this.agentPubkeyToProjects.get(agent.pubkey);
-                    if (!projectSet) {
-                        throw new Error(
-                            `Agent pubkey ${agent.pubkey.slice(0, 8)} missing from agentPubkeyToProjects after set`
-                        );
+                    // Update agent mentions subscription
+                    subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
+
+                    // Sync per-agent lesson subscriptions: add new, remove stale
+                    this.syncLessonSubscriptions(allAgentDefinitionIds);
+
+                    // Sync trust service with all known agent pubkeys (cross-project trust)
+                    this.syncTrustServiceAgentPubkeys();
+
+                    // Set up callback for dynamic agent additions (e.g., via agents_write tool)
+                    // This ensures new agents are immediately routable without requiring a restart
+                    const context = runtime.getContext();
+                    if (context) {
+                        context.setOnAgentAdded((agent) => {
+                            this.handleDynamicAgentAdded(projectId, agent);
+                        });
                     }
-                    projectSet.add(pid);
+
+                    span.addEvent("daemon.agent_subscriptions_updated", {
+                        "agents.pubkeys.total": allAgentPubkeys.size,
+                        "agents.definition_ids.total": allAgentDefinitionIds.size,
+                        "projects.active_count": activeRuntimes.size,
+                    });
+                    span.setStatus({ code: SpanStatusCode.OK });
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+
+                    span.recordException(error as Error);
+                    span.setStatus({
+                        code: SpanStatusCode.ERROR,
+                        message: errorMessage,
+                    });
+                    logger.error("Failed to update subscription with project agents", {
+                        projectId,
+                        error: errorMessage,
+                    });
+                } finally {
+                    span.end();
                 }
             }
-
-            // Update agent mentions subscription
-            this.subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
-
-            // Sync per-agent lesson subscriptions: add new, remove stale
-            this.syncLessonSubscriptions(allAgentDefinitionIds);
-
-            // Sync trust service with all known agent pubkeys (cross-project trust)
-            this.syncTrustServiceAgentPubkeys();
-
-            // Set up callback for dynamic agent additions (e.g., via agents_write tool)
-            // This ensures new agents are immediately routable without requiring a restart
-            const context = runtime.getContext();
-            if (context) {
-                context.setOnAgentAdded((agent) => {
-                    this.handleDynamicAgentAdded(projectId, agent);
-                });
-            }
-        } catch (error) {
-            logger.error("Failed to update subscription with project agents", {
-                projectId,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
+        );
     }
 
     /**
