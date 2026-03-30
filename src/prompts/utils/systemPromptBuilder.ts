@@ -323,6 +323,9 @@ function addAgentFragments(
     // Add todo-before-delegation requirement (priority 17, after stay-in-your-lane)
     builder.add("todo-before-delegation", {});
 
+    // Add delegation async pattern guidance (priority 19)
+    builder.add("delegation-async", {});
+
     // Add explicit guidance for turns where the user wants no reply.
     if (triggeringEnvelope?.transport === "telegram") {
         builder.add("no-response-guidance", {
@@ -445,21 +448,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
 
     systemPromptBuilder.add("channel-bindings", {
         bindings: dTag ? buildChannelBindingDisplayEntries(agentForFragments, dTag) : [],
-    });
-
-    // Add active conversations context (currently running agents in the project)
-    systemPromptBuilder.add("active-conversations", {
-        agent: agentForFragments,
-        currentConversationId: conversation.getId(),
-        projectId: dTag,
-    });
-
-    // Add recent conversations context (short-term memory)
-    // NOTE: Use dTag (not tagId) — disk directories use the d-tag, not the NIP-33 address
-    systemPromptBuilder.add("recent-conversations", {
-        agent: agentForFragments,
-        currentConversationId: conversation.getId(),
-        projectId: dTag,
     });
 
     // Add delegation chain if present (shows agent their position in multi-agent workflow)

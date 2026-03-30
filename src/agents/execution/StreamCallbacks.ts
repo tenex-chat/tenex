@@ -30,6 +30,8 @@ import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import { prepareLLMRequest } from "./request-preparation";
 import { updateReminderData } from "./system-reminders";
+import { renderConversationsReminder } from "@/prompts/reminders/conversations";
+import { createProjectDTag } from "@/types/project-ids";
 import type { FullRuntimeContext, LLMModelRequest, RALExecutionContext } from "./types";
 
 /**
@@ -338,12 +340,21 @@ export function createPrepareStep(
                 includeMcpResources: false,
             });
 
+            const rawDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
+            const dTag = rawDTag ? createProjectDTag(rawDTag) : undefined;
+            const conversationsContent = renderConversationsReminder({
+                agentPubkey: context.agent.pubkey,
+                currentConversationId: context.conversationId,
+                projectId: dTag,
+            });
+
             updateReminderData({
                 agent: context.agent,
                 conversation,
                 respondingToPrincipal: context.triggeringEnvelope.principal,
                 pendingDelegations,
                 completedDelegations,
+                conversationsContent: conversationsContent ?? undefined,
             });
 
             // Dynamic model switching

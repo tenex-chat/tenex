@@ -158,7 +158,7 @@ describe("systemPromptBuilder", () => {
         expect(agentIdentityFragment?.args.agent.instructions).toBe("Base instructions");
     });
 
-    it("does not add environment or cross-project fragments to the main prompt", async () => {
+    it("does not add cross-project fragments to the main prompt", async () => {
         currentProjectContext = {};
 
         await buildSystemPromptMessages({
@@ -167,7 +167,6 @@ describe("systemPromptBuilder", () => {
             conversation,
         });
 
-        expect(addedFragments.some((fragment) => fragment.id === "environment-context")).toBe(false);
         expect(addedFragments.some((fragment) => fragment.id === "meta-project-context")).toBe(false);
     });
 

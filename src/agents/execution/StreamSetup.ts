@@ -19,6 +19,7 @@ import type { LLMService } from "@/llm/service";
 import { MessageCompiler } from "./MessageCompiler";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { initializeReminderProviders, updateReminderData } from "./system-reminders";
+import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
 import {
@@ -28,6 +29,7 @@ import {
 import { prepareLLMRequest } from "./request-preparation";
 import type { FullRuntimeContext, LLMModelRequest } from "./types";
 import type { AISdkTool } from "@/tools/types";
+import { createProjectDTag } from "@/types/project-ids";
 
 /**
  * Result of stream setup
@@ -295,12 +297,22 @@ export async function setupStreamExecution(
     // Initialize providers (idempotent) and set data for this execution
     initializeReminderProviders();
     getSystemReminderContext().advance();
+
+    const rawDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
+    const dTag = rawDTag ? createProjectDTag(rawDTag) : undefined;
+    const conversationsContent = renderConversationsReminder({
+        agentPubkey: context.agent.pubkey,
+        currentConversationId: context.conversationId,
+        projectId: dTag,
+    });
+
     updateReminderData({
         agent: context.agent,
         conversation,
         respondingToPrincipal: context.triggeringEnvelope.principal,
         pendingDelegations,
         completedDelegations,
+        conversationsContent: conversationsContent ?? undefined,
     });
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
