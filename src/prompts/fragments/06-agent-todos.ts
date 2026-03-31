@@ -40,7 +40,7 @@ export const agentTodosFragment: PromptFragment<AgentTodosArgs> = {
         const done = todos.filter((t) => t.status === "done");
         const skipped = todos.filter((t) => t.status === "skipped");
 
-        parts.push("## Your Current Todo List");
+        parts.push("<agent-todos>");
         parts.push("");
 
         // Summary stats
@@ -69,6 +69,7 @@ export const agentTodosFragment: PromptFragment<AgentTodosArgs> = {
             );
         }
 
+        parts.push("</agent-todos>");
         return parts.join("\n");
     },
 };

@@ -28,20 +28,19 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         const parts: string[] = [];
 
         // Identity
-        parts.push("# Your Identity\n");
-        parts.push(`Your name: ${agent.slug}`);
-        parts.push(`Your npub: ${agent.signer.npub}`);
-        parts.push("Your nsec is stored in your home directory's `.env` file as `NSEC`.");
-        parts.push("");
+        const identityLines: string[] = [];
+        identityLines.push(`Your name: ${agent.slug}`);
+        identityLines.push(`Your npub: ${agent.signer.npub}`);
+        identityLines.push("Your nsec is stored in your home directory's `.env` file as `NSEC`.");
+        parts.push(`<agent-identity>\n${identityLines.join("\n")}\n</agent-identity>`);
 
         // Instructions
         if (agent.instructions) {
-            parts.push(`## Your Instructions\n${agent.instructions}\n`);
+            parts.push(`<agent-instructions>\n${agent.instructions}\n</agent-instructions>`);
         }
 
         // Project context
         const contextLines = [
-            "## Project Context",
             `- Title: "${projectTitle}"`,
             `- Today's Date: ${new Date().toISOString().split("T")[0]}`,
         ];
@@ -52,7 +51,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         if (conversationId) {
             contextLines.push(`- Current Conversation ID: ${shortenConversationId(conversationId)}`);
         }
-        parts.push(contextLines.join("\n"));
+        parts.push(`<project-context>\n${contextLines.join("\n")}\n</project-context>`);
 
         return parts.join("\n");
     },

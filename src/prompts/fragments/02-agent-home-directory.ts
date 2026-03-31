@@ -92,7 +92,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
 
         const parts: string[] = [];
 
-        parts.push("## Your Home Directory\n");
+        parts.push("<home-directory>");
         parts.push(`You have a personal home directory at: \`${homeDir}\`. This is *your* space to use as you see fit. The contents of this directory are persistent and private to you.`);
         parts.push("");
         parts.push("**Current contents:**");
@@ -171,6 +171,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
             }
         }
 
+        parts.push("</home-directory>");
         return parts.join("\n");
     },
 };

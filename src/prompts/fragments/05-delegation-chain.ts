@@ -34,12 +34,12 @@ export const delegationChainFragment: PromptFragment<DelegationChainArgs> = {
 
         const chainString = formatDelegationChain(delegationChain, currentAgentPubkey);
 
-        return `## Delegation Chain
+        return `<delegation-chain>
 \`\`\`
 ${chainString}
 \`\`\`
 
 This shows who initiated this request and how it reached you. The "(you)" marker indicates your position.
-`;
+</delegation-chain>`;
     },
 };
