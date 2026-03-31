@@ -96,7 +96,7 @@ function createTenexFsToolsUncached(context: ToolExecutionContext): ReturnType<t
     const tools = createFsTools({
         workingDirectory: context.workingDirectory,
         allowedRoots,
-        agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory },
+        agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory, skipRoot: true },
         formatOutsideRootsError: (path, wd) =>
             `Path "${path}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
         analyzeContent: ({ content, prompt, source }) => synthesizeContent(content, prompt, source),
