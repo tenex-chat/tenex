@@ -6,6 +6,7 @@ export const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 export const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 
 export interface ContextManagementSettings {
+    enabled: boolean;
     tokenBudget: number;
     forceScratchpadThresholdPercent: number;
     utilizationWarningThresholdPercent: number;
@@ -28,6 +29,7 @@ export function getContextManagementSettings(): ContextManagementSettings {
     const raw = configService.getContextManagementConfig();
 
     return {
+        enabled: raw?.enabled !== false,
         tokenBudget: Math.floor(
             normalizePositiveNumber(raw?.tokenBudget, DEFAULT_WORKING_TOKEN_BUDGET)
         ),

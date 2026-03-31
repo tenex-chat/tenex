@@ -209,6 +209,32 @@ export function createExecutionContextManagement(options: {
     conversationStore: ConversationStore;
     nudgeToolPermissions?: NudgeToolPermissions;
 }): ExecutionContextManagement | undefined {
+    const settings = getContextManagementSettings();
+
+    const requestContext: ContextManagementRequestContext = {
+        conversationId: options.conversationId,
+        agentId: options.agent.pubkey,
+        agentLabel: options.agent.name || options.agent.slug,
+    };
+
+    if (!settings.enabled) {
+        // Strategies are disabled, but return a minimal object so Anthropic-specific
+        // prompt caching and clear-tool-uses logic in request-preparation.ts still runs.
+        return {
+            optionalTools: {},
+            promptStabilityTracker: createSharedPrefixTracker(),
+            requestContext,
+            async prepareRequest(requestOptions) {
+                return {
+                    messages: normalizeMessagesForContextManagement(requestOptions.messages),
+                    providerOptions: requestOptions.providerOptions,
+                    toolChoice: requestOptions.toolChoice,
+                    reportActualUsage: async () => {},
+                };
+            },
+        };
+    }
+
     const scratchpadAvailable =
         !options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions);
 
@@ -226,22 +252,14 @@ export function createExecutionContextManagement(options: {
     return {
         optionalTools,
         promptStabilityTracker,
-        requestContext: {
-            conversationId: options.conversationId,
-            agentId: options.agent.pubkey,
-            agentLabel: options.agent.name || options.agent.slug,
-        },
+        requestContext,
         async prepareRequest(requestOptions) {
             return await runtime.prepareRequest({
                 ...requestOptions,
                 messages: normalizeMessagesForContextManagement(
                     requestOptions.messages
                 ),
-                requestContext: {
-                    conversationId: options.conversationId,
-                    agentId: options.agent.pubkey,
-                    agentLabel: options.agent.name || options.agent.slug,
-                },
+                requestContext,
             });
         },
     };

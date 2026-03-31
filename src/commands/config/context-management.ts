@@ -34,6 +34,12 @@ export const contextManagementCommand = new Command("context-management")
 
         const answers = await inquirer.prompt([
             {
+                type: "confirm",
+                name: "enabled",
+                message: "Enable ai-sdk-context-management strategies:",
+                default: contextManagement.enabled !== false,
+            },
+            {
                 type: "input",
                 name: "tokenBudget",
                 message: "Token budget for managed context:",
@@ -88,6 +94,7 @@ export const contextManagementCommand = new Command("context-management")
         ]);
 
         tenexConfig.contextManagement = {
+            enabled: answers.enabled,
             tokenBudget: Number.parseInt(answers.tokenBudget, 10),
             forceScratchpadThresholdPercent: Number.parseInt(answers.forceScratchpadThresholdPercent, 10),
             utilizationWarningThresholdPercent: Number.parseInt(answers.utilizationWarningThresholdPercent, 10),

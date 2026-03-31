@@ -32,6 +32,7 @@ export interface TenexConfig {
 
     // Context-management configuration
     contextManagement?: {
+        enabled?: boolean; // Enable ai-sdk-context-management strategies (default: true)
         tokenBudget?: number; // Managed working-context token budget (default: 40000)
         forceScratchpadThresholdPercent?: number; // Managed-context utilization percent that forces scratchpad (default: 70)
         utilizationWarningThresholdPercent?: number; // Managed-context utilization percent for warnings (default: 70)
@@ -122,6 +123,7 @@ export const TenexConfigSchema = z.object({
         .optional(),
     contextManagement: z
         .object({
+            enabled: z.boolean().optional(),
             tokenBudget: z.number().positive().optional(),
             forceScratchpadThresholdPercent: z.number().min(0).max(100).optional(),
             utilizationWarningThresholdPercent: z.number().min(0).max(100).optional(),
