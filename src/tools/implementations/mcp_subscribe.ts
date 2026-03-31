@@ -69,7 +69,7 @@ async function executeSubscribe(
     }
 
     // Check if server is running
-    const runningServers = mcpManager.getRunningServers();
+    const runningServers = mcpManager.getConfiguredServers();
     if (!runningServers.includes(serverName)) {
         return createExpectedError(
             `MCP server '${serverName}' is not running. ` +

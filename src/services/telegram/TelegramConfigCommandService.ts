@@ -380,7 +380,7 @@ export class TelegramConfigCommandService {
         projectId: string;
         projectTitle: string;
     }): Promise<void> {
-        const options = await this.configOptionsService.getProjectOptions(params.projectContext);
+        const options = await this.configOptionsService.getProjectOptions();
         if (
             (params.commandKind === "model" && options.models.length === 0) ||
             (params.commandKind === "tools" && options.tools.length === 0)

@@ -99,6 +99,7 @@ export interface StatusIntent {
     models: Array<{ slug: string; agents: string[] }>;
     tools: Array<{ name: string; agents: string[] }>;
     skills?: Array<{ id: string; agents: string[] }>;
+    mcpServers?: Array<{ slug: string; agents: string[] }>;
     worktrees?: string[]; // Array of branch names, first is default
     scheduledTasks?: ScheduledTaskInfo[];
 }

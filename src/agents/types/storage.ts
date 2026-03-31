@@ -22,6 +22,8 @@ export interface AgentDefaultConfig {
     tools?: string[];
     /** Skill IDs that are always active for this agent across all conversations. Local skill directory IDs are authoritative. */
     skills?: string[];
+    /** MCP server slugs (from mcp.json) this agent can access. */
+    mcpAccess?: string[];
 }
 
 /**
@@ -57,6 +59,13 @@ export interface AgentProjectConfig {
      * Set via kind 24020 event with ["pm"] tag and an a-tag.
      */
     isPM?: boolean;
+    /**
+     * Project-specific MCP server access.
+     * This is a full replacement list for the project context.
+     * - undefined: use default.mcpAccess
+     * - []: disable all MCP server access for this project
+     */
+    mcpAccess?: string[];
 }
 
 /**

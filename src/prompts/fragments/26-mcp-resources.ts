@@ -53,7 +53,7 @@ export async function fetchAgentMcpResources(
         return [];
     }
 
-    const runningServers = mcpManager.getRunningServers();
+    const runningServers = mcpManager.getConfiguredServers();
 
     // Only show resources from servers the agent has tools for AND are running
     const agentRunningServers = agentMcpServers.filter(s => runningServers.includes(s));

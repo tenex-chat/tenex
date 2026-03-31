@@ -443,13 +443,13 @@ export function getToolsObject(
         effectiveNames = modifiedNames;
     }
 
-    // Separate regular tools and MCP tools
+    // Separate regular tools (MCP tools are injected via mcpAccess, not via tool names)
     const regularTools: ToolName[] = [];
-    const mcpToolNames: string[] = [];
 
     for (const name of effectiveNames) {
         if (name.startsWith("mcp__")) {
-            mcpToolNames.push(name);
+            // mcp__ entries in tool lists are no longer valid; they are injected via mcpAccess
+            continue;
         } else if (name in toolFactories) {
             // Filter out conversation-required tools when no conversation available
             if (CONVERSATION_REQUIRED_TOOLS.has(name as ToolName) && !hasConversation) {
@@ -590,17 +590,25 @@ export function getToolsObject(
         }
     }
 
-    // Add only requested MCP tools (only for full registry context)
-    if (mcpToolNames.length > 0 && "mcpManager" in context && context.mcpManager) {
+    // Inject all MCP tools from servers the agent has access to via mcpAccess
+    if ("agent" in context && context.agent?.mcpAccess && context.agent.mcpAccess.length > 0 && "mcpManager" in context && context.mcpManager) {
         try {
+            const accessibleServerSlugs = new Set(context.agent.mcpAccess);
             const allMcpTools = context.mcpManager.getCachedTools();
-            for (const name of mcpToolNames) {
-                if (allMcpTools[name]) {
-                    tools[name] = asTool(allMcpTools[name]);
+            for (const [toolName, mcpTool] of Object.entries(allMcpTools)) {
+                // Parse server name from mcp__{serverName}__{toolName}
+                const parts = toolName.split("__");
+                if (parts.length < 3 || parts[0] !== "mcp") continue;
+                const serverSlug = parts[1];
+                // Skip internal tenex tools
+                if (serverSlug === "tenex") continue;
+                // Only inject tools from servers the agent has access to
+                if (accessibleServerSlugs.has(serverSlug)) {
+                    tools[toolName] = asTool(mcpTool);
                 }
             }
         } catch (error) {
-            console.debug("Could not load MCP tools:", error);
+            logger.debug("Could not load MCP tools:", error);
         }
     }
 

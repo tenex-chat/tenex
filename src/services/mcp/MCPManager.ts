@@ -492,13 +492,42 @@ export class MCPManager {
     /**
      * Get list of configured servers (running or pending lazy start).
      */
-    getRunningServers(): string[] {
+    getConfiguredServers(): string[] {
         const running = Array.from(this.clients.keys());
         if (this.pendingConfig) {
             const pending = Object.keys(this.pendingConfig.servers).filter(n => !this.clients.has(n));
             return [...running, ...pending];
         }
         return running;
+    }
+
+    /**
+     * Start only the MCP servers matching the given slugs.
+     * Servers already running are skipped; servers not in pending config are ignored.
+     */
+    async ensureServersForSlugs(slugs: string[]): Promise<void> {
+        if (slugs.length === 0) return;
+
+        const neededServers = new Set(slugs);
+
+        while (this.pendingConfig) {
+            const missingServers = Array.from(neededServers).filter((name) => !this.clients.has(name));
+            if (missingServers.length === 0) {
+                return;
+            }
+
+            if (this.serverStartPromise) {
+                await this.serverStartPromise;
+                continue;
+            }
+
+            this.serverStartPromise = this.startDeferredServersForTools(missingServers);
+            try {
+                await this.serverStartPromise;
+            } finally {
+                this.serverStartPromise = null;
+            }
+        }
     }
 
     /**
@@ -537,7 +566,7 @@ export class MCPManager {
         );
 
         trace.getActiveSpan()?.addEvent("mcp.reloaded", {
-            "servers.running": this.getRunningServers().length,
+            "servers.running": this.getConfiguredServers().length,
             "tools.available": Object.keys(this.cachedTools).length,
         });
     }
@@ -815,7 +844,7 @@ export class MCPManager {
     private getClientEntry(serverName: string): MCPClientEntry {
         const entry = this.clients.get(serverName);
         if (!entry) {
-            const validServers = this.getRunningServers();
+            const validServers = this.getConfiguredServers();
             const serverList =
                 validServers.length > 0
                     ? `Valid servers: ${validServers.join(", ")}`

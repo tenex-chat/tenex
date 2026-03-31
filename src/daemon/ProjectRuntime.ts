@@ -513,14 +513,10 @@ export class ProjectRuntime {
                 "mcp.count": mcpEventIds.length,
             });
 
-            if (mcpEventIds.length === 0) {
-                return;
-            }
-
             const ndk = getNDK();
             const installedCount = { success: 0, failed: 0 };
 
-            // Fetch and install each MCP tool
+            // Fetch and install each MCP tool from event tags
             for (const eventId of mcpEventIds) {
                 try {
                     trace.getActiveSpan()?.addEvent("project_runtime.mcp_fetching", {
@@ -564,20 +560,16 @@ export class ProjectRuntime {
                 "mcp.failed": installedCount.failed,
             });
 
-            // Initialize MCP service if any tools were installed
-            if (installedCount.success > 0) {
-                await this.mcpManager.initialize(this.metadataPath, this.projectBasePath);
+            // Always initialize MCPManager from mcp.json (the source of truth).
+            // MCP event installation writes to mcp.json; MCPManager reads from it.
+            await this.mcpManager.initialize(this.metadataPath, this.projectBasePath);
 
-                const configuredServers = this.mcpManager.getRunningServers();
+            const configuredServers = this.mcpManager.getConfiguredServers();
 
-                trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
-                    "mcp.configured_servers": configuredServers.length,
-                });
-            } else {
-                logger.warn(
-                    "[ProjectRuntime] No MCP tools were successfully installed, skipping MCP service initialization"
-                );
-            }
+            trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
+                "mcp.configured_servers": configuredServers.length,
+                "mcp.installed_from_events": installedCount.success,
+            });
         } catch (error) {
             logger.error("[ProjectRuntime] Failed to initialize MCP tools", {
                 error: error instanceof Error ? error.message : String(error),

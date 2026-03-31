@@ -15,6 +15,7 @@ export interface ApplyAgentConfigUpdateResult {
     hasModel: boolean;
     toolCount: number;
     skillCount: number;
+    mcpCount: number;
     hasPM: boolean;
     hasReset: boolean;
 }
@@ -47,6 +48,7 @@ export class AgentConfigUpdateService {
                 hasModel: false,
                 toolCount: 0,
                 skillCount: 0,
+                mcpCount: 0,
                 hasPM: false,
                 hasReset: false,
             };
@@ -59,6 +61,10 @@ export class AgentConfigUpdateService {
             .filter((tag) => tag[0] === "skill")
             .map((tag) => tag[1]?.trim())
             .filter((skillId): skillId is string => Boolean(skillId));
+        const mcpServerSlugs = event.tags
+            .filter((tag) => tag[0] === "mcp")
+            .map((tag) => tag[1]?.trim())
+            .filter((slug): slug is string => Boolean(slug));
         const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
         const hasResetTag = event.tags.some((tag) => tag[0] === "reset");
 
@@ -73,6 +79,7 @@ export class AgentConfigUpdateService {
                     newModel,
                     newToolNames,
                     skillTagValues,
+                    mcpServerSlugs,
                     hasPMTag,
                     hasResetTag,
                     event,
@@ -88,6 +95,7 @@ export class AgentConfigUpdateService {
                 newModel,
                 newToolNames,
                 skillTagValues,
+                mcpServerSlugs,
                 hasPMTag,
                 hasResetTag,
                 event,
@@ -101,6 +109,7 @@ export class AgentConfigUpdateService {
         newModel: string | undefined;
         newToolNames: string[];
         skillTagValues: string[];
+        mcpServerSlugs: string[];
         hasPMTag: boolean;
         hasResetTag: boolean;
         event: NDKEvent;
@@ -136,6 +145,11 @@ export class AgentConfigUpdateService {
                 projectOverride.skills = params.skillTagValues;
             }
 
+            const hasMcpTags = params.event.tags.some((tag) => tag[0] === "mcp");
+            if (hasMcpTags) {
+                projectOverride.mcpAccess = params.mcpServerSlugs;
+            }
+
             configUpdated = await agentStorage.updateProjectOverride(
                 params.agentPubkey,
                 params.projectDTag,
@@ -164,6 +178,7 @@ export class AgentConfigUpdateService {
             hasModel: !!params.newModel,
             toolCount: params.newToolNames.length,
             skillCount: params.skillTagValues.length,
+            mcpCount: params.mcpServerSlugs.length,
             hasPM: params.hasPMTag,
             hasReset: params.hasResetTag,
         };
@@ -174,6 +189,7 @@ export class AgentConfigUpdateService {
         newModel: string | undefined;
         newToolNames: string[];
         skillTagValues: string[];
+        mcpServerSlugs: string[];
         hasPMTag: boolean;
         hasResetTag: boolean;
         event: NDKEvent;
@@ -195,6 +211,11 @@ export class AgentConfigUpdateService {
             defaultUpdates.skills = params.skillTagValues;
         }
 
+        const hasMcpTags = params.event.tags.some((tag) => tag[0] === "mcp");
+        if (hasMcpTags) {
+            defaultUpdates.mcpAccess = params.mcpServerSlugs;
+        }
+
         const configUpdated = await agentStorage.updateDefaultConfig(
             params.agentPubkey,
             defaultUpdates,
@@ -208,6 +229,7 @@ export class AgentConfigUpdateService {
             hasModel: !!params.newModel,
             toolCount: params.newToolNames.length,
             skillCount: params.skillTagValues.length,
+            mcpCount: params.mcpServerSlugs.length,
             hasPM: params.hasPMTag,
             hasReset: params.hasResetTag,
         };

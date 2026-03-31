@@ -42,9 +42,10 @@ export function createAgentInstance(
     const effectiveLLMConfig = resolvedConfig.model;
     const effectiveTools = resolvedConfig.tools;
     const effectiveAlwaysSkills = resolvedConfig.skills;
+    const effectiveMcpAccess = resolvedConfig.mcpAccess;
 
     // Process tools using pure functions
-    const normalizedTools = processAgentTools(effectiveTools || [], storedAgent.slug);
+    const normalizedTools = processAgentTools(effectiveTools || []);
 
     // Resolve category for organizational purposes (no tool restrictions)
     const resolvedCategory = resolveCategory(storedAgent.category);
@@ -76,6 +77,7 @@ export function createAgentInstance(
         projectOverrides: storedAgent.projectOverrides,
         telegram: storedAgent.telegram,
         alwaysSkills: effectiveAlwaysSkills,
+        mcpAccess: effectiveMcpAccess ?? [],
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);

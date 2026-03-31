@@ -355,75 +355,23 @@ describe("ProjectStatusService.gatherToolInfo integration", () => {
         await (service as unknown as { gatherToolInfo(intent: StatusIntent): Promise<void> }).gatherToolInfo(intent);
     }
 
-    it("should filter mcp__tenex__ tools from intent.tools when agent defines them", async () => {
-        // Setup: Agent has both mcp__tenex__ tools and regular MCP tools
+    it("should not include any MCP tools in intent.tools (MCP is announced at server level)", async () => {
+        // MCP tools are no longer announced as individual tool tags on 24010.
+        // They are announced as server-level ["mcp", slug] tags instead.
         const agents = new Map<string, AgentInstance>();
         agents.set("test-agent", createTestAgent("test-agent", [
-            "mcp__tenex__delegate",
-            "mcp__tenex__lesson_learn",
-            "mcp__github__issues",
-            "mcp__slack__post_message",
             "fs_read",
+            "shell",
         ]));
 
-        // MCPManager has all these tools available (simulating running MCP servers)
         const mcpCachedTools = {
             "mcp__tenex__delegate": {},
-            "mcp__tenex__lesson_learn": {},
             "mcp__github__issues": {},
             "mcp__slack__post_message": {},
         };
 
         const mockContext = createMockProjectContext({ agents, mcpCachedTools });
         const service = new ProjectStatusService();
-
-        // Set projectContext to avoid needing AsyncLocalStorage
-        (service as unknown as { projectContext: ProjectContext }).projectContext = mockContext;
-
-        const intent: StatusIntent = {
-            type: "status",
-            agents: [],
-            models: [],
-            tools: [],
-        };
-
-        // Run within projectContextStore to satisfy isProjectContextInitialized() check
-        await projectContextStore.run(mockContext, async () => {
-            await callGatherToolInfo(service, intent);
-        });
-
-        // Verify: mcp__tenex__ tools should NOT be in the tools list
-        const toolNames = intent.tools.map((t) => t.name);
-        expect(toolNames).not.toContain("mcp__tenex__delegate");
-        expect(toolNames).not.toContain("mcp__tenex__lesson_learn");
-
-        // Verify: Regular MCP tools SHOULD be in the tools list (with agent assigned)
-        const githubTool = intent.tools.find((t) => t.name === "mcp__github__issues");
-        expect(githubTool).toBeDefined();
-        expect(githubTool?.agents).toContain("test-agent");
-
-        const slackTool = intent.tools.find((t) => t.name === "mcp__slack__post_message");
-        expect(slackTool).toBeDefined();
-        expect(slackTool?.agents).toContain("test-agent");
-    });
-
-    it("should not include MCP tools from agent definition if not in MCPManager", async () => {
-        // Setup: Agent defines MCP tools, but MCPManager doesn't have them
-        const agents = new Map<string, AgentInstance>();
-        agents.set("test-agent", createTestAgent("test-agent", [
-            "mcp__github__issues",       // Available in MCPManager
-            "mcp__linear__create_issue", // NOT available in MCPManager
-            "mcp__notion__read_page",    // NOT available in MCPManager
-        ]));
-
-        // MCPManager only has github tools
-        const mcpCachedTools = {
-            "mcp__github__issues": {},
-            "mcp__github__pulls": {},
-        };
-
-        const mockContext = createMockProjectContext({ agents, mcpCachedTools });
-        const service = new ProjectStatusService();
         (service as unknown as { projectContext: ProjectContext }).projectContext = mockContext;
 
         const intent: StatusIntent = {
@@ -437,46 +385,26 @@ describe("ProjectStatusService.gatherToolInfo integration", () => {
             await callGatherToolInfo(service, intent);
         });
 
+        // No MCP tools should appear in intent.tools
+        const mcpTools = intent.tools.filter((t) => t.name.startsWith("mcp__"));
+        expect(mcpTools).toHaveLength(0);
+
+        // Regular tools should still be present
         const toolNames = intent.tools.map((t) => t.name);
-
-        // github tools should be present (available in MCPManager)
-        expect(toolNames).toContain("mcp__github__issues");
-        expect(toolNames).toContain("mcp__github__pulls");
-
-        // linear and notion tools should NOT be present (not in MCPManager)
-        expect(toolNames).not.toContain("mcp__linear__create_issue");
-        expect(toolNames).not.toContain("mcp__notion__read_page");
-
-        // Verify agent assignment for available tool
-        const githubTool = intent.tools.find((t) => t.name === "mcp__github__issues");
-        expect(githubTool?.agents).toContain("test-agent");
-
-        // github pulls is in MCPManager but agent doesn't have it, so no agent assigned
-        const pullsTool = intent.tools.find((t) => t.name === "mcp__github__pulls");
-        expect(pullsTool?.agents).toEqual([]);
+        expect(toolNames).toContain("fs_read");
+        expect(toolNames).toContain("shell");
     });
 
-    it("should handle the end-to-end scenario: agent defines mcp__tenex__ tool that MCPManager has, tool should not appear in 24010", async () => {
-        // This is the critical test case:
-        // Agent definition includes mcp__tenex__ask
-        // MCPManager HAS mcp__tenex__ask (because TENEX wraps its own tools via MCP)
-        // The tool should STILL be filtered out from the 24010 event
-
+    it("should handle end-to-end scenario: mcp__tenex__ and other MCP tools not in intent.tools", async () => {
         const agents = new Map<string, AgentInstance>();
         agents.set("coordinator", createTestAgent("coordinator", [
-            "mcp__tenex__delegate",
-            "mcp__tenex__ask",
-            "mcp__tenex__lesson_learn",
-            "mcp__tenex__project_list",
+            "fs_read",
         ]));
 
-        // Simulate MCPManager having all TENEX tools (as would happen in real system)
         const mcpCachedTools = {
             "mcp__tenex__delegate": {},
             "mcp__tenex__ask": {},
-            "mcp__tenex__lesson_learn": {},
-            "mcp__tenex__project_list": {},
-            "mcp__tenex__todo_write": {},
+            "mcp__github__issues": {},
         };
 
         const mockContext = createMockProjectContext({ agents, mcpCachedTools });
@@ -494,8 +422,8 @@ describe("ProjectStatusService.gatherToolInfo integration", () => {
             await callGatherToolInfo(service, intent);
         });
 
-        // Critical assertion: NO mcp__tenex__ tools should appear in the output
-        const mcpTenexTools = intent.tools.filter((t) => t.name.startsWith("mcp__tenex__"));
-        expect(mcpTenexTools).toHaveLength(0);
+        // No MCP tools at all should appear in the output
+        const mcpTools = intent.tools.filter((t) => t.name.startsWith("mcp__"));
+        expect(mcpTools).toHaveLength(0);
     });
 });

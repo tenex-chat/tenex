@@ -98,15 +98,13 @@ export async function setupStreamExecution(
         ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
         : { skills: [], content: "" };
 
-    // Only start MCP servers that provide tools the agent actually uses.
+    // Start MCP servers the agent has access to via mcpAccess.
     // MCP startup is expensive (e.g. chrome-devtools-mcp launches a browser, ~6GB RSS).
-    const toolNames = context.agent.tools || [];
-    const nudgeToolNames = Object.keys(nudgeResult.toolPermissions);
-    const mcpToolNames = [...toolNames, ...nudgeToolNames].filter(t => t.startsWith("mcp__"));
-    if (mcpToolNames.length > 0 && "mcpManager" in context && context.mcpManager) {
-        await context.mcpManager.ensureServersForTools(mcpToolNames);
+    const mcpServerSlugs = context.agent.mcpAccess ?? [];
+    if (mcpServerSlugs.length > 0 && "mcpManager" in context && context.mcpManager) {
+        await context.mcpManager.ensureServersForSlugs(mcpServerSlugs);
     }
-    let toolsObject = getToolsObject(toolNames, context, nudgeResult.toolPermissions);
+    let toolsObject = getToolsObject(context.agent.tools || [], context, nudgeResult.toolPermissions);
 
     const ralRegistry = RALRegistry.getInstance();
     const conversationStore = context.conversationStore;

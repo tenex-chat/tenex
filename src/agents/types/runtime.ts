@@ -65,6 +65,8 @@ export interface AgentInstance {
     telegram?: TelegramAgentConfig;
     /** Skill IDs always active for this agent in the current project context (from resolved agent config, not conversation state). */
     alwaysSkills?: string[];
+    /** MCP server slugs this agent can access (resolved from agent config). */
+    mcpAccess: string[];
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;

@@ -155,6 +155,12 @@ export class ProjectStatusService {
             }
         }
 
+        if (intent.mcpServers) {
+            for (const server of intent.mcpServers) {
+                event.tag(["mcp", server.slug, ...server.agents]);
+            }
+        }
+
         // Add worktree tags (default branch first)
         if (intent.worktrees && intent.worktrees.length > 0) {
             for (const branchName of intent.worktrees) {
@@ -237,6 +243,9 @@ export class ProjectStatusService {
 
             // Gather tool info
             await this.gatherToolInfo(intent);
+
+            // Gather MCP server info
+            this.gatherMcpServerInfo(intent);
 
             // Gather skill info
             await this.gatherSkillInfo(intent, projectPath);
@@ -354,7 +363,7 @@ export class ProjectStatusService {
             const projectCtx = this.projectContext;
             const toolAgentMap = new Map<string, Set<string>>();
 
-            const availableTools = this.configOptionsService.getAvailableTools(projectCtx);
+            const availableTools = this.configOptionsService.getAvailableTools();
             for (const toolName of availableTools) {
                 toolAgentMap.set(toolName, new Set());
             }
@@ -451,6 +460,45 @@ export class ProjectStatusService {
             intent.skills = skills;
         } catch (err) {
             logger.warn(`Could not add skill tags to status event: ${formatAnyError(err)}`);
+        }
+    }
+
+    private gatherMcpServerInfo(intent: StatusIntent): void {
+        try {
+            const projectCtx = this.projectContext;
+            if (!projectCtx?.mcpManager) {
+                return;
+            }
+
+            // Get configured server slugs without starting any servers
+            const serverSlugs = projectCtx.mcpManager.getConfiguredServers();
+            if (serverSlugs.length === 0) {
+                return;
+            }
+
+            // Build slug→agents mapping from agent mcpAccess
+            const serverAgentMap = new Map<string, Set<string>>();
+            for (const slug of serverSlugs) {
+                serverAgentMap.set(slug, new Set());
+            }
+
+            for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
+                for (const serverSlug of agent.mcpAccess) {
+                    const agentSet = serverAgentMap.get(serverSlug);
+                    if (agentSet) {
+                        agentSet.add(agentSlug);
+                    }
+                }
+            }
+
+            intent.mcpServers = Array.from(serverAgentMap.entries())
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([slug, agentSlugs]) => ({
+                    slug,
+                    agents: Array.from(agentSlugs).sort(),
+                }));
+        } catch (err) {
+            logger.warn(`Could not gather MCP server info: ${formatAnyError(err)}`);
         }
     }
 

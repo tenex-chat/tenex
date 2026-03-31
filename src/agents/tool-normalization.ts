@@ -1,4 +1,3 @@
-import type { MCPManager } from "@/services/mcp/MCPManager";
 import { isValidToolName } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -66,74 +65,40 @@ export function normalizeAgentTools(requestedTools: string[]): string[] {
 }
 
 /**
- * Validate and filter tools, separating valid tools from MCP tool requests.
+ * Validate and filter tools.
  *
- * ## Warning: Unrecognized tools are logged
- * Tools that are neither valid static tools nor MCP tools are logged as warnings.
+ * MCP tools (mcp__ prefix) are no longer valid in tool lists — agents declare
+ * MCP server access via mcpAccess instead. Any mcp__ entries are dropped with a warning.
+ * Other unrecognized tools are also logged as warnings.
  */
-export function validateAndSeparateTools(toolNames: string[]): {
-    validTools: string[];
-    mcpToolRequests: string[];
-} {
+export function validateTools(toolNames: string[]): string[] {
     const validTools: string[] = [];
-    const mcpToolRequests: string[] = [];
     const droppedTools: string[] = [];
+    const droppedMcpTools: string[] = [];
 
     for (const toolName of toolNames) {
-        if (isValidToolName(toolName)) {
+        if (toolName.startsWith("mcp__")) {
+            droppedMcpTools.push(toolName);
+        } else if (isValidToolName(toolName)) {
             validTools.push(toolName);
-        } else if (toolName.startsWith("mcp__")) {
-            mcpToolRequests.push(toolName);
         } else {
-            // Track dropped tools to warn about them
             droppedTools.push(toolName);
         }
     }
 
-    // Warn about dropped tools
+    if (droppedMcpTools.length > 0) {
+        logger.warn(
+            `[tool-normalization] Dropping ${droppedMcpTools.length} mcp__ tool(s) — use mcpAccess instead: ${droppedMcpTools.join(", ")}`
+        );
+    }
+
     if (droppedTools.length > 0) {
         logger.warn(
             `[tool-normalization] Dropping ${droppedTools.length} unrecognized tool(s): ${droppedTools.join(", ")}`
         );
     }
 
-    return { validTools, mcpToolRequests };
-}
-
-/**
- * Resolve MCP tools - check if requested MCP tools are available
- * Returns array of available MCP tool names
- *
- * If mcpManager is not provided, returns all requested MCP tools without validation.
- * This allows agent loading to proceed before MCP is initialized - actual tool
- * availability is checked at execution time in getToolsObject.
- */
-export function resolveMCPTools(mcpToolRequests: string[], agentSlug: string, mcpManager?: MCPManager): string[] {
-    if (mcpToolRequests.length === 0) {
-        return [];
-    }
-
-    // If no MCPManager available, keep all MCP tool requests - they'll be validated at execution time
-    if (!mcpManager) {
-        return mcpToolRequests;
-    }
-
-    const availableMcpTools: string[] = [];
-
-    try {
-        const allMcpTools = mcpManager.getCachedTools();
-        for (const toolName of mcpToolRequests) {
-            if (allMcpTools[toolName]) {
-                availableMcpTools.push(toolName);
-            }
-        }
-    } catch (error) {
-        logger.debug(`Could not load MCP tools for agent "${agentSlug}":`, error);
-        // Return all requested tools on error - validation will happen at execution time
-        return mcpToolRequests;
-    }
-
-    return availableMcpTools;
+    return validTools;
 }
 
 /**
@@ -162,23 +127,16 @@ export function expandFsCapabilities(tools: string[]): string[] {
 /**
  * Complete tool processing pipeline:
  * 1. Normalize (add core, delegate, filter)
- * 2. Validate
- * 3. Resolve MCP tools
- * Returns final list of valid, available tool names
+ * 2. Validate (drop unrecognized tools and legacy mcp__ entries)
+ * Returns final list of valid tool names.
  *
- * @param mcpManager - Optional MCPManager for validating MCP tools. If not provided,
- *                     MCP tool names are kept without validation (validated at execution time).
+ * MCP tools are no longer resolved here — agents declare server-level access
+ * via mcpAccess and tools are injected at execution time.
  */
-export function processAgentTools(requestedTools: string[], agentSlug: string, mcpManager?: MCPManager): string[] {
+export function processAgentTools(requestedTools: string[]): string[] {
     // Step 1: Normalize
     const normalized = normalizeAgentTools(requestedTools);
 
-    // Step 2: Validate and separate
-    const { validTools, mcpToolRequests } = validateAndSeparateTools(normalized);
-
-    // Step 3: Resolve MCP tools
-    const mcpTools = resolveMCPTools(mcpToolRequests, agentSlug, mcpManager);
-
-    // Combine and return
-    return [...validTools, ...mcpTools];
+    // Step 2: Validate (drops mcp__ entries with warning)
+    return validateTools(normalized);
 }

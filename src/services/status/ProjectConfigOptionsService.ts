@@ -1,10 +1,8 @@
 import { CONTEXT_INJECTED_TOOLS, CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
 import type { AgentInstance } from "@/agents/types";
 import { config } from "@/services/ConfigService";
-import type { ProjectContext } from "@/services/projects";
 import { getAllToolNames } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
-import { logger } from "@/utils/logger";
 
 export interface ProjectConfigOptions {
     models: string[];
@@ -23,12 +21,10 @@ function isConfigurableTool(toolName: string): boolean {
 }
 
 export class ProjectConfigOptionsService {
-    async getProjectOptions(
-        projectContext: Pick<ProjectContext, "agentRegistry" | "mcpManager">
-    ): Promise<ProjectConfigOptions> {
+    async getProjectOptions(): Promise<ProjectConfigOptions> {
         const [models, tools] = await Promise.all([
             this.getAvailableModels(),
-            Promise.resolve(this.getAvailableTools(projectContext)),
+            Promise.resolve(this.getAvailableTools()),
         ]);
 
         return {
@@ -43,29 +39,12 @@ export class ProjectConfigOptionsService {
         return Object.keys(configurations).sort();
     }
 
-    getAvailableTools(
-        projectContext: Pick<ProjectContext, "agentRegistry" | "mcpManager">
-    ): string[] {
+    getAvailableTools(): string[] {
         const toolNames = new Set<string>();
 
         for (const toolName of getAllToolNames()) {
             if (isConfigurableTool(toolName)) {
                 toolNames.add(toolName);
-            }
-        }
-
-        if (projectContext.mcpManager) {
-            try {
-                const mcpTools = projectContext.mcpManager.getCachedTools();
-                for (const toolName of Object.keys(mcpTools)) {
-                    if (toolName && !toolName.startsWith("mcp__tenex__")) {
-                        toolNames.add(toolName);
-                    }
-                }
-            } catch (error) {
-                logger.debug("[ProjectConfigOptionsService] Failed to enumerate MCP tools", {
-                    error: error instanceof Error ? error.message : String(error),
-                });
             }
         }
 

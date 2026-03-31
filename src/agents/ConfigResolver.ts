@@ -42,6 +42,8 @@ export interface ResolvedAgentConfig {
     tools?: string[];
     /** Skill IDs always active for this agent after default/project resolution. Local skill directory IDs are authoritative. */
     skills?: string[];
+    /** MCP server slugs this agent can access after default/project resolution. */
+    mcpAccess?: string[];
 }
 
 /**
@@ -117,6 +119,20 @@ export function resolveEffectiveSkills(
 }
 
 /**
+ * Resolve the effective MCP server access for a project given defaults and a project override.
+ *
+ * Uses direct replacement semantics (like skills):
+ * - undefined project mcpAccess => use defaults
+ * - [] project mcpAccess => explicitly disable all MCP access in this project
+ */
+export function resolveEffectiveMcpAccess(
+    defaultMcpAccess: string[] | undefined,
+    projectMcpAccess: string[] | undefined
+): string[] | undefined {
+    return projectMcpAccess ?? defaultMcpAccess;
+}
+
+/**
  * Resolve the full effective config for an agent in a specific project context.
  */
 export function resolveEffectiveConfig(
@@ -126,11 +142,13 @@ export function resolveEffectiveConfig(
     const effectiveModel = resolveEffectiveModel(defaultConfig.model, projectConfig?.model);
     const effectiveTools = resolveEffectiveTools(defaultConfig.tools, projectConfig?.tools);
     const effectiveSkills = resolveEffectiveSkills(defaultConfig.skills, projectConfig?.skills);
+    const effectiveMcpAccess = resolveEffectiveMcpAccess(defaultConfig.mcpAccess, projectConfig?.mcpAccess);
 
     return {
         model: effectiveModel,
         tools: effectiveTools,
         skills: effectiveSkills,
+        mcpAccess: effectiveMcpAccess,
     };
 }
 
@@ -222,6 +240,14 @@ export function deduplicateProjectConfig(
         const defaultSkills = defaultConfig.skills ?? [];
         if (arraysEqualUnordered(cleaned.skills, defaultSkills)) {
             cleaned.skills = undefined;
+        }
+    }
+
+    // Dedup mcpAccess: a project-scoped list is redundant if it matches defaults.
+    if (cleaned.mcpAccess !== undefined) {
+        const defaultMcpAccess = defaultConfig.mcpAccess ?? [];
+        if (arraysEqualUnordered(cleaned.mcpAccess, defaultMcpAccess)) {
+            cleaned.mcpAccess = undefined;
         }
     }
 
