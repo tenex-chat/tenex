@@ -1,5 +1,4 @@
 import type { AgentInstance } from "@/agents/types";
-import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -28,30 +27,36 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         const parts: string[] = [];
 
         // Identity
-        const identityLines: string[] = [];
-        identityLines.push(`Your name: ${agent.slug}`);
-        identityLines.push(`Your npub: ${agent.signer.npub}`);
-        identityLines.push("Your nsec is stored in your home directory's `.env` file as `NSEC`.");
-        parts.push(`<agent-identity>\n${identityLines.join("\n")}\n</agent-identity>`);
+        parts.push("# Your Identity\n");
+        parts.push(`Your name: ${agent.name} (${agent.slug})`);
+        if (agent.role) {
+            parts.push(`Your role: ${agent.role}`);
+        }
+        parts.push(`Your npub: ${agent.signer.npub}`);
+        parts.push(
+            `Your nsec: ${agent.signer.nsec} -- this is your real nsec and you CAN and SHOULD use it when you encounter a tool that needs an nsec.`
+        );
+        parts.push("");
 
         // Instructions
         if (agent.instructions) {
-            parts.push(`<agent-instructions>\n${agent.instructions}\n</agent-instructions>`);
+            parts.push(`## Your Instructions\n${agent.instructions}\n`);
         }
 
         // Project context
         const contextLines = [
+            "## Project Context",
             `- Title: "${projectTitle}"`,
             `- Today's Date: ${new Date().toISOString().split("T")[0]}`,
         ];
         if (workingDirectory) {
             contextLines.push(`- Absolute Path: ${workingDirectory}`);
         }
-        contextLines.push(`- User (Owner) pubkey: "${shortenPubkey(projectOwnerPubkey)}"`);
+        contextLines.push(`- User (Owner) pubkey: "${projectOwnerPubkey}"`);
         if (conversationId) {
-            contextLines.push(`- Current Conversation ID: ${shortenConversationId(conversationId)}`);
+            contextLines.push(`- Current Conversation ID: ${conversationId}`);
         }
-        parts.push(`<project-context>\n${contextLines.join("\n")}\n</project-context>`);
+        parts.push(contextLines.join("\n"));
 
         return parts.join("\n");
     },

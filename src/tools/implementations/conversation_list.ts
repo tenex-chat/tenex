@@ -1,11 +1,10 @@
 import type { ToolExecutionContext } from "@/tools/types";
-import { join } from "node:path";
-import {
-    ConversationCatalogService,
-    type ConversationCatalogListEntry,
-    type ConversationCatalogParticipant,
-} from "@/conversations/ConversationCatalogService";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import type { ConversationRecord } from "@/conversations/types";
+import {
+    getConversationRecordAuthorPrincipalId,
+    getConversationRecordAuthorPubkey,
+} from "@/conversations/record-author";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -41,7 +40,7 @@ const conversationListSchema = z.object({
         .optional()
         .describe(
             "Filter to conversations where this actor was active. " +
-            "Accepts an agent slug (e.g., 'claude-code') or a hex pubkey."
+            "Accepts an agent slug (e.g., 'claude-code') or a pubkey (hex or npub format)."
         ),
 });
 
@@ -69,6 +68,22 @@ interface ConversationListOutput {
     total: number;
 }
 
+/**
+ * Extract delegation conversation IDs from delegation markers
+ */
+function extractDelegationIds(conversation: ConversationStore): string[] {
+    const messages = conversation.getAllMessages();
+    const delegationIds: string[] = [];
+
+    for (const message of messages) {
+        if (message.messageType === "delegation-marker" && message.delegationMarker) {
+            delegationIds.push(message.delegationMarker.delegationConversationId);
+        }
+    }
+
+    return delegationIds;
+}
+
 function shortenPrincipalId(principalId: string): string {
     const terminalSegment = principalId.split(":").pop();
     if (terminalSegment?.trim()) {
@@ -77,22 +92,23 @@ function shortenPrincipalId(principalId: string): string {
     return principalId.substring(0, PREFIX_LENGTH);
 }
 
-function resolveParticipantName(participant: ConversationCatalogParticipant): string {
-    if (participant.linkedPubkey) {
-        return getPubkeyService().getNameSync(participant.linkedPubkey);
+function resolveParticipantName(message: ConversationRecord): string {
+    const authorPubkey = getConversationRecordAuthorPubkey(message);
+    if (authorPubkey) {
+        return getPubkeyService().getNameSync(authorPubkey);
     }
 
-    const displayName = participant.displayName?.trim();
+    const displayName = message.senderPrincipal?.displayName?.trim();
     if (displayName) {
         return displayName;
     }
 
-    const username = participant.username?.trim();
+    const username = message.senderPrincipal?.username?.trim();
     if (username) {
         return username;
     }
 
-    const principalId = participant.principalId;
+    const principalId = getConversationRecordAuthorPrincipalId(message);
     if (principalId) {
         return shortenPrincipalId(principalId);
     }
@@ -100,59 +116,83 @@ function resolveParticipantName(participant: ConversationCatalogParticipant): st
     return "Unknown";
 }
 
-function extractParticipantNames(conversation: ConversationCatalogListEntry): string[] {
-    return conversation.participants.map((participant) => resolveParticipantName(participant));
+function extractParticipantNames(conversation: ConversationStore): string[] {
+    const participants = new Map<string, string>();
+
+    for (const message of conversation.getAllMessages()) {
+        const participantKey =
+            getConversationRecordAuthorPrincipalId(message)
+            ?? getConversationRecordAuthorPubkey(message);
+        if (!participantKey || participants.has(participantKey)) {
+            continue;
+        }
+
+        participants.set(participantKey, resolveParticipantName(message));
+    }
+
+    return Array.from(participants.values());
 }
 
-function summarizeConversation(
-    conversation: ConversationCatalogListEntry,
-    projectId?: string
-): ConversationSummary {
+function summarizeConversation(conversation: ConversationStore, projectId?: string): ConversationSummary {
+    const messages = conversation.getAllMessages();
+    const firstMessage = messages[0];
+    const lastMessage = messages[messages.length - 1];
+    const metadata = conversation.metadata;
+
+    // Extract participants and delegations
     const participantNames = extractParticipantNames(conversation);
+    const delegationIds = extractDelegationIds(conversation);
 
     return {
         id: conversation.id,
         projectId,
-        title: conversation.title,
-        summary: conversation.summary,
-        messageCount: conversation.messageCount,
-        createdAt: conversation.createdAt,
-        lastActivity: conversation.lastActivity || undefined,
+        title: metadata.title ?? conversation.title,
+        summary: metadata.summary,
+        messageCount: messages.length,
+        createdAt: firstMessage?.timestamp,
+        lastActivity: lastMessage?.timestamp,
         participants: participantNames,
-        delegations: conversation.delegationIds,
+        delegations: delegationIds,
     };
 }
 
 interface LoadedConversation {
-    conversation: ConversationCatalogListEntry;
+    store: ConversationStore;
     projectId: ProjectDTag;
 }
 
 function loadConversationsForProject(
     projectId: ProjectDTag,
-    filters: {
-        fromTime?: number;
-        toTime?: number;
-        withPubkey?: string | null;
-    }
+    isCurrentProject: boolean
 ): LoadedConversation[] {
-    try {
-        const catalog = ConversationCatalogService.getInstance(
-            projectId,
-            join(ConversationStore.getBasePath(), projectId)
-        );
+    const conversations: LoadedConversation[] = [];
+    const conversationIds = isCurrentProject
+        ? ConversationStore.listConversationIdsFromDisk()
+        : ConversationStore.listConversationIdsFromDiskForProject(projectId);
 
-        return catalog.listConversations({
-            fromTime: filters.fromTime,
-            toTime: filters.toTime,
-            participantPubkey: filters.withPubkey ?? undefined,
-        }).map((conversation) => ({ conversation, projectId }));
-    } catch (err) {
-        logger.debug("Failed to load conversation catalog entries", { projectId, error: err });
-        return [];
+    for (const id of conversationIds) {
+        try {
+            let store: ConversationStore;
+            if (isCurrentProject) {
+                // Use cached version for current project
+                store = ConversationStore.getOrLoad(id);
+            } else {
+                // Load fresh for external projects
+                store = new ConversationStore(ConversationStore.getBasePath());
+                store.load(projectId, id);
+            }
+            conversations.push({ store, projectId });
+        } catch (err) {
+            logger.debug("Failed to load conversation", { id, projectId, error: err });
+        }
     }
+    return conversations;
 }
 
+/**
+ * Check if a value looks like a pubkey (hex or npub format) rather than a slug.
+ * This is used to determine if slug resolution should be attempted.
+ */
 function looksLikePubkey(value: string): boolean {
     const trimmed = value.trim();
     // 64-char hex pubkey
@@ -184,14 +224,14 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
             return parsedPubkey;
         }
         throw new Error(
-            `Failed to resolve 'with' parameter: "${withValue}". The value looks like a pubkey but could not be parsed. Please provide a valid hex pubkey.`
+            `Failed to resolve 'with' parameter: "${withValue}". The value looks like a pubkey but could not be parsed. Please provide a valid 64-character hex pubkey or npub format.`
         );
     }
 
     // It looks like a slug - check if we're in all-projects mode
     if (isAllProjects) {
         throw new Error(
-            `Agent slugs are not supported when projectId='all'. The slug "${withValue}" can only be resolved within the current project. Please provide a hex pubkey instead.`
+            `Agent slugs are not supported when projectId='all'. The slug "${withValue}" can only be resolved within the current project. Please provide a pubkey (hex or npub format) instead.`
         );
     }
 
@@ -210,6 +250,19 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
         `Failed to resolve 'with' parameter: "${withValue}". ` +
         `Could not find an agent with this slug or parse it as a pubkey.${availableSlugsMsg}`
     );
+}
+
+/**
+ * Check if a conversation has a specific pubkey as a participant
+ */
+function conversationHasParticipant(conversation: ConversationStore, pubkey: string): boolean {
+    const messages = conversation.getAllMessages();
+    for (const message of messages) {
+        if (getConversationRecordAuthorPubkey(message) === pubkey) {
+            return true;
+        }
+    }
+    return false;
 }
 
 async function executeConversationList(
@@ -257,35 +310,43 @@ async function executeConversationList(
         // Only load from all projects when explicitly requested with "ALL"
         const projectIds = ConversationStore.listProjectIdsFromDisk();
         for (const pid of projectIds) {
-            const projectConversations = loadConversationsForProject(pid, {
-                fromTime,
-                toTime,
-                withPubkey,
-            });
+            const isCurrentProject = pid === currentProjectId;
+            const projectConversations = loadConversationsForProject(pid, isCurrentProject);
             allConversations.push(...projectConversations);
         }
     } else if (effectiveProjectId) {
         // Load from specific project (current project by default)
-        allConversations = loadConversationsForProject(effectiveProjectId, {
-            fromTime,
-            toTime,
-            withPubkey,
+        const isCurrentProject = effectiveProjectId === currentProjectId;
+        allConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
+    }
+
+    // Filter by date range if specified
+    let filtered = allConversations;
+    if (fromTime !== undefined || toTime !== undefined) {
+        filtered = allConversations.filter(({ store }) => {
+            const lastActivity = store.getLastActivityTime();
+            if (fromTime !== undefined && lastActivity < fromTime) return false;
+            if (toTime !== undefined && lastActivity > toTime) return false;
+            return true;
         });
     }
 
+    // Filter by 'with' parameter if specified and resolved
+    if (withPubkey) {
+        filtered = filtered.filter(({ store }) => conversationHasParticipant(store, withPubkey));
+    }
+
     // Sort by last activity (most recent first)
-    const sorted = [...allConversations].sort((a, b) => {
-        return (b.conversation.lastActivity ?? 0) - (a.conversation.lastActivity ?? 0);
+    const sorted = [...filtered].sort((a, b) => {
+        return b.store.getLastActivityTime() - a.store.getLastActivityTime();
     });
 
     const limited = sorted.slice(0, limit);
-    const summaries = limited.map(({ conversation, projectId }) =>
-        summarizeConversation(conversation, projectId)
-    );
+    const summaries = limited.map(({ store, projectId }) => summarizeConversation(store, projectId));
 
     logger.info("✅ Conversations listed", {
         total: allConversations.length,
-        filtered: allConversations.length,
+        filtered: filtered.length,
         returned: summaries.length,
         projectId: effectiveProjectId,
         with: withParam,
@@ -295,7 +356,7 @@ async function executeConversationList(
     return {
         success: true,
         conversations: summaries,
-        total: allConversations.length,
+        total: filtered.length,
     };
 }
 
