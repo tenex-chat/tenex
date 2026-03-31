@@ -97,8 +97,8 @@ function createConversationContextManagementRuntime(options: {
         settings.tokenBudget,
         requestEstimator
     );
-    const scratchpadEnabled = options.scratchpadAvailable;
     const isAnthropicProvider = options.providerId === PROVIDER_IDS.ANTHROPIC;
+    const scratchpadEnabled = options.scratchpadAvailable && !isAnthropicProvider;
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
