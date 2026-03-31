@@ -250,4 +250,80 @@ describe("explicit request preparation order", () => {
             request.analysisRequestSeed?.preparedPromptMetrics?.estimatedInputTokensSaved
         ).toBeGreaterThan(0);
     });
+
+    test("applies anthropic shared-prefix breakpoints and native clear_tool_uses after final prompt preparation", async () => {
+        const observe = mock(() => ({
+            sharedPrefixMessageCount: 2,
+            lastSharedMessageIndex: 1,
+            hasSharedPrefix: true,
+        }));
+
+        const contextManagement: ExecutionContextManagement = {
+            optionalTools: {},
+            requestContext: {
+                conversationId: "conv-1",
+                agentId: "agent-1",
+            },
+            promptStabilityTracker: {
+                observe,
+            },
+            prepareRequest: async ({ messages }) => ({
+                messages,
+                providerOptions: {
+                    custom: {
+                        prepared: true,
+                    },
+                },
+                toolChoice: undefined,
+                reportActualUsage: async () => {},
+            }),
+        };
+
+        const request = await prepareLLMRequest({
+            messages: [
+                { role: "system", content: "Stable system prompt" },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Request text" }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: "Changing tail" }],
+                },
+            ],
+            tools: {},
+            providerId: "anthropic",
+            contextManagement,
+        });
+
+        expect(observe).toHaveBeenCalledWith([
+            { role: "system", content: "Stable system prompt" },
+            {
+                role: "user",
+                content: [{ type: "text", text: "Request text" }],
+            },
+        ]);
+        expect(request.messages[1]?.providerOptions).toEqual({
+            anthropic: {
+                cacheControl: { type: "ephemeral", ttl: "1h" },
+            },
+        });
+        expect(request.providerOptions).toEqual({
+            custom: {
+                prepared: true,
+            },
+            anthropic: {
+                contextManagement: {
+                    edits: [
+                        {
+                            type: "clear_tool_uses_20250919",
+                            trigger: { type: "input_tokens", value: 16000 },
+                            keep: { type: "tool_uses", value: 1 },
+                            clearAtLeast: { type: "input_tokens", value: 4000 },
+                        },
+                    ],
+                },
+            },
+        });
+    });
 });

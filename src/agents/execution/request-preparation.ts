@@ -15,9 +15,12 @@ import type {
     LanguageModelV3CallOptions,
     SharedV3ProviderOptions as ProviderOptions,
 } from "@ai-sdk/provider";
+import type { SharedPrefixObservation } from "ai-sdk-context-management";
 import { prepareMessagesForRequest } from "@/llm/MessageProcessor";
 import { createMessageSanitizerMiddleware } from "@/llm/middleware/message-sanitizer";
 import { createTenexSystemRemindersMiddleware } from "@/llm/middleware/system-reminders";
+import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
+import { mergeProviderOptions } from "@/llm/provider-options";
 import type { AISdkTool } from "@/tools/types";
 import { analysisTelemetryService } from "@/services/analysis/AnalysisTelemetryService";
 import type { ExecutionContextManagement } from "./context-management";
@@ -28,6 +31,12 @@ import type { LLMModelRequest } from "./types";
 const messageSanitizer = createMessageSanitizerMiddleware();
 const systemReminders = createTenexSystemRemindersMiddleware();
 const promptEstimator = createDefaultPromptTokenEstimator();
+const ANTHROPIC_CLEAR_TOOL_USES_EDIT = {
+    type: "clear_tool_uses_20250919",
+    trigger: { type: "input_tokens", value: 16000 },
+    keep: { type: "tool_uses", value: 1 },
+    clearAtLeast: { type: "input_tokens", value: 4000 },
+} as const;
 
 function buildMiddlewareModel(
     model: ContextManagementModelRef | undefined,
@@ -45,6 +54,74 @@ function buildMiddlewareModel(
             throw new Error("buildMiddlewareModel.doStream should never be called");
         },
     };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function withAnthropicClearToolUses(
+    providerOptions: ProviderOptions | undefined
+): ProviderOptions {
+    const anthropicOptions = isObject(providerOptions?.anthropic)
+        ? (providerOptions?.anthropic as Record<string, unknown>)
+        : {};
+    const contextManagement = isObject(anthropicOptions.contextManagement)
+        ? (anthropicOptions.contextManagement as Record<string, unknown>)
+        : {};
+    const existingEdits = Array.isArray(contextManagement.edits)
+        ? contextManagement.edits
+        : [];
+    const hasClearToolUses = existingEdits.some(
+        (edit) => isObject(edit) && edit.type === ANTHROPIC_CLEAR_TOOL_USES_EDIT.type
+    );
+
+    return mergeProviderOptions(providerOptions, {
+        anthropic: {
+            ...anthropicOptions,
+            contextManagement: {
+                ...contextManagement,
+                edits: hasClearToolUses
+                    ? existingEdits
+                    : [...existingEdits, ANTHROPIC_CLEAR_TOOL_USES_EDIT],
+            },
+        },
+    }) ?? {
+        anthropic: {
+            contextManagement: {
+                edits: [ANTHROPIC_CLEAR_TOOL_USES_EDIT],
+            },
+        },
+    };
+}
+
+function withAnthropicSharedPrefixBreakpoint(
+    messages: ModelMessage[],
+    observation: SharedPrefixObservation
+): ModelMessage[] {
+    if (observation.lastSharedMessageIndex === undefined) {
+        return messages;
+    }
+
+    const cloned = structuredClone(messages) as ModelMessage[];
+    const target = cloned[observation.lastSharedMessageIndex] as (ModelMessage & {
+        providerOptions?: ProviderOptions;
+    }) | undefined;
+    if (!target) {
+        return messages;
+    }
+
+    const anthropicOptions = isObject(target.providerOptions?.anthropic)
+        ? (target.providerOptions?.anthropic as Record<string, unknown>)
+        : {};
+    target.providerOptions = {
+        ...(target.providerOptions ?? {}),
+        anthropic: {
+            ...anthropicOptions,
+            cacheControl: { type: "ephemeral", ttl: "1h" },
+        },
+    };
+    return cloned;
 }
 
 async function applyPromptMiddleware(options: {
@@ -169,6 +246,27 @@ export async function prepareLLMRequest(options: {
     }));
 
     preparedMessages = prepareMessagesForRequest(preparedMessages, options.providerId);
+    let promptCachingDiagnostics = analysisRequestSeed?.promptCachingDiagnostics;
+    if (
+        options.contextManagement
+        && options.contextManagement.promptStabilityTracker
+        && options.providerId === PROVIDER_IDS.ANTHROPIC
+    ) {
+        preparedProviderOptions = withAnthropicClearToolUses(preparedProviderOptions);
+        const observation = options.contextManagement.promptStabilityTracker.observe(
+            preparedMessages as never
+        );
+        preparedMessages = withAnthropicSharedPrefixBreakpoint(
+            preparedMessages,
+            observation
+        );
+        promptCachingDiagnostics = {
+            sharedPrefixBreakpointApplied: observation.hasSharedPrefix,
+            sharedPrefixMessageCount: observation.sharedPrefixMessageCount,
+            sharedPrefixLastMessageIndex: observation.lastSharedMessageIndex,
+            anthropicClearToolUsesEnabled: true,
+        };
+    }
     const sentEstimatedInputTokens = estimatePromptTokens(preparedMessages);
 
     return {
@@ -183,6 +281,33 @@ export async function prepareLLMRequest(options: {
         analysisRequestSeed: analysisRequestSeed
             ? {
                   ...analysisRequestSeed,
+                  telemetryMetadata: {
+                      ...analysisRequestSeed.telemetryMetadata,
+                      ...(promptCachingDiagnostics?.sharedPrefixBreakpointApplied !== undefined
+                          ? {
+                                "analysis.shared_prefix_breakpoint_applied":
+                                    promptCachingDiagnostics.sharedPrefixBreakpointApplied,
+                            }
+                          : {}),
+                      ...(promptCachingDiagnostics?.sharedPrefixMessageCount !== undefined
+                          ? {
+                                "analysis.shared_prefix_message_count":
+                                    promptCachingDiagnostics.sharedPrefixMessageCount,
+                            }
+                          : {}),
+                      ...(promptCachingDiagnostics?.sharedPrefixLastMessageIndex !== undefined
+                          ? {
+                                "analysis.shared_prefix_last_message_index":
+                                    promptCachingDiagnostics.sharedPrefixLastMessageIndex,
+                            }
+                          : {}),
+                      ...(promptCachingDiagnostics?.anthropicClearToolUsesEnabled !== undefined
+                          ? {
+                                "analysis.anthropic_clear_tool_uses_enabled":
+                                    promptCachingDiagnostics.anthropicClearToolUsesEnabled,
+                            }
+                          : {}),
+                  },
                   preparedPromptMetrics: {
                       preContextEstimatedInputTokens,
                       sentEstimatedInputTokens,
@@ -191,6 +316,7 @@ export async function prepareLLMRequest(options: {
                           preContextEstimatedInputTokens - sentEstimatedInputTokens
                       ),
                   },
+                  promptCachingDiagnostics,
               }
             : undefined,
         reportContextManagementUsage,

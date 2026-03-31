@@ -2,12 +2,8 @@ import { describe, test, expect } from "bun:test";
 import { getDefaultProviderOptions, mergeProviderOptions } from "../provider-options";
 
 describe("getDefaultProviderOptions", () => {
-    test("enables Anthropic automatic prompt caching by default", () => {
-        expect(getDefaultProviderOptions("anthropic")).toEqual({
-            anthropic: {
-                cacheControl: { type: "ephemeral" },
-            },
-        });
+    test("does not add provider defaults for anthropic", () => {
+        expect(getDefaultProviderOptions("anthropic")).toBeUndefined();
     });
 
     test("returns undefined for non-Anthropic providers", () => {

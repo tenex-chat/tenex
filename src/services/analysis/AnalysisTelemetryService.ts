@@ -26,7 +26,7 @@ function createBunDatabase(dbPath: string): BunDatabase {
 
 type Primitive = string | number | boolean | null;
 
-const ANALYSIS_SCHEMA_VERSION = "2";
+const ANALYSIS_SCHEMA_VERSION = "3";
 const RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 const PENDING_RUNTIME_METRICS_TTL_MS = 15 * 60 * 1000;
 const MAX_PENDING_RUNTIME_METRICS = 2048;
@@ -433,6 +433,7 @@ export class AnalysisTelemetryService {
             "analysis.request_id": requestId,
         };
         const preparedPromptMetrics = params.requestSeed?.preparedPromptMetrics;
+        const promptCachingDiagnostics = params.requestSeed?.promptCachingDiagnostics;
         const runtimeMetrics = this.consumePendingRuntimeMetrics(requestId);
         const context = {
             projectId: params.baseContext.projectId,
@@ -469,8 +470,12 @@ export class AnalysisTelemetryService {
                     estimated_input_tokens_saved,
                     context_runtime_estimated_input_tokens_before,
                     context_runtime_estimated_input_tokens_after,
-                    context_runtime_estimated_input_tokens_saved
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    context_runtime_estimated_input_tokens_saved,
+                    shared_prefix_breakpoint_applied,
+                    shared_prefix_message_count,
+                    shared_prefix_last_message_index,
+                    anthropic_clear_tool_uses_enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(request_id) DO UPDATE SET
                     project_id = excluded.project_id,
                     conversation_id = excluded.conversation_id,
@@ -495,7 +500,11 @@ export class AnalysisTelemetryService {
                     context_runtime_estimated_input_tokens_saved = COALESCE(
                         excluded.context_runtime_estimated_input_tokens_saved,
                         llm_requests.context_runtime_estimated_input_tokens_saved
-                    )
+                    ),
+                    shared_prefix_breakpoint_applied = excluded.shared_prefix_breakpoint_applied,
+                    shared_prefix_message_count = excluded.shared_prefix_message_count,
+                    shared_prefix_last_message_index = excluded.shared_prefix_last_message_index,
+                    anthropic_clear_tool_uses_enabled = excluded.anthropic_clear_tool_uses_enabled
             `).run(
                 requestId,
                 context.projectId ?? null,
@@ -512,7 +521,19 @@ export class AnalysisTelemetryService {
                 preparedPromptMetrics?.estimatedInputTokensSaved ?? null,
                 runtimeMetrics?.estimatedInputTokensBefore ?? null,
                 runtimeMetrics?.estimatedInputTokensAfter ?? null,
-                runtimeMetrics?.estimatedInputTokensSaved ?? null
+                runtimeMetrics?.estimatedInputTokensSaved ?? null,
+                promptCachingDiagnostics?.sharedPrefixBreakpointApplied === undefined
+                    ? null
+                    : promptCachingDiagnostics.sharedPrefixBreakpointApplied
+                        ? 1
+                        : 0,
+                promptCachingDiagnostics?.sharedPrefixMessageCount ?? null,
+                promptCachingDiagnostics?.sharedPrefixLastMessageIndex ?? null,
+                promptCachingDiagnostics?.anthropicClearToolUsesEnabled === undefined
+                    ? null
+                    : promptCachingDiagnostics.anthropicClearToolUsesEnabled
+                        ? 1
+                        : 0
             );
 
             db.prepare("DELETE FROM llm_request_messages WHERE request_id = ?").run(requestId);
@@ -951,7 +972,11 @@ export class AnalysisTelemetryService {
                 estimated_input_tokens_saved INTEGER,
                 context_runtime_estimated_input_tokens_before INTEGER,
                 context_runtime_estimated_input_tokens_after INTEGER,
-                context_runtime_estimated_input_tokens_saved INTEGER
+                context_runtime_estimated_input_tokens_saved INTEGER,
+                shared_prefix_breakpoint_applied INTEGER,
+                shared_prefix_message_count INTEGER,
+                shared_prefix_last_message_index INTEGER,
+                anthropic_clear_tool_uses_enabled INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS llm_request_messages (
@@ -1118,6 +1143,10 @@ export class AnalysisTelemetryService {
                     context_runtime_estimated_input_tokens_before,
                     context_runtime_estimated_input_tokens_after,
                     context_runtime_estimated_input_tokens_saved,
+                    shared_prefix_breakpoint_applied,
+                    shared_prefix_message_count,
+                    shared_prefix_last_message_index,
+                    anthropic_clear_tool_uses_enabled,
                     pre_context_estimated_input_tokens,
                     sent_estimated_input_tokens,
                     pre_context_estimated_input_tokens AS prepared_prompt_estimated_input_tokens_before,
@@ -1236,7 +1265,12 @@ export class AnalysisTelemetryService {
 
     private migrateSchema(previousVersion: string | undefined): void {
         const addedRuntimeColumns = this.ensureRequestRuntimeColumns();
-        if (addedRuntimeColumns || previousVersion !== ANALYSIS_SCHEMA_VERSION) {
+        const addedPromptCachingColumns = this.ensureRequestPromptCachingColumns();
+        if (
+            addedRuntimeColumns
+            || addedPromptCachingColumns
+            || previousVersion !== ANALYSIS_SCHEMA_VERSION
+        ) {
             this.backfillRuntimeMetricsFromContextEvents();
         }
     }
@@ -1265,6 +1299,32 @@ export class AnalysisTelemetryService {
                 "llm_requests",
                 "context_runtime_estimated_input_tokens_saved INTEGER"
             );
+            addedColumns = true;
+        }
+
+        return addedColumns;
+    }
+
+    private ensureRequestPromptCachingColumns(): boolean {
+        let addedColumns = false;
+
+        if (!this.hasColumn("llm_requests", "shared_prefix_breakpoint_applied")) {
+            this.addColumn("llm_requests", "shared_prefix_breakpoint_applied INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "shared_prefix_message_count")) {
+            this.addColumn("llm_requests", "shared_prefix_message_count INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "shared_prefix_last_message_index")) {
+            this.addColumn("llm_requests", "shared_prefix_last_message_index INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "anthropic_clear_tool_uses_enabled")) {
+            this.addColumn("llm_requests", "anthropic_clear_tool_uses_enabled INTEGER");
             addedColumns = true;
         }
 

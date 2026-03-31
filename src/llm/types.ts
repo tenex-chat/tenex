@@ -68,10 +68,18 @@ export interface LLMPreparedPromptMetrics {
     estimatedInputTokensSaved?: number;
 }
 
+export interface LLMPromptCachingDiagnostics {
+    sharedPrefixBreakpointApplied?: boolean;
+    sharedPrefixMessageCount?: number;
+    sharedPrefixLastMessageIndex?: number;
+    anthropicClearToolUsesEnabled?: boolean;
+}
+
 export interface LLMRequestAnalysisSeed {
     requestId: string;
     telemetryMetadata: Record<string, string | number | boolean>;
     preparedPromptMetrics?: LLMPreparedPromptMetrics;
+    promptCachingDiagnostics?: LLMPromptCachingDiagnostics;
 }
 
 export interface LLMAnalysisRequestHandle {

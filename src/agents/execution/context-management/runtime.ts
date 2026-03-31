@@ -4,6 +4,7 @@ import {
     CONTEXT_MANAGEMENT_KEY,
     ContextUtilizationReminderStrategy,
     ContextWindowStatusStrategy,
+    createSharedPrefixTracker,
     type ContextManagementPreparedRequest,
     ScratchpadStrategy,
     SummarizationStrategy,
@@ -16,10 +17,12 @@ import {
     type ContextManagementRuntime,
     type ContextManagementStrategy,
     type DecayedToolContext,
+    type SharedPrefixTracker,
 } from "ai-sdk-context-management";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
@@ -44,6 +47,7 @@ import { createTelemetryCallback } from "./telemetry";
 export interface ExecutionContextManagement {
     optionalTools: Record<string, AISdkTool>;
     requestContext: ContextManagementRequestContext;
+    promptStabilityTracker?: SharedPrefixTracker;
     prepareRequest(
         options: Omit<PrepareContextManagementRequestOptions, "requestContext">
     ): Promise<ContextManagementPreparedRequest>;
@@ -78,12 +82,14 @@ function createSummarizationModel(options: {
 }
 
 function createConversationContextManagementRuntime(options: {
+    providerId: string;
     conversationStore: ConversationStore;
     conversationId: string;
     agent: AgentInstance;
     scratchpadAvailable: boolean;
 }): {
     runtime: ContextManagementRuntime;
+    promptStabilityTracker: SharedPrefixTracker;
 } {
     const settings = getContextManagementSettings();
     const requestEstimator = createDefaultPromptTokenEstimator();
@@ -92,6 +98,7 @@ function createConversationContextManagementRuntime(options: {
         requestEstimator
     );
     const scratchpadEnabled = options.scratchpadAvailable;
+    const isAnthropicProvider = options.providerId === PROVIDER_IDS.ANTHROPIC;
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
@@ -128,21 +135,23 @@ function createConversationContextManagementRuntime(options: {
         );
     }
 
-    strategies.push(
-        new ToolResultDecayStrategy({
-            estimator: managedBudgetProfile.estimator,
-            placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
-                return buildDecayPlaceholder(toolName, toolCallId);
-            },
-        })
-    );
+    if (!isAnthropicProvider) {
+        strategies.push(
+            new ToolResultDecayStrategy({
+                estimator: managedBudgetProfile.estimator,
+                placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
+                    return buildDecayPlaceholder(toolName, toolCallId);
+                },
+            })
+        );
+    }
 
     const summarizationModel = createSummarizationModel({
         conversationId: options.conversationId,
         agent: options.agent,
     });
 
-    if (summarizationModel) {
+    if (summarizationModel && !isAnthropicProvider) {
         strategies.push(
             new SummarizationStrategy({
                 model: summarizationModel,
@@ -187,7 +196,10 @@ function createConversationContextManagementRuntime(options: {
         estimator: requestEstimator,
         systemReminderContext: getSystemReminderContext(),
     });
-    return { runtime };
+    return {
+        runtime,
+        promptStabilityTracker: createSharedPrefixTracker(),
+    };
 }
 
 export function createExecutionContextManagement(options: {
@@ -200,7 +212,8 @@ export function createExecutionContextManagement(options: {
     const scratchpadAvailable =
         !options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions);
 
-    const { runtime } = createConversationContextManagementRuntime({
+    const { runtime, promptStabilityTracker } = createConversationContextManagementRuntime({
+        providerId: options.providerId,
         conversationStore: options.conversationStore,
         conversationId: options.conversationId,
         agent: options.agent,
@@ -212,6 +225,7 @@ export function createExecutionContextManagement(options: {
 
     return {
         optionalTools,
+        promptStabilityTracker,
         requestContext: {
             conversationId: options.conversationId,
             agentId: options.agent.pubkey,

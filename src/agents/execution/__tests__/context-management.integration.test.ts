@@ -261,6 +261,67 @@ describe("TENEX context management integration", () => {
         expect(transformedJson).toContain("\"toolCallId\":\"call-9\"");
     });
 
+    test("anthropic stack keeps stale tool results raw and exposes prompt-stability tracking", async () => {
+        setContextManagementConfig({
+            tokenBudget: 12000,
+            forceScratchpadThresholdPercent: 100,
+        });
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "anthropic",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        const prompt: Array<Record<string, unknown>> = [{ role: "system", content: "You are helpful." }];
+        for (let index = 1; index <= 4; index++) {
+            prompt.push({
+                role: "assistant",
+                content: [
+                    {
+                        type: "tool-call",
+                        toolCallId: `call-${index}`,
+                        toolName: "fs_read",
+                        input: { path: `file-${index}.ts` },
+                    },
+                ],
+            });
+            prompt.push({
+                role: "tool",
+                content: [
+                    {
+                        type: "tool-result",
+                        toolCallId: `call-${index}`,
+                        toolName: "fs_read",
+                        output: {
+                            type: "text",
+                            value: `result-${index} ${"x".repeat(8000)}`,
+                        },
+                    },
+                ],
+            });
+        }
+        prompt.push({
+            role: "user",
+            content: [{ type: "text", text: "Continue." }],
+        });
+
+        const prepared = await prepareManagedRequest(contextManagement, prompt, {
+            provider: "anthropic",
+            modelId: "claude-haiku-4-5",
+        });
+
+        const transformedJson = JSON.stringify(prepared?.messages);
+        expect(transformedJson).not.toContain("use fs_read(tool:");
+        expect(contextManagement?.promptStabilityTracker).toBeDefined();
+    });
+
     test("utilization warning only appears once the working budget threshold is crossed", async () => {
         setContextManagementConfig({
             tokenBudget: 200,

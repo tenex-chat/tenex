@@ -1,24 +1,12 @@
 import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
-import { PROVIDER_IDS } from "./providers/provider-ids";
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Anthropic automatic prompt caching is enabled via request-level provider options.
- * Callers can still override this default with explicit anthropic provider options.
- */
 export function getDefaultProviderOptions(provider: string): ProviderOptions | undefined {
-    if (provider !== PROVIDER_IDS.ANTHROPIC) {
-        return undefined;
-    }
-
-    return {
-        anthropic: {
-            cacheControl: { type: "ephemeral" },
-        },
-    };
+    void provider;
+    return undefined;
 }
 
 export function mergeProviderOptions(

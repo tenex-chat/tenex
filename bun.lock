@@ -25,7 +25,7 @@
         "@opentelemetry/semantic-conventions": "^1.40.0",
         "@qdrant/js-client-rest": "^1.17.0",
         "ai": "^6.0.141",
-        "ai-sdk-context-management": "^0.9.0",
+        "ai-sdk-context-management": "^0.10.0",
         "ai-sdk-fs-tools": "^0.4.0",
         "ai-sdk-message-sanitizer": "0.1.3",
         "ai-sdk-provider-codex-cli": "1.1.0",
@@ -672,7 +672,7 @@
 
     "ai": ["ai@6.0.141", "", { "dependencies": { "@ai-sdk/gateway": "3.0.83", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.21", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-+GomGQWaId3xN0wcugUW/H7xMMaFkID2PiS7K/Wugj45G3efv0BXhQ3psRZoQVoRbOpdNoUqcK/KTB+FR4h6qg=="],
 
-    "ai-sdk-context-management": ["ai-sdk-context-management@0.9.0", "", { "dependencies": { "ai-sdk-system-reminders": "^0.3.0" }, "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-WHwwQaZNLfg2h4KOubzxZdFguMNaBrP2ZjfodlPVs83Da3SJDaLsoRctN4swzWtc46OTK0C70Xfp983X2AtWug=="],
+    "ai-sdk-context-management": ["ai-sdk-context-management@0.10.0", "", { "dependencies": { "ai-sdk-system-reminders": "^0.3.0" }, "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-CK4YHjHMUPQdTtwhkxMlT6D0oM7xKwxdQ2Myoel286XEo4zCkkPZT9qmI1xVrc3HZl4fjl9SMezTNEJ53W/ecQ=="],
 
     "ai-sdk-fs-tools": ["ai-sdk-fs-tools@0.4.0", "", { "dependencies": { "ai-sdk-system-reminders": "^0.2.0" }, "peerDependencies": { "ai": "^6.0.0", "zod": "^4.0.0" } }, "sha512-wAMfMOREJ48QkEB0CwP/pk1hrDgy1p8C+3HhvTDhFsgzyTIDK76p4/fLVSnfbxKMpg3R7mpeIP7+AsuaMa7ZFA=="],
 

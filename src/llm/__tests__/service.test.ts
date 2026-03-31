@@ -297,7 +297,7 @@ describe("LLMService", () => {
     });
 
     describe("cache control", () => {
-        test("enables Anthropic automatic caching for stream requests", async () => {
+        test("does not add Anthropic cache control defaults for stream requests", async () => {
             const service = new LLMService(
                 createMockAccessor(mockRegistry),
                 "anthropic",
@@ -318,11 +318,7 @@ describe("LLMService", () => {
             await service.stream(messages, {});
 
             const callArgs = mockStreamText.mock.calls[0][0];
-            expect(callArgs.providerOptions).toEqual({
-                anthropic: {
-                    cacheControl: { type: "ephemeral" },
-                },
-            });
+            expect(callArgs.providerOptions).toBeUndefined();
         });
 
         test("preserves caller Anthropic provider options over defaults", async () => {
@@ -375,7 +371,7 @@ describe("LLMService", () => {
             expect(callArgs.providerOptions.anthropic).toBeUndefined();
         });
 
-        test("enables Anthropic automatic caching for generateText", async () => {
+        test("does not add Anthropic cache control defaults for generateText", async () => {
             const service = new LLMService(
                 createMockAccessor(mockRegistry),
                 "anthropic",
@@ -391,12 +387,10 @@ describe("LLMService", () => {
             await service.generateText([{ role: "user", content: [{ type: "text", text: "Hello" }] }]);
 
             const callArgs = mockGenerateText.mock.calls[0][0];
-            expect(callArgs.providerOptions.anthropic).toEqual({
-                cacheControl: { type: "ephemeral" },
-            });
+            expect(callArgs.providerOptions).toBeUndefined();
         });
 
-        test("enables Anthropic automatic caching for generateObject", async () => {
+        test("does not add Anthropic cache control defaults for generateObject", async () => {
             const { z } = await import("zod");
             const service = new LLMService(
                 createMockAccessor(mockRegistry),
@@ -416,9 +410,7 @@ describe("LLMService", () => {
             );
 
             const callArgs = mockGenerateObject.mock.calls[0][0];
-            expect(callArgs.providerOptions.anthropic).toEqual({
-                cacheControl: { type: "ephemeral" },
-            });
+            expect(callArgs.providerOptions).toBeUndefined();
         });
     });
 

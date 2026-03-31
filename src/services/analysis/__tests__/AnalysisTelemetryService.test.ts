@@ -333,6 +333,12 @@ describe("Analysis telemetry services", () => {
                     sentEstimatedInputTokens: 90,
                     estimatedInputTokensSaved: 30,
                 },
+                promptCachingDiagnostics: {
+                    sharedPrefixBreakpointApplied: true,
+                    sharedPrefixMessageCount: 3,
+                    sharedPrefixLastMessageIndex: 2,
+                    anthropicClearToolUsesEnabled: true,
+                },
             },
             baseContext,
         });
@@ -443,6 +449,10 @@ describe("Analysis telemetry services", () => {
                 context_runtime_estimated_input_tokens_before,
                 context_runtime_estimated_input_tokens_after,
                 context_runtime_estimated_input_tokens_saved,
+                shared_prefix_breakpoint_applied,
+                shared_prefix_message_count,
+                shared_prefix_last_message_index,
+                anthropic_clear_tool_uses_enabled,
                 input_cache_write_tokens
             FROM llm_requests
             ORDER BY started_at_ms
@@ -459,6 +469,10 @@ describe("Analysis telemetry services", () => {
                 context_runtime_estimated_input_tokens_before: 140,
                 context_runtime_estimated_input_tokens_after: 100,
                 context_runtime_estimated_input_tokens_saved: 40,
+                shared_prefix_breakpoint_applied: 1,
+                shared_prefix_message_count: 3,
+                shared_prefix_last_message_index: 2,
+                anthropic_clear_tool_uses_enabled: 1,
                 input_cache_write_tokens: 70,
             },
             {
@@ -472,6 +486,10 @@ describe("Analysis telemetry services", () => {
                 context_runtime_estimated_input_tokens_before: 220,
                 context_runtime_estimated_input_tokens_after: 150,
                 context_runtime_estimated_input_tokens_saved: 70,
+                shared_prefix_breakpoint_applied: null,
+                shared_prefix_message_count: null,
+                shared_prefix_last_message_index: null,
+                anthropic_clear_tool_uses_enabled: null,
                 input_cache_write_tokens: null,
             },
             {
@@ -485,6 +503,10 @@ describe("Analysis telemetry services", () => {
                 context_runtime_estimated_input_tokens_before: null,
                 context_runtime_estimated_input_tokens_after: null,
                 context_runtime_estimated_input_tokens_saved: null,
+                shared_prefix_breakpoint_applied: null,
+                shared_prefix_message_count: null,
+                shared_prefix_last_message_index: null,
+                anthropic_clear_tool_uses_enabled: null,
                 input_cache_write_tokens: null,
             },
         ]);
@@ -912,6 +934,10 @@ describe("Analysis telemetry services", () => {
                 "context_runtime_estimated_input_tokens_before",
                 "context_runtime_estimated_input_tokens_after",
                 "context_runtime_estimated_input_tokens_saved",
+                "shared_prefix_breakpoint_applied",
+                "shared_prefix_message_count",
+                "shared_prefix_last_message_index",
+                "anthropic_clear_tool_uses_enabled",
             ])
         );
 
@@ -952,7 +978,7 @@ describe("Analysis telemetry services", () => {
             FROM analysis_meta
             WHERE key = ?
         `).get("schema_version") as { value: string };
-        expect(schemaVersion.value).toBe("2");
+        expect(schemaVersion.value).toBe("3");
 
         db.close(false);
     });
