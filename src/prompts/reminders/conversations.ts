@@ -4,6 +4,7 @@ import type { DelegationChainEntry } from "@/conversations/types";
 import { formatRelativeTimeShort } from "@/lib/time";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { getIdentityService } from "@/services/identity";
+import { shortenEventId, tryCreateFullEventId } from "@/types/event-ids";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -45,11 +46,9 @@ const MAX_SUMMARY_LENGTH = 200;
 const ELLIPSIS = "...";
 const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
-function truncateConversationIdForDisplay(conversationId: string, maxLength = 12): string {
-    if (conversationId.length <= maxLength) {
-        return conversationId;
-    }
-    return `${conversationId.substring(0, maxLength)}${ELLIPSIS}`;
+function shortenConversationId(conversationId: string): string {
+    const fullId = tryCreateFullEventId(conversationId);
+    return fullId ? shortenEventId(fullId) : conversationId;
 }
 
 /**
@@ -208,11 +207,11 @@ function sortNodeChildren(node: ConversationTreeNode): ConversationTreeNode {
  * Render a single conversation line in compact format.
  */
 function renderConversationLine(entry: ActiveConversationEntry): string {
-    const title = entry.title || `Conversation ${truncateConversationIdForDisplay(entry.conversationId)}`;
+    const title = entry.title || `Conversation ${shortenConversationId(entry.conversationId)}`;
     const duration = formatDuration(entry.startedAt);
     const lastMsg = formatRelativeTimeShort(Math.floor(entry.lastActivityAt / 1000));
     const staleMarker = isStale(entry.lastActivityAt) ? " [stale]" : "";
-    return `**${title}** (${entry.agentName}) - ${duration}, last msg ${lastMsg}${staleMarker} [id: ${entry.conversationId}]`;
+    return `**${title}** (${entry.agentName}) - ${duration}, last msg ${lastMsg}${staleMarker} [id: ${shortenConversationId(entry.conversationId)}]`;
 }
 
 /**
