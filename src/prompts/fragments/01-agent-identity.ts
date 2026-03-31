@@ -27,7 +27,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         const parts: string[] = [];
 
         // Identity
-        parts.push("# Your Identity\n");
+        parts.push("<agent-identity>");
         parts.push(`Your name: ${agent.name} (${agent.slug})`);
         if (agent.role) {
             parts.push(`Your role: ${agent.role}`);
@@ -36,16 +36,17 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         parts.push(
             `Your nsec: ${agent.signer.nsec} -- this is your real nsec and you CAN and SHOULD use it when you encounter a tool that needs an nsec.`
         );
+        parts.push("</agent-identity>");
         parts.push("");
 
         // Instructions
         if (agent.instructions) {
-            parts.push(`## Your Instructions\n${agent.instructions}\n`);
+            parts.push(`<agent-instructions>\n${agent.instructions}\n</agent-instructions>`);
         }
 
         // Project context
+        parts.push("<project-context>");
         const contextLines = [
-            "## Project Context",
             `- Title: "${projectTitle}"`,
             `- Today's Date: ${new Date().toISOString().split("T")[0]}`,
         ];
@@ -57,6 +58,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
             contextLines.push(`- Current Conversation ID: ${conversationId}`);
         }
         parts.push(contextLines.join("\n"));
+        parts.push("</project-context>");
 
         return parts.join("\n");
     },
