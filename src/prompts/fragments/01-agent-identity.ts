@@ -1,4 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -47,9 +48,9 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         if (workingDirectory) {
             contextLines.push(`- Absolute Path: ${workingDirectory}`);
         }
-        contextLines.push(`- User (Owner) pubkey: "${projectOwnerPubkey}"`);
+        contextLines.push(`- User (Owner) pubkey: "${shortenPubkey(projectOwnerPubkey)}"`);
         if (conversationId) {
-            contextLines.push(`- Current Conversation ID: ${conversationId}`);
+            contextLines.push(`- Current Conversation ID: ${shortenConversationId(conversationId)}`);
         }
         parts.push(contextLines.join("\n"));
 
