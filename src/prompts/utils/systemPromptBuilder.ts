@@ -1,4 +1,3 @@
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
@@ -7,12 +6,8 @@ import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { isOnlyToolMode, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
 import type { SkillData } from "@/services/skill";
-import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
-import { getIdentityBindingStore } from "@/services/identity";
 import { getProjectContext } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling";
-import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
-import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -24,136 +19,10 @@ import { trace } from "@opentelemetry/api";
 import "@/prompts/fragments"; // This auto-registers all fragments
 import { fetchAgentMcpResources } from "@/prompts/fragments/26-mcp-resources";
 
-const ROOT_AGENTS_MD_CACHE_TTL_MS = 30_000;
-
-interface RootAgentsMdCacheEntry {
-    expiresAt: number;
-    hasRootAgentsMd: boolean;
-    rootAgentsMdContent?: string;
-}
-
-const rootAgentsMdCache = new Map<string, RootAgentsMdCacheEntry>();
-
-async function getCachedRootAgentsMd(
-    projectBasePath: string
-): Promise<{ hasRootAgentsMd: boolean; rootAgentsMdContent?: string }> {
-    const cached = rootAgentsMdCache.get(projectBasePath);
-    if (cached && cached.expiresAt > Date.now()) {
-        return {
-            hasRootAgentsMd: cached.hasRootAgentsMd,
-            rootAgentsMdContent: cached.rootAgentsMdContent,
-        };
-    }
-
-    const agentsMdPath = path.join(projectBasePath, "AGENTS.md");
-
-    try {
-        const rootAgentsMdContent = await fs.readFile(agentsMdPath, "utf-8");
-        const entry: RootAgentsMdCacheEntry = {
-            expiresAt: Date.now() + ROOT_AGENTS_MD_CACHE_TTL_MS,
-            hasRootAgentsMd: true,
-            rootAgentsMdContent,
-        };
-        rootAgentsMdCache.set(projectBasePath, entry);
-        return {
-            hasRootAgentsMd: true,
-            rootAgentsMdContent,
-        };
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            const entry: RootAgentsMdCacheEntry = {
-                expiresAt: Date.now() + ROOT_AGENTS_MD_CACHE_TTL_MS,
-                hasRootAgentsMd: false,
-            };
-            rootAgentsMdCache.set(projectBasePath, entry);
-            return {
-                hasRootAgentsMd: false,
-                rootAgentsMdContent: undefined,
-            };
-        }
-        throw error;
-    }
-}
-
 /**
  * List of scheduling-related tools that trigger the scheduled tasks context
  */
 const SCHEDULING_TOOLS = ["schedule_task"] as const;
-
-function formatHandle(username: string | undefined): string {
-    return username ? ` (@${username})` : "";
-}
-
-function formatIdentityLabel(
-    displayName: string | undefined,
-    username: string | undefined,
-    fallback: string
-): string {
-    const base = displayName ?? username ?? fallback;
-    if (!username || base === username) {
-        return base;
-    }
-    return `${base}${formatHandle(username)}`;
-}
-
-function describeTelegramChannelBinding(
-    projectId: string,
-    agentPubkey: string,
-    channelId: string
-): string | undefined {
-    const parsed = parseTelegramChannelId(channelId);
-    if (!parsed) {
-        return undefined;
-    }
-
-    if (!parsed.chatId.startsWith("-")) {
-        const identity = getIdentityBindingStore().getBinding(`telegram:user:${parsed.chatId}`);
-        return `Telegram DM with ${formatIdentityLabel(
-            identity?.displayName,
-            identity?.username,
-            parsed.chatId
-        )}`;
-    }
-
-    const chatContext = getTelegramChatContextStore().getContext(projectId, agentPubkey, channelId);
-    if (!chatContext?.chatTitle && !chatContext?.chatUsername) {
-        return parsed.messageThreadId ? "Telegram topic" : "Telegram chat";
-    }
-
-    const title = chatContext.chatTitle
-        ? `"${chatContext.chatTitle}"`
-        : chatContext.chatUsername
-          ? `@${chatContext.chatUsername}`
-          : undefined;
-    if (!title) {
-        return parsed.messageThreadId ? "Telegram topic" : "Telegram chat";
-    }
-
-    if (parsed.messageThreadId) {
-        const topicLabel = chatContext.topicTitle
-            ? `Telegram topic "${chatContext.topicTitle}" in ${title}`
-            : `Telegram topic in ${title}`;
-        return topicLabel;
-    }
-
-    return `Telegram chat ${title}`;
-}
-
-function buildChannelBindingDisplayEntries(agent: AgentInstance, projectId: string): Array<{
-    channelId: string;
-    description?: string;
-}> {
-    if (!agent.pubkey || !agent.telegram?.botToken) {
-        return [];
-    }
-
-    return getTransportBindingStore()
-        .listBindingsForAgentProject(agent.pubkey, projectId, "telegram")
-        .map((binding) => ({
-            channelId: binding.channelId,
-            description: describeTelegramChannelBinding(projectId, agent.pubkey, binding.channelId),
-        }));
-}
 
 export interface BuildSystemPromptOptions {
     // Required data
@@ -185,8 +54,6 @@ export interface BuildSystemPromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
-    isProjectManager?: boolean; // Indicates if this agent is the PM
-    projectManagerPubkey?: string; // Pubkey of the project manager
     mcpManager?: MCPManager; // MCP manager for this project
     nudgeContent?: string; // Concatenated content from kind:4201 nudge events (legacy)
     /** Individual nudge data for rendering with titles */
@@ -293,27 +160,18 @@ async function addCoreAgentFragments(
 function addAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    availableAgents: AgentInstance[],
     triggeringEnvelope?: BuildSystemPromptOptions["triggeringEnvelope"],
-    projectManagerPubkey?: string,
     projectDTag?: string,
     projectPath?: string
 ): void {
-    // Add available nudges and skills for delegation (priority 13, before available-agents)
+    // Add available nudges and skills for delegation (priority 13)
     builder.add("available-nudges-and-skills", {
         agentPubkey: agent.pubkey,
         projectPath,
         projectDTag,
     });
 
-    // Add available agents for delegations
-    builder.add("available-agents", {
-        agents: availableAgents,
-        currentAgent: agent,
-        projectManagerPubkey,
-    });
-
-    // Add delegation best practices guidance (priority 16, after available-agents)
+    // Add delegation best practices guidance (priority 16)
     builder.add("stay-in-your-lane", {});
 
     // Add todo-before-delegation requirement (priority 17, after stay-in-your-lane)
@@ -409,21 +267,16 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     const systemPromptBuilder = new PromptBuilder();
     let t0: number;
 
-    // Add agent identity - use workingDirectory for "Absolute Path" (where the agent operates)
+    // Add agent identity
     // NOTE: Uses agentForFragments which has Effective Agent Instructions (lessons merged in)
     systemPromptBuilder.add("agent-identity", {
         agent: agentForFragments,
-        projectTitle: project.tagValue("title") || "Unknown Project",
-        projectOwnerPubkey: project.pubkey,
-        workingDirectory,
-        conversationId: conversation.getId(),
     });
 
     // Add agent home directory context
     systemPromptBuilder.add("agent-home-directory", {
         agent: agentForFragments,
         projectDTag: dTag,
-        projectDocsPath: projectBasePath ? path.join(projectBasePath, "tenex", "docs") : undefined,
     });
 
     // Explain <system-reminder> tags before agents encounter them
@@ -443,8 +296,18 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         triggeringEnvelope,
     });
 
-    systemPromptBuilder.add("channel-bindings", {
-        bindings: dTag ? buildChannelBindingDisplayEntries(agentForFragments, dTag) : [],
+    // Add consolidated project context (workspace, team, channels, agents.md, other-projects)
+    systemPromptBuilder.add("project-context", {
+        agent: agentForFragments,
+        projectTitle: project.tagValue("title") || "Unknown Project",
+        projectId: dTag,
+        projectOwnerPubkey: project.pubkey,
+        conversationId: conversation.getId(),
+        projectBasePath,
+        workingDirectory,
+        currentBranch,
+        projectDocsPath: projectBasePath ? path.join(projectBasePath, "tenex", "docs") : undefined,
+        availableAgents,
     });
 
     // Add delegation chain if present (shows agent their position in multi-agent workflow)
@@ -480,45 +343,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // NOTE: agent-todos is NOT included here - it's injected as a late system message
     // in AgentExecutor.executeStreaming() to ensure it appears at the end of messages
 
-    // Add worktree context if we have the necessary information
-    if (workingDirectory && currentBranch && projectBasePath) {
-        systemPromptBuilder.add("worktree-context", {
-            context: {
-                workingDirectory,
-                currentBranch,
-                projectBasePath,
-                agent: agentForFragments,
-            },
-        });
-    }
-
-    // Add AGENTS.md guidance - always included to inform agents about the AGENTS.md system
-    // When no AGENTS.md exists, the fragment explicitly states so
-    if (projectBasePath) {
-        try {
-            t0 = performance.now();
-            const { hasRootAgentsMd, rootAgentsMdContent } = await getCachedRootAgentsMd(projectBasePath);
-            parentSpan?.addEvent("agents_md_read", { "duration_ms": Math.round(performance.now() - t0), "has_root_agents_md": hasRootAgentsMd });
-            systemPromptBuilder.add("agents-md-guidance", {
-                hasRootAgentsMd,
-                rootAgentsMdContent,
-            });
-        } catch (error) {
-            // AGENTS lookup failed - add fragment with no AGENTS.md state
-            logger.debug("Could not check for root AGENTS.md:", error);
-            systemPromptBuilder.add("agents-md-guidance", {
-                hasRootAgentsMd: false,
-                rootAgentsMdContent: undefined,
-            });
-        }
-    } else {
-        // No project base path - still add fragment to explain AGENTS.md system
-        systemPromptBuilder.add("agents-md-guidance", {
-            hasRootAgentsMd: false,
-            rootAgentsMdContent: undefined,
-        });
-    }
-
     // Add tool description guidance (universal — all agents benefit)
     systemPromptBuilder.add("tool-description-guidance", {});
 
@@ -538,9 +362,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     addAgentFragments(
         systemPromptBuilder,
         agentForFragments,
-        availableAgents,
         triggeringEnvelope,
-        options.projectManagerPubkey,
         projectDTag,
         options.projectBasePath
     );

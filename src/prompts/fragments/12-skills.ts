@@ -74,7 +74,7 @@ export function renderSkill(skill: SkillData): string {
  */
 export const skillsFragment: PromptFragment<SkillsArgs> = {
     id: "skills",
-    priority: 12, // After nudges (11), before available-agents (15)
+    priority: 12, // After nudges (11)
     template: ({ skillContent, skills }) => {
         // New rendering path: individual skills with their data
         if (skills && skills.length > 0) {

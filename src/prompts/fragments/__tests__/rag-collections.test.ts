@@ -82,7 +82,7 @@ describe("rag-collections fragment", () => {
             expect(ragCollectionsFragment.id).toBe("rag-collections");
         });
 
-        it("should have priority 29 (after agent-directed-monitoring, before worktree-context)", () => {
+        it("should have priority 29 (after agent-directed-monitoring)", () => {
             expect(ragCollectionsFragment.priority).toBe(29);
         });
 

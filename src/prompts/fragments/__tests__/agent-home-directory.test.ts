@@ -252,19 +252,16 @@ describe("agent-home-directory fragment", () => {
             expect(result).not.toContain("### Injected Project Files");
         });
 
-        it("should document project-specific memory and git-tracked docs when project context is present", async () => {
+        it("should document project-specific memory when project context is present", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => []);
 
             const result = await agentHomeDirectoryFragment.template({
                 agent: mockAgent,
                 projectDTag: "acme-app",
-                projectDocsPath: "/repo/acme-app/tenex/docs",
             } as never);
 
             expect(result).toContain("/home/abcd1234/projects/acme-app/docs");
-            expect(result).toContain("/repo/acme-app/tenex/docs");
-            expect(result).toContain("root `AGENTS.md`");
         });
 
         it("should inject project-scoped +files separately from home files", async () => {

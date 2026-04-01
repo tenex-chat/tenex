@@ -7,23 +7,12 @@ import type { PromptFragment } from "../core/types";
  */
 interface AgentIdentityArgs {
     agent: AgentInstance;
-    projectTitle: string;
-    projectOwnerPubkey: string;
-    /**
-     * Actual worktree path where code execution happens.
-     * This is displayed as "Absolute Path" in the system prompt.
-     */
-    workingDirectory?: string;
-    /**
-     * Current conversation ID as stored in the conversation system.
-     */
-    conversationId?: string;
 }
 
 export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
     id: "agent-identity",
     priority: 1,
-    template: ({ agent, projectTitle, projectOwnerPubkey, workingDirectory, conversationId }) => {
+    template: ({ agent }) => {
         const parts: string[] = [];
 
         // Identity
@@ -43,22 +32,6 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         if (agent.instructions) {
             parts.push(`<agent-instructions>\n${agent.instructions}\n</agent-instructions>`);
         }
-
-        // Project context
-        parts.push("<project-context>");
-        const contextLines = [
-            `- Title: "${projectTitle}"`,
-            `- Today's Date: ${new Date().toISOString().split("T")[0]}`,
-        ];
-        if (workingDirectory) {
-            contextLines.push(`- Absolute Path: ${workingDirectory}`);
-        }
-        contextLines.push(`- User (Owner) pubkey: "${projectOwnerPubkey}"`);
-        if (conversationId) {
-            contextLines.push(`- Current Conversation ID: ${conversationId}`);
-        }
-        parts.push(contextLines.join("\n"));
-        parts.push("</project-context>");
 
         return parts.join("\n");
     },

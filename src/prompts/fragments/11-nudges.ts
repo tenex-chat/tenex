@@ -93,7 +93,7 @@ ${nudge.content}
  */
 export const nudgesFragment: PromptFragment<NudgesArgs> = {
     id: "nudges",
-    priority: 11, // Before available-agents (15)
+    priority: 11,
     template: ({ nudgeContent, nudges, nudgeToolPermissions }) => {
         // New rendering path: individual nudges with their data
         if (nudges && nudges.length > 0) {

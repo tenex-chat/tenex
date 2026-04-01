@@ -9,7 +9,7 @@ import type { PromptFragment } from "../core/types";
  */
 export const stayInYourLaneFragment: PromptFragment = {
     id: "stay-in-your-lane",
-    priority: 16, // Right after available-agents (15)
+    priority: 16,
     template: () => `## Delegation Best Practices
 
 **Core Principle: Delegate WHAT needs to be done, not HOW to do it.**

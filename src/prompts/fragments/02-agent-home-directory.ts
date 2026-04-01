@@ -30,7 +30,6 @@ export function clearAgentHomePromptCache(): void {
 interface AgentHomeDirectoryArgs {
     agent: AgentInstance;
     projectDTag?: string;
-    projectDocsPath?: string;
 }
 
 /**
@@ -79,7 +78,7 @@ function buildHomeListing(homeDir: string, agentPubkey: string): HomeListing {
 export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> = {
     id: "agent-home-directory",
     priority: 2, // Right after agent-identity (priority 1)
-    template: async ({ agent, projectDTag, projectDocsPath }) => {
+    template: async ({ agent, projectDTag }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const listing = buildHomeListing(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
@@ -130,14 +129,6 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
                 "Those `+` files are injected separately from your home-root memory files."
             );
         }
-        if (projectDocsPath) {
-            parts.push("");
-            parts.push(
-                `**Project docs:** Write shared, git-tracked project docs in \`${projectDocsPath}\`. ` +
-                "Use the root `AGENTS.md` for team-wide conventions that every agent should follow."
-            );
-        }
-
         // Inject +prefixed file contents
         if (injectedFiles.length > 0) {
             parts.push("");

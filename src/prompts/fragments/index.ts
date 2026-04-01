@@ -13,9 +13,8 @@ import { agentHomeDirectoryFragment } from "./02-agent-home-directory";
 import { systemRemindersExplanationFragment } from "./03-system-reminders-explanation";
 import { scratchpadPracticeFragment } from "./04-scratchpad-practice";
 import { delegationChainFragment } from "./05-delegation-chain";
-import { metaProjectContextFragment } from "./07-meta-project-context";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
-import { availableAgentsFragment } from "./15-available-agents";
+import { projectContextFragment } from "./08-project-context";
 import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
 import { noResponseGuidanceFragment } from "./18-no-response-guidance";
@@ -30,11 +29,8 @@ import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { mcpResourcesFragment } from "./26-mcp-resources";
 import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
 import { ragCollectionsFragment } from "./29-rag-collections";
-import { worktreeContextFragment } from "./30-worktree-context";
-import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
 import { telegramChatContextFragment } from "./33-telegram-chat-context";
 import { telegramDeliveryRulesFragment } from "./34-telegram-delivery-rules";
-import { channelBindingsFragment } from "./34-channel-bindings";
 
 /**
  * Register all fragments explicitly
@@ -51,10 +47,9 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(scratchpadPracticeFragment);
     fragmentRegistry.register(delegationChainFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
-    fragmentRegistry.register(metaProjectContextFragment);
+    fragmentRegistry.register(projectContextFragment);
 
     // Agent collaboration
-    fragmentRegistry.register(availableAgentsFragment);
     fragmentRegistry.register(stayInYourLaneFragment);
     fragmentRegistry.register(TodoUsageFragment);
     fragmentRegistry.register(noResponseGuidanceFragment);
@@ -74,11 +69,8 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(mcpResourcesFragment);
     fragmentRegistry.register(agentDirectedMonitoringFragment);
     fragmentRegistry.register(ragCollectionsFragment);
-    fragmentRegistry.register(worktreeContextFragment);
-    fragmentRegistry.register(agentsMdGuidanceFragment);
     fragmentRegistry.register(telegramChatContextFragment);
     fragmentRegistry.register(telegramDeliveryRulesFragment);
-    fragmentRegistry.register(channelBindingsFragment);
 }
 
 // Auto-register all fragments on import

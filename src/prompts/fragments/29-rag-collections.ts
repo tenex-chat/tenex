@@ -25,7 +25,7 @@ interface RAGCollectionsArgs {
 
 export const ragCollectionsFragment: PromptFragment<RAGCollectionsArgs> = {
     id: "rag-collections",
-    priority: 29, // After agent-directed-monitoring (28), before worktree-context (30)
+    priority: 29, // After agent-directed-monitoring (28)
     template: ({ collections }) => {
         // Filter to only collections where the agent has contributions
         const agentCollections = collections.filter((c) => c.agentDocCount > 0);
