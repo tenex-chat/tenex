@@ -1,5 +1,5 @@
 import { ConversationStore } from "../ConversationStore";
-import type { ConversationMetadata, MessagePrincipalContext } from "../types";
+import type { MessagePrincipalContext } from "../types";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import {
     getMentionedPubkeys,
@@ -12,67 +12,8 @@ import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { buildDelegationChain } from "@/utils/delegation-chain";
-import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import chalk from "chalk";
-import { formatAnyError } from "@/lib/error-formatter";
-
-/**
- * Fetch a kind 30023 (NDKArticle) from an a-tag reference.
- * @param aTagValue - The a-tag value in format "30023:pubkey:d-tag"
- * @returns The article metadata or null if not found
- */
-async function fetchReferencedArticle(
-    aTagValue: string
-): Promise<ConversationMetadata["referencedArticle"] | null> {
-    try {
-        const parts = aTagValue.split(":");
-        if (parts.length < 3 || parts[0] !== "30023") {
-            return null;
-        }
-
-        const [, pubkey, ...dTagParts] = parts;
-        const dTag = dTagParts.join(":");
-
-        const ndk = getNDK();
-        const filter = {
-            kinds: [30023],
-            authors: [pubkey],
-            "#d": [dTag],
-        };
-
-        const events = await ndk.fetchEvents(filter);
-        if (events.size === 0) {
-            logger.debug(chalk.yellow(`Referenced article not found: ${aTagValue}`));
-            return null;
-        }
-
-        const event = Array.from(events)[0];
-        const article = NDKArticle.from(event);
-
-        logger.info(chalk.cyan(`📄 Fetched referenced article: "${article.title || dTag}"`));
-
-        return {
-            title: article.title || dTag,
-            content: article.content || "",
-            dTag,
-        };
-    } catch (error) {
-        logger.debug(chalk.yellow(`Failed to fetch referenced article: ${formatAnyError(error)}`));
-        return null;
-    }
-}
-
-async function extractReferencedArticle(
-    envelope: InboundEnvelope
-): Promise<ConversationMetadata["referencedArticle"] | null> {
-    const articleATag = envelope.metadata.articleReferences?.find((tag) => tag.startsWith("30023:"));
-    if (!articleATag) {
-        return null;
-    }
-
-    return fetchReferencedArticle(articleATag);
-}
 
 export interface ConversationResolutionResult {
     conversation: ConversationStore | undefined;
@@ -145,18 +86,6 @@ export class ConversationResolver {
                 reason: "failed_to_create_conversation",
             });
             return { conversation: undefined };
-        }
-
-        const referencedArticle = await extractReferencedArticle(envelope);
-        if (referencedArticle) {
-            conversation.updateMetadata({ referencedArticle });
-            await conversation.save();
-
-            activeSpan?.addEvent("referenced_article_loaded", {
-                "article.title": referencedArticle.title,
-                "article.dTag": referencedArticle.dTag,
-                "article.content_length": referencedArticle.content.length,
-            });
         }
 
         const targetAgentPubkey = mentionedPubkeys.find((pubkey) =>
@@ -260,18 +189,6 @@ export class ConversationResolver {
         const conversation = await ConversationStore.create(rootEnvelope);
         if (!conversation) {
             return undefined;
-        }
-
-        const referencedArticle = await extractReferencedArticle(rootEnvelope);
-        if (referencedArticle) {
-            conversation.updateMetadata({ referencedArticle });
-            await conversation.save();
-
-            activeSpan?.addEvent("referenced_article_loaded", {
-                "article.title": referencedArticle.title,
-                "article.dTag": referencedArticle.dTag,
-                "article.content_length": referencedArticle.content.length,
-            });
         }
 
         for (const replyEnvelope of replyEnvelopes) {

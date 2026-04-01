@@ -118,11 +118,6 @@ export interface ConversationMetadata {
     lastUserMessage?: string;
     statusLabel?: string;
     statusCurrentActivity?: string;
-    referencedArticle?: {
-        title: string;
-        content: string;
-        dTag: string;
-    };
     /**
      * The delegation chain showing who initiated this conversation.
      * First entry is the original initiator (typically User), last entry is the current agent.
