@@ -50,6 +50,7 @@ interface DeltaState {
 
 const deltaStateStore = new Map<string, DeltaState>();
 
+
 interface ProviderTelemetry {
     type: string;
     mode: "full" | "delta" | "skip";
@@ -381,34 +382,39 @@ export async function collectAndInjectSystemReminders(
         });
     }
 
-    if (reminders.length === 0) return messages;
+    const combinedXml = reminders.length > 0 ? combineSystemReminders(reminders) : "";
 
-    const combinedXml = combineSystemReminders(reminders);
-    if (combinedXml === "") return messages;
+    if (combinedXml !== "") {
+        span?.addEvent("system-reminders.applied", {
+            "reminders.count": reminders.length,
+            "reminders.types": reminders.map((r) => r.type).join(","),
+            "reminders.content": combinedXml,
+        });
+    }
 
-    span?.addEvent("system-reminders.applied", {
-        "reminders.count": reminders.length,
-        "reminders.types": reminders.map((r) => r.type).join(","),
-        "reminders.content": combinedXml,
-    });
+    if (combinedXml === "") {
+        return messages;
+    }
 
+    // Inject into the last user message via shallow copy (never mutate the source).
+    // This preserves the prefix cache for all messages before the last user message
+    // and keeps context-management and telemetry working correctly (the reminder
+    // stays part of a real user turn, not a synthetic standalone message).
     const result = [...messages];
 
-    // Inject into the last user message, matching the ai-sdk-system-reminders convention
     for (let i = result.length - 1; i >= 0; i--) {
-        const msg = result[i];
-        if (msg.role !== "user") continue;
+        if (result[i].role !== "user") continue;
 
-        const userMsg = msg as UserModelMessage;
-        if (typeof userMsg.content === "string") {
-            result[i] = { ...userMsg, content: `${userMsg.content}\n\n${combinedXml}` };
+        const msg = result[i] as UserModelMessage;
+        if (typeof msg.content === "string") {
+            result[i] = { ...msg, content: `${msg.content}\n\n${combinedXml}` };
         } else {
-            const parts = userMsg.content.map((p) => ({ ...p }));
+            const parts = msg.content.map((p) => ({ ...p }));
             let injected = false;
             for (let j = parts.length - 1; j >= 0; j--) {
-                const part = parts[j];
-                if (part.type === "text") {
-                    parts[j] = { ...part, text: `${part.text}\n\n${combinedXml}` };
+                if (parts[j].type === "text") {
+                    const textPart = parts[j] as { type: "text"; text: string };
+                    parts[j] = { ...textPart, text: `${textPart.text}\n\n${combinedXml}` };
                     injected = true;
                     break;
                 }
@@ -416,7 +422,7 @@ export async function collectAndInjectSystemReminders(
             if (!injected) {
                 parts.push({ type: "text" as const, text: combinedXml });
             }
-            result[i] = { ...userMsg, content: parts };
+            result[i] = { ...msg, content: parts };
         }
         return result;
     }

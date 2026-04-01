@@ -48,6 +48,7 @@ export interface ExecutionContextManagement {
     optionalTools: Record<string, AISdkTool>;
     requestContext: ContextManagementRequestContext;
     promptStabilityTracker?: SharedPrefixTracker;
+    scratchpadAvailable: boolean;
     prepareRequest(
         options: Omit<PrepareContextManagementRequestOptions, "requestContext">
     ): Promise<ContextManagementPreparedRequest>;
@@ -224,6 +225,7 @@ export function createExecutionContextManagement(options: {
             optionalTools: {},
             promptStabilityTracker: createSharedPrefixTracker(),
             requestContext,
+            scratchpadAvailable: true,
             async prepareRequest(requestOptions) {
                 return {
                     messages: normalizeMessagesForContextManagement(requestOptions.messages),
@@ -253,6 +255,7 @@ export function createExecutionContextManagement(options: {
         optionalTools,
         promptStabilityTracker,
         requestContext,
+        scratchpadAvailable,
         async prepareRequest(requestOptions) {
             return await runtime.prepareRequest({
                 ...requestOptions,

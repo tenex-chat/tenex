@@ -140,7 +140,11 @@ describe("system reminder injection integration", () => {
 
         const result = await collectAndInjectSystemReminders(compiled.messages, undefined);
 
-        // Reminders should be in the last user message
+        // Source compiled messages are untouched
+        const sourceUserMsg = compiled.messages.find((m) => m.role === "user");
+        expect(typeof sourceUserMsg?.content === "string" ? sourceUserMsg.content : "").toBe("Hello, can you help me?");
+
+        // Reminders injected into the last user message (new object)
         const lastUserMsg = result.findLast((m) => m.role === "user");
         expect(lastUserMsg).toBeDefined();
         const userContent = typeof lastUserMsg?.content === "string"
@@ -156,7 +160,7 @@ describe("system reminder injection integration", () => {
         expect(String(systemMsg?.content)).not.toContain("<system-reminders>");
     });
 
-    it("keeps deferred reminders across turns while injecting into last user message", async () => {
+    it("keeps deferred reminders across turns, injected into last user message", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Initial message",
@@ -196,12 +200,15 @@ describe("system reminder injection integration", () => {
         const result = await collectAndInjectSystemReminders(compiled.messages, undefined);
 
         expect(compiled.messages).toHaveLength(4);
+        // Same length — no extra message appended
+        expect(result).toHaveLength(4);
 
-        // Reminders in last user message
+        // Reminders injected into last user message
         const lastUser = result.findLast((m) => m.role === "user");
         const lastUserContent = typeof lastUser?.content === "string"
             ? lastUser.content
             : JSON.stringify(lastUser?.content);
+        expect(lastUserContent).toContain("Follow-up question");
         expect(lastUserContent).toContain("<response-routing>");
         expect(lastUserContent).toContain("<supervision-message>");
 
@@ -210,7 +217,7 @@ describe("system reminder injection integration", () => {
         expect(String(systemMsg?.content)).not.toContain("<system-reminders>");
     });
 
-    it("injects into user message even when prompt has no system message", async () => {
+    it("injects into user message with array content parts", async () => {
         const ctx = getSystemReminderContext();
         ctx.queue({
             type: "heuristic",
@@ -223,13 +230,19 @@ describe("system reminder injection integration", () => {
 
         const result = await collectAndInjectSystemReminders(messagesWithNoSystem, undefined);
 
+        // Same length — injected into existing user message
         expect(result).toHaveLength(1);
         expect(result[0]?.role).toBe("user");
-        // The reminder should be injected into the user message's text part
-        const content = result[0]?.content;
-        expect(Array.isArray(content)).toBe(true);
-        if (Array.isArray(content)) {
-            const textPart = content.find((p: { type: string }) => p.type === "text");
+        // Source not mutated
+        const sourceContent = messagesWithNoSystem[0].content;
+        expect(sourceContent[0].text).toBe("Hello");
+
+        // Result has reminder injected into the text part
+        const resultContent = result[0]?.content;
+        expect(Array.isArray(resultContent)).toBe(true);
+        if (Array.isArray(resultContent)) {
+            const textPart = resultContent.find((p: { type: string }) => p.type === "text");
+            expect(textPart?.text).toContain("Hello");
             expect(textPart?.text).toContain("<heuristic>");
         }
     });
