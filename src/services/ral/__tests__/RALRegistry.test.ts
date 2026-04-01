@@ -1899,7 +1899,7 @@ describe("RALRegistry", () => {
       // Access private state via type assertion for test purposes
       const key = `${agentPubkey}:${conversationId}`;
       // @ts-expect-error - accessing private field for testing
-      const convDelegations = registry.conversationDelegations.get(key);
+      const convDelegations = registry.delegationRegistry.conversationDelegationsMap.get(key);
       expect(convDelegations).toBeDefined();
 
       // Manually add to completed (simulating the edge case)
@@ -2110,7 +2110,7 @@ describe("RALRegistry", () => {
       // where the map might not be populated
       // Access private member for testing purposes
       // @ts-expect-error Accessing private member for testing
-      registry.followupToCanonical.delete(followupId);
+      registry.delegationRegistry.followupToCanonicalMap.delete(followupId);
 
       // Now canonicalize the full followup ID - should still work via fallback scan
       const canonicalized = registry.canonicalizeDelegationId(followupId);
@@ -2139,7 +2139,7 @@ describe("RALRegistry", () => {
 
       // Clear the followupToCanonical map to force fallback path
       // @ts-expect-error Accessing private member for testing
-      registry.followupToCanonical.delete(followupId);
+      registry.delegationRegistry.followupToCanonicalMap.delete(followupId);
 
       // Canonicalize with uppercase - should still work
       const uppercaseFollowupId = followupId.toUpperCase();
@@ -2426,6 +2426,57 @@ describe("RALRegistry", () => {
         expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(false);
         // agentPubkey2:conversationId2 has RAL state, so killed marker remains
         expect(registry.isAgentConversationKilled(agentPubkey2, conversationId2)).toBe(true);
+      });
+    });
+
+    describe("REGRESSION: cleanup interval fires repeatedly via startCleanupInterval", () => {
+      it("should schedule a recurring setInterval (not a one-shot setTimeout) on construction", () => {
+        // Reset singleton so constructor re-runs startCleanupInterval with a mocked setInterval
+        // @ts-expect-error - accessing private static for testing
+        RALRegistry.instance = undefined;
+
+        let intervalCallCount = 0;
+        let capturedCallback: (() => void) | undefined;
+        let capturedIntervalMs: number | undefined;
+        const originalSetInterval = globalThis.setInterval;
+        const originalSetTimeout = globalThis.setTimeout;
+
+        let setTimeoutCallCount = 0;
+
+        // @ts-expect-error - replacing global for test
+        globalThis.setInterval = (fn: () => void, ms: number) => {
+          intervalCallCount++;
+          capturedCallback = fn;
+          capturedIntervalMs = ms;
+          return { unref: () => {} } as unknown as ReturnType<typeof setInterval>;
+        };
+        // @ts-expect-error - replacing global for test
+        globalThis.setTimeout = (...args: Parameters<typeof setTimeout>) => {
+          setTimeoutCallCount++;
+          return originalSetTimeout(...args);
+        };
+
+        try {
+          RALRegistry.getInstance();
+
+          // Must have called setInterval exactly once (recurring interval scheduled)
+          expect(intervalCallCount).toBe(1);
+          // Must NOT have used setTimeout (which would only fire once)
+          expect(setTimeoutCallCount).toBe(0);
+          // Interval must be configured with a positive duration
+          expect(capturedIntervalMs).toBeGreaterThan(0);
+          // The callback must be defined and invocable multiple times without throwing
+          expect(capturedCallback).toBeDefined();
+          capturedCallback!();
+          capturedCallback!();
+          capturedCallback!();
+        } finally {
+          globalThis.setInterval = originalSetInterval;
+          globalThis.setTimeout = originalSetTimeout;
+          // @ts-expect-error - accessing private static for testing
+          RALRegistry.instance = undefined;
+          registry = RALRegistry.getInstance();
+        }
       });
     });
   });

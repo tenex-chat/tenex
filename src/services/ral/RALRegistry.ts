@@ -86,43 +86,11 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     this.emit("updated", projectId, conversationId);
   }
 
-  get conversationDelegations(): Map<string, { pending: Map<string, PendingDelegation>; completed: Map<string, CompletedDelegation> }> {
-    return this.delegationRegistry.conversationDelegationsMap;
-  }
-
-  get delegationToRal(): Map<string, { key: string; ralNumber: number }> {
-    return this.delegationRegistry.delegationToRalMap;
-  }
-
-  get followupToCanonical(): Map<string, string> {
-    return this.delegationRegistry.followupToCanonicalMap;
-  }
-
-  get killedAgentConversations(): Set<string> {
-    return this.killSwitchRegistry.killedAgentConversationsSet;
-  }
-
-  get states(): Map<string, Map<number, RALRegistryEntry>> {
-    return this.stateRegistry.statesMap;
-  }
-
-  get nextRalNumber(): Map<string, number> {
-    return this.stateRegistry.nextRalNumberMap;
-  }
-
-  get ralIdToLocation(): Map<string, { key: string; ralNumber: number }> {
-    return this.stateRegistry.ralIdToLocationMap;
-  }
-
-  get abortControllers(): Map<string, AbortController> {
-    return this.stateRegistry.abortControllersMap;
-  }
-
   private startCleanupInterval(): void {
-    this.cleanupExpiredStates();
+    this.stateRegistry.startCleanupInterval();
   }
 
-  private cleanupExpiredStates(): void {
+  cleanupExpiredStates(): void {
     this.stateRegistry.cleanupExpiredStates();
   }
 
