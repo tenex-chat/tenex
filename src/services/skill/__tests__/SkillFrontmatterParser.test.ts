@@ -47,4 +47,35 @@ describe("SkillFrontmatterParser", () => {
             content: "plain content",
         });
     });
+
+    it("parses metadata nested block when metadata line has an inline comment", () => {
+        const metadata = parseSkillFrontmatter(
+            [
+                "name: \"my-skill\"",
+                "metadata: # source event",
+                "  tenex-event-id: abc123",
+            ].join("\n")
+        );
+
+        expect(metadata).toEqual({
+            name: "my-skill",
+            eventId: "abc123",
+        });
+    });
+
+    it("parses block scalar with 4-space indentation correctly", () => {
+        const metadata = parseSkillFrontmatter(
+            [
+                "name: \"my-skill\"",
+                "description: |",
+                "    line one",
+                "    line two",
+            ].join("\n")
+        );
+
+        expect(metadata).toEqual({
+            name: "my-skill",
+            description: "line one\nline two",
+        });
+    });
 });

@@ -112,6 +112,7 @@ export function readYamlValue(
 
     const collectedLines: string[] = [];
     let lineIndex = startIndex + 1;
+    let blockIndent = -1;
 
     while (lineIndex < lines.length) {
         const nextLine = lines[lineIndex];
@@ -127,7 +128,11 @@ export function readYamlValue(
             break;
         }
 
-        const contentStart = Math.min(nextLine.length, parentIndent + 2);
+        if (blockIndent === -1) {
+            blockIndent = nextIndent;
+        }
+
+        const contentStart = Math.min(nextLine.length, blockIndent);
         collectedLines.push(nextLine.slice(contentStart));
         lineIndex += 1;
     }
@@ -169,7 +174,7 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
         const key = line.slice(0, separatorIndex).trim();
         const rawValue = line.slice(separatorIndex + 1);
 
-        if (key === FRONTMATTER_METADATA_FIELD && rawValue.trim().length === 0) {
+        if (key === FRONTMATTER_METADATA_FIELD && stripInlineYamlComment(rawValue).trim().length === 0) {
             lineIndex += 1;
             while (lineIndex < lines.length) {
                 const nestedLine = lines[lineIndex];
