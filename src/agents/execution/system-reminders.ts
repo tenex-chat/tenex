@@ -23,7 +23,101 @@ export interface TenexReminderData {
 }
 
 // ---------------------------------------------------------------------------
-// Todo formatting (inlined from removed 06-agent-todos fragment)
+// Delta state management
+// ---------------------------------------------------------------------------
+
+type DeltaRenderResult = SystemReminderDescriptor | null | "full";
+
+interface DeltaProviderConfig<TSnapshot> {
+    type: string;
+    fullInterval: number;
+    snapshot: (data: TenexReminderData) => TSnapshot | Promise<TSnapshot>;
+    renderFull: (
+        snapshot: TSnapshot,
+        data: TenexReminderData
+    ) => SystemReminderDescriptor | null | Promise<SystemReminderDescriptor | null>;
+    renderDelta: (
+        prev: TSnapshot,
+        curr: TSnapshot,
+        data: TenexReminderData
+    ) => DeltaRenderResult | Promise<DeltaRenderResult>;
+}
+
+interface DeltaState {
+    snapshot: unknown;
+    turnsSinceFullState: number;
+}
+
+const deltaStateStore = new Map<string, DeltaState>();
+
+interface ProviderTelemetry {
+    type: string;
+    mode: "full" | "delta" | "skip";
+    contentLength: number;
+}
+
+const deltaTelemetry: ProviderTelemetry[] = [];
+
+function createDeltaProvider<TSnapshot>(
+    config: DeltaProviderConfig<TSnapshot>
+): (data: TenexReminderData | undefined) => Promise<SystemReminderDescriptor | null> {
+    return async (data) => {
+        if (!data) return null;
+
+        const stateKey = `${data.conversation.getId()}:${config.type}`;
+        const currentSnapshot = await config.snapshot(data);
+        const prevState = deltaStateStore.get(stateKey);
+
+        // First turn or periodic full refresh
+        if (!prevState || prevState.turnsSinceFullState >= config.fullInterval) {
+            const result = await config.renderFull(currentSnapshot, data);
+            deltaStateStore.set(stateKey, { snapshot: currentSnapshot, turnsSinceFullState: 0 });
+            deltaTelemetry.push({
+                type: config.type,
+                mode: "full",
+                contentLength: result?.content.length ?? 0,
+            });
+            return result;
+        }
+
+        const deltaResult = await config.renderDelta(
+            prevState.snapshot as TSnapshot,
+            currentSnapshot,
+            data
+        );
+
+        if (deltaResult === null) {
+            prevState.turnsSinceFullState++;
+            deltaTelemetry.push({ type: config.type, mode: "skip", contentLength: 0 });
+            return null;
+        }
+
+        if (deltaResult === "full") {
+            const result = await config.renderFull(currentSnapshot, data);
+            deltaStateStore.set(stateKey, { snapshot: currentSnapshot, turnsSinceFullState: 0 });
+            deltaTelemetry.push({
+                type: config.type,
+                mode: "full",
+                contentLength: result?.content.length ?? 0,
+            });
+            return result;
+        }
+
+        deltaStateStore.set(stateKey, {
+            snapshot: currentSnapshot,
+            turnsSinceFullState: prevState.turnsSinceFullState + 1,
+        });
+        deltaTelemetry.push({
+            type: config.type,
+            mode: "delta",
+            contentLength: deltaResult.content.length,
+        });
+        return deltaResult;
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Todo formatting
 // ---------------------------------------------------------------------------
 
 const STATUS_MARKER: Record<string, string> = {
@@ -81,83 +175,180 @@ function formatTodos(todos: TodoItem[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Providers
+// Provider factories
 // ---------------------------------------------------------------------------
 
-async function todoListProvider(
-    data: TenexReminderData | undefined
-): Promise<SystemReminderDescriptor | null> {
-    if (!data) return null;
+const DATETIME_BUCKET_MS = 5 * 60 * 1000;
 
-    const todos = data.conversation.getTodos(data.agent.pubkey);
-    const todoContent = formatTodos(todos);
-    if (!todoContent) return null;
-
-    return { type: "todo-list", content: todoContent };
-}
-
-async function responseRoutingProvider(
-    data: TenexReminderData | undefined
-): Promise<SystemReminderDescriptor | null> {
-    if (!data) return null;
-
-    const identityService = getIdentityService();
-    const respondingToName = await identityService.getDisplayName({
-        principalId: data.respondingToPrincipal.id,
-        linkedPubkey: data.respondingToPrincipal.linkedPubkey,
-        displayName: data.respondingToPrincipal.displayName,
-        username: data.respondingToPrincipal.username,
-        kind: data.respondingToPrincipal.kind,
+function createDatetimeProvider() {
+    return createDeltaProvider<string>({
+        type: "datetime",
+        fullInterval: 15,
+        snapshot: () => {
+            const now = new Date(
+                Math.floor(Date.now() / DATETIME_BUCKET_MS) * DATETIME_BUCKET_MS
+            );
+            const hours = now.getUTCHours();
+            const minutes = now.getUTCMinutes().toString().padStart(2, "0");
+            const period = hours >= 12 ? "pm" : "am";
+            const hour12 = hours % 12 || 12;
+            const date = now.toISOString().slice(0, 10);
+            return `now: ${date} ${hour12}.${minutes}${period} UTC`;
+        },
+        renderFull: (snapshot) => ({ type: "datetime", content: snapshot }),
+        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
     });
-
-    const isSelfDelegation = data.respondingToPrincipal.linkedPubkey === data.agent.pubkey;
-    const content = isSelfDelegation
-        ? `Your response will be sent to @${respondingToName}. Note: this is a self-delegation — you are executing a task delegated by a parent instance of yourself.`
-        : `Your response will be sent to @${respondingToName}.`;
-
-    return { type: "response-routing", content };
 }
 
-async function delegationsProvider(
-    data: TenexReminderData | undefined
-): Promise<SystemReminderDescriptor | null> {
-    if (!data) return null;
+interface TodoSnapshot {
+    id: string;
+    title: string;
+    status: string;
+}
 
-    const allDelegatedPubkeys = [
-        ...data.pendingDelegations.map((delegation) => delegation.recipientPubkey),
-        ...data.completedDelegations.map((delegation) => delegation.recipientPubkey),
-    ];
+function createTodoListProvider() {
+    return createDeltaProvider<TodoSnapshot[]>({
+        type: "todo-list",
+        fullInterval: 6,
+        snapshot: (data) => {
+            const todos = data.conversation.getTodos(data.agent.pubkey);
+            return todos.map((t) => ({ id: t.id, title: t.title, status: t.status }));
+        },
+        renderFull: (_snapshot, data) => {
+            const todos = data.conversation.getTodos(data.agent.pubkey);
+            const content = formatTodos(todos);
+            return content ? { type: "todo-list", content } : null;
+        },
+        renderDelta: (prev, curr) => {
+            if (curr.length === 0 && prev.length === 0) return null;
 
-    if (allDelegatedPubkeys.length === 0) return null;
+            const prevMap = new Map(prev.map((t) => [t.id, t]));
+            const currMap = new Map(curr.map((t) => [t.id, t]));
+            const changes: string[] = [];
 
-    const identityService = getIdentityService();
-    const delegatedAgentNames = await Promise.all(
-        allDelegatedPubkeys.map((pubkey) => identityService.getName(pubkey))
-    );
-    const uniqueNames = [...new Set(delegatedAgentNames)];
+            for (const t of curr) {
+                if (!prevMap.has(t.id)) {
+                    changes.push(`New: ${STATUS_MARKER[t.status]} ${t.title} (id: ${t.id})`);
+                }
+            }
 
-    return {
+            for (const t of prev) {
+                if (!currMap.has(t.id)) {
+                    changes.push(`Removed: ${t.title} (id: ${t.id})`);
+                }
+            }
+
+            for (const t of curr) {
+                const prevItem = prevMap.get(t.id);
+                if (prevItem && prevItem.status !== t.status) {
+                    changes.push(
+                        `${t.title} (id: ${t.id}): ${prevItem.status} → ${t.status}`
+                    );
+                }
+            }
+
+            if (changes.length === 0) return null;
+
+            const pending = curr.filter((t) => t.status === "pending");
+            const parts = ["<agent-todos-update>", "", ...changes];
+            if (pending.length > 0) {
+                parts.push("", `**ATTENTION:** You have ${pending.length} pending todo item(s).`);
+            }
+            parts.push("", "</agent-todos-update>");
+
+            return { type: "todo-list", content: parts.join("\n") };
+        },
+    });
+}
+
+function createResponseRoutingProvider() {
+    return createDeltaProvider<string>({
+        type: "response-routing",
+        fullInterval: 12,
+        snapshot: (data) => data.respondingToPrincipal.id,
+        renderFull: async (_snapshot, data) => {
+            const identityService = getIdentityService();
+            const respondingToName = await identityService.getDisplayName({
+                principalId: data.respondingToPrincipal.id,
+                linkedPubkey: data.respondingToPrincipal.linkedPubkey,
+                displayName: data.respondingToPrincipal.displayName,
+                username: data.respondingToPrincipal.username,
+                kind: data.respondingToPrincipal.kind,
+            });
+
+            const isSelfDelegation =
+                data.respondingToPrincipal.linkedPubkey === data.agent.pubkey;
+            const content = isSelfDelegation
+                ? `Your response will be sent to @${respondingToName}. Note: this is a self-delegation — you are executing a task delegated by a parent instance of yourself.`
+                : `Your response will be sent to @${respondingToName}.`;
+
+            return { type: "response-routing", content };
+        },
+        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+    });
+}
+
+function createDelegationsProvider() {
+    return createDeltaProvider<string>({
         type: "delegations",
-        content: [
-            `You have delegations to: ${uniqueNames.map((name) => `@${name}`).join(", ")}.`,
-            "If you want to follow up with a delegated agent, use delegate_followup with the delegation ID. Do NOT address them directly in your response - they won't see it.",
-        ].join("\n"),
-    };
+        fullInterval: 8,
+        snapshot: (data) => {
+            const allPubkeys = [
+                ...data.pendingDelegations.map((d) => d.recipientPubkey),
+                ...data.completedDelegations.map((d) => d.recipientPubkey),
+            ];
+            return [...new Set(allPubkeys)].sort().join(",");
+        },
+        renderFull: async (_snapshot, data) => {
+            const allDelegatedPubkeys = [
+                ...data.pendingDelegations.map((d) => d.recipientPubkey),
+                ...data.completedDelegations.map((d) => d.recipientPubkey),
+            ];
+
+            if (allDelegatedPubkeys.length === 0) return null;
+
+            const identityService = getIdentityService();
+            const delegatedAgentNames = await Promise.all(
+                allDelegatedPubkeys.map((pubkey) => identityService.getName(pubkey))
+            );
+            const uniqueNames = [...new Set(delegatedAgentNames)];
+
+            return {
+                type: "delegations",
+                content: [
+                    `You have delegations to: ${uniqueNames.map((name) => `@${name}`).join(", ")}.`,
+                    "If you want to follow up with a delegated agent, use delegate_followup with the delegation ID. Do NOT address them directly in your response - they won't see it.",
+                ].join("\n"),
+            };
+        },
+        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+    });
 }
 
-async function conversationsProvider(
-    data: TenexReminderData | undefined
-): Promise<SystemReminderDescriptor | null> {
-    if (!data?.conversationsContent) return null;
-    return { type: "conversations", content: data.conversationsContent };
+function createConversationsProvider() {
+    return createDeltaProvider<string>({
+        type: "conversations",
+        fullInterval: 5,
+        snapshot: (data) => data.conversationsContent ?? "",
+        renderFull: (_snapshot, data) => {
+            if (!data.conversationsContent) return null;
+            return { type: "conversations", content: data.conversationsContent };
+        },
+        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+    });
 }
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export function initializeReminderProviders(): void {
     const ctx = getSystemReminderContext();
-    ctx.registerProvider("todo-list", todoListProvider);
-    ctx.registerProvider("response-routing", responseRoutingProvider);
-    ctx.registerProvider("delegations", delegationsProvider);
-    ctx.registerProvider("conversations", conversationsProvider);
+    ctx.registerProvider("datetime", createDatetimeProvider());
+    ctx.registerProvider("todo-list", createTodoListProvider());
+    ctx.registerProvider("response-routing", createResponseRoutingProvider());
+    ctx.registerProvider("delegations", createDelegationsProvider());
+    ctx.registerProvider("conversations", createConversationsProvider());
 }
 
 export function updateReminderData(data: TenexReminderData): void {
@@ -166,14 +357,29 @@ export function updateReminderData(data: TenexReminderData): void {
 
 export function resetSystemReminders(): void {
     getSystemReminderContext().clear();
+    deltaStateStore.clear();
+    deltaTelemetry.length = 0;
 }
 
 export async function collectAndInjectSystemReminders(
     messages: ModelMessage[],
     span: Span | undefined
 ): Promise<ModelMessage[]> {
+    deltaTelemetry.length = 0;
     const ctx = getSystemReminderContext();
     const reminders = await ctx.collect();
+
+    // Log delta telemetry
+    if (span && deltaTelemetry.length > 0) {
+        const emitted = deltaTelemetry.filter((t) => t.mode !== "skip");
+        const skipped = deltaTelemetry.filter((t) => t.mode === "skip");
+        span.addEvent("system-reminders.delta-stats", {
+            "delta.providers": deltaTelemetry.map((t) => `${t.type}:${t.mode}`).join(","),
+            "delta.emitted": emitted.length,
+            "delta.skipped": skipped.length,
+            "delta.skippedTypes": skipped.map((t) => t.type).join(","),
+        });
+    }
 
     if (reminders.length === 0) return messages;
 
