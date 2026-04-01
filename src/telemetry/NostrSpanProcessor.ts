@@ -73,24 +73,31 @@ export class NostrSpanProcessor implements SpanProcessor {
         }
 
         // Fix parentSpanId based on event.reply_to
-        const hasTraceContext = span.attributes["event.has_trace_context"] === true;
+        const isDelegated = span.attributes["event.is_delegated_root"] === true;
         const replyTo = span.attributes["event.reply_to"];
-        if (hasTraceContext) {
-            return;
-        }
+
+        const hasTraceContext = span.attributes["event.has_trace_context"] === true;
 
         if (isHexNostrId(replyTo)) {
-            // This is a reply - set parent to the event being replied to
+            // Reply to a Nostr event — set parent to the replied-to event
             const derivedParentSpanId = nostrIdToSpanId(replyTo);
 
-            // Modify the parent span context
             if (spanInternal._parentSpanContext) {
                 spanInternal._parentSpanContext.spanId = derivedParentSpanId;
             } else if (spanInternal.parentSpanContext) {
                 spanInternal.parentSpanContext.spanId = derivedParentSpanId;
             }
+        } else if (isDelegated) {
+            // Delegated root — trace_context was injected by the delegator but this span
+            // starts a new trace in its own conversation. Clear parent so it is a true root
+            // and won't be self-parented (spanId === parentSpanId).
+            spanInternal._parentSpanContext = undefined;
+            spanInternal.parentSpanContext = undefined;
+        } else if (hasTraceContext) {
+            // In-thread event with W3C trace context (e.g. reply via non-Nostr threading).
+            // Preserve the extracted parent context as-is — do not clear it.
         } else {
-            // This is a root message - clear parent context so it becomes a true root span
+            // Root message with no trace context — clear parent so it becomes a true root span.
             spanInternal._parentSpanContext = undefined;
             spanInternal.parentSpanContext = undefined;
         }

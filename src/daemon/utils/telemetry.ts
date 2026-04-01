@@ -101,11 +101,18 @@ export function createEventSpan(event: NDKEvent): Span {
     const parentContext: Context = derived.context;
     const derivedTraceId: string | undefined = derived.traceId;
 
-    // If this is a delegated event, extract the parent trace context as a span link.
+    // A delegation root is identified by having BOTH a trace_context tag (from the delegator)
+    // AND a delegation tag (set by AgentPublisher.addDelegationTag on delegate/ask events).
+    // Other events (completions, conversations, tool-use, etc.) also have trace_context but
+    // are NOT delegation roots — they should not receive span links or is_delegated attributes.
+    const delegationTag = event.tags.find((t) => t[0] === "delegation");
+    const isDelegatedRoot = !!traceContextTag && !!delegationTag;
+
+    // If this is a delegated root, extract the parent trace context as a span link.
     // This preserves causality (parent→child relationship visible in Jaeger) without
     // nesting the delegated conversation's spans under the parent's traceId.
     const links: Link[] = [];
-    if (traceContextTag) {
+    if (isDelegatedRoot) {
         const carrier = { traceparent: traceContextTag[1] };
         const delegationParentContext = propagation.extract(ROOT_CONTEXT, carrier);
         const delegationParentSpanContext = trace.getSpanContext(delegationParentContext);
@@ -140,12 +147,13 @@ export function createEventSpan(event: NDKEvent): Span {
                 "event.content_length": event.content.length,
                 "event.tag_count": event.tags.length,
                 "event.has_trace_context": !!traceContextTag,
+                "event.is_delegated_root": isDelegatedRoot,
                 "event.reply_to": replyToEventId || "",
                 "event.reply_to_is_hex": isHexNostrId(replyToEventId),
                 "conversation.id": conversationId ? shortenConversationId(conversationId) : "unknown",
                 "conversation.is_root": !getReplyTarget(event),
                 "trace.derived_from_nostr": !!derivedTraceId,
-                "trace.is_delegated": !!traceContextTag,
+                "trace.is_delegated": isDelegatedRoot,
             },
         },
         parentContext
