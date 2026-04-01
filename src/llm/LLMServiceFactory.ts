@@ -178,10 +178,14 @@ export class LLMServiceFactory {
 
         // For standard providers, pass a live accessor so LLMService always
         // gets the current registry (which may be rebuilt after key rotation)
-        const standardProviderAccessor = (): { registry: ProviderRegistryProvider; activeApiKey: string | undefined } => ({
-            registry: providerRegistry.getAiSdkRegistry(),
-            activeApiKey: providerRegistry.getActiveApiKey(actualProvider),
-        });
+        const standardProviderAccessor = (): { registry: ProviderRegistryProvider; activeApiKey: string | undefined; apiKeyIdentity: string | undefined } => {
+            const activeEntry = providerRegistry.getActiveApiKey(actualProvider);
+            return {
+                registry: providerRegistry.getAiSdkRegistry(),
+                activeApiKey: activeEntry?.key,
+                apiKeyIdentity: activeEntry?.identity,
+            };
+        };
 
         // Key rotation handler delegates to the registry's reinitializeProvider
         const keyRotationHandler = async (providerId: string, failedKey: string): Promise<boolean> => {

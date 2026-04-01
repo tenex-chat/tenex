@@ -978,7 +978,7 @@ describe("Analysis telemetry services", () => {
             FROM analysis_meta
             WHERE key = ?
         `).get("schema_version") as { value: string };
-        expect(schemaVersion.value).toBe("3");
+        expect(schemaVersion.value).toBe("4");
 
         db.close(false);
     });

@@ -175,7 +175,7 @@ describe("ProviderRegistry", () => {
                     anthropic: { apiKey: ["sk-a", "sk-b"] },
                 });
 
-                expect(registry.getActiveApiKey("anthropic")).toBe("sk-a");
+                expect(registry.getActiveApiKey("anthropic")?.key).toBe("sk-a");
             } finally {
                 Math.random = originalRandom;
             }
@@ -195,12 +195,12 @@ describe("ProviderRegistry", () => {
                     anthropic: { apiKey: ["sk-rate-limited", "sk-healthy"] },
                 });
 
-                expect(registry.getActiveApiKey("anthropic")).toBe("sk-rate-limited");
+                expect(registry.getActiveApiKey("anthropic")?.key).toBe("sk-rate-limited");
 
                 const rotated = await registry.reinitializeProvider("anthropic", "sk-rate-limited");
 
                 expect(rotated).toBe(true);
-                expect(registry.getActiveApiKey("anthropic")).toBe("sk-healthy");
+                expect(registry.getActiveApiKey("anthropic")?.key).toBe("sk-healthy");
             } finally {
                 Math.random = originalRandom;
             }

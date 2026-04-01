@@ -10,7 +10,7 @@ function createBunDatabase(dbPath: string): SqliteDatabase {
     return new Database(dbPath, { readonly: true });
 }
 
-type UsageGroupKey = "project" | "provider" | "agent";
+type UsageGroupKey = "project" | "provider" | "agent" | "apiKey";
 type ContextGroupKey = "project" | "provider" | "agent" | "strategy";
 
 const usageGroupColumns: Record<UsageGroupKey, { select: string; group: string }> = {
@@ -25,6 +25,10 @@ const usageGroupColumns: Record<UsageGroupKey, { select: string; group: string }
     agent: {
         select: "agent_slug AS agentSlug",
         group: "agent_slug",
+    },
+    apiKey: {
+        select: "api_key_identity AS apiKeyIdentity",
+        group: "api_key_identity",
     },
 };
 
@@ -72,6 +76,7 @@ export class AnalysisQueryService {
         projectIds?: string[];
         providers?: string[];
         agentSlugs?: string[];
+        apiKeyIdentities?: string[];
         includeUnscopedProjects?: boolean;
     }): Array<Record<string, number | string | null>> {
         return this.queryGroupedUsage(options);
@@ -135,6 +140,7 @@ export class AnalysisQueryService {
         projectIds?: string[];
         providers?: string[];
         agentSlugs?: string[];
+        apiKeyIdentities?: string[];
         limit?: number;
     }): Array<Record<string, number | string | null>> {
         const db = this.ensureDb();
@@ -151,6 +157,7 @@ export class AnalysisQueryService {
         addInClause(clauses, values, "project_id", options.projectIds);
         addInClause(clauses, values, "provider", options.providers);
         addInClause(clauses, values, "agent_slug", options.agentSlugs);
+        addInClause(clauses, values, "api_key_identity", options.apiKeyIdentities);
 
         const limit = options.limit ?? 100;
         values.push(limit);
@@ -163,6 +170,7 @@ export class AnalysisQueryService {
                 agent_slug AS agentSlug,
                 provider,
                 model,
+                api_key_identity AS apiKeyIdentity,
                 operation_kind AS operationKind,
                 started_at_ms AS startedAt,
                 completed_at_ms AS completedAt,
@@ -181,6 +189,7 @@ export class AnalysisQueryService {
         projectIds?: string[];
         providers?: string[];
         agentSlugs?: string[];
+        apiKeyIdentities?: string[];
         includeUnscopedProjects?: boolean;
     }): Array<Record<string, number | string | null>> {
         const db = this.ensureDb();
@@ -197,6 +206,7 @@ export class AnalysisQueryService {
         addInClause(clauses, values, "project_id", options.projectIds);
         addInClause(clauses, values, "provider", options.providers);
         addInClause(clauses, values, "agent_slug", options.agentSlugs);
+        addInClause(clauses, values, "api_key_identity", options.apiKeyIdentities);
 
         if (options.groupBy.includes("project") && !options.includeUnscopedProjects) {
             clauses.push("project_id IS NOT NULL");
@@ -225,6 +235,7 @@ export class AnalysisQueryService {
         projectIds?: string[];
         providers?: string[];
         agentSlugs?: string[];
+        apiKeyIdentities?: string[];
         includeUnscopedProjects?: boolean;
         limit?: number;
     }): Array<Record<string, number | string | null>> {
@@ -252,6 +263,7 @@ export class AnalysisQueryService {
         addInClause(clauses, values, "project_id", options.projectIds);
         addInClause(clauses, values, "provider", options.providers);
         addInClause(clauses, values, "agent_slug", options.agentSlugs);
+        addInClause(clauses, values, "api_key_identity", options.apiKeyIdentities);
 
         if (!options.includeUnscopedProjects) {
             clauses.push("project_id IS NOT NULL");
@@ -268,6 +280,7 @@ export class AnalysisQueryService {
                 agent_slug AS agentSlug,
                 provider,
                 model,
+                api_key_identity AS apiKeyIdentity,
                 operation_kind AS operationKind,
                 started_at_ms AS startedAt,
                 (? - started_at_ms) AS ageMs
@@ -337,6 +350,37 @@ export class AnalysisQueryService {
         `).all(...values) as Array<Record<string, number | string | null>>;
     }
 
+    public listDistinctApiKeyIdentities(options: {
+        since: number;
+        until: number;
+        providers?: string[];
+    }): Array<{ apiKeyIdentity: string; provider: string; requestCount: number }> {
+        const db = this.ensureDb();
+        if (!db) {
+            return [];
+        }
+
+        const clauses = [
+            "started_at_ms >= ?",
+            "started_at_ms <= ?",
+            "api_key_identity IS NOT NULL",
+        ];
+        const values: Array<string | number> = [options.since, options.until];
+
+        addInClause(clauses, values, "provider", options.providers);
+
+        return db.prepare(`
+            SELECT
+                api_key_identity AS apiKeyIdentity,
+                provider,
+                COUNT(*) AS requestCount
+            FROM llm_requests
+            WHERE ${clauses.join(" AND ")}
+            GROUP BY api_key_identity, provider
+            ORDER BY requestCount DESC
+        `).all(...values) as Array<{ apiKeyIdentity: string; provider: string; requestCount: number }>;
+    }
+
     public close(): void {
         if (!this.db) {
             return;
@@ -370,6 +414,7 @@ export class AnalysisQueryService {
         projectIds?: string[];
         providers?: string[];
         agentSlugs?: string[];
+        apiKeyIdentities?: string[];
         includeUnscopedProjects?: boolean;
     }): Array<Record<string, number | string | null>> {
         const db = this.ensureDb();
@@ -386,6 +431,7 @@ export class AnalysisQueryService {
         addInClause(clauses, values, "project_id", options.projectIds);
         addInClause(clauses, values, "provider", options.providers);
         addInClause(clauses, values, "agent_slug", options.agentSlugs);
+        addInClause(clauses, values, "api_key_identity", options.apiKeyIdentities);
 
         if (options.groupBy.includes("project") && !options.includeUnscopedProjects) {
             clauses.push("project_id IS NOT NULL");

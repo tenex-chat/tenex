@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { KeyManager } from "../key-manager";
+import { KeyManager, type KeyEntry } from "../key-manager";
 
 describe("KeyManager", () => {
     let km: KeyManager;
@@ -15,13 +15,16 @@ describe("KeyManager", () => {
     describe("registerKeys", () => {
         it("registers a single key as string", () => {
             km.registerKeys("openai", "sk-single");
-            expect(km.selectKey("openai")).toBe("sk-single");
+            const entry = km.selectKey("openai");
+            expect(entry?.key).toBe("sk-single");
+            expect(entry?.identity).toBe("openai-key-1-****ngle");
         });
 
         it("registers multiple keys as array", () => {
             km.registerKeys("openai", ["sk-1", "sk-2", "sk-3"]);
-            const key = km.selectKey("openai");
-            expect(["sk-1", "sk-2", "sk-3"]).toContain(key);
+            const entry = km.selectKey("openai");
+            expect(entry).toBeDefined();
+            expect(["sk-1", "sk-2", "sk-3"]).toContain(entry!.key);
         });
 
         it("ignores empty arrays", () => {
@@ -38,7 +41,7 @@ describe("KeyManager", () => {
         it("returns the only key when single key is registered", () => {
             km.registerKeys("anthropic", "sk-only");
             for (let i = 0; i < 10; i++) {
-                expect(km.selectKey("anthropic")).toBe("sk-only");
+                expect(km.selectKey("anthropic")?.key).toBe("sk-only");
             }
         });
 
@@ -49,8 +52,8 @@ describe("KeyManager", () => {
             const selected = new Set<string>();
             // With 100 selections from 3 keys, we should see all of them
             for (let i = 0; i < 100; i++) {
-                const key = km.selectKey("openai");
-                if (key) selected.add(key);
+                const entry = km.selectKey("openai");
+                if (entry) selected.add(entry.key);
             }
 
             expect(selected.size).toBe(3);
@@ -66,7 +69,7 @@ describe("KeyManager", () => {
 
             // Now only sk-good should be returned
             for (let i = 0; i < 20; i++) {
-                expect(km.selectKey("openai")).toBe("sk-good");
+                expect(km.selectKey("openai")?.key).toBe("sk-good");
             }
         });
 
@@ -80,8 +83,9 @@ describe("KeyManager", () => {
             }
 
             // Should still return a key (fallback to all)
-            const key = km.selectKey("openai");
-            expect(["sk-1", "sk-2"]).toContain(key);
+            const entry = km.selectKey("openai");
+            expect(entry).toBeDefined();
+            expect(["sk-1", "sk-2"]).toContain(entry!.key);
         });
     });
 
@@ -92,7 +96,7 @@ describe("KeyManager", () => {
             km.reportFailure("anthropic", "sk-rate-limited");
 
             for (let i = 0; i < 20; i++) {
-                expect(km.selectAlternativeKey("anthropic", "sk-rate-limited")).toBe("sk-healthy");
+                expect(km.selectAlternativeKey("anthropic", "sk-rate-limited")?.key).toBe("sk-healthy");
             }
         });
 
@@ -109,7 +113,7 @@ describe("KeyManager", () => {
             km.reportFailure("anthropic", "sk-disabled");
             km.reportFailure("anthropic", "sk-disabled");
 
-            expect(km.selectAlternativeKey("anthropic", "sk-rate-limited")).toBe("sk-disabled");
+            expect(km.selectAlternativeKey("anthropic", "sk-rate-limited")?.key).toBe("sk-disabled");
         });
     });
 
@@ -123,8 +127,8 @@ describe("KeyManager", () => {
 
             const selected = new Set<string>();
             for (let i = 0; i < 50; i++) {
-                const key = km.selectKey("openai");
-                if (key) selected.add(key);
+                const entry = km.selectKey("openai");
+                if (entry) selected.add(entry.key);
             }
             // sk-a should still be available
             expect(selected.has("sk-a")).toBe(true);
@@ -139,7 +143,7 @@ describe("KeyManager", () => {
 
             // sk-a should be disabled, only sk-b returned
             for (let i = 0; i < 20; i++) {
-                expect(km.selectKey("openai")).toBe("sk-b");
+                expect(km.selectKey("openai")?.key).toBe("sk-b");
             }
         });
 
@@ -169,7 +173,7 @@ describe("KeyManager", () => {
 
             // Immediately, sk-a should be disabled
             for (let i = 0; i < 10; i++) {
-                expect(km.selectKey("openai")).toBe("sk-b");
+                expect(km.selectKey("openai")?.key).toBe("sk-b");
             }
 
             // Advance clock past the disable duration
@@ -178,8 +182,8 @@ describe("KeyManager", () => {
             // sk-a should be re-enabled now
             const selected = new Set<string>();
             for (let i = 0; i < 50; i++) {
-                const key = km.selectKey("openai");
-                if (key) selected.add(key);
+                const entry = km.selectKey("openai");
+                if (entry) selected.add(entry.key);
             }
             expect(selected.has("sk-a")).toBe(true);
         });
@@ -212,8 +216,8 @@ describe("KeyManager", () => {
             // sk-a should still be available
             const selected = new Set<string>();
             for (let i = 0; i < 50; i++) {
-                const key = km.selectKey("openai");
-                if (key) selected.add(key);
+                const entry = km.selectKey("openai");
+                if (entry) selected.add(entry.key);
             }
             expect(selected.has("sk-a")).toBe(true);
         });
@@ -272,7 +276,9 @@ describe("KeyManager", () => {
     describe("backwards compatibility", () => {
         it("works with a single string key (no array)", () => {
             km.registerKeys("anthropic", "sk-ant-key123");
-            expect(km.selectKey("anthropic")).toBe("sk-ant-key123");
+            const entry = km.selectKey("anthropic");
+            expect(entry?.key).toBe("sk-ant-key123");
+            expect(entry?.identity).toBe("anthropic-key-1-****y123");
             expect(km.hasMultipleKeys("anthropic")).toBe(false);
             expect(km.getHealthyKeyCount("anthropic")).toBe(1);
         });

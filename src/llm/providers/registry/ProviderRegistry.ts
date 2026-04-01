@@ -11,7 +11,7 @@ import type { ProviderRegistryProvider } from "ai";
 import type { ProviderV3 } from "@ai-sdk/provider";
 import { createMockProvider } from "../MockProvider";
 import { logger } from "@/utils/logger";
-import { keyManager } from "../key-manager";
+import { keyManager, type KeyEntry } from "../key-manager";
 import type {
     ILLMProvider,
     ProviderInitConfig,
@@ -46,7 +46,7 @@ export class ProviderRegistry {
     private providers: Map<string, ILLMProvider> = new Map();
     private registrations: Map<string, ProviderRegistration> = new Map();
     private providerConfigs: Map<string, ProviderPoolConfig> = new Map();
-    private activeApiKeys: Map<string, string> = new Map();
+    private activeApiKeys: Map<string, KeyEntry> = new Map();
     private aiSdkRegistry: ProviderRegistryProvider | null = null;
     private initialized = false;
 
@@ -139,19 +139,19 @@ export class ProviderRegistry {
             }
 
             // Select a single key for this initialization
-            const selectedKey = apiKey ? keyManager.selectKey(providerId) : undefined;
+            const selectedEntry = apiKey ? keyManager.selectKey(providerId) : undefined;
 
             try {
                 const provider = new registration.Provider();
                 const initConfig: ProviderInitConfig = {
-                    apiKey: selectedKey,
+                    apiKey: selectedEntry?.key,
                     baseUrl: config?.baseUrl,
                     options: config?.options,
                 };
                 await provider.initialize(initConfig);
                 this.providers.set(providerId, provider);
-                if (selectedKey) {
-                    this.activeApiKeys.set(providerId, selectedKey);
+                if (selectedEntry) {
+                    this.activeApiKeys.set(providerId, selectedEntry);
                 }
 
                 results.push({ providerId, success: true });
@@ -196,8 +196,8 @@ export class ProviderRegistry {
         // Select an explicit alternative key instead of re-rolling the full pool.
         // The failed key may still be "healthy" until it crosses the disable threshold,
         // but a retryable runtime failure should still move to a different configured key.
-        const newKey = keyManager.selectAlternativeKey(providerId, failedKey);
-        if (!newKey) {
+        const newEntry = keyManager.selectAlternativeKey(providerId, failedKey);
+        if (!newEntry) {
             logger.warn(`[ProviderRegistry] No alternative key available for "${providerId}"`);
             return false;
         }
@@ -212,7 +212,7 @@ export class ProviderRegistry {
             // Build the new provider FIRST — never tear down before we have a replacement
             const newProvider = new registration.Provider();
             const initConfig: ProviderInitConfig = {
-                apiKey: newKey,
+                apiKey: newEntry.key,
                 baseUrl: originalConfig.baseUrl,
                 options: originalConfig.options,
             };
@@ -221,7 +221,7 @@ export class ProviderRegistry {
             // New provider is ready — now swap it in and clean up the old one
             const oldProvider = this.providers.get(providerId);
             this.providers.set(providerId, newProvider);
-            this.activeApiKeys.set(providerId, newKey);
+            this.activeApiKeys.set(providerId, newEntry);
 
             if (oldProvider) {
                 oldProvider.reset();
@@ -230,7 +230,7 @@ export class ProviderRegistry {
             // Rebuild the AI SDK registry to reflect the new provider instance
             this.buildAiSdkRegistry();
 
-            const keyPreview = `${newKey.slice(0, 8)}...`;
+            const keyPreview = `${newEntry.key.slice(0, 8)}...`;
             logger.info(`[ProviderRegistry] Re-initialized "${providerId}" with key ${keyPreview}`);
             return true;
         } catch (error) {
@@ -247,7 +247,7 @@ export class ProviderRegistry {
      * Get the currently active API key for a provider.
      * Used by callers that need to report which key failed.
      */
-    getActiveApiKey(providerId: string): string | undefined {
+    getActiveApiKey(providerId: string): KeyEntry | undefined {
         return this.activeApiKeys.get(providerId);
     }
 

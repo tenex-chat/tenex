@@ -74,6 +74,7 @@ interface OpenRequestParams {
     requestSeed?: LLMRequestAnalysisSeed;
     provider: string;
     model: string;
+    apiKeyIdentity?: string;
     baseContext: AnalysisBaseContext;
 }
 
@@ -465,6 +466,7 @@ export class AnalysisTelemetryService {
                     operation_kind,
                     started_at_ms,
                     status,
+                    api_key_identity,
                     pre_context_estimated_input_tokens,
                     sent_estimated_input_tokens,
                     estimated_input_tokens_saved,
@@ -475,7 +477,7 @@ export class AnalysisTelemetryService {
                     shared_prefix_message_count,
                     shared_prefix_last_message_index,
                     anthropic_clear_tool_uses_enabled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(request_id) DO UPDATE SET
                     project_id = excluded.project_id,
                     conversation_id = excluded.conversation_id,
@@ -486,6 +488,7 @@ export class AnalysisTelemetryService {
                     operation_kind = excluded.operation_kind,
                     started_at_ms = excluded.started_at_ms,
                     status = excluded.status,
+                    api_key_identity = excluded.api_key_identity,
                     pre_context_estimated_input_tokens = excluded.pre_context_estimated_input_tokens,
                     sent_estimated_input_tokens = excluded.sent_estimated_input_tokens,
                     estimated_input_tokens_saved = excluded.estimated_input_tokens_saved,
@@ -516,6 +519,7 @@ export class AnalysisTelemetryService {
                 params.operationKind,
                 params.startedAt,
                 "started",
+                params.apiKeyIdentity ?? null,
                 preparedPromptMetrics?.preContextEstimatedInputTokens ?? null,
                 preparedPromptMetrics?.sentEstimatedInputTokens ?? null,
                 preparedPromptMetrics?.estimatedInputTokensSaved ?? null,

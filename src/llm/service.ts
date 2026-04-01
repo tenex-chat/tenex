@@ -45,6 +45,7 @@ import { extractLastStepUsage } from "./utils/usage";
 export type StandardProviderAccessor = () => {
     registry: ProviderRegistryProvider;
     activeApiKey?: string;
+    apiKeyIdentity?: string;
 };
 
 /**
@@ -207,6 +208,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         };
     }
 
+    private getCurrentApiKeyIdentity(): string | undefined {
+        if (!this.standardProviderAccessor) {
+            return undefined;
+        }
+        return this.standardProviderAccessor().apiKeyIdentity;
+    }
+
     /**
      * Create a wrapped AI SDK language model instance using this service's provider configuration.
      * Useful for callers that need to pass a model instance into other AI SDK helpers.
@@ -313,6 +321,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     private createStandardAttemptContext(messages?: ModelMessage[]): {
         model: LanguageModel;
         failedKey?: string;
+        apiKeyIdentity?: string;
     } {
         if (!this.standardProviderAccessor) {
             return {
@@ -320,12 +329,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             };
         }
 
-        const { registry, activeApiKey } = this.standardProviderAccessor();
+        const { registry, activeApiKey, apiKeyIdentity } = this.standardProviderAccessor();
         this.captureSystemPromptTelemetry(messages);
 
         return {
             model: this.wrapWithMiddleware(registry.languageModel(`${this.provider}:${this.model}`)),
             failedKey: activeApiKey,
+            apiKeyIdentity,
         };
     }
 
@@ -381,7 +391,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             tools,
             options,
             startTime,
-            { emitStreamError: false }
+            { emitStreamError: false, apiKeyIdentity: attempt.apiKeyIdentity }
         );
 
         if (firstResult.success) return;
@@ -433,7 +443,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             tools,
             options,
             startTime,
-            { emitStreamError: true }
+            { emitStreamError: true, apiKeyIdentity: retryAttempt.apiKeyIdentity }
         );
 
         if (!retryResult.success) {
@@ -468,7 +478,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             ) => Promise<void> | void;
         } | undefined,
         startTime: number,
-        { emitStreamError }: { emitStreamError: boolean }
+        { emitStreamError, apiKeyIdentity }: { emitStreamError: boolean; apiKeyIdentity?: string }
     ): Promise<
         | { success: true }
         | { success: false; error: unknown; chunkCount: number; lastChunkType?: string }
@@ -578,6 +588,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             toolChoice?: ToolChoice<Record<string, CoreTool>>;
             requestSeed?: LLMRequestAnalysisSeed;
             model?: LanguageModel;
+            apiKeyIdentity?: string;
         }): Promise<void> => {
             if (!this.analysisHooks || stepAnalysisHandles.has(params.stepNumber)) {
                 return;
@@ -589,6 +600,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 startedAt: params.startedAt,
                 provider: modelIdentity.provider,
                 model: modelIdentity.model,
+                apiKeyIdentity: params.apiKeyIdentity,
                 messages: params.messages,
                 providerOptions: params.providerOptions,
                 toolChoice: params.toolChoice,
@@ -620,6 +632,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     toolChoice: prepared?.toolChoice ?? options?.toolChoice,
                     requestSeed: prepared?.analysisRequestSeed,
                     model: prepared?.model ?? model,
+                    apiKeyIdentity,
                 });
 
                 if (!prepared) {
@@ -643,6 +656,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 toolChoice: options?.toolChoice,
                 requestSeed: options?.analysisRequestSeed,
                 model,
+                apiKeyIdentity,
             });
         }
 
@@ -1024,6 +1038,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             startedAt: startTime,
             provider: this.provider,
             model: this.model,
+            apiKeyIdentity: this.getCurrentApiKeyIdentity(),
             messages,
             providerOptions: options?.providerOptions,
             requestSeed: options?.analysisRequestSeed,
@@ -1096,6 +1111,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             startedAt: startTime,
             provider: this.provider,
             model: this.model,
+            apiKeyIdentity: this.getCurrentApiKeyIdentity(),
             messages,
             providerOptions: options?.providerOptions,
             requestSeed: options?.analysisRequestSeed,
