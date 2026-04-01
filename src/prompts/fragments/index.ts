@@ -15,8 +15,6 @@ import { scratchpadPracticeFragment } from "./04-scratchpad-practice";
 import { delegationChainFragment } from "./05-delegation-chain";
 import { metaProjectContextFragment } from "./07-meta-project-context";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
-// 10-referenced-article uses inline registration, no named export
-import "./10-referenced-article";
 import { availableAgentsFragment } from "./15-available-agents";
 import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
@@ -37,8 +35,6 @@ import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
 import { telegramChatContextFragment } from "./33-telegram-chat-context";
 import { telegramDeliveryRulesFragment } from "./34-telegram-delivery-rules";
 import { channelBindingsFragment } from "./34-channel-bindings";
-import { debugModeFragment } from "./debug-mode";
-import { delegationCompletionFragment } from "./delegation-completion";
 
 /**
  * Register all fragments explicitly
@@ -56,8 +52,6 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(delegationChainFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
     fragmentRegistry.register(metaProjectContextFragment);
-    fragmentRegistry.register(debugModeFragment);
-    fragmentRegistry.register(delegationCompletionFragment);
 
     // Agent collaboration
     fragmentRegistry.register(availableAgentsFragment);
@@ -67,7 +61,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(delegationAsyncFragment);
 
     // Behavioral guidance
-    // voice-mode and referenced-article are registered via side effects
+    // voice-mode is registered via side effects
     fragmentRegistry.register(nudgesFragment);
     fragmentRegistry.register(skillsFragment);
     fragmentRegistry.register(availableNudgesAndSkillsFragment);

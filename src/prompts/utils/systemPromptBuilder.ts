@@ -217,16 +217,10 @@ export interface SystemMessage {
 async function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    conversation?: ConversationStore,
     mcpManager?: MCPManager,
     parentSpan?: import("@opentelemetry/api").Span,
     includeMcpResources = true
 ): Promise<void> {
-    // Add referenced article context if present
-    if (conversation?.metadata?.referencedArticle) {
-        builder.add("referenced-article", conversation.metadata.referencedArticle);
-    }
-
     // Add scheduled tasks context if agent has scheduling tools
     const hasSchedulingTools = agent.tools.some((tool) =>
         SCHEDULING_TOOLS.includes(tool as (typeof SCHEDULING_TOOLS)[number])
@@ -530,7 +524,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     await addCoreAgentFragments(
         systemPromptBuilder,
         agentForFragments,
-        conversation,
         mcpManager,
         parentSpan,
         includeMcpResources
