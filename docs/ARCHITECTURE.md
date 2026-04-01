@@ -146,12 +146,18 @@ Services should be organized by domain, with related code grouped together:
 
 ```
 services/
+├── analysis/            # LLM telemetry schema, migrations, and query services
 ├── dispatch/             # Chat routing + delegation dispatch
 │   ├── AgentDispatchService.ts
 │   ├── AgentRouter.ts
 │   └── DelegationCompletionHandler.ts
 ├── ral/                  # Delegation/RAL state
 │   ├── RALRegistry.ts
+│   ├── DelegationRegistry.ts
+│   ├── KillSwitchRegistry.ts
+│   ├── HeuristicViolationManager.ts
+│   ├── MessageInjectionQueue.ts
+│   ├── ExecutionTimingTracker.ts
 │   ├── types.ts
 │   └── index.ts
 ├── rag/                  # RAG domain
