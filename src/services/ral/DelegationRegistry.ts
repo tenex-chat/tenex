@@ -34,6 +34,18 @@ export class DelegationRegistry {
 
   constructor(private readonly deps: DelegationRegistryDeps) {}
 
+  get conversationDelegationsMap(): Map<string, ConversationDelegations> {
+    return this.conversationDelegations;
+  }
+
+  get delegationToRalMap(): Map<string, DelegationLocation> {
+    return this.delegationToRal;
+  }
+
+  get followupToCanonicalMap(): Map<string, string> {
+    return this.followupToCanonical;
+  }
+
   getConversationDelegationState(key: string): ConversationDelegations | undefined {
     return this.conversationDelegations.get(key);
   }

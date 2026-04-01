@@ -27,6 +27,10 @@ export class KillSwitchRegistry {
     private readonly delegations: DelegationRegistry
   ) {}
 
+  get killedAgentConversationsSet(): Set<string> {
+    return this.killedAgentConversations;
+  }
+
   clearAll(): void {
     this.killedAgentConversations.clear();
   }
