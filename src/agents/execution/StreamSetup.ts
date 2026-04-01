@@ -18,7 +18,7 @@ import { trace } from "@opentelemetry/api";
 import type { LLMService } from "@/llm/service";
 import { MessageCompiler } from "./MessageCompiler";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { initializeReminderProviders, updateReminderData } from "./system-reminders";
+import { initializeReminderProviders, updateReminderData, collectAndInjectSystemReminders } from "./system-reminders";
 import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
@@ -267,7 +267,7 @@ export async function setupStreamExecution(
         ralNumber
     );
 
-    const { messages, systemPrompt, counts } = await messageCompiler.compile({
+    let { messages, systemPrompt, counts } = await messageCompiler.compile({
         agent: context.agent,
         project: projectContext.project,
         conversation,
@@ -312,6 +312,8 @@ export async function setupStreamExecution(
         completedDelegations,
         conversationsContent: conversationsContent ?? undefined,
     });
+
+    messages = await collectAndInjectSystemReminders(messages, trace.getActiveSpan());
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
         "ral.number": ralNumber,

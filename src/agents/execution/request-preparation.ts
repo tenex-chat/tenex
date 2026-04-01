@@ -18,7 +18,6 @@ import type {
 import type { SharedPrefixObservation } from "ai-sdk-context-management";
 import { prepareMessagesForRequest } from "@/llm/MessageProcessor";
 import { createMessageSanitizerMiddleware } from "@/llm/middleware/message-sanitizer";
-import { createTenexSystemRemindersMiddleware } from "@/llm/middleware/system-reminders";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { mergeProviderOptions } from "@/llm/provider-options";
 import type { AISdkTool } from "@/tools/types";
@@ -29,7 +28,6 @@ import { withContextManagementAnalysisScope } from "./context-management/telemet
 import type { LLMModelRequest } from "./types";
 
 const messageSanitizer = createMessageSanitizerMiddleware();
-const systemReminders = createTenexSystemRemindersMiddleware();
 const promptEstimator = createDefaultPromptTokenEstimator();
 const ANTHROPIC_CLEAR_TOOL_USES_EDIT = {
     type: "clear_tool_uses_20250919",
@@ -230,16 +228,6 @@ export async function prepareLLMRequest(options: {
         providerOptions: preparedProviderOptions,
     } = await applyPromptMiddleware({
         middleware: messageSanitizer,
-        messages: preparedMessages,
-        providerOptions: preparedProviderOptions,
-        model,
-    }));
-
-    ({
-        messages: preparedMessages,
-        providerOptions: preparedProviderOptions,
-    } = await applyPromptMiddleware({
-        middleware: systemReminders,
         messages: preparedMessages,
         providerOptions: preparedProviderOptions,
         model,

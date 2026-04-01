@@ -1,4 +1,5 @@
 import type { SystemReminderDescriptor } from "ai-sdk-system-reminders";
+import { combineSystemReminders } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
@@ -9,6 +10,8 @@ import type {
     PendingDelegation,
     TodoItem,
 } from "@/services/ral/types";
+import type { Span } from "@opentelemetry/api";
+import type { ModelMessage } from "ai";
 
 export interface TenexReminderData {
     agent: AgentInstance;
@@ -161,4 +164,38 @@ export function updateReminderData(data: TenexReminderData): void {
 
 export function resetSystemReminders(): void {
     getSystemReminderContext().clear();
+}
+
+export async function collectAndInjectSystemReminders(
+    messages: ModelMessage[],
+    span: Span | undefined
+): Promise<ModelMessage[]> {
+    const ctx = getSystemReminderContext();
+    const reminders = await ctx.collect();
+
+    if (reminders.length === 0) return messages;
+
+    const combinedXml = combineSystemReminders(reminders);
+    if (combinedXml === "") return messages;
+
+    span?.addEvent("system-reminders.applied", {
+        "reminders.count": reminders.length,
+        "reminders.types": reminders.map((r) => r.type).join(","),
+        "reminders.content": combinedXml,
+    });
+
+    const result = [...messages];
+    for (let i = result.length - 1; i >= 0; i--) {
+        const msg = result[i];
+        if (msg.role === "system") {
+            result[i] = {
+                ...msg,
+                content: `${msg.content}\n\n${combinedXml}`,
+            };
+            return result;
+        }
+    }
+
+    result.unshift({ role: "system", content: combinedXml });
+    return result;
 }

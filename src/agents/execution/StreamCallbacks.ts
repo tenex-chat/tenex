@@ -29,7 +29,7 @@ import type { ExecutionContextManagement } from "./context-management";
 import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import { prepareLLMRequest } from "./request-preparation";
-import { updateReminderData } from "./system-reminders";
+import { updateReminderData, collectAndInjectSystemReminders } from "./system-reminders";
 import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import { createProjectDTag } from "@/types/project-ids";
 import type { FullRuntimeContext, LLMModelRequest, RALExecutionContext } from "./types";
@@ -319,7 +319,7 @@ export function createPrepareStep(
                 ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
                 : { skills: [] as SkillData[], content: "" };
 
-            const { messages: rebuiltMessages } = await messageCompiler.compile({
+            let { messages: rebuiltMessages } = await messageCompiler.compile({
                 agent: context.agent,
                 project: projectContext.project,
                 conversation,
@@ -356,6 +356,8 @@ export function createPrepareStep(
                 completedDelegations,
                 conversationsContent: conversationsContent ?? undefined,
             });
+
+            rebuiltMessages = await collectAndInjectSystemReminders(rebuiltMessages, executionSpan);
 
             // Dynamic model switching
             if (isMetaModel) {
