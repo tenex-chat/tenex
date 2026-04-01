@@ -155,7 +155,12 @@ function deriveRole(
     // Text messages - assistant for own, user for everything else
     const senderPubkey = getConversationRecordAuthorPubkey(entry);
     if (senderPubkey === viewingAgentPubkey) {
-        return "assistant"; // Own messages
+        // Self-delegation: the agent sent this message TO itself (targetedPubkeys includes
+        // the agent's own pubkey). Treat as user — it's an incoming task from the parent instance.
+        if (entry.targetedPubkeys?.includes(viewingAgentPubkey)) {
+            return "user";
+        }
+        return "assistant"; // Own output messages
     }
 
     return "user"; // All non-self messages
