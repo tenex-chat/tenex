@@ -19,7 +19,6 @@ const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "STATIC_SYSTEM_B" } },
 ]);
 
-const todoTemplate = mock(async () => "TODO LIST");
 const getName = mock(async (pubkey: string) => {
     const names: Record<string, string> = {
         "user-pubkey": "User",
@@ -30,12 +29,6 @@ const getName = mock(async (pubkey: string) => {
 
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
-}));
-
-mock.module("@/prompts/fragments/06-agent-todos", () => ({
-    agentTodosFragment: {
-        template: todoTemplate,
-    },
 }));
 
 mock.module("@/services/PubkeyService", () => ({
@@ -104,7 +97,6 @@ describe("MessageCompiler", () => {
         project = {} as NDKProject;
 
         buildSystemPromptMessages.mockClear();
-        todoTemplate.mockClear();
         getName.mockClear();
         resetSystemReminders();
         initializeReminderProviders();
@@ -173,7 +165,6 @@ describe("MessageCompiler", () => {
         });
         const reminders = await getSystemReminderContext().collect();
         const reminderContent = JSON.stringify(reminders);
-        expect(reminderContent).toContain("TODO LIST");
         expect(reminderContent).toContain("Your response will be sent to @User.");
     });
 

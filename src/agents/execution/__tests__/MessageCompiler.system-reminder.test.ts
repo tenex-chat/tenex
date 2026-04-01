@@ -16,16 +16,9 @@ import {
     updateReminderData,
 } from "../system-reminders";
 
-let todoTemplateCallCount = 0;
-
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
 ]);
-
-const todoTemplate = mock(async () => {
-    todoTemplateCallCount++;
-    return "## Current Todos\n- [ ] Task 1\n- [x] Task 2";
-});
 
 const getName = mock(async (pubkey: string) => {
     const names: Record<string, string> = {
@@ -38,12 +31,6 @@ const getName = mock(async (pubkey: string) => {
 
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
-}));
-
-mock.module("@/prompts/fragments/06-agent-todos", () => ({
-    agentTodosFragment: {
-        template: todoTemplate,
-    },
 }));
 
 mock.module("@/services/PubkeyService", () => ({
@@ -112,9 +99,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
         project = {} as NDKProject;
 
         buildSystemPromptMessages.mockClear();
-        todoTemplate.mockClear();
         getName.mockClear();
-        todoTemplateCallCount = 0;
         resetSystemReminders();
         initializeReminderProviders();
     });
@@ -156,6 +141,11 @@ describe("MessageCompiler and TENEX system reminders", () => {
             messageType: "text",
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
+
+        conversationStore.setTodos(agentPubkey, [
+            { id: "t1", title: "Task 1", description: "", status: "pending" },
+            { id: "t2", title: "Task 2", description: "", status: "done" },
+        ]);
 
         updateReminderData({
             agent,
@@ -254,7 +244,6 @@ describe("MessageCompiler and TENEX system reminders", () => {
         expect(second.messages).toHaveLength(5);
         expect(second.messages.find((message) => message.role === "user" && message.content === "Initial message")).toBeDefined();
         expect(second.messages.find((message) => message.role === "user" && message.content === "Follow-up question")).toBeDefined();
-        expect(todoTemplateCallCount).toBe(2);
         expect(reminders.map((reminder) => reminder.type)).toContain("delegations");
     });
 });

@@ -13,7 +13,6 @@ import { agentHomeDirectoryFragment } from "./02-agent-home-directory";
 import { systemRemindersExplanationFragment } from "./03-system-reminders-explanation";
 import { scratchpadPracticeFragment } from "./04-scratchpad-practice";
 import { delegationChainFragment } from "./05-delegation-chain";
-import { agentTodosFragment } from "./06-agent-todos";
 import { metaProjectContextFragment } from "./07-meta-project-context";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 // 10-referenced-article uses inline registration, no named export
@@ -55,7 +54,6 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(systemRemindersExplanationFragment);
     fragmentRegistry.register(scratchpadPracticeFragment);
     fragmentRegistry.register(delegationChainFragment);
-    fragmentRegistry.register(agentTodosFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
     fragmentRegistry.register(metaProjectContextFragment);
     fragmentRegistry.register(debugModeFragment);

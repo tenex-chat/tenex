@@ -20,8 +20,6 @@ const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
 ]);
 
-const todoTemplate = mock(async () => "## Current Todos\n- [ ] Task 1\n- [x] Task 2");
-
 const getName = mock(async (pubkey: string) => {
     const names: Record<string, string> = {
         "user-pubkey": "User",
@@ -32,12 +30,6 @@ const getName = mock(async (pubkey: string) => {
 
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
-}));
-
-mock.module("@/prompts/fragments/06-agent-todos", () => ({
-    agentTodosFragment: {
-        template: todoTemplate,
-    },
 }));
 
 mock.module("@/services/PubkeyService", () => ({
@@ -136,7 +128,7 @@ describe("TENEX system reminder middleware integration", () => {
         mock.restore();
     });
 
-    it("applies separate computed and current-cycle queued reminders to the latest user message", async () => {
+    it("injects reminders into the last system message, not user messages", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
@@ -177,17 +169,22 @@ describe("TENEX system reminder middleware integration", () => {
             model: { provider: "test", modelId: "model" } as any,
         });
 
-        const userPrompt = result?.prompt.find((message) => message.role === "user");
-        const textPart = userPrompt?.content[0];
+        // Reminders should be in the system message
+        const systemMsg = result?.prompt.findLast((m) => m.role === "system");
+        expect(systemMsg).toBeDefined();
+        expect(systemMsg?.content).toContain("<response-routing>");
+        expect(systemMsg?.content).toContain("<delegations>");
+        expect(systemMsg?.content).toContain("<heuristic>");
+
+        // User message should be untouched
+        const userMsg = result?.prompt.find((m) => m.role === "user");
+        const textPart = userMsg?.content[0];
         expect(textPart?.type).toBe("text");
-        expect(textPart?.text).toContain("Hello, can you help me?");
-        expect(textPart?.text).toContain("<todo-list>");
-        expect(textPart?.text).toContain("<response-routing>");
-        expect(textPart?.text).toContain("<delegations>");
-        expect(textPart?.text).toContain("<heuristic>");
+        expect(textPart?.text).toBe("Hello, can you help me?");
+        expect(textPart?.text).not.toContain("<system-reminders>");
     });
 
-    it("keeps deferred reminders across turns while injecting fresh persistent reminders into rebuilt prompts", async () => {
+    it("keeps deferred reminders across turns while injecting into system message", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Initial message",
@@ -233,13 +230,40 @@ describe("TENEX system reminder middleware integration", () => {
             model: { provider: "test", modelId: "model" } as any,
         });
 
-        const userPrompt = result?.prompt.findLast((message) => message.role === "user");
-        const textPart = userPrompt?.content[0];
         expect(compiled.messages).toHaveLength(4);
-        expect(textPart?.type).toBe("text");
-        expect(textPart?.text).toContain("Follow-up question");
-        expect(textPart?.text).toContain("<todo-list>");
-        expect(textPart?.text).toContain("<response-routing>");
-        expect(textPart?.text).toContain("<supervision-message>");
+
+        // Reminders in system message
+        const systemMsg = result?.prompt.findLast((m) => m.role === "system");
+        expect(systemMsg?.content).toContain("<response-routing>");
+        expect(systemMsg?.content).toContain("<supervision-message>");
+
+        // User messages untouched
+        const lastUser = result?.prompt.findLast((m) => m.role === "user");
+        expect(lastUser?.content[0]?.text).toBe("Follow-up question");
+    });
+
+    it("prepends a system message when prompt has none", async () => {
+        const middleware = createTenexSystemRemindersMiddleware();
+        const ctx = getSystemReminderContext();
+        ctx.queue({
+            type: "heuristic",
+            content: "Some reminder",
+        });
+
+        const promptWithNoSystem: LanguageModelV3Message[] = [
+            { role: "user", content: [{ type: "text", text: "Hello" }] },
+        ];
+
+        const result = await middleware.transformParams?.({
+            params: { prompt: promptWithNoSystem } as any,
+            type: "generate-text" as any,
+            model: { provider: "test", modelId: "model" } as any,
+        });
+
+        expect(result?.prompt[0]?.role).toBe("system");
+        expect(result?.prompt[0]?.content).toContain("<heuristic>");
+        // User message should still be there and untouched
+        expect(result?.prompt[1]?.role).toBe("user");
+        expect(result?.prompt[1]?.content[0]?.text).toBe("Hello");
     });
 });
