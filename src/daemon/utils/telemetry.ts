@@ -8,6 +8,7 @@ import {
     type Context,
     type Span,
     type SpanContext,
+    type Link,
 } from "@opentelemetry/api";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { getReplyTarget } from "@/nostr/AgentEventDecoder";
@@ -85,26 +86,32 @@ function createContextFromNostrEvent(event: NDKEvent): {
  * - parentSpanId = first 16 chars of reply-to event ID (creates parent-child hierarchy)
  * - spanID = first 16 chars of this event's ID (unique per event)
  *
- * This enables viewing entire conversations as single traces in Jaeger with proper
- * hierarchical relationships based on Nostr's e-tag threading.
+ * Delegated conversations start a NEW root trace (new traceId) rather than inheriting
+ * the parent's traceId. The parent's trace context is preserved as a SpanLink so
+ * causality can still be followed in Jaeger without causing deeply nested hierarchies.
  */
 export function createEventSpan(event: NDKEvent): Span {
-    // First check for explicit trace_context tag (backwards compat with delegations)
+    // Check for explicit trace_context tag injected by AgentPublisher on delegation events
     const traceContextTag = event.tags.find((t) => t[0] === "trace_context");
 
     let conversationId = getReplyTarget(event);
-    let derivedTraceId: string | undefined;
 
-    let parentContext: Context;
+    // Always derive trace context from Nostr event threading to get a new root trace
+    const derived = createContextFromNostrEvent(event);
+    const parentContext: Context = derived.context;
+    const derivedTraceId: string | undefined = derived.traceId;
+
+    // If this is a delegated event, extract the parent trace context as a span link.
+    // This preserves causality (parent→child relationship visible in Jaeger) without
+    // nesting the delegated conversation's spans under the parent's traceId.
+    const links: Link[] = [];
     if (traceContextTag) {
-        // Use explicit W3C trace context if provided (delegation events)
         const carrier = { traceparent: traceContextTag[1] };
-        parentContext = propagation.extract(ROOT_CONTEXT, carrier);
-    } else {
-        // Derive trace context from Nostr event threading
-        const derived = createContextFromNostrEvent(event);
-        parentContext = derived.context;
-        derivedTraceId = derived.traceId;
+        const delegationParentContext = propagation.extract(ROOT_CONTEXT, carrier);
+        const delegationParentSpanContext = trace.getSpanContext(delegationParentContext);
+        if (delegationParentSpanContext) {
+            links.push({ context: delegationParentSpanContext });
+        }
     }
 
     if (!conversationId && event.id) {
@@ -122,6 +129,7 @@ export function createEventSpan(event: NDKEvent): Span {
     const span = trace.getTracer("tenex.daemon").startSpan(
         "tenex.event.process",
         {
+            links,
             attributes: {
                 "event.id": event.id,
                 "event.kind": event.kind || 0,
@@ -136,7 +144,8 @@ export function createEventSpan(event: NDKEvent): Span {
                 "event.reply_to_is_hex": isHexNostrId(replyToEventId),
                 "conversation.id": conversationId ? shortenConversationId(conversationId) : "unknown",
                 "conversation.is_root": !getReplyTarget(event),
-                "trace.derived_from_nostr": !traceContextTag && !!derivedTraceId,
+                "trace.derived_from_nostr": !!derivedTraceId,
+                "trace.is_delegated": !!traceContextTag,
             },
         },
         parentContext
