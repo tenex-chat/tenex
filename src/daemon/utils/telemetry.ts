@@ -96,8 +96,14 @@ export function createEventSpan(event: NDKEvent): Span {
 
     let conversationId = getReplyTarget(event);
 
-    // Always derive trace context from Nostr event threading to get a new root trace
-    const derived = createContextFromNostrEvent(event);
+    // Derive trace context from Nostr event threading.
+    // For non-delegation root events (no e-tag), skip the Nostr-derived context and use
+    // ROOT_CONTEXT directly. When there is no e-tag, createContextFromNostrEvent sets
+    // spanContext.spanId = first16(event.id), which is identical to the span's own derived
+    // spanId — causing self-parenting (parentSpanId === spanId). Root events should be true
+    // roots with no parent context.
+    const isRootEvent = !conversationId;
+    const derived = isRootEvent ? { context: ROOT_CONTEXT, traceId: "" } : createContextFromNostrEvent(event);
     const parentContext: Context = derived.context;
     const derivedTraceId: string | undefined = derived.traceId;
 

@@ -95,7 +95,16 @@ export class NostrSpanProcessor implements SpanProcessor {
             spanInternal.parentSpanContext = undefined;
         } else if (hasTraceContext) {
             // In-thread event with W3C trace context (e.g. reply via non-Nostr threading).
-            // Preserve the extracted parent context as-is — do not clear it.
+            // Preserve the extracted parent context as-is — but guard against self-parenting.
+            // If the preserved parentSpanId equals this span's own derived spanId (which
+            // happens when createContextFromNostrEvent used event.id as both trace root and
+            // parent for a root event), clear the parent so this becomes a true root span.
+            const preservedParentSpanId =
+                spanInternal._parentSpanContext?.spanId ?? spanInternal.parentSpanContext?.spanId;
+            if (preservedParentSpanId === derivedSpanId) {
+                spanInternal._parentSpanContext = undefined;
+                spanInternal.parentSpanContext = undefined;
+            }
         } else {
             // Root message with no trace context — clear parent so it becomes a true root span.
             spanInternal._parentSpanContext = undefined;
