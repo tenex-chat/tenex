@@ -31,10 +31,12 @@ const messageSanitizer = createMessageSanitizerMiddleware();
 const promptEstimator = createDefaultPromptTokenEstimator();
 const ANTHROPIC_CLEAR_TOOL_USES_EDIT = {
     type: "clear_tool_uses_20250919",
-    trigger: { type: "tool_uses", value: 10 },
+    trigger: { type: "tool_uses", value: 25 },
     keep: { type: "tool_uses", value: 10 },
     clearAtLeast: { type: "input_tokens", value: 4000 },
-} as const;
+    clearToolInputs: true,
+    excludeTools: ["delegate", "delegate_followup", "delegate_crossproject"],
+};
 
 function buildMiddlewareModel(
     model: ContextManagementModelRef | undefined,
