@@ -11,7 +11,7 @@ import type {
     TodoItem,
 } from "@/services/ral/types";
 import type { Span } from "@opentelemetry/api";
-import type { ModelMessage } from "ai";
+import type { ModelMessage, UserModelMessage } from "ai";
 
 export interface TenexReminderData {
     agent: AgentInstance;
@@ -393,17 +393,35 @@ export async function collectAndInjectSystemReminders(
     });
 
     const result = [...messages];
+
+    // Inject into the last user message, matching the ai-sdk-system-reminders convention
     for (let i = result.length - 1; i >= 0; i--) {
         const msg = result[i];
-        if (msg.role === "system") {
-            result[i] = {
-                ...msg,
-                content: `${msg.content}\n\n${combinedXml}`,
-            };
-            return result;
+        if (msg.role !== "user") continue;
+
+        const userMsg = msg as UserModelMessage;
+        if (typeof userMsg.content === "string") {
+            result[i] = { ...userMsg, content: `${userMsg.content}\n\n${combinedXml}` };
+        } else {
+            const parts = userMsg.content.map((p) => ({ ...p }));
+            let injected = false;
+            for (let j = parts.length - 1; j >= 0; j--) {
+                const part = parts[j];
+                if (part.type === "text") {
+                    parts[j] = { ...part, text: `${part.text}\n\n${combinedXml}` };
+                    injected = true;
+                    break;
+                }
+            }
+            if (!injected) {
+                parts.push({ type: "text" as const, text: combinedXml });
+            }
+            result[i] = { ...userMsg, content: parts };
         }
+        return result;
     }
 
-    result.unshift({ role: "system", content: combinedXml });
+    // No user message found — append one
+    result.push({ role: "user", content: combinedXml });
     return result;
 }

@@ -71,13 +71,16 @@ describe("delta-based system reminders", () => {
 
     async function collectReminders(data: TenexReminderData) {
         updateReminderData(data);
-        const messages = [{ role: "system" as const, content: "SYSTEM" }];
+        const messages = [
+            { role: "system" as const, content: "SYSTEM" },
+            { role: "user" as const, content: "hello" },
+        ];
         return collectAndInjectSystemReminders(messages, undefined);
     }
 
     function extractRemindersXml(result: { role: string; content: unknown }[]): string {
-        const systemMsg = result.find((m) => m.role === "system");
-        const content = systemMsg?.content;
+        const userMsg = result.find((m) => m.role === "user");
+        const content = userMsg?.content;
         if (typeof content !== "string") return "";
         const match = content.match(/<system-reminders>[\s\S]*<\/system-reminders>/);
         return match?.[0] ?? "";

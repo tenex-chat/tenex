@@ -106,7 +106,7 @@ describe("system reminder injection integration", () => {
         mock.restore();
     });
 
-    it("injects reminders into the last system message, not user messages", async () => {
+    it("injects reminders into the last user message, not system messages", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
@@ -140,19 +140,23 @@ describe("system reminder injection integration", () => {
 
         const result = await collectAndInjectSystemReminders(compiled.messages, undefined);
 
-        // Reminders should be in the system message
+        // Reminders should be in the last user message
+        const lastUserMsg = result.findLast((m) => m.role === "user");
+        expect(lastUserMsg).toBeDefined();
+        const userContent = typeof lastUserMsg?.content === "string"
+            ? lastUserMsg.content
+            : JSON.stringify(lastUserMsg?.content);
+        expect(userContent).toContain("<response-routing>");
+        expect(userContent).toContain("<delegations>");
+        expect(userContent).toContain("<heuristic>");
+
+        // System message should be untouched
         const systemMsg = result.findLast((m) => m.role === "system");
         expect(systemMsg).toBeDefined();
-        expect(systemMsg?.content).toContain("<response-routing>");
-        expect(systemMsg?.content).toContain("<delegations>");
-        expect(systemMsg?.content).toContain("<heuristic>");
-
-        // User message should be untouched — no XML injected
-        const userMsg = result.find((m) => m.role === "user");
-        expect(JSON.stringify(userMsg?.content)).not.toContain("<system-reminders>");
+        expect(String(systemMsg?.content)).not.toContain("<system-reminders>");
     });
 
-    it("keeps deferred reminders across turns while injecting into system message", async () => {
+    it("keeps deferred reminders across turns while injecting into last user message", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Initial message",
@@ -193,17 +197,20 @@ describe("system reminder injection integration", () => {
 
         expect(compiled.messages).toHaveLength(4);
 
-        // Reminders in system message
-        const systemMsg = result.findLast((m) => m.role === "system");
-        expect(systemMsg?.content).toContain("<response-routing>");
-        expect(systemMsg?.content).toContain("<supervision-message>");
-
-        // Last user message untouched
+        // Reminders in last user message
         const lastUser = result.findLast((m) => m.role === "user");
-        expect(JSON.stringify(lastUser?.content)).not.toContain("<system-reminders>");
+        const lastUserContent = typeof lastUser?.content === "string"
+            ? lastUser.content
+            : JSON.stringify(lastUser?.content);
+        expect(lastUserContent).toContain("<response-routing>");
+        expect(lastUserContent).toContain("<supervision-message>");
+
+        // System message untouched
+        const systemMsg = result.findLast((m) => m.role === "system");
+        expect(String(systemMsg?.content)).not.toContain("<system-reminders>");
     });
 
-    it("prepends a system message when prompt has none", async () => {
+    it("injects into user message even when prompt has no system message", async () => {
         const ctx = getSystemReminderContext();
         ctx.queue({
             type: "heuristic",
@@ -216,9 +223,14 @@ describe("system reminder injection integration", () => {
 
         const result = await collectAndInjectSystemReminders(messagesWithNoSystem, undefined);
 
-        expect(result[0]?.role).toBe("system");
-        expect(result[0]?.content).toContain("<heuristic>");
-        // User message should still be there and untouched
-        expect(result[1]?.role).toBe("user");
+        expect(result).toHaveLength(1);
+        expect(result[0]?.role).toBe("user");
+        // The reminder should be injected into the user message's text part
+        const content = result[0]?.content;
+        expect(Array.isArray(content)).toBe(true);
+        if (Array.isArray(content)) {
+            const textPart = content.find((p: { type: string }) => p.type === "text");
+            expect(textPart?.text).toContain("<heuristic>");
+        }
     });
 });
