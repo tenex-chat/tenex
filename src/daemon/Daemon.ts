@@ -1,25 +1,20 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
-import type { AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
-import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getReplyTarget, classifyForDaemon, isConfigUpdate } from "@/nostr/AgentEventDecoder";
 import { publishBackendProfile } from "@/nostr/AgentProfilePublisher";
 import { getNDK } from "@/nostr/ndkClient";
-import { AgentConfigUpdateService } from "@/services/agents";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
 import { Lockfile } from "@/utils/lockfile";
-import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { logger } from "@/utils/logger";
-import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
+import type { ProjectDTag } from "@/types/project-ids";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
-import { SpanStatusCode, context as otelContext, trace, type Span } from "@opentelemetry/api";
+import { context as otelContext, trace, type Span } from "@opentelemetry/api";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
-import { shutdownTelemetry } from "@/telemetry/setup";
 import type { RoutingDecision } from "./routing/DaemonRouter";
 import {
     shouldTraceEvent,
@@ -36,7 +31,11 @@ import { logDropped, logRouted } from "./utils/routing-log";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { RAGService } from "@/services/rag/RAGService";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { InterventionService, type AgentResolutionResult, type ActiveDelegationCheckerFn } from "@/services/intervention";
+import {
+    InterventionService,
+    type AgentResolutionResult,
+    type ActiveDelegationCheckerFn,
+} from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
 import { NudgeSkillWhitelistService } from "@/services/nudge";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
@@ -48,19 +47,20 @@ import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 import { APNsService } from "@/services/apns";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
-import { installAgentFromDefinitionEventId } from "@/services/agents/AgentProvisioningService";
-const lessonTracer = trace.getTracer("tenex.lessons");
-const daemonTracer = trace.getTracer("tenex.daemon");
+import { ShutdownCoordinator } from "./ShutdownCoordinator";
+import { SubscriptionSyncCoordinator } from "./SubscriptionSyncCoordinator";
+import { EventHandlerRegistry } from "./EventHandlerRegistry";
 
 /**
  * Main daemon that manages all projects in a single process.
  * Uses lazy loading - projects only start when they receive events.
  *
- * This class now focuses on orchestration, delegating specific responsibilities to:
+ * This class orchestrates the following focused coordinators:
+ * - ShutdownCoordinator: Signal handling, graceful shutdown/restart
+ * - SubscriptionSyncCoordinator: Keep Nostr subscriptions in sync with agents
+ * - EventHandlerRegistry: Discrete event type handlers (project, lesson, etc.)
  * - RuntimeLifecycle: Runtime management (start/stop/restart)
  * - DaemonRouter: Event routing decisions
- * - SubscriptionFilterBuilder: Filter construction
- * - AgentEventDecoder: Event classification
  */
 export class Daemon {
     private ndk: NDK | null = null;
@@ -76,7 +76,6 @@ export class Daemon {
 
     // Runtime management delegated to RuntimeLifecycle
     private runtimeLifecycle: RuntimeLifecycle | null = null;
-    private readonly agentConfigUpdateService = new AgentConfigUpdateService();
 
     // Project management — keyed by d-tag (ProjectDTag)
     private knownProjects = new Map<ProjectDTag, NDKProject>();
@@ -86,9 +85,6 @@ export class Daemon {
 
     // Agent pubkeys seeded from AgentStorage at startup (covers not-yet-running projects)
     private storedAgentPubkeys = new Set<Hexpubkey>();
-
-    // Tracked agent definition IDs for lesson subscription sync
-    private trackedLessonDefinitionIds = new Set<string>();
 
     // Auto-boot patterns - projects whose d-tag contains any of these patterns will be auto-started
     private autoBootPatterns: string[] = [];
@@ -105,9 +101,6 @@ export class Daemon {
     // Projects pending auto-boot from restart state (populated by loadRestartState, consumed by handleProjectEvent)
     private pendingRestartBootProjects: Set<ProjectDTag> = new Set();
 
-    // Shutdown function (set by setupShutdownHandlers, used by triggerGracefulRestart)
-    private shutdownFn: ((exitCode?: number, isGracefulRestart?: boolean) => Promise<void>) | null = null;
-
     // Background-mode readiness signaling
     private readyCallback: (() => void) | null = null;
     private pendingAutoBootCount = 0;
@@ -121,10 +114,28 @@ export class Daemon {
     private statusInterval: NodeJS.Timeout | null = null;
     private installedAgentListPublisher: InstalledAgentListService | null = null;
 
+    // Focused coordinators (initialized in start() before isRunning = true)
+    private shutdownCoordinator: ShutdownCoordinator | undefined;
+    private subscriptionSyncCoordinator: SubscriptionSyncCoordinator | undefined;
+    private eventHandlerRegistry: EventHandlerRegistry | undefined;
+
+    private getSubscriptionSyncCoordinator(): SubscriptionSyncCoordinator {
+        if (!this.subscriptionSyncCoordinator) {
+            throw new Error("SubscriptionSyncCoordinator not initialized — call start() first");
+        }
+        return this.subscriptionSyncCoordinator;
+    }
+
+    private getEventHandlerRegistry(): EventHandlerRegistry {
+        if (!this.eventHandlerRegistry) {
+            throw new Error("EventHandlerRegistry not initialized — call start() first");
+        }
+        return this.eventHandlerRegistry;
+    }
+
     constructor() {
         this.routingLogger = new EventRoutingLogger();
     }
-
 
     /**
      * Set patterns for auto-booting projects on discovery
@@ -202,8 +213,18 @@ export class Daemon {
         });
         const startedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
         this.statusFile
-            .write({ pid: process.pid, startedAt, knownProjects: this.knownProjects.size, runtimes, updatedAt: new Date().toISOString() })
-            .catch((err) => logger.warn("Failed to write status file", { error: err instanceof Error ? err.message : String(err) }));
+            .write({
+                pid: process.pid,
+                startedAt,
+                knownProjects: this.knownProjects.size,
+                runtimes,
+                updatedAt: new Date().toISOString(),
+            })
+            .catch((err) =>
+                logger.warn("Failed to write status file", {
+                    error: err instanceof Error ? err.message : String(err),
+                })
+            );
     }
 
     private onStaticEose(): void {
@@ -285,9 +306,7 @@ export class Daemon {
                 : [];
             OwnerAgentListService.getInstance().initialize(ownerAgentListPubkeys);
 
-            // 6d. Initialize NudgeSkillWhitelistService (global nudge/skill whitelist)
-            // Nudges are user-scoped, not project-scoped — initialize once at daemon level
-            // with the configured whitelisted user pubkeys, independent of 14199 publishing.
+            // 6d. Initialize NudgeSkillWhitelistService
             const whitelistService = NudgeSkillWhitelistService.getInstance();
             this.removeWhitelistCacheListener?.();
             this.removeWhitelistCacheListener = whitelistService.onCacheUpdated(async () => {
@@ -300,18 +319,81 @@ export class Daemon {
             logger.debug("Initializing runtime lifecycle manager");
             this.runtimeLifecycle = new RuntimeLifecycle(this.projectsBase);
 
+            // Initialize coordinators now that dependencies are available
+            this.subscriptionSyncCoordinator = new SubscriptionSyncCoordinator({
+                getRuntimeLifecycle: () => this.runtimeLifecycle,
+                getSubscriptionManager: () => this.subscriptionManager,
+                getStoredAgentPubkeys: () => this.storedAgentPubkeys,
+                addStoredAgentPubkey: (pubkey) => this.storedAgentPubkeys.add(pubkey),
+                getAgentPubkeyToProjects: () => this.agentPubkeyToProjects,
+                clearAgentPubkeyToProjects: () => this.agentPubkeyToProjects.clear(),
+                setAgentPubkeyInProjects: (pubkey, projects) =>
+                    this.agentPubkeyToProjects.set(pubkey, projects),
+            });
+
+            this.eventHandlerRegistry = new EventHandlerRegistry({
+                getNdk: () => this.ndk,
+                getBackendPubkey: () => this.backendPubkey,
+                getWhitelistedPubkeys: () => this.whitelistedPubkeys,
+                getKnownProjects: () => this.knownProjects,
+                getAutoBootPatterns: () => this.autoBootPatterns,
+                getRuntimeLifecycle: () => this.runtimeLifecycle,
+                getSubscriptionSyncCoordinator: () => this.getSubscriptionSyncCoordinator(),
+                buildProjectAddressesForSubscription: () =>
+                    this.buildProjectAddressesForSubscription(),
+                updateKnownProjectsSubscription: (addresses) =>
+                    this.subscriptionManager?.updateKnownProjects(addresses),
+                onAutoBootStarted: () => {
+                    this.pendingAutoBootCount++;
+                },
+                onAutoBootFinished: () => {
+                    this.pendingAutoBootCount--;
+                    this.checkReady();
+                },
+                getPendingRestartBootProjects: () => this.pendingRestartBootProjects,
+                killRuntime: (projectId) => this.killRuntime(projectId),
+            });
+
+            this.shutdownCoordinator = new ShutdownCoordinator({
+                getIsRunning: () => this.isRunning,
+                setIsRunning: (running) => {
+                    this.isRunning = running;
+                },
+                getRestartState: () => this.restartState,
+                getRuntimeLifecycle: () => this.runtimeLifecycle,
+                getAgentDefinitionMonitor: () => this.agentDefinitionMonitor,
+                setAgentDefinitionMonitor: (monitor) => {
+                    this.agentDefinitionMonitor = monitor;
+                },
+                getInstalledAgentListPublisher: () => this.installedAgentListPublisher,
+                setInstalledAgentListPublisher: (publisher) => {
+                    this.installedAgentListPublisher = publisher;
+                },
+                getSubscriptionManager: () => this.subscriptionManager,
+                getShutdownHandlers: () => this.shutdownHandlers,
+                getLockfile: () => this.lockfile,
+                getSupervisedMode: () => this.supervisedMode,
+                getPendingRestart: () => this.pendingRestart,
+                setPendingRestart: (pending) => {
+                    this.pendingRestart = pending;
+                },
+                getRestartInProgress: () => this.restartInProgress,
+                setRestartInProgress: (inProgress) => {
+                    this.restartInProgress = inProgress;
+                },
+            });
+
             // 8. Initialize subscription manager (before discovery)
             logger.debug("Initializing subscription manager");
             this.subscriptionManager = new SubscriptionManager(
                 this.ndk,
-                this.handleIncomingEvent.bind(this), // Pass event handler
+                this.handleIncomingEvent.bind(this),
                 this.whitelistedPubkeys,
                 this.routingLogger,
                 this.onStaticEose.bind(this)
             );
 
             // 8b. Seed trust service with all known agent pubkeys from storage
-            // This covers agents from not-yet-running projects for cross-project trust
             await agentStorage.initialize();
             this.storedAgentPubkeys = await agentStorage.getAllKnownPubkeys();
             if (this.storedAgentPubkeys.size > 0) {
@@ -322,7 +404,6 @@ export class Daemon {
             }
 
             // 9. Start subscription immediately
-            // Projects will be discovered naturally as events arrive
             logger.debug("Starting subscription manager");
             await this.subscriptionManager.start();
             logger.debug("Subscription manager started");
@@ -335,19 +416,11 @@ export class Daemon {
             getConversationIndexingJob().start();
             logger.info("Automatic conversation indexing job started");
 
-            // 11. Initialize InterventionService (after projects are loaded)
-            // This must happen after subscriptions start so agent slugs can be resolved
+            // 11. Initialize InterventionService
             logger.debug("Initializing intervention service");
             const interventionService = InterventionService.getInstance();
-
-            // Wire the agent resolver - allows InterventionService (Layer 3) to resolve agents
-            // per-project without depending on @/daemon (Layer 4)
             interventionService.setAgentResolver(this.createAgentResolver());
-
-            // Wire the active delegation checker - prevents premature intervention notifications
-            // when an agent has delegated work that is still running
             interventionService.setActiveDelegationChecker(this.createActiveDelegationChecker());
-
             await interventionService.initialize();
 
             // 11b. Initialize APNs push notification service
@@ -360,7 +433,7 @@ export class Daemon {
 
             // 13. Setup RAL completion listener for graceful restart
             if (this.supervisedMode) {
-                this.setupRALCompletionListener();
+                this.shutdownCoordinator.setupRALCompletionListener();
             }
 
             // 14. Start agent definition monitor for auto-upgrades
@@ -368,16 +441,15 @@ export class Daemon {
             this.agentDefinitionMonitor = new AgentDefinitionMonitor(
                 this.ndk,
                 { whitelistedPubkeys: this.whitelistedPubkeys },
-                () => this.runtimeLifecycle?.getActiveRuntimes() || new Map(),
+                () => this.runtimeLifecycle?.getActiveRuntimes() || new Map()
             );
             await this.agentDefinitionMonitor.start();
             logger.info("Agent definition monitor started");
 
             // 15. Setup graceful shutdown
-            this.setupShutdownHandlers();
+            this.shutdownCoordinator.setupShutdownHandlers();
 
             this.isRunning = true;
-
         } catch (error) {
             logger.error("Failed to start daemon", {
                 error: error instanceof Error ? error.message : String(error),
@@ -400,9 +472,7 @@ export class Daemon {
     }
 
     private async hydrateWhitelistedSkillsToLocalStore(): Promise<void> {
-        const whitelistedSkills = NudgeSkillWhitelistService
-            .getInstance()
-            .getWhitelistedSkills();
+        const whitelistedSkills = NudgeSkillWhitelistService.getInstance().getWhitelistedSkills();
 
         if (whitelistedSkills.length === 0) {
             return;
@@ -421,7 +491,6 @@ export class Daemon {
      * Initialize required directories for daemon operations
      */
     private async initializeDirectories(): Promise<void> {
-        // Use global daemon directory instead of project-local .tenex
         this.daemonDir = config.getConfigPath("daemon");
 
         const dirs = [
@@ -433,7 +502,6 @@ export class Daemon {
         for (const dir of dirs) {
             await fs.mkdir(dir, { recursive: true });
         }
-
     }
 
     /**
@@ -446,19 +514,7 @@ export class Daemon {
     }
 
     /**
-     * Extract project d-tag from a project event.
-     */
-    private buildProjectId(event: NDKEvent): ProjectDTag {
-        const dTag = event.tags.find((t) => t[0] === "d")?.[1];
-        if (!dTag) {
-            throw new Error("Project event missing d tag");
-        }
-        return createProjectDTag(dTag);
-    }
-
-    /**
      * Build NIP-33 addresses from known projects for Nostr subscription filters.
-     * This is the boundary where d-tags are converted to NIP-33 addresses.
      */
     private buildProjectAddressesForSubscription(): string[] {
         const addresses: string[] = [];
@@ -472,11 +528,6 @@ export class Daemon {
      * Handle incoming events from the subscription (telemetry wrapper)
      */
     private async handleIncomingEvent(event: NDKEvent): Promise<void> {
-        // Check if this daemon should trace this event at all.
-        // This prevents noisy traces when multiple backends are running.
-        // Only trace events we'll actually process:
-        // - Project events from whitelisted authors (for discovery)
-        // - Other events only if we have a runtime OR can boot one
         const knownAgentPubkeys = new Set(this.agentPubkeyToProjects.keys());
         const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
         if (
@@ -489,19 +540,14 @@ export class Daemon {
                 this.backendPubkey ?? undefined
             )
         ) {
-            // Not our event - drop silently without creating a span
             return;
         }
 
-        // Drop agent events without p-tags silently — no span needed
+        // Drop agent events without p-tags silently
         const isRootEvent = !getReplyTarget(event);
         if (
             isAgentEvent(event, this.agentPubkeyToProjects) &&
-            !hasPTagsToSystemEntities(
-                event,
-                this.whitelistedPubkeys,
-                this.agentPubkeyToProjects
-            ) &&
+            !hasPTagsToSystemEntities(event, this.whitelistedPubkeys, this.agentPubkeyToProjects) &&
             !isRootEvent
         ) {
             return;
@@ -532,50 +578,52 @@ export class Daemon {
     /**
      * Process incoming event (pure business logic, telemetry-free)
      */
-    private async processIncomingEvent(
-        event: NDKEvent,
-        span: Span
-    ): Promise<void> {
-        // Classify event type
+    private async processIncomingEvent(event: NDKEvent, span: Span): Promise<void> {
         const eventType = classifyForDaemon(event);
 
-        // Handle project events (kind 31933)
         if (eventType === "project") {
             addRoutingEvent(span, "project_event", { reason: "kind_31933" });
-            await this.handleProjectEvent(event);
+            await this.getEventHandlerRegistry().handleProjectEvent(event);
             await logDropped(this.routingLogger, event, "Project creation/update event");
             return;
         }
 
-        // Handle lesson events (kind 4129)
         if (eventType === "lesson") {
             addRoutingEvent(span, "lesson_event", { reason: "kind_4129" });
-            await this.handleLessonEvent(event);
-            await logDropped(this.routingLogger, event, "Lesson event - hydrated into active runtimes only");
+            await this.getEventHandlerRegistry().handleLessonEvent(event);
+            await logDropped(
+                this.routingLogger,
+                event,
+                "Lesson event - hydrated into active runtimes only"
+            );
             return;
         }
 
-        // Handle lesson comment events (kind 1111 with #K: ["4129"])
         if (eventType === "lesson_comment") {
             addRoutingEvent(span, "lesson_comment_event", { reason: "kind_1111_K_4129" });
-            await this.handleLessonCommentEvent(event);
-            await logDropped(this.routingLogger, event, "Lesson comment - hydrated into active runtimes only");
+            await this.getEventHandlerRegistry().handleLessonCommentEvent(event);
+            await logDropped(
+                this.routingLogger,
+                event,
+                "Lesson comment - hydrated into active runtimes only"
+            );
             return;
         }
 
         if (eventType === "agent_create") {
             addRoutingEvent(span, "agent_create", { reason: "kind_24001" });
-            await this.handleAgentCreateRequest(event);
-            await logDropped(this.routingLogger, event, "Handled backend-targeted agent create request");
+            await this.getEventHandlerRegistry().handleAgentCreateRequest(event);
+            await logDropped(
+                this.routingLogger,
+                event,
+                "Handled backend-targeted agent create request"
+            );
             return;
         }
 
-        // Handle global agent config updates (kind 24020 without a-tag) at daemon level.
-        // These update the agent's default config in storage and don't need project context.
-        // With a-tag: falls through to normal A-tag routing for project-scoped updates.
         if (isConfigUpdate(event) && !event.tagValue("a")) {
             addRoutingEvent(span, "agent_config_global", { reason: "kind_24020_no_a_tag" });
-            await this.handleGlobalAgentConfigUpdate(event);
+            await this.getEventHandlerRegistry().handleGlobalAgentConfigUpdate(event);
             return;
         }
 
@@ -589,7 +637,6 @@ export class Daemon {
         );
 
         if (!routingResult.projectId) {
-            // Log routing failures for kind:1 events to diagnose agent "disappearing"
             addRoutingEvent(span, "dropped", { reason: routingResult.reason });
             await logDropped(this.routingLogger, event, routingResult.reason);
             return;
@@ -597,14 +644,14 @@ export class Daemon {
 
         addRoutingEvent(span, "route_to_project", {
             projectId: routingResult.projectId,
-            method: routingResult.method
+            method: routingResult.method,
         });
 
         await this.routeEventToProject(event, routingResult, span);
     }
 
     /**
-     * Route event to a specific project (business logic)
+     * Route event to a specific project
      */
     private async routeEventToProject(
         event: NDKEvent,
@@ -630,11 +677,9 @@ export class Daemon {
             return;
         }
 
-        // Check if runtime exists
         let runtime = this.runtimeLifecycle.getRuntime(projectId);
 
         if (!runtime) {
-            // Only kind:1 (Text) and kind:24000 (TenexBootProject) can boot projects
             const canBootProject = event.kind === 1 || event.kind === 24000;
 
             if (!canBootProject) {
@@ -647,14 +692,16 @@ export class Daemon {
                 return;
             }
 
-            // Start the project runtime
             try {
                 addRoutingEvent(span, "project_runtime_start", {
                     title: project.tagValue("title") || "untitled",
                     bootKind: event.kind,
                 });
                 runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
-                await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+                await this.getSubscriptionSyncCoordinator().updateSubscriptionWithProjectAgents(
+                    projectId,
+                    runtime
+                );
             } catch (error) {
                 logger.error("Failed to start runtime", { projectId, error });
                 await logDropped(this.routingLogger, event, "Failed to start runtime");
@@ -662,13 +709,6 @@ export class Daemon {
             }
         }
 
-        // Log successful routing
-        if (!routingResult.matchedTags) {
-            throw new Error("Routing matchedTags not found");
-        }
-        if (!routingResult.method) {
-            throw new Error("Routing method not found");
-        }
         if (!routingResult.matchedTags) {
             throw new Error("Routing matchedTags not found");
         }
@@ -685,35 +725,21 @@ export class Daemon {
             );
         }
 
-        // Handle the event with crash isolation
         try {
             if (!event.id) {
                 throw new Error("Event ID not found");
             }
             await runtime.handleEvent(event);
-
-            // Check for intervention triggers (completion or user response)
             await this.checkInterventionTriggers(event, runtime, projectId);
         } catch (error) {
             logger.error("Project runtime crashed", { projectId, eventId: event.id });
             await this.runtimeLifecycle.handleRuntimeCrash(projectId, runtime);
-            throw error; // Re-throw to mark span as error
+            throw error;
         }
     }
 
     /**
      * Check if an event triggers intervention logic.
-     *
-     * Completion detection:
-     * - Event is kind:1
-     * - Event author is an agent (not whitelisted user)
-     * - Event p-tags a whitelisted pubkey
-     * - That whitelisted pubkey is the author of the root event for this conversation
-     *
-     * User response detection:
-     * - Event is kind:1
-     * - Event author is a whitelisted user
-     * - Event is a reply in an existing conversation
      */
     private async checkInterventionTriggers(
         event: NDKEvent,
@@ -725,7 +751,6 @@ export class Daemon {
             return;
         }
 
-        // Only process kind:1 events
         if (event.kind !== 1) {
             return;
         }
@@ -735,19 +760,15 @@ export class Daemon {
             return;
         }
 
-        const eventTimestamp = (event.created_at || 0) * 1000; // Convert to ms
+        const eventTimestamp = (event.created_at || 0) * 1000;
 
-        // Get conversation ID from the event (e-tag or reply target)
         const replyTarget = getReplyTarget(event);
         if (!replyTarget) {
-            // This is a root event, not a reply - no intervention needed
             return;
         }
 
-        // Find the conversation for this event
         const conversation = ConversationStore.findByEventId(replyTarget);
         if (!conversation) {
-            // Conversation not found - can't determine root author
             return;
         }
 
@@ -757,11 +778,6 @@ export class Daemon {
             return;
         }
 
-        // Set the project context for InterventionService per-event
-        // This ensures the service loads/saves state for the correct project
-        // Must await to prevent race conditions during project switch:
-        // - setProject flushes pending writes before updating currentProjectId
-        // - If not awaited, onUserResponse/onAgentCompletion could run under wrong project
         try {
             await interventionService.setProject(projectId);
         } catch (error) {
@@ -769,21 +785,14 @@ export class Daemon {
                 projectId: projectId.substring(0, 12),
                 error: error instanceof Error ? error.message : String(error),
             });
-            // Continue processing - intervention is optional, don't block event handling
         }
 
         const isUserEvent = this.whitelistedPubkeys.includes(event.pubkey);
-        const isAgentEvent = this.agentPubkeyToProjects.has(event.pubkey);
+        const isAgentEv = this.agentPubkeyToProjects.has(event.pubkey);
 
         if (isUserEvent) {
-            // User response - potentially cancel intervention timer
-            interventionService.onUserResponse(
-                conversationId,
-                eventTimestamp,
-                event.pubkey
-            );
-        } else if (isAgentEvent) {
-            // Check if agent is p-tagging the root author (completion signal)
+            interventionService.onUserResponse(conversationId, eventTimestamp, event.pubkey);
+        } else if (isAgentEv) {
             const pTags = event.tags.filter((t) => t[0] === "p").map((t) => t[1]);
             const pTagsRootAuthor = pTags.includes(rootAuthorPubkey);
 
@@ -793,61 +802,41 @@ export class Daemon {
                     eventTimestamp,
                     event.pubkey,
                     rootAuthorPubkey,
-                    projectId,
+                    projectId
                 );
             }
         }
     }
 
-    /** Create an agent resolver for InterventionService to resolve agents per-project. */
+    /** Create an agent resolver for InterventionService */
     private createAgentResolver(): (projectId: string, agentSlug: string) => AgentResolutionResult {
         return (projectId: string, agentSlug: string): AgentResolutionResult => {
-            // Get active runtimes
             const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes();
             if (!activeRuntimes) {
-                // RuntimeLifecycle not initialized - transient failure
                 return { status: "runtime_unavailable" };
             }
 
-            // Find the runtime for this project (projectId arrives as string from InterventionService)
             const runtime = activeRuntimes.get(projectId as ProjectDTag);
             if (!runtime) {
-                // Runtime not active for this project - transient failure
-                // (Project might not be booted yet, or was stopped)
                 return { status: "runtime_unavailable" };
             }
 
-            // Get the project context
             const context = runtime.getContext();
             if (!context) {
-                // Context not available - transient failure
                 return { status: "runtime_unavailable" };
             }
 
-            // Look up the agent by slug in the project's agent registry
             const agent = context.agentRegistry.getAgent(agentSlug);
             if (!agent) {
-                // Agent slug not found in this project - permanent failure
                 return { status: "agent_not_found" };
             }
 
-            // Successfully resolved
             return { status: "resolved", pubkey: agent.pubkey };
         };
     }
 
     /**
      * Create an active delegation checker function for InterventionService.
-     * This allows Layer 3 (InterventionService) to check if a conversation
-     * has active outgoing delegations without directly depending on RALRegistry.
-     *
-     * Returns a function that:
-     * - Returns true if the agent+conversation has pending delegations
-     * - Returns false otherwise
-     *
-     * CRITICAL: This prevents premature intervention notifications when an agent
-     * has delegated work that is still running. The intervention should only
-     * trigger when the entire delegation tree has completed.
      */
     private createActiveDelegationChecker(): ActiveDelegationCheckerFn {
         return (agentPubkey: string, conversationId: string): boolean => {
@@ -860,930 +849,6 @@ export class Daemon {
     }
 
     /**
-     * Collect all agent pubkeys and definition IDs from active runtimes
-     */
-    private collectAgentData(): { pubkeys: Set<Hexpubkey>; definitionIds: Set<string> } {
-        const pubkeys = new Set<Hexpubkey>();
-        const definitionIds = new Set<string>();
-
-        if (!this.runtimeLifecycle) {
-            return { pubkeys, definitionIds };
-        }
-
-        const activeRuntimes = this.runtimeLifecycle.getActiveRuntimes();
-        for (const [pid, rt] of activeRuntimes) {
-            const context = rt.getContext();
-            if (!context) {
-                throw new Error(
-                    `Runtime for project ${pid} has no context during agent collection`
-                );
-            }
-
-            const agents = context.agentRegistry.getAllAgents();
-            for (const agent of agents) {
-                pubkeys.add(agent.pubkey);
-
-                if (agent.eventId) {
-                    definitionIds.add(agent.eventId);
-                }
-            }
-        }
-
-        return { pubkeys, definitionIds };
-    }
-
-    /**
-     * Update subscription with agent pubkeys and definition IDs from all active runtimes.
-     * Also sets up the onAgentAdded callback to keep routing synchronized when
-     * agents are created dynamically via agents_write tool.
-     */
-    private async updateSubscriptionWithProjectAgents(
-        projectId: ProjectDTag,
-        runtime: ProjectRuntime
-    ): Promise<void> {
-        const subscriptionManager = this.subscriptionManager;
-        if (!subscriptionManager) return;
-
-        await daemonTracer.startActiveSpan(
-            "tenex.daemon.update_agent_subscriptions",
-            async (span) => {
-                span.setAttribute("project.id", projectId);
-
-                try {
-                    const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } =
-                        this.collectAgentData();
-
-                    span.setAttributes({
-                        "agents.pubkeys.total": allAgentPubkeys.size,
-                        "agents.definition_ids.total": allAgentDefinitionIds.size,
-                    });
-
-                    // Rebuild the routing map from scratch
-                    this.agentPubkeyToProjects.clear();
-
-                    // Track which projects each agent belongs to
-                    const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
-                    span.setAttribute("projects.active_count", activeRuntimes.size);
-                    for (const [pid, rt] of activeRuntimes) {
-                        const context = rt.getContext();
-                        if (!context) {
-                            throw new Error(
-                                `Runtime for project ${pid} has no context during subscription update`
-                            );
-                        }
-
-                        const agents = context.agentRegistry.getAllAgents();
-                        for (const agent of agents) {
-                            if (!this.agentPubkeyToProjects.has(agent.pubkey)) {
-                                this.agentPubkeyToProjects.set(agent.pubkey, new Set());
-                            }
-
-                            const projectSet = this.agentPubkeyToProjects.get(agent.pubkey);
-                            if (!projectSet) {
-                                throw new Error(
-                                    `Agent pubkey ${agent.pubkey.slice(0, 8)} missing from agentPubkeyToProjects after set`
-                                );
-                            }
-                            projectSet.add(pid);
-                        }
-                    }
-
-                    // Update agent mentions subscription
-                    subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
-
-                    // Sync per-agent lesson subscriptions: add new, remove stale
-                    this.syncLessonSubscriptions(allAgentDefinitionIds);
-
-                    // Sync trust service with all known agent pubkeys (cross-project trust)
-                    this.syncTrustServiceAgentPubkeys();
-
-                    // Set up callback for dynamic agent additions (e.g., via agents_write tool)
-                    // This ensures new agents are immediately routable without requiring a restart
-                    const context = runtime.getContext();
-                    if (context) {
-                        context.setOnAgentAdded((agent) => {
-                            this.handleDynamicAgentAdded(projectId, agent);
-                        });
-                    }
-
-                    span.addEvent("daemon.agent_subscriptions_updated", {
-                        "agents.pubkeys.total": allAgentPubkeys.size,
-                        "agents.definition_ids.total": allAgentDefinitionIds.size,
-                        "projects.active_count": activeRuntimes.size,
-                    });
-                    span.setStatus({ code: SpanStatusCode.OK });
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-
-                    span.recordException(error as Error);
-                    span.setStatus({
-                        code: SpanStatusCode.ERROR,
-                        message: errorMessage,
-                    });
-                    logger.error("Failed to update subscription with project agents", {
-                        projectId,
-                        error: errorMessage,
-                    });
-                } finally {
-                    span.end();
-                }
-            }
-        );
-    }
-
-    /**
-     * Sync per-agent lesson subscriptions: add subscriptions for new definition IDs,
-     * remove subscriptions for definition IDs no longer active.
-     */
-    private syncLessonSubscriptions(currentDefinitionIds: Set<string>): void {
-        if (!this.subscriptionManager) return;
-
-        // Collect existing lesson subscription IDs from the subscription manager
-        const existingIds = this.trackedLessonDefinitionIds;
-
-        // Add new
-        for (const id of currentDefinitionIds) {
-            if (!existingIds.has(id)) {
-                this.subscriptionManager.addLessonSubscription(id);
-            }
-        }
-
-        // Remove stale
-        for (const id of existingIds) {
-            if (!currentDefinitionIds.has(id)) {
-                this.subscriptionManager.removeLessonSubscription(id);
-            }
-        }
-
-        this.trackedLessonDefinitionIds = new Set(currentDefinitionIds);
-    }
-
-    /**
-     * Push current agent pubkeys to TrustPubkeyService for cross-project trust.
-     * Unions the daemon-level runtime pubkeys (from currently running projects)
-     * with the stored pubkeys seeded from AgentStorage at startup (covers
-     * not-yet-running projects), so trust is never dropped for known agents.
-     */
-    private syncTrustServiceAgentPubkeys(): void {
-        const allPubkeys = new Set<Hexpubkey>(this.agentPubkeyToProjects.keys());
-
-        // Union with stored pubkeys so non-running projects retain trust
-        for (const pubkey of this.storedAgentPubkeys) {
-            allPubkeys.add(pubkey);
-        }
-
-        getTrustPubkeyService().setGlobalAgentPubkeys(allPubkeys);
-    }
-
-    /**
-     * Handle a dynamically added agent (e.g., created via agents_write tool).
-     * Updates the routing map and subscription to make the agent immediately routable.
-     */
-    private handleDynamicAgentAdded(projectId: ProjectDTag, agent: AgentInstance): void {
-        // Add to routing map
-        if (!this.agentPubkeyToProjects.has(agent.pubkey)) {
-            this.agentPubkeyToProjects.set(agent.pubkey, new Set());
-        }
-        const projectSet = this.agentPubkeyToProjects.get(agent.pubkey);
-        if (projectSet) {
-            projectSet.add(projectId);
-        }
-
-        // Persist in stored set so trust survives if this project later stops
-        this.storedAgentPubkeys.add(agent.pubkey);
-
-        // Update subscriptions
-        if (this.subscriptionManager) {
-            const allPubkeys = Array.from(this.agentPubkeyToProjects.keys());
-            this.subscriptionManager.updateAgentMentions(allPubkeys);
-
-            // Add lesson subscription if this agent has a definition ID
-            if (agent.eventId) {
-                this.subscriptionManager.addLessonSubscription(agent.eventId);
-                this.trackedLessonDefinitionIds.add(agent.eventId);
-            }
-        }
-
-        // Register with global 14199 service
-        OwnerAgentListService.getInstance().registerAgents(projectId, [agent.pubkey]);
-
-        // Sync trust service with updated agent pubkeys (cross-project trust)
-        this.syncTrustServiceAgentPubkeys();
-
-        logger.info("Dynamic agent added to routing", {
-            projectId,
-            agentSlug: agent.slug,
-            agentPubkey: agent.pubkey.slice(0, 8),
-        });
-    }
-
-    /**
-     * Handle global agent config updates (kind 24020 without a-tag).
-     * Updates agent storage directly and reloads the agent in all running runtimes.
-     */
-    private async handleGlobalAgentConfigUpdate(event: NDKEvent): Promise<void> {
-        const agentPubkey = event.tagValue("p");
-        if (!agentPubkey) {
-            logger.warn("Global agent config update missing p-tag", { eventId: event.id });
-            return;
-        }
-
-        await agentStorage.initialize();
-        const storedAgent = await agentStorage.loadAgent(agentPubkey);
-        if (!storedAgent) {
-            logger.warn("Agent not found for global config update", {
-                agentPubkey: agentPubkey.substring(0, 8),
-            });
-            return;
-        }
-
-        const updateResult = await this.agentConfigUpdateService.applyEvent(event);
-        const configUpdated = updateResult.configUpdated || updateResult.pmUpdated;
-
-        if (!configUpdated) {
-            logger.info("No config changes for global agent config update", {
-                agentSlug: storedAgent.slug,
-                agentPubkey: agentPubkey.substring(0, 8),
-            });
-            return;
-        }
-
-        logger.info("Applied global agent config update", {
-            agentSlug: storedAgent.slug,
-            agentPubkey: agentPubkey.substring(0, 8),
-            hasModel: updateResult.hasModel,
-            toolCount: updateResult.toolCount,
-            skillCount: updateResult.skillCount,
-            hasPM: updateResult.hasPM,
-        });
-
-        // Reload agent in all running runtimes that have it
-        const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
-        for (const [, runtime] of activeRuntimes) {
-            const context = runtime.getContext();
-            if (!context) continue;
-
-            const agent = context.getAgentByPubkey(agentPubkey);
-            if (!agent) continue;
-
-            await context.agentRegistry.reloadAgent(agentPubkey);
-
-            if (context.statusPublisher) {
-                await context.statusPublisher.publishImmediately();
-            }
-        }
-    }
-
-    private async handleAgentCreateRequest(event: NDKEvent): Promise<void> {
-        if (!this.backendPubkey) {
-            logger.warn("[Daemon] Ignoring agent create request before backend pubkey is initialized", {
-                eventId: event.id,
-            });
-            return;
-        }
-
-        const targetedBackendPubkeys = event.tags
-            .filter((tag) => tag[0] === "p" && tag[1])
-            .map((tag) => tag[1]);
-        if (!targetedBackendPubkeys.includes(this.backendPubkey)) {
-            return;
-        }
-
-        if (!this.whitelistedPubkeys.includes(event.pubkey)) {
-            logger.warn("[Daemon] Unauthorized agent create request", {
-                author: event.pubkey.slice(0, 8),
-                eventId: event.id,
-            });
-            return;
-        }
-
-        const definitionEventId = event.tags.find((tag) => tag[0] === "e" && tag[1])?.[1];
-        if (!definitionEventId) {
-            logger.warn("[Daemon] Agent create request missing definition e-tag", {
-                eventId: event.id,
-            });
-            return;
-        }
-
-        const slugOverride = event.tags.find((tag) => tag[0] === "slug" && tag[1])?.[1];
-        const result = await installAgentFromDefinitionEventId(definitionEventId, {
-            slugOverride,
-            ndk: this.ndk || undefined,
-        });
-
-        logger.info("[Daemon] Processed agent create request", {
-            author: event.pubkey.slice(0, 8),
-            definitionEventId: definitionEventId.slice(0, 8),
-            agentPubkey: result.pubkey.slice(0, 8),
-            slug: result.storedAgent.slug,
-            created: result.created,
-        });
-    }
-
-    /**
-     * Handle project creation/update events
-     */
-    private async handleProjectEvent(event: NDKEvent): Promise<void> {
-        const projectId = this.buildProjectId(event);
-
-        const isDeleted = event.tags.some((tag: string[]) => tag[0] === "deleted");
-        if (isDeleted) {
-            if (this.knownProjects.has(projectId)) {
-                this.knownProjects.delete(projectId);
-                this.pendingRestartBootProjects.delete(projectId);
-
-                if (this.runtimeLifecycle?.getRuntime(projectId)) {
-                    try {
-                        await this.killRuntime(projectId);
-                    } catch (error) {
-                        logger.error("Failed to stop runtime for deleted project", {
-                            projectId,
-                            error: error instanceof Error ? error.message : String(error),
-                        });
-                    }
-                }
-
-                if (this.subscriptionManager) {
-                    this.subscriptionManager.updateKnownProjects(this.buildProjectAddressesForSubscription());
-                }
-            }
-
-            logger.info("Ignored deleted project event", { projectId });
-            return;
-        }
-
-        const project = new NDKProject(getNDK(), event.rawEvent());
-        const isNewProject = !this.knownProjects.has(projectId);
-
-        this.knownProjects.set(projectId, project);
-
-        // Update subscription for new projects
-        if (isNewProject && this.subscriptionManager) {
-            this.subscriptionManager.updateKnownProjects(this.buildProjectAddressesForSubscription());
-        }
-
-        // Route to active runtime if exists
-        let runtime = this.runtimeLifecycle?.getRuntime(projectId);
-        if (runtime) {
-            await runtime.handleEvent(event);
-            await this.updateSubscriptionWithProjectAgents(projectId, runtime);
-        }
-
-        // Auto-boot newly discovered projects that match boot patterns
-        if (isNewProject && !runtime && this.autoBootPatterns.length > 0) {
-            const dTag = event.tags.find((t) => t[0] === "d")?.[1] || "";
-            const matchingPattern = this.autoBootPatterns.find((pattern) =>
-                dTag.toLowerCase().includes(pattern.toLowerCase())
-            );
-
-            if (matchingPattern && this.runtimeLifecycle) {
-                const projectTitle = project.tagValue("title") || dTag;
-                logger.info("Auto-booting project matching pattern", {
-                    projectId,
-                    projectTitle,
-                    dTag,
-                    matchedPattern: matchingPattern,
-                });
-
-                this.pendingAutoBootCount++;
-                try {
-                    runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
-                    await this.updateSubscriptionWithProjectAgents(projectId, runtime);
-                    // Clear any pending restart boot entry since we've successfully started
-                    this.pendingRestartBootProjects.delete(projectId);
-                    logger.info("Auto-booted project successfully", { projectId, projectTitle });
-                } catch (error) {
-                    logger.error("Failed to auto-boot project", {
-                        projectId,
-                        projectTitle,
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                } finally {
-                    this.pendingAutoBootCount--;
-                    this.checkReady();
-                    this.writeStatus();
-                }
-            }
-        }
-
-        // Auto-boot projects from restart state when they are discovered or retried
-        // Drop the isNewProject guard: already-known projects that failed to boot in loadRestartState
-        // need another chance when their project event is re-processed
-        if (!runtime && this.pendingRestartBootProjects.has(projectId)) {
-            if (this.runtimeLifecycle) {
-                const projectTitle = project.tagValue("title") || event.tags.find((t) => t[0] === "d")?.[1] || "untitled";
-                logger.info("Auto-booting project from restart state (deferred)", {
-                    projectId,
-                    projectTitle,
-                });
-
-                try {
-                    runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
-                    await this.updateSubscriptionWithProjectAgents(projectId, runtime);
-                    this.pendingRestartBootProjects.delete(projectId);
-                    logger.info("Auto-booted project from restart state (deferred) successfully", {
-                        projectId,
-                        projectTitle,
-                        remainingPending: this.pendingRestartBootProjects.size,
-                    });
-                } catch (error) {
-                    logger.error("Failed to auto-boot project from restart state (deferred)", {
-                        projectId,
-                        projectTitle,
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                    // Remove from pending to avoid repeated failures
-                    this.pendingRestartBootProjects.delete(projectId);
-                }
-            }
-        }
-    }
-
-    /**
-     * Handle lesson events (kind 4129) - hydrate into active runtimes only
-     * Does NOT start new project runtimes
-     */
-    private async handleLessonEvent(event: NDKEvent): Promise<void> {
-        if (!event.id) {
-            throw new Error("[Daemon] Missing lesson event id.");
-        }
-        if (!event.pubkey) {
-            throw new Error("[Daemon] Missing lesson event pubkey.");
-        }
-
-        const span = lessonTracer.startSpan("tenex.lesson.received", {
-            attributes: {
-                "lesson.event_id": event.id.substring(0, 16),
-                "lesson.publisher": event.pubkey.substring(0, 16),
-                "lesson.created_at": event.created_at || 0,
-            },
-        });
-
-        try {
-            const lesson = NDKAgentLesson.from(event);
-            span.setAttribute("lesson.title", lesson.title || "untitled");
-
-            // Check if we should trust this lesson
-            if (!shouldTrustLesson(lesson, event.pubkey)) {
-                span.setAttribute("lesson.rejected", true);
-                span.setAttribute("lesson.rejection_reason", "trust_check_failed");
-                span.end();
-                return;
-            }
-
-            const agentDefinitionId = lesson.agentDefinitionId;
-            const lessonAuthorPubkey = event.pubkey;
-            span.setAttribute("lesson.agent_definition_id", agentDefinitionId?.substring(0, 16) || "none");
-            span.setAttribute("lesson.author_pubkey", lessonAuthorPubkey.substring(0, 16));
-
-            // Hydrate lesson into ACTIVE runtimes only (don't start new ones)
-            const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
-            span.setAttribute("lesson.active_runtimes_count", activeRuntimes.size);
-
-            let totalMatches = 0;
-            let totalAgentsChecked = 0;
-
-            for (const [projectId, runtime] of activeRuntimes) {
-                try {
-                    const context = runtime.getContext();
-                    if (!context) {
-                        continue;
-                    }
-
-                    const allAgents = context.agentRegistry.getAllAgents();
-                    totalAgentsChecked += allAgents.length;
-
-                    // Match agents by EITHER:
-                    // 1. Author pubkey (the agent published this lesson)
-                    // 2. Definition eventId (lesson references agent's definition via e-tag)
-                    const matchingAgents = allAgents.filter((agent: AgentInstance) => {
-                        // Always match if the agent authored this lesson
-                        if (agent.pubkey === lessonAuthorPubkey) {
-                            return true;
-                        }
-                        // Also match if lesson references this agent's definition (and agent has an eventId)
-                        if (agentDefinitionId && agent.eventId === agentDefinitionId) {
-                            return true;
-                        }
-                        return false;
-                    });
-
-                    if (matchingAgents.length === 0) {
-                        // Log all agent info for debugging
-                        const agentInfo = allAgents.map((a: AgentInstance) => ({
-                            slug: a.slug,
-                            pubkey: a.pubkey.substring(0, 16),
-                            eventId: a.eventId?.substring(0, 16) || "none",
-                        }));
-                        span.addEvent("no_matching_agents_in_project", {
-                            "project.id": projectId,
-                            "project.agent_count": allAgents.length,
-                            "project.agents": JSON.stringify(agentInfo),
-                            "lesson.agent_definition_id": agentDefinitionId?.substring(0, 16) || "none",
-                            "lesson.author_pubkey": lessonAuthorPubkey.substring(0, 16),
-                        });
-                        continue;
-                    }
-
-                    // Store the lesson for each matching agent
-                    for (const agent of matchingAgents) {
-                        const matchedByAuthor = agent.pubkey === lessonAuthorPubkey;
-                        const matchedByEventId = agentDefinitionId && agent.eventId === agentDefinitionId;
-                        const matchReason = matchedByAuthor && matchedByEventId
-                            ? "author_and_event_id"
-                            : matchedByAuthor
-                                ? "author_pubkey"
-                                : "event_id";
-
-                        context.addLesson(agent.pubkey, lesson);
-                        totalMatches++;
-                        span.addEvent("lesson_stored", {
-                            "agent.slug": agent.slug,
-                            "agent.pubkey": agent.pubkey.substring(0, 16),
-                            "project.id": projectId,
-                            "lesson.title": lesson.title || "untitled",
-                            "match_reason": matchReason,
-                        });
-                        logger.info("Stored lesson for agent", {
-                            agentSlug: agent.slug,
-                            lessonTitle: lesson.title,
-                            lessonId: event.id?.substring(0, 8),
-                            matchReason,
-                        });
-                    }
-                } catch (error) {
-                    span.addEvent("hydration_error", {
-                        "project.id": projectId,
-                        "error": error instanceof Error ? error.message : String(error),
-                    });
-                    logger.error("Failed to hydrate lesson into project", {
-                        projectId,
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                }
-            }
-
-            span.setAttribute("lesson.total_agents_checked", totalAgentsChecked);
-            span.setAttribute("lesson.total_matches", totalMatches);
-            span.setAttribute("lesson.stored", totalMatches > 0);
-            span.end();
-        } catch (error) {
-            span.setAttribute("error", true);
-            span.setAttribute("error.message", error instanceof Error ? error.message : String(error));
-            span.end();
-            throw error;
-        }
-    }
-
-    /**
-     * Handle lesson comment events (kind 1111 with #K: ["4129"])
-     * Hydrates comments into the active runtime contexts for background recompilation.
-     *
-     * The static subscription receives ALL lesson comments from whitelisted authors
-     * (no #p pre-filtering). We use the e-tag (lesson event ID) to find which
-     * agent the comment belongs to, falling back to p-tag if present.
-     */
-    private async handleLessonCommentEvent(event: NDKEvent): Promise<void> {
-        if (!event.id) {
-            throw new Error("[Daemon] Missing lesson comment event id.");
-        }
-        if (!event.pubkey) {
-            throw new Error("[Daemon] Missing lesson comment pubkey.");
-        }
-
-        const span = lessonTracer.startSpan("tenex.lesson_comment.received", {
-            attributes: {
-                "comment.event_id": event.id.substring(0, 16),
-                "comment.author": event.pubkey.substring(0, 16),
-                "comment.created_at": event.created_at || 0,
-            },
-        });
-
-        try {
-            // Verify author is whitelisted
-            if (!this.whitelistedPubkeys.includes(event.pubkey)) {
-                span.setAttribute("comment.rejected", true);
-                span.setAttribute("comment.rejection_reason", "not_whitelisted");
-                span.end();
-                return;
-            }
-
-            // Extract the lesson event ID from the root 'e' tag (NIP-22)
-            // Try uppercase E tag first (NIP-22 root reference), then lowercase e
-            const upperETag = event.tags.find(
-                (tag) => tag[0] === "E"
-            );
-            const rootETag = event.tags.find(
-                (tag) => tag[0] === "e" && tag[3] === "root"
-            );
-            const anyETag = event.tags.find((tag) => tag[0] === "e");
-            const lessonEventId = upperETag?.[1] || rootETag?.[1] || anyETag?.[1];
-
-            if (!lessonEventId) {
-                span.setAttribute("comment.rejected", true);
-                span.setAttribute("comment.rejection_reason", "no_lesson_reference");
-                span.end();
-                return;
-            }
-
-            span.setAttribute("comment.lesson_event_id", lessonEventId.substring(0, 16));
-
-            // Build the LessonComment object
-            const comment = {
-                id: event.id || "",
-                pubkey: event.pubkey,
-                content: event.content,
-                lessonEventId,
-                createdAt: event.created_at || 0,
-            };
-
-            // Route to active runtimes. Use p-tag if available for direct lookup,
-            // otherwise scan agents to find those with matching lesson event IDs.
-            const agentPubkey = event.tagValue("p");
-            const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
-            let routedCount = 0;
-
-            for (const [projectId, runtime] of activeRuntimes) {
-                const context = runtime.getContext();
-                if (!context) continue;
-
-                if (agentPubkey) {
-                    // Direct lookup by p-tag
-                    const agent = context.getAgentByPubkey(agentPubkey);
-                    if (agent) {
-                        context.addComment(agentPubkey, comment);
-                        routedCount++;
-                        logger.debug("Stored lesson comment for agent", {
-                            projectId,
-                            agentSlug: agent.slug,
-                            commentId: event.id?.substring(0, 8),
-                            lessonEventId: lessonEventId.substring(0, 8),
-                        });
-                    }
-                } else {
-                    // No p-tag: scan agents for those whose lessons match this event ID
-                    for (const agent of context.agentRegistry.getAllAgents()) {
-                        const lessons = context.getLessonsForAgent(agent.pubkey);
-                        if (lessons.some((l: NDKAgentLesson) => l.id === lessonEventId)) {
-                            context.addComment(agent.pubkey, comment);
-                            routedCount++;
-                            logger.debug("Stored lesson comment for agent (via lesson scan)", {
-                                projectId,
-                                agentSlug: agent.slug,
-                                commentId: event.id?.substring(0, 8),
-                                lessonEventId: lessonEventId.substring(0, 8),
-                            });
-                        }
-                    }
-                }
-            }
-
-            span.setAttribute("comment.routed_count", routedCount);
-            span.end();
-        } catch (error) {
-            span.setAttribute("error", true);
-            span.setAttribute("error.message", error instanceof Error ? error.message : String(error));
-            span.end();
-            throw error;
-        }
-    }
-
-    /**
-     * Setup graceful shutdown handlers
-     */
-    private setupShutdownHandlers(): void {
-        // Prevent EPIPE from crashing the daemon when stdout/stderr pipe breaks
-        // (e.g. when the TUI exits). The daemon logs to ~/.tenex/daemon/daemon.log
-        // so silently dropping broken-pipe writes is correct behavior.
-        process.stdout.on("error", (err) => {
-            if ((err as NodeJS.ErrnoException).code === "EPIPE") return;
-            throw err;
-        });
-        process.stderr.on("error", (err) => {
-            if ((err as NodeJS.ErrnoException).code === "EPIPE") return;
-            throw err;
-        });
-        /**
-         * Perform graceful shutdown of the daemon.
-         * @param exitCode - Exit code to use (default: 0)
-         * @param isGracefulRestart - If true, persist restart state before shutdown
-         */
-        const shutdown = async (exitCode = 0, isGracefulRestart = false): Promise<void> => {
-            if (isGracefulRestart) {
-                console.log("\n[Daemon] Triggering graceful restart...");
-            } else {
-                console.log("\nShutting down gracefully...");
-            }
-
-            if (!this.isRunning) {
-                process.exit(exitCode);
-            }
-
-            this.isRunning = false;
-
-            try {
-                // Persist booted projects for auto-boot on restart (only for graceful restart)
-                if (isGracefulRestart && this.restartState && this.runtimeLifecycle) {
-                    const bootedProjects = this.runtimeLifecycle.getActiveProjectIds();
-                    await this.restartState.save(bootedProjects);
-                    console.log(`[Daemon] Saved ${bootedProjects.length} booted project(s) for restart`);
-                }
-
-                // Stop conversation indexing job
-                logger.info("Stopping conversation indexing job...");
-                getConversationIndexingJob().stop();
-
-                // Close RAG service (stops maintenance timer)
-                logger.info("Closing RAG service...");
-                await RAGService.closeInstance();
-
-                // Stop agent definition monitor
-                if (this.agentDefinitionMonitor) {
-                    logger.info("Stopping agent definition monitor...");
-                    this.agentDefinitionMonitor.stop();
-                    this.agentDefinitionMonitor = null;
-                }
-
-                // Stop intervention service
-                logger.info("Stopping intervention service...");
-                InterventionService.getInstance().shutdown();
-
-                // Stop owner agent list service
-                logger.info("Stopping owner agent list service...");
-                OwnerAgentListService.getInstance().shutdown();
-
-                if (this.installedAgentListPublisher) {
-                    logger.info("Stopping installed-agent inventory publisher...");
-                    this.installedAgentListPublisher.stopPublishing();
-                    this.installedAgentListPublisher = null;
-                }
-
-                // Stop NIP-46 signing service
-                logger.info("Stopping NIP-46 signing service...");
-                await Nip46SigningService.getInstance().shutdown();
-
-                if (this.subscriptionManager) {
-                    logger.info("Stopping subscriptions...");
-                    this.subscriptionManager.stop();
-                }
-
-                if (this.runtimeLifecycle) {
-                    const stats = this.runtimeLifecycle.getStats();
-                    if (stats.activeCount > 0) {
-                        logger.info(`Stopping ${stats.activeCount} project runtime(s)...`);
-                    }
-                    await this.runtimeLifecycle.stopAllRuntimes();
-                }
-
-                // Close the global prefix KV store (after all runtimes are stopped)
-                logger.info("Closing storage...");
-                await prefixKVStore.forceClose();
-
-                if (this.shutdownHandlers.length > 0) {
-                    logger.info("Running shutdown handlers...");
-                    for (const handler of this.shutdownHandlers) {
-                        await handler();
-                    }
-                }
-
-                if (this.lockfile) {
-                    await this.lockfile.release();
-                }
-
-                logger.info("Flushing telemetry...");
-                const conversationSpanManager = getConversationSpanManager();
-                conversationSpanManager.shutdown();
-                await shutdownTelemetry();
-
-                if (isGracefulRestart) {
-                    logger.info("[Daemon] Graceful restart complete - exiting with code 0");
-                } else {
-                    logger.info("Shutdown complete.");
-                }
-                process.exit(exitCode);
-            } catch (error) {
-                logger.error("Error during shutdown", { error });
-                process.exit(1);
-            }
-        };
-
-        // Store shutdown function for use by triggerGracefulRestart
-        this.shutdownFn = shutdown;
-
-        // SIGHUP handler - deferred restart in supervised mode, immediate shutdown otherwise
-        const handleSighup = async (): Promise<void> => {
-            if (this.supervisedMode) {
-                // Ignore duplicate SIGHUP if restart is already pending or in progress
-                if (this.pendingRestart || this.restartInProgress) {
-                    logger.info("[Daemon] SIGHUP received but restart already pending/in progress, ignoring");
-                    console.log("Restart already pending, ignoring duplicate SIGHUP");
-                    return;
-                }
-
-                this.pendingRestart = true;
-                const activeRalCount = RALRegistry.getInstance().getTotalActiveCount();
-
-                console.log("\n[Daemon] SIGHUP received - initiating deferred restart");
-                logger.info("[Daemon] SIGHUP received - initiating deferred restart", {
-                    activeRalCount,
-                });
-
-                // If no active RALs, trigger restart immediately
-                if (activeRalCount === 0) {
-                    console.log("[Daemon] No active RALs, triggering immediate graceful restart");
-                    await this.triggerGracefulRestart();
-                } else {
-                    console.log(`[Daemon] Waiting for ${activeRalCount} active RAL(s) to complete before restart...`);
-                    // The RAL completion listener will trigger restart when count hits 0
-                }
-            } else {
-                // Non-supervised mode: immediate shutdown
-                shutdown();
-            }
-        };
-
-        process.on("SIGTERM", () => shutdown());
-        process.on("SIGINT", () => shutdown());
-        process.on("SIGHUP", () => handleSighup());
-
-        // Handle uncaught exceptions - exit with code 1 to trigger crash counter
-        process.on("uncaughtException", (error) => {
-            logger.error("Uncaught exception", {
-                error: error.message,
-                stack: error.stack,
-            });
-            // Use exit code 1 to indicate a crash, not a graceful restart
-            // This ensures the wrapper's crash counter is incremented
-            shutdown(1);
-        });
-
-        process.on("unhandledRejection", (reason, promise) => {
-            logger.error("Unhandled rejection", {
-                reason: String(reason),
-                promise: String(promise),
-            });
-            // Don't shutdown - most unhandled rejections are not critical
-            // e.g., relay rejections like "replaced: have newer event"
-        });
-    }
-
-    /**
-     * Setup listener for RAL completion events to trigger deferred restart.
-     * Called when supervised mode is enabled.
-     */
-    private setupRALCompletionListener(): void {
-        const ralRegistry = RALRegistry.getInstance();
-
-        // Subscribe to RAL updates
-        ralRegistry.on("updated", (_projectId: string, _conversationId: string) => {
-            // Only check if restart is pending
-            if (!this.pendingRestart) {
-                return;
-            }
-
-            const activeRalCount = ralRegistry.getTotalActiveCount();
-            logger.debug("[Daemon] RAL update received during pending restart", {
-                activeRalCount,
-            });
-
-            // When count hits 0, trigger graceful restart
-            if (activeRalCount === 0) {
-                console.log("[Daemon] All RALs completed, triggering graceful restart");
-                this.triggerGracefulRestart().catch((error) => {
-                    logger.error("[Daemon] Failed to trigger graceful restart", {
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                    process.exit(1);
-                });
-            }
-        });
-
-        logger.debug("[Daemon] RAL completion listener registered for supervised mode");
-    }
-
-    /**
-     * Trigger graceful restart: persist state and exit cleanly.
-     * The wrapper process will respawn the daemon.
-     */
-    private async triggerGracefulRestart(): Promise<void> {
-        // Guard against concurrent calls (race condition from multiple RAL updates)
-        if (this.restartInProgress) {
-            logger.debug("[Daemon] Graceful restart already in progress, ignoring duplicate trigger");
-            return;
-        }
-        this.restartInProgress = true;
-
-        // Use the unified shutdown function with graceful restart flag
-        if (this.shutdownFn) {
-            await this.shutdownFn(0, true);
-        } else {
-            // Fallback if shutdown function not yet initialized (shouldn't happen)
-            logger.error("[Daemon] Shutdown function not initialized, exiting with code 0");
-            process.exit(0);
-        }
-    }
-
-    /**
      * Add a custom shutdown handler
      */
     addShutdownHandler(handler: () => Promise<void>): void {
@@ -1792,10 +857,6 @@ export class Daemon {
 
     /**
      * Load restart state and queue previously booted projects for auto-boot.
-     * Called after daemon is fully initialized to restore state from a graceful restart.
-     *
-     * Note: Projects may not be discovered yet via SubscriptionManager, so we store
-     * the project IDs and attempt to boot them when they are discovered in handleProjectEvent.
      */
     async loadRestartState(): Promise<void> {
         if (!this.restartState) {
@@ -1808,19 +869,17 @@ export class Daemon {
         }
 
         console.log(`[Daemon] Found restart state from ${new Date(state.requestedAt).toISOString()}`);
-        console.log(`[Daemon] Queuing ${state.bootedProjects.length} project(s) for auto-boot from restart state`);
+        console.log(
+            `[Daemon] Queuing ${state.bootedProjects.length} project(s) for auto-boot from restart state`
+        );
 
-        // Store projects to boot - they will be booted when discovered via handleProjectEvent
         this.pendingRestartBootProjects = new Set(state.bootedProjects);
 
-        // Attempt to boot any projects that are already known
-        // (This handles the case where some projects were discovered before loadRestartState was called)
         let bootedCount = 0;
 
         for (const projectId of state.bootedProjects) {
             const project = this.knownProjects.get(projectId);
             if (!project) {
-                // Project not yet discovered - will be booted when discovered
                 logger.debug("[Daemon] Project from restart state not yet discovered, deferring boot", {
                     projectId: projectId.substring(0, 20),
                 });
@@ -1832,7 +891,6 @@ export class Daemon {
                 break;
             }
 
-            // Already running? Skip
             if (this.runtimeLifecycle.getRuntime(projectId)) {
                 this.pendingRestartBootProjects.delete(projectId);
                 continue;
@@ -1840,7 +898,10 @@ export class Daemon {
 
             try {
                 const runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
-                await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+                await this.getSubscriptionSyncCoordinator().updateSubscriptionWithProjectAgents(
+                    projectId,
+                    runtime
+                );
                 this.pendingRestartBootProjects.delete(projectId);
                 bootedCount++;
                 logger.info("[Daemon] Auto-booted project from restart state", {
@@ -1851,17 +912,16 @@ export class Daemon {
                     projectId: projectId.substring(0, 20),
                     error: error instanceof Error ? error.message : String(error),
                 });
-                // Keep in pending set - will retry when project event is re-processed in handleProjectEvent
             }
         }
 
-        // Clear restart state file now that we've loaded it
-        // (Pending boots are tracked in memory via pendingRestartBootProjects)
         await this.restartState.clear();
 
         const pendingCount = this.pendingRestartBootProjects.size;
         if (pendingCount > 0) {
-            console.log(`[Daemon] Restart state loaded: ${bootedCount} booted immediately, ${pendingCount} pending discovery`);
+            console.log(
+                `[Daemon] Restart state loaded: ${bootedCount} booted immediately, ${pendingCount} pending discovery`
+            );
         } else {
             console.log(`[Daemon] Restart state processed: ${bootedCount} booted`);
         }
@@ -1871,7 +931,6 @@ export class Daemon {
      * Get daemon status
      */
     getStatus(): DaemonStatus {
-        // Count total agents across all known projects
         let totalAgents = 0;
         for (const project of this.knownProjects.values()) {
             const agentTags = project.tags.filter((t) => t[0] === "p");
@@ -1910,21 +969,17 @@ export class Daemon {
 
     /**
      * Kill a specific project runtime
-     * @param projectId - The project d-tag to kill
-     * @throws Error if the runtime is not found or not running
      */
     async killRuntime(projectId: ProjectDTag): Promise<void> {
         if (!this.runtimeLifecycle) {
             throw new Error("RuntimeLifecycle not initialized");
         }
 
-
         try {
             await this.runtimeLifecycle.stopRuntime(projectId);
-
-            // Update subscription to remove this project's agent pubkeys
-            await this.updateSubscriptionAfterRuntimeRemoved(projectId);
-
+            await this.getSubscriptionSyncCoordinator().updateSubscriptionAfterRuntimeRemoved(
+                projectId
+            );
         } catch (error) {
             logger.error(`Failed to kill project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -1935,8 +990,6 @@ export class Daemon {
 
     /**
      * Restart a specific project runtime
-     * @param projectId - The project ID to restart
-     * @throws Error if the runtime is not found or restart fails
      */
     async restartRuntime(projectId: ProjectDTag): Promise<void> {
         if (!this.runtimeLifecycle) {
@@ -1948,13 +1001,12 @@ export class Daemon {
             throw new Error(`Project not found: ${projectId}`);
         }
 
-
         try {
             const runtime = await this.runtimeLifecycle.restartRuntime(projectId, project);
-
-            // Update subscription with potentially new agent pubkeys
-            await this.updateSubscriptionWithProjectAgents(projectId, runtime);
-
+            await this.getSubscriptionSyncCoordinator().updateSubscriptionWithProjectAgents(
+                projectId,
+                runtime
+            );
         } catch (error) {
             logger.error(`Failed to restart project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -1965,15 +1017,12 @@ export class Daemon {
 
     /**
      * Start a specific project runtime
-     * @param projectId - The project ID to start
-     * @throws Error if the project is not found or already running
      */
     async startRuntime(projectId: ProjectDTag): Promise<void> {
         if (!this.runtimeLifecycle) {
             throw new Error("RuntimeLifecycle not initialized");
         }
 
-        // Check if project exists in known projects
         const project = this.knownProjects.get(projectId);
         if (!project) {
             throw new Error(`Project not found: ${projectId}`);
@@ -1981,47 +1030,15 @@ export class Daemon {
 
         try {
             const runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
-
-            // Update subscription with this project's agent pubkeys
-            await this.updateSubscriptionWithProjectAgents(projectId, runtime);
-
+            await this.getSubscriptionSyncCoordinator().updateSubscriptionWithProjectAgents(
+                projectId,
+                runtime
+            );
         } catch (error) {
             logger.error(`Failed to start project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
             });
             throw error;
-        }
-    }
-
-    /**
-     * Update subscription after a runtime has been removed
-     */
-    private async updateSubscriptionAfterRuntimeRemoved(projectId: ProjectDTag): Promise<void> {
-        if (!this.subscriptionManager) return;
-
-        try {
-            // Rebuild agent pubkey mapping without the removed project
-            this.agentPubkeyToProjects.forEach((projectSet, agentPubkey) => {
-                projectSet.delete(projectId);
-                if (projectSet.size === 0) {
-                    this.agentPubkeyToProjects.delete(agentPubkey);
-                }
-            });
-
-            // Collect all agent pubkeys and definition IDs from remaining active runtimes
-            const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } =
-                this.collectAgentData();
-
-            this.subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
-            this.syncLessonSubscriptions(allAgentDefinitionIds);
-
-            // Sync trust service with remaining agent pubkeys (cross-project trust)
-            this.syncTrustServiceAgentPubkeys();
-        } catch (error) {
-            logger.error("Failed to update subscription after runtime removed", {
-                projectId,
-                error: error instanceof Error ? error.message : String(error),
-            });
         }
     }
 
@@ -2034,62 +1051,42 @@ export class Daemon {
             return;
         }
 
-
         this.isRunning = false;
 
-        // Stop conversation indexing job
         getConversationIndexingJob().stop();
-
-        // Close RAG service (stops maintenance timer)
         RAGService.closeInstance();
-
-        // Stop intervention service
         InterventionService.getInstance().shutdown();
-
-        // Stop owner agent list service
         OwnerAgentListService.getInstance().shutdown();
 
         this.removeWhitelistCacheListener?.();
         this.removeWhitelistCacheListener = null;
 
-        // Stop nudge/skill whitelist service
         NudgeSkillWhitelistService.getInstance().shutdown();
-
-        // Stop NIP-46 signing service
         await Nip46SigningService.getInstance().shutdown();
 
-        // Stop subscription
         if (this.subscriptionManager) {
             this.subscriptionManager.stop();
         }
 
-        // Stop all active project runtimes
         if (this.runtimeLifecycle) {
             await this.runtimeLifecycle.stopAllRuntimes();
         }
 
-        // Close the global prefix KV store (after all runtimes are stopped)
         await prefixKVStore.forceClose();
-
-        // Clear state
         this.knownProjects.clear();
 
-        // Stop status writer and remove status file
         if (this.statusInterval) {
             clearInterval(this.statusInterval);
             this.statusInterval = null;
         }
         await this.statusFile?.remove();
 
-        // Release lockfile
         if (this.lockfile) {
             await this.lockfile.release();
         }
 
-        // Shutdown conversation span manager
         const conversationSpanManager = getConversationSpanManager();
         conversationSpanManager.shutdown();
-
     }
 }
 
