@@ -132,34 +132,22 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
         // Inject +prefixed file contents
         if (injectedFiles.length > 0) {
             parts.push("");
-            parts.push("### Injected Home Files\n");
-
+            parts.push("<memorized-files>");
             for (const file of injectedFiles) {
-                parts.push(`**${file.filename}:**`);
-                if (file.truncated) {
-                    parts.push("*(truncated to 1500 characters)*");
-                }
-                parts.push("```");
-                parts.push(file.content);
-                parts.push("```");
-                parts.push("");
+                const truncatedAttr = file.truncated ? ` truncated="true"` : "";
+                parts.push(`  <file name="${file.filename}"${truncatedAttr}>${file.content}</file>`);
             }
+            parts.push("</memorized-files>");
         }
 
         if (projectInjectedFiles.length > 0) {
             parts.push("");
-            parts.push("### Injected Project Files\n");
-
+            parts.push("<memorized-project-files>");
             for (const file of projectInjectedFiles) {
-                parts.push(`**${file.filename}:**`);
-                if (file.truncated) {
-                    parts.push("*(truncated to 1500 characters)*");
-                }
-                parts.push("```");
-                parts.push(file.content);
-                parts.push("```");
-                parts.push("");
+                const truncatedAttr = file.truncated ? ` truncated="true"` : "";
+                parts.push(`  <file name="${file.filename}"${truncatedAttr}>${file.content}</file>`);
             }
+            parts.push("</memorized-project-files>");
         }
 
         parts.push("</home-directory>");

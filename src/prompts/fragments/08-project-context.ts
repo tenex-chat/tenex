@@ -480,6 +480,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         if (coworkers.length > 0) {
             parts.push("");
             parts.push("  <team>");
+            parts.push("    You are part of a multi-agent team. Stay in your lane, trust your teammates, and defer to their expertise rather than overstepping your own role.");
             for (const coworker of coworkers) {
                 const criteria = coworker.useCriteria
                     ? `Use Criteria: ${coworker.useCriteria}`
@@ -497,6 +498,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
             if (channelEntries.length > 0) {
                 parts.push("");
                 parts.push("  <channels>");
+                parts.push("    These are alternative communication channels available to you via the send_message tool.");
                 for (const entry of channelEntries) {
                     parts.push(
                         `    <telegram type="${entry.type}" id="${entry.channelId}" description="${entry.description}" />`

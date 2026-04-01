@@ -203,8 +203,8 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("### Injected Home Files");
-            expect(result).toContain("**+NOTES.md:**");
+            expect(result).toContain("<memorized-files>");
+            expect(result).toContain(`<file name="+NOTES.md">`);
             expect(result).toContain("Remember to test everything!");
         });
 
@@ -218,8 +218,8 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("**+LONG.txt:**");
-            expect(result).toContain("truncated to 1500 characters");
+            expect(result).toContain(`<file name="+LONG.txt" truncated="true">`);
+            expect(result).toContain("x".repeat(1500));
         });
 
         it("should inject multiple +prefixed files", async () => {
@@ -233,9 +233,9 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("**+ALPHA.txt:**");
+            expect(result).toContain(`<file name="+ALPHA.txt">`);
             expect(result).toContain("First file");
-            expect(result).toContain("**+BETA.txt:**");
+            expect(result).toContain(`<file name="+BETA.txt">`);
             expect(result).toContain("Second file");
         });
 
@@ -248,8 +248,8 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).not.toContain("### Injected Home Files");
-            expect(result).not.toContain("### Injected Project Files");
+            expect(result).not.toContain("<memorized-files>");
+            expect(result).not.toContain("<memorized-project-files>");
         });
 
         it("should document project-specific memory when project context is present", async () => {
@@ -279,9 +279,9 @@ describe("agent-home-directory fragment", () => {
                 projectDTag: "acme-app",
             } as never);
 
-            expect(result).toContain("### Injected Home Files");
+            expect(result).toContain("<memorized-files>");
             expect(result).toContain("Home memory");
-            expect(result).toContain("### Injected Project Files");
+            expect(result).toContain("<memorized-project-files>");
             expect(result).toContain("Project memory");
         });
 

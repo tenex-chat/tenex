@@ -2,24 +2,25 @@ import { describe, expect, it } from "bun:test";
 import { agentIdentityFragment } from "../01-agent-identity";
 
 describe("agentIdentityFragment", () => {
-    it("renders agent identity with name, npub, and nsec", () => {
-        const nsec = "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq26us3r";
+    it("renders agent identity with name, shortened pubkey, and nsec note", () => {
         const result = agentIdentityFragment.template({
             agent: {
                 name: "Test Agent",
                 slug: "test-agent",
                 role: "builder",
                 signer: {
-                    npub: "npub1test",
-                    nsec,
+                    npub: "npub1testabcdef",
+                    nsec: "nsec1test",
                 },
             } as any,
         });
 
         expect(result).toContain("Your name: Test Agent (test-agent)");
-        expect(result).toContain("Your npub: npub1test");
+        expect(result).toContain("Your shortened pubkey: npub1testab");
         expect(result).toContain("Your role: builder");
-        expect(result).toContain(nsec);
+        expect(result).toContain(".env");
+        expect(result).toContain("NSEC");
+        expect(result).not.toContain("nsec1test");
         expect(result).not.toContain("<project-context>");
     });
 
