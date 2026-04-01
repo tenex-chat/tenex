@@ -199,6 +199,8 @@ export interface BuildSystemPromptOptions {
     skills?: SkillData[];
     /** Include MCP resource discovery in the system prompt. Defaults to true. */
     includeMcpResources?: boolean;
+    /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
+    scratchpadAvailable?: boolean;
 }
 
 
@@ -380,6 +382,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         skillContent,
         skills,
         includeMcpResources = true,
+        scratchpadAvailable = true,
     } = options;
 
     const baseAgentInstructions = agent.instructions || "";
@@ -426,7 +429,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // Explain <system-reminder> tags before agents encounter them
     systemPromptBuilder.add("system-reminders-explanation", {});
 
-    if (!nudgeToolPermissions || !isOnlyToolMode(nudgeToolPermissions)) {
+    if (scratchpadAvailable && (!nudgeToolPermissions || !isOnlyToolMode(nudgeToolPermissions))) {
         systemPromptBuilder.add("scratchpad-practice", {});
     }
 

@@ -287,6 +287,7 @@ export async function setupStreamExecution(
         ralNumber,
         metaModelSystemPrompt,
         variantSystemPrompt,
+        scratchpadAvailable: contextManagement?.scratchpadAvailable ?? true,
     });
 
     // Cache the compiled system prompt for reuse by supervision checks

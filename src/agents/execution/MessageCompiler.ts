@@ -50,6 +50,8 @@ export interface MessageCompilerContext {
     variantSystemPrompt?: string;
     /** Include MCP resource discovery in the system prompt. Defaults to true. */
     includeMcpResources?: boolean;
+    /** Whether the scratchpad strategy is active. When false, scratchpad-practice prompt is omitted. Defaults to true. */
+    scratchpadAvailable?: boolean;
 }
 
 export interface CompiledMessages {
