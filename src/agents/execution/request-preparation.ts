@@ -35,7 +35,7 @@ const ANTHROPIC_CLEAR_TOOL_USES_EDIT = {
     type: "clear_tool_uses_20250919",
     trigger: { type: "tool_uses", value: 10 },
     keep: { type: "tool_uses", value: 10 },
-    clearToolInputs: true,
+    clearAtLeast: { type: "input_tokens", value: 4000 },
 } as const;
 
 function buildMiddlewareModel(
