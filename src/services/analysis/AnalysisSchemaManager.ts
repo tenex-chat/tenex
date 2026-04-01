@@ -1,7 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BunDatabase = any;
 
-const ANALYSIS_SCHEMA_VERSION = "3";
+const ANALYSIS_SCHEMA_VERSION = "4";
 
 export class AnalysisSchemaManager {
     public constructor(private readonly db: BunDatabase) {}
@@ -64,7 +64,8 @@ export class AnalysisSchemaManager {
                 shared_prefix_breakpoint_applied INTEGER,
                 shared_prefix_message_count INTEGER,
                 shared_prefix_last_message_index INTEGER,
-                anthropic_clear_tool_uses_enabled INTEGER
+                anthropic_clear_tool_uses_enabled INTEGER,
+                api_key_identity TEXT
             );
 
             CREATE TABLE IF NOT EXISTS llm_request_messages (
@@ -159,7 +160,9 @@ export class AnalysisSchemaManager {
             CREATE INDEX IF NOT EXISTS idx_llm_requests_started_at
                 ON llm_requests (started_at_ms);
             CREATE INDEX IF NOT EXISTS idx_llm_requests_grouping
-                ON llm_requests (project_id, provider, agent_slug, started_at_ms);
+                ON llm_requests (project_id, provider, api_key_identity, agent_slug, started_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_llm_requests_api_key_identity
+                ON llm_requests(api_key_identity);
             CREATE INDEX IF NOT EXISTS idx_llm_requests_rate_limit
                 ON llm_requests (rate_limit, started_at_ms);
 
@@ -200,6 +203,7 @@ export class AnalysisSchemaManager {
                     agent_id,
                     provider,
                     model,
+                    api_key_identity,
                     operation_kind,
                     started_at_ms,
                     completed_at_ms,
@@ -334,9 +338,11 @@ export class AnalysisSchemaManager {
     private migrateSchema(previousVersion: string | undefined): void {
         const addedRuntimeColumns = this.ensureRequestRuntimeColumns();
         const addedPromptCachingColumns = this.ensureRequestPromptCachingColumns();
+        const addedApiKeyIdentityColumn = this.ensureApiKeyIdentityColumn();
         if (
             addedRuntimeColumns
             || addedPromptCachingColumns
+            || addedApiKeyIdentityColumn
             || previousVersion !== ANALYSIS_SCHEMA_VERSION
         ) {
             this.backfillRuntimeMetricsFromContextEvents();
@@ -397,6 +403,14 @@ export class AnalysisSchemaManager {
         }
 
         return addedColumns;
+    }
+
+    private ensureApiKeyIdentityColumn(): boolean {
+        if (this.hasColumn("llm_requests", "api_key_identity")) {
+            return false;
+        }
+        this.addColumn("llm_requests", "api_key_identity TEXT");
+        return true;
     }
 
     private hasColumn(tableName: string, columnName: string): boolean {

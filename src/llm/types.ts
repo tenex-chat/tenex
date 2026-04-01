@@ -102,6 +102,7 @@ export interface LLMAnalysisHooks {
         startedAt: number;
         provider: string;
         model: string;
+        apiKeyIdentity?: string;
         messages: ModelMessage[];
         providerOptions?: ProviderOptions;
         toolChoice?: ToolChoice<Record<string, CoreTool>>;

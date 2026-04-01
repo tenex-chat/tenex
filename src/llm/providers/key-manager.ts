@@ -14,6 +14,15 @@
 import { logger } from "@/utils/logger";
 
 /**
+ * A key entry pairs a raw API key string with its derived identity label.
+ * The identity is a human-readable, non-reversible tag used for analytics.
+ */
+export interface KeyEntry {
+    key: string;
+    identity: string;
+}
+
+/**
  * Clock interface for injectable time source (enables deterministic testing)
  */
 export interface Clock {
@@ -60,7 +69,7 @@ interface KeyHealth {
  * automatic fallback to healthy keys.
  */
 export class KeyManager {
-    private keys: Map<string, string[]> = new Map();
+    private keys: Map<string, KeyEntry[]> = new Map();
     private health: Map<string, KeyHealth> = new Map();
     private config: KeyManagerConfig;
     private clock: Clock;
@@ -75,22 +84,26 @@ export class KeyManager {
      * Normalizes single keys to arrays for uniform handling.
      */
     registerKeys(providerId: string, apiKey: string | string[]): void {
-        const keys = Array.isArray(apiKey) ? [...apiKey] : [apiKey];
-        if (keys.length === 0) {
+        const rawKeys = Array.isArray(apiKey) ? [...apiKey] : [apiKey];
+        if (rawKeys.length === 0) {
             return;
         }
-        this.keys.set(providerId, keys);
+        const entries: KeyEntry[] = rawKeys.map((key, index) => ({
+            key,
+            identity: `${providerId}-key-${index + 1}-****${key.slice(-4)}`,
+        }));
+        this.keys.set(providerId, entries);
 
         // Initialize health tracking for new keys
-        for (const key of keys) {
-            const healthKey = this.healthKey(providerId, key);
+        for (const entry of entries) {
+            const healthKey = this.healthKey(providerId, entry.key);
             if (!this.health.has(healthKey)) {
                 this.health.set(healthKey, { failures: [], disabledUntil: 0 });
             }
         }
 
-        if (keys.length > 1) {
-            logger.debug(`[KeyManager] Registered ${keys.length} keys for provider "${providerId}"`);
+        if (rawKeys.length > 1) {
+            logger.debug(`[KeyManager] Registered ${rawKeys.length} keys for provider "${providerId}"`);
         }
     }
 
@@ -98,21 +111,21 @@ export class KeyManager {
      * Select a random healthy key for a provider.
      * Returns undefined if no healthy keys are available.
      */
-    selectKey(providerId: string): string | undefined {
-        const keys = this.keys.get(providerId);
-        if (!keys || keys.length === 0) {
+    selectKey(providerId: string): KeyEntry | undefined {
+        const entries = this.keys.get(providerId);
+        if (!entries || entries.length === 0) {
             return undefined;
         }
 
-        const healthy = keys.filter(key => this.isKeyHealthy(providerId, key));
+        const healthy = entries.filter(entry => this.isKeyHealthy(providerId, entry.key));
 
         if (healthy.length === 0) {
             logger.warn(`[KeyManager] No healthy keys available for provider "${providerId}", trying all keys`);
             // Fall back to all keys when everything is disabled — better than nothing
-            return this.pickRandomKey(keys);
+            return this.pickRandom(entries);
         }
 
-        return this.pickRandomKey(healthy);
+        return this.pickRandom(healthy);
     }
 
     /**
@@ -120,27 +133,27 @@ export class KeyManager {
      * This is used during immediate failover after a key-specific runtime error,
      * before the failed key necessarily crosses the disable threshold.
      */
-    selectAlternativeKey(providerId: string, excludedKey: string): string | undefined {
-        const keys = this.keys.get(providerId);
-        if (!keys || keys.length === 0) {
+    selectAlternativeKey(providerId: string, excludedKey: string): KeyEntry | undefined {
+        const entries = this.keys.get(providerId);
+        if (!entries || entries.length === 0) {
             return undefined;
         }
 
-        const alternatives = keys.filter(key => key !== excludedKey);
+        const alternatives = entries.filter(entry => entry.key !== excludedKey);
         if (alternatives.length === 0) {
             return undefined;
         }
 
-        const healthyAlternatives = alternatives.filter(key => this.isKeyHealthy(providerId, key));
+        const healthyAlternatives = alternatives.filter(entry => this.isKeyHealthy(providerId, entry.key));
 
         if (healthyAlternatives.length === 0) {
             logger.warn(
                 `[KeyManager] No healthy alternative keys available for provider "${providerId}", trying disabled alternatives`
             );
-            return this.pickRandomKey(alternatives);
+            return this.pickRandom(alternatives);
         }
 
-        return this.pickRandomKey(healthyAlternatives);
+        return this.pickRandom(healthyAlternatives);
     }
 
     /**
@@ -183,9 +196,18 @@ export class KeyManager {
      * Get the number of currently healthy keys for a provider
      */
     getHealthyKeyCount(providerId: string): number {
-        const keys = this.keys.get(providerId);
-        if (!keys) return 0;
-        return keys.filter(key => this.isKeyHealthy(providerId, key)).length;
+        const entries = this.keys.get(providerId);
+        if (!entries) return 0;
+        return entries.filter(entry => this.isKeyHealthy(providerId, entry.key)).length;
+    }
+
+    /**
+     * Look up the identity label for a raw API key under a given provider.
+     */
+    getKeyIdentity(providerId: string, rawKey: string): string | undefined {
+        const entries = this.keys.get(providerId);
+        if (!entries) return undefined;
+        return entries.find(entry => entry.key === rawKey)?.identity;
     }
 
     /**
@@ -238,8 +260,8 @@ export class KeyManager {
         return `${providerId}:${apiKey}`;
     }
 
-    private pickRandomKey(keys: string[]): string {
-        return keys[Math.floor(Math.random() * keys.length)];
+    private pickRandom(entries: KeyEntry[]): KeyEntry {
+        return entries[Math.floor(Math.random() * entries.length)];
     }
 }
 
