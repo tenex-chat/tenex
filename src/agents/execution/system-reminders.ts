@@ -110,10 +110,12 @@ async function responseRoutingProvider(
         kind: data.respondingToPrincipal.kind,
     });
 
-    return {
-        type: "response-routing",
-        content: `Your response will be sent to @${respondingToName}.`,
-    };
+    const isSelfDelegation = data.respondingToPrincipal.linkedPubkey === data.agent.pubkey;
+    const content = isSelfDelegation
+        ? `Your response will be sent to @${respondingToName}. Note: this is a self-delegation — you are executing a task delegated by a parent instance of yourself.`
+        : `Your response will be sent to @${respondingToName}.`;
+
+    return { type: "response-routing", content };
 }
 
 async function delegationsProvider(
