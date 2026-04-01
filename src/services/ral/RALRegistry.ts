@@ -1,9 +1,8 @@
 import { trace } from "@opentelemetry/api";
 import { EventEmitter, type DefaultEventMap } from "tseep";
 import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { shortenConversationId, shortenEventId, shortenPubkey } from "@/utils/conversation-id";
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { ConversationStore } from "@/conversations/ConversationStore";
 import type { ProjectDTag } from "@/types/project-ids";
 import type {
   InjectionResult,
@@ -14,6 +13,11 @@ import type {
   QueuedInjection,
   DelegationMessage,
 } from "./types";
+import { DelegationRegistry } from "./DelegationRegistry";
+import { ExecutionTimingTracker } from "./ExecutionTimingTracker";
+import { HeuristicViolationManager } from "./HeuristicViolationManager";
+import { KillSwitchRegistry } from "./KillSwitchRegistry";
+import { MessageInjectionQueue } from "./MessageInjectionQueue";
 
 /** Events emitted by RALRegistry */
 export type RALRegistryEvents = DefaultEventMap & {
@@ -43,36 +47,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   /** Track next RAL number for each conversation */
   private nextRalNumber: Map<string, number> = new Map();
 
-  /** Maps delegation event ID -> {key, ralNumber} for O(1) lookup */
-  private delegationToRal: Map<string, { key: string; ralNumber: number }> = new Map();
-
   /** Maps RAL ID -> {key, ralNumber} for O(1) reverse lookup */
   private ralIdToLocation: Map<string, { key: string; ralNumber: number }> = new Map();
-
-  /** Maps followupEventId -> delegationConversationId for resolving followup completion routing */
-  private followupToCanonical: Map<string, string> = new Map();
 
   /** Abort controllers keyed by "key:ralNumber" */
   private abortControllers: Map<string, AbortController> = new Map();
 
-  /** Delegations keyed by "agentPubkey:conversationId" - persists beyond RAL lifetime */
-  private conversationDelegations: Map<string, {
-    pending: Map<string, PendingDelegation>;
-    completed: Map<string, CompletedDelegation>;
-  }> = new Map();
-
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
-
-  /**
-   * Set of agent+conversation keys that have been killed via abortWithCascade.
-   * Key format: "agentPubkey:conversationId" (same as other state maps).
-   * Used to prevent killed agents from publishing completion events
-   * (race condition where agent continues running during long tool execution).
-   *
-   * ISSUE 3 FIX: Using agentPubkey:conversationId scope ensures that killing
-   * one agent doesn't suppress completions for other agents in the same conversation.
-   */
-  private killedAgentConversations: Set<string> = new Set();
 
   /** Maximum age for RAL states before cleanup (default: 24 hours) */
   private static readonly STATE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -81,8 +62,33 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   /** Maximum queue size for injections (prevents DoS) */
   private static readonly MAX_QUEUE_SIZE = 100;
 
+  private readonly timingTracker: ExecutionTimingTracker;
+  private readonly injectionQueue: MessageInjectionQueue;
+  private readonly heuristicManager: HeuristicViolationManager;
+  private readonly delegationRegistry: DelegationRegistry;
+  private readonly killSwitchRegistry: KillSwitchRegistry;
+
   private constructor() {
     super();
+    this.timingTracker = new ExecutionTimingTracker();
+    this.injectionQueue = new MessageInjectionQueue(RALRegistry.MAX_QUEUE_SIZE);
+    this.heuristicManager = new HeuristicViolationManager();
+    this.delegationRegistry = new DelegationRegistry({
+      getRAL: this.getRAL.bind(this),
+      incrementDelegationCounter: this.incrementDelegationCounter.bind(this),
+      decrementDelegationCounter: this.decrementDelegationCounter.bind(this),
+    });
+    this.killSwitchRegistry = new KillSwitchRegistry(
+      {
+        getState: this.getState.bind(this),
+        getActiveRALs: this.getActiveRALs.bind(this),
+        getAbortControllers: () => this.abortControllers,
+        clearConversation: this.clear.bind(this),
+        makeKey: this.makeKey.bind(this),
+        makeAbortKey: this.makeAbortKey.bind(this),
+      },
+      this.delegationRegistry
+    );
     this.startCleanupInterval();
   }
 
@@ -104,27 +110,11 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     this.emit("updated", projectId, conversationId);
   }
 
-  private getOrCreateConversationDelegations(key: string): {
-    pending: Map<string, PendingDelegation>;
-    completed: Map<string, CompletedDelegation>;
-  } {
-    let delegations = this.conversationDelegations.get(key);
-    if (!delegations) {
-      delegations = { pending: new Map(), completed: new Map() };
-      this.conversationDelegations.set(key, delegations);
-    }
-    return delegations;
-  }
-
   /**
    * Get pending delegations for a conversation, optionally filtered by RAL number
    */
   getConversationPendingDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): PendingDelegation[] {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const delegations = this.conversationDelegations.get(key);
-    if (!delegations) return [];
-    const pending = Array.from(delegations.pending.values());
-    return ralNumber !== undefined ? pending.filter(d => d.ralNumber === ralNumber) : pending;
+    return this.delegationRegistry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
   }
 
   /**
@@ -150,90 +140,19 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     ralNumber: number,
     newDelegations: PendingDelegation[]
   ): { insertedCount: number; mergedCount: number } {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) {
-      logger.warn("[RALRegistry] No RAL found to merge pending delegations", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        ralNumber,
-      });
-      return { insertedCount: 0, mergedCount: 0 };
-    }
-
-    const key = this.makeKey(agentPubkey, conversationId);
-    const convDelegations = this.getOrCreateConversationDelegations(key);
-    ral.lastActivityAt = Date.now();
-
-    let insertedCount = 0;
-    let mergedCount = 0;
-
-    // Atomically add/merge delegations, handling duplicates by merging fields
-    for (const d of newDelegations) {
-      const existing = convDelegations.pending.get(d.delegationConversationId);
-
-      if (existing) {
-        // Merge fields from new delegation into existing entry
-        // This preserves metadata updates (e.g., followupEventId) on retried delegations
-        const merged: PendingDelegation = {
-          ...existing,
-          ...d,
-          ralNumber, // Always use the current RAL number
-        };
-        convDelegations.pending.set(d.delegationConversationId, merged);
-
-        // Always refresh delegationToRal mapping (RAL number may have changed)
-        this.delegationToRal.set(d.delegationConversationId, { key, ralNumber });
-
-        // For followup delegations, ensure the followup event ID is also mapped
-        if (merged.type === "followup" && merged.followupEventId) {
-          this.delegationToRal.set(merged.followupEventId, { key, ralNumber });
-          // Also maintain reverse lookup for completion routing
-          this.followupToCanonical.set(merged.followupEventId, d.delegationConversationId);
-        }
-
-        mergedCount++;
-      } else {
-        // New delegation - insert it
-        const delegation = { ...d, ralNumber };
-        convDelegations.pending.set(d.delegationConversationId, delegation);
-
-        // Register delegation conversation ID -> RAL mappings (for routing delegation responses)
-        this.delegationToRal.set(d.delegationConversationId, { key, ralNumber });
-
-        // For followup delegations, also map the followup event ID
-        if (d.type === "followup" && d.followupEventId) {
-          this.delegationToRal.set(d.followupEventId, { key, ralNumber });
-          // Also maintain reverse lookup for completion routing
-          this.followupToCanonical.set(d.followupEventId, d.delegationConversationId);
-        }
-
-        // Increment O(1) counter for this RAL
-        this.incrementDelegationCounter(agentPubkey, conversationId, ralNumber);
-
-        insertedCount++;
-      }
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.delegations_merged", {
-      "ral.id": ral.id,
-      "ral.number": ralNumber,
-      "delegation.inserted_count": insertedCount,
-      "delegation.merged_count": mergedCount,
-      "delegation.total_pending": convDelegations.pending.size,
-    });
-
-    return { insertedCount, mergedCount };
+    return this.delegationRegistry.mergePendingDelegations(
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      newDelegations
+    );
   }
 
   /**
    * Get completed delegations for a conversation, optionally filtered by RAL number
    */
   getConversationCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): CompletedDelegation[] {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const delegations = this.conversationDelegations.get(key);
-    if (!delegations) return [];
-    const completed = Array.from(delegations.completed.values());
-    return ralNumber !== undefined ? completed.filter(d => d.ralNumber === ralNumber) : completed;
+    return this.delegationRegistry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
   }
 
   /**
@@ -242,30 +161,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * to prevent re-processing on subsequent executions.
    */
   clearCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): void {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const delegations = this.conversationDelegations.get(key);
-    if (!delegations) return;
-
-    if (ralNumber !== undefined) {
-      // Clear only completions for the specified RAL
-      for (const [id, completion] of delegations.completed) {
-        if (completion.ralNumber === ralNumber) {
-          this.delegationToRal.delete(id);
-          delegations.completed.delete(id);
-        }
-      }
-    } else {
-      // Clear all completions and their RAL mappings
-      for (const id of delegations.completed.keys()) {
-        this.delegationToRal.delete(id);
-      }
-      delegations.completed.clear();
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.completed_delegations_cleared", {
-      "conversation.id": shortenConversationId(conversationId),
-      "ral.number": ralNumber ?? "all",
-    });
+    this.delegationRegistry.clearCompletedDelegations(agentPubkey, conversationId, ralNumber);
   }
 
   private startCleanupInterval(): void {
@@ -299,21 +195,15 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     }
 
     // ISSUE 1 FIX: Prune killed agent entries that correspond to cleaned states.
-    // This prevents unbounded growth of killedAgentConversations Set.
+    // This prevents unbounded growth of the kill-switch marker set.
     // We prune keys that no longer have active RAL states - if there's no state,
     // the conversation is done and the kill marker is no longer needed.
-    let prunedKilledCount = 0;
-    for (const key of this.killedAgentConversations) {
-      if (!this.states.has(key)) {
-        this.killedAgentConversations.delete(key);
-        prunedKilledCount++;
-      }
-    }
+    const prunedKilledCount = this.killSwitchRegistry.pruneStaleKilledConversations((key) => this.states.has(key));
 
     if (prunedKilledCount > 0) {
       logger.debug("[RALRegistry] Pruned stale killed agent entries", {
         prunedKilledCount,
-        remainingKilledCount: this.killedAgentConversations.size,
+        remainingKilledCount: this.killSwitchRegistry.getKilledConversationCount(),
       });
     }
 
@@ -554,25 +444,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @param lastUserMessage - The last user message that triggered this LLM call (for debugging)
    */
   startLLMStream(agentPubkey: string, conversationId: string, ralNumber: number, lastUserMessage?: string): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (ral) {
-      const now = Date.now();
-      ral.llmStreamStartTime = now;
-      ral.lastRuntimeCheckpointAt = now; // Initialize checkpoint to stream start
-      ral.lastActivityAt = now;
-
-      // Include the last user message in telemetry for debugging
-      // Truncate to 1000 chars to avoid bloating traces
-      const truncatedMessage = lastUserMessage
-        ? (lastUserMessage.length > 1000 ? `${lastUserMessage.substring(0, 1000)}...` : lastUserMessage)
-        : undefined;
-
-      trace.getActiveSpan()?.addEvent("ral.llm_stream_started", {
-        "ral.number": ralNumber,
-        "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
-        ...(truncatedMessage && { "ral.last_user_message": truncatedMessage }),
-      });
-    }
+    this.timingTracker.startLLMStream(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      lastUserMessage
+    );
   }
 
   /**
@@ -581,38 +459,19 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns The total accumulated runtime in milliseconds
    */
   endLLMStream(agentPubkey: string, conversationId: string, ralNumber: number): number {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (ral && ral.llmStreamStartTime !== undefined) {
-      const now = Date.now();
-      // Calculate TOTAL stream duration from original start (not from checkpoint)
-      const streamDuration = now - ral.llmStreamStartTime;
-      // Add only the time since last checkpoint (to avoid double-counting what was already consumed)
-      const checkpointTime = ral.lastRuntimeCheckpointAt ?? ral.llmStreamStartTime;
-      // Guard against clock rollback - keep runtime monotonic
-      const unreportedDuration = Math.max(0, now - checkpointTime);
-      ral.accumulatedRuntime += unreportedDuration;
-      // Clear both stream timing fields
-      ral.llmStreamStartTime = undefined;
-      ral.lastRuntimeCheckpointAt = undefined;
-      ral.lastActivityAt = now;
-
-      trace.getActiveSpan()?.addEvent("ral.llm_stream_ended", {
-        "ral.number": ralNumber,
-        "ral.stream_duration_ms": streamDuration,
-        "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
-      });
-
-      return ral.accumulatedRuntime;
-    }
-    return ral?.accumulatedRuntime ?? 0;
+    return this.timingTracker.endLLMStream(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber
+    );
   }
 
   /**
    * Get the accumulated LLM runtime for a RAL
    */
   getAccumulatedRuntime(agentPubkey: string, conversationId: string, ralNumber: number): number {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    return ral?.accumulatedRuntime ?? 0;
+    return this.timingTracker.getAccumulatedRuntime(this.getRAL(agentPubkey, conversationId, ralNumber));
   }
 
   /**
@@ -626,64 +485,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * preserved so that endLLMStream() can still report correct total stream duration.
    */
   consumeUnreportedRuntime(agentPubkey: string, conversationId: string, ralNumber: number): number {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) {
-      // DEBUG: RAL not found
-      logger.warn("[RALRegistry.consumeUnreportedRuntime] RAL not found", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        ralNumber,
-      });
-      return 0;
-    }
-
-    const now = Date.now();
-
-    // DEBUG: Log state before calculating
-    logger.info("[RALRegistry.consumeUnreportedRuntime] RAL state", {
-      agentPubkey: agentPubkey.substring(0, 8),
-      ralNumber,
-      llmStreamStartTime: ral.llmStreamStartTime,
-      lastRuntimeCheckpointAt: ral.lastRuntimeCheckpointAt,
-      accumulatedRuntime: ral.accumulatedRuntime,
-      lastReportedRuntime: ral.lastReportedRuntime,
-    });
-
-    // If there's an active LLM stream, capture the runtime since last checkpoint
-    // Use checkpoint if available, otherwise fall back to stream start
-    if (ral.llmStreamStartTime !== undefined) {
-      const checkpointTime = ral.lastRuntimeCheckpointAt ?? ral.llmStreamStartTime;
-      const liveStreamRuntime = now - checkpointTime;
-      ral.accumulatedRuntime += liveStreamRuntime;
-      // Update checkpoint only - preserve llmStreamStartTime for endLLMStream()
-      ral.lastRuntimeCheckpointAt = now;
-    }
-
-    const unreported = ral.accumulatedRuntime - ral.lastReportedRuntime;
-
-    // Guard against NaN or negative deltas (defensive programming)
-    // Repair lastReportedRuntime to prevent permanent suppression of future runtime
-    if (!Number.isFinite(unreported) || unreported < 0) {
-      logger.warn("[RALRegistry] Invalid runtime delta", {
-        unreported,
-        accumulated: ral.accumulatedRuntime,
-        lastReported: ral.lastReportedRuntime,
-      });
-      ral.lastReportedRuntime = ral.accumulatedRuntime;
-      return 0;
-    }
-
-    ral.lastReportedRuntime = ral.accumulatedRuntime;
-
-    if (unreported > 0) {
-      trace.getActiveSpan()?.addEvent("ral.runtime_consumed", {
-        "ral.number": ralNumber,
-        "ral.unreported_runtime_ms": unreported,
-        "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
-      });
-    }
-
-    return unreported;
+    return this.timingTracker.consumeUnreportedRuntime(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber
+    );
   }
 
   /**
@@ -693,17 +500,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * NOTE: This also calculates "live" runtime during active streams for accurate preview.
    */
   getUnreportedRuntime(agentPubkey: string, conversationId: string, ralNumber: number): number {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return 0;
-
-    // Calculate current accumulated + live stream time since checkpoint for accurate preview
-    let effectiveAccumulated = ral.accumulatedRuntime;
-    if (ral.llmStreamStartTime !== undefined) {
-      const checkpointTime = ral.lastRuntimeCheckpointAt ?? ral.llmStreamStartTime;
-      effectiveAccumulated += Date.now() - checkpointTime;
-    }
-
-    return effectiveAccumulated - ral.lastReportedRuntime;
+    return this.timingTracker.getUnreportedRuntime(this.getRAL(agentPubkey, conversationId, ralNumber));
   }
 
   /**
@@ -722,58 +519,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     ralNumber: number,
     pendingDelegations: PendingDelegation[]
   ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) {
-      logger.warn("[RALRegistry] No RAL found to set pending delegations", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        ralNumber,
-      });
-      return;
-    }
-
-    const key = this.makeKey(agentPubkey, conversationId);
-    const convDelegations = this.getOrCreateConversationDelegations(key);
-    ral.lastActivityAt = Date.now();
-
-    // Clear existing pending for this RAL, then add new ones
-    for (const [id, d] of convDelegations.pending) {
-      if (d.ralNumber === ralNumber) {
-        convDelegations.pending.delete(id);
-        this.delegationToRal.delete(id);
-        // Also clean up followup event ID mappings
-        if (d.type === "followup" && d.followupEventId) {
-          this.delegationToRal.delete(d.followupEventId);
-          this.followupToCanonical.delete(d.followupEventId);
-        }
-      }
-    }
-
-    // Add new pending delegations using the shared helper logic
-    // Note: We don't use mergePendingDelegations here because we've already cleared
-    // existing delegations for this RAL - merge semantics would be redundant
-    for (const d of pendingDelegations) {
-      // Ensure ralNumber is set
-      const delegation = { ...d, ralNumber };
-      convDelegations.pending.set(d.delegationConversationId, delegation);
-
-      // Register delegation conversation ID -> RAL mappings (for routing delegation responses)
-      this.delegationToRal.set(d.delegationConversationId, { key, ralNumber });
-
-      // For followup delegations, also map the followup event ID
-      // This ensures responses e-tagging either the original or followup are routed correctly
-      if (d.type === "followup" && d.followupEventId) {
-        this.delegationToRal.set(d.followupEventId, { key, ralNumber });
-        // Also maintain reverse lookup for completion routing
-        this.followupToCanonical.set(d.followupEventId, d.delegationConversationId);
-      }
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.delegations_set", {
-      "ral.id": ral.id,
-      "ral.number": ralNumber,
-      "delegation.pending_count": pendingDelegations.length,
-    });
+    this.delegationRegistry.setPendingDelegations(
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      pendingDelegations
+    );
   }
 
   /**
@@ -798,135 +549,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     /** If provided, use this transcript instead of constructing from prompt + response */
     fullTranscript?: DelegationMessage[];
   }): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined {
-    const location = this.delegationToRal.get(completion.delegationConversationId);
-    if (!location) return undefined;
-
-    const [agentPubkey, conversationId] = location.key.split(":");
-    const convDelegations = this.conversationDelegations.get(location.key);
-    if (!convDelegations) return undefined;
-
-    // Resolve followup event ID to canonical delegation conversation ID if needed
-    // The pending map is keyed by the original delegationConversationId, not the followupEventId
-    const canonicalId = this.followupToCanonical.get(completion.delegationConversationId)
-      ?? completion.delegationConversationId;
-
-    const pendingDelegation = convDelegations.pending.get(canonicalId);
-    if (!pendingDelegation) {
-      logger.warn("[RALRegistry] No pending delegation found for completion", {
-        delegationConversationId: completion.delegationConversationId.substring(0, 8),
-      });
-      return undefined;
-    }
-
-    // DOMAIN INVARIANT: Reject completions for killed delegations.
-    // This is the authoritative check - no caller can bypass it.
-    if (pendingDelegation.killed) {
-      trace.getActiveSpan()?.addEvent("ral.completion_rejected_killed", {
-        "delegation.conversation_id": shortenConversationId(canonicalId),
-        "delegation.killed_at": pendingDelegation.killedAt,
-      });
-      logger.info("[RALRegistry.recordCompletion] Rejected completion - delegation was killed", {
-        delegationConversationId: shortenConversationId(canonicalId),
-        killedAt: pendingDelegation.killedAt,
-      });
-      return undefined;
-    }
-
-    // Only record completion if the response is from the delegatee, not the delegator
-    // A message from the delegator (e.g., delegate_followup) is not a completion response
-    if (completion.recipientPubkey !== pendingDelegation.recipientPubkey) {
-      logger.debug("[RALRegistry] Ignoring completion - sender is not the delegatee", {
-        delegationConversationId: completion.delegationConversationId.substring(0, 8),
-        expectedRecipient: pendingDelegation.recipientPubkey.substring(0, 8),
-        actualSender: completion.recipientPubkey.substring(0, 8),
-      });
-      return undefined;
-    }
-
-    // Update RAL activity if it still exists
-    const ral = this.states.get(location.key)?.get(location.ralNumber);
-    if (ral) {
-      ral.lastActivityAt = Date.now();
-    }
-
-    // Check if this delegation already has a completed entry (followup case)
-    // Use canonical ID for lookups since completed entries are keyed by original delegation ID
-    const existingCompletion = convDelegations.completed.get(canonicalId);
-
-    if (existingCompletion) {
-      // Append to existing transcript
-      if (completion.fullTranscript) {
-        // Use provided full transcript - replace entire transcript
-        existingCompletion.transcript = completion.fullTranscript;
-      } else {
-        // Fall back to appending the followup prompt and response
-        existingCompletion.transcript.push({
-          senderPubkey: pendingDelegation.senderPubkey,
-          recipientPubkey: pendingDelegation.recipientPubkey,
-          content: pendingDelegation.prompt,
-          timestamp: completion.completedAt - 1, // Just before the response
-        });
-        existingCompletion.transcript.push({
-          senderPubkey: completion.recipientPubkey,
-          recipientPubkey: pendingDelegation.senderPubkey,
-          content: completion.response,
-          timestamp: completion.completedAt,
-        });
-      }
-
-      // Update ralNumber to the followup's RAL so findResumableRAL finds the correct RAL
-      existingCompletion.ralNumber = pendingDelegation.ralNumber;
-
-      trace.getActiveSpan()?.addEvent("ral.followup_response_appended", {
-        "ral.id": ral?.id,
-        "ral.number": location.ralNumber,
-        "delegation.completed_conversation_id": shortenConversationId(completion.delegationConversationId),
-        "delegation.transcript_length": existingCompletion.transcript.length,
-      });
-    } else {
-      // Create new completed delegation with transcript
-      // Use provided fullTranscript if available, otherwise construct synthetic 2-message transcript
-      const transcript: DelegationMessage[] = completion.fullTranscript ?? [
-        {
-          senderPubkey: pendingDelegation.senderPubkey,
-          recipientPubkey: pendingDelegation.recipientPubkey,
-          content: pendingDelegation.prompt,
-          timestamp: completion.completedAt - 1,
-        },
-        {
-          senderPubkey: completion.recipientPubkey,
-          recipientPubkey: pendingDelegation.senderPubkey,
-          content: completion.response,
-          timestamp: completion.completedAt,
-        },
-      ];
-
-      convDelegations.completed.set(canonicalId, {
-        delegationConversationId: canonicalId,
-        recipientPubkey: completion.recipientPubkey,
-        senderPubkey: pendingDelegation.senderPubkey,
-        ralNumber: pendingDelegation.ralNumber,
-        transcript,
-        completedAt: completion.completedAt,
-        status: "completed",
-      });
-
-      const remainingPending = this.getConversationPendingDelegations(agentPubkey, conversationId, location.ralNumber).length - 1;
-      trace.getActiveSpan()?.addEvent("ral.completion_recorded", {
-        "ral.id": ral?.id,
-        "ral.number": location.ralNumber,
-        "delegation.completed_conversation_id": shortenConversationId(completion.delegationConversationId),
-        "delegation.remaining_pending": remainingPending,
-      });
-    }
-
-    // Remove from pending using canonical ID
-    convDelegations.pending.delete(canonicalId);
-
-    // Decrement O(1) counter for this RAL
-    this.decrementDelegationCounter(agentPubkey, conversationId, location.ralNumber);
-
-    return { agentPubkey, conversationId, ralNumber: location.ralNumber };
+    return this.delegationRegistry.recordCompletion(completion);
   }
 
   /**
@@ -953,7 +576,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       };
     }
 
-    this.queueMessage(agentPubkey, conversationId, activeRal.ralNumber, role, message);
+    this.injectionQueue.queueMessage(activeRal, agentPubkey, conversationId, activeRal.ralNumber, role, message);
 
     const messageLength = message.length;
     let aborted = false;
@@ -1006,7 +629,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     ralNumber: number,
     message: string
   ): void {
-    this.queueMessage(agentPubkey, conversationId, ralNumber, "system", message);
+    this.injectionQueue.queueSystemMessage(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      message
+    );
   }
 
   /**
@@ -1024,52 +653,14 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       eventId?: string;
     }
   ): void {
-    this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message, options);
-  }
-
-  /**
-   * Queue a message with specified role for injection into a specific RAL
-   */
-  private queueMessage(
-    agentPubkey: string,
-    conversationId: string,
-    ralNumber: number,
-    role: "system" | "user",
-    message: string,
-    options?: {
-      senderPubkey?: string;
-      senderPrincipal?: QueuedInjection["senderPrincipal"];
-      targetedPrincipals?: QueuedInjection["targetedPrincipals"];
-      eventId?: string;
-    }
-  ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) {
-      logger.warn("[RALRegistry] Cannot queue message - no RAL state", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        ralNumber,
-        role,
-      });
-      return;
-    }
-
-    if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
-      ral.queuedInjections.shift();
-      logger.warn("[RALRegistry] Queue full, dropping oldest message", {
-        agentPubkey: agentPubkey.substring(0, 8),
-      });
-    }
-
-    ral.queuedInjections.push({
-      role,
-      content: message,
-      queuedAt: Date.now(),
-      senderPubkey: options?.senderPubkey,
-      senderPrincipal: options?.senderPrincipal,
-      targetedPrincipals: options?.targetedPrincipals,
-      eventId: options?.eventId,
-    });
+    this.injectionQueue.queueUserMessage(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      message,
+      options
+    );
   }
 
   /**
@@ -1077,23 +668,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * Injections are persisted to ConversationStore by the caller
    */
   getAndConsumeInjections(agentPubkey: string, conversationId: string, ralNumber: number): QueuedInjection[] {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return [];
-
-    if (ral.queuedInjections.length === 0) {
-      return [];
-    }
-
-    const injections = [...ral.queuedInjections];
-    ral.queuedInjections = [];
-
-    trace.getActiveSpan()?.addEvent("ral.injections_consumed", {
-      "ral.id": ral.id,
-      "ral.number": ralNumber,
-      "injection.count": injections.length,
-    });
-
-    return injections;
+    return this.injectionQueue.getAndConsumeInjections(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber
+    );
   }
 
   /**
@@ -1102,31 +682,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * follow-ups remain pending for the same conversation.
    */
   clearQueuedInjectionByEventId(agentPubkey: string, conversationId: string, eventId: string): number {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const ralMap = this.states.get(key);
-    if (!ralMap) return 0;
-
-    let totalCleared = 0;
-    for (const ral of ralMap.values()) {
-      if (ral.queuedInjections.length === 0) {
-        continue;
-      }
-
-      const beforeCount = ral.queuedInjections.length;
-      ral.queuedInjections = ral.queuedInjections.filter((injection) => injection.eventId !== eventId);
-      totalCleared += beforeCount - ral.queuedInjections.length;
-    }
-
-    if (totalCleared > 0) {
-      trace.getActiveSpan()?.addEvent("ral.injection_cleared_after_delivery", {
-        "agent.pubkey": shortenPubkey(agentPubkey),
-        "conversation.id": shortenConversationId(conversationId),
-        "event.id": shortenEventId(eventId),
-        "cleared.count": totalCleared,
-      });
-    }
-
-    return totalCleared;
+    return this.injectionQueue.clearQueuedInjectionByEventId(
+      this.states.get(this.makeKey(agentPubkey, conversationId))?.values(),
+      agentPubkey,
+      conversationId,
+      eventId
+    );
   }
 
   /**
@@ -1137,25 +698,11 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * instead of complete().
    */
   clearQueuedInjections(agentPubkey: string, conversationId: string): void {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const ralMap = this.states.get(key);
-    if (!ralMap) return;
-
-    let totalCleared = 0;
-    for (const ral of ralMap.values()) {
-      if (ral.queuedInjections.length > 0) {
-        totalCleared += ral.queuedInjections.length;
-        ral.queuedInjections = [];
-      }
-    }
-
-    if (totalCleared > 0) {
-      trace.getActiveSpan()?.addEvent("ral.injections_cleared_after_delivery", {
-        "agent.pubkey": shortenPubkey(agentPubkey),
-        "conversation.id": shortenConversationId(conversationId),
-        "cleared.count": totalCleared,
-      });
-    }
+    this.injectionQueue.clearQueuedInjections(
+      this.states.get(this.makeKey(agentPubkey, conversationId))?.values(),
+      agentPubkey,
+      conversationId
+    );
   }
 
   /**
@@ -1362,28 +909,8 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         this.clearRAL(agentPubkey, conversationId, ralNumber);
       }
     }
-
-    // ISSUE 1 FIX: Clean up killed agent marker when clearing state.
-    // This prevents unbounded growth and allows conversation ID reuse.
-    this.killedAgentConversations.delete(key);
-
-    // Clean up conversation-level delegation storage and routing
-    const convDelegations = this.conversationDelegations.get(key);
-    if (convDelegations) {
-      for (const [id, d] of convDelegations.pending) {
-        this.delegationToRal.delete(id);
-        // Also clean up followup event ID mappings
-        if (d.type === "followup" && d.followupEventId) {
-          this.delegationToRal.delete(d.followupEventId);
-          this.followupToCanonical.delete(d.followupEventId);
-        }
-      }
-      for (const id of convDelegations.completed.keys()) {
-        this.delegationToRal.delete(id);
-      }
-      this.conversationDelegations.delete(key);
-    }
-
+    this.killSwitchRegistry.clearConversation(agentPubkey, conversationId);
+    this.delegationRegistry.clearConversation(agentPubkey, conversationId);
     // Reset the RAL number counter for this conversation
     this.nextRalNumber.delete(key);
   }
@@ -1404,53 +931,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns Full 64-char ID if unique match found, null if no match or ambiguous
    */
   resolveDelegationPrefix(prefix: string): string | null {
-    const matches: string[] = [];
-
-    // Scan all conversation delegations
-    for (const [_key, delegations] of this.conversationDelegations) {
-      // Check pending delegations
-      for (const [delegationId, _pendingDelegation] of delegations.pending) {
-        if (delegationId.toLowerCase().startsWith(prefix)) {
-          matches.push(delegationId);
-        }
-      }
-
-      // Check completed delegations
-      for (const [delegationId, _completedDelegation] of delegations.completed) {
-        if (delegationId.toLowerCase().startsWith(prefix)) {
-          // Avoid duplicates (a delegation might be in both pending and completed during transitions)
-          if (!matches.includes(delegationId)) {
-            matches.push(delegationId);
-          }
-        }
-      }
-    }
-
-    // Also scan followupToCanonical map for followup event ID prefixes
-    // Users receive followupEventId from delegate_followup responses and may try to use it
-    for (const [followupId, canonicalId] of this.followupToCanonical) {
-      if (followupId.toLowerCase().startsWith(prefix)) {
-        // For followup IDs, return the canonical delegation conversation ID
-        // since that's what the caller needs for further operations
-        if (!matches.includes(canonicalId)) {
-          matches.push(canonicalId);
-        }
-      }
-    }
-
-    // Return unique match, null if ambiguous or not found
-    if (matches.length === 1) {
-      return matches[0];
-    }
-
-    if (matches.length > 1) {
-      logger.debug("[RALRegistry.resolveDelegationPrefix] Ambiguous prefix match", {
-        prefix,
-        matchCount: matches.length,
-      });
-    }
-
-    return null;
+    return this.delegationRegistry.resolveDelegationPrefix(prefix);
   }
 
   /**
@@ -1475,35 +956,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns The canonical delegation conversation ID (unchanged if not a followup)
    */
   canonicalizeDelegationId(id: string): string {
-    // Fast path: check followupToCanonical map first (O(1))
-    const fromMap = this.followupToCanonical.get(id);
-    if (fromMap) {
-      return fromMap;
-    }
-
-    // Slow path: scan pending/completed delegations for followup entries
-    // This handles cases where the followupToCanonical map isn't populated
-    // (MCP-only mode, cross-session lookups, etc.)
-    const normalizedId = id.toLowerCase();
-    for (const [_key, delegations] of this.conversationDelegations) {
-      // Check pending delegations for followup entries
-      for (const [canonicalId, pending] of delegations.pending) {
-        if (pending.type === "followup" && pending.followupEventId?.toLowerCase() === normalizedId) {
-          logger.debug("[RALRegistry.canonicalizeDelegationId] Found canonical via pending scan", {
-            followupId: shortenEventId(id),
-            canonicalId: shortenConversationId(canonicalId),
-          });
-          return canonicalId;
-        }
-      }
-
-      // Check completed delegations - they may have followup transcript entries
-      // Note: completed delegations don't store followupEventId directly,
-      // but we can still check if the ID matches any delegation conversation ID
-    }
-
-    // Not a followup ID or not found - return unchanged (treat as canonical)
-    return id;
+    return this.delegationRegistry.canonicalizeDelegationId(id);
   }
 
   /**
@@ -1518,24 +971,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     conversationId: string;
     ralNumber: number;
   } | undefined {
-    const location = this.delegationToRal.get(delegationEventId);
-    if (!location) return undefined;
-
-    const [agentPubkey, conversationId] = location.key.split(":");
-    const convDelegations = this.conversationDelegations.get(location.key);
-    if (!convDelegations) return undefined;
-
-    // Resolve followup event ID to canonical delegation conversation ID if needed
-    // The pending/completed maps are keyed by the original delegationConversationId
-    const canonicalId = this.followupToCanonical.get(delegationEventId) ?? delegationEventId;
-
-    return {
-      pending: convDelegations.pending.get(canonicalId),
-      completed: convDelegations.completed.get(canonicalId),
-      agentPubkey,
-      conversationId,
-      ralNumber: location.ralNumber,
-    };
+    return this.delegationRegistry.findDelegation(delegationEventId);
   }
 
   /**
@@ -1543,26 +979,14 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * Handles both original delegation IDs and followup event IDs through the reverse lookup.
    */
   findStateWaitingForDelegation(delegationEventId: string): RALRegistryEntry | undefined {
-    const location = this.delegationToRal.get(delegationEventId);
-    if (!location) return undefined;
-
-    const ral = this.states.get(location.key)?.get(location.ralNumber);
-    if (!ral) return undefined;
-
-    // Resolve followup event ID to canonical delegation conversation ID if needed
-    const canonicalId = this.followupToCanonical.get(delegationEventId) ?? delegationEventId;
-
-    // Check if delegation exists in conversation storage
-    const convDelegations = this.conversationDelegations.get(location.key);
-    const hasPending = convDelegations?.pending.has(canonicalId) ?? false;
-    return hasPending ? ral : undefined;
+    return this.delegationRegistry.findStateWaitingForDelegation(delegationEventId);
   }
 
   /**
    * Get the RAL key for a delegation event ID (for routing completions)
    */
   getRalKeyForDelegation(delegationEventId: string): string | undefined {
-    return this.delegationToRal.get(delegationEventId)?.key;
+    return this.delegationRegistry.getRalKeyForDelegation(delegationEventId);
   }
 
   /**
@@ -1625,30 +1049,10 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
-   * Get the most recent RAL number for a conversation
-   */
-  private getCurrentRalNumber(agentPubkey: string, conversationId: string): number | undefined {
-    const ral = this.getState(agentPubkey, conversationId);
-    return ral?.ralNumber;
-  }
-
-  /**
    * Abort current tool on most recent RAL (convenience for tests)
    */
   abortCurrentTool(agentPubkey: string, conversationId: string): void {
-    const ralNumber = this.getCurrentRalNumber(agentPubkey, conversationId);
-    if (ralNumber !== undefined) {
-      const key = this.makeKey(agentPubkey, conversationId);
-      const abortKey = this.makeAbortKey(key, ralNumber);
-      const controller = this.abortControllers.get(abortKey);
-      if (controller) {
-        controller.abort();
-        this.abortControllers.delete(abortKey);
-        trace.getActiveSpan()?.addEvent("ral.tool_aborted", {
-          "ral.number": ralNumber,
-        });
-      }
-    }
+    this.killSwitchRegistry.abortCurrentTool(agentPubkey, conversationId);
   }
 
   /**
@@ -1656,30 +1060,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * This is used when a stop signal is received to immediately terminate all executions.
    */
   abortAllForAgent(agentPubkey: string, conversationId: string): number {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const rals = this.states.get(key);
-    if (!rals) return 0;
-
-    let abortedCount = 0;
-
-    for (const [ralNumber] of rals) {
-      const abortKey = this.makeAbortKey(key, ralNumber);
-      const controller = this.abortControllers.get(abortKey);
-      if (controller && !controller.signal.aborted) {
-        controller.abort();
-        abortedCount++;
-        trace.getActiveSpan()?.addEvent("ral.aborted_by_stop_signal", {
-          "ral.number": ralNumber,
-          "agent.pubkey": agentPubkey.substring(0, 8),
-          "conversation.id": shortenConversationId(conversationId),
-        });
-      }
-    }
-
-    // Clear all state for this agent+conversation
-    this.clear(agentPubkey, conversationId);
-
-    return abortedCount;
+    return this.killSwitchRegistry.abortAllForAgent(agentPubkey, conversationId);
   }
 
   /**
@@ -1701,165 +1082,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     reason: string,
     cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }
   ): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> {
-    if (!reason) {
-      throw new Error("[RALRegistry] Missing abort reason for cascade.");
-    }
-
-    const abortedTuples: Array<{ conversationId: string; agentPubkey: string }> = [];
-
-    // CRITICAL: Capture pending delegations AND conversation delegations BEFORE aborting/clearing
-    // The abort operation will clear conversation delegations, so we must snapshot them first
-    const pendingDelegations = this.getConversationPendingDelegations(agentPubkey, conversationId);
-    const key = this.makeKey(agentPubkey, conversationId);
-    const convDelegations = this.conversationDelegations.get(key);
-
-    // RACE CONDITION FIX: Mark all pending delegations as killed BEFORE aborting.
-    // This prevents the race where a delegation completes between the time we abort
-    // and the time we process the cascade. The killed flag ensures that any
-    // completion events arriving for these delegations will be ignored.
-    const killedDelegationCount = this.markAllDelegationsKilled(agentPubkey, conversationId);
-    if (killedDelegationCount > 0) {
-      trace.getActiveSpan()?.addEvent("ral.delegations_marked_killed_before_abort", {
-        "cascade.agent_pubkey": shortenPubkey(agentPubkey),
-        "cascade.conversation_id": shortenConversationId(conversationId),
-        "cascade.killed_delegation_count": killedDelegationCount,
-      });
-    }
-
-    // Abort the target agent's RAL controllers and LLM stream
-    const directAbortCount = this.abortAllForAgent(agentPubkey, conversationId);
-    const llmAborted = llmOpsRegistry.stopByAgentAndConversation(agentPubkey, conversationId, reason);
-
-    // Always mark killed + block — we were asked to stop this agent.
-    // Unconditional to handle the timing window where an LLM op exists but RAL controller doesn't yet.
-    this.markAgentConversationKilled(agentPubkey, conversationId);
-    const conversation = ConversationStore.get(conversationId);
-    if (conversation) {
-      conversation.blockAgent(agentPubkey);
-    }
-
-    if (directAbortCount > 0 || llmAborted) {
-      abortedTuples.push({ conversationId, agentPubkey });
-
-      // Update parent's delegation state when killing a child conversation.
-      this.markParentDelegationKilled(conversationId);
-
-      // Add to cooldown registry if provided
-      if (cooldownRegistry) {
-        cooldownRegistry.add(projectId, conversationId, agentPubkey, reason);
-      }
-
-      // Persist abort message in conversation store
-      if (conversation) {
-        const abortMessage = `This conversation was aborted at ${new Date().toISOString()}. Reason: ${reason}`;
-        conversation.addMessage({
-          pubkey: "system",
-          content: abortMessage,
-          messageType: "text",
-          timestamp: Math.floor(Date.now() / 1000),
-        });
-        await conversation.save();
-      }
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.cascade_abort_started", {
-      "cascade.root_conversation_id": shortenConversationId(conversationId),
-      "cascade.root_agent_pubkey": shortenPubkey(agentPubkey),
-      "cascade.pending_delegations": pendingDelegations.length,
-      "cascade.reason": reason,
-    });
-
-    // Recursively abort each pending delegation
-    for (const delegation of pendingDelegations) {
-      const descendantConvId = delegation.delegationConversationId;
-      const descendantAgentPubkey = delegation.recipientPubkey;
-
-      // Get the projectId for the descendant conversation
-      const descendantConversation = ConversationStore.get(descendantConvId);
-      const descendantProjectId = descendantConversation?.getProjectId() ?? projectId;
-
-      logger.info("[RALRegistry] Cascading abort to nested delegation", {
-        parentConversation: shortenConversationId(conversationId),
-        parentAgent: shortenPubkey(agentPubkey),
-        childConversation: shortenConversationId(descendantConvId),
-        childAgent: shortenPubkey(descendantAgentPubkey),
-        projectId: descendantProjectId?.substring(0, 12),
-      });
-
-      // Recursively abort the descendant
-      const descendantResult = await this.abortWithCascade(
-        descendantAgentPubkey,
-        descendantConvId,
-        descendantProjectId,
-        `cascaded from ${shortenConversationId(conversationId)}`,
-        cooldownRegistry
-      );
-
-      // Collect all aborted tuples from descendants
-      abortedTuples.push(...descendantResult.descendantConversations);
-
-      // Mark this delegation as aborted by moving it from pending to completed with abort status
-      // Use the captured convDelegations from before the abort
-      if (convDelegations) {
-        // Remove from pending
-        const pendingDelegation = convDelegations.pending.get(descendantConvId);
-        if (pendingDelegation) {
-          convDelegations.pending.delete(descendantConvId);
-
-          // Load partial transcript from the aborted conversation
-          const abortedConv = ConversationStore.get(descendantConvId);
-          const partialTranscript: DelegationMessage[] = [];
-          if (abortedConv) {
-            const messages = abortedConv.getAllMessages();
-            for (const msg of messages) {
-              if (msg.messageType === "text" && msg.targetedPubkeys && msg.targetedPubkeys.length > 0) {
-                partialTranscript.push({
-                  senderPubkey: msg.pubkey,
-                  recipientPubkey: msg.targetedPubkeys[0],
-                  content: msg.content,
-                  timestamp: msg.timestamp ?? Date.now(),
-                });
-              }
-            }
-          }
-
-          // Add to completed with "aborted" status
-          convDelegations.completed.set(descendantConvId, {
-            delegationConversationId: descendantConvId,
-            recipientPubkey: descendantAgentPubkey,
-            senderPubkey: pendingDelegation.senderPubkey,
-            ralNumber: pendingDelegation.ralNumber,
-            transcript: partialTranscript,
-            completedAt: Date.now(),
-            status: "aborted",
-            abortReason: `cascaded from ${shortenConversationId(conversationId)}`,
-          });
-
-          trace.getActiveSpan()?.addEvent("ral.delegation_marked_aborted", {
-            "delegation.conversation_id": shortenConversationId(descendantConvId),
-            "delegation.transcript_length": partialTranscript.length,
-          });
-        }
-      }
-    }
-
-    // Re-insert the modified convDelegations back into the Map so it's queryable later
-    // This is critical because abortAllForAgent() deleted the Map entry, but we've
-    // now added aborted completions to the captured reference
-    if (convDelegations && (convDelegations.pending.size > 0 || convDelegations.completed.size > 0)) {
-      this.conversationDelegations.set(key, convDelegations);
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.cascade_abort_completed", {
-      "cascade.root_conversation_id": shortenConversationId(conversationId),
-      "cascade.root_agent_pubkey": shortenPubkey(agentPubkey),
-      "cascade.total_aborted": abortedTuples.length,
-    });
-
-    return {
-      abortedCount: directAbortCount + (llmAborted ? 1 : 0),
-      descendantConversations: abortedTuples,
-    };
+    return this.killSwitchRegistry.abortWithCascade(
+      agentPubkey,
+      conversationId,
+      projectId,
+      reason,
+      cooldownRegistry
+    );
   }
 
   /**
@@ -1868,12 +1097,10 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   clearAll(): void {
     this.states.clear();
     this.nextRalNumber.clear();
-    this.delegationToRal.clear();
     this.ralIdToLocation.clear();
     this.abortControllers.clear();
-    this.conversationDelegations.clear();
-    this.followupToCanonical.clear();
-    this.killedAgentConversations.clear();
+    this.delegationRegistry.clearAll();
+    this.killSwitchRegistry.clearAll();
   }
 
   // ============================================================================
@@ -1890,56 +1117,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns true if the delegation was found and marked, false otherwise
    */
   markDelegationKilled(delegationConversationId: string): boolean {
-    // Look up the delegation's location
-    const location = this.delegationToRal.get(delegationConversationId);
-    if (!location) {
-      logger.debug("[RALRegistry.markDelegationKilled] No delegation found for ID", {
-        delegationConversationId: shortenConversationId(delegationConversationId),
-      });
-      return false;
-    }
-
-    const convDelegations = this.conversationDelegations.get(location.key);
-    if (!convDelegations) {
-      return false;
-    }
-
-    // Resolve followup event ID to canonical delegation conversation ID if needed
-    const canonicalId = this.followupToCanonical.get(delegationConversationId)
-      ?? delegationConversationId;
-
-    const pendingDelegation = convDelegations.pending.get(canonicalId);
-    if (!pendingDelegation) {
-      logger.debug("[RALRegistry.markDelegationKilled] No pending delegation found", {
-        delegationConversationId: shortenConversationId(canonicalId),
-      });
-      return false;
-    }
-
-    // Idempotent: preserve original kill time for audit trail
-    if (pendingDelegation.killed) {
-      logger.debug("[RALRegistry.markDelegationKilled] Delegation already killed", {
-        delegationConversationId: shortenConversationId(canonicalId),
-        killedAt: pendingDelegation.killedAt,
-      });
-      return true; // Already killed, but return true to indicate it's in killed state
-    }
-
-    // Mark the delegation as killed
-    pendingDelegation.killed = true;
-    pendingDelegation.killedAt = Date.now();
-
-    trace.getActiveSpan()?.addEvent("ral.delegation_marked_killed", {
-      "delegation.conversation_id": shortenConversationId(canonicalId),
-      "delegation.recipient_pubkey": shortenPubkey(pendingDelegation.recipientPubkey),
-    });
-
-    logger.info("[RALRegistry.markDelegationKilled] Delegation marked as killed", {
-      delegationConversationId: shortenConversationId(canonicalId),
-      recipientPubkey: shortenPubkey(pendingDelegation.recipientPubkey),
-    });
-
-    return true;
+    return this.killSwitchRegistry.markDelegationKilled(delegationConversationId);
   }
 
   /**
@@ -1950,22 +1128,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns true if the delegation is killed, false if not found or not killed
    */
   isDelegationKilled(delegationConversationId: string): boolean {
-    const location = this.delegationToRal.get(delegationConversationId);
-    if (!location) {
-      return false;
-    }
-
-    const convDelegations = this.conversationDelegations.get(location.key);
-    if (!convDelegations) {
-      return false;
-    }
-
-    // Resolve followup event ID to canonical delegation conversation ID if needed
-    const canonicalId = this.followupToCanonical.get(delegationConversationId)
-      ?? delegationConversationId;
-
-    const pendingDelegation = convDelegations.pending.get(canonicalId);
-    return pendingDelegation?.killed === true;
+    return this.killSwitchRegistry.isDelegationKilled(delegationConversationId);
   }
 
   /**
@@ -1975,37 +1138,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns The number of delegations marked as killed
    */
   markAllDelegationsKilled(agentPubkey: string, conversationId: string): number {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const convDelegations = this.conversationDelegations.get(key);
-    if (!convDelegations) {
-      return 0;
-    }
-
-    let killedCount = 0;
-    const now = Date.now();
-
-    for (const [delegationId, pendingDelegation] of convDelegations.pending) {
-      if (!pendingDelegation.killed) {
-        pendingDelegation.killed = true;
-        pendingDelegation.killedAt = now;
-        killedCount++;
-
-        trace.getActiveSpan()?.addEvent("ral.delegation_marked_killed_bulk", {
-          "delegation.conversation_id": shortenConversationId(delegationId),
-          "delegation.recipient_pubkey": shortenPubkey(pendingDelegation.recipientPubkey),
-        });
-      }
-    }
-
-    if (killedCount > 0) {
-      logger.info("[RALRegistry.markAllDelegationsKilled] Marked delegations as killed", {
-        agentPubkey: shortenPubkey(agentPubkey),
-        conversationId: shortenConversationId(conversationId),
-        killedCount,
-      });
-    }
-
-    return killedCount;
+    return this.killSwitchRegistry.markAllDelegationsKilled(agentPubkey, conversationId);
   }
 
   /**
@@ -2021,18 +1154,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @param conversationId - The conversation ID
    */
   markAgentConversationKilled(agentPubkey: string, conversationId: string): void {
-    const key = this.makeKey(agentPubkey, conversationId);
-    this.killedAgentConversations.add(key);
-
-    trace.getActiveSpan()?.addEvent("ral.agent_conversation_marked_killed", {
-      "agent.pubkey": shortenPubkey(agentPubkey),
-      "conversation.id": shortenConversationId(conversationId),
-    });
-
-    logger.info("[RALRegistry.markAgentConversationKilled] Agent+conversation marked as killed", {
-      agentPubkey: shortenPubkey(agentPubkey),
-      conversationId: shortenConversationId(conversationId),
-    });
+    this.killSwitchRegistry.markAgentConversationKilled(agentPubkey, conversationId);
   }
 
   /**
@@ -2047,8 +1169,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns true if the agent+conversation has been killed
    */
   isAgentConversationKilled(agentPubkey: string, conversationId: string): boolean {
-    const key = this.makeKey(agentPubkey, conversationId);
-    return this.killedAgentConversations.has(key);
+    return this.killSwitchRegistry.isAgentConversationKilled(agentPubkey, conversationId);
   }
 
   /**
@@ -2065,30 +1186,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns The recipient agent pubkey if delegation is PENDING, or null if not found or completed
    */
   getDelegationRecipientPubkey(delegationConversationId: string): string | null {
-    // Look up which parent owns this delegation
-    const location = this.delegationToRal.get(delegationConversationId);
-    if (!location) {
-      return null;
-    }
-
-    // Get the parent's conversation delegations
-    const convDelegations = this.conversationDelegations.get(location.key);
-    if (!convDelegations) {
-      return null;
-    }
-
-    // Resolve followup event ID to canonical delegation conversation ID if needed
-    const canonicalId = this.followupToCanonical.get(delegationConversationId)
-      ?? delegationConversationId;
-
-    // ONLY return for pending delegations - completed delegations are excluded
-    // to prevent pre-emptive kill on already-finished work
-    const pendingDelegation = convDelegations.pending.get(canonicalId);
-    if (pendingDelegation) {
-      return pendingDelegation.recipientPubkey;
-    }
-
-    return null;
+    return this.killSwitchRegistry.getDelegationRecipientPubkey(delegationConversationId);
   }
 
   /**
@@ -2102,106 +1200,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @returns true if parent delegation was found and marked, false otherwise
    */
   markParentDelegationKilled(delegationConversationId: string): boolean {
-    // Look up which parent owns this delegation
-    const location = this.delegationToRal.get(delegationConversationId);
-    if (!location) {
-      logger.debug("[RALRegistry.markParentDelegationKilled] No parent found for delegation", {
-        delegationConversationId: shortenConversationId(delegationConversationId),
-      });
-      return false;
-    }
-
-    // Get the parent's conversation delegations
-    const convDelegations = this.conversationDelegations.get(location.key);
-    if (!convDelegations) {
-      logger.debug("[RALRegistry.markParentDelegationKilled] No delegations found for parent", {
-        parentKey: location.key.substring(0, 20),
-      });
-      return false;
-    }
-
-    // Resolve followup event ID to canonical delegation conversation ID if needed
-    const canonicalId = this.followupToCanonical.get(delegationConversationId)
-      ?? delegationConversationId;
-
-    const pendingDelegation = convDelegations.pending.get(canonicalId);
-    if (!pendingDelegation) {
-      logger.debug("[RALRegistry.markParentDelegationKilled] No pending delegation found", {
-        delegationConversationId: shortenConversationId(canonicalId),
-      });
-      return false;
-    }
-
-    // Mark the delegation as killed (idempotent)
-    if (!pendingDelegation.killed) {
-      pendingDelegation.killed = true;
-      pendingDelegation.killedAt = Date.now();
-
-      trace.getActiveSpan()?.addEvent("ral.parent_delegation_marked_killed", {
-        "parent.key": location.key.substring(0, 20),
-        "delegation.conversation_id": shortenConversationId(canonicalId),
-        "delegation.recipient_pubkey": shortenPubkey(pendingDelegation.recipientPubkey),
-      });
-
-      logger.info("[RALRegistry.markParentDelegationKilled] Parent delegation marked as killed", {
-        parentKey: location.key.substring(0, 20),
-        delegationConversationId: shortenConversationId(canonicalId),
-        recipientPubkey: shortenPubkey(pendingDelegation.recipientPubkey),
-      });
-    }
-
-    // Remove from pending
-    convDelegations.pending.delete(canonicalId);
-
-    // ISSUE 2 FIX: Check if there's an existing completion entry (from followup scenario).
-    // If so, preserve the existing transcript when creating the abort entry.
-    const existingCompletion = convDelegations.completed.get(canonicalId);
-    if (existingCompletion) {
-      // Replace existing completion with aborted entry, but PRESERVE the transcript
-      // The discriminated union type requires replacing the entire object to change status
-      convDelegations.completed.set(canonicalId, {
-        delegationConversationId: canonicalId,
-        recipientPubkey: existingCompletion.recipientPubkey,
-        senderPubkey: existingCompletion.senderPubkey,
-        ralNumber: existingCompletion.ralNumber,
-        transcript: existingCompletion.transcript, // PRESERVE original transcript
-        completedAt: Date.now(),
-        status: "aborted",
-        abortReason: "killed via kill tool (after partial completion)",
-      });
-
-      trace.getActiveSpan()?.addEvent("ral.parent_delegation_updated_as_aborted", {
-        "delegation.conversation_id": shortenConversationId(canonicalId),
-        "delegation.status": "aborted",
-        "delegation.transcript_preserved": existingCompletion.transcript.length,
-      });
-    } else {
-      // No existing completion - create new aborted entry
-      convDelegations.completed.set(canonicalId, {
-        delegationConversationId: canonicalId,
-        recipientPubkey: pendingDelegation.recipientPubkey,
-        senderPubkey: pendingDelegation.senderPubkey,
-        ralNumber: pendingDelegation.ralNumber,
-        transcript: [], // Empty transcript since it was killed before completion
-        completedAt: Date.now(),
-        status: "aborted",
-        abortReason: "killed via kill tool",
-      });
-
-      trace.getActiveSpan()?.addEvent("ral.parent_delegation_moved_to_completed", {
-        "delegation.conversation_id": shortenConversationId(canonicalId),
-        "delegation.status": "aborted",
-      });
-    }
-
-    // Decrement the O(1) delegation counter
-    this.decrementDelegationCounter(
-      location.key.split(":")[0], // agentPubkey
-      location.key.split(":")[1], // conversationId
-      pendingDelegation.ralNumber
-    );
-
-    return true;
+    return this.killSwitchRegistry.markParentDelegationKilled(delegationConversationId);
   }
 
   // ============================================================================
@@ -2227,49 +1226,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       heuristicId: string;
     }>
   ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) {
-      logger.warn("[RALRegistry] Cannot add heuristic violations - no RAL state", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        ralNumber,
-      });
-      return;
-    }
-
-    // Initialize heuristics state if needed
-    if (!ral.heuristics) {
-      ral.heuristics = {
-        pendingViolations: [],
-        shownViolationIds: new Set(),
-      };
-    }
-
-    // Filter out duplicates by heuristicId (not individual violation id)
-    // Check both shown set AND pending queue to prevent accumulation
-    // between tool results that fire before the next prepareStep consume
-    const pendingHeuristicIds = new Set(
-      ral.heuristics.pendingViolations.map((v) => v.heuristicId)
+    this.heuristicManager.addHeuristicViolations(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      violations
     );
-    const newViolations = violations.filter(
-      (v) =>
-        !ral.heuristics?.shownViolationIds.has(v.heuristicId) &&
-        !pendingHeuristicIds.has(v.heuristicId)
-    );
-
-    if (newViolations.length === 0) {
-      return; // All violations already shown or pending
-    }
-
-    // Add to pending queue
-    ral.heuristics.pendingViolations.push(...newViolations);
-    ral.lastActivityAt = Date.now();
-
-    trace.getActiveSpan()?.addEvent("ral.heuristic_violations_added", {
-      "ral.number": ralNumber,
-      "heuristic.violation_count": newViolations.length,
-      "heuristic.pending_count": ral.heuristics.pendingViolations.length,
-    });
   }
 
   /**
@@ -2290,26 +1253,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     timestamp: number;
     heuristicId: string;
   }> {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral || !ral.heuristics || ral.heuristics.pendingViolations.length === 0) {
-      return [];
-    }
-
-    // Atomic read+clear
-    const violations = [...ral.heuristics.pendingViolations];
-    ral.heuristics.pendingViolations = [];
-
-    // Mark heuristicId as shown (for deduplication by heuristic, not by individual violation)
-    for (const v of violations) {
-      ral.heuristics.shownViolationIds.add(v.heuristicId);
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.heuristic_violations_consumed", {
-      "ral.number": ralNumber,
-      "heuristic.violation_count": violations.length,
-    });
-
-    return violations;
+    return this.heuristicManager.getAndConsumeHeuristicViolations(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber
+    );
   }
 
   /**
@@ -2320,33 +1269,9 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     conversationId: string,
     ralNumber: number
   ): boolean {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    return (ral?.heuristics?.pendingViolations?.length ?? 0) > 0;
-  }
-
-  // ============================================================================
-  // Heuristic Helper Methods (BLOCKER 1 & 2 Fixes)
-  // ============================================================================
-
-  /**
-   * Initialize heuristic state for a RAL entry (DRY helper).
-   */
-  private initializeHeuristicState(): NonNullable<RALRegistryEntry["heuristics"]> {
-    return {
-      pendingViolations: [],
-      shownViolationIds: new Set(),
-      summary: {
-        recentTools: [],
-        flags: {
-          hasTodoWrite: false,
-          hasDelegation: false,
-          hasVerification: false,
-          hasGitAgentCommit: false,
-        },
-        pendingDelegationCount: 0,
-      },
-      toolArgs: new Map(),
-    };
+    return this.heuristicManager.hasPendingHeuristicViolations(
+      this.getRAL(agentPubkey, conversationId, ralNumber)
+    );
   }
 
   /**
@@ -2360,18 +1285,14 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     toolCallId: string,
     args: unknown
   ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return;
-
-    if (!ral.heuristics) {
-      ral.heuristics = this.initializeHeuristicState();
-    }
-
-    if (!ral.heuristics.toolArgs) {
-      ral.heuristics.toolArgs = new Map();
-    }
-
-    ral.heuristics.toolArgs.set(toolCallId, args);
+    this.heuristicManager.storeToolArgs(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      toolCallId,
+      args
+    );
   }
 
   /**
@@ -2384,8 +1305,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     ralNumber: number,
     toolCallId: string
   ): unknown | undefined {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    return ral?.heuristics?.toolArgs?.get(toolCallId);
+    return this.heuristicManager.getToolArgs(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      toolCallId
+    );
   }
 
   /**
@@ -2398,9 +1324,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     ralNumber: number,
     toolCallId: string
   ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral?.heuristics?.toolArgs) return;
-    ral.heuristics.toolArgs.delete(toolCallId);
+    this.heuristicManager.clearToolArgs(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      toolCallId
+    );
   }
 
   /**
@@ -2417,65 +1347,15 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     toolArgs: unknown,
     maxRecentTools = 10
   ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return;
-
-    if (!ral.heuristics) {
-      ral.heuristics = this.initializeHeuristicState();
-    }
-
-    if (!ral.heuristics.summary) {
-      ral.heuristics.summary = {
-        recentTools: [],
-        flags: {
-          hasTodoWrite: false,
-          hasDelegation: false,
-          hasVerification: false,
-          hasGitAgentCommit: false,
-        },
-        pendingDelegationCount: 0,
-      };
-    }
-
-    const summary = ral.heuristics.summary;
-
-    // Add to recent tools (bounded)
-    summary.recentTools.push({ name: toolName, timestamp: Date.now() });
-    if (summary.recentTools.length > maxRecentTools) {
-      summary.recentTools.shift(); // Remove oldest
-    }
-
-    // Update flags based on tool name
-    // Include all variants: todo_write (actual ToolName), TodoWrite (legacy), mcp__tenex__todo_write (MCP)
-    if (toolName === "todo_write" || toolName === "TodoWrite" || toolName === "mcp__tenex__todo_write") {
-      summary.flags.hasTodoWrite = true;
-    }
-
-    if (toolName === "mcp__tenex__delegate" || toolName === "mcp__tenex__delegate_crossproject") {
-      summary.flags.hasDelegation = true;
-
-      // Check if delegation to git-agent
-      const args = toolArgs as { delegations?: Array<{ recipient?: string }> };
-      if (args?.delegations?.some((d) => d.recipient === "git-agent")) {
-        summary.flags.hasGitAgentCommit = true;
-      }
-    }
-
-    if (toolName === "Bash") {
-      const args = toolArgs as { command?: string };
-      const command = args?.command?.toLowerCase() || "";
-
-      // Check for verification commands
-      if (
-        command.includes("test") ||
-        command.includes("build") ||
-        command.includes("lint") ||
-        command.includes("jest") ||
-        command.includes("vitest")
-      ) {
-        summary.flags.hasVerification = true;
-      }
-    }
+    this.heuristicManager.updateHeuristicSummary(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      toolName,
+      toolArgs,
+      maxRecentTools
+    );
   }
 
   /**
@@ -2487,27 +1367,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     conversationId: string,
     ralNumber: number
   ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return;
-
-    if (!ral.heuristics) {
-      ral.heuristics = this.initializeHeuristicState();
-    }
-
-    if (!ral.heuristics.summary) {
-      ral.heuristics.summary = {
-        recentTools: [],
-        flags: {
-          hasTodoWrite: false,
-          hasDelegation: false,
-          hasVerification: false,
-          hasGitAgentCommit: false,
-        },
-        pendingDelegationCount: 0,
-      };
-    }
-
-    ral.heuristics.summary.pendingDelegationCount++;
+    this.heuristicManager.incrementDelegationCounter(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber
+    );
   }
 
   /**
@@ -2519,12 +1384,11 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     conversationId: string,
     ralNumber: number
   ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral?.heuristics?.summary) return;
-
-    ral.heuristics.summary.pendingDelegationCount = Math.max(
-      0,
-      ral.heuristics.summary.pendingDelegationCount - 1
+    this.heuristicManager.decrementDelegationCounter(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber
     );
   }
 
@@ -2548,8 +1412,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         pendingDelegationCount: number;
       }
     | undefined {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    return ral?.heuristics?.summary;
+    return this.heuristicManager.getHeuristicSummary(
+      this.getRAL(agentPubkey, conversationId, ralNumber),
+      agentPubkey,
+      conversationId,
+      ralNumber
+    );
   }
 
   // ============================================================================

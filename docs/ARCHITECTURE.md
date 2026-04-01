@@ -153,6 +153,11 @@ services/
 │   └── DelegationCompletionHandler.ts
 ├── ral/                  # Delegation/RAL state
 │   ├── RALRegistry.ts
+│   ├── DelegationRegistry.ts
+│   ├── KillSwitchRegistry.ts
+│   ├── HeuristicViolationManager.ts
+│   ├── MessageInjectionQueue.ts
+│   ├── ExecutionTimingTracker.ts
 │   ├── types.ts
 │   └── index.ts
 ├── rag/                  # RAG domain
