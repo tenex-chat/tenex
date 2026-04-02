@@ -39,28 +39,6 @@ export const DELEGATE_TOOLS: ToolName[] = [
     "delegate_followup",
 ] as const;
 
-/**
- * Skill-provided tools that should be excluded from TenexProjectStatus (24010) events.
- * These tools are only accessible via skill activation, not direct agent configuration.
- */
-export const SKILL_PROVIDED_TOOLS: ToolName[] = [
-    // RAG skill tools
-    "rag_search",
-    "rag_collection_create",
-    "rag_add_documents",
-    "rag_collection_delete",
-    "rag_collection_list",
-    "rag_subscription_create",
-    "rag_subscription_list",
-    "rag_subscription_get",
-    "rag_subscription_delete",
-    // Shell skill tools
-    "shell",
-    // Conversation search skill
-    "conversation_search",
-    // Nostr skill
-    "nostr_publish_as_user",
-] as const;
 
 
 /**

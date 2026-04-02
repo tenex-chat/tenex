@@ -25,12 +25,11 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
     return tool as CoreTool<unknown, unknown>;
 }
 import { logger } from "@/utils/logger";
-import { CORE_AGENT_TOOLS, SKILL_PROVIDED_TOOLS } from "@/agents/constants";
+import { CORE_AGENT_TOOLS } from "@/agents/constants";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createConversationGetTool } from "./implementations/conversation_get";
 import { createConversationListTool } from "./implementations/conversation_list";
-import { createConversationSearchTool } from "./implementations/conversation_search";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
@@ -42,29 +41,13 @@ import { createKillTool } from "./implementations/kill";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createNoResponseTool } from "./implementations/no_response";
 import { createProjectListTool } from "./implementations/project_list";
-import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
-import { createRAGCollectionCreateTool } from "./implementations/rag_collection_create";
-import { createRAGCollectionDeleteTool } from "./implementations/rag_collection_delete";
-import { createRAGCollectionListTool } from "./implementations/rag_collection_list";
-
-import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscription_create";
-import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
-import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
-import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
 import { createMcpResourceReadTool } from "./implementations/mcp_resource_read";
 import { createMcpSubscribeTool } from "./implementations/mcp_subscribe";
 import { createMcpSubscriptionStopTool } from "./implementations/mcp_subscription_stop";
 import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
-import { createShellTool } from "./implementations/shell";
 // Todo tools
 import { createTodoWriteTool } from "./implementations/todo";
-
-// Nostr tools
-import { createNostrPublishAsUserTool } from "./implementations/nostr_publish_as_user";
-
-// Unified RAG search tool
-import { createRAGSearchTool } from "./implementations/rag_search";
 
 // Skills tools
 import { createSkillsSetTool } from "./implementations/skills_set";
@@ -154,14 +137,22 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
  * All tools receive ToolExecutionContext - tools that don't need
  * agentPublisher/ralNumber simply ignore those fields.
  */
-const toolFactories: Record<ToolName, ToolFactory> = {
+/**
+ * Registry of tool factories for tools that are always available in the system.
+ * Skill-provided tools (shell, RAG, conversation_search, nostr) are NOT here —
+ * they are loaded on-demand via SkillToolLoader when their skill is activated.
+ */
+const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
     // Agent tools
     agents_write: createAgentsWriteTool,
 
     // Ask tool
     ask: createAskTool,
 
-    // File search tools
+    // Filesystem tools
+    fs_read: (ctx) => getOrCreateTenexFsTools(ctx).fs_read as AISdkTool,
+    fs_write: (ctx) => getOrCreateTenexFsTools(ctx).fs_write as AISdkTool,
+    fs_edit: (ctx) => getOrCreateTenexFsTools(ctx).fs_edit as AISdkTool,
     fs_glob: (ctx) => getOrCreateTenexFsTools(ctx).fs_glob as AISdkTool,
     fs_grep: (ctx) => getOrCreateTenexFsTools(ctx).fs_grep as AISdkTool,
 
@@ -180,33 +171,12 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Lesson tools
     lesson_learn: createLessonLearnTool,
 
-    fs_read: (ctx) => getOrCreateTenexFsTools(ctx).fs_read as AISdkTool,
-    fs_write: (ctx) => getOrCreateTenexFsTools(ctx).fs_write as AISdkTool,
-    fs_edit: (ctx) => getOrCreateTenexFsTools(ctx).fs_edit as AISdkTool,
-    // Schedule tools
+    // Schedule tools (core — always available)
     schedule_task: createScheduleTaskTool,
 
-    // Conversation search
-    conversation_search: createConversationSearchTool,
-
-    // Unified RAG search across all project knowledge
-    rag_search: createRAGSearchTool,
-
-    shell: createShellTool,
+    // Process control
     kill: createKillTool,
     no_response: createNoResponseTool,
-
-    // RAG tools
-    rag_collection_create: createRAGCollectionCreateTool,
-    rag_add_documents: createRAGAddDocumentsTool,
-    rag_collection_delete: createRAGCollectionDeleteTool,
-    rag_collection_list: createRAGCollectionListTool,
-
-    // RAG subscription tools
-    rag_subscription_create: createRAGSubscriptionCreateTool,
-    rag_subscription_list: createRAGSubscriptionListTool,
-    rag_subscription_get: createRAGSubscriptionGetTool,
-    rag_subscription_delete: createRAGSubscriptionDeleteTool,
 
     // MCP tools
     mcp_resource_read: createMcpResourceReadTool,
@@ -216,9 +186,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Todo tools - require ConversationToolContext (filtered out when no conversation)
     todo_write: createTodoWriteTool as ToolFactory,
 
-    // Nostr tools
-    nostr_publish_as_user: createNostrPublishAsUserTool,
-
+    // Skills management
     skills_set: createSkillsSetTool as ToolFactory,
 
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
@@ -451,11 +419,6 @@ export function getToolsObject(
             // mcp__ entries in tool lists are no longer valid; they are injected via mcpAccess
             continue;
         } else if (name in toolFactories) {
-            // Filter out skill-provided tools - they can only be accessed via skill activation
-            if (SKILL_PROVIDED_TOOLS.includes(name as ToolName)) {
-                logger.debug(`Filtering out tool '${name}' - skill-provided tools must be activated via skills`);
-                continue;
-            }
             // Filter out conversation-required tools when no conversation available
             if (CONVERSATION_REQUIRED_TOOLS.has(name as ToolName) && !hasConversation) {
                 logger.debug(`Filtering out tool '${name}' - requires conversation context`);

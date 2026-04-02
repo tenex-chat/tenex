@@ -50,13 +50,13 @@ describe("Tool Registry", () => {
 
     describe("getTools", () => {
         it("should return array of existing tools", () => {
-            const tools = getTools(["fs_read", "shell"], mockContext);
+            const tools = getTools(["fs_read", "agents_write"], mockContext);
             expect(tools).toHaveLength(2);
         });
 
         it("should filter out non-existent tools", () => {
             // @ts-expect-error Testing with invalid tool name
-            const tools = getTools(["fs_read", "non_existent" as ToolName, "shell"], mockContext);
+            const tools = getTools(["fs_read", "non_existent" as ToolName, "agents_write"], mockContext);
             expect(tools).toHaveLength(2);
         });
 
