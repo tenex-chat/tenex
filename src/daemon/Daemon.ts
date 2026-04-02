@@ -37,7 +37,7 @@ import {
     type ActiveDelegationCheckerFn,
 } from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
-import { NudgeSkillWhitelistService } from "@/services/nudge";
+import { SkillWhitelistService } from "@/services/skill";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { SkillService } from "@/services/skill";
@@ -306,8 +306,8 @@ export class Daemon {
                 : [];
             OwnerAgentListService.getInstance().initialize(ownerAgentListPubkeys);
 
-            // 6d. Initialize NudgeSkillWhitelistService
-            const whitelistService = NudgeSkillWhitelistService.getInstance();
+            // 6d. Initialize SkillWhitelistService
+            const whitelistService = SkillWhitelistService.getInstance();
             this.removeWhitelistCacheListener?.();
             this.removeWhitelistCacheListener = whitelistService.onCacheUpdated(async () => {
                 await this.hydrateWhitelistedSkillsToLocalStore();
@@ -472,7 +472,7 @@ export class Daemon {
     }
 
     private async hydrateWhitelistedSkillsToLocalStore(): Promise<void> {
-        const whitelistedSkills = NudgeSkillWhitelistService.getInstance().getWhitelistedSkills();
+        const whitelistedSkills = SkillWhitelistService.getInstance().getWhitelistedSkills();
 
         if (whitelistedSkills.length === 0) {
             return;
@@ -1061,7 +1061,7 @@ export class Daemon {
         this.removeWhitelistCacheListener?.();
         this.removeWhitelistCacheListener = null;
 
-        NudgeSkillWhitelistService.getInstance().shutdown();
+        SkillWhitelistService.getInstance().shutdown();
         await Nip46SigningService.getInstance().shutdown();
 
         if (this.subscriptionManager) {

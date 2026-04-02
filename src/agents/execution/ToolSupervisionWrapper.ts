@@ -70,7 +70,7 @@ export function wrapToolsWithSupervision(
                             currentBranch: context.currentBranch,
                             availableAgents: Array.from(projectContext.agents.values()),
                             mcpManager: projectContext.mcpManager,
-                            nudgeContent: "",
+                            skillContent: "",
                         })).map(m => m.message.content).join("\n\n");
 
                     // Build conversation history from ConversationStore.

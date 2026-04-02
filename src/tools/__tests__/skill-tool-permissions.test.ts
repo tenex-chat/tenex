@@ -1,17 +1,17 @@
 import { describe, expect, it } from "bun:test";
 import { createMockExecutionEnvironment } from "@/test-utils";
-import type { NudgeToolPermissions } from "@/services/nudge";
+import type { SkillToolPermissions } from "@/services/skill";
 import { getToolsObject } from "../registry";
 import { CORE_AGENT_TOOLS } from "@/agents/constants";
 
-describe("Nudge Tool Permissions", () => {
+describe("Skill Tool Permissions", () => {
     const mockContext = createMockExecutionEnvironment();
 
     describe("getToolsObject with nudge permissions", () => {
         describe("only-tool mode (highest priority)", () => {
             it("should return EXACTLY the tools specified in onlyTools with NO auto-injection", () => {
                 const baseTools = ["fs_read", "fs_write", "shell", "delegate"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["fs_read", "fs_write"],
                 };
 
@@ -29,7 +29,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should completely ignore allow-tool when only-tool is set", () => {
                 const baseTools = ["fs_read"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["shell"],
                     allowTools: ["delegate", "fs_write"], // Should be ignored
                 };
@@ -44,7 +44,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should completely ignore deny-tool when only-tool is set", () => {
                 const baseTools = ["fs_read", "shell", "delegate"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["fs_read", "shell"],
                     denyTools: ["fs_read"], // Should be ignored - fs_read should still be included
                 };
@@ -59,7 +59,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should fall back to base tools when onlyTools array is empty", () => {
                 const baseTools = ["fs_read", "shell"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: [], // Empty array does NOT trigger only-tool mode
                 };
 
@@ -77,7 +77,7 @@ describe("Nudge Tool Permissions", () => {
         describe("allow-tool mode", () => {
             it("should add allowed tools to the base set", () => {
                 const baseTools = ["fs_read"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     allowTools: ["shell", "delegate"],
                 };
 
@@ -91,7 +91,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should not duplicate tools already in base set", () => {
                 const baseTools = ["fs_read", "shell"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     allowTools: ["fs_read", "shell"], // Already in base
                 };
 
@@ -117,7 +117,7 @@ describe("Nudge Tool Permissions", () => {
         describe("deny-tool mode", () => {
             it("should remove denied tools from the base set", () => {
                 const baseTools = ["fs_read", "fs_write", "shell", "delegate"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     denyTools: ["shell", "delegate"],
                 };
 
@@ -132,7 +132,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should handle denying non-existent tools gracefully", () => {
                 const baseTools = ["fs_read", "shell"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     denyTools: ["non_existent_tool", "another_fake_tool"],
                 };
 
@@ -146,7 +146,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should block auto-injected core tools (kill) when denied", () => {
                 const baseTools = ["fs_read", "shell"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     denyTools: ["kill"], // Block the auto-injected kill tool
                 };
 
@@ -163,7 +163,7 @@ describe("Nudge Tool Permissions", () => {
         describe("combined allow and deny", () => {
             it("should apply both allow and deny (add then remove)", () => {
                 const baseTools = ["fs_read"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     allowTools: ["shell", "delegate"],
                     denyTools: ["fs_read"], // Remove the original tool
                 };
@@ -178,7 +178,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should deny tools even if they were added by allow", () => {
                 const baseTools = ["fs_read"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     allowTools: ["shell", "delegate"],
                     denyTools: ["shell"], // Deny something we just allowed
                 };
@@ -206,7 +206,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should return base tools when permissions is empty object", () => {
                 const baseTools = ["fs_read", "shell"];
-                const nudgePermissions: NudgeToolPermissions = {};
+                const nudgePermissions: SkillToolPermissions = {};
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
                 const toolNames = Object.keys(tools);
@@ -220,7 +220,7 @@ describe("Nudge Tool Permissions", () => {
             it("should filter MCP tools with only-tool mode", () => {
                 // MCP tools start with "mcp__"
                 const baseTools = ["fs_read", "mcp__tenex__ask"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["fs_read"], // Exclude MCP tool
                 };
 
@@ -233,7 +233,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should include MCP tools if specified in only-tool", () => {
                 const baseTools = ["fs_read", "mcp__tenex__ask"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["mcp__tenex__ask"], // Only MCP tool
                 };
 
@@ -251,7 +251,7 @@ describe("Nudge Tool Permissions", () => {
         describe("auto-injection behavior", () => {
             it("should NOT auto-inject fs_edit when fs_write is in only-tools (strict exclusivity)", () => {
                 const baseTools = ["fs_read", "shell"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["fs_write"],
                 };
 
@@ -267,7 +267,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should auto-inject fs_edit when fs_write is allowed (not only-tool mode)", () => {
                 const baseTools = ["fs_read"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     allowTools: ["fs_write"],
                 };
 
@@ -294,7 +294,7 @@ describe("Nudge Tool Permissions", () => {
         describe("only-tool mode strict exclusivity", () => {
             it("should produce exact tool count with no extras", () => {
                 const baseTools = ["fs_read", "fs_write", "shell", "delegate", "ask"];
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["shell", "ask"],
                 };
 
@@ -312,7 +312,7 @@ describe("Nudge Tool Permissions", () => {
         describe("empty base tools with nudge permissions", () => {
             it("should grant tools via only-tool to agent with empty tools array", () => {
                 const baseTools: string[] = []; // Agent has no default tools
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["fs_read", "shell"],
                 };
 
@@ -327,7 +327,7 @@ describe("Nudge Tool Permissions", () => {
 
             it("should grant tools via allow-tool to agent with empty tools array", () => {
                 const baseTools: string[] = []; // Agent has no default tools
-                const nudgePermissions: NudgeToolPermissions = {
+                const nudgePermissions: SkillToolPermissions = {
                     allowTools: ["delegate", "ask"],
                 };
 

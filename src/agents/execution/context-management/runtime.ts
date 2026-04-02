@@ -25,7 +25,7 @@ import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
-import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
+import { isOnlyToolMode, type SkillToolPermissions } from "@/services/skill";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import {
@@ -208,7 +208,7 @@ export function createExecutionContextManagement(options: {
     conversationId: string;
     agent: AgentInstance;
     conversationStore: ConversationStore;
-    nudgeToolPermissions?: NudgeToolPermissions;
+    skillToolPermissions?: SkillToolPermissions;
 }): ExecutionContextManagement | undefined {
     const settings = getContextManagementSettings();
 
@@ -238,7 +238,7 @@ export function createExecutionContextManagement(options: {
     }
 
     const scratchpadAvailable =
-        !options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions);
+        !options.skillToolPermissions || !isOnlyToolMode(options.skillToolPermissions);
 
     const { runtime, promptStabilityTracker } = createConversationContextManagementRuntime({
         providerId: options.providerId,

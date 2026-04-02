@@ -1,4 +1,6 @@
 import type { SkillData } from "@/services/skill";
+import type { SkillToolPermissions } from "@/services/skill";
+import { isOnlyToolMode, hasToolPermissions } from "@/services/skill";
 import type { PromptFragment } from "../core/types";
 
 interface SkillsArgs {
@@ -6,6 +8,8 @@ interface SkillsArgs {
     skillContent?: string;
     /** Individual skill data with name, content, and files */
     skills?: SkillData[];
+    /** Tool permissions extracted from skill events */
+    skillToolPermissions?: SkillToolPermissions;
 }
 
 /**
@@ -17,6 +21,42 @@ function escapeAttrValue(value: string): string {
         .replace(/"/g, "&quot;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
+}
+
+/**
+ * Render aggregated tool permissions as a separate header block.
+ * These permissions are collected from ALL active skills and apply globally.
+ */
+function renderToolPermissionsHeader(permissions: SkillToolPermissions): string {
+    if (!hasToolPermissions(permissions)) {
+        return "";
+    }
+
+    const lines: string[] = [];
+
+    if (isOnlyToolMode(permissions)) {
+        // only-tool mode: restricted to specific tools only
+        lines.push(
+            `Your available tools are restricted to: ${permissions.onlyTools?.join(", ")}`
+        );
+    } else {
+        // allow/deny mode
+        if (permissions.allowTools && permissions.allowTools.length > 0) {
+            lines.push(`Additional tools enabled: ${permissions.allowTools.join(", ")}`);
+        }
+        if (permissions.denyTools && permissions.denyTools.length > 0) {
+            lines.push(`Tools disabled: ${permissions.denyTools.join(", ")}`);
+        }
+    }
+
+    if (lines.length === 0) {
+        return "";
+    }
+
+    return `<skill-tool-permissions>
+<!-- Aggregated across all active skills -->
+${lines.join("\n")}
+</skill-tool-permissions>`;
 }
 
 /**
@@ -69,21 +109,33 @@ export function renderSkill(skill: SkillData): string {
  * or always-on agent config. Their content is fetched, files are downloaded,
  * and everything is injected to provide additional instructions/context.
  *
- * Unlike nudges, skills do NOT have tool permissions.
- * Skills focus on providing context, instructions, and attached files.
+ * Skills can also carry tool permissions (only-tool, allow-tool, deny-tool)
+ * which restrict or expand the agent's available tools.
  */
 export const skillsFragment: PromptFragment<SkillsArgs> = {
     id: "skills",
-    priority: 12, // After nudges (11)
-    template: ({ skillContent, skills }) => {
+    priority: 12,
+    template: ({ skillContent, skills, skillToolPermissions }) => {
         // New rendering path: individual skills with their data
         if (skills && skills.length > 0) {
+            const parts: string[] = [];
+
+            // Render tool permissions as a separate header block (aggregated across ALL skills)
+            if (skillToolPermissions) {
+                const permissionsHeader = renderToolPermissionsHeader(skillToolPermissions);
+                if (permissionsHeader) {
+                    parts.push(permissionsHeader);
+                }
+            }
+
             const header = `## Loaded Skills
 
 The following skills have been loaded for this conversation. These provide additional context and capabilities:
 `;
             const renderedSkills = skills.map((skill) => renderSkill(skill));
-            return header + renderedSkills.join("\n\n");
+            parts.push(header + renderedSkills.join("\n\n"));
+
+            return parts.join("\n\n");
         }
 
         // Legacy fallback: just skillContent string
@@ -118,5 +170,5 @@ ${skillContent}
         if (a.skillContent !== undefined && typeof a.skillContent !== "string") return false;
         return true;
     },
-    expectedArgs: "{ skillContent?: string; skills?: SkillData[] }",
+    expectedArgs: "{ skillContent?: string; skills?: SkillData[]; skillToolPermissions?: SkillToolPermissions }",
 };

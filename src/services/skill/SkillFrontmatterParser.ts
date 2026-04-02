@@ -6,11 +6,23 @@ export interface StoredSkillMetadata {
     eventId?: string;
     name?: string;
     description?: string;
+    /** Tools the agent is restricted to (highest priority, overrides allow/deny) */
+    onlyTools?: string[];
+    /** Tools to add to the agent's default set */
+    allowTools?: string[];
+    /** Tools to remove from the agent's default set */
+    denyTools?: string[];
 }
 
 export interface ParsedSkillDocument {
     content: string;
     metadata?: StoredSkillMetadata;
+}
+
+function normalizeStringArray(arr: string[] | undefined): string[] | undefined {
+    if (!arr || arr.length === 0) return undefined;
+    const filtered = arr.map((s) => s.trim()).filter(Boolean);
+    return filtered.length > 0 ? filtered : undefined;
 }
 
 export function normalizeStoredSkillMetadata(
@@ -24,6 +36,9 @@ export function normalizeStoredSkillMetadata(
         eventId: metadata.eventId?.trim() || undefined,
         name: metadata.name?.trim() || undefined,
         description: metadata.description?.trim() || undefined,
+        onlyTools: normalizeStringArray(metadata.onlyTools),
+        allowTools: normalizeStringArray(metadata.allowTools),
+        denyTools: normalizeStringArray(metadata.denyTools),
     };
 
     return Object.values(normalized).some((value) => value !== undefined)
@@ -143,11 +158,56 @@ export function readYamlValue(
     };
 }
 
+/**
+ * Read a YAML sequence (list) starting from lines after the key.
+ * Expects lines like "  - value" indented deeper than parentIndent.
+ */
+export function readYamlList(
+    lines: string[],
+    startIndex: number,
+    parentIndent: number
+): { nextIndex: number; items: string[] } {
+    const items: string[] = [];
+    let lineIndex = startIndex;
+
+    while (lineIndex < lines.length) {
+        const line = lines[lineIndex];
+        const trimmed = line.trim();
+
+        if (!trimmed || trimmed.startsWith("#")) {
+            lineIndex += 1;
+            continue;
+        }
+
+        const lineIndent = countIndent(line);
+        if (lineIndent <= parentIndent) {
+            break;
+        }
+
+        if (trimmed.startsWith("- ")) {
+            const value = parseYamlScalarValue(trimmed.slice(2));
+            if (value) {
+                items.push(value);
+            }
+            lineIndex += 1;
+        } else {
+            break;
+        }
+    }
+
+    return { nextIndex: lineIndex, items };
+}
+
+const TOOL_PERMISSION_KEYS = new Set(["only-tools", "allow-tools", "deny-tools"]);
+
 export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMetadata | undefined {
     const lines = frontmatterBlock.replace(/\r\n/g, "\n").split("\n");
     const metadataValues: Record<string, string> = {};
     let name: string | undefined;
     let description: string | undefined;
+    let onlyTools: string[] | undefined;
+    let allowTools: string[] | undefined;
+    let denyTools: string[] | undefined;
     let lineIndex = 0;
 
     while (lineIndex < lines.length) {
@@ -205,6 +265,16 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
             continue;
         }
 
+        // Handle tool permission list fields (YAML sequences)
+        if (TOOL_PERMISSION_KEYS.has(key) && stripInlineYamlComment(rawValue).trim().length === 0) {
+            const listResult = readYamlList(lines, lineIndex + 1, indent);
+            if (key === "only-tools") onlyTools = listResult.items;
+            else if (key === "allow-tools") allowTools = listResult.items;
+            else if (key === "deny-tools") denyTools = listResult.items;
+            lineIndex = listResult.nextIndex;
+            continue;
+        }
+
         const parsedValue = readYamlValue(lines, lineIndex, indent, rawValue);
         if (key === "name" && parsedValue.value) {
             name = parsedValue.value;
@@ -219,6 +289,9 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
         eventId: metadataValues[TENEX_METADATA_EVENT_ID_KEY],
         name,
         description,
+        onlyTools,
+        allowTools,
+        denyTools,
     });
 }
 
@@ -256,12 +329,25 @@ export function formatYamlScalar(value: string): string {
     return JSON.stringify(value);
 }
 
+function serializeYamlList(lines: string[], key: string, items: string[] | undefined): void {
+    if (!items || items.length === 0) return;
+    lines.push(`${key}:`);
+    for (const item of items) {
+        lines.push(`  - ${formatYamlScalar(item)}`);
+    }
+}
+
 export function serializeSkillDocument(content: string, metadata: StoredSkillMetadata): string {
     const lines = [
         FRONTMATTER_DELIMITER,
         `name: ${formatYamlScalar(metadata.name ?? "skill")}`,
         `description: ${formatYamlScalar(metadata.description ?? "")}`,
     ];
+
+    // Tool permission lists
+    serializeYamlList(lines, "only-tools", metadata.onlyTools);
+    serializeYamlList(lines, "allow-tools", metadata.allowTools);
+    serializeYamlList(lines, "deny-tools", metadata.denyTools);
 
     const metadataEntries = [[TENEX_METADATA_EVENT_ID_KEY, metadata.eventId]].filter(
         (entry): entry is [string, string] => Boolean(entry[1])

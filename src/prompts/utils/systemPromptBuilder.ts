@@ -4,8 +4,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import { isOnlyToolMode, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
-import type { SkillData } from "@/services/skill";
+import { isOnlyToolMode, type SkillToolPermissions, type SkillData } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling";
 import { RAGService } from "@/services/rag/RAGService";
@@ -55,15 +54,12 @@ export interface BuildSystemPromptOptions {
     // Optional runtime data
     availableAgents?: AgentInstance[];
     mcpManager?: MCPManager; // MCP manager for this project
-    nudgeContent?: string; // Concatenated content from kind:4201 nudge events (legacy)
-    /** Individual nudge data for rendering with titles */
-    nudges?: NudgeData[];
-    /** Tool permissions extracted from nudge events */
-    nudgeToolPermissions?: NudgeToolPermissions;
     /** Concatenated content from kind:4202 skill events (legacy) */
     skillContent?: string;
     /** Individual skill data for rendering with files */
     skills?: SkillData[];
+    /** Tool permissions extracted from skill events */
+    skillToolPermissions?: SkillToolPermissions;
     /** Include MCP resource discovery in the system prompt. Defaults to true. */
     includeMcpResources?: boolean;
     /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
@@ -164,8 +160,8 @@ function addAgentFragments(
     projectDTag?: string,
     projectPath?: string
 ): void {
-    // Add available nudges and skills for delegation (priority 13)
-    builder.add("available-nudges-and-skills", {
+    // Add available skills for delegation (priority 13)
+    builder.add("available-skills", {
         agentPubkey: agent.pubkey,
         projectPath,
         projectDTag,
@@ -234,11 +230,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         availableAgents = [],
         conversation,
         mcpManager,
-        nudgeContent,
-        nudges,
-        nudgeToolPermissions,
         skillContent,
         skills,
+        skillToolPermissions,
         includeMcpResources = true,
         scratchpadAvailable = true,
     } = options;
@@ -282,7 +276,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // Explain <system-reminder> tags before agents encounter them
     systemPromptBuilder.add("system-reminders-explanation", {});
 
-    if (scratchpadAvailable && (!nudgeToolPermissions || !isOnlyToolMode(nudgeToolPermissions))) {
+    if (scratchpadAvailable && (!skillToolPermissions || !isOnlyToolMode(skillToolPermissions))) {
         systemPromptBuilder.add("scratchpad-practice", {});
     }
 
@@ -320,23 +314,13 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         });
     }
 
-    // Add nudge content if present (from kind:4201 events referenced by the triggering event)
-    // Now supports individual nudge data with tool permissions
-    if ((nudges && nudges.length > 0) || (nudgeContent && nudgeContent.trim().length > 0)) {
-        systemPromptBuilder.add("nudges", {
-            nudgeContent,
-            nudges,
-            nudgeToolPermissions,
-        });
-    }
-
-    // Add skill content if present. These can come from triggering-event skill tags,
-    // self-applied conversation state, or always-on agent config.
-    // Skills provide additional instructions and attached files, but do NOT modify tool permissions.
+    // Add skill content if present (from kind:4201/4202 events)
+    // Skills provide additional instructions, attached files, and tool permissions.
     if ((skills && skills.length > 0) || (skillContent && skillContent.trim().length > 0)) {
         systemPromptBuilder.add("skills", {
             skillContent,
             skills,
+            skillToolPermissions,
         });
     }
 

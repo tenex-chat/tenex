@@ -1,8 +1,19 @@
 export { SkillService } from "./SkillService";
+export { SkillWhitelistService } from "./SkillWhitelistService";
+export type { WhitelistItem } from "./SkillWhitelistService";
+export { SkillIdentifierResolver } from "./SkillIdentifierResolver";
+export type { SkillIdentifierResolution } from "./SkillIdentifierResolver";
 export type {
     SkillResult,
     SkillData,
     SkillFileInfo,
     SkillFileInstallResult,
     SkillLookupContext,
+    SkillToolPermissions,
 } from "./types";
+export {
+    extractToolPermissions,
+    isOnlyToolMode,
+    hasToolPermissions,
+    mergeToolPermissionsFromFrontmatter,
+} from "./tool-permissions";

@@ -63,7 +63,6 @@ describe("NostrInboundAdapter", () => {
             articleReferences: undefined,
             replyTargets: ["e".repeat(64)],
             delegationParentConversationId: undefined,
-            nudgeEventIds: undefined,
             skillEventIds: undefined,
         });
     });

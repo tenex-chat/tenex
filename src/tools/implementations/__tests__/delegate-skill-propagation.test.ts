@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, spyOn, mock } from "bun:te
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import * as nostrModule from "@/nostr";
-import * as nudgeModule from "@/services/nudge";
+import * as skillModule from "@/services/skill";
 
-// Track delegate calls to verify nudge propagation
-const delegateCallArgs: Array<{ nudges?: string[] }> = [];
+// Track delegate calls to verify skill propagation
+const delegateCallArgs: Array<{ skills?: string[] }> = [];
 
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
@@ -17,13 +17,13 @@ import * as agentResolution from "@/services/agents";
 const createTriggeringEnvelope = (nudgeTags: string[][] = []) =>
     createMockInboundEnvelope({
         metadata: {
-            nudgeEventIds: nudgeTags
+            skillEventIds: nudgeTags
                 .filter((tag) => tag[0] === "nudge" && Boolean(tag[1]))
                 .map((tag) => tag[1]),
         },
     });
 
-describe("Delegate Tool - Nudge Propagation", () => {
+describe("Delegate Tool - Skill Propagation", () => {
     const conversationId = "test-conversation-id";
     const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
@@ -52,8 +52,8 @@ describe("Delegate Tool - Nudge Propagation", () => {
         triggeringEnvelope: createTriggeringEnvelope(nudgeTags),
         agentPublisher: {
             delegate: async (config: any) => {
-                // Track the delegate call to verify nudge propagation
-                delegateCallArgs.push({ nudges: config.nudges });
+                // Track the delegate call to verify skill propagation
+                delegateCallArgs.push({ skills: config.skills });
                 return `mock-delegation-id-${Math.random().toString(36).substring(7)}`;
             },
             delegationMarker: async () => ({ id: "marker-id" }),
@@ -106,11 +106,11 @@ describe("Delegate Tool - Nudge Propagation", () => {
     describe("nudge inheritance", () => {
         it("should resolve prompt-facing nudge ids before delegating", async () => {
             const resolvedNudgeId = "a".repeat(64);
-            const nudgeResolverSpy = spyOn(
-                nudgeModule.NudgeIdentifierResolverService,
+            const skillResolverSpy = spyOn(
+                skillModule.SkillIdentifierResolver,
                 "getInstance"
             ).mockReturnValue({
-                resolveNudgeIdentifier: (identifier: string) =>
+                resolveSkillIdentifier: (identifier: string) =>
                     identifier === "be-brief" ? resolvedNudgeId : null,
             } as never);
 
@@ -124,16 +124,16 @@ describe("Delegate Tool - Nudge Propagation", () => {
                     {
                         recipient: "other-agent",
                         prompt: "Do something",
-                        nudges: ["be-brief"],
+                        skills: ["be-brief"],
                     }
                 ],
             });
 
             expect(result.success).toBe(true);
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].nudges).toEqual([resolvedNudgeId]);
+            expect(delegateCallArgs[0].skills).toEqual([resolvedNudgeId]);
 
-            nudgeResolverSpy.mockRestore();
+            skillResolverSpy.mockRestore();
         });
 
         it("should inherit nudges from triggering event and pass to delegated agent", async () => {
@@ -161,8 +161,8 @@ describe("Delegate Tool - Nudge Propagation", () => {
 
             // Verify delegate was called with inherited nudges
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].nudges).toContain(inheritedNudge1);
-            expect(delegateCallArgs[0].nudges).toContain(inheritedNudge2);
+            expect(delegateCallArgs[0].skills).toContain(inheritedNudge1);
+            expect(delegateCallArgs[0].skills).toContain(inheritedNudge2);
         });
 
         it("should combine inherited nudges with explicit nudges", async () => {
@@ -181,7 +181,7 @@ describe("Delegate Tool - Nudge Propagation", () => {
                     {
                         recipient: "other-agent",
                         prompt: "Do something",
-                        nudges: [explicitNudge],
+                        skills: [explicitNudge],
                     }
                 ],
             };
@@ -191,9 +191,9 @@ describe("Delegate Tool - Nudge Propagation", () => {
 
             // Verify delegate was called with BOTH inherited and explicit nudges
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].nudges).toContain(inheritedNudge);
-            expect(delegateCallArgs[0].nudges).toContain(explicitNudge);
-            expect(delegateCallArgs[0].nudges?.length).toBe(2);
+            expect(delegateCallArgs[0].skills).toContain(inheritedNudge);
+            expect(delegateCallArgs[0].skills).toContain(explicitNudge);
+            expect(delegateCallArgs[0].skills?.length).toBe(2);
         });
 
         it("should deduplicate nudges when explicit nudge is same as inherited", async () => {
@@ -211,7 +211,7 @@ describe("Delegate Tool - Nudge Propagation", () => {
                     {
                         recipient: "other-agent",
                         prompt: "Do something",
-                        nudges: [sameNudgeId], // Same as inherited
+                        skills: [sameNudgeId], // Same as inherited
                     }
                 ],
             };
@@ -221,8 +221,8 @@ describe("Delegate Tool - Nudge Propagation", () => {
 
             // Verify nudge appears only ONCE (deduplication)
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].nudges?.length).toBe(1);
-            expect(delegateCallArgs[0].nudges).toContain(sameNudgeId);
+            expect(delegateCallArgs[0].skills?.length).toBe(1);
+            expect(delegateCallArgs[0].skills).toContain(sameNudgeId);
         });
 
         it("should handle no nudges gracefully", async () => {
@@ -240,10 +240,10 @@ describe("Delegate Tool - Nudge Propagation", () => {
             const result = await delegateTool.execute(input);
             expect(result.success).toBe(true);
 
-            // Verify delegate was called without nudges (undefined or empty)
+            // Verify delegate was called without skills (undefined or empty)
             expect(delegateCallArgs.length).toBe(1);
-            const nudges = delegateCallArgs[0].nudges;
-            expect(nudges === undefined || nudges.length === 0).toBe(true);
+            const skills = delegateCallArgs[0].skills;
+            expect(skills === undefined || skills.length === 0).toBe(true);
         });
     });
 
@@ -270,8 +270,8 @@ describe("Delegate Tool - Nudge Propagation", () => {
 
             // Verify BOTH delegations received the inherited nudge
             expect(delegateCallArgs.length).toBe(2);
-            expect(delegateCallArgs[0].nudges).toContain(inheritedNudge);
-            expect(delegateCallArgs[1].nudges).toContain(inheritedNudge);
+            expect(delegateCallArgs[0].skills).toContain(inheritedNudge);
+            expect(delegateCallArgs[1].skills).toContain(inheritedNudge);
         });
 
         it("should allow different explicit nudges per delegation while still inheriting", async () => {
@@ -288,8 +288,8 @@ describe("Delegate Tool - Nudge Propagation", () => {
 
             const input = {
                 delegations: [
-                    { recipient: "other-agent", prompt: "Task 1", nudges: [explicitNudge1] },
-                    { recipient: "third-agent", prompt: "Task 2", nudges: [explicitNudge2] },
+                    { recipient: "other-agent", prompt: "Task 1", skills: [explicitNudge1] },
+                    { recipient: "third-agent", prompt: "Task 2", skills: [explicitNudge2] },
                 ],
             };
 
@@ -297,14 +297,14 @@ describe("Delegate Tool - Nudge Propagation", () => {
             expect(result.success).toBe(true);
 
             // First delegation: inherited + explicit1
-            expect(delegateCallArgs[0].nudges).toContain(inheritedNudge);
-            expect(delegateCallArgs[0].nudges).toContain(explicitNudge1);
-            expect(delegateCallArgs[0].nudges).not.toContain(explicitNudge2);
+            expect(delegateCallArgs[0].skills).toContain(inheritedNudge);
+            expect(delegateCallArgs[0].skills).toContain(explicitNudge1);
+            expect(delegateCallArgs[0].skills).not.toContain(explicitNudge2);
 
             // Second delegation: inherited + explicit2
-            expect(delegateCallArgs[1].nudges).toContain(inheritedNudge);
-            expect(delegateCallArgs[1].nudges).toContain(explicitNudge2);
-            expect(delegateCallArgs[1].nudges).not.toContain(explicitNudge1);
+            expect(delegateCallArgs[1].skills).toContain(inheritedNudge);
+            expect(delegateCallArgs[1].skills).toContain(explicitNudge2);
+            expect(delegateCallArgs[1].skills).not.toContain(explicitNudge1);
         });
     });
 
@@ -322,7 +322,7 @@ describe("Delegate Tool - Nudge Propagation", () => {
                     {
                         recipient: "other-agent",
                         prompt: "Task",
-                        nudges: [nudgeId, nudgeId, nudgeId], // Duplicates
+                        skills: [nudgeId, nudgeId, nudgeId], // Duplicates
                     }
                 ],
             };
@@ -332,8 +332,8 @@ describe("Delegate Tool - Nudge Propagation", () => {
 
             // Verify only one nudge (deduplicated)
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].nudges?.length).toBe(1);
-            expect(delegateCallArgs[0].nudges).toContain(nudgeId);
+            expect(delegateCallArgs[0].skills?.length).toBe(1);
+            expect(delegateCallArgs[0].skills).toContain(nudgeId);
         });
     });
 });

@@ -3,7 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { LessonComment } from "@/events/LessonComment";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import { NudgeWhitelistService, type WhitelistItem } from "@/services/nudge";
+import { SkillWhitelistService, type WhitelistItem } from "@/services/skill";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
@@ -206,11 +206,11 @@ export class ProjectContext {
     public promptCompilerRegistry?: PromptCompilerRegistryService;
 
     /**
-     * @deprecated Nudge whitelist is now user-scoped, not project-scoped.
-     * Use NudgeSkillWhitelistService.getInstance() directly instead.
+     * @deprecated Skill whitelist is now user-scoped, not project-scoped.
+     * Use SkillWhitelistService.getInstance() directly instead.
      * Retained as a backward-compatible shim; callers should migrate to the singleton.
      */
-    public nudgeWhitelist: NudgeWhitelistService;
+    public skillWhitelist: SkillWhitelistService;
 
     /**
      * Callback invoked when a new agent is added to this project's registry.
@@ -252,24 +252,24 @@ export class ProjectContext {
         this.agentLessons = new Map();
         this.agentComments = new Map();
 
-        // Reference the daemon-scoped nudge whitelist singleton
-        this.nudgeWhitelist = NudgeWhitelistService.getInstance();
+        // Reference the daemon-scoped skill whitelist singleton
+        this.skillWhitelist = SkillWhitelistService.getInstance();
     }
 
     /**
-     * @deprecated Nudge whitelist is now initialized at daemon level (user-scoped).
+     * @deprecated Skill whitelist is now initialized at daemon level (user-scoped).
      * This method is a no-op. See Daemon.ts step 6d.
      */
-    initializeNudgeWhitelist(_additionalPubkeys: string[] = []): void {
-        logger.debug("initializeNudgeWhitelist is deprecated — nudge whitelist is now initialized at daemon level");
+    initializeSkillWhitelist(_additionalPubkeys: string[] = []): void {
+        logger.debug("initializeSkillWhitelist is deprecated — skill whitelist is now initialized at daemon level");
     }
 
     /**
-     * @deprecated Use NudgeSkillWhitelistService.getInstance().getWhitelistedNudges() directly.
-     * Nudges are user-scoped, not project-scoped.
+     * @deprecated Use SkillWhitelistService.getInstance().getWhitelistedSkills() directly.
+     * Skills are user-scoped, not project-scoped.
      */
-    getAvailableNudges(): WhitelistItem[] {
-        return this.nudgeWhitelist.getWhitelistedNudges();
+    getAvailableSkills(): WhitelistItem[] {
+        return this.skillWhitelist.getWhitelistedSkills();
     }
 
     // =====================================================================================

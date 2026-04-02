@@ -73,7 +73,6 @@ export interface InboundEnvelope {
         articleReferences?: string[];
         replyTargets?: string[];
         delegationParentConversationId?: string;
-        nudgeEventIds?: string[];
         skillEventIds?: string[];
         transport?: {
             telegram?: TelegramTransportMetadata;

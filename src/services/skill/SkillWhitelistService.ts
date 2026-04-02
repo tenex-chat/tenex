@@ -6,23 +6,23 @@ import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/ap
 import { shortenOptionalEventId } from "@/utils/conversation-id";
 import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
 
-const tracer = trace.getTracer("tenex.nudge-whitelist-service");
+const tracer = trace.getTracer("tenex.skill-whitelist-service");
 
 /**
- * Categorized whitelist item - either a nudge or a skill
+ * Whitelisted skill item — covers both legacy nudges (kind:4201) and skills (kind:4202)
  */
 export interface WhitelistItem {
-    /** The event ID of the whitelisted nudge/skill */
+    /** The event ID of the whitelisted skill */
     eventId: string;
     /** Prompt-facing identifier derived from d-tag/name/title, falling back to shortId */
     identifier?: string;
     /** Short event ID kept locally for fallback mapping/debugging */
     shortId?: string;
-    /** The kind of the referenced event (4201 for nudge, 4202 for skill) */
+    /** The kind of the referenced event (4201 for legacy nudge, 4202 for skill) */
     kind: typeof NDKKind.AgentNudge | typeof NDKKind.AgentSkill;
-    /** The name of the nudge/skill (from title tag) */
+    /** The name of the skill (from title tag) */
     name?: string;
-    /** Description of the nudge/skill (full content - truncation is done in presentation layer) */
+    /** Description of the skill (full content - truncation is done in presentation layer) */
     description?: string;
     /** Pubkeys that have whitelisted this item (multiple whitelist events can reference same item) */
     whitelistedBy: string[];
@@ -40,9 +40,7 @@ function getSkillDescription(event: NDKEvent): string {
  * Cached whitelist data with fetch timestamp
  */
 interface WhitelistCache {
-    /** Whitelisted nudges (kind:4201) */
-    nudges: WhitelistItem[];
-    /** Whitelisted skills (kind:4202) */
+    /** All whitelisted skills (including legacy nudges treated as skills) */
     skills: WhitelistItem[];
     /** When this cache was last updated */
     lastUpdated: number;
@@ -52,17 +50,17 @@ const REBUILD_DEBOUNCE_MS = 500;
 const FETCH_TIMEOUT_MS = 10_000;
 
 /**
- * Service for managing nudge/skill whitelists.
+ * Service for managing skill whitelists.
  *
  * This service subscribes to kind:14202 events from whitelisted pubkeys,
  * which are NIP-51-like lists that e-tag nudge (kind:4201) and skill (kind:4202) events.
  *
- * The service maintains a cached list of all whitelisted nudges and skills,
- * categorized by their event kind. Cache is built incrementally as events
- * stream in from the subscription — initialization never blocks on EOSE.
+ * Both kinds are treated uniformly as skills. The service maintains a cached list
+ * of all whitelisted skills. Cache is built incrementally as events stream in
+ * from the subscription — initialization never blocks on EOSE.
  */
-export class NudgeSkillWhitelistService {
-    private static instance: NudgeSkillWhitelistService;
+export class SkillWhitelistService {
+    private static instance: SkillWhitelistService;
     private cache: WhitelistCache | null = null;
     private subscription: NDKSubscription | null = null;
     private whitelistPubkeys: Set<string> = new Set();
@@ -70,7 +68,7 @@ export class NudgeSkillWhitelistService {
 
     /** Latest kind:14202 event per author pubkey (replaceable semantics) */
     private latestWhitelistEvents: Map<string, NDKEvent> = new Map();
-    /** Fetched nudge/skill events by ID — avoids re-fetching */
+    /** Fetched skill events by ID — avoids re-fetching */
     private referencedEventCache: Map<string, NDKEvent> = new Map();
     /** Debounce timer for coalescing rapid event bursts */
     private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
@@ -79,11 +77,11 @@ export class NudgeSkillWhitelistService {
 
     private constructor() {}
 
-    static getInstance(): NudgeSkillWhitelistService {
-        if (!NudgeSkillWhitelistService.instance) {
-            NudgeSkillWhitelistService.instance = new NudgeSkillWhitelistService();
+    static getInstance(): SkillWhitelistService {
+        if (!SkillWhitelistService.instance) {
+            SkillWhitelistService.instance = new SkillWhitelistService();
         }
-        return NudgeSkillWhitelistService.instance;
+        return SkillWhitelistService.instance;
     }
 
     onCacheUpdated(listener: () => void | Promise<void>): () => void {
@@ -97,17 +95,17 @@ export class NudgeSkillWhitelistService {
      */
     initialize(whitelistPubkeys: string[]): void {
         if (this.initialized && this.pubkeysMatch(whitelistPubkeys)) {
-            logger.debug("[NudgeSkillWhitelistService] Already initialized with same pubkeys, skipping");
+            logger.debug("[SkillWhitelistService] Already initialized with same pubkeys, skipping");
             return;
         }
 
         this.whitelistPubkeys = new Set(whitelistPubkeys);
         this.initialized = true;
-        this.cache = { nudges: [], skills: [], lastUpdated: Date.now() };
+        this.cache = { skills: [], lastUpdated: Date.now() };
 
         this.startSubscription();
 
-        logger.info("[NudgeSkillWhitelistService] Initialized", {
+        logger.info("[SkillWhitelistService] Initialized", {
             pubkeyCount: whitelistPubkeys.length,
         });
     }
@@ -130,7 +128,7 @@ export class NudgeSkillWhitelistService {
         }
 
         if (this.whitelistPubkeys.size === 0) {
-            logger.debug("[NudgeSkillWhitelistService] No whitelisted pubkeys, skipping subscription");
+            logger.debug("[SkillWhitelistService] No whitelisted pubkeys, skipping subscription");
             return;
         }
 
@@ -150,7 +148,7 @@ export class NudgeSkillWhitelistService {
             }
         );
 
-        logger.debug("[NudgeSkillWhitelistService] Started subscription", {
+        logger.debug("[SkillWhitelistService] Started subscription", {
             pubkeyCount: authors.length,
         });
     }
@@ -166,7 +164,7 @@ export class NudgeSkillWhitelistService {
             return;
         }
 
-        logger.debug("[NudgeSkillWhitelistService] Received whitelist event", {
+        logger.debug("[SkillWhitelistService] Received whitelist event", {
             eventId: shortenOptionalEventId(event.id),
             author: event.pubkey.substring(0, 8),
         });
@@ -186,17 +184,17 @@ export class NudgeSkillWhitelistService {
         this.rebuildTimer = setTimeout(() => {
             this.rebuildTimer = null;
             this.rebuildCache().catch(error => {
-                logger.error("[NudgeSkillWhitelistService] Failed to rebuild cache", { error });
+                logger.error("[SkillWhitelistService] Failed to rebuild cache", { error });
             });
         }, REBUILD_DEBOUNCE_MS);
     }
 
     /**
      * Rebuild the cache from all stored whitelist events.
-     * Fetches any referenced nudge/skill events not yet in the local cache.
+     * Fetches any referenced skill events not yet in the local cache.
      */
     private async rebuildCache(): Promise<void> {
-        const span = tracer.startSpan("tenex.nudge-whitelist.rebuild", {
+        const span = tracer.startSpan("tenex.skill-whitelist.rebuild", {
             attributes: {
                 "whitelist.pubkey_count": this.whitelistPubkeys.size,
             },
@@ -205,7 +203,7 @@ export class NudgeSkillWhitelistService {
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
                 if (this.latestWhitelistEvents.size === 0) {
-                    this.cache = { nudges: [], skills: [], lastUpdated: Date.now() };
+                    this.cache = { skills: [], lastUpdated: Date.now() };
                     await this.notifyCacheUpdated();
                     span.setStatus({ code: SpanStatusCode.OK });
                     span.end();
@@ -227,7 +225,7 @@ export class NudgeSkillWhitelistService {
                 }
 
                 if (eventToWhitelisters.size === 0) {
-                    this.cache = { nudges: [], skills: [], lastUpdated: Date.now() };
+                    this.cache = { skills: [], lastUpdated: Date.now() };
                     await this.notifyCacheUpdated();
                     span.setAttributes({ "whitelist.item_count": 0 });
                     span.setStatus({ code: SpanStatusCode.OK });
@@ -257,20 +255,19 @@ export class NudgeSkillWhitelistService {
                             this.referencedEventCache.set(event.id, event);
                         }
                     } catch (error) {
-                        logger.warn("[NudgeSkillWhitelistService] Fetch timed out or failed, using cached events", {
+                        logger.warn("[SkillWhitelistService] Fetch timed out or failed, using cached events", {
                             unfetchedCount: unfetchedIds.length,
                             error: error instanceof Error ? error.message : String(error),
                         });
                     }
                 }
 
-                // Build cache from referencedEventCache + whitelister tracking
+                // Build cache — both nudge and skill kinds are unified into skills[]
                 interface WhitelistDraft extends WhitelistItem {
                     sourceDTag?: string;
                     sourceName?: string;
                     sourceTitle?: string;
                 }
-                const nudgeDrafts: WhitelistDraft[] = [];
                 const skillDrafts: WhitelistDraft[] = [];
 
                 for (const [eventId, whitelisters] of eventToWhitelisters) {
@@ -283,25 +280,15 @@ export class NudgeSkillWhitelistService {
                     const name = event.tagValue("name") || undefined;
                     const shortId = event.id.substring(0, 12).toLowerCase();
 
-                    if (event.kind === NDKKind.AgentNudge) {
-                        nudgeDrafts.push({
-                            eventId: event.id,
-                            kind: NDKKind.AgentNudge,
-                            name: title || name || dTag,
-                            shortId,
-                            description: event.content,
-                            whitelistedBy,
-                            sourceDTag: dTag,
-                            sourceName: name,
-                            sourceTitle: title,
-                        });
-                    } else if (event.kind === NDKKind.AgentSkill) {
+                    if (event.kind === NDKKind.AgentNudge || event.kind === NDKKind.AgentSkill) {
                         skillDrafts.push({
                             eventId: event.id,
-                            kind: NDKKind.AgentSkill,
+                            kind: event.kind as typeof NDKKind.AgentNudge | typeof NDKKind.AgentSkill,
                             name: title || name || dTag,
                             shortId,
-                            description: getSkillDescription(event),
+                            description: event.kind === NDKKind.AgentNudge
+                                ? event.content
+                                : getSkillDescription(event),
                             whitelistedBy,
                             sourceDTag: dTag,
                             sourceName: name,
@@ -310,14 +297,6 @@ export class NudgeSkillWhitelistService {
                     }
                 }
 
-                const nudgeIdentifiers = assignCapabilityIdentifiers(
-                    nudgeDrafts.map((item) => ({
-                        eventId: item.eventId,
-                        dTag: item.sourceDTag,
-                        name: item.sourceName,
-                        title: item.sourceTitle,
-                    }))
-                );
                 const skillIdentifiers = assignCapabilityIdentifiers(
                     skillDrafts.map((item) => ({
                         eventId: item.eventId,
@@ -327,16 +306,6 @@ export class NudgeSkillWhitelistService {
                     }))
                 );
 
-                const nudges: WhitelistItem[] = nudgeDrafts.map((draft) => ({
-                    eventId: draft.eventId,
-                    kind: draft.kind,
-                    name: draft.name,
-                    description: draft.description,
-                    whitelistedBy: draft.whitelistedBy,
-                    identifier:
-                        nudgeIdentifiers.get(draft.eventId)?.identifier ?? draft.shortId,
-                    shortId: nudgeIdentifiers.get(draft.eventId)?.shortId ?? draft.shortId,
-                }));
                 const skills: WhitelistItem[] = skillDrafts.map((draft) => ({
                     eventId: draft.eventId,
                     kind: draft.kind,
@@ -349,20 +318,17 @@ export class NudgeSkillWhitelistService {
                 }));
 
                 this.cache = {
-                    nudges,
                     skills,
                     lastUpdated: Date.now(),
                 };
                 await this.notifyCacheUpdated();
 
                 span.setAttributes({
-                    "whitelist.nudge_count": nudges.length,
                     "whitelist.skill_count": skills.length,
-                    "whitelist.item_count": nudges.length + skills.length,
+                    "whitelist.item_count": skills.length,
                 });
 
-                logger.info("[NudgeSkillWhitelistService] Cache rebuilt", {
-                    nudgeCount: nudges.length,
+                logger.info("[SkillWhitelistService] Cache rebuilt", {
                     skillCount: skills.length,
                 });
 
@@ -375,23 +341,13 @@ export class NudgeSkillWhitelistService {
                     message: (error as Error).message,
                 });
                 span.end();
-                logger.error("[NudgeSkillWhitelistService] Failed to rebuild cache", { error });
+                logger.error("[SkillWhitelistService] Failed to rebuild cache", { error });
             }
         });
     }
 
     /**
-     * Get all whitelisted nudges
-     */
-    getWhitelistedNudges(): WhitelistItem[] {
-        if (!this.initialized) {
-            this.logUninitializedRead("getWhitelistedNudges");
-        }
-        return this.cache?.nudges || [];
-    }
-
-    /**
-     * Get all whitelisted skills
+     * Get all whitelisted skills (includes legacy nudges treated as skills)
      */
     getWhitelistedSkills(): WhitelistItem[] {
         if (!this.initialized) {
@@ -401,14 +357,13 @@ export class NudgeSkillWhitelistService {
     }
 
     /**
-     * Get all whitelisted items (both nudges and skills)
+     * Get all whitelisted items
      */
     getAllWhitelistedItems(): WhitelistItem[] {
         if (!this.initialized) {
             this.logUninitializedRead("getAllWhitelistedItems");
         }
-        if (!this.cache) return [];
-        return [...this.cache.nudges, ...this.cache.skills];
+        return this.cache?.skills || [];
     }
 
     private async notifyCacheUpdated(): Promise<void> {
@@ -416,7 +371,7 @@ export class NudgeSkillWhitelistService {
             try {
                 await listener();
             } catch (error) {
-                logger.warn("[NudgeSkillWhitelistService] Cache update listener failed", {
+                logger.warn("[SkillWhitelistService] Cache update listener failed", {
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
@@ -429,15 +384,8 @@ export class NudgeSkillWhitelistService {
         }
         this.uninitializedReadMethods.add(methodName);
         logger.debug(
-            `[NudgeSkillWhitelistService] ${methodName} called before initialize() — returning empty list`
+            `[SkillWhitelistService] ${methodName} called before initialize() — returning empty list`
         );
-    }
-
-    /**
-     * Check if a nudge event ID is whitelisted
-     */
-    isNudgeWhitelisted(eventId: string): boolean {
-        return this.cache?.nudges.some(n => n.eventId === eventId) || false;
     }
 
     /**
@@ -445,13 +393,6 @@ export class NudgeSkillWhitelistService {
      */
     isSkillWhitelisted(eventId: string): boolean {
         return this.cache?.skills.some(s => s.eventId === eventId) || false;
-    }
-
-    /**
-     * Get a whitelisted nudge by event ID
-     */
-    getNudge(eventId: string): WhitelistItem | undefined {
-        return this.cache?.nudges.find(n => n.eventId === eventId);
     }
 
     /**
