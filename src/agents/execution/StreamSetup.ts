@@ -21,6 +21,7 @@ import { initializeReminderProviders, updateReminderData, collectAndInjectSystem
 import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
+import { FullResultStash, wrapToolsWithOutputTruncation } from "./ToolOutputTruncation";
 import {
     createExecutionContextManagement,
     type ExecutionContextManagement,
@@ -62,7 +63,7 @@ export interface InjectionProcessor {
  */
 export async function setupStreamExecution(
     context: FullRuntimeContext,
-    _toolTracker: ToolExecutionTracker, // Reserved for future use
+    toolTracker: ToolExecutionTracker,
     ralNumber: number,
     injectionProcessor: InjectionProcessor
 ): Promise<StreamSetupResult> {
@@ -258,6 +259,9 @@ export async function setupStreamExecution(
         };
     }
 
+    const fullResultStash = new FullResultStash();
+    toolTracker.setFullResultStash(fullResultStash);
+    toolsObject = wrapToolsWithOutputTruncation(toolsObject, fullResultStash);
     toolsObject = wrapToolsWithSupervision(toolsObject, context);
 
     const messageCompiler = new MessageCompiler(conversationStore);

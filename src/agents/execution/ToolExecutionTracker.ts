@@ -21,6 +21,7 @@ import { PendingDelegationsRegistry } from "@/services/ral";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { extractErrorDetails } from "./ToolResultUtils";
+import type { FullResultStash } from "./ToolOutputTruncation";
 
 /**
  * Delegation tools need delayed tool use event publishing so the delegation
@@ -102,6 +103,15 @@ export class ToolExecutionTracker {
      * Key: toolCallId, Value: execution state and metadata
      */
     private executions = new Map<string, TrackedExecution>();
+    private fullResultStash?: FullResultStash;
+
+    /**
+     * Set the stash that holds full (pre-truncation) tool results.
+     * Called once per execution from setupStreamExecution.
+     */
+    setFullResultStash(stash: FullResultStash): void {
+        this.fullResultStash = stash;
+    }
 
     /**
      * Track a new tool execution when it starts
@@ -342,6 +352,10 @@ export class ToolExecutionTracker {
             });
         }
 
+        // If the tool output was truncated, recover the full result from the stash
+        // so ToolMessageStorage persists the complete output (retrievable via fs_read).
+        const persistedResult = this.fullResultStash?.consume(toolCallId) ?? result;
+
         // Persist the complete tool message to filesystem
         // This enables conversation reconstruction and audit trails
         await toolMessageStorage.store(
@@ -354,7 +368,7 @@ export class ToolExecutionTracker {
             {
                 toolCallId,
                 toolName: execution.toolName,
-                output: result,
+                output: persistedResult,
                 error,
             },
             agentPubkey
@@ -443,6 +457,7 @@ export class ToolExecutionTracker {
     clear(): void {
         const previousSize = this.executions.size;
         this.executions.clear();
+        this.fullResultStash?.clear();
 
         logger.debug("[ToolExecutionTracker] Cleared all tracked executions", {
             previousSize,

@@ -16,6 +16,7 @@ import { PendingDelegationsRegistry } from "@/services/ral";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { ToolExecutionTracker } from "../ToolExecutionTracker";
+import { FullResultStash } from "../ToolOutputTruncation";
 
 // Mock the toolMessageStorage
 const mockStore = mock(() => Promise.resolve());
@@ -781,6 +782,112 @@ describe("ToolExecutionTracker", () => {
 
             // Should have published immediately
             expect(mockAgentPublisher.toolUse).toHaveBeenCalled();
+        });
+    });
+
+    describe("FullResultStash integration", () => {
+        it("should persist stashed full result instead of truncated result", async () => {
+            const stash = new FullResultStash();
+            tracker.setFullResultStash(stash);
+
+            await tracker.trackExecution({
+                toolCallId: "stash-call",
+                toolName: "shell",
+                args: { command: "big output" },
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Simulate what ToolOutputTruncation does: stash the full result
+            const fullOutput = "x".repeat(20000);
+            stash.stash("stash-call", fullOutput);
+
+            const truncatedPlaceholder = "[shell result truncated...]";
+
+            await tracker.completeExecution({
+                toolCallId: "stash-call",
+                result: truncatedPlaceholder,
+                error: false,
+                agentPubkey: "agent-pubkey-123",
+            });
+
+            // toolMessageStorage.store should receive the FULL result, not the truncated one
+            expect(mockStore).toHaveBeenCalledWith(
+                "conv-123",
+                expect.objectContaining({ toolCallId: "stash-call" }),
+                expect.objectContaining({ output: fullOutput }),
+                "agent-pubkey-123"
+            );
+        });
+
+        it("should pass original result when stash has no entry", async () => {
+            const stash = new FullResultStash();
+            tracker.setFullResultStash(stash);
+
+            await tracker.trackExecution({
+                toolCallId: "no-stash-call",
+                toolName: "small_tool",
+                args: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            const smallResult = { data: "small" };
+
+            await tracker.completeExecution({
+                toolCallId: "no-stash-call",
+                result: smallResult,
+                error: false,
+                agentPubkey: "agent-pubkey-123",
+            });
+
+            // Should pass the original result through
+            expect(mockStore).toHaveBeenCalledWith(
+                "conv-123",
+                expect.objectContaining({ toolCallId: "no-stash-call" }),
+                expect.objectContaining({ output: smallResult }),
+                "agent-pubkey-123"
+            );
+        });
+
+        it("should pass original result when no stash is set", async () => {
+            // No setFullResultStash called — default behavior
+            const freshTracker = new ToolExecutionTracker();
+
+            await freshTracker.trackExecution({
+                toolCallId: "no-stash-tracker",
+                toolName: "tool",
+                args: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            const result = "some result";
+
+            await freshTracker.completeExecution({
+                toolCallId: "no-stash-tracker",
+                result,
+                error: false,
+                agentPubkey: "agent-pubkey-123",
+            });
+
+            expect(mockStore).toHaveBeenCalledWith(
+                "conv-123",
+                expect.objectContaining({ toolCallId: "no-stash-tracker" }),
+                expect.objectContaining({ output: result }),
+                "agent-pubkey-123"
+            );
+        });
+
+        it("should clear stash when clear() is called", () => {
+            const stash = new FullResultStash();
+            tracker.setFullResultStash(stash);
+            stash.stash("leftover-call", "leftover data");
+
+            tracker.clear();
+
+            // Stash should be cleared
+            expect(stash.consume("leftover-call")).toBeUndefined();
         });
     });
 
