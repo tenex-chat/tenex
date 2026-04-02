@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import { readdirSync } from "node:fs";
 import type { AgentInstance } from "@/agents/types/runtime";
 import {
@@ -24,7 +23,6 @@ export function clearAgentHomePromptCache(): void {
 interface AgentHomeDirectoryArgs {
     agent: AgentInstance;
     projectDTag?: string;
-    projectBasePath?: string;
 }
 
 /**
@@ -66,7 +64,7 @@ function countHomeFiles(homeDir: string, agentPubkey: string): string {
 export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> = {
     id: "agent-home-directory",
     priority: 2, // Right after agent-identity (priority 1)
-    template: async ({ agent, projectDTag, projectBasePath }) => {
+    template: async ({ agent, projectDTag }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const homeCount = countHomeFiles(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
@@ -117,16 +115,6 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
             parts.push("</memorized-files>");
         }
 
-
-        // Environment path variables — available in shell and fs_* tools
-        parts.push("");
-        parts.push("<environment-variables>");
-        parts.push(`$USER_HOME = ${homedir()}`);
-        parts.push(`$AGENT_HOME = ${homeDir}`);
-        if (projectBasePath) {
-            parts.push(`$PROJECT_BASE = ${projectBasePath}`);
-        }
-        parts.push("</environment-variables>");
 
         parts.push("</home-directory>");
         return parts.join("\n");

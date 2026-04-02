@@ -14,6 +14,7 @@ import { systemRemindersExplanationFragment } from "./03-system-reminders-explan
 import { scratchpadPracticeFragment } from "./04-scratchpad-practice";
 import { delegationChainFragment } from "./05-delegation-chain";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
+import { environmentVariablesFragment } from "./07-environment-variables";
 import { projectContextFragment } from "./08-project-context";
 import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
@@ -21,8 +22,6 @@ import { noResponseGuidanceFragment } from "./18-no-response-guidance";
 import { delegationAsyncFragment } from "./19-delegation-async";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
-import { skillsFragment } from "./12-skills";
-import { availableSkillsFragment } from "./13-available-skills";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
@@ -45,6 +44,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(scratchpadPracticeFragment);
     fragmentRegistry.register(delegationChainFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
+    fragmentRegistry.register(environmentVariablesFragment);
     fragmentRegistry.register(projectContextFragment);
 
     // Agent collaboration
@@ -55,8 +55,6 @@ export function registerAllFragments(): void {
 
     // Behavioral guidance
     // voice-mode is registered via side effects
-    fragmentRegistry.register(skillsFragment);
-    fragmentRegistry.register(availableSkillsFragment);
     fragmentRegistry.register(toolDescriptionGuidanceFragment);
 
     // Scheduled tasks context

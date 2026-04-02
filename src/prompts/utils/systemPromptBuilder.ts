@@ -3,7 +3,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import { isOnlyToolMode, type SkillToolPermissions, type SkillData } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling";
 import { RAGService } from "@/services/rag/RAGService";
@@ -51,12 +50,6 @@ export interface BuildSystemPromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
-    /** Concatenated content from kind:4202 skill events (legacy) */
-    skillContent?: string;
-    /** Individual skill data for rendering with files */
-    skills?: SkillData[];
-    /** Tool permissions extracted from skill events */
-    skillToolPermissions?: SkillToolPermissions;
     /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
     scratchpadAvailable?: boolean;
 }
@@ -134,16 +127,8 @@ async function addCoreAgentFragments(
  */
 function addAgentFragments(
     builder: PromptBuilder,
-    agent: AgentInstance,
     triggeringEnvelope?: BuildSystemPromptOptions["triggeringEnvelope"],
-    projectPath?: string
 ): void {
-    // Add available skills for delegation (priority 13)
-    builder.add("available-skills", {
-        agentPubkey: agent.pubkey,
-        projectPath,
-    });
-
     // Add delegation best practices guidance (priority 16)
     builder.add("stay-in-your-lane", {});
 
@@ -206,9 +191,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         currentBranch,
         availableAgents = [],
         conversation,
-        skillContent,
-        skills,
-        skillToolPermissions,
         scratchpadAvailable = true,
     } = options;
 
@@ -246,13 +228,12 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     systemPromptBuilder.add("agent-home-directory", {
         agent: agentForFragments,
         projectDTag: dTag,
-        projectBasePath,
     });
 
     // Explain <system-reminder> tags before agents encounter them
     systemPromptBuilder.add("system-reminders-explanation", {});
 
-    if (scratchpadAvailable && (!skillToolPermissions || !isOnlyToolMode(skillToolPermissions))) {
+    if (scratchpadAvailable) {
         systemPromptBuilder.add("scratchpad-practice", {});
     }
 
@@ -264,6 +245,12 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     });
     systemPromptBuilder.add("telegram-delivery-rules", {
         triggeringEnvelope,
+    });
+
+    // Add environment path variables (shell + file tool usage)
+    systemPromptBuilder.add("environment-variables", {
+        agent: agentForFragments,
+        projectBasePath,
     });
 
     // Add consolidated project context (workspace, team, channels, agents.md, other-projects)
@@ -290,16 +277,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         });
     }
 
-    // Add skill content if present (from kind:4201/4202 events)
-    // Skills provide additional instructions, attached files, and tool permissions.
-    if ((skills && skills.length > 0) || (skillContent && skillContent.trim().length > 0)) {
-        systemPromptBuilder.add("skills", {
-            skillContent,
-            skills,
-            skillToolPermissions,
-        });
-    }
-
     // NOTE: agent-todos is NOT included here - it's injected as a late system message
     // in AgentExecutor.executeStreaming() to ensure it appears at the end of messages
 
@@ -318,9 +295,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // Add agent-specific fragments
     addAgentFragments(
         systemPromptBuilder,
-        agentForFragments,
         triggeringEnvelope,
-        options.projectBasePath
     );
 
     // Build and return the complete prompt with all fragments
