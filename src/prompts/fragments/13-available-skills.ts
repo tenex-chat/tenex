@@ -2,6 +2,7 @@ import { SkillWhitelistService } from "@/services/skill";
 import type { WhitelistItem } from "@/services/skill";
 import { SkillService } from "@/services/skill/SkillService";
 import type { SkillData, SkillStoreScope } from "@/services/skill";
+import { getShortPubkey } from "@/lib/agent-home";
 import type { PromptFragment } from "../core/types";
 
 interface AvailableSkillsArgs {
@@ -91,11 +92,13 @@ export const availableSkillsFragment: PromptFragment<AvailableSkillsArgs> = {
 
         const parts: string[] = ["<available-skills>", "Use the IDs exactly as shown below.", ""];
 
+        const shortPubkey = getShortPubkey(agentPubkey);
+
         // Your skills (agent-scoped) — always show structure
         parts.push("<your-skills>");
         parts.push("These are skills only available to you:");
         parts.push("");
-        parts.push("### On this project (`$PROJECT_BASE/.agents/<your-short-pubkey>/skills`)");
+        parts.push(`### On this project (\`$PROJECT_BASE/.agents/${shortPubkey}/skills\`)`);
         const yourProject = grouped.get("your-project") ?? [];
         if (yourProject.length > 0) {
             parts.push(...yourProject);
