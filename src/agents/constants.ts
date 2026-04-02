@@ -15,6 +15,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "fs_edit", // All agents should be able to edit files
     "fs_glob", // All agents should be able to find files by pattern
     "fs_grep", // All agents should be able to search file contents
+    // Task scheduling
+    "schedule_task", // All agents should be able to schedule recurring and one-off tasks
     // Conversation tools for project introspection
     "conversation_get", // All agents should access conversation details
     "conversation_list", // All agents should list conversations
@@ -54,7 +56,6 @@ export const SKILL_PROVIDED_TOOLS: ToolName[] = [
     "rag_subscription_delete",
     // Shell skill tools
     "shell",
-    "schedule_task",
     // Conversation search skill
     "conversation_search",
     // Nostr skill
