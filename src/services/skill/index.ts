@@ -5,4 +5,11 @@ export type {
     SkillFileInfo,
     SkillFileInstallResult,
     SkillLookupContext,
+    SkillToolPermissions,
 } from "./types";
+export {
+    extractToolPermissions,
+    isOnlyToolMode,
+    hasToolPermissions,
+    mergeToolPermissionsFromFrontmatter,
+} from "./tool-permissions";

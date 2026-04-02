@@ -983,6 +983,7 @@ export class SkillService {
         const emptyResult: SkillResult = {
             skills: [],
             content: "",
+            toolPermissions: {},
         };
 
         if (skillIdentifiers.length === 0) {
@@ -1044,6 +1045,7 @@ export class SkillService {
                 return {
                     skills: skillDataArray,
                     content: concatenated,
+                    toolPermissions: {},
                 };
             } catch (error) {
                 span.recordException(error as Error);

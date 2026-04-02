@@ -1,11 +1,9 @@
 /**
  * Skill Event Types
  *
- * Defines the structure for skill events (kind:4202).
- * Skills are instruction bundles that can be injected into agent system prompts.
- *
- * Unlike nudges, skills do NOT have tool permissions (only-tool, allow-tool, deny-tool).
- * Skills are focused on providing additional context, instructions, and attached files.
+ * Defines the structure for skill events (kind:4202 and legacy kind:4201).
+ * Skills are instruction bundles that can be injected into agent system prompts,
+ * with optional tool permission controls (only-tool, allow-tool, deny-tool).
  */
 
 /**
@@ -78,6 +76,35 @@ export interface SkillData {
 }
 
 /**
+ * Tool permissions extracted from skill event tags.
+ * Used to modify an agent's available tools during execution.
+ *
+ * Precedence: only-tool > allow-tool/deny-tool
+ */
+export interface SkillToolPermissions {
+    /**
+     * If set, the agent gets EXACTLY these tools (and nothing else).
+     * This is the highest priority - completely overrides allow/deny and agent defaults.
+     * Tag format: ["only-tool", "tool_name"]
+     */
+    onlyTools?: string[];
+
+    /**
+     * Tools to enable (add to agent's default set).
+     * Ignored if onlyTools is set.
+     * Tag format: ["allow-tool", "tool_name"]
+     */
+    allowTools?: string[];
+
+    /**
+     * Tools to disable (remove from agent's default set).
+     * Ignored if onlyTools is set.
+     * Tag format: ["deny-tool", "tool_name"]
+     */
+    denyTools?: string[];
+}
+
+/**
  * Result from fetching skills with their attached files.
  * Contains both the concatenated content for system prompt injection
  * and the individual skill data with file information.
@@ -88,4 +115,7 @@ export interface SkillResult {
 
     /** Concatenated content from all skills (for backward compatibility) */
     content: string;
+
+    /** Tool permissions aggregated across all active skills */
+    toolPermissions: SkillToolPermissions;
 }
