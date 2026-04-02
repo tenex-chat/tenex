@@ -8,7 +8,7 @@ import type { PromptFragment } from "../core/types";
  */
 export const TodoUsageFragment: PromptFragment = {
     id: "todo-before-delegation",
-    priority: 17, // Right after stay-in-your-lane (16)
+    priority: 17, // Right after delegation-tips (16)
     template: () => `## Todo List
 
 When delegating tasks, a todo list helps you track progress and stay organized.

@@ -6,7 +6,7 @@ describe("TodoUsageFragment", () => {
         expect(TodoUsageFragment.id).toBe("todo-before-delegation");
     });
 
-    it("should have priority 17 (after stay-in-your-lane)", () => {
+    it("should have priority 17 (after delegation-tips)", () => {
         expect(TodoUsageFragment.priority).toBe(17);
     });
 

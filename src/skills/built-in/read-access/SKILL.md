@@ -9,4 +9,4 @@ tools:
 
 # Read access
 
-This skill provides read-only filesystem tools for the project directory.
+This skill provides read-only filesystem tools for the project directory. You can use your environment variables (e.g. `$PROJECT_BASE`) as part of path arguments.

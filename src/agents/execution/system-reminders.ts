@@ -10,8 +10,23 @@ import type {
     PendingDelegation,
     TodoItem,
 } from "@/services/ral/types";
+import type { SkillData, SkillToolPermissions } from "@/services/skill";
+import { getAgentHomeDirectory } from "@/lib/agent-home";
+import { homedir } from "node:os";
 import type { Span } from "@opentelemetry/api";
 import type { ModelMessage, UserModelMessage } from "ai";
+import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
+
+function buildReminderPathVars(data: TenexReminderData): Record<string, string> {
+    const vars: Record<string, string> = {
+        "$USER_HOME": homedir(),
+        "$AGENT_HOME": getAgentHomeDirectory(data.agent.pubkey),
+    };
+    if (data.projectPath) {
+        vars["$PROJECT_BASE"] = data.projectPath;
+    }
+    return vars;
+}
 
 export interface TenexReminderData {
     agent: AgentInstance;
@@ -20,6 +35,9 @@ export interface TenexReminderData {
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
     conversationsContent?: string;
+    loadedSkills: SkillData[];
+    skillToolPermissions?: SkillToolPermissions;
+    projectPath?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +357,61 @@ function createConversationsProvider() {
     });
 }
 
+function createLoadedSkillsProvider() {
+    return createDeltaProvider<string>({
+        type: "loaded-skills",
+        fullInterval: 10,
+        snapshot: (data) => {
+            const skillParts = data.loadedSkills
+                .map((s) => `${s.identifier}:${s.content.length}`)
+                .sort()
+                .join("|");
+            const permParts = data.skillToolPermissions
+                ? JSON.stringify(data.skillToolPermissions)
+                : "";
+            return `${skillParts}||${permParts}`;
+        },
+        renderFull: (_snapshot, data) => {
+            const content = renderLoadedSkillsBlock(
+                data.loadedSkills,
+                data.skillToolPermissions,
+                buildReminderPathVars(data)
+            );
+            return content ? { type: "loaded-skills", content } : null;
+        },
+        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+    });
+}
+
+function createAvailableSkillsProvider() {
+    return createDeltaProvider<string>({
+        type: "available-skills",
+        fullInterval: 15,
+        snapshot: async (data) => {
+            const { SkillService } = await import("@/services/skill/SkillService");
+            const { SkillWhitelistService } = await import("@/services/skill");
+            const installed = await SkillService.getInstance().listAvailableSkills({
+                agentPubkey: data.agent.pubkey,
+                projectPath: data.projectPath,
+            });
+            const whitelist = SkillWhitelistService.getInstance().getWhitelistedSkills();
+            const ids = [
+                ...installed.map((s) => s.identifier).sort(),
+                ...whitelist.map((w) => w.identifier ?? w.shortId ?? w.eventId).sort(),
+            ];
+            return ids.join(",");
+        },
+        renderFull: async (_snapshot, data) => {
+            const content = await renderAvailableSkillsBlock(
+                data.agent.pubkey,
+                data.projectPath
+            );
+            return { type: "available-skills", content };
+        },
+        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -350,6 +423,8 @@ export function initializeReminderProviders(): void {
     ctx.registerProvider("response-routing", createResponseRoutingProvider());
     ctx.registerProvider("delegations", createDelegationsProvider());
     ctx.registerProvider("conversations", createConversationsProvider());
+    ctx.registerProvider("loaded-skills", createLoadedSkillsProvider());
+    ctx.registerProvider("available-skills", createAvailableSkillsProvider());
 }
 
 export function updateReminderData(data: TenexReminderData): void {

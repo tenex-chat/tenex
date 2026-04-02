@@ -1,68 +1,105 @@
 import { z } from "zod";
 import { tool } from "ai";
+import { homedir } from "node:os";
 import type { AISdkTool, ConversationToolContext } from "@/tools/types";
 import { SkillService } from "@/services/skill/SkillService";
-import { renderSkill } from "@/prompts/fragments/12-skills";
+import { renderSkill } from "@/agents/execution/skill-reminder-renderers";
 import { agentStorage } from "@/agents/AgentStorage";
 import { getProjectContext } from "@/services/projects";
+import { getAgentHomeDirectory } from "@/lib/agent-home";
 
 const skillsSetSchema = z.object({
-    skills: z
+    add: z
         .array(z.string())
+        .optional()
         .describe(
-            "The full set of skill IDs to activate. Use the IDs shown in the available-skills list. Passing [] clears all self-applied skills."
+            "Skill IDs to activate (merged into current set). Use IDs from the available-skills list."
+        ),
+    remove: z
+        .array(z.string())
+        .optional()
+        .describe(
+            'Skill IDs to deactivate. Pass ["*"] to clear all skills before applying `add`.'
         ),
     always: z
         .boolean()
         .optional()
         .describe(
-            "When true, saves these skills to the agent's persistent config so they are active by default in all future conversations."
+            "When true, persists the resulting skill set to agent config for all future conversations."
         ),
 });
 
 type SkillsSetInput = z.infer<typeof skillsSetSchema>;
 
 /**
- * Creates the `skills_set` tool that lets agents self-apply skills during a conversation.
- * Accepts an array of skill identifiers exactly as surfaced in the prompt.
- * Passing `[]` clears all self-applied skills.
+ * Creates the `skills_set` tool that lets agents incrementally add/remove skills during a conversation.
  *
  * Semantics:
- * - Each call sets the complete active skill list (not additive). Prior tool-result messages
- *   from earlier calls remain in conversation history, but the system prompt and future steps
- *   reflect only the latest set via `prepareStep` rehydration.
- * - All input IDs must already exist in the available skill list. Partial resolution is rejected
- *   to prevent garbage IDs from persisting.
- * - Local skill IDs are persisted, because the local skill store is authoritative.
- * - Tool result includes the full rendered skill payload (matching system prompt format) so the
- *   agent sees file paths and content immediately, not just on the next RAL.
+ * - Reads the current active skill set from the conversation store.
+ * - Applies `remove` first (subtract listed IDs, or clear all with `["*"]`).
+ * - Validates `add` IDs against the available skill list. Partial resolution is rejected.
+ * - Merges `add` into the remaining set (deduped).
+ * - Fetches only newly-added skills for rendering (the agent already has content for previously-active ones).
+ * - Persists via `setSelfAppliedSkills` and optionally `updateDefaultConfig`.
  */
 export function createSkillsSetTool(context: ConversationToolContext): AISdkTool {
     const { conversationStore, agent } = context;
 
     return tool({
         description:
-            "Activate skills on yourself for this conversation. Pass the complete set of skill IDs you want active, using the IDs shown in the available-skills list. Each call sets the full list (not additive). Passing an empty array clears all self-applied skills. Skill content is returned immediately; the system prompt updates on the next step and in future RALs.",
+            "Add or remove skills on yourself for this conversation. Use `add` to activate skills and `remove` to deactivate them (or pass remove: [\"*\"] to clear all). Both fields are optional and can be combined. Only newly-added skill content is returned; the system prompt updates on the next step.",
         inputSchema: skillsSetSchema,
         execute: async (input: SkillsSetInput) => {
-            const { skills: rawRequestedSkillIds, always } = input;
+            const { add: rawAdd, remove: rawRemove, always } = input;
             const agentPubkey = agent.pubkey;
-            const requestedSkillIds = rawRequestedSkillIds.map((skillId) => skillId.trim());
 
-            // If clearing all skills
-            if (requestedSkillIds.length === 0) {
-                conversationStore.setSelfAppliedSkills([], agentPubkey);
-                if (always) {
-                    await agentStorage.updateDefaultConfig(agentPubkey, { skills: [] });
-                }
+            const addIds = (rawAdd ?? []).map((id) => id.trim()).filter(Boolean);
+            const removeIds = (rawRemove ?? []).map((id) => id.trim()).filter(Boolean);
+
+            // No-op: both empty/omitted
+            if (addIds.length === 0 && removeIds.length === 0) {
+                const currentSkills = conversationStore.getSelfAppliedSkillIds(agentPubkey);
                 return {
                     success: true,
-                    message: "All self-applied skills cleared.",
-                    activeSkills: [] as string[],
+                    message: currentSkills.length === 0
+                        ? "No skills currently active. Pass `add` to activate skills."
+                        : `Currently active skills: ${currentSkills.join(", ")}. Pass \`add\` or \`remove\` to change.`,
+                    activeSkills: currentSkills,
                     skillContent: "",
                 };
             }
 
+            // Read current set
+            const currentSkills = new Set(conversationStore.getSelfAppliedSkillIds(agentPubkey));
+
+            // Apply remove
+            if (removeIds.includes("*")) {
+                currentSkills.clear();
+            } else {
+                for (const id of removeIds) {
+                    currentSkills.delete(id);
+                }
+            }
+
+            // If no add IDs, just persist the removal result
+            if (addIds.length === 0) {
+                const finalSkills = [...currentSkills];
+                conversationStore.setSelfAppliedSkills(finalSkills, agentPubkey);
+                if (always) {
+                    await agentStorage.updateDefaultConfig(agentPubkey, { skills: finalSkills });
+                }
+                const message = finalSkills.length === 0
+                    ? "All self-applied skills cleared."
+                    : `Removed skill(s). Active skills: ${finalSkills.join(", ")}.`;
+                return {
+                    success: true,
+                    message,
+                    activeSkills: finalSkills,
+                    skillContent: "",
+                };
+            }
+
+            // Validate add IDs against available skills
             const skillService = SkillService.getInstance();
             const projectContext = getProjectContext();
             const skillLookupContext = {
@@ -77,19 +114,7 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
                     .map((skill) => skill.identifier)
                     .filter((skillId): skillId is string => Boolean(skillId))
             );
-            const unresolvedIdentifiers = requestedSkillIds.filter(
-                (skillId) => !availableSkillIds.has(skillId)
-            );
-            const uniqueRequestedSkillIds = [...new Set(requestedSkillIds)];
-
-            if (uniqueRequestedSkillIds.length === 0) {
-                return {
-                    success: false,
-                    message: "Could not resolve any skills from the provided identifiers.",
-                    activeSkills: [] as string[],
-                    skillContent: "",
-                };
-            }
+            const unresolvedIdentifiers = addIds.filter((id) => !availableSkillIds.has(id));
 
             if (unresolvedIdentifiers.length > 0) {
                 return {
@@ -100,70 +125,82 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
                 };
             }
 
-            // Fetch and validate skills
-            const result = await skillService.fetchSkills(
-                uniqueRequestedSkillIds,
-                skillLookupContext
-            );
+            // Determine which IDs are genuinely new (not already in current set)
+            const uniqueAddIds = [...new Set(addIds)];
+            const newlyAddedIds = uniqueAddIds.filter((id) => !currentSkills.has(id));
 
-            // Reject if no skills resolved at all
-            if (result.skills.length === 0) {
-                return {
-                    success: false,
-                    message: `Could not resolve any skills from the provided identifiers: ${requestedSkillIds.join(", ")}`,
-                    activeSkills: [] as string[],
-                    skillContent: "",
-                };
+            // Merge add into current set
+            for (const id of uniqueAddIds) {
+                currentSkills.add(id);
             }
 
-            // Reject partial resolution — every input ID must resolve to prevent garbage IDs from persisting
-            if (result.skills.length < uniqueRequestedSkillIds.length) {
-                const loadedSkillIds = new Set(
-                    result.skills
-                        .map((skill) => skill.identifier)
-                        .filter((skillId): skillId is string => Boolean(skillId))
-                );
-                const unresolvedIds = uniqueRequestedSkillIds.filter((id) => !loadedSkillIds.has(id));
-                return {
-                    success: false,
-                    message: `Partial resolution rejected: ${unresolvedIds.length} skill(s) could not be resolved: ${unresolvedIds.join(", ")}. All IDs must be valid. No changes were made.`,
-                    activeSkills: [] as string[],
-                    skillContent: "",
+            // Fetch only newly-added skills for rendering
+            let renderedContent = "";
+            if (newlyAddedIds.length > 0) {
+                const result = await skillService.fetchSkills(newlyAddedIds, skillLookupContext);
+
+                if (result.skills.length === 0) {
+                    return {
+                        success: false,
+                        message: `Could not resolve any skills from the provided identifiers: ${newlyAddedIds.join(", ")}`,
+                        activeSkills: [] as string[],
+                        skillContent: "",
+                    };
+                }
+
+                if (result.skills.length < newlyAddedIds.length) {
+                    const loadedSkillIds = new Set(
+                        result.skills
+                            .map((skill) => skill.identifier)
+                            .filter((skillId): skillId is string => Boolean(skillId))
+                    );
+                    const unresolvedIds = newlyAddedIds.filter((id) => !loadedSkillIds.has(id));
+                    return {
+                        success: false,
+                        message: `Partial resolution rejected: ${unresolvedIds.length} skill(s) could not be resolved: ${unresolvedIds.join(", ")}. All IDs must be valid. No changes were made.`,
+                        activeSkills: [] as string[],
+                        skillContent: "",
+                    };
+                }
+
+                const resolvedLocalSkillIds = result.skills
+                    .map((skill) => skill.identifier)
+                    .filter((skillId): skillId is string => Boolean(skillId));
+
+                if (resolvedLocalSkillIds.length !== result.skills.length) {
+                    return {
+                        success: false,
+                        message: "One or more loaded skills did not have a local identifier. No changes were made.",
+                        activeSkills: [] as string[],
+                        skillContent: "",
+                    };
+                }
+
+                const pathVars: Record<string, string> = {
+                    "$USER_HOME": homedir(),
+                    "$AGENT_HOME": getAgentHomeDirectory(agentPubkey),
                 };
+                if (context.projectBasePath) {
+                    pathVars["$PROJECT_BASE"] = context.projectBasePath;
+                }
+                renderedContent = result.skills.map((s) => renderSkill(s, pathVars)).join("\n\n");
             }
 
-            const resolvedLocalSkillIds = result.skills
-                .map((skill) => skill.identifier)
-                .filter((skillId): skillId is string => Boolean(skillId));
-
-            if (resolvedLocalSkillIds.length !== result.skills.length) {
-                return {
-                    success: false,
-                    message: "One or more loaded skills did not have a local identifier. No changes were made.",
-                    activeSkills: [] as string[],
-                    skillContent: "",
-                };
-            }
-
-            conversationStore.setSelfAppliedSkills(resolvedLocalSkillIds, agentPubkey);
+            const finalSkills = [...currentSkills];
+            conversationStore.setSelfAppliedSkills(finalSkills, agentPubkey);
 
             if (always) {
-                await agentStorage.updateDefaultConfig(agentPubkey, { skills: resolvedLocalSkillIds });
+                await agentStorage.updateDefaultConfig(agentPubkey, { skills: finalSkills });
             }
 
-            // Build full rendered skill content matching system prompt format (includes file paths)
-            const renderedContent = result.skills.map((s) => renderSkill(s)).join("\n\n");
-
-            const activatedIds = resolvedLocalSkillIds;
-
             const message = always
-                ? `Activated ${result.skills.length} skill(s): ${activatedIds.join(", ")}. Saved as always-on to agent config.`
-                : `Activated ${result.skills.length} skill(s): ${activatedIds.join(", ")}. Full skill content (including file paths) is included below — apply it immediately.`;
+                ? `Activated ${uniqueAddIds.length} skill(s): ${uniqueAddIds.join(", ")}. Saved as always-on to agent config.`
+                : `Activated ${uniqueAddIds.length} skill(s): ${uniqueAddIds.join(", ")}. Full skill content (including file paths) is included below — apply it immediately.`;
 
             return {
                 success: true,
                 message,
-                activeSkills: activatedIds,
+                activeSkills: finalSkills,
                 skillContent: renderedContent,
             };
         },

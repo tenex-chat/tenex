@@ -78,6 +78,12 @@ describe("skills_set tool", () => {
         }) as any,
     } as ConversationToolContext);
 
+    const toolCallOpts = (id: string) => ({
+        toolCallId: id,
+        messages: [],
+        abortSignal: undefined as any,
+    });
+
     beforeEach(() => {
         skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
             fetchSkills: mockFetchSkills,
@@ -99,6 +105,7 @@ describe("skills_set tool", () => {
         mockGetSelfAppliedSkillIds.mockClear();
         mockUpdateDefaultConfig.mockClear();
         mockListAvailableSkills.mockResolvedValue([]);
+        mockGetSelfAppliedSkillIds.mockReturnValue([]);
     });
 
     afterEach(() => {
@@ -108,23 +115,154 @@ describe("skills_set tool", () => {
         mock.restore();
     });
 
-    it("should clear all skills when empty array is passed", async () => {
+    it("should return current active set when both add and remove are omitted (no-op)", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
+
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute({}, toolCallOpts("tc-noop-1"));
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual(["brainstorming"]);
+        expect(result.message).toContain("brainstorming");
+        expect(mockSetSelfAppliedSkills).not.toHaveBeenCalled();
+        expect(mockListAvailableSkills).not.toHaveBeenCalled();
+    });
+
+    it("should return no-op message when no skills active and both fields omitted", async () => {
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute({}, toolCallOpts("tc-noop-2"));
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual([]);
+        expect(result.message).toContain("No skills currently active");
+    });
+
+    it("should add skills incrementally, preserving existing ones", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
+        mockListAvailableSkills.mockResolvedValue([
+            createAvailableSkill("brainstorming"),
+            createAvailableSkill("wikifreedia-writer"),
+        ]);
+        mockFetchSkills.mockResolvedValue({
+            skills: [
+                createResolvedSkill("wikifreedia-writer", SKILL_ID_2, {
+                    name: "Wikifreedia Writer",
+                    content: "content2",
+                }),
+            ],
+            content: "skill content",
+        });
+
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: [] },
-            { toolCallId: "tc1", messages: [], abortSignal: undefined as any }
+            { add: ["wikifreedia-writer"] },
+            toolCallOpts("tc-add-incr")
         );
 
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith([], AGENT_PUBKEY);
-        expect(result).toEqual({
-            success: true,
-            message: "All self-applied skills cleared.",
-            activeSkills: [],
-            skillContent: "",
-        });
-        expect(mockListAvailableSkills).not.toHaveBeenCalled();
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual(
+            expect.arrayContaining(["brainstorming", "wikifreedia-writer"])
+        );
+        expect(result.activeSkills).toHaveLength(2);
+        // Only newly-added skill content returned
+        expect(result.skillContent).toContain("content2");
+        expect(result.skillContent).not.toContain("content1");
+        // fetchSkills called only for the new skill
+        expect(mockFetchSkills).toHaveBeenCalledWith(["wikifreedia-writer"], SKILL_LOOKUP_CONTEXT);
+    });
+
+    it("should remove specific skills", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming", "wikifreedia-writer"]);
+
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute(
+            { remove: ["brainstorming"] },
+            toolCallOpts("tc-remove-1")
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual(["wikifreedia-writer"]);
+        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["wikifreedia-writer"], AGENT_PUBKEY);
         expect(mockFetchSkills).not.toHaveBeenCalled();
+    });
+
+    it("should clear all skills with remove: ['*']", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming", "wikifreedia-writer"]);
+
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute(
+            { remove: ["*"] },
+            toolCallOpts("tc-wildcard")
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual([]);
+        expect(result.message).toBe("All self-applied skills cleared.");
+        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith([], AGENT_PUBKEY);
+    });
+
+    it("should clear all skills with remove: ['*'] and persist with always: true", async () => {
+        mockUpdateDefaultConfig.mockResolvedValue(true);
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
+
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute(
+            { remove: ["*"], always: true },
+            toolCallOpts("tc-wildcard-always")
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual([]);
+        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith([], AGENT_PUBKEY);
+        expect(mockUpdateDefaultConfig).toHaveBeenCalledWith(AGENT_PUBKEY, { skills: [] });
+    });
+
+    it("should let add win over remove for the same ID", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
+        mockListAvailableSkills.mockResolvedValue([createAvailableSkill("brainstorming")]);
+        mockFetchSkills.mockResolvedValue({
+            skills: [
+                createResolvedSkill("brainstorming", SKILL_ID_1, {
+                    name: "Brainstorming",
+                    content: "content1",
+                }),
+            ],
+            content: "skill content",
+        });
+
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute(
+            { add: ["brainstorming"], remove: ["brainstorming"] },
+            toolCallOpts("tc-add-wins")
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual(["brainstorming"]);
+        // After remove clears it, add re-adds it — it's "newly added" so fetch is called
+        expect(mockFetchSkills).toHaveBeenCalledWith(["brainstorming"], SKILL_LOOKUP_CONTEXT);
+        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["brainstorming"], AGENT_PUBKEY);
+    });
+
+    it("should silently ignore remove IDs that aren't currently active", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
+
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute(
+            { remove: ["not-active-skill"] },
+            toolCallOpts("tc-remove-noop")
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual(["brainstorming"]);
+        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["brainstorming"], AGENT_PUBKEY);
     });
 
     it("should activate valid skills and store them", async () => {
@@ -149,8 +287,8 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: ["brainstorming", "wikifreedia-writer"] },
-            { toolCallId: "tc2", messages: [], abortSignal: undefined as any }
+            { add: ["brainstorming", "wikifreedia-writer"] },
+            toolCallOpts("tc2")
         );
 
         expect(mockListAvailableSkills).toHaveBeenCalledWith(SKILL_LOOKUP_CONTEXT);
@@ -164,7 +302,7 @@ describe("skills_set tool", () => {
         );
         expect(result.success).toBe(true);
         expect(result.activeSkills).toEqual(["brainstorming", "wikifreedia-writer"]);
-        expect(result.skillContent).toContain("<loaded-skill");
+        expect(result.skillContent).toContain("<skill");
         expect(result.skillContent).toContain("content1");
         expect(result.skillContent).toContain("content2");
     });
@@ -179,8 +317,8 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: ["brainstorming"] },
-            { toolCallId: "tc3", messages: [], abortSignal: undefined as any }
+            { add: ["brainstorming"] },
+            toolCallOpts("tc3")
         );
 
         expect(mockFetchSkills).toHaveBeenCalledWith(["brainstorming"], SKILL_LOOKUP_CONTEXT);
@@ -203,8 +341,8 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: ["brainstorming"] },
-            { toolCallId: "tc5", messages: [], abortSignal: undefined as any }
+            { add: ["brainstorming"] },
+            toolCallOpts("tc5")
         );
 
         expect(result).toEqual({
@@ -217,21 +355,12 @@ describe("skills_set tool", () => {
 
     it("should reject partial resolution — some IDs valid, some not", async () => {
         mockListAvailableSkills.mockResolvedValue([createAvailableSkill("brainstorming")]);
-        mockFetchSkills.mockResolvedValue({
-            skills: [
-                createResolvedSkill("brainstorming", SKILL_ID_1, {
-                    name: "Brainstorming",
-                    content: "content",
-                }),
-            ],
-            content: "skill content",
-        });
 
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: ["brainstorming", "not-a-real-skill"] },
-            { toolCallId: "tc6", messages: [], abortSignal: undefined as any }
+            { add: ["brainstorming", "not-a-real-skill"] },
+            toolCallOpts("tc6")
         );
 
         expect(result.success).toBe(false);
@@ -247,8 +376,8 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: [SKILL_ID_1, "not-a-real-skill"] },
-            { toolCallId: "tc6b", messages: [], abortSignal: undefined as any }
+            { add: [SKILL_ID_1, "not-a-real-skill"] },
+            toolCallOpts("tc6b")
         );
 
         expect(result.success).toBe(false);
@@ -262,21 +391,12 @@ describe("skills_set tool", () => {
     it("should reject short skill ids before fetching", async () => {
         const skillShortId = SKILL_ID_1.slice(0, 12);
         mockListAvailableSkills.mockResolvedValue([createAvailableSkill("brainstorming")]);
-        mockFetchSkills.mockResolvedValue({
-            skills: [
-                createResolvedSkill("brainstorming", SKILL_ID_1, {
-                    name: "Brainstorming",
-                    content: "content",
-                }),
-            ],
-            content: "skill content",
-        });
 
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: [skillShortId] },
-            { toolCallId: "tc6c", messages: [], abortSignal: undefined as any }
+            { add: [skillShortId] },
+            toolCallOpts("tc6c")
         );
 
         expect(result.success).toBe(false);
@@ -300,8 +420,8 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         await toolDef.execute(
-            { skills: ["test-skill"] },
-            { toolCallId: "tc7", messages: [], abortSignal: undefined as any }
+            { add: ["test-skill"] },
+            toolCallOpts("tc7")
         );
 
         expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["test-skill"], AGENT_PUBKEY);
@@ -337,122 +457,17 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: ["code-style"] },
-            { toolCallId: "tc8", messages: [], abortSignal: undefined as any }
+            { add: ["code-style"] },
+            toolCallOpts("tc8")
         );
 
         expect(result.success).toBe(true);
-        expect(result.skillContent).toContain("<loaded-skill");
-        expect(result.skillContent).toContain('name="Code Style"');
+        expect(result.skillContent).toContain("<skill");
         expect(result.skillContent).toContain("Follow these patterns.");
-        expect(result.skillContent).toContain("/tmp/skills/code-style/style.md");
-        expect(result.skillContent).toContain("Installed Files");
         expect(result.skillContent).toContain("Failed File Downloads");
         expect(result.skillContent).toContain("Download failed");
-        expect(result.skillContent).toContain("</loaded-skill>");
+        expect(result.skillContent).toContain("</skill>");
         expect(result.message).toContain("file paths");
-    });
-
-    it("should replace prior skills when called repeatedly in the same RAL", async () => {
-        const skillId3 = "f".repeat(64);
-        mockListAvailableSkills.mockResolvedValue([
-            createAvailableSkill("brainstorming"),
-            createAvailableSkill("wikifreedia-writer"),
-            createAvailableSkill("code-review"),
-        ]);
-        mockFetchSkills.mockResolvedValueOnce({
-            skills: [
-                createResolvedSkill("brainstorming", SKILL_ID_1, {
-                    name: "Brainstorming",
-                    content: "content1",
-                }),
-                createResolvedSkill("wikifreedia-writer", SKILL_ID_2, {
-                    name: "Wikifreedia Writer",
-                    content: "content2",
-                }),
-            ],
-            content: "skill content",
-        });
-        mockFetchSkills.mockResolvedValueOnce({
-            skills: [
-                createResolvedSkill("code-review", skillId3, {
-                    name: "Code Review",
-                    content: "content3",
-                }),
-            ],
-            content: "skill content",
-        });
-
-        const context = createMockContext();
-        const toolDef = createSkillsSetTool(context);
-
-        const result1 = await toolDef.execute(
-            { skills: ["brainstorming", "wikifreedia-writer"] },
-            { toolCallId: "tc-repeat-1", messages: [], abortSignal: undefined as any }
-        );
-        expect(result1.success).toBe(true);
-        expect(result1.activeSkills).toEqual(["brainstorming", "wikifreedia-writer"]);
-
-        const result2 = await toolDef.execute(
-            { skills: ["code-review"] },
-            { toolCallId: "tc-repeat-2", messages: [], abortSignal: undefined as any }
-        );
-        expect(result2.success).toBe(true);
-        expect(result2.activeSkills).toEqual(["code-review"]);
-
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledTimes(2);
-        expect(mockSetSelfAppliedSkills).toHaveBeenNthCalledWith(
-            1,
-            ["brainstorming", "wikifreedia-writer"],
-            AGENT_PUBKEY
-        );
-        expect(mockSetSelfAppliedSkills).toHaveBeenNthCalledWith(
-            2,
-            ["code-review"],
-            AGENT_PUBKEY
-        );
-        expect(result2.skillContent).toContain("content3");
-        expect(result2.skillContent).not.toContain("content1");
-        expect(result2.skillContent).not.toContain("content2");
-    });
-
-    it("should activate valid skills and store local skill ids", async () => {
-        mockListAvailableSkills.mockResolvedValue([
-            createAvailableSkill("brainstorming"),
-            createAvailableSkill("wikifreedia-writer"),
-        ]);
-        mockFetchSkills.mockResolvedValue({
-            skills: [
-                createResolvedSkill("brainstorming", SKILL_ID_1, {
-                    name: "Brainstorming",
-                    content: "content1",
-                }),
-                createResolvedSkill("wikifreedia-writer", SKILL_ID_2, {
-                    name: "Wikifreedia Writer",
-                    content: "content2",
-                }),
-            ],
-            content: "skill content",
-        });
-
-        const context = createMockContext();
-        const toolDef = createSkillsSetTool(context);
-        const result = await toolDef.execute(
-            { skills: ["brainstorming", "wikifreedia-writer"] },
-            { toolCallId: "tc9", messages: [], abortSignal: undefined as any }
-        );
-
-        expect(mockFetchSkills).toHaveBeenCalledWith(
-            ["brainstorming", "wikifreedia-writer"],
-            SKILL_LOOKUP_CONTEXT
-        );
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(
-            ["brainstorming", "wikifreedia-writer"],
-            AGENT_PUBKEY
-        );
-        expect(result.success).toBe(true);
-        expect(result.activeSkills).toEqual(["brainstorming", "wikifreedia-writer"]);
-        expect(result.skillContent).toContain("<loaded-skill");
     });
 
     it("should persist to agent config when always: true", async () => {
@@ -471,8 +486,8 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: ["brainstorming"], always: true },
-            { toolCallId: "tc-always-1", messages: [], abortSignal: undefined as any }
+            { add: ["brainstorming"], always: true },
+            toolCallOpts("tc-always-1")
         );
 
         expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["brainstorming"], AGENT_PUBKEY);
@@ -499,26 +514,68 @@ describe("skills_set tool", () => {
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         await toolDef.execute(
-            { skills: ["brainstorming"] },
-            { toolCallId: "tc-always-2", messages: [], abortSignal: undefined as any }
+            { add: ["brainstorming"] },
+            toolCallOpts("tc-always-2")
         );
 
         expect(mockUpdateDefaultConfig).not.toHaveBeenCalled();
     });
 
-    it("should persist empty skills to agent config when clearing with always: true", async () => {
-        mockUpdateDefaultConfig.mockResolvedValue(true);
+    it("should not re-fetch skills that are already active when adding", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
+        mockListAvailableSkills.mockResolvedValue([
+            createAvailableSkill("brainstorming"),
+            createAvailableSkill("wikifreedia-writer"),
+        ]);
+        mockFetchSkills.mockResolvedValue({
+            skills: [
+                createResolvedSkill("wikifreedia-writer", SKILL_ID_2, {
+                    name: "Wikifreedia Writer",
+                    content: "content2",
+                }),
+            ],
+            content: "skill content",
+        });
 
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { skills: [], always: true },
-            { toolCallId: "tc-always-3", messages: [], abortSignal: undefined as any }
+            { add: ["brainstorming", "wikifreedia-writer"] },
+            toolCallOpts("tc-no-refetch")
         );
 
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith([], AGENT_PUBKEY);
-        expect(mockUpdateDefaultConfig).toHaveBeenCalledWith(AGENT_PUBKEY, { skills: [] });
         expect(result.success).toBe(true);
-        expect(result.message).toBe("All self-applied skills cleared.");
+        // Should only fetch the newly-added skill
+        expect(mockFetchSkills).toHaveBeenCalledWith(["wikifreedia-writer"], SKILL_LOOKUP_CONTEXT);
+        expect(result.activeSkills).toEqual(
+            expect.arrayContaining(["brainstorming", "wikifreedia-writer"])
+        );
+    });
+
+    it("should handle remove: ['*'] combined with add", async () => {
+        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming", "old-skill"]);
+        mockListAvailableSkills.mockResolvedValue([
+            createAvailableSkill("wikifreedia-writer"),
+        ]);
+        mockFetchSkills.mockResolvedValue({
+            skills: [
+                createResolvedSkill("wikifreedia-writer", SKILL_ID_2, {
+                    name: "Wikifreedia Writer",
+                    content: "content2",
+                }),
+            ],
+            content: "skill content",
+        });
+
+        const context = createMockContext();
+        const toolDef = createSkillsSetTool(context);
+        const result = await toolDef.execute(
+            { remove: ["*"], add: ["wikifreedia-writer"] },
+            toolCallOpts("tc-wildcard-add")
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.activeSkills).toEqual(["wikifreedia-writer"]);
+        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["wikifreedia-writer"], AGENT_PUBKEY);
     });
 });

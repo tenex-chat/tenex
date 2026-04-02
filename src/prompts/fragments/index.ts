@@ -16,10 +16,9 @@ import { delegationChainFragment } from "./05-delegation-chain";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 import { environmentVariablesFragment } from "./07-environment-variables";
 import { projectContextFragment } from "./08-project-context";
-import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
+import { delegationTipsFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
 import { noResponseGuidanceFragment } from "./18-no-response-guidance";
-import { delegationAsyncFragment } from "./19-delegation-async";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
@@ -48,10 +47,9 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(projectContextFragment);
 
     // Agent collaboration
-    fragmentRegistry.register(stayInYourLaneFragment);
+    fragmentRegistry.register(delegationTipsFragment);
     fragmentRegistry.register(TodoUsageFragment);
     fragmentRegistry.register(noResponseGuidanceFragment);
-    fragmentRegistry.register(delegationAsyncFragment);
 
     // Behavioral guidance
     // voice-mode is registered via side effects

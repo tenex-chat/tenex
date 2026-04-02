@@ -7,4 +7,4 @@ tools:
 
 # Shell Execution
 
-This skill provides the shell tool for executing shell commands in the project directory.
+Environment variables are expanded: `nak --sec $NSEC -c "$(cat $AGENT_HOME/content.txt)"`

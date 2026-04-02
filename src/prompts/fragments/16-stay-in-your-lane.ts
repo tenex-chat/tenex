@@ -1,41 +1,20 @@
 import type { PromptFragment } from "../core/types";
 
 /**
- * Stay In Your Lane Fragment
+ * Delegation Tips Fragment
  *
- * Educates agents about delegation boundaries and role respect.
- * Encourages thoughtful delegation that respects both the delegator's
- * and delegatee's roles, avoiding micromanagement.
+ * Concise guidance on delegation style and async behavior.
  */
-export const stayInYourLaneFragment: PromptFragment = {
-    id: "stay-in-your-lane",
+export const delegationTipsFragment: PromptFragment = {
+    id: "delegation-tips",
     priority: 16,
-    template: () => `## Delegation Best Practices
+    template: () => `## Delegation Tips
 
-**Core Principle: Delegate WHAT needs to be done, not HOW to do it.**
+Delegate **what** needs to be done, not **how**. Provide context and constraints, but trust the delegatee's expertise — don't prescribe tools or step-by-step approaches.
 
-**Before delegating, ask yourself:**
-1. What is MY role and responsibility?
-2. What is the role of the agent I'm delegating to?
-3. Am I delegating the TASK or micromanaging the APPROACH?
+- BAD: "Search for X, read files Y and Z, then modify function F with these changes..."
+- GOOD: "Fix the auth bug in the login flow — it appears related to token validation."
 
-**Effective delegation:**
-- Provide necessary context and constraints
-- Trust the delegatee to use their expertise and tools
-- Focus on outcomes, not step-by-step instructions
-
-**Avoid:**
-- Telling other agents which specific tools to use
-- Prescribing implementation details outside your expertise
-- Duplicating work that the delegatee is better suited for
-- Micromanaging approaches when you should delegate the entire task
-
-**Example - BAD delegation:**
-"Follow this exact sequence: search the codebase for X, read files Y and Z, then modify function F with the following changes..."
-
-**Example - GOOD delegation:**
-"Find and fix the authentication bug in the login flow. The issue appears to be related to token validation."
-
-Each agent has specialized knowledge and tools - respect their expertise.
+Delegation is async — you are **automatically re-invoked** when the delegatee completes. Don't poll or send \`delegate_followup\` to check status; use \`conversation_get\` if you need progress visibility. \`delegate_followup\` is for sending additional context or clarifying questions.
 `,
 };

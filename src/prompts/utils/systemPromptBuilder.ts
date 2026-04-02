@@ -129,14 +129,11 @@ function addAgentFragments(
     builder: PromptBuilder,
     triggeringEnvelope?: BuildSystemPromptOptions["triggeringEnvelope"],
 ): void {
-    // Add delegation best practices guidance (priority 16)
-    builder.add("stay-in-your-lane", {});
+    // Add delegation tips (priority 16)
+    builder.add("delegation-tips", {});
 
-    // Add todo-before-delegation requirement (priority 17, after stay-in-your-lane)
+    // Add todo-before-delegation requirement (priority 17)
     builder.add("todo-before-delegation", {});
-
-    // Add delegation async pattern guidance (priority 19)
-    builder.add("delegation-async", {});
 
     // Add explicit guidance for turns where the user wants no reply.
     if (triggeringEnvelope?.transport === "telegram") {

@@ -34,20 +34,11 @@ export function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnTy
 
         const pathVars = buildPathVars(context);
 
-        const envVarNote = "Path variables ($PROJECT_BASE, $AGENT_HOME, $USER_HOME) are expanded automatically.";
-
         tools = createFsTools({
             workingDirectory: context.workingDirectory,
             allowedRoots,
             beforeExecute: (_toolName, input) => expandPathVars(input, pathVars),
             agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory, skipRoot: true },
-            descriptions: {
-                read: `Read a file, directory, or caller-defined tool result. File reads include line numbers, default to 250 lines, and truncate lines over 2000 characters. Paths must be absolute. ${envVarNote} Reading outside the configured roots requires allowOutsideWorkingDirectory: true.`,
-                write: `Write content to a file. Creates parent directories automatically and overwrites existing files. ${envVarNote}`,
-                edit: `Perform exact string replacements in a file. When replace_all is false, old_string must match exactly once. ${envVarNote}`,
-                glob: `Fast glob-based file search. Returns matching file paths relative to workingDirectory in glob traversal order. ${envVarNote}`,
-                grep: `Search file contents with ripgrep, with grep as a fallback. Supports content, file-list, and count modes. ${envVarNote}`,
-            },
             formatOutsideRootsError: (path, wd) =>
                 `Path "${path}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
             analyzeContent: ({ content, prompt, source }) => synthesizeContent(content, prompt, source),
