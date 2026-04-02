@@ -240,7 +240,6 @@ describe("agent-home-directory fragment", () => {
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
             expect(result).not.toContain("<memorized-files>");
-            expect(result).not.toContain("<memorized-project-files>");
         });
 
         it("should document project-specific memory when project context is present", async () => {
@@ -253,9 +252,10 @@ describe("agent-home-directory fragment", () => {
             } as never);
 
             expect(result).toContain("/home/abcd1234/projects/acme-app/docs");
+            expect(result).toContain("injected in the project-context section");
         });
 
-        it("should inject project-scoped +files separately from home files", async () => {
+        it("should inject home-scoped +files only (project files moved to project-context)", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => []);
             getInjectedFilesSpy.mockImplementation(() => [
@@ -272,8 +272,9 @@ describe("agent-home-directory fragment", () => {
 
             expect(result).toContain("<memorized-files>");
             expect(result).toContain("Home memory");
-            expect(result).toContain("<memorized-project-files>");
-            expect(result).toContain("Project memory");
+            // Project files are now in project-context fragment, not here
+            expect(result).not.toContain("<memorized-project-files>");
+            expect(result).not.toContain("Project memory");
         });
 
         it("should reflect updated injected files and count on consecutive renders", async () => {

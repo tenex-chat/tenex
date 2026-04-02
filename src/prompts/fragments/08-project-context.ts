@@ -13,6 +13,8 @@ import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatCon
 import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { config } from "@/services/ConfigService";
 import { listWorktrees, loadWorktreeMetadata, type WorktreeMetadata } from "@/utils/git/worktree";
+import { getAgentProjectInjectedFiles } from "@/lib/agent-home";
+import { shortenPubkey, shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -436,9 +438,9 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         if (projectId) {
             parts.push(`  ID: ${projectId}`);
         }
-        parts.push(`  Owner pubkey: "${projectOwnerPubkey}"`);
+        parts.push(`  Owner pubkey: "${shortenPubkey(projectOwnerPubkey)}"`);
         if (conversationId) {
-            parts.push(`  Conversation ID: ${conversationId}`);
+            parts.push(`  Conversation ID: ${shortenConversationId(conversationId)}`);
         }
 
         // <workspace> section
@@ -545,6 +547,20 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
                 parts.push("    </project>");
             }
             parts.push("  </other-projects>");
+        }
+
+        // <memorized-project-files> section
+        if (projectId && agent.pubkey) {
+            const projectInjectedFiles = getAgentProjectInjectedFiles(agent.pubkey, projectId);
+            if (projectInjectedFiles.length > 0) {
+                parts.push("");
+                parts.push("  <memorized-project-files>");
+                for (const file of projectInjectedFiles) {
+                    const truncatedAttr = file.truncated ? ` truncated="true"` : "";
+                    parts.push(`    <file name="${file.filename}"${truncatedAttr}>${file.content}</file>`);
+                }
+                parts.push("  </memorized-project-files>");
+            }
         }
 
         parts.push("</project-context>");

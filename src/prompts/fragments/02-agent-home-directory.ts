@@ -4,7 +4,6 @@ import {
     ensureAgentHomeDirectory,
     getAgentHomeDirectory,
     getAgentHomeInjectedFiles,
-    getAgentProjectInjectedFiles,
     getAgentProjectMemoryDirectory,
 } from "@/lib/agent-home";
 
@@ -69,9 +68,6 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const homeCount = countHomeFiles(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
-        const projectInjectedFiles = projectDTag
-            ? getAgentProjectInjectedFiles(agent.pubkey, projectDTag)
-            : [];
         const projectMemoryDir = projectDTag
             ? getAgentProjectMemoryDirectory(agent.pubkey, projectDTag)
             : undefined;
@@ -105,7 +101,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
             parts.push("");
             parts.push(
                 `**Project-specific memory:** For private persistent notes for this project, use \`${projectMemoryDir}/+<slug>.md\`. ` +
-                "Those `+` files are injected separately from your home-root memory files."
+                "Those `+` files are injected in the project-context section."
             );
         }
         // Inject +prefixed file contents
@@ -117,16 +113,6 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
                 parts.push(`  <file name="${file.filename}"${truncatedAttr}>${file.content}</file>`);
             }
             parts.push("</memorized-files>");
-        }
-
-        if (projectInjectedFiles.length > 0) {
-            parts.push("");
-            parts.push("<memorized-project-files>");
-            for (const file of projectInjectedFiles) {
-                const truncatedAttr = file.truncated ? ` truncated="true"` : "";
-                parts.push(`  <file name="${file.filename}"${truncatedAttr}>${file.content}</file>`);
-            }
-            parts.push("</memorized-project-files>");
         }
 
         parts.push("</home-directory>");
