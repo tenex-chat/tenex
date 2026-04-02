@@ -14,11 +14,11 @@ import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 // Mock the resolution function to return pubkeys for our test agents
 import * as agentResolution from "@/services/agents";
 
-const createTriggeringEnvelope = (nudgeTags: string[][] = []) =>
+const createTriggeringEnvelope = (skillTags: string[][] = []) =>
     createMockInboundEnvelope({
         metadata: {
-            skillEventIds: nudgeTags
-                .filter((tag) => tag[0] === "nudge" && Boolean(tag[1]))
+            skillEventIds: skillTags
+                .filter((tag) => tag[0] === "skill" && Boolean(tag[1]))
                 .map((tag) => tag[1]),
         },
     });
@@ -40,16 +40,16 @@ describe("Delegate Tool - Skill Propagation", () => {
     };
 
     /**
-     * Create a mock context with optional nudge tags on the triggering event
+     * Create a mock context with optional skill tags on the triggering event
      */
-    const createMockContext = (ralNumber: number, nudgeTags: string[][] = []): ToolExecutionContext => ({
+    const createMockContext = (ralNumber: number, skillTags: string[][] = []): ToolExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEnvelope: createTriggeringEnvelope(nudgeTags),
+        triggeringEnvelope: createTriggeringEnvelope(skillTags),
         agentPublisher: {
             delegate: async (config: any) => {
                 // Track the delegate call to verify skill propagation
@@ -103,15 +103,15 @@ describe("Delegate Tool - Skill Propagation", () => {
         mock.restore();
     });
 
-    describe("nudge inheritance", () => {
-        it("should resolve prompt-facing nudge ids before delegating", async () => {
-            const resolvedNudgeId = "a".repeat(64);
+    describe("skill inheritance", () => {
+        it("should resolve prompt-facing skill ids before delegating", async () => {
+            const resolvedSkillId = "a".repeat(64);
             const skillResolverSpy = spyOn(
                 skillModule.SkillIdentifierResolver,
                 "getInstance"
             ).mockReturnValue({
                 resolveSkillIdentifier: (identifier: string) =>
-                    identifier === "be-brief" ? resolvedNudgeId : null,
+                    identifier === "be-brief" ? resolvedSkillId : null,
             } as never);
 
             const agentPubkey = "agent-pubkey-123";
@@ -131,23 +131,23 @@ describe("Delegate Tool - Skill Propagation", () => {
 
             expect(result.success).toBe(true);
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].skills).toEqual([resolvedNudgeId]);
+            expect(delegateCallArgs[0].skills).toEqual([resolvedSkillId]);
 
             skillResolverSpy.mockRestore();
         });
 
-        it("should inherit nudges from triggering event and pass to delegated agent", async () => {
-            const inheritedNudge1 = "inherited-nudge-event-id-1";
-            const inheritedNudge2 = "inherited-nudge-event-id-2";
+        it("should inherit skills from triggering event and pass to delegated agent", async () => {
+            const inheritedSkill1 = "inherited-skill-event-id-1";
+            const inheritedSkill2 = "inherited-skill-event-id-2";
 
-            const nudgeTags = [
-                ["nudge", inheritedNudge1],
-                ["nudge", inheritedNudge2],
+            const skillTags = [
+                ["skill", inheritedSkill1],
+                ["skill", inheritedSkill2],
             ];
 
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, nudgeTags);
+            const context = createMockContext(ralNumber, skillTags);
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -159,21 +159,21 @@ describe("Delegate Tool - Skill Propagation", () => {
             const result = await delegateTool.execute(input);
             expect(result.success).toBe(true);
 
-            // Verify delegate was called with inherited nudges
+            // Verify delegate was called with inherited skills
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].skills).toContain(inheritedNudge1);
-            expect(delegateCallArgs[0].skills).toContain(inheritedNudge2);
+            expect(delegateCallArgs[0].skills).toContain(inheritedSkill1);
+            expect(delegateCallArgs[0].skills).toContain(inheritedSkill2);
         });
 
-        it("should combine inherited nudges with explicit nudges", async () => {
-            const inheritedNudge = "inherited-nudge-id";
-            const explicitNudge = "explicit-nudge-id";
+        it("should combine inherited skills with explicit skills", async () => {
+            const inheritedSkill = "inherited-skill-id";
+            const explicitSkill = "explicit-skill-id";
 
-            const nudgeTags = [["nudge", inheritedNudge]];
+            const skillTags = [["skill", inheritedSkill]];
 
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, nudgeTags);
+            const context = createMockContext(ralNumber, skillTags);
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -181,7 +181,7 @@ describe("Delegate Tool - Skill Propagation", () => {
                     {
                         recipient: "other-agent",
                         prompt: "Do something",
-                        skills: [explicitNudge],
+                        skills: [explicitSkill],
                     }
                 ],
             };
@@ -189,21 +189,21 @@ describe("Delegate Tool - Skill Propagation", () => {
             const result = await delegateTool.execute(input);
             expect(result.success).toBe(true);
 
-            // Verify delegate was called with BOTH inherited and explicit nudges
+            // Verify delegate was called with BOTH inherited and explicit skills
             expect(delegateCallArgs.length).toBe(1);
-            expect(delegateCallArgs[0].skills).toContain(inheritedNudge);
-            expect(delegateCallArgs[0].skills).toContain(explicitNudge);
+            expect(delegateCallArgs[0].skills).toContain(inheritedSkill);
+            expect(delegateCallArgs[0].skills).toContain(explicitSkill);
             expect(delegateCallArgs[0].skills?.length).toBe(2);
         });
 
-        it("should deduplicate nudges when explicit nudge is same as inherited", async () => {
-            const sameNudgeId = "same-nudge-id";
+        it("should deduplicate skills when explicit skill is same as inherited", async () => {
+            const sameSkillId = "same-skill-id";
 
-            const nudgeTags = [["nudge", sameNudgeId]];
+            const skillTags = [["skill", sameSkillId]];
 
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, nudgeTags);
+            const context = createMockContext(ralNumber, skillTags);
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -211,7 +211,7 @@ describe("Delegate Tool - Skill Propagation", () => {
                     {
                         recipient: "other-agent",
                         prompt: "Do something",
-                        skills: [sameNudgeId], // Same as inherited
+                        skills: [sameSkillId], // Same as inherited
                     }
                 ],
             };
@@ -219,16 +219,16 @@ describe("Delegate Tool - Skill Propagation", () => {
             const result = await delegateTool.execute(input);
             expect(result.success).toBe(true);
 
-            // Verify nudge appears only ONCE (deduplication)
+            // Verify skill appears only ONCE (deduplication)
             expect(delegateCallArgs.length).toBe(1);
             expect(delegateCallArgs[0].skills?.length).toBe(1);
-            expect(delegateCallArgs[0].skills).toContain(sameNudgeId);
+            expect(delegateCallArgs[0].skills).toContain(sameSkillId);
         });
 
-        it("should handle no nudges gracefully", async () => {
+        it("should handle no skills gracefully", async () => {
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, []); // No nudge tags
+            const context = createMockContext(ralNumber, []); // No skill tags
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -248,13 +248,13 @@ describe("Delegate Tool - Skill Propagation", () => {
     });
 
     describe("multiple delegations", () => {
-        it("should propagate nudges to all delegated agents", async () => {
-            const inheritedNudge = "inherited-nudge-for-all";
-            const nudgeTags = [["nudge", inheritedNudge]];
+        it("should propagate skills to all delegated agents", async () => {
+            const inheritedSkill = "inherited-skill-for-all";
+            const skillTags = [["skill", inheritedSkill]];
 
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, nudgeTags);
+            const context = createMockContext(ralNumber, skillTags);
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -268,28 +268,28 @@ describe("Delegate Tool - Skill Propagation", () => {
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(2);
 
-            // Verify BOTH delegations received the inherited nudge
+            // Verify BOTH delegations received the inherited skill
             expect(delegateCallArgs.length).toBe(2);
-            expect(delegateCallArgs[0].skills).toContain(inheritedNudge);
-            expect(delegateCallArgs[1].skills).toContain(inheritedNudge);
+            expect(delegateCallArgs[0].skills).toContain(inheritedSkill);
+            expect(delegateCallArgs[1].skills).toContain(inheritedSkill);
         });
 
-        it("should allow different explicit nudges per delegation while still inheriting", async () => {
-            const inheritedNudge = "inherited-nudge";
-            const explicitNudge1 = "explicit-nudge-1";
-            const explicitNudge2 = "explicit-nudge-2";
+        it("should allow different explicit skills per delegation while still inheriting", async () => {
+            const inheritedSkill = "inherited-skill";
+            const explicitSkill1 = "explicit-skill-1";
+            const explicitSkill2 = "explicit-skill-2";
 
-            const nudgeTags = [["nudge", inheritedNudge]];
+            const skillTags = [["skill", inheritedSkill]];
 
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, nudgeTags);
+            const context = createMockContext(ralNumber, skillTags);
             const delegateTool = createDelegateTool(context);
 
             const input = {
                 delegations: [
-                    { recipient: "other-agent", prompt: "Task 1", skills: [explicitNudge1] },
-                    { recipient: "third-agent", prompt: "Task 2", skills: [explicitNudge2] },
+                    { recipient: "other-agent", prompt: "Task 1", skills: [explicitSkill1] },
+                    { recipient: "third-agent", prompt: "Task 2", skills: [explicitSkill2] },
                 ],
             };
 
@@ -297,20 +297,20 @@ describe("Delegate Tool - Skill Propagation", () => {
             expect(result.success).toBe(true);
 
             // First delegation: inherited + explicit1
-            expect(delegateCallArgs[0].skills).toContain(inheritedNudge);
-            expect(delegateCallArgs[0].skills).toContain(explicitNudge1);
-            expect(delegateCallArgs[0].skills).not.toContain(explicitNudge2);
+            expect(delegateCallArgs[0].skills).toContain(inheritedSkill);
+            expect(delegateCallArgs[0].skills).toContain(explicitSkill1);
+            expect(delegateCallArgs[0].skills).not.toContain(explicitSkill2);
 
             // Second delegation: inherited + explicit2
-            expect(delegateCallArgs[1].skills).toContain(inheritedNudge);
-            expect(delegateCallArgs[1].skills).toContain(explicitNudge2);
-            expect(delegateCallArgs[1].skills).not.toContain(explicitNudge1);
+            expect(delegateCallArgs[1].skills).toContain(inheritedSkill);
+            expect(delegateCallArgs[1].skills).toContain(explicitSkill2);
+            expect(delegateCallArgs[1].skills).not.toContain(explicitSkill1);
         });
     });
 
-    describe("explicit nudges array deduplication", () => {
-        it("should deduplicate duplicate explicit nudges", async () => {
-            const nudgeId = "duplicate-nudge";
+    describe("explicit skills array deduplication", () => {
+        it("should deduplicate duplicate explicit skills", async () => {
+            const skillId = "duplicate-skill";
 
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
@@ -322,7 +322,7 @@ describe("Delegate Tool - Skill Propagation", () => {
                     {
                         recipient: "other-agent",
                         prompt: "Task",
-                        skills: [nudgeId, nudgeId, nudgeId], // Duplicates
+                        skills: [skillId, skillId, skillId], // Duplicates
                     }
                 ],
             };
@@ -330,10 +330,10 @@ describe("Delegate Tool - Skill Propagation", () => {
             const result = await delegateTool.execute(input);
             expect(result.success).toBe(true);
 
-            // Verify only one nudge (deduplicated)
+            // Verify only one skill (deduplicated)
             expect(delegateCallArgs.length).toBe(1);
             expect(delegateCallArgs[0].skills?.length).toBe(1);
-            expect(delegateCallArgs[0].skills).toContain(nudgeId);
+            expect(delegateCallArgs[0].skills).toContain(skillId);
         });
     });
 });

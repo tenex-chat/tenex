@@ -510,7 +510,7 @@ describe("TENEX context management integration", () => {
             conversationId: CONVERSATION_ID,
             agent,
             conversationStore: store,
-            nudgeToolPermissions: {
+            skillToolPermissions: {
                 onlyTools: ["shell"],
             },
         });

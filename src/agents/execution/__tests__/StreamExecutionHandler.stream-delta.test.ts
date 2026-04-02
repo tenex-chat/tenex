@@ -47,9 +47,6 @@ function createHandler(streamTextDeltaMock: ReturnType<typeof mock>): StreamExec
         request: {
             messages: [],
         },
-        nudgeContent: "",
-        skillContent: "",
-        skills: [],
         abortSignal: new AbortController().signal,
     });
 

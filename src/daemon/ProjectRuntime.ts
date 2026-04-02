@@ -193,7 +193,7 @@ export class ProjectRuntime {
                 await mcpSubService.initialize();
             });
 
-            // NOTE: Nudge whitelist is initialized at daemon level (user-scoped, not project-scoped).
+            // NOTE: Skill whitelist is initialized at daemon level (user-scoped, not project-scoped).
             // See Daemon.ts step 6d.
 
             // Initialize conversation store with project path and agent pubkeys

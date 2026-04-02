@@ -66,7 +66,6 @@ describe("system reminder injection integration", () => {
             workingDirectory,
             currentBranch: "main",
             availableAgents: [agent],
-            nudgeContent: "",
             pendingDelegations: [],
             completedDelegations: [],
             ralNumber,
@@ -125,6 +124,7 @@ describe("system reminder injection integration", () => {
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
+            loadedSkills: [],
             pendingDelegations: [
                 {
                     delegationConversationId: "delegation-1",
@@ -192,6 +192,7 @@ describe("system reminder injection integration", () => {
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
+            loadedSkills: [],
             pendingDelegations: [],
             completedDelegations: [],
         });

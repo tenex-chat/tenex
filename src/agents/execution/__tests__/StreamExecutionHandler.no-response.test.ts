@@ -122,11 +122,6 @@ describe("StreamExecutionHandler no_response short-circuit", () => {
             request: {
                 messages: [{ role: "user", content: "Don't reply" }],
             },
-            nudgeContent: "",
-            nudges: [],
-            nudgeToolPermissions: {},
-            skillContent: "",
-            skills: [],
             abortSignal: new AbortController().signal,
         });
 

@@ -5,7 +5,7 @@ Actions that agents can invoke. Tools own validation, call into services or lowe
 ## Structure
 
 - `implementations/` — concrete tool factories plus `fs-hooks.ts`, the shared adapter for filesystem-tool analysis/load hooks
-- `registry.ts` — canonical tool registry, auto-injection rules, nudge allow/deny handling, and `fs_*` / `home_fs_*` wiring
+- `registry.ts` — canonical tool registry, auto-injection rules, skill allow/deny handling, and `fs_*` / `home_fs_*` wiring
 - `types.ts` — `ToolName`, execution contexts, and factory/result types
 - `utils.ts` and `utils/transcript-args.ts` — shared tool helpers
 

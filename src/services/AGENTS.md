@@ -23,11 +23,10 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `embedding/` — Embedding provider wrappers
 - `scheduling/` — Cron-like scheduling
 - `status/` — Progress event broadcasting
-- `nudge/` — Stalled agent reminders
+- `skill/` — Skill management and resolution
 - `prompt-compiler/` — Lesson + comment synthesis
 - `search/` — Unified search
 - `config/` — Config subsystem
-- `skill/` — Skill management
 - `trust-pubkeys/`, `pubkey-gate/` — Trust and access control
 - `nip46/` — NIP-46 remote signing
 - `apns/` — Apple Push Notifications

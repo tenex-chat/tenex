@@ -32,15 +32,15 @@ describe("Skill Tool Permissions", () => {
         });
     });
 
-    describe("getToolsObject with nudge permissions", () => {
+    describe("getToolsObject with skill permissions", () => {
         describe("only-tool mode (highest priority)", () => {
             it("should return EXACTLY the tools specified in onlyTools with NO auto-injection", () => {
                 const baseTools = ["ask", "kill", "delegate_crossproject", "delegate"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["ask", "kill"],
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 // Should have EXACTLY the only-tools - NO auto-injection (security feature)
@@ -53,12 +53,12 @@ describe("Skill Tool Permissions", () => {
 
             it("should completely ignore allow-tool when only-tool is set", () => {
                 const baseTools = ["ask"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["delegate_crossproject"],
                     allowTools: ["delegate", "kill"], // Should be ignored
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("delegate_crossproject");
@@ -68,12 +68,12 @@ describe("Skill Tool Permissions", () => {
 
             it("should completely ignore deny-tool when only-tool is set", () => {
                 const baseTools = ["ask", "delegate_crossproject", "delegate"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["ask", "delegate_crossproject"],
                     denyTools: ["ask"], // Should be ignored - ask should still be included
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
@@ -83,13 +83,13 @@ describe("Skill Tool Permissions", () => {
 
             it("should fall back to base tools when onlyTools array is empty", () => {
                 const baseTools = ["ask", "delegate_crossproject"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: [], // Empty array does NOT trigger only-tool mode
                 };
 
                 // Empty onlyTools array is NOT treated as only-tool mode (length === 0)
                 // This falls back to regular allow/deny processing with base tools
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 // Base tools should remain - empty onlyTools doesn't mean "no tools"
@@ -101,11 +101,11 @@ describe("Skill Tool Permissions", () => {
         describe("allow-tool mode", () => {
             it("should add allowed tools to the base set", () => {
                 const baseTools = ["ask"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     allowTools: ["delegate_crossproject", "delegate"],
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
@@ -115,11 +115,11 @@ describe("Skill Tool Permissions", () => {
 
             it("should not duplicate tools already in base set", () => {
                 const baseTools = ["ask", "delegate_crossproject"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     allowTools: ["ask", "delegate_crossproject"], // Already in base
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
@@ -141,11 +141,11 @@ describe("Skill Tool Permissions", () => {
         describe("deny-tool mode", () => {
             it("should remove denied tools from the base set", () => {
                 const baseTools = ["ask", "kill", "delegate_crossproject", "delegate"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     denyTools: ["delegate_crossproject", "delegate"],
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
@@ -156,11 +156,11 @@ describe("Skill Tool Permissions", () => {
 
             it("should handle denying non-existent tools gracefully", () => {
                 const baseTools = ["ask", "delegate_crossproject"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     denyTools: ["non_existent_tool", "another_fake_tool"],
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 // Original tools should remain
@@ -170,11 +170,11 @@ describe("Skill Tool Permissions", () => {
 
             it("should block auto-injected core tools (kill) when denied", () => {
                 const baseTools = ["ask", "delegate_crossproject"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     denyTools: ["kill"], // Block the auto-injected kill tool
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 // Core tools should NOT be auto-injected when explicitly denied (SECURITY)
@@ -187,12 +187,12 @@ describe("Skill Tool Permissions", () => {
         describe("combined allow and deny", () => {
             it("should apply both allow and deny (add then remove)", () => {
                 const baseTools = ["ask"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     allowTools: ["delegate_crossproject", "delegate"],
                     denyTools: ["ask"], // Remove the original tool
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).not.toContain("ask"); // Denied
@@ -202,12 +202,12 @@ describe("Skill Tool Permissions", () => {
 
             it("should deny tools even if they were added by allow", () => {
                 const baseTools = ["ask"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     allowTools: ["delegate_crossproject", "delegate"],
                     denyTools: ["delegate_crossproject"], // Deny something we just allowed
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
@@ -216,7 +216,7 @@ describe("Skill Tool Permissions", () => {
             });
         });
 
-        describe("no nudge permissions", () => {
+        describe("no skill permissions", () => {
             it("should return base tools when no permissions provided", () => {
                 const baseTools = ["ask", "delegate_crossproject", "delegate"];
 
@@ -230,9 +230,9 @@ describe("Skill Tool Permissions", () => {
 
             it("should return base tools when permissions is empty object", () => {
                 const baseTools = ["ask", "delegate_crossproject"];
-                const nudgePermissions: SkillToolPermissions = {};
+                const skillPermissions: SkillToolPermissions = {};
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
@@ -244,11 +244,11 @@ describe("Skill Tool Permissions", () => {
             it("should filter MCP tools with only-tool mode", () => {
                 // MCP tools start with "mcp__"
                 const baseTools = ["ask", "mcp__tenex__ask"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["ask"], // Exclude MCP tool
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
@@ -257,13 +257,13 @@ describe("Skill Tool Permissions", () => {
 
             it("should include MCP tools if specified in only-tool", () => {
                 const baseTools = ["ask", "mcp__tenex__ask"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["mcp__tenex__ask"], // Only MCP tool
                 };
 
                 // Note: MCP tools require mcpManager in context to be loaded
                 // Without it, MCP tools won't be included even if requested
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 // MCP tool won't be loaded without mcpManager
@@ -275,11 +275,11 @@ describe("Skill Tool Permissions", () => {
         describe("only-tool mode strict exclusivity", () => {
             it("should produce exact tool count with no extras", () => {
                 const baseTools = ["ask", "kill", "delegate_crossproject", "delegate", "lesson_learn"];
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["delegate_crossproject", "ask"],
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 // Exactly 2 tools, nothing else
@@ -288,17 +288,17 @@ describe("Skill Tool Permissions", () => {
             });
         });
 
-        describe("empty base tools with nudge permissions", () => {
+        describe("empty base tools with skill permissions", () => {
             it("should grant tools via only-tool to agent with empty tools array", () => {
                 const baseTools: string[] = []; // Agent has no default tools
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["ask", "delegate_crossproject"],
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
-                // Nudge grants tools even with empty base
+                // Skill grants tools even with empty base
                 expect(toolNames).toContain("ask");
                 expect(toolNames).toContain("delegate_crossproject");
                 expect(toolNames.length).toBe(2);
@@ -306,19 +306,19 @@ describe("Skill Tool Permissions", () => {
 
             it("should grant tools via allow-tool to agent with empty tools array", () => {
                 const baseTools: string[] = []; // Agent has no default tools
-                const nudgePermissions: SkillToolPermissions = {
+                const skillPermissions: SkillToolPermissions = {
                     allowTools: ["delegate", "ask"],
                 };
 
-                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
-                // Nudge adds tools to empty base
+                // Skill adds tools to empty base
                 expect(toolNames).toContain("delegate");
                 expect(toolNames).toContain("ask");
             });
 
-            it("should return core tools when no base tools and no nudge permissions", () => {
+            it("should return core tools when no base tools and no skill permissions", () => {
                 const baseTools: string[] = [];
 
                 const tools = getToolsObject(baseTools, mockContext, undefined);
@@ -372,11 +372,11 @@ describe("Skill Tool Permissions", () => {
 
         it("should respect deny-tool for home_fs_* tools", () => {
             const baseTools = ["ask", "delegate"];
-            const nudgePermissions: SkillToolPermissions = {
+            const skillPermissions: SkillToolPermissions = {
                 denyTools: ["home_fs_write", "home_fs_edit"],
             };
 
-            const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+            const tools = getToolsObject(baseTools, mockContext, skillPermissions);
             const toolNames = Object.keys(tools);
 
             expect(toolNames).toContain("home_fs_read");

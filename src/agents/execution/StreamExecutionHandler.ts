@@ -18,7 +18,7 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
-import type { SkillData, SkillToolPermissions } from "@/services/skill";
+import type { SkillToolPermissions } from "@/services/skill";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { createEventContext } from "@/services/event-context";
@@ -54,11 +54,7 @@ export interface StreamExecutionConfig {
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
     contextManagement?: ExecutionContextManagement;
-    /** Concatenated skill content (includes former nudge content) */
-    skillContent: string;
-    /** Individual skill data for system prompt rendering */
-    skills: SkillData[];
-    /** Tool permissions extracted from skill events */
+    /** Tool permissions extracted from skill events (needed for tool permission enforcement) */
     skillToolPermissions: SkillToolPermissions;
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
@@ -168,8 +164,6 @@ export class StreamExecutionHandler {
                 toolsObject,
                 contextManagement: this.config.contextManagement,
                 initialRequest: request,
-                skillContent: this.config.skillContent,
-                skills: this.config.skills,
                 skillToolPermissions: this.config.skillToolPermissions,
                 ralNumber,
                 execContext: this.execContext,

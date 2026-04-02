@@ -79,10 +79,6 @@ export interface PrepareStepConfig {
     toolsObject: Record<string, AISdkTool>;
     contextManagement?: ExecutionContextManagement;
     initialRequest: LLMModelRequest;
-    /** Concatenated skill content (includes former nudge content) */
-    skillContent: string;
-    /** Individual skill data for system prompt rendering */
-    skills: SkillData[];
     /** Tool permissions extracted from skill events */
     skillToolPermissions: SkillToolPermissions;
     ralNumber: number;
@@ -150,8 +146,6 @@ export function createPrepareStep(
         toolsObject,
         contextManagement,
         initialRequest,
-        skillContent: _skillContent,
-        skills: _skills,
         skillToolPermissions,
         ralNumber,
         execContext,
@@ -357,9 +351,6 @@ export function createPrepareStep(
                 workingDirectory: context.workingDirectory,
                 currentBranch: context.currentBranch,
                 availableAgents: Array.from(projectContext.agents.values()),
-                skillContent: currentSkillResult.content,
-                skills: currentSkillResult.skills,
-                skillToolPermissions,
                 pendingDelegations,
                 completedDelegations,
                 ralNumber,
@@ -380,6 +371,9 @@ export function createPrepareStep(
                 pendingDelegations,
                 completedDelegations,
                 conversationsContent: conversationsContent ?? undefined,
+                loadedSkills: currentSkillResult.skills,
+                skillToolPermissions,
+                projectPath: context.projectBasePath || undefined,
             });
 
             rebuiltMessages = await collectAndInjectSystemReminders(rebuiltMessages, executionSpan);

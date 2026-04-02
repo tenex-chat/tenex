@@ -8,7 +8,7 @@
 
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { SkillService, type SkillData, type SkillToolPermissions, loadAllSkillTools } from "@/services/skill";
+import { SkillService, type SkillToolPermissions, loadAllSkillTools } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject, HOME_FS_FALLBACKS } from "@/tools/registry";
@@ -40,11 +40,7 @@ export interface StreamSetupResult {
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
     contextManagement?: ExecutionContextManagement;
-    /** Concatenated skill content */
-    skillContent: string;
-    /** Individual skill data for system prompt rendering */
-    skills: SkillData[];
-    /** Tool permissions aggregated across all active skills */
+    /** Tool permissions aggregated across all active skills (needed for tool permission enforcement) */
     skillToolPermissions: SkillToolPermissions;
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
@@ -191,9 +187,6 @@ export async function setupStreamExecution(
         });
     }
 
-    // Skill content was already fetched at the top of this function
-    const skillContent = skillResult.content;
-
     const abortSignal = llmOpsRegistry.registerOperation(context);
 
     // === META MODEL RESOLUTION ===
@@ -295,9 +288,6 @@ export async function setupStreamExecution(
         workingDirectory: context.workingDirectory,
         currentBranch: context.currentBranch,
         availableAgents: Array.from(projectContext.agents.values()),
-        skillContent,
-        skills: skillResult.skills,
-        skillToolPermissions: skillResult.toolPermissions,
         pendingDelegations,
         completedDelegations,
         ralNumber,
@@ -328,6 +318,9 @@ export async function setupStreamExecution(
         pendingDelegations,
         completedDelegations,
         conversationsContent: conversationsContent ?? undefined,
+        loadedSkills: skillResult.skills,
+        skillToolPermissions: skillResult.toolPermissions,
+        projectPath: context.projectBasePath || undefined,
     });
 
     messages = await collectAndInjectSystemReminders(messages, trace.getActiveSpan());
@@ -362,8 +355,6 @@ export async function setupStreamExecution(
         messageCompiler,
         request,
         contextManagement,
-        skillContent,
-        skills: skillResult.skills,
         skillToolPermissions: skillResult.toolPermissions,
         abortSignal,
         metaModelSystemPrompt,

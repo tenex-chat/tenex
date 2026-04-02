@@ -33,7 +33,7 @@ The Effective Agent Instructions are the compiled instruction set used by the ag
 - Agent lessons
 - Lesson comments
 
-Project context, tools, nudges, MCP resources, worktree state, and the rest of the normal system prompt are still added later as prompt fragments. They are not part of the lesson compilation step.
+Project context, tools, skills, MCP resources, worktree state, and the rest of the normal system prompt are still added later as prompt fragments. They are not part of the lesson compilation step.
 
 ## 4. Prompt Builder Composition
 
@@ -44,7 +44,7 @@ After resolving Effective Agent Instructions, the prompt builder assembles the n
 - Global system prompt
 - Environment and transport context
 - Meta-project and conversation context
-- Nudges and skills
+- Skills
 - Worktree and AGENTS.md guidance
 - Core runtime fragments such as scheduled tasks, MCP resources, RAG collection stats, and memorized reports
 - Agent-specific fragments such as available agents and delegation guidance

@@ -65,6 +65,7 @@ describe("delta-based system reminders", () => {
             respondingToPrincipal,
             pendingDelegations: [],
             completedDelegations: [],
+            loadedSkills: [],
             ...overrides,
         };
     }
@@ -564,5 +565,69 @@ describe("delta-based system reminders", () => {
         // Next turn — should send full again
         const result2 = await collectReminders(makeData());
         expect(extractRemindersXml(result2)).toContain("<datetime>");
+    });
+
+    it("sends loaded-skills on first turn when skills are present", async () => {
+        const result = await collectReminders(
+            makeData({
+                loadedSkills: [
+                    {
+                        identifier: "test-skill",
+                        content: "Do something special",
+                        installedFiles: [],
+                    },
+                ],
+            })
+        );
+        const xml = extractRemindersXml(result);
+        expect(xml).toContain("<loaded-skills>");
+        expect(xml).toContain("Do something special");
+    });
+
+    it("skips loaded-skills when unchanged", async () => {
+        const skills = [
+            {
+                identifier: "test-skill",
+                content: "Do something special",
+                installedFiles: [] as { eventId: string; relativePath: string; absolutePath: string; success: boolean; error?: string }[],
+            },
+        ];
+
+        // First turn
+        await collectReminders(makeData({ loadedSkills: skills }));
+
+        // Second turn — same skills
+        const result = await collectReminders(makeData({ loadedSkills: skills }));
+        const xml = extractRemindersXml(result);
+        expect(xml).not.toContain("<loaded-skills>");
+    });
+
+    it("re-sends loaded-skills when skills change", async () => {
+        // First turn
+        await collectReminders(
+            makeData({
+                loadedSkills: [
+                    { identifier: "skill-a", content: "A content", installedFiles: [] },
+                ],
+            })
+        );
+
+        // Second turn — different skill
+        const result = await collectReminders(
+            makeData({
+                loadedSkills: [
+                    { identifier: "skill-b", content: "B content", installedFiles: [] },
+                ],
+            })
+        );
+        const xml = extractRemindersXml(result);
+        expect(xml).toContain("<loaded-skills>");
+        expect(xml).toContain("B content");
+    });
+
+    it("does not emit loaded-skills when no skills are present", async () => {
+        const result = await collectReminders(makeData({ loadedSkills: [] }));
+        const xml = extractRemindersXml(result);
+        expect(xml).not.toContain("<loaded-skills>");
     });
 });

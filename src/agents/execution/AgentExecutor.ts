@@ -731,8 +731,6 @@ export class AgentExecutor {
             messageCompiler: setup.messageCompiler,
             request: setup.request,
             contextManagement: setup.contextManagement,
-            skillContent: setup.skillContent,
-            skills: setup.skills,
             skillToolPermissions: setup.skillToolPermissions,
             abortSignal: setup.abortSignal,
             metaModelSystemPrompt: setup.metaModelSystemPrompt,

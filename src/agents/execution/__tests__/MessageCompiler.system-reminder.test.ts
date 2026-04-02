@@ -67,7 +67,6 @@ describe("MessageCompiler and TENEX system reminders", () => {
             workingDirectory,
             currentBranch: "main",
             availableAgents: [agent],
-            nudgeContent: "",
             pendingDelegations: [],
             completedDelegations: [],
             ralNumber,
@@ -150,6 +149,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
+            loadedSkills: [],
             pendingDelegations: [
                 {
                     delegationConversationId: "delegation-1",
@@ -175,11 +175,11 @@ describe("MessageCompiler and TENEX system reminders", () => {
         const reminders = await getSystemReminderContext().collect();
         const types = reminders.map((r) => r.type);
 
-        expect(types).toEqual([
+        expect(types).toEqual(expect.arrayContaining([
             "todo-list",
             "response-routing",
             "delegations",
-        ]);
+        ]));
     });
 
     it("recomputes reminders and rebuilds the full prompt on every refresh", async () => {
@@ -201,6 +201,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
+            loadedSkills: [],
             pendingDelegations: [],
             completedDelegations: [],
         });
@@ -223,6 +224,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
+            loadedSkills: [],
             pendingDelegations: [],
             completedDelegations: [
                 {

@@ -32,7 +32,7 @@ function getPreferredIdentifier(source: CapabilityIdentifierSource): CapabilityI
 }
 
 /**
- * Build stable prompt-facing identifiers for a list of nudges or skills.
+ * Build stable prompt-facing identifiers for a list of skills.
  *
  * Slugged d-tag/name/title identifiers are preferred. When multiple items
  * collapse to the same slug, they fall back to their short event IDs so the

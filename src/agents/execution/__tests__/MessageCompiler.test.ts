@@ -66,7 +66,6 @@ describe("MessageCompiler", () => {
             workingDirectory,
             currentBranch: "main",
             availableAgents: [agent],
-            nudgeContent: "",
             pendingDelegations: [],
             completedDelegations: [],
             ralNumber,
