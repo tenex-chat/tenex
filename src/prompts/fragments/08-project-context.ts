@@ -531,20 +531,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
             parts.push("");
             parts.push("  <other-projects>");
             for (const project of otherProjects) {
-                const convLines: string[] = [];
-                if (project.activeConversations.length > 0) {
-                    convLines.push("      Active conversations:");
-                    for (const conv of project.activeConversations) {
-                        convLines.push(
-                            `        - "${conv.title}" - ${conv.agentName} (${conv.status}, ${conv.duration}) [id: ${conv.conversationId}]`
-                        );
-                    }
-                }
-                parts.push(`    <project title="${project.title}" id="${project.dTag}">`);
-                if (convLines.length > 0) {
-                    parts.push(convLines.join("\n"));
-                }
-                parts.push("    </project>");
+                parts.push(`    ${project.title}: (${project.dTag})`);
             }
             parts.push("  </other-projects>");
         }

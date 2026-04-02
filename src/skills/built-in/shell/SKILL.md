@@ -8,6 +8,3 @@ tools:
 # Shell Execution
 
 This skill provides the shell tool for executing shell commands in the project directory.
-
-## Available Tools
-- `shell` - Execute shell commands in the project directory

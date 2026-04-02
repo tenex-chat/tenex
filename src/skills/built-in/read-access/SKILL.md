@@ -10,8 +10,3 @@ tools:
 # Read access
 
 This skill provides read-only filesystem tools for the project directory.
-
-## Available Tools
-- `fs_read` - Read a file or directory listing from the project
-- `fs_glob` - Find files by glob pattern within the project
-- `fs_grep` - Search for patterns in files within the project
