@@ -376,7 +376,7 @@ export function createPrepareStep(
                 projectPath: context.projectBasePath || undefined,
             });
 
-            rebuiltMessages = await collectAndInjectSystemReminders(rebuiltMessages, executionSpan);
+            rebuiltMessages = await collectAndInjectSystemReminders(rebuiltMessages, executionSpan, conversation.getId());
 
             // Dynamic model switching
             if (isMetaModel) {

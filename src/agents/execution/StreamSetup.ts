@@ -323,7 +323,7 @@ export async function setupStreamExecution(
         projectPath: context.projectBasePath || undefined,
     });
 
-    messages = await collectAndInjectSystemReminders(messages, trace.getActiveSpan());
+    messages = await collectAndInjectSystemReminders(messages, trace.getActiveSpan(), conversation.getId());
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
         "ral.number": ralNumber,

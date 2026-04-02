@@ -68,6 +68,9 @@ interface DeltaState {
 
 const deltaStateStore = new Map<string, DeltaState>();
 
+// Maps conversationId → Map<messageKey, injectedXml>
+const injectionHistory = new Map<string, Map<string, string>>();
+
 
 interface ProviderTelemetry {
     type: string;
@@ -434,12 +437,38 @@ export function updateReminderData(data: TenexReminderData): void {
 export function resetSystemReminders(): void {
     getSystemReminderContext().clear();
     deltaStateStore.clear();
+    injectionHistory.clear();
     deltaTelemetry.length = 0;
+}
+
+function injectXmlIntoUserMessage(msg: UserModelMessage, xml: string): UserModelMessage {
+    if (typeof msg.content === "string") {
+        return { ...msg, content: `${msg.content}\n\n${xml}` };
+    }
+    const parts = msg.content.map((p) => ({ ...p }));
+    let injected = false;
+    for (let j = parts.length - 1; j >= 0; j--) {
+        if (parts[j].type === "text") {
+            const textPart = parts[j] as { type: "text"; text: string };
+            parts[j] = { ...textPart, text: `${textPart.text}\n\n${xml}` };
+            injected = true;
+            break;
+        }
+    }
+    if (!injected) {
+        parts.push({ type: "text" as const, text: xml });
+    }
+    return { ...msg, content: parts };
+}
+
+function getMessageKey(msg: ModelMessage, index: number): string {
+    return (msg as { id?: string }).id ?? `__idx:${index}`;
 }
 
 export async function collectAndInjectSystemReminders(
     messages: ModelMessage[],
-    span: Span | undefined
+    span: Span | undefined,
+    conversationId?: string,
 ): Promise<ModelMessage[]> {
     deltaTelemetry.length = 0;
     const ctx = getSystemReminderContext();
@@ -457,52 +486,71 @@ export async function collectAndInjectSystemReminders(
         });
     }
 
-    const combinedXml = reminders.length > 0 ? combineSystemReminders(reminders) : "";
+    const currentXml = reminders.length > 0 ? combineSystemReminders(reminders) : "";
 
-    if (combinedXml !== "") {
+    if (currentXml !== "") {
         span?.addEvent("system-reminders.applied", {
             "reminders.count": reminders.length,
             "reminders.types": reminders.map((r) => r.type).join(","),
-            "reminders.content": combinedXml,
+            "reminders.content": currentXml,
         });
     }
 
-    if (combinedXml === "") {
+    const historyKey = conversationId ?? "__default";
+    let history = injectionHistory.get(historyKey);
+
+    if (!history && currentXml === "") {
         return messages;
     }
 
-    // Inject into the last user message via shallow copy (never mutate the source).
-    // This preserves the prefix cache for all messages before the last user message
-    // and keeps context-management and telemetry working correctly (the reminder
-    // stays part of a real user turn, not a synthetic standalone message).
-    const result = [...messages];
-
-    for (let i = result.length - 1; i >= 0; i--) {
-        if (result[i].role !== "user") continue;
-
-        const msg = result[i] as UserModelMessage;
-        if (typeof msg.content === "string") {
-            result[i] = { ...msg, content: `${msg.content}\n\n${combinedXml}` };
-        } else {
-            const parts = msg.content.map((p) => ({ ...p }));
-            let injected = false;
-            for (let j = parts.length - 1; j >= 0; j--) {
-                if (parts[j].type === "text") {
-                    const textPart = parts[j] as { type: "text"; text: string };
-                    parts[j] = { ...textPart, text: `${textPart.text}\n\n${combinedXml}` };
-                    injected = true;
-                    break;
-                }
-            }
-            if (!injected) {
-                parts.push({ type: "text" as const, text: combinedXml });
-            }
-            result[i] = { ...msg, content: parts };
-        }
-        return result;
+    if (!history) {
+        history = new Map<string, string>();
+        injectionHistory.set(historyKey, history);
     }
 
-    // No user message found — append one
-    result.push({ role: "user", content: combinedXml });
+    // Find the last user message index
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+            lastUserIdx = i;
+            break;
+        }
+    }
+
+    if (lastUserIdx === -1 && currentXml === "") {
+        return messages;
+    }
+
+    const result = [...messages];
+
+    for (let i = 0; i < result.length; i++) {
+        if (result[i].role !== "user") continue;
+
+        const key = getMessageKey(result[i], i);
+
+        if (i === lastUserIdx) {
+            const storedXml = history.get(key);
+            if (storedXml && currentXml !== "") {
+                const combined = `${storedXml}\n\n${currentXml}`;
+                history.set(key, combined);
+                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, combined);
+            } else if (storedXml) {
+                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, storedXml);
+            } else if (currentXml !== "") {
+                history.set(key, currentXml);
+                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, currentXml);
+            }
+        } else {
+            const storedXml = history.get(key);
+            if (storedXml) {
+                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, storedXml);
+            }
+        }
+    }
+
+    if (lastUserIdx === -1 && currentXml !== "") {
+        result.push({ role: "user", content: currentXml });
+    }
+
     return result;
 }

@@ -70,13 +70,18 @@ describe("delta-based system reminders", () => {
         };
     }
 
+    let collectCallCounter = 0;
+
     async function collectReminders(data: TenexReminderData) {
         updateReminderData(data);
         const messages = [
             { role: "system" as const, content: "SYSTEM" },
             { role: "user" as const, content: "hello" },
         ];
-        return collectAndInjectSystemReminders(messages, undefined);
+        // Use a unique conversationId per call so injection history doesn't
+        // accumulate across turns. These tests verify delta provider behavior,
+        // not injection history (which is tested in prefix-cache tests).
+        return collectAndInjectSystemReminders(messages, undefined, `delta-test-${++collectCallCounter}`);
     }
 
     function extractRemindersXml(result: { role: string; content: unknown }[]): string {
@@ -110,6 +115,7 @@ describe("delta-based system reminders", () => {
                 new AgentMetadataStore(convId, "test-agent", metadataPath),
         } as AgentInstance;
 
+        collectCallCounter = 0;
         resetSystemReminders();
         initializeReminderProviders();
     });
@@ -350,13 +356,15 @@ describe("delta-based system reminders", () => {
     });
 
     it("never mutates source messages — injects into last user message via shallow copy", async () => {
+        const testConvId = "mutate-test-conv";
+
         // Turn 1: reminders injected into the last (only) user message
         updateReminderData(makeData());
         const turn1Messages = [
             { role: "system" as const, content: "SYSTEM" },
             { role: "user" as const, content: "hello", id: "msg-1" },
         ];
-        const turn1Result = await collectAndInjectSystemReminders(turn1Messages, undefined);
+        const turn1Result = await collectAndInjectSystemReminders(turn1Messages, undefined, testConvId);
         // Source message not mutated
         expect(turn1Messages[1].content).toBe("hello");
         // Result has same length — no extra message appended
@@ -382,15 +390,15 @@ describe("delta-based system reminders", () => {
             { role: "assistant" as const, content: [{ type: "text" as const, text: "hi there" }] },
             { role: "user" as const, content: "follow up", id: "msg-2" },
         ];
-        const turn2Result = await collectAndInjectSystemReminders(turn2Messages, undefined);
+        const turn2Result = await collectAndInjectSystemReminders(turn2Messages, undefined, testConvId);
 
         // Source messages not mutated
         expect(turn2Messages[1].content).toBe("hello");
         expect(turn2Messages[3].content).toBe("follow up");
         // Same length — no extra message
         expect(turn2Result).toHaveLength(4);
-        // Historical msg-1 untouched in result (cache-stable prefix)
-        expect(turn2Result[1].content).toBe("hello");
+        // Historical msg-1 has its turn-1 injection preserved (prefix cache stability)
+        expect(turn2Result[1].content).toEqual(resultMsg1);
         // Last user msg-2 has delegations injected
         const resultMsg2 = turn2Result[3].content as string;
         expect(resultMsg2).toContain("follow up");
@@ -398,17 +406,13 @@ describe("delta-based system reminders", () => {
     });
 
     it("reproduces trace 2b1e9086: source messages never mutated, reminders in last user msg", async () => {
+        const testConvId = "trace-repro-conv";
+
         // Exact reproduction of Jaeger trace 2b1e9086328aca1b9000000000000000.
         //
-        // The bug: messages are recompiled from scratch by MessageCompiler on each step.
-        // With the old decoratedMessages mutation approach, step 2's todo-list injection
-        // was lost on step 3.
-        //
-        // With the shallow-copy approach, each step injects reminders into a NEW object
-        // for the last user message. Source arrays are never mutated, preserving cache
-        // stability for everything before the last user message. The
-        // PendingTodosHeuristic supervision-correction carries the full todo data, so the
-        // model still sees todo items on step 3.
+        // With injection history, each user message's injection is preserved across
+        // subsequent calls. The msg-hello injection from exec 1 is re-applied in all
+        // later steps, preserving the prefix cache.
 
         // Snapshot source messages to detect mutation by reference
         function snapshotContents(msgs: { role: string; content: unknown }[]) {
@@ -426,7 +430,7 @@ describe("delta-based system reminders", () => {
             { role: "user" as const, content: "hello", id: "msg-hello" },
         ];
         const exec1Snapshot = snapshotContents(exec1Messages);
-        const exec1Result = await collectAndInjectSystemReminders(exec1Messages, undefined);
+        const exec1Result = await collectAndInjectSystemReminders(exec1Messages, undefined, testConvId);
 
         // Source not mutated
         expect(snapshotContents(exec1Messages)).toEqual(exec1Snapshot);
@@ -436,6 +440,8 @@ describe("delta-based system reminders", () => {
         expect(exec1UserContent).toContain("hello");
         expect(exec1UserContent).toContain("<datetime>");
         expect(exec1UserContent).toContain("<response-routing>");
+        // Capture for later prefix cache checks
+        const frozenMsgHelloContent = exec1UserContent;
 
         // --- Execution 2, Step 1: "start a todo list with 3 items" ---
         // All delta providers skip (nothing changed since exec 1).
@@ -447,11 +453,14 @@ describe("delta-based system reminders", () => {
             { role: "user" as const, content: "start a todo list with 3 items", id: "msg-todo" },
         ];
         const step1Snapshot = snapshotContents(step1Messages);
-        const step1Result = await collectAndInjectSystemReminders(step1Messages, undefined);
+        const step1Result = await collectAndInjectSystemReminders(step1Messages, undefined, testConvId);
 
         expect(snapshotContents(step1Messages)).toEqual(step1Snapshot);
-        // No reminders emitted → returned as-is
         expect(step1Result).toHaveLength(4);
+        // msg-hello has its historical injection preserved
+        expect(step1Result[1].content).toEqual(frozenMsgHelloContent);
+        // msg-todo is last user message, no new reminders → plain content
+        expect(step1Result[3].content).toBe("start a todo list with 3 items");
 
         // --- Agent calls todo_write → 3 todos created ---
         conversationStore.setTodos(agentPubkey, [
@@ -472,14 +481,14 @@ describe("delta-based system reminders", () => {
             { role: "tool" as const, content: [{ type: "tool-result" as const, toolCallId: "tc1", result: "done" }] },
         ];
         const step2Snapshot = snapshotContents(step2Messages);
-        const step2Result = await collectAndInjectSystemReminders(step2Messages, undefined);
+        const step2Result = await collectAndInjectSystemReminders(step2Messages, undefined, testConvId);
 
         // Source not mutated
         expect(snapshotContents(step2Messages)).toEqual(step2Snapshot);
         // Same length — injected into last user message (msg-todo at index 3)
         expect(step2Result).toHaveLength(6);
-        // Historical msg-hello untouched in result
-        expect(step2Result[1].content).toBe("hello");
+        // Historical msg-hello preserved
+        expect(step2Result[1].content).toEqual(frozenMsgHelloContent);
         // Last user message has todo-list delta injected
         const step2TodoContent = step2Result[3].content as string;
         expect(step2TodoContent).toContain("start a todo list with 3 items");
@@ -489,7 +498,6 @@ describe("delta-based system reminders", () => {
         expect(step2TodoContent).toContain("Execute implementation plan");
 
         // --- PendingTodosHeuristic fires → supervision-correction queued ---
-        // Real payload from PendingTodosHeuristic.buildCorrectionMessage():
         const supervisionContent = [
             "You have incomplete items in your todo list:\n",
             "- [pending] **Define project objectives and scope** (id: t1): Clarify goals",
@@ -506,8 +514,8 @@ describe("delta-based system reminders", () => {
         });
 
         // --- Execution 2, Step 3: rebuild after agent response ---
-        // MessageCompiler recompiles from scratch again. Step 2's todo-list injection is NOT
-        // carried forward — messages are clean. But supervision-correction carries the todo data.
+        // msg-todo is still the last user message. Its stored injection from step 2
+        // is preserved, and the new supervision-correction is appended.
         updateReminderData(makeData());
         const step3Messages = [
             { role: "system" as const, content: "SYSTEM" },
@@ -519,20 +527,21 @@ describe("delta-based system reminders", () => {
             { role: "assistant" as const, content: [{ type: "text" as const, text: "I created 3 items." }] },
         ];
         const step3Snapshot = snapshotContents(step3Messages);
-        const step3Result = await collectAndInjectSystemReminders(step3Messages, undefined);
+        const step3Result = await collectAndInjectSystemReminders(step3Messages, undefined, testConvId);
 
         // Source not mutated
         expect(snapshotContents(step3Messages)).toEqual(step3Snapshot);
         // Same length
         expect(step3Result).toHaveLength(7);
-        // Historical msg-hello untouched
-        expect(step3Result[1].content).toBe("hello");
-        // Last user message (msg-todo) has supervision-correction injected
+        // Historical msg-hello preserved
+        expect(step3Result[1].content).toEqual(frozenMsgHelloContent);
+        // Last user message (msg-todo) has both stored todo-list AND new supervision-correction
         const step3TodoContent = step3Result[3].content as string;
         expect(step3TodoContent).toContain("start a todo list with 3 items");
         expect(step3TodoContent).toContain("<supervision-correction>");
-        // The supervision-correction carries the full todo data from PendingTodosHeuristic,
-        // so the model still sees the todo items even though <todo-list> delta was skipped.
+        // The stored todo-list from step 2 is also preserved
+        expect(step3TodoContent).toContain("<todo-list>");
+        // The supervision-correction carries the full todo data from PendingTodosHeuristic
         expect(step3TodoContent).toContain("Define project objectives and scope");
         expect(step3TodoContent).toContain("Research and gather requirements");
         expect(step3TodoContent).toContain("Execute implementation plan");
