@@ -74,53 +74,49 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("## Your Home Directory");
+            expect(result).toContain("<home-directory>");
             expect(result).toContain("(empty)");
             expect(result).toContain("Feel free to use this space");
         });
 
-        it("should list files and directories with proper formatting", async () => {
+        it("should show file and directory counts instead of listing names", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => [
-                { name: "notes.txt", isDirectory: () => false },
-                { name: "scripts", isDirectory: () => true },
-                { name: "data.json", isDirectory: () => false },
+                { name: "notes.txt", isDirectory: () => false, isFile: () => true },
+                { name: "scripts", isDirectory: () => true, isFile: () => false },
+                { name: "data.json", isDirectory: () => false, isFile: () => true },
             ]);
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("data.json");
-            expect(result).toContain("notes.txt");
-            expect(result).toContain("scripts");
+            expect(result).toContain("2 files, 1 directory");
         });
 
-        it("should cap listing at 20 visible entries and show a tidy-up note", async () => {
+        it("should show correct count for many files", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             const manyEntries = Array.from({ length: 30 }, (_, i) => ({
                 name: `file-${String(i).padStart(2, "0")}.txt`,
                 isDirectory: () => false,
+                isFile: () => true,
             }));
             readdirSyncSpy.mockImplementation(() => manyEntries);
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("file-00.txt");
-            expect(result).toContain("file-19.txt");
-            expect(result).not.toContain("file-20.txt");
-            expect(result).toContain("too many files in your home directory root");
+            expect(result).toContain("30 files");
+            expect(result).not.toContain("file-00.txt");
         });
 
-        it("should hide dotfiles so the listing matches plain ls output", async () => {
+        it("should hide dotfiles from the count", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => [
-                { name: ".env", isDirectory: () => false },
-                { name: "notes.txt", isDirectory: () => false },
+                { name: ".env", isDirectory: () => false, isFile: () => true },
+                { name: "notes.txt", isDirectory: () => false, isFile: () => true },
             ]);
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain("notes.txt");
-            expect(result).not.toContain("```" + "\n" + ".env");
+            expect(result).toContain("1 file");
         });
 
         it("should handle directory creation failure gracefully", async () => {
@@ -129,7 +125,7 @@ describe("agent-home-directory fragment", () => {
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
             expect(result).toContain("(home directory unavailable)");
-            expect(result).toContain("## Your Home Directory");
+            expect(result).toContain("<home-directory>");
         });
 
         it("should handle directory listing failure gracefully", async () => {
@@ -141,7 +137,7 @@ describe("agent-home-directory fragment", () => {
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
             expect(result).toContain("(unable to read directory)");
-            expect(result).toContain("## Your Home Directory");
+            expect(result).toContain("<home-directory>");
         });
 
         it("should include the correct home directory path in output", async () => {
@@ -158,22 +154,17 @@ describe("agent-home-directory fragment", () => {
             expect(result).toContain("/home/abcd1234");
         });
 
-        it("should sort entries alphabetically", async () => {
+        it("should count files and directories separately", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => [
-                { name: "zebra.txt", isDirectory: () => false },
-                { name: "alpha.txt", isDirectory: () => false },
-                { name: "beta", isDirectory: () => true },
+                { name: "zebra.txt", isDirectory: () => false, isFile: () => true },
+                { name: "alpha.txt", isDirectory: () => false, isFile: () => true },
+                { name: "beta", isDirectory: () => true, isFile: () => false },
             ]);
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            const alphaIndex = result.indexOf("alpha.txt");
-            const betaIndex = result.indexOf("beta");
-            const zebraIndex = result.indexOf("zebra.txt");
-
-            expect(alphaIndex).toBeLessThan(betaIndex);
-            expect(betaIndex).toBeLessThan(zebraIndex);
+            expect(result).toContain("2 files, 1 directory");
         });
 
         it("should include documentation about auto-injected files", async () => {
@@ -285,15 +276,15 @@ describe("agent-home-directory fragment", () => {
             expect(result).toContain("Project memory");
         });
 
-        it("should reflect updated injected files and listing on consecutive renders", async () => {
+        it("should reflect updated injected files and count on consecutive renders", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy
                 .mockImplementationOnce(() => [
-                    { name: "+NOTES.md", isDirectory: () => false },
+                    { name: "+NOTES.md", isDirectory: () => false, isFile: () => true },
                 ])
                 .mockImplementationOnce(() => [
-                    { name: "+NOTES.md", isDirectory: () => false },
-                    { name: "fresh.txt", isDirectory: () => false },
+                    { name: "+NOTES.md", isDirectory: () => false, isFile: () => true },
+                    { name: "fresh.txt", isDirectory: () => false, isFile: () => true },
                 ]);
             getInjectedFilesSpy
                 .mockImplementationOnce(() => [
@@ -307,8 +298,9 @@ describe("agent-home-directory fragment", () => {
             const secondRender = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
             expect(firstRender).toContain("Old note");
+            expect(firstRender).toContain("1 file");
             expect(secondRender).toContain("Updated note");
-            expect(secondRender).toContain("fresh.txt");
+            expect(secondRender).toContain("2 files");
         });
     });
 

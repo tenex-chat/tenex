@@ -13,12 +13,6 @@ export { getAgentHomeDirectory } from "@/lib/agent-home";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 
-/**
- * Maximum number of entries to show in the home directory listing.
- * Keeps the visible listing aligned with a short non-recursive `ls` output.
- */
-const MAX_LISTING_ENTRIES = 20;
-
 export function clearAgentHomePromptCache(): void {
     // Agent home prompt data must reflect +file updates immediately between turns.
     // Keep the helper as a no-op so existing tests can keep calling it.
@@ -33,40 +27,33 @@ interface AgentHomeDirectoryArgs {
 }
 
 /**
- * Build the home directory listing with proper error handling.
- * Creates the directory if it doesn't exist and returns a formatted listing.
+ * Count the files in the home directory with proper error handling.
+ * Creates the directory if it doesn't exist and returns a count summary.
  */
-interface HomeListing {
-    content: string;
-    truncated: boolean;
-}
-
-function buildHomeListing(homeDir: string, agentPubkey: string): HomeListing {
+function countHomeFiles(homeDir: string, agentPubkey: string): string {
     // Try to create the directory using the shared helper
     if (!ensureAgentHomeDirectory(agentPubkey)) {
-        return { content: "(home directory unavailable)", truncated: false };
+        return "(home directory unavailable)";
     }
 
-    // Try to list the directory contents
     try {
         const entries = readdirSync(homeDir, { withFileTypes: true })
-            .filter((entry) => !entry.name.startsWith("."))
-            .sort((a, b) => a.name.localeCompare(b.name));
+            .filter((entry) => !entry.name.startsWith("."));
 
         if (entries.length === 0) {
-            return { content: "(empty)", truncated: false };
+            return "(empty)";
         }
 
-        const displayEntries = entries.slice(0, MAX_LISTING_ENTRIES);
-        const lines = displayEntries.map((entry) => entry.name);
+        const fileCount = entries.filter((e) => e.isFile()).length;
+        const dirCount = entries.filter((e) => e.isDirectory()).length;
+        const parts: string[] = [];
+        if (fileCount > 0) parts.push(`${fileCount} file${fileCount !== 1 ? "s" : ""}`);
+        if (dirCount > 0) parts.push(`${dirCount} director${dirCount !== 1 ? "ies" : "y"}`);
 
-        return {
-            content: lines.join("\n"),
-            truncated: entries.length > MAX_LISTING_ENTRIES,
-        };
+        return parts.join(", ");
     } catch (error) {
         logger.warn("Failed to list agent home dir:", error);
-        return { content: "(unable to read directory)", truncated: false };
+        return "(unable to read directory)";
     }
 }
 
@@ -80,7 +67,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
     priority: 2, // Right after agent-identity (priority 1)
     template: async ({ agent, projectDTag }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
-        const listing = buildHomeListing(homeDir, agent.pubkey);
+        const homeCount = countHomeFiles(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
         const projectInjectedFiles = projectDTag
             ? getAgentProjectInjectedFiles(agent.pubkey, projectDTag)
@@ -94,15 +81,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
         parts.push("<home-directory>");
         parts.push(`You have a personal home directory at: \`${homeDir}\`. This is *your* space to use as you see fit. The contents of this directory are persistent and private to you.`);
         parts.push("");
-        parts.push("**Current contents:**");
-        parts.push("```");
-        parts.push(listing.content);
-        parts.push("```");
-        if (listing.truncated) {
-            parts.push(
-                "Note: You have too many files in your home directory root. Tidy them up into directories."
-            );
-        }
+        parts.push(`**Current contents:** ${homeCount}`);
         parts.push("");
         parts.push(
             "Feel free to use this space for notes, helper scripts, temporary files, or any personal workspace needs. " +
