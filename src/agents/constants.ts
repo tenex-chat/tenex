@@ -9,12 +9,6 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "lesson_learn", // All agents should be able to learn
     // Todo tool for task tracking
     "todo_write", // All agents should be able to write/update todos
-    // Filesystem tools for reading and writing project files
-    "fs_read", // All agents should be able to read files
-    "fs_write", // All agents should be able to write files
-    "fs_edit", // All agents should be able to edit files
-    "fs_glob", // All agents should be able to find files by pattern
-    "fs_grep", // All agents should be able to search file contents
     // Process control
     "kill", // All agents should be able to terminate processes
     // Skills management
@@ -41,12 +35,6 @@ export const DELEGATE_TOOLS: ToolName[] = [
 export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     // Meta model tool (injected when agent uses a meta model configuration)
     "change_model",
-    // Home-scoped filesystem tools (injected when agent lacks fs_* tools)
-    "home_fs_read",
-    "home_fs_write",
-    "home_fs_edit",
-    "home_fs_grep",
-    "home_fs_glob",
     // Send message (injected when agent has remembered Telegram transport bindings)
     "send_message",
     // Silent completion is only injected for Telegram-triggered turns

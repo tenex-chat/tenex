@@ -1,61 +1,54 @@
 import { describe, expect, it } from "bun:test";
-import { expandFsCapabilities } from "../tool-normalization";
+import { normalizeAgentTools, validateTools, processAgentTools } from "../tool-normalization";
+import { CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "../constants";
 
-describe("expandFsCapabilities", () => {
-    it("should add fs_glob and fs_grep when fs_read is present", () => {
-        const result = expandFsCapabilities(["fs_read"]);
-        expect(result).toContain("fs_read");
-        expect(result).toContain("fs_glob");
-        expect(result).toContain("fs_grep");
+describe("normalizeAgentTools", () => {
+    it("should add core and delegate tools", () => {
+        const result = normalizeAgentTools(["shell"]);
+        for (const coreTool of CORE_AGENT_TOOLS) {
+            expect(result).toContain(coreTool);
+        }
+        for (const delegateTool of DELEGATE_TOOLS) {
+            expect(result).toContain(delegateTool);
+        }
+        expect(result).toContain("shell");
     });
 
-    it("should add fs_edit when fs_write is present", () => {
-        const result = expandFsCapabilities(["fs_write"]);
-        expect(result).toContain("fs_write");
-        expect(result).toContain("fs_edit");
+    it("should filter out delegation tools from input", () => {
+        const result = normalizeAgentTools(["shell", "delegate", "ask"]);
+        // delegate and ask should still be present (re-added as delegate tools)
+        expect(result).toContain("delegate");
+        expect(result).toContain("ask");
+        expect(result).toContain("shell");
     });
 
-    it("should expand both fs_read and fs_write together", () => {
-        const result = expandFsCapabilities(["fs_read", "fs_write"]);
-        expect(result).toContain("fs_read");
-        expect(result).toContain("fs_glob");
-        expect(result).toContain("fs_grep");
-        expect(result).toContain("fs_write");
-        expect(result).toContain("fs_edit");
-        expect(result).toHaveLength(5);
+    it("should not duplicate core tools already present", () => {
+        const result = normalizeAgentTools(["kill", "shell"]);
+        const killCount = result.filter((t) => t === "kill").length;
+        expect(killCount).toBe(1);
+    });
+});
+
+describe("validateTools", () => {
+    it("should drop unrecognized tools", () => {
+        const result = validateTools(["ask", "nonexistent_tool"]);
+        expect(result).toContain("ask");
+        expect(result).not.toContain("nonexistent_tool");
     });
 
-    it("should not duplicate tools already present", () => {
-        const result = expandFsCapabilities(["fs_read", "fs_glob", "fs_grep"]);
-        expect(result).toEqual(["fs_read", "fs_glob", "fs_grep"]);
+    it("should drop mcp__ prefixed tools", () => {
+        const result = validateTools(["ask", "mcp__server__tool"]);
+        expect(result).toContain("ask");
+        expect(result).not.toContain("mcp__server__tool");
     });
+});
 
-    it("should not modify tools when neither fs_read nor fs_write is present", () => {
-        const result = expandFsCapabilities(["shell", "rag_search"]);
-        expect(result).toEqual(["shell", "rag_search"]);
-    });
-
-    it("should return empty array for empty input", () => {
-        const result = expandFsCapabilities([]);
-        expect(result).toEqual([]);
-    });
-
-    it("should not add write tools when only fs_read is present", () => {
-        const result = expandFsCapabilities(["fs_read"]);
-        expect(result).not.toContain("fs_write");
-        expect(result).not.toContain("fs_edit");
-    });
-
-    it("should not add read tools when only fs_write is present", () => {
-        const result = expandFsCapabilities(["fs_write"]);
-        expect(result).not.toContain("fs_read");
-        expect(result).not.toContain("fs_glob");
-        expect(result).not.toContain("fs_grep");
-    });
-
-    it("should not mutate the input array", () => {
-        const input = ["fs_read"];
-        expandFsCapabilities(input);
-        expect(input).toEqual(["fs_read"]);
+describe("processAgentTools", () => {
+    it("should normalize and validate", () => {
+        const result = processAgentTools(["shell"]);
+        // Should have core + delegate tools, shell is skill-provided so dropped by validate
+        for (const coreTool of CORE_AGENT_TOOLS) {
+            expect(result).toContain(coreTool);
+        }
     });
 });

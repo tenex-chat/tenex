@@ -11,9 +11,9 @@ describe("Tool Registry", () => {
 
     describe("getTool", () => {
         it("should return tool when exists", () => {
-            const tool = getTool("fs_read", mockContext);
+            const tool = getTool("ask", mockContext);
             expect(tool).toBeDefined();
-            expect(tool?.description).toContain("Read a file");
+            expect(tool?.description).toBeDefined();
         });
 
         it("should not expose the no_response tool outside Telegram", () => {
@@ -50,13 +50,13 @@ describe("Tool Registry", () => {
 
     describe("getTools", () => {
         it("should return array of existing tools", () => {
-            const tools = getTools(["fs_read", "agents_write"], mockContext);
+            const tools = getTools(["ask", "kill"], mockContext);
             expect(tools).toHaveLength(2);
         });
 
         it("should filter out non-existent tools", () => {
             // @ts-expect-error Testing with invalid tool name
-            const tools = getTools(["fs_read", "non_existent" as ToolName, "agents_write"], mockContext);
+            const tools = getTools(["ask", "non_existent" as ToolName, "kill"], mockContext);
             expect(tools).toHaveLength(2);
         });
 
@@ -84,9 +84,8 @@ describe("Tool Registry", () => {
             const tools = getAllTools(mockContext);
             const toolDescriptions = tools.map((t) => t.description);
 
-            expect(toolDescriptions.some(d => d.includes("Read a file"))).toBe(true);
-            expect(toolDescriptions.some(d => d.includes("shell") || d.includes("command"))).toBe(true);
-            expect(toolDescriptions.some(d => d.includes("delegate"))).toBe(true);
+            expect(toolDescriptions.some(d => d?.includes("delegate"))).toBe(true);
+            expect(toolDescriptions.some(d => d?.includes("kill") || d?.includes("terminate"))).toBe(true);
         });
 
         it("should return tools with required AI SDK properties", () => {

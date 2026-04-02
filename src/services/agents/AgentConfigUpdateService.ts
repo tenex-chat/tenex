@@ -1,7 +1,6 @@
 import { computeToolsDelta } from "@/agents/ConfigResolver";
 import { agentStorage } from "@/agents/AgentStorage";
 import type { AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
-import { expandFsCapabilities } from "@/agents/tool-normalization";
 import { getToolTags } from "@/nostr/TagExtractor";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -55,8 +54,7 @@ export class AgentConfigUpdateService {
         }
 
         const newModel = event.tagValue("model");
-        const rawToolNames = getToolTags(event).map((tool) => tool.name).filter(Boolean);
-        const newToolNames = expandFsCapabilities(rawToolNames);
+        const newToolNames = getToolTags(event).map((tool) => tool.name).filter(Boolean);
         const skillTagValues = event.tags
             .filter((tag) => tag[0] === "skill")
             .map((tag) => tag[1]?.trim())

@@ -26,19 +26,13 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
 }
 import { logger } from "@/utils/logger";
 import { CORE_AGENT_TOOLS } from "@/agents/constants";
-import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
-import { createFsTools } from "ai-sdk-fs-tools";
-import { getAgentHomeDirectory } from "@/lib/agent-home";
-import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
-import { synthesizeContent, executeReadToolResult } from "./implementations/fs-hooks";
 import { createKillTool } from "./implementations/kill";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createNoResponseTool } from "./implementations/no_response";
-import { createProjectListTool } from "./implementations/project_list";
 // Todo tools
 import { createTodoWriteTool } from "./implementations/todo";
 
@@ -50,68 +44,6 @@ import { createSendMessageTool } from "./implementations/send_message";
 
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
-
-// Home-scoped filesystem tools - provided by ai-sdk-fs-tools with home_fs prefix
-import { ensureAgentHomeDirectory } from "@/lib/agent-home";
-
-const tenexFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof createFsTools>>();
-
-function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
-    let tools = tenexFsToolsCache.get(context);
-    if (!tools) {
-        tools = createTenexFsToolsUncached(context);
-        tenexFsToolsCache.set(context, tools);
-    }
-    return tools;
-}
-
-function createTenexFsToolsUncached(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
-    const allowedRoots = [context.projectBasePath, getAgentHomeDirectory(context.agent.pubkey)]
-        .filter((p): p is string => typeof p === "string" && p.trim() !== "");
-
-    const tools = createFsTools({
-        workingDirectory: context.workingDirectory,
-        allowedRoots,
-        agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory, skipRoot: true },
-        formatOutsideRootsError: (path, wd) =>
-            `Path "${path}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
-        analyzeContent: ({ content, prompt, source }) => synthesizeContent(content, prompt, source),
-        loadToolResult: (toolCallId) =>
-            executeReadToolResult(context.conversationId, toolCallId),
-    });
-
-    attachTranscriptArgs(tools.fs_read as AISdkTool, [{ key: "path", attribute: "file_path" }]);
-    attachTranscriptArgs(tools.fs_write as AISdkTool, [{ key: "path", attribute: "file_path" }]);
-
-    return tools;
-}
-
-const homeFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof createFsTools>>();
-
-function getOrCreateHomeFsTools(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
-    let tools = homeFsToolsCache.get(context);
-    if (!tools) {
-        const homeDir = getAgentHomeDirectory(context.agent.pubkey);
-        ensureAgentHomeDirectory(context.agent.pubkey);
-        tools = createFsTools({
-            workingDirectory: homeDir,
-            namePrefix: "home_fs",
-            strictContainment: true,
-            agentsMd: false,
-            descriptions: {
-                read: "Read a file or directory listing from your home directory. Returns contents with line numbers. Use offset/limit to paginate large files.",
-                write: "Write content to a file in your home directory. Creates parent directories automatically. Overwrites existing files.",
-                edit: "Edit a file in your home directory by replacing a specific string with a new string.",
-                glob: "Find files by glob pattern within your home directory.",
-                grep: "Search for patterns in files within your home directory. Uses ripgrep. Supports regex patterns.",
-            },
-            formatOutsideRootsError: (path) =>
-                `Path "${path}" is outside your home directory. You can only access files within your home directory.`,
-        });
-        homeFsToolsCache.set(context, tools);
-    }
-    return tools;
-}
 
 /**
  * Tools that require conversation context to function.
@@ -134,21 +66,8 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
  * they are loaded on-demand via SkillToolLoader when their skill is activated.
  */
 const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
-    // Agent tools
-    agents_write: createAgentsWriteTool,
-
     // Ask tool
     ask: createAskTool,
-
-    // Filesystem tools
-    fs_read: (ctx) => getOrCreateTenexFsTools(ctx).fs_read as AISdkTool,
-    fs_write: (ctx) => getOrCreateTenexFsTools(ctx).fs_write as AISdkTool,
-    fs_edit: (ctx) => getOrCreateTenexFsTools(ctx).fs_edit as AISdkTool,
-    fs_glob: (ctx) => getOrCreateTenexFsTools(ctx).fs_glob as AISdkTool,
-    fs_grep: (ctx) => getOrCreateTenexFsTools(ctx).fs_grep as AISdkTool,
-
-    // Project tools
-    project_list: createProjectListTool,
 
     // Delegation tools
     delegate_crossproject: createDelegateCrossProjectTool,
@@ -173,13 +92,6 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
 
     // Channel messaging tools (auto-injected when agent has remembered transport bindings)
     send_message: createSendMessageTool,
-
-    // Home-scoped filesystem tools (for agents without fs_* tools)
-    home_fs_read: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_read as AISdkTool,
-    home_fs_write: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_write as AISdkTool,
-    home_fs_edit: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_edit as AISdkTool,
-    home_fs_glob: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_glob as AISdkTool,
-    home_fs_grep: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_grep as AISdkTool,
 };
 
 function isToolAvailableInContext(name: ToolName, context: ToolExecutionContext): boolean {
@@ -244,26 +156,8 @@ export function getAllToolNames(): ToolName[] {
     return Object.keys(toolFactories) as ToolName[];
 }
 
-/** File editing tools - auto-injected when fs_write is available */
-const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
-
-/** File search tools - auto-injected when fs_read is available */
-const FILE_SEARCH_TOOLS: ToolName[] = ["fs_glob", "fs_grep"];
-
 /** Meta model tools - auto-injected when agent uses a meta model configuration */
 const META_MODEL_TOOLS: ToolName[] = ["change_model"];
-
-/**
- * Mapping from fs_* capabilities to their home_fs_* fallbacks.
- * When an agent lacks a given fs_* tool, the corresponding home_fs_* tools are injected.
- */
-const HOME_FS_FALLBACKS: [ToolName, ToolName[]][] = [
-    ["fs_read", ["home_fs_read"]],
-    ["fs_write", ["home_fs_write", "home_fs_edit"]],
-    ["fs_glob", ["home_fs_glob"]],
-    ["fs_grep", ["home_fs_grep"]],
-];
-
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
@@ -406,25 +300,6 @@ export function getToolsObject(
         }
     }
 
-    // Auto-inject edit tool when fs_write is available
-    if (regularTools.includes("fs_write")) {
-        for (const editToolName of FILE_EDIT_TOOLS) {
-            if (!regularTools.includes(editToolName)) {
-                regularTools.push(editToolName);
-            }
-        }
-    }
-
-    // Auto-inject search tools when fs_read is available
-    // fs_read implies full read capability: glob + grep
-    if (regularTools.includes("fs_read")) {
-        for (const searchToolName of FILE_SEARCH_TOOLS) {
-            if (!regularTools.includes(searchToolName)) {
-                regularTools.push(searchToolName);
-            }
-        }
-    }
-
     // Auto-inject change_model tool when agent uses a meta model configuration
     // Only inject if we have conversation context (needed for variant override persistence)
     if (hasConversation && "agent" in context && context.agent?.llmConfig) {
@@ -439,17 +314,6 @@ export function getToolsObject(
             }
         } catch {
             // Config not loaded or not available - skip meta model tool injection
-        }
-    }
-
-    // Auto-inject home_fs_* fallbacks per capability when agent lacks the fs_* equivalent
-    for (const [fsTool, homeFallbacks] of HOME_FS_FALLBACKS) {
-        if (!regularTools.includes(fsTool)) {
-            for (const fallback of homeFallbacks) {
-                if (!regularTools.includes(fallback)) {
-                    regularTools.push(fallback);
-                }
-            }
         }
     }
 
