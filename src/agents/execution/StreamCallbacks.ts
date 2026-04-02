@@ -12,6 +12,7 @@ import { createViolationReminders } from "@/services/heuristics";
 import { RALRegistry } from "@/services/ral";
 import { SkillService, loadAllSkillTools } from "@/services/skill";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
+import { HOME_FS_FALLBACKS } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type {
@@ -333,6 +334,15 @@ export function createPrepareStep(
                                 tool: name,
                                 stepNumber: step.stepNumber,
                             });
+                        }
+                    }
+
+                    // Remove home_fs_* fallbacks if their fs_* counterparts are now available
+                    for (const [fsTool, homeFallbacks] of HOME_FS_FALLBACKS) {
+                        if (fsTool in toolsObject) {
+                            for (const fallback of homeFallbacks) {
+                                delete toolsObject[fallback];
+                            }
                         }
                     }
                 }

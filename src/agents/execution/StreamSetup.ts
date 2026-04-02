@@ -11,7 +11,7 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SkillService, type SkillData, type SkillToolPermissions, loadAllSkillTools } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
-import { getToolsObject } from "@/tools/registry";
+import { getToolsObject, HOME_FS_FALLBACKS } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type { LLMService } from "@/llm/service";
@@ -110,6 +110,15 @@ export async function setupStreamExecution(
             }
             // Merge skill tools into final toolsObject
             Object.assign(toolsObject, skillTools);
+
+            // Remove home_fs_* fallbacks if their fs_* counterparts are now available
+            for (const [fsTool, homeFallbacks] of HOME_FS_FALLBACKS) {
+                if (fsTool in toolsObject) {
+                    for (const fallback of homeFallbacks) {
+                        delete toolsObject[fallback];
+                    }
+                }
+            }
         }
     }
 

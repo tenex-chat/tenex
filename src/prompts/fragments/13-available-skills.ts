@@ -141,6 +141,8 @@ export const availableSkillsFragment: PromptFragment<AvailableSkillsArgs> = {
 
         // Built-in skills — always show
         parts.push("<built-in>");
+        parts.push("These are built-in skills you can activate at any point using skills_set:");
+        parts.push("");
         const builtIn = grouped.get("built-in") ?? [];
         if (builtIn.length > 0) {
             parts.push(...builtIn);

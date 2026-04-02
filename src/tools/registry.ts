@@ -45,6 +45,9 @@ import { createSendMessageTool } from "./implementations/send_message";
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
 
+// Home-scoped filesystem tools
+import { getOrCreateHomeFsTools } from "./implementations/fs-tools-factory";
+
 /**
  * Tools that require conversation context to function.
  * These are filtered out when no conversation is available (e.g., MCP context).
@@ -92,6 +95,13 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
 
     // Channel messaging tools (auto-injected when agent has remembered transport bindings)
     send_message: createSendMessageTool,
+
+    // Home-scoped filesystem tools (auto-injected when fs_* counterparts unavailable)
+    home_fs_read: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_read as AISdkTool,
+    home_fs_write: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_write as AISdkTool,
+    home_fs_edit: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_edit as AISdkTool,
+    home_fs_glob: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_glob as AISdkTool,
+    home_fs_grep: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_grep as AISdkTool,
 };
 
 function isToolAvailableInContext(name: ToolName, context: ToolExecutionContext): boolean {
@@ -158,6 +168,18 @@ export function getAllToolNames(): ToolName[] {
 
 /** Meta model tools - auto-injected when agent uses a meta model configuration */
 const META_MODEL_TOOLS: ToolName[] = ["change_model"];
+
+/**
+ * Mapping from fs_* capabilities to their home_fs_* fallbacks.
+ * When an agent lacks a given fs_* tool, the corresponding home_fs_* tools are injected.
+ * This is processed AFTER skill tools are loaded to avoid duplicates.
+ */
+export const HOME_FS_FALLBACKS: [ToolName, ToolName[]][] = [
+    ["fs_read", ["home_fs_read"]],
+    ["fs_write", ["home_fs_write", "home_fs_edit"]],
+    ["fs_glob", ["home_fs_glob"]],
+    ["fs_grep", ["home_fs_grep"]],
+];
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
@@ -344,6 +366,16 @@ export function getToolsObject(
         !regularTools.includes("no_response")
     ) {
         regularTools.push("no_response");
+    }
+
+    // Auto-inject home_fs_* tools (fallback filesystem access)
+    // These are automatically removed later if fs_* counterparts are loaded via skills
+    for (const [_, homeFallbacks] of HOME_FS_FALLBACKS) {
+        for (const fallback of homeFallbacks) {
+            if (!regularTools.includes(fallback)) {
+                regularTools.push(fallback);
+            }
+        }
     }
 
     // === FINAL DENY-TOOL ENFORCEMENT ===

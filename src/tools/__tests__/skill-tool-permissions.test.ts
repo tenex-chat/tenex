@@ -127,8 +127,14 @@ describe("Skill Tool Permissions", () => {
                 // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
                 expect(toolNames).toContain("todo_write");
-                // CORE_AGENT_TOOLS + ask + delegate_crossproject (from baseTools, not core)
-                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 2);
+                // home_fs_* tools are auto-injected when fs_* tools are not available
+                expect(toolNames).toContain("home_fs_read");
+                expect(toolNames).toContain("home_fs_write");
+                expect(toolNames).toContain("home_fs_edit");
+                expect(toolNames).toContain("home_fs_glob");
+                expect(toolNames).toContain("home_fs_grep");
+                // CORE_AGENT_TOOLS + ask + delegate_crossproject + home_fs_* (5 tools)
+                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 2 + 5);
             });
         });
 
@@ -326,9 +332,58 @@ describe("Skill Tool Permissions", () => {
                 // Filesystem tools are no longer core — they're skill-provided
                 expect(toolNames).not.toContain("fs_read");
                 expect(toolNames).not.toContain("fs_write");
-                // Should have exactly CORE_AGENT_TOOLS
-                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length);
+                // home_fs_* tools are auto-injected as fallbacks when fs_* tools are not available
+                expect(toolNames).toContain("home_fs_read");
+                expect(toolNames).toContain("home_fs_write");
+                expect(toolNames).toContain("home_fs_edit");
+                expect(toolNames).toContain("home_fs_glob");
+                expect(toolNames).toContain("home_fs_grep");
+                // Should have CORE_AGENT_TOOLS + home_fs_* (5 tools)
+                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 5);
             });
+        });
+    });
+
+    describe("home_fs_* auto-injection", () => {
+        it("should always auto-inject all home_fs_* tools from registry", () => {
+            const baseTools = ["ask", "delegate"];
+            const tools = getToolsObject(baseTools, mockContext, undefined);
+            const toolNames = Object.keys(tools);
+
+            // home_fs_* tools are always injected by the registry (they're removed later by StreamSetup if fs_* tools are loaded via skills)
+            expect(toolNames).toContain("home_fs_read");
+            expect(toolNames).toContain("home_fs_write");
+            expect(toolNames).toContain("home_fs_edit");
+            expect(toolNames).toContain("home_fs_glob");
+            expect(toolNames).toContain("home_fs_grep");
+        });
+
+        it("should include home_fs_* tools even with other tools present", () => {
+            const baseTools = ["ask", "delegate", "kill"];
+            const tools = getToolsObject(baseTools, mockContext, undefined);
+            const toolNames = Object.keys(tools);
+
+            expect(toolNames).toContain("home_fs_read");
+            expect(toolNames).toContain("home_fs_write");
+            expect(toolNames).toContain("home_fs_edit");
+            expect(toolNames).toContain("home_fs_glob");
+            expect(toolNames).toContain("home_fs_grep");
+        });
+
+        it("should respect deny-tool for home_fs_* tools", () => {
+            const baseTools = ["ask", "delegate"];
+            const nudgePermissions: SkillToolPermissions = {
+                denyTools: ["home_fs_write", "home_fs_edit"],
+            };
+
+            const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+            const toolNames = Object.keys(tools);
+
+            expect(toolNames).toContain("home_fs_read");
+            expect(toolNames).not.toContain("home_fs_write");
+            expect(toolNames).not.toContain("home_fs_edit");
+            expect(toolNames).toContain("home_fs_glob");
+            expect(toolNames).toContain("home_fs_grep");
         });
     });
 });
