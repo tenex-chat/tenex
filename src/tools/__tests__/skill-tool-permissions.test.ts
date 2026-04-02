@@ -103,14 +103,14 @@ describe("Skill Tool Permissions", () => {
                 // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
                 expect(toolNames).toContain("todo_write");
-                // fs_read triggers auto-injection of fs_glob + fs_grep
+                // fs_read triggers auto-injection of fs_glob + fs_grep (but they're already core)
                 expect(toolNames).toContain("fs_glob");
                 expect(toolNames).toContain("fs_grep");
-                // Lacking fs_write still injects home-scoped write fallbacks
-                expect(toolNames).toContain("home_fs_write");
-                expect(toolNames).toContain("home_fs_edit");
-                // Base tools (2) + all core tools + fs search tools (2) + home write fallbacks (2)
-                expect(toolNames.length).toBe(2 + CORE_AGENT_TOOLS.length + 4);
+                // All filesystem tools are now core, so no home_fs fallbacks needed
+                expect(toolNames).not.toContain("home_fs_write");
+                expect(toolNames).not.toContain("home_fs_edit");
+                // CORE_AGENT_TOOLS + shell (from baseTools, not core)
+                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 1);
             });
         });
 
@@ -339,7 +339,7 @@ describe("Skill Tool Permissions", () => {
                 expect(toolNames).toContain("ask");
             });
 
-            it("should return core tools and home_fs tools when no base tools and no nudge permissions", () => {
+            it("should return core tools (including fs tools) when no base tools and no nudge permissions", () => {
                 const baseTools: string[] = [];
 
                 const tools = getToolsObject(baseTools, mockContext, undefined);
@@ -348,14 +348,17 @@ describe("Skill Tool Permissions", () => {
                 // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
                 expect(toolNames).toContain("todo_write");
-                // Home fs tools are also auto-injected when agent lacks fs_* tools
-                expect(toolNames).toContain("home_fs_read");
-                expect(toolNames).toContain("home_fs_write");
-                expect(toolNames).toContain("home_fs_edit");
-                expect(toolNames).toContain("home_fs_glob");
-                expect(toolNames).toContain("home_fs_grep");
-                // All core tools + all home-scoped fs fallbacks (5)
-                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 5);
+                // All filesystem tools are now core, so they're included automatically
+                expect(toolNames).toContain("fs_read");
+                expect(toolNames).toContain("fs_write");
+                expect(toolNames).toContain("fs_edit");
+                expect(toolNames).toContain("fs_glob");
+                expect(toolNames).toContain("fs_grep");
+                // Home fs tools are NOT injected since fs_* tools are available as core
+                expect(toolNames).not.toContain("home_fs_read");
+                expect(toolNames).not.toContain("home_fs_write");
+                // Should have exactly CORE_AGENT_TOOLS
+                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length);
             });
         });
     });

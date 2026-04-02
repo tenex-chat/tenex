@@ -9,6 +9,12 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "lesson_learn", // All agents should be able to learn
     // Todo tool for task tracking
     "todo_write", // All agents should be able to write/update todos
+    // Filesystem tools for reading and writing project files
+    "fs_read", // All agents should be able to read files
+    "fs_write", // All agents should be able to write files
+    "fs_edit", // All agents should be able to edit files
+    "fs_glob", // All agents should be able to find files by pattern
+    "fs_grep", // All agents should be able to search file contents
     // Conversation tools for project introspection
     "conversation_get", // All agents should access conversation details
     "conversation_list", // All agents should list conversations

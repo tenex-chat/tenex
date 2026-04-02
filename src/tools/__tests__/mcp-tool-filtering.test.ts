@@ -79,6 +79,9 @@ describe("MCP Tool Filtering in getToolsObject", () => {
 
         // Should NOT include unrequested MCP tools
         expect(tools.mcp__server2__tool_c).toBeUndefined();
+
+        // Note: Core tools (fs_*, shell, etc.) will also be present due to auto-injection
+        // when conversation context is available, but unrequested MCP tools are still excluded
     });
 
     it("should handle context without mcpManager gracefully", () => {
