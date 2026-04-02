@@ -28,8 +28,6 @@ import { logger } from "@/utils/logger";
 import { CORE_AGENT_TOOLS } from "@/agents/constants";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
-import { createConversationGetTool } from "./implementations/conversation_get";
-import { createConversationListTool } from "./implementations/conversation_list";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
@@ -41,11 +39,6 @@ import { createKillTool } from "./implementations/kill";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createNoResponseTool } from "./implementations/no_response";
 import { createProjectListTool } from "./implementations/project_list";
-import { createMcpResourceReadTool } from "./implementations/mcp_resource_read";
-import { createMcpSubscribeTool } from "./implementations/mcp_subscribe";
-import { createMcpSubscriptionStopTool } from "./implementations/mcp_subscription_stop";
-import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
-import { createScheduleTaskTool } from "./implementations/schedule_task";
 // Todo tools
 import { createTodoWriteTool } from "./implementations/todo";
 
@@ -126,9 +119,7 @@ function getOrCreateHomeFsTools(context: ToolExecutionContext): ReturnType<typeo
  */
 const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
     "todo_write",
-    "conversation_get", // Needs conversation for current-conversation optimization
     "change_model", // Needs conversation to persist variant override
-    "mcp_subscribe", // Needs conversation to bind subscription to it
     "skills_set", // Needs conversation to store self-applied skills
 ]);
 
@@ -156,10 +147,6 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
     fs_glob: (ctx) => getOrCreateTenexFsTools(ctx).fs_glob as AISdkTool,
     fs_grep: (ctx) => getOrCreateTenexFsTools(ctx).fs_grep as AISdkTool,
 
-    // Conversation tools
-    conversation_get: createConversationGetTool,
-    conversation_list: createConversationListTool,
-
     // Project tools
     project_list: createProjectListTool,
 
@@ -171,17 +158,9 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
     // Lesson tools
     lesson_learn: createLessonLearnTool,
 
-    // Schedule tools (core — always available)
-    schedule_task: createScheduleTaskTool,
-
     // Process control
     kill: createKillTool,
     no_response: createNoResponseTool,
-
-    // MCP tools
-    mcp_resource_read: createMcpResourceReadTool,
-    mcp_subscribe: createMcpSubscribeTool as ToolFactory,
-    mcp_subscription_stop: createMcpSubscriptionStopTool,
 
     // Todo tools - require ConversationToolContext (filtered out when no conversation)
     todo_write: createTodoWriteTool as ToolFactory,
@@ -285,18 +264,6 @@ const HOME_FS_FALLBACKS: [ToolName, ToolName[]][] = [
     ["fs_grep", ["home_fs_grep"]],
 ];
 
-/**
- * Check if an agent has stoppable MCP subscriptions (ACTIVE or ERROR).
- * Wrapped in a function to handle cases where the service isn't initialized.
- */
-function mcpSubscriptionServiceHasStoppableSubscriptions(agentPubkey: string): boolean {
-    try {
-        const service = McpSubscriptionService.getInstance();
-        return service.hasStoppableSubscriptions(agentPubkey);
-    } catch {
-        return false;
-    }
-}
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
@@ -513,19 +480,6 @@ export function getToolsObject(
         !regularTools.includes("no_response")
     ) {
         regularTools.push("no_response");
-    }
-
-    // Auto-inject mcp_subscription_stop when agent has active MCP subscriptions
-    if (hasConversation && "agent" in context && context.agent?.pubkey) {
-        try {
-            if (mcpSubscriptionServiceHasStoppableSubscriptions(context.agent.pubkey)) {
-                if (!regularTools.includes("mcp_subscription_stop")) {
-                    regularTools.push("mcp_subscription_stop");
-                }
-            }
-        } catch {
-            // McpSubscriptionService not initialized - skip injection
-        }
     }
 
     // === FINAL DENY-TOOL ENFORCEMENT ===

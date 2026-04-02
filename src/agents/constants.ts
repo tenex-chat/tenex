@@ -15,16 +15,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "fs_edit", // All agents should be able to edit files
     "fs_glob", // All agents should be able to find files by pattern
     "fs_grep", // All agents should be able to search file contents
-    // Task scheduling
-    "schedule_task", // All agents should be able to schedule recurring and one-off tasks
-    // Conversation tools for project introspection
-    "conversation_get", // All agents should access conversation details
-    "conversation_list", // All agents should list conversations
     // Process control
     "kill", // All agents should be able to terminate processes
-    // MCP resource reading and subscriptions (self-gating: only works if agent has MCP tools from that server)
-    "mcp_resource_read", // All agents can read MCP resources from servers they have tools for
-    "mcp_subscribe", // All agents can subscribe to MCP resource notifications
     // Skills management
     "skills_set", // All agents can activate/deactivate skills mid-conversation
 ] as const;
@@ -55,8 +47,6 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "home_fs_edit",
     "home_fs_grep",
     "home_fs_glob",
-    // MCP subscription stop (injected when agent has active MCP subscriptions)
-    "mcp_subscription_stop",
     // Send message (injected when agent has remembered Telegram transport bindings)
     "send_message",
     // Silent completion is only injected for Telegram-triggered turns
