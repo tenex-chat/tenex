@@ -37,6 +37,14 @@ export interface TenexConfig {
         forceScratchpadThresholdPercent?: number; // Managed-context utilization percent that forces scratchpad (default: 70)
         utilizationWarningThresholdPercent?: number; // Managed-context utilization percent for warnings (default: 70)
         summarizationFallbackThresholdPercent?: number; // Managed-context utilization percent for summarization (default: 90)
+        strategies?: {
+            systemPromptCaching?: boolean; // Enable SystemPromptCachingStrategy (default: true)
+            scratchpad?: boolean; // Enable ScratchpadStrategy (default: true)
+            toolResultDecay?: boolean; // Enable ToolResultDecayStrategy (default: true)
+            summarization?: boolean; // Enable SummarizationStrategy (default: true)
+            contextUtilizationReminder?: boolean; // Enable ContextUtilizationReminderStrategy (default: true)
+            contextWindowStatus?: boolean; // Enable ContextWindowStatusStrategy (default: true)
+        };
     };
 
     // Telemetry configuration
@@ -128,6 +136,16 @@ export const TenexConfigSchema = z.object({
             forceScratchpadThresholdPercent: z.number().min(0).max(100).optional(),
             utilizationWarningThresholdPercent: z.number().min(0).max(100).optional(),
             summarizationFallbackThresholdPercent: z.number().min(0).max(100).optional(),
+            strategies: z
+                .object({
+                    systemPromptCaching: z.boolean().optional(),
+                    scratchpad: z.boolean().optional(),
+                    toolResultDecay: z.boolean().optional(),
+                    summarization: z.boolean().optional(),
+                    contextUtilizationReminder: z.boolean().optional(),
+                    contextWindowStatus: z.boolean().optional(),
+                })
+                .optional(),
         })
         .optional(),
     telemetry: z

@@ -101,11 +101,13 @@ function createConversationContextManagementRuntime(options: {
     const isAnthropicProvider = options.providerId === PROVIDER_IDS.ANTHROPIC;
     const scratchpadEnabled = options.scratchpadAvailable && !isAnthropicProvider;
 
-    const strategies: ContextManagementStrategy[] = [
-        new SystemPromptCachingStrategy(),
-    ];
+    const strategies: ContextManagementStrategy[] = [];
 
-    if (scratchpadEnabled) {
+    if (settings.strategies.systemPromptCaching) {
+        strategies.push(new SystemPromptCachingStrategy());
+    }
+
+    if (scratchpadEnabled && settings.strategies.scratchpad) {
         strategies.push(
             new ScratchpadStrategy({
                 scratchpadStore: {
@@ -136,7 +138,7 @@ function createConversationContextManagementRuntime(options: {
         );
     }
 
-    if (!isAnthropicProvider) {
+    if (!isAnthropicProvider && settings.strategies.toolResultDecay) {
         strategies.push(
             new ToolResultDecayStrategy({
                 estimator: managedBudgetProfile.estimator,
@@ -152,7 +154,7 @@ function createConversationContextManagementRuntime(options: {
         agent: options.agent,
     });
 
-    if (summarizationModel && !isAnthropicProvider) {
+    if (summarizationModel && !isAnthropicProvider && settings.strategies.summarization) {
         strategies.push(
             new SummarizationStrategy({
                 model: summarizationModel,
@@ -165,30 +167,34 @@ function createConversationContextManagementRuntime(options: {
         );
     }
 
-    strategies.push(
-        new ContextUtilizationReminderStrategy({
-            budgetProfile: managedBudgetProfile,
-            warningThresholdRatio: settings.utilizationWarningThresholdPercent / 100,
-            mode: scratchpadEnabled ? "scratchpad" : "generic",
-        })
-    );
+    if (settings.strategies.contextUtilizationReminder) {
+        strategies.push(
+            new ContextUtilizationReminderStrategy({
+                budgetProfile: managedBudgetProfile,
+                warningThresholdRatio: settings.utilizationWarningThresholdPercent / 100,
+                mode: scratchpadEnabled ? "scratchpad" : "generic",
+            })
+        );
+    }
 
-    strategies.push(
-        new ContextWindowStatusStrategy({
-            budgetProfile: managedBudgetProfile,
-            requestEstimator,
-            getContextWindow: ({ model }) => {
-                if (!model) {
-                    return undefined;
-                }
+    if (settings.strategies.contextWindowStatus) {
+        strategies.push(
+            new ContextWindowStatusStrategy({
+                budgetProfile: managedBudgetProfile,
+                requestEstimator,
+                getContextWindow: ({ model }) => {
+                    if (!model) {
+                        return undefined;
+                    }
 
-                return getContextWindow(
-                    normalizeProviderId(model.provider),
-                    model.modelId
-                );
-            },
-        })
-    );
+                    return getContextWindow(
+                        normalizeProviderId(model.provider),
+                        model.modelId
+                    );
+                },
+            })
+        );
+    }
 
     const telemetry = createTelemetryCallback();
     const runtime = createContextManagementRuntime({

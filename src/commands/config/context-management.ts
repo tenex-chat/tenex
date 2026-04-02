@@ -93,12 +93,59 @@ export const contextManagementCommand = new Command("context-management")
             },
         ]);
 
+        const strategyAnswers = await inquirer.prompt([
+            {
+                type: "confirm",
+                name: "systemPromptCaching",
+                message: "Enable SystemPromptCachingStrategy:",
+                default: contextManagement.strategies?.systemPromptCaching !== false,
+            },
+            {
+                type: "confirm",
+                name: "scratchpad",
+                message: "Enable ScratchpadStrategy:",
+                default: contextManagement.strategies?.scratchpad !== false,
+            },
+            {
+                type: "confirm",
+                name: "toolResultDecay",
+                message: "Enable ToolResultDecayStrategy:",
+                default: contextManagement.strategies?.toolResultDecay !== false,
+            },
+            {
+                type: "confirm",
+                name: "summarization",
+                message: "Enable SummarizationStrategy:",
+                default: contextManagement.strategies?.summarization !== false,
+            },
+            {
+                type: "confirm",
+                name: "contextUtilizationReminder",
+                message: "Enable ContextUtilizationReminderStrategy:",
+                default: contextManagement.strategies?.contextUtilizationReminder !== false,
+            },
+            {
+                type: "confirm",
+                name: "contextWindowStatus",
+                message: "Enable ContextWindowStatusStrategy:",
+                default: contextManagement.strategies?.contextWindowStatus !== false,
+            },
+        ]);
+
         tenexConfig.contextManagement = {
             enabled: answers.enabled,
             tokenBudget: Number.parseInt(answers.tokenBudget, 10),
             forceScratchpadThresholdPercent: Number.parseInt(answers.forceScratchpadThresholdPercent, 10),
             utilizationWarningThresholdPercent: Number.parseInt(answers.utilizationWarningThresholdPercent, 10),
             summarizationFallbackThresholdPercent: Number.parseInt(answers.summarizationFallbackThresholdPercent, 10),
+            strategies: {
+                systemPromptCaching: strategyAnswers.systemPromptCaching,
+                scratchpad: strategyAnswers.scratchpad,
+                toolResultDecay: strategyAnswers.toolResultDecay,
+                summarization: strategyAnswers.summarization,
+                contextUtilizationReminder: strategyAnswers.contextUtilizationReminder,
+                contextWindowStatus: strategyAnswers.contextWindowStatus,
+            },
         };
 
         await config.saveTenexConfig(globalPath, tenexConfig);
