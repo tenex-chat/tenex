@@ -223,31 +223,21 @@ describe("skills_set tool", () => {
         expect(mockUpdateDefaultConfig).toHaveBeenCalledWith(AGENT_PUBKEY, { skills: [] });
     });
 
-    it("should let add win over remove for the same ID", async () => {
+    it("should fail when same ID appears in both add and remove", async () => {
         mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
-        mockListAvailableSkills.mockResolvedValue([createAvailableSkill("brainstorming")]);
-        mockFetchSkills.mockResolvedValue({
-            skills: [
-                createResolvedSkill("brainstorming", SKILL_ID_1, {
-                    name: "Brainstorming",
-                    content: "content1",
-                }),
-            ],
-            content: "skill content",
-        });
 
         const context = createMockContext();
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
             { add: ["brainstorming"], remove: ["brainstorming"] },
-            toolCallOpts("tc-add-wins")
+            toolCallOpts("tc-conflict")
         );
 
-        expect(result.success).toBe(true);
-        expect(result.activeSkills).toEqual(["brainstorming"]);
-        // After remove clears it, add re-adds it — it's "newly added" so fetch is called
-        expect(mockFetchSkills).toHaveBeenCalledWith(["brainstorming"], SKILL_LOOKUP_CONTEXT);
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["brainstorming"], AGENT_PUBKEY);
+        expect(result.success).toBe(false);
+        expect(result.message).toContain("Conflicting intent");
+        expect(result.message).toContain("brainstorming");
+        expect(mockSetSelfAppliedSkills).not.toHaveBeenCalled();
+        expect(mockFetchSkills).not.toHaveBeenCalled();
     });
 
     it("should silently ignore remove IDs that aren't currently active", async () => {

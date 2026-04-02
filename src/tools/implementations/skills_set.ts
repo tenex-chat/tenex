@@ -56,6 +56,17 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
             const addIds = (rawAdd ?? []).map((id) => id.trim()).filter(Boolean);
             const removeIds = (rawRemove ?? []).map((id) => id.trim()).filter(Boolean);
 
+            // Reject conflicting intent: same ID in both add and remove
+            const conflicting = addIds.filter((id) => removeIds.includes(id));
+            if (conflicting.length > 0) {
+                return {
+                    success: false,
+                    message: `Conflicting intent: ${conflicting.join(", ")} appear in both \`add\` and \`remove\`. Decide whether to add or remove, not both.`,
+                    activeSkills: [] as string[],
+                    skillContent: "",
+                };
+            }
+
             // No-op: both empty/omitted
             if (addIds.length === 0 && removeIds.length === 0) {
                 const currentSkills = conversationStore.getSelfAppliedSkillIds(agentPubkey);
