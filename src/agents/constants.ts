@@ -12,16 +12,6 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     // Conversation tools for project introspection
     "conversation_get", // All agents should access conversation details
     "conversation_list", // All agents should list conversations
-    // RAG tools for knowledge management
-    "rag_search", // All agents should be able to search across project knowledge
-    "rag_collection_create", // All agents should be able to create RAG collections
-    "rag_add_documents", // All agents should be able to add documents to collections
-    "rag_collection_delete", // All agents should be able to delete RAG collections
-    "rag_collection_list", // All agents should be able to list RAG collections
-    "rag_subscription_create", // All agents should be able to create RAG subscriptions
-    "rag_subscription_list", // All agents should be able to list RAG subscriptions
-    "rag_subscription_get", // All agents should be able to get RAG subscription details
-    "rag_subscription_delete", // All agents should be able to delete RAG subscriptions
     // Process control
     "kill", // All agents should be able to terminate processes
     // MCP resource reading and subscriptions (self-gating: only works if agent has MCP tools from that server)

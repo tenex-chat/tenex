@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { ensureDirectory } from "@/lib/fs";
 import { slugifyIdentifier } from "@/lib/string";
@@ -42,7 +43,7 @@ interface LocalSkillRecord {
     metadata?: StoredSkillMetadata;
 }
 
-type SkillStoreScope = "agent" | "project-repo" | "project" | "global" | "legacy-agents";
+type SkillStoreScope = "agent" | "project-repo" | "project" | "global" | "legacy-agents" | "built-in";
 
 interface SkillStoreDirectory {
     dir: string;
@@ -120,6 +121,10 @@ export class SkillService {
         return {
             ...skill,
             installedFiles: skill.installedFiles.map((file) => ({ ...file })),
+            toolNames: skill.toolNames ? [...skill.toolNames] : undefined,
+            // loadedTools are intentionally NOT cloned — they are runtime-only
+            // and populated by SkillToolLoader at RAL setup time
+            loadedTools: undefined,
         };
     }
 
@@ -276,6 +281,13 @@ export class SkillService {
         directories.push({
             scope: "legacy-agents",
             dir: await this.getLegacyAgentsSkillsBaseDir(false),
+        });
+
+        // Built-in skills bundled with source code
+        const thisDir = path.dirname(fileURLToPath(import.meta.url));
+        directories.push({
+            scope: "built-in",
+            dir: path.resolve(thisDir, "../../skills/built-in"),
         });
 
         return directories;
@@ -493,6 +505,8 @@ export class SkillService {
                 content: skillDocument.content,
                 name: metadata?.name,
                 installedFiles,
+                localDir: skillDir,
+                toolNames: metadata?.tools,
             };
         } catch {
             return null;

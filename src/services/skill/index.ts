@@ -3,6 +3,7 @@ export { SkillWhitelistService } from "./SkillWhitelistService";
 export type { WhitelistItem } from "./SkillWhitelistService";
 export { SkillIdentifierResolver } from "./SkillIdentifierResolver";
 export type { SkillIdentifierResolution } from "./SkillIdentifierResolver";
+export { getSkillToolsDir, loadSkillTools, loadAllSkillTools } from "./SkillToolLoader";
 export type {
     SkillResult,
     SkillData,

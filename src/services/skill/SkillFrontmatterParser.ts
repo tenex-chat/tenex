@@ -12,6 +12,7 @@ export interface StoredSkillMetadata {
     allowTools?: string[];
     /** Tools to remove from the agent's default set */
     denyTools?: string[];
+    tools?: string[];
 }
 
 export interface ParsedSkillDocument {
@@ -39,6 +40,7 @@ export function normalizeStoredSkillMetadata(
         onlyTools: normalizeStringArray(metadata.onlyTools),
         allowTools: normalizeStringArray(metadata.allowTools),
         denyTools: normalizeStringArray(metadata.denyTools),
+        tools: normalizeStringArray(metadata.tools),
     };
 
     return Object.values(normalized).some((value) => value !== undefined)
@@ -200,6 +202,7 @@ export function readYamlList(
 
 const TOOL_PERMISSION_KEYS = new Set(["only-tools", "allow-tools", "deny-tools"]);
 
+
 export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMetadata | undefined {
     const lines = frontmatterBlock.replace(/\r\n/g, "\n").split("\n");
     const metadataValues: Record<string, string> = {};
@@ -208,6 +211,7 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
     let onlyTools: string[] | undefined;
     let allowTools: string[] | undefined;
     let denyTools: string[] | undefined;
+    let tools: string[] | undefined;
     let lineIndex = 0;
 
     while (lineIndex < lines.length) {
@@ -275,6 +279,15 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
             continue;
         }
 
+        if (key === "tools" && stripInlineYamlComment(rawValue).trim().length === 0) {
+            const listResult = readYamlList(lines, lineIndex + 1, indent);
+            if (listResult.items.length > 0) {
+                tools = listResult.items;
+            }
+            lineIndex = listResult.nextIndex;
+            continue;
+        }
+
         const parsedValue = readYamlValue(lines, lineIndex, indent, rawValue);
         if (key === "name" && parsedValue.value) {
             name = parsedValue.value;
@@ -292,6 +305,7 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
         onlyTools,
         allowTools,
         denyTools,
+        tools,
     });
 }
 
@@ -348,6 +362,7 @@ export function serializeSkillDocument(content: string, metadata: StoredSkillMet
     serializeYamlList(lines, "only-tools", metadata.onlyTools);
     serializeYamlList(lines, "allow-tools", metadata.allowTools);
     serializeYamlList(lines, "deny-tools", metadata.denyTools);
+    serializeYamlList(lines, "tools", metadata.tools);
 
     const metadataEntries = [[TENEX_METADATA_EVENT_ID_KEY, metadata.eventId]].filter(
         (entry): entry is [string, string] => Boolean(entry[1])

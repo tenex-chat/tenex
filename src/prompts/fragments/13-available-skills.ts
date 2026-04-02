@@ -36,7 +36,11 @@ function formatWhitelistItem(item: WhitelistItem): string {
 
 function formatSkillItem(skill: SkillData): string {
     const identifier = skill.identifier;
-    return `  - \`${escapePromptText(identifier)}\`: ${escapePromptText(summarizeContent(skill.description ?? skill.content))}`;
+    const desc = escapePromptText(summarizeContent(skill.description ?? skill.content));
+    const unlocks = skill.toolNames && skill.toolNames.length > 0
+        ? ` | Unlocks: ${skill.toolNames.map((t) => `\`${t}\``).join(", ")}`
+        : "";
+    return `  - \`${escapePromptText(identifier)}\`: ${desc}${unlocks}`;
 }
 
 export const availableSkillsFragment: PromptFragment<AvailableSkillsArgs> = {

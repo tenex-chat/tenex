@@ -75,6 +75,13 @@ export function renderSkill(skill: SkillData): string {
     const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
 
     parts.push(`<loaded-skill${attrStr}>`);
+
+    // Show which tools this skill provides
+    if (skill.toolNames && skill.toolNames.length > 0) {
+        parts.push(`**Provides:** ${skill.toolNames.map((t) => `\`${t}\``).join(", ")}`);
+        parts.push("");
+    }
+
     parts.push(skill.content);
 
     // List installed files if any

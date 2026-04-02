@@ -73,6 +73,23 @@ export interface SkillData {
     name?: string;
     /** List of installed files for this skill */
     installedFiles: SkillFileInstallResult[];
+    /**
+     * Absolute path to this skill's local directory.
+     * Used by SkillToolLoader to locate the tools/ subdirectory.
+     */
+    localDir?: string;
+    /**
+     * Tool names declared in the skill's SKILL.md frontmatter.
+     * Informational — used for prompt display (Provides: / Unlocks: labels).
+     * The actual tool objects are in loadedTools (populated at RAL setup time).
+     */
+    toolNames?: string[];
+    /**
+     * Loaded AI SDK tool implementations from the skill's tools/ directory.
+     * Populated by SkillToolLoader at RAL setup time (not during fetchSkills).
+     * Undefined for content-only skills or before loading.
+     */
+    loadedTools?: Record<string, import("ai").Tool>;
 }
 
 /**

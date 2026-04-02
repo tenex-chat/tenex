@@ -8,7 +8,7 @@
 
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { SkillService, type SkillData, type SkillToolPermissions } from "@/services/skill";
+import { SkillService, type SkillData, type SkillToolPermissions, loadAllSkillTools } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
@@ -95,6 +95,22 @@ export async function setupStreamExecution(
         await context.mcpManager.ensureServersForSlugs(mcpServerSlugs);
     }
     let toolsObject = getToolsObject(context.agent.tools || [], context, skillResult.toolPermissions);
+
+    // === LOAD SKILL-DECLARED TOOLS ===
+    // Skills can declare tools in their SKILL.md frontmatter.
+    // Load and merge them into toolsObject, respecting deny-tool permissions.
+    if (skillResult.skills.length > 0 && !skillResult.toolPermissions?.onlyTools) {
+        const skillTools = await loadAllSkillTools(skillResult.skills, context);
+        if (Object.keys(skillTools).length > 0) {
+            // Apply deny-tool filtering to skill-injected tools
+            const denyTools = skillResult.toolPermissions?.denyTools ?? [];
+            for (const denied of denyTools) {
+                delete skillTools[denied];
+            }
+            // Merge skill tools into final toolsObject
+            Object.assign(toolsObject, skillTools);
+        }
+    }
 
     const ralRegistry = RALRegistry.getInstance();
     const conversationStore = context.conversationStore;
