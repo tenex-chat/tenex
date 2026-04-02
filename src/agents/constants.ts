@@ -39,6 +39,12 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "send_message",
     // Silent completion is only injected for Telegram-triggered turns
     "no_response",
+    // Home filesystem tools (auto-injected as fallbacks when fs_* skills unavailable)
+    "home_fs_read",
+    "home_fs_write",
+    "home_fs_edit",
+    "home_fs_glob",
+    "home_fs_grep",
 ];
 
 /**
