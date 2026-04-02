@@ -389,10 +389,11 @@ describe("ProjectStatusService.gatherToolInfo integration", () => {
         const mcpTools = intent.tools.filter((t) => t.name.startsWith("mcp__"));
         expect(mcpTools).toHaveLength(0);
 
-        // Regular tools should still be present
+        // Regular configurable tools should still be present
+        // Note: fs_read is now a core tool (excluded), shell is skill-provided (excluded)
         const toolNames = intent.tools.map((t) => t.name);
-        expect(toolNames).toContain("fs_read");
-        expect(toolNames).toContain("shell");
+        expect(toolNames).toContain("agents_write");
+        expect(toolNames).toContain("project_list");
     });
 
     it("should handle end-to-end scenario: mcp__tenex__ and other MCP tools not in intent.tools", async () => {

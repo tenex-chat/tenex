@@ -1,4 +1,4 @@
-import { CONTEXT_INJECTED_TOOLS, CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
+import { CONTEXT_INJECTED_TOOLS, CORE_AGENT_TOOLS, DELEGATE_TOOLS, SKILL_PROVIDED_TOOLS } from "@/agents/constants";
 import type { AgentInstance } from "@/agents/types";
 import { config } from "@/services/ConfigService";
 import { getAllToolNames } from "@/tools/registry";
@@ -17,7 +17,8 @@ export interface ProjectConfigSnapshot {
 function isConfigurableTool(toolName: string): boolean {
     return !DELEGATE_TOOLS.includes(toolName as ToolName) &&
         !CORE_AGENT_TOOLS.includes(toolName as ToolName) &&
-        !CONTEXT_INJECTED_TOOLS.includes(toolName as ToolName);
+        !CONTEXT_INJECTED_TOOLS.includes(toolName as ToolName) &&
+        !SKILL_PROVIDED_TOOLS.includes(toolName as ToolName);
 }
 
 export class ProjectConfigOptionsService {
