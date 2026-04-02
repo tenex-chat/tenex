@@ -102,7 +102,6 @@ export function createMockInboundEnvelope(overrides?: Partial<InboundEnvelope>):
             eventTagCount: 0,
             replyTargets: [],
             articleReferences: [],
-            nudgeEventIds: [],
             skillEventIds: [],
         },
     };

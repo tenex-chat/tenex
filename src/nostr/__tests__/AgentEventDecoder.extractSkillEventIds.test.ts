@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { extractSkillEventIds, extractNudgeEventIds } from "../AgentEventDecoder";
+import { extractSkillEventIds } from "../AgentEventDecoder";
 
 describe("AgentEventDecoder.extractSkillEventIds", () => {
     function createMockEvent(tags: string[][]): NDKEvent {
@@ -88,58 +88,5 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
         const result = extractSkillEventIds(event);
 
         expect(result).toEqual(["third", "first", "second"]);
-    });
-});
-
-describe("AgentEventDecoder.extractNudgeEventIds", () => {
-    function createMockEvent(tags: string[][]): NDKEvent {
-        const event = new NDKEvent();
-        event.tags = tags;
-        return event;
-    }
-
-    it("should return empty array when no nudge tags present", () => {
-        const event = createMockEvent([
-            ["p", "somepubkey"],
-            ["e", "someeventid"],
-        ]);
-
-        const result = extractNudgeEventIds(event);
-
-        expect(result).toEqual([]);
-    });
-
-    it("should extract single nudge event ID", () => {
-        const event = createMockEvent([
-            ["p", "somepubkey"],
-            ["nudge", "nudge123456789"],
-        ]);
-
-        const result = extractNudgeEventIds(event);
-
-        expect(result).toEqual(["nudge123456789"]);
-    });
-
-    it("should extract multiple nudge event IDs", () => {
-        const event = createMockEvent([
-            ["nudge", "nudge1"],
-            ["p", "somepubkey"],
-            ["nudge", "nudge2"],
-        ]);
-
-        const result = extractNudgeEventIds(event);
-
-        expect(result).toEqual(["nudge1", "nudge2"]);
-    });
-
-    it("should not confuse nudge tags with skill tags", () => {
-        const event = createMockEvent([
-            ["skill", "skill123"],
-            ["nudge", "nudge123"],
-        ]);
-
-        const result = extractNudgeEventIds(event);
-
-        expect(result).toEqual(["nudge123"]);
     });
 });

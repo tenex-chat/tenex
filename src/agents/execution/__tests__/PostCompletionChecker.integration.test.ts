@@ -36,7 +36,7 @@ import {
 } from "../system-reminders";
 import * as projectServices from "@/services/projects";
 import * as systemPromptBuilderModule from "@/prompts/utils/systemPromptBuilder";
-import { NudgeService } from "@/services/nudge";
+import { SkillService } from "@/services/skill";
 import * as toolRegistryModule from "@/tools/registry";
 
 describe("PostCompletionChecker - True Integration Test", () => {
@@ -49,7 +49,7 @@ describe("PostCompletionChecker - True Integration Test", () => {
     let registry: RALRegistry;
     let getProjectContextSpy: ReturnType<typeof spyOn>;
     let buildSystemPromptMessagesSpy: ReturnType<typeof spyOn>;
-    let getNudgeServiceInstanceSpy: ReturnType<typeof spyOn>;
+    let getSkillServiceInstanceSpy: ReturnType<typeof spyOn>;
     let getToolsObjectSpy: ReturnType<typeof spyOn>;
 
     beforeAll(() => {
@@ -70,11 +70,11 @@ describe("PostCompletionChecker - True Integration Test", () => {
             systemPromptBuilderModule,
             "buildSystemPromptMessages"
         ).mockResolvedValue([]);
-        getNudgeServiceInstanceSpy = spyOn(NudgeService, "getInstance").mockReturnValue({
-            fetchNudges: async () => "",
-        } as ReturnType<typeof NudgeService.getInstance>);
+        getSkillServiceInstanceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
+            fetchSkills: async () => "",
+        } as ReturnType<typeof SkillService.getInstance>);
         getToolsObjectSpy = spyOn(toolRegistryModule, "getToolsObject").mockReturnValue({});
-        spyOn(AgentEventDecoder, "extractNudgeEventIds").mockReturnValue([]);
+        spyOn(AgentEventDecoder, "extractSkillEventIds").mockReturnValue([]);
         await mkdir(TEST_DIR, { recursive: true });
         conversationStore = new ConversationStore(TEST_DIR);
         conversationStore.load(PROJECT_ID, CONVERSATION_ID);
@@ -92,7 +92,7 @@ describe("PostCompletionChecker - True Integration Test", () => {
         await rm(TEST_DIR, { recursive: true, force: true });
         getProjectContextSpy?.mockRestore();
         buildSystemPromptMessagesSpy?.mockRestore();
-        getNudgeServiceInstanceSpy?.mockRestore();
+        getSkillServiceInstanceSpy?.mockRestore();
         getToolsObjectSpy?.mockRestore();
         mock.restore();
     });

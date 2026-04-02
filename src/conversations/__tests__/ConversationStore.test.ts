@@ -1043,7 +1043,6 @@ describe("ConversationStore", () => {
                     eventTagCount: 1,
                     replyTargets: [],
                     articleReferences: [],
-                    nudgeEventIds: [],
                     skillEventIds: [],
                 },
                 recipients: [{
@@ -1096,7 +1095,6 @@ describe("ConversationStore", () => {
                     eventTagCount: 1,
                     replyTargets: [],
                     articleReferences: [],
-                    nudgeEventIds: [],
                     skillEventIds: [],
                 },
                 recipients: [{
