@@ -1,5 +1,5 @@
 ---
-name: Filesystem Read
+name: Read access
 description: Read files, search by pattern, and grep file contents in the project directory
 tools:
   - fs_read
@@ -10,7 +10,7 @@ tools:
   - home_fs_grep
 ---
 
-# Filesystem Read
+# Read access
 
 This skill provides read-only filesystem tools for the project and the agent's home directory.
 

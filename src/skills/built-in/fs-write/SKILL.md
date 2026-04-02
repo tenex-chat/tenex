@@ -1,5 +1,5 @@
 ---
-name: Filesystem Write
+name: Write access
 description: Write and edit files in the project directory
 tools:
   - fs_write
@@ -8,7 +8,7 @@ tools:
   - home_fs_edit
 ---
 
-# Filesystem Write
+# Write access
 
 This skill provides file writing and editing tools for the project and the agent's home directory.
 
