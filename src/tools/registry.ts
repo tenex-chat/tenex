@@ -25,7 +25,7 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
     return tool as CoreTool<unknown, unknown>;
 }
 import { logger } from "@/utils/logger";
-import { CORE_AGENT_TOOLS } from "@/agents/constants";
+import { CORE_AGENT_TOOLS, SKILL_PROVIDED_TOOLS } from "@/agents/constants";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createConversationGetTool } from "./implementations/conversation_get";
@@ -451,6 +451,11 @@ export function getToolsObject(
             // mcp__ entries in tool lists are no longer valid; they are injected via mcpAccess
             continue;
         } else if (name in toolFactories) {
+            // Filter out skill-provided tools - they can only be accessed via skill activation
+            if (SKILL_PROVIDED_TOOLS.includes(name as ToolName)) {
+                logger.debug(`Filtering out tool '${name}' - skill-provided tools must be activated via skills`);
+                continue;
+            }
             // Filter out conversation-required tools when no conversation available
             if (CONVERSATION_REQUIRED_TOOLS.has(name as ToolName) && !hasConversation) {
                 logger.debug(`Filtering out tool '${name}' - requires conversation context`);

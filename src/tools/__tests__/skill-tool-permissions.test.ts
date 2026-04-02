@@ -7,10 +7,36 @@ import { CORE_AGENT_TOOLS } from "@/agents/constants";
 describe("Skill Tool Permissions", () => {
     const mockContext = createMockExecutionEnvironment();
 
+    describe("skill-provided tool filtering (token savings)", () => {
+        it("should filter out shell even when it's in agent's configured tools", () => {
+            const baseTools = ["fs_read", "shell", "delegate"];
+
+            const tools = getToolsObject(baseTools, mockContext, undefined);
+            const toolNames = Object.keys(tools);
+
+            // shell is skill-provided, should NOT be loaded (saves tokens!)
+            expect(toolNames).not.toContain("shell");
+            expect(toolNames).toContain("fs_read"); // Core tool, always present
+            expect(toolNames).toContain("delegate"); // Not skill-provided
+        });
+
+        it("should filter out all RAG tools from agent config", () => {
+            const baseTools = ["fs_read", "rag_search", "rag_collection_create"];
+
+            const tools = getToolsObject(baseTools, mockContext, undefined);
+            const toolNames = Object.keys(tools);
+
+            // All RAG tools are skill-provided
+            expect(toolNames).not.toContain("rag_search");
+            expect(toolNames).not.toContain("rag_collection_create");
+            expect(toolNames).toContain("fs_read");
+        });
+    });
+
     describe("getToolsObject with nudge permissions", () => {
         describe("only-tool mode (highest priority)", () => {
             it("should return EXACTLY the tools specified in onlyTools with NO auto-injection", () => {
-                const baseTools = ["fs_read", "fs_write", "shell", "delegate"];
+                const baseTools = ["fs_read", "fs_write", "agents_write", "delegate"];
                 const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["fs_read", "fs_write"],
                 };
@@ -22,7 +48,7 @@ describe("Skill Tool Permissions", () => {
                 expect(toolNames).toContain("fs_read");
                 expect(toolNames).toContain("fs_write");
                 expect(toolNames).not.toContain("fs_edit"); // NO auto-injection in only-tool mode!
-                expect(toolNames).not.toContain("shell");
+                expect(toolNames).not.toContain("agents_write");
                 expect(toolNames).not.toContain("delegate");
                 expect(toolNames.length).toBe(2); // Exactly 2 tools
             });
@@ -30,22 +56,22 @@ describe("Skill Tool Permissions", () => {
             it("should completely ignore allow-tool when only-tool is set", () => {
                 const baseTools = ["fs_read"];
                 const nudgePermissions: SkillToolPermissions = {
-                    onlyTools: ["shell"],
+                    onlyTools: ["agents_write"],
                     allowTools: ["delegate", "fs_write"], // Should be ignored
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
                 const toolNames = Object.keys(tools);
 
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
                 expect(toolNames).not.toContain("delegate");
                 expect(toolNames).not.toContain("fs_read");
             });
 
             it("should completely ignore deny-tool when only-tool is set", () => {
-                const baseTools = ["fs_read", "shell", "delegate"];
+                const baseTools = ["fs_read", "agents_write", "delegate"];
                 const nudgePermissions: SkillToolPermissions = {
-                    onlyTools: ["fs_read", "shell"],
+                    onlyTools: ["fs_read", "agents_write"],
                     denyTools: ["fs_read"], // Should be ignored - fs_read should still be included
                 };
 
@@ -53,12 +79,12 @@ describe("Skill Tool Permissions", () => {
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
                 expect(toolNames).not.toContain("delegate");
             });
 
             it("should fall back to base tools when onlyTools array is empty", () => {
-                const baseTools = ["fs_read", "shell"];
+                const baseTools = ["fs_read", "agents_write"];
                 const nudgePermissions: SkillToolPermissions = {
                     onlyTools: [], // Empty array does NOT trigger only-tool mode
                 };
@@ -70,7 +96,7 @@ describe("Skill Tool Permissions", () => {
 
                 // Base tools should remain - empty onlyTools doesn't mean "no tools"
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
             });
         });
 
@@ -78,28 +104,28 @@ describe("Skill Tool Permissions", () => {
             it("should add allowed tools to the base set", () => {
                 const baseTools = ["fs_read"];
                 const nudgePermissions: SkillToolPermissions = {
-                    allowTools: ["shell", "delegate"],
+                    allowTools: ["agents_write", "delegate"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
                 expect(toolNames).toContain("delegate");
             });
 
             it("should not duplicate tools already in base set", () => {
-                const baseTools = ["fs_read", "shell"];
+                const baseTools = ["fs_read", "agents_write"];
                 const nudgePermissions: SkillToolPermissions = {
-                    allowTools: ["fs_read", "shell"], // Already in base
+                    allowTools: ["fs_read", "agents_write"], // Already in base
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
                 // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
                 expect(toolNames).toContain("todo_write");
@@ -116,9 +142,9 @@ describe("Skill Tool Permissions", () => {
 
         describe("deny-tool mode", () => {
             it("should remove denied tools from the base set", () => {
-                const baseTools = ["fs_read", "fs_write", "shell", "delegate"];
+                const baseTools = ["fs_read", "fs_write", "agents_write", "delegate"];
                 const nudgePermissions: SkillToolPermissions = {
-                    denyTools: ["shell", "delegate"],
+                    denyTools: ["agents_write", "delegate"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
@@ -126,12 +152,12 @@ describe("Skill Tool Permissions", () => {
 
                 expect(toolNames).toContain("fs_read");
                 expect(toolNames).toContain("fs_write");
-                expect(toolNames).not.toContain("shell");
+                expect(toolNames).not.toContain("agents_write");
                 expect(toolNames).not.toContain("delegate");
             });
 
             it("should handle denying non-existent tools gracefully", () => {
-                const baseTools = ["fs_read", "shell"];
+                const baseTools = ["fs_read", "agents_write"];
                 const nudgePermissions: SkillToolPermissions = {
                     denyTools: ["non_existent_tool", "another_fake_tool"],
                 };
@@ -141,11 +167,11 @@ describe("Skill Tool Permissions", () => {
 
                 // Original tools should remain
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
             });
 
             it("should block auto-injected core tools (kill) when denied", () => {
-                const baseTools = ["fs_read", "shell"];
+                const baseTools = ["fs_read", "agents_write"];
                 const nudgePermissions: SkillToolPermissions = {
                     denyTools: ["kill"], // Block the auto-injected kill tool
                 };
@@ -156,7 +182,7 @@ describe("Skill Tool Permissions", () => {
                 // Core tools should NOT be auto-injected when explicitly denied (SECURITY)
                 expect(toolNames).not.toContain("kill");
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
             });
         });
 
@@ -164,7 +190,7 @@ describe("Skill Tool Permissions", () => {
             it("should apply both allow and deny (add then remove)", () => {
                 const baseTools = ["fs_read"];
                 const nudgePermissions: SkillToolPermissions = {
-                    allowTools: ["shell", "delegate"],
+                    allowTools: ["agents_write", "delegate"],
                     denyTools: ["fs_read"], // Remove the original tool
                 };
 
@@ -172,47 +198,47 @@ describe("Skill Tool Permissions", () => {
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).not.toContain("fs_read"); // Denied
-                expect(toolNames).toContain("shell"); // Allowed
+                expect(toolNames).toContain("agents_write"); // Allowed
                 expect(toolNames).toContain("delegate"); // Allowed
             });
 
             it("should deny tools even if they were added by allow", () => {
                 const baseTools = ["fs_read"];
                 const nudgePermissions: SkillToolPermissions = {
-                    allowTools: ["shell", "delegate"],
-                    denyTools: ["shell"], // Deny something we just allowed
+                    allowTools: ["agents_write", "delegate"],
+                    denyTools: ["agents_write"], // Deny something we just allowed
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).not.toContain("shell"); // Denied even though allowed
+                expect(toolNames).not.toContain("agents_write"); // Denied even though allowed
                 expect(toolNames).toContain("delegate");
             });
         });
 
         describe("no nudge permissions", () => {
             it("should return base tools when no permissions provided", () => {
-                const baseTools = ["fs_read", "shell", "delegate"];
+                const baseTools = ["fs_read", "agents_write", "delegate"];
 
                 const tools = getToolsObject(baseTools, mockContext, undefined);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
                 expect(toolNames).toContain("delegate");
             });
 
             it("should return base tools when permissions is empty object", () => {
-                const baseTools = ["fs_read", "shell"];
+                const baseTools = ["fs_read", "agents_write"];
                 const nudgePermissions: SkillToolPermissions = {};
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
             });
         });
 
@@ -250,7 +276,7 @@ describe("Skill Tool Permissions", () => {
 
         describe("auto-injection behavior", () => {
             it("should NOT auto-inject fs_edit when fs_write is in only-tools (strict exclusivity)", () => {
-                const baseTools = ["fs_read", "shell"];
+                const baseTools = ["fs_read", "agents_write"];
                 const nudgePermissions: SkillToolPermissions = {
                     onlyTools: ["fs_write"],
                 };
@@ -261,7 +287,7 @@ describe("Skill Tool Permissions", () => {
                 expect(toolNames).toContain("fs_write");
                 expect(toolNames).not.toContain("fs_edit"); // NO auto-injection in only-tool mode!
                 expect(toolNames).not.toContain("fs_read");
-                expect(toolNames).not.toContain("shell");
+                expect(toolNames).not.toContain("agents_write");
                 expect(toolNames.length).toBe(1); // Exactly 1 tool
             });
 
@@ -293,16 +319,16 @@ describe("Skill Tool Permissions", () => {
 
         describe("only-tool mode strict exclusivity", () => {
             it("should produce exact tool count with no extras", () => {
-                const baseTools = ["fs_read", "fs_write", "shell", "delegate", "ask"];
+                const baseTools = ["fs_read", "fs_write", "agents_write", "delegate", "ask"];
                 const nudgePermissions: SkillToolPermissions = {
-                    onlyTools: ["shell", "ask"],
+                    onlyTools: ["agents_write", "ask"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
                 const toolNames = Object.keys(tools);
 
                 // Exactly 2 tools, nothing else
-                expect(toolNames).toEqual(expect.arrayContaining(["shell", "ask"]));
+                expect(toolNames).toEqual(expect.arrayContaining(["agents_write", "ask"]));
                 expect(toolNames.length).toBe(2);
             });
 
@@ -313,7 +339,7 @@ describe("Skill Tool Permissions", () => {
             it("should grant tools via only-tool to agent with empty tools array", () => {
                 const baseTools: string[] = []; // Agent has no default tools
                 const nudgePermissions: SkillToolPermissions = {
-                    onlyTools: ["fs_read", "shell"],
+                    onlyTools: ["fs_read", "agents_write"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
@@ -321,7 +347,7 @@ describe("Skill Tool Permissions", () => {
 
                 // Nudge grants tools even with empty base
                 expect(toolNames).toContain("fs_read");
-                expect(toolNames).toContain("shell");
+                expect(toolNames).toContain("agents_write");
                 expect(toolNames.length).toBe(2);
             });
 
