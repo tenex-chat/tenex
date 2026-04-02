@@ -50,12 +50,12 @@ describe("shellTool env resolution", () => {
         };
     }
 
-    it("bootstraps NSEC and provides TENEX_AGENT_HOME without overwriting HOME", async () => {
+    it("bootstraps NSEC and provides AGENT_HOME without overwriting HOME", async () => {
         const { signer, context } = createShellContext();
         const shellTool = createShellTool(context);
 
         const result = await shellTool.execute({
-            command: "printf '%s\\n%s\\n%s' \"$HOME\" \"$TENEX_AGENT_HOME\" \"$NSEC\"",
+            command: "printf '%s\\n%s\\n%s' \"$HOME\" \"$AGENT_HOME\" \"$NSEC\"",
             description: "Inspect shell environment",
         });
 
@@ -66,7 +66,7 @@ describe("shellTool env resolution", () => {
         // HOME should NOT be the agent home - tools like gh rely on user's real home
         expect(output[0]).not.toBe(agentHome);
         expect(output[0].length).toBeGreaterThan(0);
-        // TENEX_AGENT_HOME provides access to agent home for scripts that need it
+        // AGENT_HOME provides access to agent home for scripts that need it
         expect(output[1]).toBe(agentHome);
         expect(output[2].startsWith("nsec1")).toBe(true);
 

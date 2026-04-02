@@ -43,19 +43,22 @@ export interface SkillFileInstallResult {
  *
  * Resolution precedence is:
  * 1. agent home (`$TENEX_BASE_DIR/home/<agent-short-pubkey>/skills`)
- * 2. project repository (`<projectPath>/skills`)
- * 3. project metadata (`$TENEX_BASE_DIR/projects/<project-dTag>/skills`)
- * 4. global (`$TENEX_BASE_DIR/skills`)
- * 5. legacy shared skills (`~/.agents/skills`)
+ * 2. agent-project (`<projectPath>/.agents/<agent-short-pubkey>/skills`)
+ * 3. project shared (`<projectPath>/.agents/skills`)
+ * 4. shared (`~/.agents/skills`)
+ * 5. built-in (bundled with source)
  */
 export interface SkillLookupContext {
-    /** Agent pubkey whose home-scoped skills should be considered */
+    /** Agent pubkey whose home-scoped and agent-project skills should be considered */
     agentPubkey?: string;
-    /** Project repository base path for workspace-scoped skills */
+    /** Project repository base path for project-scoped skills */
     projectPath?: string;
-    /** Project d-tag whose project-scoped skills should be considered */
-    projectDTag?: string;
 }
+
+/**
+ * Individual skill data with content, name, and attached files
+ */
+export type SkillStoreScope = "agent" | "agent-project" | "project" | "shared" | "built-in";
 
 /**
  * Individual skill data with content, name, and attached files
@@ -77,6 +80,8 @@ export interface SkillData {
      * Absolute path to this skill's local directory.
      * Used by SkillToolLoader to locate the tools/ subdirectory.
      */
+    /** Which skill store scope this skill was loaded from */
+    scope?: SkillStoreScope;
     localDir?: string;
     /**
      * Tool names declared in the skill's SKILL.md frontmatter.

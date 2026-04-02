@@ -4,7 +4,7 @@ import type { PromptFragment } from "../core/types";
  * Todo Usage Fragment
  *
  * Recommends agents establish a todo list when delegating tasks.
- * The delegation tools append a system reminder nudge when no todos exist.
+ * The delegation tools append a system reminder when no todos exist.
  */
 export const TodoUsageFragment: PromptFragment = {
     id: "todo-before-delegation",

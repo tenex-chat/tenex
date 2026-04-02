@@ -117,7 +117,7 @@ export function createLessonLearnTool(context: ToolExecutionContext): AISdkTool 
 
 Use when the user instructs you to remember something about YOUR BEHAVIOR or PREFERENCES, or when the user instructs you to change some behavior. Lessons persist across conversations and help build institutional memory. Categorize and tag appropriately for future discovery.
 
-**CRITICAL:** Only use this for content ABOUT YOUR BEHAVIOR. For content about the project itself, write git-tracked docs under \`<projectRoot>/tenex/docs/\`, use project-specific \`+\` files under \`$TENEX_AGENT_HOME/projects/<project-dTag>/docs/\` for your own persistent project memory, or update the root \`AGENTS.md\` for team-shared conventions.
+**CRITICAL:** Only use this for content ABOUT YOUR BEHAVIOR. For content about the project itself, write git-tracked docs under \`<projectRoot>/tenex/docs/\`, use project-specific \`+\` files under \`$AGENT_HOME/projects/<project-dTag>/docs/\` for your own persistent project memory, or update the root \`AGENTS.md\` for team-shared conventions.
 
 **NEVER use for:**
 - Project conventions or patterns

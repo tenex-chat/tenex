@@ -1,17 +1,14 @@
-import { exec, spawn, type ExecException } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { agentEnvironmentService } from "@/services/AgentEnvironmentService";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { tool } from "ai";
 import { z } from "zod";
-
-const execAsync = promisify(exec);
 
 /**
  * Commands known to use non-zero exit codes for non-error conditions.
@@ -338,13 +335,49 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         return result;
     }
 
-    try {
-        const { stdout, stderr } = await execAsync(command, {
+    const timeoutMs = timeout != null ? timeout * 1000 : undefined;
+
+    // Use spawn with stdin disconnected to prevent commands from blocking on stdin.
+    // Without this, commands like `cat`, `grep` (no file args), `wc -l`, `read`, etc.
+    // block indefinitely waiting for input, get killed by timeout, and crash with
+    // "Missing exit code" because signal-killed processes have no exit code.
+    const result = await new Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: string | null }>((resolve) => {
+        const child = spawn(command, [], {
             cwd: workingDir,
-            timeout: timeout != null ? timeout * 1000 : undefined,
+            shell: true,
+            stdio: ["ignore", "pipe", "pipe"],
             env: resolvedEnv,
         });
 
+        let stdout = "";
+        let stderr = "";
+        let killed = false;
+
+        child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+        child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        if (timeoutMs) {
+            timer = setTimeout(() => {
+                killed = true;
+                child.kill("SIGTERM");
+            }, timeoutMs);
+        }
+
+        child.on("close", (code, signal) => {
+            if (timer) clearTimeout(timer);
+            resolve({
+                stdout,
+                stderr,
+                exitCode: code,
+                signal: killed ? "SIGTERM" : (signal || null),
+            });
+        });
+    });
+
+    const { stdout, stderr, exitCode, signal } = result;
+
+    if (exitCode === 0) {
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : "");
 
         span?.addEvent("shell.execute_complete", {
@@ -362,86 +395,71 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         });
 
         return output;
-    } catch (error) {
-        // Handle exec errors - which include non-zero exit codes
-        const execError = error as ExecException & { stdout?: string; stderr?: string };
-        const exitCode = execError.code ?? null;
-        const stdout = execError.stdout || "";
-        const stderr = execError.stderr || "";
-        const signal = execError.signal || null;
-
-        // Check if this is an expected non-zero exit code
-        if (exitCode !== null) {
-            const { expected, explanation } = isExpectedNonZeroExit(command, exitCode);
-
-            if (expected) {
-                // This is NOT an error - it's expected behavior (e.g., grep found no matches)
-                const result: ShellExpectedNonZeroResult = {
-                    type: "expected-non-zero-exit",
-                    command: command.substring(0, 200),
-                    exitCode,
-                    stdout,
-                    stderr,
-                    explanation: explanation || `Command exited with code ${exitCode}`,
-                };
-
-                span?.addEvent("shell.execute_complete", {
-                    has_stdout: !!stdout,
-                    has_stderr: !!stderr,
-                    exit_code: exitCode,
-                    expected_non_zero: true,
-                    explanation: explanation,
-                });
-
-                logger.info("Shell command completed with expected non-zero exit", {
-                    command,
-                    exitCode,
-                    explanation,
-                    hasStdout: !!stdout,
-                    hasStderr: !!stderr,
-                });
-
-                // Return structured result - NOT throwing an error
-                return result;
-            }
-        }
-
-        // This is a genuine error - return structured error for LLM recovery
-        const errorResult: ShellErrorResult = {
-            type: "shell-error",
-            command: command.substring(0, 200),
-            exitCode,
-            error: execError.message,
-            stdout,
-            stderr,
-            signal,
-        };
-
-        if (exitCode == null) {
-            throw new Error("[ShellTool] Missing exit code for shell error result.");
-        }
-
-        span?.addEvent("shell.execute_error", {
-            exit_code: exitCode,
-            signal: signal ?? "none",
-            error_message: execError.message.substring(0, 200),
-            has_stdout: !!stdout,
-            has_stderr: !!stderr,
-        });
-
-        logger.error("Shell command failed", {
-            command,
-            exitCode,
-            signal,
-            error: execError.message,
-            hasStdout: !!stdout,
-            hasStderr: !!stderr,
-        });
-
-        // Return structured error instead of throwing
-        // This allows the LLM to see the full context and make recovery decisions
-        return errorResult;
     }
+
+    // Check if this is an expected non-zero exit code
+    if (exitCode !== null) {
+        const { expected, explanation } = isExpectedNonZeroExit(command, exitCode);
+
+        if (expected) {
+            const expectedResult: ShellExpectedNonZeroResult = {
+                type: "expected-non-zero-exit",
+                command: command.substring(0, 200),
+                exitCode,
+                stdout,
+                stderr,
+                explanation: explanation || `Command exited with code ${exitCode}`,
+            };
+
+            span?.addEvent("shell.execute_complete", {
+                has_stdout: !!stdout,
+                has_stderr: !!stderr,
+                exit_code: exitCode,
+                expected_non_zero: true,
+                explanation: explanation,
+            });
+
+            logger.info("Shell command completed with expected non-zero exit", {
+                command,
+                exitCode,
+                explanation,
+                hasStdout: !!stdout,
+                hasStderr: !!stderr,
+            });
+
+            return expectedResult;
+        }
+    }
+
+    // Genuine error — return structured error for LLM recovery
+    const errorResult: ShellErrorResult = {
+        type: "shell-error",
+        command: command.substring(0, 200),
+        exitCode,
+        error: signal ? `Process killed by ${signal}` : `Command exited with code ${exitCode}`,
+        stdout,
+        stderr,
+        signal,
+    };
+
+    span?.addEvent("shell.execute_error", {
+        exit_code: exitCode ?? -1,
+        signal: signal ?? "none",
+        error_message: errorResult.error.substring(0, 200),
+        has_stdout: !!stdout,
+        has_stderr: !!stderr,
+    });
+
+    logger.error("Shell command failed", {
+        command,
+        exitCode,
+        signal,
+        error: errorResult.error,
+        hasStdout: !!stdout,
+        hasStderr: !!stderr,
+    });
+
+    return errorResult;
 }
 
 /**
@@ -479,7 +497,7 @@ OTHER RESTRICTIONS:
 - NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
 - Commands run with timeout in seconds (default: 30s, max: 600s / 10 minutes)
 - Shell sessions auto-load env vars from TENEX .env files with precedence agent > project > global.
-- \`~\` resolves to the user's real home directory (via $HOME). To access your agent home, use \`$TENEX_AGENT_HOME\`.
+- \`~\` resolves to the user's real home directory (via $HOME). To access your agent home, use \`$AGENT_HOME\`.
 
 Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.
 - Time-based delays: Use shell(sleep N) to wait N seconds (e.g., shell(sleep 5) for 5 seconds).`,

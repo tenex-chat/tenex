@@ -10,6 +10,7 @@ export type {
     SkillFileInfo,
     SkillFileInstallResult,
     SkillLookupContext,
+    SkillStoreScope,
     SkillToolPermissions,
 } from "./types";
 export {

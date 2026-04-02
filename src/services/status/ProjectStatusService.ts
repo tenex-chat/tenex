@@ -410,10 +410,8 @@ export class ProjectStatusService {
             }
 
             const projectCtx = this.projectContext;
-            const projectDTag = projectCtx.project.dTag || projectCtx.project.tagValue("d") || undefined;
             const availableSkills = await SkillService.getInstance().listAvailableSkills({
                 projectPath,
-                projectDTag,
             });
             const skillAgentMap = new Map<string, Set<string>>();
 
@@ -429,7 +427,6 @@ export class ProjectStatusService {
                         await SkillService.getInstance().listAvailableSkills({
                             agentPubkey: agent.pubkey,
                             projectPath,
-                            projectDTag,
                         })
                     )
                         .map((skill) => skill.identifier)

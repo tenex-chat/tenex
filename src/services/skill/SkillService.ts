@@ -3,12 +3,12 @@ import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getAgentHomeDirectory } from "@/lib/agent-home";
+import { getAgentHomeDirectory, getShortPubkey } from "@/lib/agent-home";
 import { ensureDirectory } from "@/lib/fs";
 import { slugifyIdentifier } from "@/lib/string";
 import { getNDK } from "@/nostr";
 import { NDKKind } from "@/nostr/kinds";
-import { config } from "@/services/ConfigService";
+import { homedir } from "node:os";
 import { SkillWhitelistService } from "./SkillWhitelistService";
 import {
     type ParsedSkillDocument,
@@ -22,6 +22,7 @@ import type {
     SkillFileInstallResult,
     SkillLookupContext,
     SkillResult,
+    SkillStoreScope,
 } from "./types";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
@@ -43,7 +44,7 @@ interface LocalSkillRecord {
     metadata?: StoredSkillMetadata;
 }
 
-type SkillStoreScope = "agent" | "project-repo" | "project" | "global" | "legacy-agents" | "built-in";
+// SkillStoreScope imported from ./types
 
 interface SkillStoreDirectory {
     dir: string;
@@ -62,14 +63,12 @@ interface InFlightAvailableSkillsEntry {
 }
 
 /**
- * Service for resolving the effective local skill set across agent, project-repo,
- * project, global directories, plus the shared ~/.agents fallback.
+ * Service for resolving the effective local skill set across scoped directories.
  *
- * Remote kind:4202 skills still hydrate into the global store at
- * $TENEX_BASE_DIR/skills/<id>/SKILL.md.
+ * Remote kind:4202 skills hydrate into ~/.agents/skills/<id>/SKILL.md.
  *
  * When the same local skill ID exists in multiple scopes, precedence is:
- * agent > project-repo > project > global > ~/.agents.
+ * agent > agent-project > project > shared > built-in.
  */
 export class SkillService {
     private static instance: SkillService;
@@ -110,7 +109,6 @@ export class SkillService {
     private buildAvailableSkillsCacheKey(lookupContext: SkillLookupContext = {}): string {
         return JSON.stringify({
             agentPubkey: lookupContext.agentPubkey?.trim() || "",
-            projectDTag: lookupContext.projectDTag?.trim() || "",
             projectPath: lookupContext.projectPath
                 ? path.resolve(lookupContext.projectPath)
                 : "",
@@ -185,36 +183,6 @@ export class SkillService {
         return Array.from(visibleSignatures.values()).join("|");
     }
 
-    private async getGlobalSkillsBaseDir(ensureExists = true): Promise<string> {
-        const skillsDir = config.getConfigPath("skills");
-        if (ensureExists) {
-            await ensureDirectory(skillsDir);
-        }
-        return skillsDir;
-    }
-
-    private async getProjectSkillsBaseDir(
-        projectDTag: string,
-        ensureExists = false
-    ): Promise<string> {
-        const skillsDir = path.join(config.getConfigPath("projects"), projectDTag, "skills");
-        if (ensureExists) {
-            await ensureDirectory(skillsDir);
-        }
-        return skillsDir;
-    }
-
-    private async getProjectRepoSkillsBaseDir(
-        projectPath: string,
-        ensureExists = false
-    ): Promise<string> {
-        const skillsDir = path.join(projectPath, "skills");
-        if (ensureExists) {
-            await ensureDirectory(skillsDir);
-        }
-        return skillsDir;
-    }
-
     private async getAgentSkillsBaseDir(
         agentPubkey: string,
         ensureExists = false
@@ -226,16 +194,42 @@ export class SkillService {
         return skillsDir;
     }
 
-    private async getLegacyAgentsSkillsBaseDir(ensureExists = false): Promise<string> {
-        const skillsDir = config.getLegacyAgentsSkillsPath();
+    private async getAgentProjectSkillsBaseDir(
+        projectPath: string,
+        agentPubkey: string,
+        ensureExists = false
+    ): Promise<string> {
+        const skillsDir = path.join(projectPath, ".agents", getShortPubkey(agentPubkey), "skills");
         if (ensureExists) {
             await ensureDirectory(skillsDir);
         }
         return skillsDir;
     }
 
+    private async getProjectSharedSkillsBaseDir(
+        projectPath: string,
+        ensureExists = false
+    ): Promise<string> {
+        const skillsDir = path.join(projectPath, ".agents", "skills");
+        if (ensureExists) {
+            await ensureDirectory(skillsDir);
+        }
+        return skillsDir;
+    }
+
+    private async getSharedSkillsBaseDir(ensureExists = false): Promise<string> {
+        const skillsDir = path.join(homedir(), ".agents", "skills");
+        if (ensureExists) {
+            await ensureDirectory(skillsDir);
+        }
+        return skillsDir;
+    }
+
+    /**
+     * Hydration target: remote skills are written to ~/.agents/skills/<id>/
+     */
     private async getSkillsBaseDir(): Promise<string> {
-        return this.getGlobalSkillsBaseDir(true);
+        return this.getSharedSkillsBaseDir(true);
     }
 
     private async getSkillDir(skillId: string, ensureExists = true): Promise<string> {
@@ -259,28 +253,23 @@ export class SkillService {
             });
         }
 
+        if (lookupContext.projectPath && lookupContext.agentPubkey) {
+            directories.push({
+                scope: "agent-project",
+                dir: await this.getAgentProjectSkillsBaseDir(lookupContext.projectPath, lookupContext.agentPubkey),
+            });
+        }
+
         if (lookupContext.projectPath) {
             directories.push({
-                scope: "project-repo",
-                dir: await this.getProjectRepoSkillsBaseDir(lookupContext.projectPath),
-            });
-        }
-
-        if (lookupContext.projectDTag) {
-            directories.push({
                 scope: "project",
-                dir: await this.getProjectSkillsBaseDir(lookupContext.projectDTag),
+                dir: await this.getProjectSharedSkillsBaseDir(lookupContext.projectPath),
             });
         }
 
         directories.push({
-            scope: "global",
-            dir: await this.getGlobalSkillsBaseDir(true),
-        });
-
-        directories.push({
-            scope: "legacy-agents",
-            dir: await this.getLegacyAgentsSkillsBaseDir(false),
+            scope: "shared",
+            dir: await this.getSharedSkillsBaseDir(false),
         });
 
         // Built-in skills bundled with source code
@@ -505,6 +494,7 @@ export class SkillService {
                 content: skillDocument.content,
                 name: metadata?.name,
                 installedFiles,
+                scope: record.scope,
                 localDir: skillDir,
                 toolNames: metadata?.tools,
             };

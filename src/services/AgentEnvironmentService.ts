@@ -102,8 +102,14 @@ export class AgentEnvironmentService {
             mergedEnv.HOME = originalHome;
         }
 
-        // Provide agent home as a separate variable (TENEX_AGENT_HOME)
-        mergedEnv.TENEX_AGENT_HOME = path.dirname(agentEnvPath);
+        // Provide agent home and path variables
+        mergedEnv.AGENT_HOME = path.dirname(agentEnvPath);
+        if (originalHome !== undefined) {
+            mergedEnv.USER_HOME = originalHome;
+        }
+        if (params.projectPath) {
+            mergedEnv.PROJECT_BASE = params.projectPath;
+        }
 
         return mergedEnv;
     }

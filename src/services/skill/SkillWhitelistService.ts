@@ -9,7 +9,7 @@ import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
 const tracer = trace.getTracer("tenex.skill-whitelist-service");
 
 /**
- * Whitelisted skill item — covers both legacy nudges (kind:4201) and skills (kind:4202)
+ * Whitelisted skill item (kind:4202)
  */
 export interface WhitelistItem {
     /** The event ID of the whitelisted skill */
@@ -18,8 +18,8 @@ export interface WhitelistItem {
     identifier?: string;
     /** Short event ID kept locally for fallback mapping/debugging */
     shortId?: string;
-    /** The kind of the referenced event (4201 for legacy nudge, 4202 for skill) */
-    kind: typeof NDKKind.AgentNudge | typeof NDKKind.AgentSkill;
+    /** The kind of the referenced event */
+    kind: typeof NDKKind.AgentSkill;
     /** The name of the skill (from title tag) */
     name?: string;
     /** Description of the skill (full content - truncation is done in presentation layer) */
@@ -40,7 +40,7 @@ function getSkillDescription(event: NDKEvent): string {
  * Cached whitelist data with fetch timestamp
  */
 interface WhitelistCache {
-    /** All whitelisted skills (including legacy nudges treated as skills) */
+    /** All whitelisted skills */
     skills: WhitelistItem[];
     /** When this cache was last updated */
     lastUpdated: number;
@@ -53,9 +53,9 @@ const FETCH_TIMEOUT_MS = 10_000;
  * Service for managing skill whitelists.
  *
  * This service subscribes to kind:14202 events from whitelisted pubkeys,
- * which are NIP-51-like lists that e-tag nudge (kind:4201) and skill (kind:4202) events.
+ * which are NIP-51-like lists that e-tag skill (kind:4202) events.
  *
- * Both kinds are treated uniformly as skills. The service maintains a cached list
+ * The service maintains a cached list
  * of all whitelisted skills. Cache is built incrementally as events stream in
  * from the subscription — initialization never blocks on EOSE.
  */
@@ -137,7 +137,7 @@ export class SkillWhitelistService {
 
         this.subscription = ndk.subscribe(
             {
-                kinds: [NDKKind.NudgeSkillWhitelist],
+                kinds: [NDKKind.SkillWhitelist],
                 authors,
             },
             {
@@ -262,7 +262,6 @@ export class SkillWhitelistService {
                     }
                 }
 
-                // Build cache — both nudge and skill kinds are unified into skills[]
                 interface WhitelistDraft extends WhitelistItem {
                     sourceDTag?: string;
                     sourceName?: string;
@@ -280,15 +279,13 @@ export class SkillWhitelistService {
                     const name = event.tagValue("name") || undefined;
                     const shortId = event.id.substring(0, 12).toLowerCase();
 
-                    if (event.kind === NDKKind.AgentNudge || event.kind === NDKKind.AgentSkill) {
+                    if (event.kind === NDKKind.AgentSkill) {
                         skillDrafts.push({
                             eventId: event.id,
-                            kind: event.kind as typeof NDKKind.AgentNudge | typeof NDKKind.AgentSkill,
+                            kind: event.kind as typeof NDKKind.AgentSkill,
                             name: title || name || dTag,
                             shortId,
-                            description: event.kind === NDKKind.AgentNudge
-                                ? event.content
-                                : getSkillDescription(event),
+                            description: getSkillDescription(event),
                             whitelistedBy,
                             sourceDTag: dTag,
                             sourceName: name,
@@ -347,7 +344,7 @@ export class SkillWhitelistService {
     }
 
     /**
-     * Get all whitelisted skills (includes legacy nudges treated as skills)
+     * Get all whitelisted skills
      */
     getWhitelistedSkills(): WhitelistItem[] {
         if (!this.initialized) {

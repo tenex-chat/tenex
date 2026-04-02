@@ -36,7 +36,7 @@ export interface InjectedFile {
 /**
  * Get the short pubkey (first 8 characters) for an agent.
  */
-function getShortPubkey(pubkey: string): string {
+export function getShortPubkey(pubkey: string): string {
     return pubkey.slice(0, 8);
 }
 

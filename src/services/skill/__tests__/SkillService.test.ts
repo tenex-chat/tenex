@@ -19,11 +19,12 @@ const directories = new Set<string>();
 const symlinks = new Map<string, string>(); // symlink path -> target path
 const fileMtimestamps = new Map<string, number>();
 const AGENT_PUBKEY = "a".repeat(64);
-const PROJECT_DTAG = "TENEX-ff3ssq";
+const AGENT_SHORT_PUBKEY = AGENT_PUBKEY.slice(0, 8);
+const PROJECT_PATH = "/path/to/my-project";
 const AVAILABLE_SKILLS_CACHE_TTL_MS = 5_000;
 const LOOKUP_CONTEXT = {
     agentPubkey: AGENT_PUBKEY,
-    projectDTag: PROJECT_DTAG,
+    projectPath: PROJECT_PATH,
 };
 let nextMockMtimeMs = 1;
 let mockNowMs = 0;
@@ -132,7 +133,7 @@ beforeEach(() => {
     readFileCallCount = 0;
     readdirCallCount = 0;
     statCallCount = 0;
-    ensureMockDirectory("/tmp/test-tenex/skills");
+    ensureMockDirectory(`${homedir()}/.agents/skills`);
 
     mockFetch = mock(() =>
         Promise.resolve(
@@ -249,14 +250,14 @@ afterEach(() => {
 describe("SkillService", () => {
     it("lists local skills from SKILL.md frontmatter and body", async () => {
         seedFile(
-            "/tmp/test-tenex/skills/custom-id/SKILL.md",
+            `${homedir()}/.agents/skills/custom-id/SKILL.md`,
             createSkillDocument({
                 name: "custom-id",
                 description: "Frontmatter-backed local skill description",
                 content: "Local skill content",
             })
         );
-        seedFile("/tmp/test-tenex/skills/custom-id/helper.ts", "export const helper = true;");
+        seedFile(`${homedir()}/.agents/skills/custom-id/helper.ts`, "export const helper = true;");
 
         const skills = await SkillService.getInstance().listAvailableSkills();
 
@@ -269,7 +270,7 @@ describe("SkillService", () => {
 
     it("reuses cached available skills when the visible skill tree has not changed", async () => {
         seedFile(
-            "/tmp/test-tenex/skills/cache-test/SKILL.md",
+            `${homedir()}/.agents/skills/cache-test/SKILL.md`,
             createSkillDocument({
                 name: "cache-test",
                 description: "Cache test description",
@@ -293,7 +294,7 @@ describe("SkillService", () => {
 
     it("does not rescan the skill tree within the TTL even when disk contents change", async () => {
         seedFile(
-            "/tmp/test-tenex/skills/existing-skill/SKILL.md",
+            `${homedir()}/.agents/skills/existing-skill/SKILL.md`,
             createSkillDocument({
                 name: "existing-skill",
                 description: "Existing description",
@@ -307,7 +308,7 @@ describe("SkillService", () => {
         const statAfterInitialLoad = statCallCount;
 
         seedFile(
-            "/tmp/test-tenex/skills/new-skill/SKILL.md",
+            `${homedir()}/.agents/skills/new-skill/SKILL.md`,
             createSkillDocument({
                 name: "new-skill",
                 description: "New description",
@@ -326,7 +327,7 @@ describe("SkillService", () => {
 
     it("refreshes cached available skills when a new skill appears on disk after the TTL elapses", async () => {
         seedFile(
-            "/tmp/test-tenex/skills/existing-skill/SKILL.md",
+            `${homedir()}/.agents/skills/existing-skill/SKILL.md`,
             createSkillDocument({
                 name: "existing-skill",
                 description: "Existing description",
@@ -338,7 +339,7 @@ describe("SkillService", () => {
         const readsAfterInitialLoad = readFileCallCount;
 
         seedFile(
-            "/tmp/test-tenex/skills/new-skill/SKILL.md",
+            `${homedir()}/.agents/skills/new-skill/SKILL.md`,
             createSkillDocument({
                 name: "new-skill",
                 description: "New description",
@@ -371,12 +372,12 @@ describe("SkillService", () => {
 
         expect(initialDocument.length).toBe(updatedDocument.length);
 
-        seedFile("/tmp/test-tenex/skills/mutable-skill/SKILL.md", initialDocument);
+        seedFile(`${homedir()}/.agents/skills/mutable-skill/SKILL.md`, initialDocument);
 
         const initialSkills = await SkillService.getInstance().listAvailableSkills();
         const readsAfterInitialLoad = readFileCallCount;
 
-        seedFile("/tmp/test-tenex/skills/mutable-skill/SKILL.md", updatedDocument);
+        seedFile(`${homedir()}/.agents/skills/mutable-skill/SKILL.md`, updatedDocument);
 
         mockNowMs += AVAILABLE_SKILLS_CACHE_TTL_MS + 1;
         const refreshedSkills = await SkillService.getInstance().listAvailableSkills();
@@ -388,25 +389,17 @@ describe("SkillService", () => {
         expect(readFileCallCount).toBeGreaterThan(readsAfterInitialLoad);
     });
 
-    it("prefers project skills over global skills when identifiers conflict", async () => {
+    it("prefers project skills over shared skills when identifiers conflict", async () => {
         seedFile(
             `${homedir()}/.agents/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "poster-kit",
-                description: "Legacy poster description",
-                content: "Legacy poster skill",
+                description: "Shared poster description",
+                content: "Shared poster skill",
             })
         );
         seedFile(
-            "/tmp/test-tenex/skills/poster-kit/SKILL.md",
-            createSkillDocument({
-                name: "poster-kit",
-                description: "Global poster description",
-                content: "Global poster skill",
-            })
-        );
-        seedFile(
-            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/poster-kit/SKILL.md",
+            `${PROJECT_PATH}/.agents/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "poster-kit",
                 description: "Project poster description",
@@ -415,11 +408,11 @@ describe("SkillService", () => {
         );
 
         const skills = await SkillService.getInstance().listAvailableSkills({
-            projectDTag: PROJECT_DTAG,
+            projectPath: PROJECT_PATH,
         });
         const result = await SkillService.getInstance().fetchSkills(
             ["poster-kit"],
-            { projectDTag: PROJECT_DTAG }
+            { projectPath: PROJECT_PATH }
         );
 
         expect(skills).toHaveLength(1);
@@ -429,25 +422,17 @@ describe("SkillService", () => {
         expect(result.skills[0].content).toBe("Project poster skill");
     });
 
-    it("prefers agent skills over project and global skills when identifiers conflict", async () => {
+    it("prefers agent skills over project and shared skills when identifiers conflict", async () => {
         seedFile(
             `${homedir()}/.agents/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "poster-kit",
-                description: "Legacy poster description",
-                content: "Legacy poster skill",
+                description: "Shared poster description",
+                content: "Shared poster skill",
             })
         );
         seedFile(
-            "/tmp/test-tenex/skills/poster-kit/SKILL.md",
-            createSkillDocument({
-                name: "poster-kit",
-                description: "Global poster description",
-                content: "Global poster skill",
-            })
-        );
-        seedFile(
-            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/poster-kit/SKILL.md",
+            `${PROJECT_PATH}/.agents/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "poster-kit",
                 description: "Project poster description",
@@ -455,7 +440,7 @@ describe("SkillService", () => {
             })
         );
         seedFile(
-            "/tmp/test-tenex/home/aaaaaaaa/skills/poster-kit/SKILL.md",
+            `/tmp/test-tenex/home/${AGENT_SHORT_PUBKEY}/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "poster-kit",
                 description: "Agent poster description",
@@ -476,14 +461,14 @@ describe("SkillService", () => {
         expect(result.skills[0].content).toBe("Agent poster skill");
     });
 
-    it("loads project-repo skills when projectPath is provided", async () => {
+    it("loads project skills when projectPath is provided", async () => {
         const projectRepoPath = "/path/to/my-project";
         seedFile(
-            `${projectRepoPath}/skills/repo-skill/SKILL.md`,
+            `${projectRepoPath}/.agents/skills/repo-skill/SKILL.md`,
             createSkillDocument({
                 name: "repo-skill",
-                description: "Project repo skill description",
-                content: "Project repo skill content",
+                description: "Project skill description",
+                content: "Project skill content",
             })
         );
 
@@ -497,58 +482,85 @@ describe("SkillService", () => {
 
         expect(skills).toHaveLength(1);
         expect(skills[0].identifier).toBe("repo-skill");
-        expect(skills[0].content).toBe("Project repo skill content");
+        expect(skills[0].content).toBe("Project skill content");
         expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].content).toBe("Project repo skill content");
+        expect(result.skills[0].content).toBe("Project skill content");
     });
 
-    it("prefers project-repo skills over project-metadata skills when identifiers conflict", async () => {
+    it("loads agent-project skills when both agentPubkey and projectPath are provided", async () => {
         const projectRepoPath = "/path/to/my-project";
         seedFile(
-            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/conflict-skill/SKILL.md",
+            `${projectRepoPath}/.agents/${AGENT_SHORT_PUBKEY}/skills/agent-proj-skill/SKILL.md`,
             createSkillDocument({
-                name: "conflict-skill",
-                description: "Project metadata description",
-                content: "Project metadata skill",
-            })
-        );
-        seedFile(
-            `${projectRepoPath}/skills/conflict-skill/SKILL.md`,
-            createSkillDocument({
-                name: "conflict-skill",
-                description: "Project repo description",
-                content: "Project repo skill",
+                name: "agent-proj-skill",
+                description: "Agent-project skill description",
+                content: "Agent-project skill content",
             })
         );
 
         const skills = await SkillService.getInstance().listAvailableSkills({
+            agentPubkey: AGENT_PUBKEY,
             projectPath: projectRepoPath,
-            projectDTag: PROJECT_DTAG,
+        });
+        const result = await SkillService.getInstance().fetchSkills(
+            ["agent-proj-skill"],
+            { agentPubkey: AGENT_PUBKEY, projectPath: projectRepoPath }
+        );
+
+        expect(skills).toHaveLength(1);
+        expect(skills[0].identifier).toBe("agent-proj-skill");
+        expect(skills[0].content).toBe("Agent-project skill content");
+        expect(result.skills).toHaveLength(1);
+        expect(result.skills[0].content).toBe("Agent-project skill content");
+    });
+
+    it("prefers agent-project skills over project-shared skills when identifiers conflict", async () => {
+        const projectRepoPath = "/path/to/my-project";
+        seedFile(
+            `${projectRepoPath}/.agents/skills/conflict-skill/SKILL.md`,
+            createSkillDocument({
+                name: "conflict-skill",
+                description: "Project shared description",
+                content: "Project shared skill",
+            })
+        );
+        seedFile(
+            `${projectRepoPath}/.agents/${AGENT_SHORT_PUBKEY}/skills/conflict-skill/SKILL.md`,
+            createSkillDocument({
+                name: "conflict-skill",
+                description: "Agent-project description",
+                content: "Agent-project skill",
+            })
+        );
+
+        const skills = await SkillService.getInstance().listAvailableSkills({
+            agentPubkey: AGENT_PUBKEY,
+            projectPath: projectRepoPath,
         });
         const result = await SkillService.getInstance().fetchSkills(
             ["conflict-skill"],
-            { projectPath: projectRepoPath, projectDTag: PROJECT_DTAG }
+            { agentPubkey: AGENT_PUBKEY, projectPath: projectRepoPath }
         );
 
         expect(skills).toHaveLength(1);
         expect(skills[0].identifier).toBe("conflict-skill");
-        expect(skills[0].content).toBe("Project repo skill");
+        expect(skills[0].content).toBe("Agent-project skill");
         expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].content).toBe("Project repo skill");
+        expect(result.skills[0].content).toBe("Agent-project skill");
     });
 
-    it("prefers agent skills over project-repo skills when identifiers conflict", async () => {
+    it("prefers agent skills over project skills when identifiers conflict", async () => {
         const projectRepoPath = "/path/to/my-project";
         seedFile(
-            `${projectRepoPath}/skills/agent-vs-repo/SKILL.md`,
+            `${projectRepoPath}/.agents/skills/agent-vs-repo/SKILL.md`,
             createSkillDocument({
                 name: "agent-vs-repo",
-                description: "Project repo description",
-                content: "Project repo skill",
+                description: "Project description",
+                content: "Project skill",
             })
         );
         seedFile(
-            "/tmp/test-tenex/home/aaaaaaaa/skills/agent-vs-repo/SKILL.md",
+            `/tmp/test-tenex/home/${AGENT_SHORT_PUBKEY}/skills/agent-vs-repo/SKILL.md`,
             createSkillDocument({
                 name: "agent-vs-repo",
                 description: "Agent skill description",
@@ -572,7 +584,7 @@ describe("SkillService", () => {
         expect(result.skills[0].content).toBe("Agent skill");
     });
 
-    it("resolves symlinked skill directories in project-repo scope", async () => {
+    it("resolves symlinked skill directories in project scope", async () => {
         const projectRepoPath = "/path/to/my-project";
         const symlinkTarget = "/elsewhere/shared-skills/notion-api";
 
@@ -586,8 +598,8 @@ describe("SkillService", () => {
             })
         );
 
-        // Create a symlink in the project-repo skills directory pointing to the target
-        seedSymlink(`${projectRepoPath}/skills/notion-api`, symlinkTarget);
+        // Create a symlink in the project skills directory pointing to the target
+        seedSymlink(`${projectRepoPath}/.agents/skills/notion-api`, symlinkTarget);
 
         const skills = await SkillService.getInstance().listAvailableSkills({
             projectPath: projectRepoPath,
@@ -635,7 +647,7 @@ describe("SkillService", () => {
             })
         );
         seedFile(
-            "/tmp/test-tenex/skills/fallback-kit/SKILL.md",
+            `${homedir()}/.agents/skills/fallback-kit/SKILL.md`,
             createSkillDocument({
                 name: "fallback-kit",
                 description: "Global fallback description",
@@ -658,7 +670,7 @@ describe("SkillService", () => {
 
     it("treats missing project and agent skill directories as empty", async () => {
         seedFile(
-            "/tmp/test-tenex/skills/global-only/SKILL.md",
+            `${homedir()}/.agents/skills/global-only/SKILL.md`,
             createSkillDocument({
                 name: "global-only",
                 description: "Global only description",
@@ -697,7 +709,7 @@ describe("SkillService", () => {
         expect(result.skills[0].description).toBe("Creates posters from structured inputs");
         expect(result.skills[0].content).toBe("Make a poster");
         const storedSkillDocument = files
-            .get(normalizePath("/tmp/test-tenex/skills/make-poster/SKILL.md"))
+            .get(normalizePath(`${homedir()}/.agents/skills/make-poster/SKILL.md`))
             ?.toString("utf-8");
         expect(storedSkillDocument).toContain('name: "Make Poster"');
         expect(storedSkillDocument).toContain(
@@ -720,7 +732,7 @@ describe("SkillService", () => {
         skillEvent.tags = [["title", "Remote Scoped"]];
 
         seedFile(
-            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/local-only/SKILL.md",
+            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/local-only/SKILL.md`,
             createSkillDocument({
                 name: "local-only",
                 description: "Project only description",
@@ -740,7 +752,7 @@ describe("SkillService", () => {
         expect(result.skills[0].name).toBe("Remote Scoped");
         expect(result.skills[0].content).toBe("Remote scoped skill");
         const storedScopedSkillDocument = files
-            .get(normalizePath("/tmp/test-tenex/skills/remote-scoped/SKILL.md"))
+            .get(normalizePath(`${homedir()}/.agents/skills/remote-scoped/SKILL.md`))
             ?.toString("utf-8");
         expect(storedScopedSkillDocument).toContain('name: "Remote Scoped"');
         expect(storedScopedSkillDocument).toContain('description: "Remote scoped skill"');
@@ -752,7 +764,7 @@ describe("SkillService", () => {
 
     it("reuses already-hydrated local skill content instead of re-fetching the remote event", async () => {
         seedFile(
-            "/tmp/test-tenex/skills/poster-kit/SKILL.md",
+            `${homedir()}/.agents/skills/poster-kit/SKILL.md`,
             createSkillDocument({
                 name: "Poster Kit",
                 description: "Poster skill description",

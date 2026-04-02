@@ -17,7 +17,7 @@ const DEBOUNCE_MS = 5000;
  * Pending additions survive relay echo events to prevent the race condition
  * where a relay event clobbers locally-queued-but-not-yet-published pubkeys.
  *
- * Follows the same singleton + subscription pattern as NudgeSkillWhitelistService.
+ * Follows the same singleton + subscription pattern as SkillWhitelistService.
  */
 export class OwnerAgentListService {
     private static instance: OwnerAgentListService;

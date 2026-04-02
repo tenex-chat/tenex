@@ -63,8 +63,8 @@ describe("AgentEnvironmentService", () => {
         expect(env.LEVEL).toBe("agent");
         // HOME should NOT be overwritten - tools like gh rely on user's home for credentials
         expect(env.HOME).toBe("/host/home");
-        // Agent home is available via TENEX_AGENT_HOME for scripts that need it
-        expect(env.TENEX_AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
+        // Agent home is available via AGENT_HOME for scripts that need it
+        expect(env.AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
     });
 
     it("bootstraps the agent home env with a normalized bech32 NSEC and preserves existing files", async () => {
@@ -148,8 +148,8 @@ describe("AgentEnvironmentService", () => {
         // HOME MUST remain the original user home - never overridden
         // This is critical for tools like `gh auth` that rely on ~/.config/gh/
         expect(env.HOME).toBe(originalHome);
-        // Agent home should still be available via TENEX_AGENT_HOME
-        expect(env.TENEX_AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
+        // Agent home should still be available via AGENT_HOME
+        expect(env.AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
     });
 
     it("loads .env from the project repo directory between global and project-metadata", async () => {

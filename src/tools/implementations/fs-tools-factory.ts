@@ -1,8 +1,28 @@
 import { createFsTools } from "ai-sdk-fs-tools";
+import { homedir } from "node:os";
 import { getAgentHomeDirectory, ensureAgentHomeDirectory } from "@/lib/agent-home";
 import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
 import { synthesizeContent, executeReadToolResult } from "./fs-hooks";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
+
+function buildPathVars(context: ToolExecutionContext): Record<string, string> {
+    const vars: Record<string, string> = {
+        '$USER_HOME': homedir(),
+        '$AGENT_HOME': getAgentHomeDirectory(context.agent.pubkey),
+    };
+    if (context.projectBasePath) {
+        vars['$PROJECT_BASE'] = context.projectBasePath;
+    }
+    return vars;
+}
+
+function expandPathVars(input: Record<string, unknown>, pathVars: Record<string, string>): void {
+    if (typeof input.path === 'string') {
+        for (const [varName, varValue] of Object.entries(pathVars)) {
+            input.path = (input.path as string).replaceAll(varName, varValue);
+        }
+    }
+}
 
 const tenexFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof createFsTools>>();
 
@@ -12,9 +32,12 @@ export function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnTy
         const allowedRoots = [context.projectBasePath, getAgentHomeDirectory(context.agent.pubkey)]
             .filter((p): p is string => typeof p === "string" && p.trim() !== "");
 
+        const pathVars = buildPathVars(context);
+
         tools = createFsTools({
             workingDirectory: context.workingDirectory,
             allowedRoots,
+            beforeExecute: (_toolName, input) => expandPathVars(input, pathVars),
             agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory, skipRoot: true },
             formatOutsideRootsError: (path, wd) =>
                 `Path "${path}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,

@@ -95,10 +95,6 @@ export class ConfigService {
         return this.getConfigPath();
     }
 
-    getLegacyAgentsSkillsPath(): string {
-        return path.join(homedir(), ".agents", "skills");
-    }
-
     getProjectPath(projectPath: string): string {
         return path.join(projectPath, TENEX_DIR);
     }

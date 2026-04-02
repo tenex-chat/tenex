@@ -1,14 +1,12 @@
 import { SkillWhitelistService } from "@/services/skill";
 import type { WhitelistItem } from "@/services/skill";
 import { SkillService } from "@/services/skill/SkillService";
-import type { SkillData } from "@/services/skill";
-import { NDKKind } from "@/nostr/kinds";
+import type { SkillData, SkillStoreScope } from "@/services/skill";
 import type { PromptFragment } from "../core/types";
 
 interface AvailableSkillsArgs {
     agentPubkey: string;
     projectPath?: string;
-    projectDTag?: string;
 }
 
 function escapePromptText(value: string): string {
@@ -37,66 +35,72 @@ function formatWhitelistItem(item: WhitelistItem): string {
 function formatSkillItem(skill: SkillData): string {
     const identifier = skill.identifier;
     const desc = escapePromptText(summarizeContent(skill.description ?? skill.content));
-    const unlocks = skill.toolNames && skill.toolNames.length > 0
-        ? ` | Unlocks: ${skill.toolNames.map((t) => `\`${t}\``).join(", ")}`
-        : "";
-    return `  - \`${escapePromptText(identifier)}\`: ${desc}${unlocks}`;
+    return `  - \`${escapePromptText(identifier)}\`: ${desc}`;
 }
+
+const SCOPE_GROUP_TAG: Record<SkillStoreScope, string> = {
+    "built-in": "built-in",
+    "agent": `path "$AGENT_HOME/skills"`,
+    "agent-project": `path "$PROJECT_BASE/.agents/<agent-short-pubkey>/skills"`,
+    "project": `path "$PROJECT_BASE/.agents/skills"`,
+    "shared": `path "$USER_HOME/.agents/skills"`,
+};
 
 export const availableSkillsFragment: PromptFragment<AvailableSkillsArgs> = {
     id: "available-skills",
     priority: 13,
-    template: async ({ agentPubkey, projectPath, projectDTag }) => {
+    template: async ({ agentPubkey, projectPath }) => {
         const whitelistService = SkillWhitelistService.getInstance();
         const whitelistedItems = whitelistService.getWhitelistedSkills();
         const installedSkills = await SkillService.getInstance().listAvailableSkills({
             agentPubkey,
             projectPath,
-            projectDTag,
         });
 
-        // Partition whitelisted items: kind:4201 shown as "Nudges", kind:4202 as "Skills"
-        const nudgeItems = whitelistedItems.filter((item) => item.kind === NDKKind.AgentNudge);
-        const skillItems = whitelistedItems.filter((item) => item.kind === NDKKind.AgentSkill);
-
-        const nudgeLines = nudgeItems.map(formatWhitelistItem);
-        const skillLines = [
-            ...skillItems.map(formatWhitelistItem),
-            ...installedSkills.map(formatSkillItem),
-        ];
-
-        const hasNudges = nudgeLines.length > 0;
-        const hasSkills = skillLines.length > 0;
-
-        if (!hasNudges && !hasSkills) {
+        if (installedSkills.length === 0 && whitelistedItems.length === 0) {
             return "";
         }
 
-        const hasBoth = hasNudges && hasSkills;
-        const sections: string[] = [];
+        // Group installed skills by scope
+        const installedEventIds = new Set(
+            installedSkills.filter(s => s.eventId).map(s => s.eventId!)
+        );
 
-        sections.push("## Available Nudges and Skills");
-        sections.push("");
-        sections.push("Use the IDs exactly as shown below.");
+        const groupedLines = new Map<string, string[]>();
 
-        if (hasNudges) {
-            sections.push("");
-            if (hasBoth) {
-                sections.push("### Nudges");
-                sections.push("");
+        for (const skill of installedSkills) {
+            const tag = SCOPE_GROUP_TAG[skill.scope ?? "shared"];
+            if (!groupedLines.has(tag)) {
+                groupedLines.set(tag, []);
             }
-            sections.push(nudgeLines.join("\n"));
+            groupedLines.get(tag)!.push(formatSkillItem(skill));
         }
 
-        if (hasSkills) {
-            sections.push("");
-            if (hasBoth) {
-                sections.push("### Skills");
-                sections.push("");
+        // Whitelisted items not yet hydrated go under "global"
+        const unhydratedWhitelisted = whitelistedItems.filter(
+            item => !installedEventIds.has(item.eventId)
+        );
+        if (unhydratedWhitelisted.length > 0) {
+            const sharedTag = SCOPE_GROUP_TAG.shared;
+            if (!groupedLines.has(sharedTag)) {
+                groupedLines.set(sharedTag, []);
             }
-            sections.push(skillLines.join("\n"));
+            for (const item of unhydratedWhitelisted) {
+                groupedLines.get(sharedTag)!.push(formatWhitelistItem(item));
+            }
         }
 
-        return sections.join("\n");
+        const parts: string[] = ["<available-skills>"];
+        parts.push("Use the IDs exactly as shown below.");
+        parts.push("");
+
+        for (const [tag, lines] of groupedLines) {
+            parts.push(`  <${tag}>`);
+            parts.push(...lines);
+            parts.push(`  </${tag.split(" ")[0]}>`);
+        }
+
+        parts.push("</available-skills>");
+        return parts.join("\n");
     },
 };

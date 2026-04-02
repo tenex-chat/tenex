@@ -136,14 +136,12 @@ function addAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     triggeringEnvelope?: BuildSystemPromptOptions["triggeringEnvelope"],
-    projectDTag?: string,
     projectPath?: string
 ): void {
     // Add available skills for delegation (priority 13)
     builder.add("available-skills", {
         agentPubkey: agent.pubkey,
         projectPath,
-        projectDTag,
     });
 
     // Add delegation best practices guidance (priority 16)
@@ -248,6 +246,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     systemPromptBuilder.add("agent-home-directory", {
         agent: agentForFragments,
         projectDTag: dTag,
+        projectBasePath,
     });
 
     // Explain <system-reminder> tags before agents encounter them
@@ -317,12 +316,10 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     parentSpan?.addEvent("core_agent_fragments_added", { "duration_ms": Math.round(performance.now() - t0) });
 
     // Add agent-specific fragments
-    const projectDTag = project.dTag || project.tagValue("d") || undefined;
     addAgentFragments(
         systemPromptBuilder,
         agentForFragments,
         triggeringEnvelope,
-        projectDTag,
         options.projectBasePath
     );
 
