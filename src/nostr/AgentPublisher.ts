@@ -8,7 +8,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKPublishError } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { AgentPublishError } from "./AgentPublishError";
 import { AgentEventEncoder } from "./AgentEventEncoder";
@@ -134,14 +134,29 @@ export class AgentPublisher implements AgentRuntimePublisher {
                 relays: successRelays,
             });
         } catch (error) {
+            const relayErrors = error instanceof NDKPublishError ? error.relayErrors : undefined;
+            const rawEvent = JSON.stringify(event.rawEvent());
             logger.error(`Failed to publish ${eventType}`, {
-                error,
                 eventId: event.id?.substring(0, 8),
                 agent: this.agent.slug,
                 kind: event.kind,
                 contentLength: event.content?.length || 0,
                 tagCount: event.tags?.length || 0,
-                rawEvent: JSON.stringify(event.rawEvent()),
+                relayErrors,
+                rawEvent,
+            });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "AgentPublisher",
+                message: `Failed to publish ${eventType}`,
+                context: {
+                    eventId: event.id?.substring(0, 8),
+                    agent: this.agent.slug,
+                    relayErrors,
+                    rawEvent,
+                },
+                error: error instanceof Error ? error.message : String(error),
             });
             const message = error instanceof Error ? error.message : String(error);
             throw new AgentPublishError(
