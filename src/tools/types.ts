@@ -46,6 +46,7 @@ export type ToolName =
     | "rag_subscription_list"
     | "rag_subscription_get"
     | "rag_subscription_delete"
+    | "mcp_list_resources"
     | "mcp_resource_read"
     | "mcp_subscribe"
     | "mcp_subscription_stop"

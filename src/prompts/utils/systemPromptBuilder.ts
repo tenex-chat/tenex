@@ -3,7 +3,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import type { MCPManager } from "@/services/mcp/MCPManager";
 import { isOnlyToolMode, type SkillToolPermissions, type SkillData } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling";
@@ -16,7 +15,6 @@ import { trace } from "@opentelemetry/api";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
-import { fetchAgentMcpResources } from "@/prompts/fragments/26-mcp-resources";
 
 /**
  * List of scheduling-related tools that trigger the scheduled tasks context
@@ -53,15 +51,12 @@ export interface BuildSystemPromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
-    mcpManager?: MCPManager; // MCP manager for this project
     /** Concatenated content from kind:4202 skill events (legacy) */
     skillContent?: string;
     /** Individual skill data for rendering with files */
     skills?: SkillData[];
     /** Tool permissions extracted from skill events */
     skillToolPermissions?: SkillToolPermissions;
-    /** Include MCP resource discovery in the system prompt. Defaults to true. */
-    includeMcpResources?: boolean;
     /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
     scratchpadAvailable?: boolean;
 }
@@ -82,9 +77,7 @@ export interface SystemMessage {
 async function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    mcpManager?: MCPManager,
     parentSpan?: import("@opentelemetry/api").Span,
-    includeMcpResources = true
 ): Promise<void> {
     // Add scheduled tasks context if agent has scheduling tools
     const hasSchedulingTools = agent.tools.some((tool) =>
@@ -110,20 +103,6 @@ async function addCoreAgentFragments(
     // Add todo usage guidance if agent has todo tools
     if (agent.tools.includes("todo_add")) {
         builder.add("todo-usage-guidance", {});
-    }
-
-    // Add MCP resources if agent has any MCP tools and mcpManager is available
-    if (includeMcpResources && mcpManager) {
-        const t0 = performance.now();
-        const resourcesPerServer = await fetchAgentMcpResources(agent.tools, mcpManager);
-        parentSpan?.addEvent("mcp_resources_fetched", { "duration_ms": Math.round(performance.now() - t0) });
-        if (resourcesPerServer.length > 0) {
-            builder.add("mcp-resources", {
-                agentPubkey: agent.pubkey,
-                mcpEnabled: true,
-                resourcesPerServer,
-            });
-        }
     }
 
     // Add RAG collection attribution - shows agents their contributions to RAG collections
@@ -229,11 +208,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         currentBranch,
         availableAgents = [],
         conversation,
-        mcpManager,
         skillContent,
         skills,
         skillToolPermissions,
-        includeMcpResources = true,
         scratchpadAvailable = true,
     } = options;
 
@@ -335,9 +312,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     await addCoreAgentFragments(
         systemPromptBuilder,
         agentForFragments,
-        mcpManager,
         parentSpan,
-        includeMcpResources
     );
     parentSpan?.addEvent("core_agent_fragments_added", { "duration_ms": Math.round(performance.now() - t0) });
 

@@ -286,7 +286,6 @@ export async function setupStreamExecution(
         workingDirectory: context.workingDirectory,
         currentBranch: context.currentBranch,
         availableAgents: Array.from(projectContext.agents.values()),
-        mcpManager: projectContext.mcpManager,
         skillContent,
         skills: skillResult.skills,
         skillToolPermissions: skillResult.toolPermissions,

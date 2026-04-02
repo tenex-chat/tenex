@@ -347,14 +347,12 @@ export function createPrepareStep(
                 workingDirectory: context.workingDirectory,
                 currentBranch: context.currentBranch,
                 availableAgents: Array.from(projectContext.agents.values()),
-                mcpManager: projectContext.mcpManager,
                 skillContent: currentSkillResult.content,
                 skills: currentSkillResult.skills,
                 skillToolPermissions,
                 pendingDelegations,
                 completedDelegations,
                 ralNumber,
-                includeMcpResources: false,
             });
 
             const rawDTag = projectContext.project.dTag || projectContext.project.tagValue("d");

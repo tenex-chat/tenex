@@ -66,7 +66,6 @@ describe("system reminder injection integration", () => {
             workingDirectory,
             currentBranch: "main",
             availableAgents: [agent],
-            mcpManager: undefined,
             nudgeContent: "",
             pendingDelegations: [],
             completedDelegations: [],

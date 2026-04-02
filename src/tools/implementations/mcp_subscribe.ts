@@ -1,7 +1,7 @@
 import type { ConversationToolContext } from "@/tools/types";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, createExpectedError } from "@/tools/utils";
-import { extractAgentMcpServers } from "@/prompts/fragments/26-mcp-resources";
+import { extractAgentMcpServers } from "@/services/mcp/mcp-utils";
 import { getProjectContext } from "@/services/projects";
 import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { tool } from "ai";

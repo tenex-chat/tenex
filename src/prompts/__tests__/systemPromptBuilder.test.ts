@@ -61,10 +61,6 @@ mock.module("@/services/telegram/TelegramChatContextStoreService", () => ({
     }),
 }));
 
-mock.module("@/prompts/fragments/26-mcp-resources", () => ({
-    fetchAgentMcpResources: async () => [],
-}));
-
 mock.module("@/utils/logger", () => ({
     logger: {
         debug: () => {},

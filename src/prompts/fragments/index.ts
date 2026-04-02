@@ -25,7 +25,6 @@ import { skillsFragment } from "./12-skills";
 import { availableSkillsFragment } from "./13-available-skills";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
-import { mcpResourcesFragment } from "./26-mcp-resources";
 import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
 import { ragCollectionsFragment } from "./29-rag-collections";
 import { telegramChatContextFragment } from "./33-telegram-chat-context";
@@ -64,7 +63,6 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(scheduledTasksFragment);
 
     // Context and learning
-    fragmentRegistry.register(mcpResourcesFragment);
     fragmentRegistry.register(agentDirectedMonitoringFragment);
     fragmentRegistry.register(ragCollectionsFragment);
     fragmentRegistry.register(telegramChatContextFragment);

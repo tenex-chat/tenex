@@ -3,7 +3,6 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
-import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import type { PromptMessage } from "@/conversations/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -30,7 +29,6 @@ export interface MessageCompilerContext {
     workingDirectory?: string;
     currentBranch?: string;
     availableAgents?: AgentInstance[];
-    mcpManager?: MCPManager;
     /** Concatenated skill content (includes former nudge content) */
     skillContent?: string;
     /** Individual skill data for rendering in fragments */
@@ -44,8 +42,6 @@ export interface MessageCompilerContext {
     metaModelSystemPrompt?: string;
     /** Variant-specific system prompt to inject when a meta model variant is active */
     variantSystemPrompt?: string;
-    /** Include MCP resource discovery in the system prompt. Defaults to true. */
-    includeMcpResources?: boolean;
     /** Whether the scratchpad strategy is active. When false, scratchpad-practice prompt is omitted. Defaults to true. */
     scratchpadAvailable?: boolean;
 }

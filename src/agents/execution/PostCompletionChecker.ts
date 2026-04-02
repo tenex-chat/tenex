@@ -101,7 +101,6 @@ export async function checkPostCompletion(
                 workingDirectory: context.workingDirectory,
                 currentBranch: context.currentBranch,
                 availableAgents: Array.from(projectContext.agents.values()),
-                mcpManager: projectContext.mcpManager,
                 skillContent: "",
             })).map(m => m.message.content).join("\n\n")
             : "");
