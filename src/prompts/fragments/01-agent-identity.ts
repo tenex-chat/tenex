@@ -1,4 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
+import { shortenPubkey } from "@/utils/conversation-id";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -21,8 +22,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         if (agent.role) {
             parts.push(`Your role: ${agent.role}`);
         }
-        const shortPubkey = agent.signer.npub.slice(0, 12);
-        parts.push(`Your shortened pubkey: ${shortPubkey}`);
+        parts.push(`Your shortened pubkey: ${shortenPubkey(agent.pubkey)}`);
         parts.push(
             `Your nsec is available in your home directory's .env file as NSEC. Use it when you encounter a tool that needs an nsec.`
         );

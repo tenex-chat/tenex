@@ -8,6 +8,7 @@ describe("agentIdentityFragment", () => {
                 name: "Test Agent",
                 slug: "test-agent",
                 role: "builder",
+                pubkey: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
                 signer: {
                     npub: "npub1testabcdef",
                     nsec: "nsec1test",
@@ -16,7 +17,7 @@ describe("agentIdentityFragment", () => {
         });
 
         expect(result).toContain("Your name: Test Agent (test-agent)");
-        expect(result).toContain("Your shortened pubkey: npub1testab");
+        expect(result).toContain("Your shortened pubkey: abcd1234567890efab");
         expect(result).toContain("Your role: builder");
         expect(result).toContain(".env");
         expect(result).toContain("NSEC");
@@ -30,6 +31,7 @@ describe("agentIdentityFragment", () => {
                 name: "Test Agent",
                 slug: "test-agent",
                 role: "builder",
+                pubkey: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
                 instructions: "You are a helpful builder.",
                 signer: {
                     npub: "npub1test",
