@@ -10,7 +10,7 @@ import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { config as configService } from "@/services/ConfigService";
 import { createViolationReminders } from "@/services/heuristics";
 import { RALRegistry } from "@/services/ral";
-import { SkillService } from "@/services/skill";
+import { SkillService, loadAllSkillTools } from "@/services/skill";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -314,6 +314,29 @@ export function createPrepareStep(
             const currentSkillResult = requestedSkillIds.length > 0
                 ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
                 : { skills: [] as SkillData[], content: "" };
+
+            // Inject any new skill-declared tools into the mutable toolsObject
+            // so the AI SDK picks them up in this step (object is passed by reference)
+            if (currentSkillResult.skills.length > 0 && !skillToolPermissions?.onlyTools) {
+                const skillTools = await loadAllSkillTools(currentSkillResult.skills, context);
+                if (Object.keys(skillTools).length > 0) {
+                    const denyTools = skillToolPermissions?.denyTools ?? [];
+                    for (const denied of denyTools) {
+                        delete skillTools[denied];
+                    }
+                    // Only add tools not already present
+                    for (const [name, toolDef] of Object.entries(skillTools)) {
+                        if (!(name in toolsObject)) {
+                            toolsObject[name] = toolDef;
+                            logger.info("[StreamCallbacks] Injected skill tool mid-execution", {
+                                agent: context.agent.slug,
+                                tool: name,
+                                stepNumber: step.stepNumber,
+                            });
+                        }
+                    }
+                }
+            }
 
             let { messages: rebuiltMessages } = await messageCompiler.compile({
                 agent: context.agent,
