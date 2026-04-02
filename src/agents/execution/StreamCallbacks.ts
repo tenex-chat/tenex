@@ -9,10 +9,9 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { config as configService } from "@/services/ConfigService";
 import { createViolationReminders } from "@/services/heuristics";
-import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { RALRegistry } from "@/services/ral";
 import { SkillService } from "@/services/skill";
-import type { SkillData } from "@/services/skill";
+import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type {
@@ -79,15 +78,12 @@ export interface PrepareStepConfig {
     toolsObject: Record<string, AISdkTool>;
     contextManagement?: ExecutionContextManagement;
     initialRequest: LLMModelRequest;
-    nudgeContent: string;
-    /** Individual nudge data for system prompt rendering */
-    nudges: NudgeData[];
-    /** Tool permissions extracted from nudge events */
-    nudgeToolPermissions: NudgeToolPermissions;
-    /** Concatenated skill content */
+    /** Concatenated skill content (includes former nudge content) */
     skillContent: string;
     /** Individual skill data for system prompt rendering */
     skills: SkillData[];
+    /** Tool permissions extracted from skill events */
+    skillToolPermissions: SkillToolPermissions;
     ralNumber: number;
     execContext: RALExecutionContext;
     executionSpan?: ReturnType<typeof trace.getActiveSpan>;
@@ -153,9 +149,9 @@ export function createPrepareStep(
         toolsObject,
         contextManagement,
         initialRequest,
-        nudgeContent,
-        nudges,
-        nudgeToolPermissions,
+        skillContent: _skillContent,
+        skills: _skills,
+        skillToolPermissions,
         ralNumber,
         execContext,
         executionSpan,
@@ -329,11 +325,9 @@ export function createPrepareStep(
                 currentBranch: context.currentBranch,
                 availableAgents: Array.from(projectContext.agents.values()),
                 mcpManager: projectContext.mcpManager,
-                nudgeContent,
-                nudges,
-                nudgeToolPermissions,
                 skillContent: currentSkillResult.content,
                 skills: currentSkillResult.skills,
+                skillToolPermissions,
                 pendingDelegations,
                 completedDelegations,
                 ralNumber,

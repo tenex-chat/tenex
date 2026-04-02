@@ -15,7 +15,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
-import { NudgeIdentifierResolverService } from "@/services/nudge";
+import { SkillIdentifierResolver } from "@/services/skill";
 import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
@@ -42,10 +42,10 @@ const delegationItemSchema = z.object({
     .boolean()
     .optional()
     .describe("Set to true to proceed even if circular delegation is detected"),
-  nudges: z
+  skills: z
     .array(z.string())
     .optional()
-    .describe("Nudge IDs to apply to this delegated agent. Use the IDs shown in the prompt; slugged IDs and short event IDs are resolved automatically."),
+    .describe("Skill IDs to apply to this delegated agent. Use the IDs shown in the prompt; slugged IDs and short event IDs are resolved automatically."),
 });
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
@@ -97,10 +97,10 @@ async function executeDelegate(
   const conversationStore = ConversationStore.get(context.conversationId);
   const delegationChain = conversationStore?.metadata?.delegationChain;
 
-  // Extract inherited nudges from the triggering event
-  // Nudge inheritance: any nudges on the current triggering event are automatically
+  // Extract inherited skills from the triggering event
+  // Skill inheritance: any skills on the current triggering event are automatically
   // passed forward to delegated agents unless explicitly overridden
-  const inheritedNudges = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
+  const inheritedSkills = context.triggeringEnvelope.metadata.skillEventIds ?? [];
 
   for (const delegation of delegations) {
     // Resolve slug to pubkey - throws if invalid
@@ -150,28 +150,28 @@ async function executeDelegate(
     // Publish delegation event
     const eventContext = createEventContext(context);
 
-    // Combine inherited nudges with explicitly specified nudges
-    // Nudge inheritance: inherited nudges are always passed forward
-    // Explicit nudges are added to the inherited set (not replaced)
-    const combinedNudges = [
-      ...inheritedNudges,
-      ...(delegation.nudges || []),
+    // Combine inherited skills with explicitly specified skills
+    // Skill inheritance: inherited skills are always passed forward
+    // Explicit skills are added to the inherited set (not replaced)
+    const combinedSkills = [
+      ...inheritedSkills,
+      ...(delegation.skills || []),
     ];
-    const uniqueNudges = Array.from(
+    const uniqueSkills = Array.from(
       new Set(
-        combinedNudges
-          .map((nudgeIdentifier) => {
-            const trimmedIdentifier = nudgeIdentifier.trim();
+        combinedSkills
+          .map((skillIdentifier) => {
+            const trimmedIdentifier = skillIdentifier.trim();
             if (!trimmedIdentifier) {
               return null;
             }
 
             return (
-              NudgeIdentifierResolverService.getInstance().resolveNudgeIdentifier(trimmedIdentifier) ??
+              SkillIdentifierResolver.getInstance().resolveSkillIdentifier(trimmedIdentifier) ??
               trimmedIdentifier
             );
           })
-          .filter((nudgeIdentifier): nudgeIdentifier is string => Boolean(nudgeIdentifier))
+          .filter((skillIdentifier): skillIdentifier is string => Boolean(skillIdentifier))
       )
     );
 
@@ -179,7 +179,7 @@ async function executeDelegate(
       recipient: pubkey,
       content: delegation.prompt,
       branch: delegation.branch,
-      nudges: uniqueNudges.length > 0 ? uniqueNudges : undefined,
+      skills: uniqueSkills.length > 0 ? uniqueSkills : undefined,
     }, eventContext);
 
     const pendingDelegation: PendingDelegation = {
@@ -254,7 +254,7 @@ async function executeDelegate(
     count: pendingDelegations.length,
     delegationConversationIds,
     circularWarningsCount: circularWarnings.length,
-    inheritedNudgesCount: inheritedNudges.length,
+    inheritedSkillsCount: inheritedSkills.length,
   });
 
   let message = `Delegated ${pendingDelegations.length} task(s). The agent(s) will wake you up when ready with the response(s).`;
@@ -293,7 +293,7 @@ export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
 
 Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` on an individual delegation to bypass this check.
 
-Nudge support: Pass nudge IDs from the available-nudges list in the \`nudges\` array to apply behavioral nudges to delegated agents. Slugged IDs and short event IDs are resolved automatically before publishing. Nudges can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context. Nudge inheritance: any nudges active on the current agent are automatically forwarded to all delegated agents.`;
+Skill support: Pass skill IDs from the available-skills list in the \`skills\` array to activate skills on delegated agents. Slugged IDs and short event IDs are resolved automatically before publishing. Skills can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context. Skill inheritance: any skills active on the current agent are automatically forwarded to all delegated agents.`;
 
   const aiTool = tool({
     description,

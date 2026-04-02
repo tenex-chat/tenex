@@ -21,9 +21,8 @@ import { noResponseGuidanceFragment } from "./18-no-response-guidance";
 import { delegationAsyncFragment } from "./19-delegation-async";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
-import { nudgesFragment } from "./11-nudges";
 import { skillsFragment } from "./12-skills";
-import { availableNudgesAndSkillsFragment } from "./13-available-nudges";
+import { availableSkillsFragment } from "./13-available-skills";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { mcpResourcesFragment } from "./26-mcp-resources";
@@ -57,9 +56,8 @@ export function registerAllFragments(): void {
 
     // Behavioral guidance
     // voice-mode is registered via side effects
-    fragmentRegistry.register(nudgesFragment);
     fragmentRegistry.register(skillsFragment);
-    fragmentRegistry.register(availableNudgesAndSkillsFragment);
+    fragmentRegistry.register(availableSkillsFragment);
     fragmentRegistry.register(toolDescriptionGuidanceFragment);
 
     // Scheduled tasks context

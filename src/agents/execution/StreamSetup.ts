@@ -8,8 +8,7 @@
 
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { NudgeService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
-import { SkillService, type SkillData } from "@/services/skill";
+import { SkillService, type SkillData, type SkillToolPermissions } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
@@ -40,15 +39,12 @@ export interface StreamSetupResult {
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
     contextManagement?: ExecutionContextManagement;
-    nudgeContent: string;
-    /** Individual nudge data for system prompt rendering */
-    nudges: NudgeData[];
-    /** Tool permissions extracted from nudge events */
-    nudgeToolPermissions: NudgeToolPermissions;
     /** Concatenated skill content */
     skillContent: string;
     /** Individual skill data for system prompt rendering */
     skills: SkillData[];
+    /** Tool permissions aggregated across all active skills */
+    skillToolPermissions: SkillToolPermissions;
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
@@ -73,12 +69,6 @@ export async function setupStreamExecution(
     const triggeringPrincipalId =
         context.triggeringEnvelope.principal.linkedPubkey ?? context.triggeringEnvelope.principal.id;
 
-    // === FETCH NUDGES FIRST ===
-    // Must fetch nudges BEFORE getToolsObject because nudges can modify available tools
-    const nudgeEventIds = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
-    const nudgeResult = nudgeEventIds.length > 0
-        ? await NudgeService.getInstance().fetchNudgesWithPermissions(nudgeEventIds)
-        : { nudges: [], content: "", toolPermissions: {} };
     const projectContext = getProjectContext();
     const skillLookupContext = {
         agentPubkey: context.agent.pubkey,
@@ -87,7 +77,7 @@ export async function setupStreamExecution(
     };
 
     // === FETCH SKILLS ===
-    // Skills do NOT affect tools, but we fetch them early to download attached files
+    // Must fetch skills BEFORE getToolsObject because skills can modify available tools
     // Merge delegation-provided skills, self-applied skills from conversation state,
     // and agent-level always-on skills from agent config
     const delegationSkillIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
@@ -96,7 +86,7 @@ export async function setupStreamExecution(
     const requestedSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds, ...agentAlwaysSkillIds])];
     const skillResult = requestedSkillIds.length > 0
         ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
-        : { skills: [], content: "" };
+        : { skills: [], content: "", toolPermissions: {} };
 
     // Start MCP servers the agent has access to via mcpAccess.
     // MCP startup is expensive (e.g. chrome-devtools-mcp launches a browser, ~6GB RSS).
@@ -104,7 +94,7 @@ export async function setupStreamExecution(
     if (mcpServerSlugs.length > 0 && "mcpManager" in context && context.mcpManager) {
         await context.mcpManager.ensureServersForSlugs(mcpServerSlugs);
     }
-    let toolsObject = getToolsObject(context.agent.tools || [], context, nudgeResult.toolPermissions);
+    let toolsObject = getToolsObject(context.agent.tools || [], context, skillResult.toolPermissions);
 
     const ralRegistry = RALRegistry.getInstance();
     const conversationStore = context.conversationStore;
@@ -175,8 +165,8 @@ export async function setupStreamExecution(
         });
     }
 
-    // Use already-fetched nudge content (fetched at the top of this function)
-    const nudgeContent = nudgeResult.content;
+    // Skill content was already fetched at the top of this function
+    const skillContent = skillResult.content;
 
     const abortSignal = llmOpsRegistry.registerOperation(context);
 
@@ -242,7 +232,7 @@ export async function setupStreamExecution(
         conversationId: context.conversationId,
         agent: context.agent,
         conversationStore,
-        nudgeToolPermissions: nudgeResult.toolPermissions,
+        skillToolPermissions: skillResult.toolPermissions,
     });
 
     if (contextManagement) {
@@ -277,11 +267,9 @@ export async function setupStreamExecution(
         currentBranch: context.currentBranch,
         availableAgents: Array.from(projectContext.agents.values()),
         mcpManager: projectContext.mcpManager,
-        nudgeContent,
-        nudges: nudgeResult.nudges,
-        nudgeToolPermissions: nudgeResult.toolPermissions,
-        skillContent: skillResult.content,
+        skillContent,
         skills: skillResult.skills,
+        skillToolPermissions: skillResult.toolPermissions,
         pendingDelegations,
         completedDelegations,
         ralNumber,
@@ -346,11 +334,9 @@ export async function setupStreamExecution(
         messageCompiler,
         request,
         contextManagement,
-        nudgeContent,
-        nudges: nudgeResult.nudges,
-        nudgeToolPermissions: nudgeResult.toolPermissions,
-        skillContent: skillResult.content,
+        skillContent,
         skills: skillResult.skills,
+        skillToolPermissions: skillResult.toolPermissions,
         abortSignal,
         metaModelSystemPrompt,
         variantSystemPrompt,

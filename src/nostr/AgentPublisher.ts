@@ -285,11 +285,11 @@ export class AgentPublisher implements AgentRuntimePublisher {
             event.tags.push(["branch", config.branch]);
         }
 
-        // Add nudge tags for the delegated agent (deduplicated for robustness)
-        if (config.nudges && config.nudges.length > 0) {
-            const uniqueNudges = [...new Set(config.nudges)];
-            for (const nudgeId of uniqueNudges) {
-                event.tags.push(["nudge", nudgeId]);
+        // Add skill tags for the delegated agent (deduplicated for robustness)
+        if (config.skills && config.skills.length > 0) {
+            const uniqueSkills = [...new Set(config.skills)];
+            for (const skillId of uniqueSkills) {
+                event.tags.push(["skill", skillId]);
             }
         }
 

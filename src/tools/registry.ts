@@ -8,8 +8,8 @@ import { config as configService } from "@/services/ConfigService";
 import { isMetaModelConfiguration } from "@/services/config/types";
 import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
-import type { NudgeToolPermissions } from "@/services/nudge";
-import { isOnlyToolMode } from "@/services/nudge";
+import type { SkillToolPermissions } from "@/services/skill";
+import { isOnlyToolMode } from "@/services/skill";
 import type { Tool as CoreTool } from "ai";
 import type {
     AISdkTool,
@@ -334,13 +334,13 @@ function mcpSubscriptionServiceHasStoppableSubscriptions(agentPubkey: string): b
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names)
  * @param context - Registry context
- * @param nudgePermissions - Optional tool permissions from nudge events
+ * @param skillPermissions - Optional tool permissions from skill events
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
 export function getToolsObject(
     names: string[],
     context: ToolRegistryContext,
-    nudgePermissions?: NudgeToolPermissions
+    skillPermissions?: SkillToolPermissions
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
@@ -349,14 +349,14 @@ export function getToolsObject(
 
     // === ONLY-TOOL MODE: STRICT EXCLUSIVITY ===
     // When only-tool mode is active, return EXACTLY those tools - no auto-injection whatsoever.
-    // This is a security feature: the nudge author has complete control over available tools.
+    // This is a security feature: the skill author has complete control over available tools.
     //
     // IMPORTANT: Core agent tools (like 'kill') are NOT auto-injected in only-tool mode.
-    // If the nudge author wants core tools, they must explicitly include them in onlyTools.
-    // This ensures the nudge author has complete, unambiguous control over the tool set.
-    if (nudgePermissions && isOnlyToolMode(nudgePermissions)) {
-        const onlyToolNames = nudgePermissions.onlyTools ?? [];
-        logger.debug("[ToolRegistry] Nudge only-tool mode: strict exclusive tool set", {
+    // If the skill author wants core tools, they must explicitly include them in onlyTools.
+    // This ensures the skill author has complete, unambiguous control over the tool set.
+    if (skillPermissions && isOnlyToolMode(skillPermissions)) {
+        const onlyToolNames = skillPermissions.onlyTools ?? [];
+        logger.debug("[ToolRegistry] Skill only-tool mode: strict exclusive tool set", {
             originalTools: names.length,
             onlyTools: onlyToolNames,
         });
@@ -404,7 +404,7 @@ export function getToolsObject(
         return tools;
     }
 
-    // === ALLOW/DENY MODE OR NO NUDGE PERMISSIONS ===
+    // === ALLOW/DENY MODE OR NO SKILL PERMISSIONS ===
     // In allow/deny mode, the base tool set is modified by allow-tool and deny-tool directives.
     //
     // POLICY:
@@ -412,30 +412,30 @@ export function getToolsObject(
     // 2. Auto-injection: Core tools, etc. are added
     // 3. Final enforcement: deny-tool is re-applied to block any auto-injected tools
     // - This ensures deny-tool CAN block core tools if explicitly denied (e.g., deny-tool: kill)
-    // - Provides flexibility: nudges can restrict even critical tools when needed
+    // - Provides flexibility: skills can restrict even critical tools when needed
     let effectiveNames = names;
 
-    if (nudgePermissions) {
+    if (skillPermissions) {
         // allow-tool / deny-tool mode
         let modifiedNames = [...names];
 
         // Add allowed tools (that aren't already in the list)
-        if (nudgePermissions.allowTools && nudgePermissions.allowTools.length > 0) {
-            for (const allowTool of nudgePermissions.allowTools) {
+        if (skillPermissions.allowTools && skillPermissions.allowTools.length > 0) {
+            for (const allowTool of skillPermissions.allowTools) {
                 if (!modifiedNames.includes(allowTool)) {
                     modifiedNames.push(allowTool);
                 }
             }
-            logger.debug("[ToolRegistry] Nudge allow-tool: added tools", {
-                allowedTools: nudgePermissions.allowTools,
+            logger.debug("[ToolRegistry] Skill allow-tool: added tools", {
+                allowedTools: skillPermissions.allowTools,
             });
         }
 
         // Remove denied tools
-        const deniedTools = nudgePermissions.denyTools;
+        const deniedTools = skillPermissions.denyTools;
         if (deniedTools && deniedTools.length > 0) {
             modifiedNames = modifiedNames.filter((name) => !deniedTools.includes(name));
-            logger.debug("[ToolRegistry] Nudge deny-tool: removed tools", {
+            logger.debug("[ToolRegistry] Skill deny-tool: removed tools", {
                 deniedTools,
             });
         }
@@ -563,7 +563,7 @@ export function getToolsObject(
     // === FINAL DENY-TOOL ENFORCEMENT ===
     // Apply deny-tool filtering AFTER all auto-injection (core tools, edit, meta-model)
     // This ensures deny-tool can block even core tools if explicitly denied
-    const deniedTools = nudgePermissions?.denyTools;
+    const deniedTools = skillPermissions?.denyTools;
     if (deniedTools && deniedTools.length > 0) {
         const beforeDenyCount = regularTools.length;
         const deniedPresent = regularTools.filter((name) => deniedTools.includes(name));

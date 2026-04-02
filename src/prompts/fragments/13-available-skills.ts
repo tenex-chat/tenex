@@ -1,10 +1,11 @@
-import { NudgeSkillWhitelistService } from "@/services/nudge";
-import type { WhitelistItem } from "@/services/nudge";
+import { SkillWhitelistService } from "@/services/skill";
+import type { WhitelistItem } from "@/services/skill";
 import { SkillService } from "@/services/skill/SkillService";
 import type { SkillData } from "@/services/skill";
+import { NDKKind } from "@/nostr/kinds";
 import type { PromptFragment } from "../core/types";
 
-interface AvailableNudgesAndSkillsArgs {
+interface AvailableSkillsArgs {
     agentPubkey: string;
     projectPath?: string;
     projectDTag?: string;
@@ -28,7 +29,7 @@ function summarizeContent(value?: string): string {
     return value.replace(/\n/g, " ").substring(0, MAX_DESCRIPTION_LENGTH);
 }
 
-function formatNudgeItem(item: WhitelistItem): string {
+function formatWhitelistItem(item: WhitelistItem): string {
     const identifier = item.identifier ?? item.shortId ?? item.eventId;
     return `  - \`${escapePromptText(identifier)}\`: ${escapePromptText(summarizeContent(item.description))}`;
 }
@@ -38,19 +39,30 @@ function formatSkillItem(skill: SkillData): string {
     return `  - \`${escapePromptText(identifier)}\`: ${escapePromptText(summarizeContent(skill.description ?? skill.content))}`;
 }
 
-export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAndSkillsArgs> = {
-    id: "available-nudges-and-skills",
+export const availableSkillsFragment: PromptFragment<AvailableSkillsArgs> = {
+    id: "available-skills",
     priority: 13,
     template: async ({ agentPubkey, projectPath, projectDTag }) => {
-        const whitelistService = NudgeSkillWhitelistService.getInstance();
-        const nudges = whitelistService.getWhitelistedNudges();
-        const skills = await SkillService.getInstance().listAvailableSkills({
+        const whitelistService = SkillWhitelistService.getInstance();
+        const whitelistedItems = whitelistService.getWhitelistedSkills();
+        const installedSkills = await SkillService.getInstance().listAvailableSkills({
             agentPubkey,
             projectPath,
             projectDTag,
         });
-        const hasNudges = nudges.length > 0;
-        const hasSkills = skills.length > 0;
+
+        // Partition whitelisted items: kind:4201 shown as "Nudges", kind:4202 as "Skills"
+        const nudgeItems = whitelistedItems.filter((item) => item.kind === NDKKind.AgentNudge);
+        const skillItems = whitelistedItems.filter((item) => item.kind === NDKKind.AgentSkill);
+
+        const nudgeLines = nudgeItems.map(formatWhitelistItem);
+        const skillLines = [
+            ...skillItems.map(formatWhitelistItem),
+            ...installedSkills.map(formatSkillItem),
+        ];
+
+        const hasNudges = nudgeLines.length > 0;
+        const hasSkills = skillLines.length > 0;
 
         if (!hasNudges && !hasSkills) {
             return "";
@@ -69,7 +81,7 @@ export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAnd
                 sections.push("### Nudges");
                 sections.push("");
             }
-            sections.push(nudges.map(formatNudgeItem).join("\n"));
+            sections.push(nudgeLines.join("\n"));
         }
 
         if (hasSkills) {
@@ -78,7 +90,7 @@ export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAnd
                 sections.push("### Skills");
                 sections.push("");
             }
-            sections.push(skills.map(formatSkillItem).join("\n"));
+            sections.push(skillLines.join("\n"));
         }
 
         return sections.join("\n");

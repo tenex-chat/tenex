@@ -8,7 +8,7 @@ import { slugifyIdentifier } from "@/lib/string";
 import { getNDK } from "@/nostr";
 import { NDKKind } from "@/nostr/kinds";
 import { config } from "@/services/ConfigService";
-import { NudgeSkillWhitelistService } from "@/services/nudge/NudgeWhitelistService";
+import { SkillWhitelistService } from "./SkillWhitelistService";
 import {
     type ParsedSkillDocument,
     parseSkillDocument,
@@ -546,7 +546,7 @@ export class SkillService {
             return normalizedIdentifier;
         }
 
-        const availableSkills = NudgeSkillWhitelistService.getInstance().getWhitelistedSkills();
+        const availableSkills = SkillWhitelistService.getInstance().getWhitelistedSkills();
         for (const skill of availableSkills) {
             const aliases = [skill.identifier, skill.shortId, skill.eventId];
             if (aliases.some((alias) => alias?.toLowerCase() === normalizedIdentifier)) {
@@ -638,7 +638,7 @@ export class SkillService {
     }
 
     private getWhitelistedSkillDescription(eventId: string): string | undefined {
-        const description = NudgeSkillWhitelistService
+        const description = SkillWhitelistService
             .getInstance()
             .getWhitelistedSkills()
             .find((skill) => skill.eventId === eventId)

@@ -18,6 +18,7 @@ export const NDKKind = {
     Comment: 1111 as BaseNDKKind, // NIP-22 Comment - used for lesson refinements
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
     AgentDefinition: 4199 as BaseNDKKind, // Agent Definition
+    /** @deprecated Use AgentSkill (4202) instead. Kept for backward compatibility parsing of old events. */
     AgentNudge: 4201 as BaseNDKKind, // Agent Nudge - system prompt injection
     AgentSkill: 4202 as BaseNDKKind, // Agent Skill - instruction bundle injection
     DelegationMarker: 4203 as BaseNDKKind, // Delegation Marker - lifecycle tracking

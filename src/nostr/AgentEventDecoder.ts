@@ -182,17 +182,6 @@ export function getParticipants(event: NDKEvent): string[] {
 }
 
 /**
- * Extract nudge event IDs from event tags
- * Returns an array of event IDs from all ['nudge', '<id>'] tags
- */
-export function extractNudgeEventIds(event: NDKEvent): string[] {
-    return event.tags
-        .filter((tag) => tag[0] === "nudge")
-        .map((tag) => tag[1])
-        .filter((id): id is string => !!id);
-}
-
-/**
  * Extract skill event IDs from event tags
  * Returns an array of event IDs from all ['skill', '<id>'] tags
  */

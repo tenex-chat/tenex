@@ -17,9 +17,8 @@ import type {
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { RALRegistry } from "@/services/ral";
-import type { SkillData } from "@/services/skill";
+import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { createEventContext } from "@/services/event-context";
@@ -55,15 +54,12 @@ export interface StreamExecutionConfig {
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
     contextManagement?: ExecutionContextManagement;
-    nudgeContent: string;
-    /** Individual nudge data for system prompt rendering */
-    nudges: NudgeData[];
-    /** Tool permissions extracted from nudge events */
-    nudgeToolPermissions: NudgeToolPermissions;
-    /** Concatenated skill content */
+    /** Concatenated skill content (includes former nudge content) */
     skillContent: string;
     /** Individual skill data for system prompt rendering */
     skills: SkillData[];
+    /** Tool permissions extracted from skill events */
+    skillToolPermissions: SkillToolPermissions;
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
@@ -172,11 +168,9 @@ export class StreamExecutionHandler {
                 toolsObject,
                 contextManagement: this.config.contextManagement,
                 initialRequest: request,
-                nudgeContent: this.config.nudgeContent,
-                nudges: this.config.nudges,
-                nudgeToolPermissions: this.config.nudgeToolPermissions,
                 skillContent: this.config.skillContent,
                 skills: this.config.skills,
+                skillToolPermissions: this.config.skillToolPermissions,
                 ralNumber,
                 execContext: this.execContext,
                 executionSpan: this.executionSpan,

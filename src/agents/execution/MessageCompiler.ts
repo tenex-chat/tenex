@@ -4,8 +4,7 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
-import type { SkillData } from "@/services/skill";
+import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import type { PromptMessage } from "@/conversations/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
@@ -32,15 +31,12 @@ export interface MessageCompilerContext {
     currentBranch?: string;
     availableAgents?: AgentInstance[];
     mcpManager?: MCPManager;
-    nudgeContent?: string;
-    /** Individual nudge data for rendering in fragments */
-    nudges?: NudgeData[];
-    /** Tool permissions extracted from nudge events */
-    nudgeToolPermissions?: NudgeToolPermissions;
-    /** Concatenated skill content */
+    /** Concatenated skill content (includes former nudge content) */
     skillContent?: string;
     /** Individual skill data for rendering in fragments */
     skills?: SkillData[];
+    /** Tool permissions extracted from skill events */
+    skillToolPermissions?: SkillToolPermissions;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
     ralNumber: number;
