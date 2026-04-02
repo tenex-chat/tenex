@@ -29,22 +29,26 @@ function summarizeContent(value?: string): string {
 
 function formatWhitelistItem(item: WhitelistItem): string {
     const identifier = item.identifier ?? item.shortId ?? item.eventId;
-    return `  - \`${escapePromptText(identifier)}\`: ${escapePromptText(summarizeContent(item.description))}`;
+    return `- \`${escapePromptText(identifier)}\`: ${escapePromptText(summarizeContent(item.description))}`;
 }
 
 function formatSkillItem(skill: SkillData): string {
     const identifier = skill.identifier;
     const desc = escapePromptText(summarizeContent(skill.description ?? skill.content));
-    return `  - \`${escapePromptText(identifier)}\`: ${desc}`;
+    return `- \`${escapePromptText(identifier)}\`: ${desc}`;
 }
 
-const SCOPE_GROUP_TAG: Record<SkillStoreScope, string> = {
-    "built-in": "built-in",
-    "agent": `path "$AGENT_HOME/skills"`,
-    "agent-project": `path "$PROJECT_BASE/.agents/<agent-short-pubkey>/skills"`,
-    "project": `path "$PROJECT_BASE/.agents/skills"`,
-    "shared": `path "$USER_HOME/.agents/skills"`,
-};
+type ScopeGroup = "your-project" | "your-all" | "project" | "shared" | "built-in";
+
+function classifyScope(scope: SkillStoreScope): ScopeGroup {
+    switch (scope) {
+        case "agent-project": return "your-project";
+        case "agent": return "your-all";
+        case "project": return "project";
+        case "shared": return "shared";
+        case "built-in": return "built-in";
+    }
+}
 
 export const availableSkillsFragment: PromptFragment<AvailableSkillsArgs> = {
     id: "available-skills",
@@ -57,48 +61,93 @@ export const availableSkillsFragment: PromptFragment<AvailableSkillsArgs> = {
             projectPath,
         });
 
-        if (installedSkills.length === 0 && whitelistedItems.length === 0) {
-            return "";
-        }
-
-        // Group installed skills by scope
         const installedEventIds = new Set(
             installedSkills.filter(s => s.eventId).map(s => s.eventId!)
         );
 
-        const groupedLines = new Map<string, string[]>();
+        // Group installed skills by scope group
+        const grouped = new Map<ScopeGroup, string[]>();
 
         for (const skill of installedSkills) {
-            const tag = SCOPE_GROUP_TAG[skill.scope ?? "shared"];
-            if (!groupedLines.has(tag)) {
-                groupedLines.set(tag, []);
+            const group = classifyScope(skill.scope ?? "shared");
+            if (!grouped.has(group)) {
+                grouped.set(group, []);
             }
-            groupedLines.get(tag)!.push(formatSkillItem(skill));
+            grouped.get(group)!.push(formatSkillItem(skill));
         }
 
-        // Whitelisted items not yet hydrated go under "global"
+        // Unhydrated whitelisted items go under "shared"
         const unhydratedWhitelisted = whitelistedItems.filter(
             item => !installedEventIds.has(item.eventId)
         );
         if (unhydratedWhitelisted.length > 0) {
-            const sharedTag = SCOPE_GROUP_TAG.shared;
-            if (!groupedLines.has(sharedTag)) {
-                groupedLines.set(sharedTag, []);
+            if (!grouped.has("shared")) {
+                grouped.set("shared", []);
             }
             for (const item of unhydratedWhitelisted) {
-                groupedLines.get(sharedTag)!.push(formatWhitelistItem(item));
+                grouped.get("shared")!.push(formatWhitelistItem(item));
             }
         }
 
-        const parts: string[] = ["<available-skills>"];
-        parts.push("Use the IDs exactly as shown below.");
+        const parts: string[] = ["<available-skills>", "Use the IDs exactly as shown below.", ""];
+
+        // Your skills (agent-scoped) — always show structure
+        parts.push("<your-skills>");
+        parts.push("These are skills only available to you:");
+        parts.push("");
+        parts.push("### On this project (`$PROJECT_BASE/.agents/<your-short-pubkey>/skills`)");
+        const yourProject = grouped.get("your-project") ?? [];
+        if (yourProject.length > 0) {
+            parts.push(...yourProject);
+        } else {
+            parts.push("(none)");
+        }
+        parts.push("");
+        parts.push("### All projects (`$AGENT_HOME/skills`)");
+        const yourAll = grouped.get("your-all") ?? [];
+        if (yourAll.length > 0) {
+            parts.push(...yourAll);
+        } else {
+            parts.push("(none)");
+        }
+        parts.push("</your-skills>");
         parts.push("");
 
-        for (const [tag, lines] of groupedLines) {
-            parts.push(`  <${tag}>`);
-            parts.push(...lines);
-            parts.push(`  </${tag.split(" ")[0]}>`);
+        // Project skills — always show
+        parts.push("<project-skills>");
+        parts.push("These are skills available for this project, shared with all your teammates (`$PROJECT_BASE/.agents/skills`):");
+        parts.push("");
+        const projectSkills = grouped.get("project") ?? [];
+        if (projectSkills.length > 0) {
+            parts.push(...projectSkills);
+        } else {
+            parts.push("(none)");
         }
+        parts.push("</project-skills>");
+        parts.push("");
+
+        // Global/shared skills — always show
+        parts.push("<global-skills>");
+        parts.push("Skills in `~/.agents/skills`:");
+        parts.push("");
+        const sharedSkills = grouped.get("shared") ?? [];
+        if (sharedSkills.length > 0) {
+            parts.push(...sharedSkills);
+        } else {
+            parts.push("(none)");
+        }
+        parts.push("</global-skills>");
+        parts.push("");
+
+        // Built-in skills — always show
+        parts.push("<built-in>");
+        const builtIn = grouped.get("built-in") ?? [];
+        if (builtIn.length > 0) {
+            parts.push(...builtIn);
+        } else {
+            parts.push("(none)");
+        }
+        parts.push("</built-in>");
 
         parts.push("</available-skills>");
         return parts.join("\n");

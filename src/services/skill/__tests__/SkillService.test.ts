@@ -616,77 +616,46 @@ describe("SkillService", () => {
         expect(result.skills[0].content).toBe("Notion skill content");
     });
 
-    it("loads legacy ~/.agents skills when no higher-precedence copy exists", async () => {
+    it("loads shared ~/.agents skills when no higher-precedence copy exists", async () => {
         seedFile(
-            `${homedir()}/.agents/skills/legacy-only/SKILL.md`,
+            `${homedir()}/.agents/skills/shared-only/SKILL.md`,
             createSkillDocument({
-                name: "legacy-only",
-                description: "Legacy only description",
-                content: "Legacy only skill",
+                name: "shared-only",
+                description: "Shared only description",
+                content: "Shared only skill",
             })
         );
 
         const skills = await SkillService.getInstance().listAvailableSkills(LOOKUP_CONTEXT);
         const result = await SkillService.getInstance().fetchSkills(
-            ["legacy-only"],
+            ["shared-only"],
             LOOKUP_CONTEXT
         );
 
-        expect(skills.map((skill) => skill.identifier)).toEqual(["legacy-only"]);
+        expect(skills.map((skill) => skill.identifier)).toEqual(["shared-only"]);
         expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].content).toBe("Legacy only skill");
-    });
-
-    it("prefers global skills over legacy ~/.agents skills when identifiers conflict", async () => {
-        seedFile(
-            `${homedir()}/.agents/skills/fallback-kit/SKILL.md`,
-            createSkillDocument({
-                name: "fallback-kit",
-                description: "Legacy fallback description",
-                content: "Legacy fallback skill",
-            })
-        );
-        seedFile(
-            `${homedir()}/.agents/skills/fallback-kit/SKILL.md`,
-            createSkillDocument({
-                name: "fallback-kit",
-                description: "Global fallback description",
-                content: "Global fallback skill",
-            })
-        );
-
-        const skills = await SkillService.getInstance().listAvailableSkills(LOOKUP_CONTEXT);
-        const result = await SkillService.getInstance().fetchSkills(
-            ["fallback-kit"],
-            LOOKUP_CONTEXT
-        );
-
-        expect(skills.find((skill) => skill.identifier === "fallback-kit")?.content).toBe(
-            "Global fallback skill"
-        );
-        expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].content).toBe("Global fallback skill");
+        expect(result.skills[0].content).toBe("Shared only skill");
     });
 
     it("treats missing project and agent skill directories as empty", async () => {
         seedFile(
-            `${homedir()}/.agents/skills/global-only/SKILL.md`,
+            `${homedir()}/.agents/skills/shared-only/SKILL.md`,
             createSkillDocument({
-                name: "global-only",
-                description: "Global only description",
-                content: "Global only skill",
+                name: "shared-only",
+                description: "Shared only description",
+                content: "Shared only skill",
             })
         );
 
         const skills = await SkillService.getInstance().listAvailableSkills(LOOKUP_CONTEXT);
         const result = await SkillService.getInstance().fetchSkills(
-            ["global-only"],
+            ["shared-only"],
             LOOKUP_CONTEXT
         );
 
-        expect(skills.map((skill) => skill.identifier)).toEqual(["global-only"]);
+        expect(skills.map((skill) => skill.identifier)).toEqual(["shared-only"]);
         expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].content).toBe("Global only skill");
+        expect(result.skills[0].content).toBe("Shared only skill");
     });
 
     it("hydrates remote skills into slugged local directories and loads them from disk", async () => {
@@ -732,7 +701,7 @@ describe("SkillService", () => {
         skillEvent.tags = [["title", "Remote Scoped"]];
 
         seedFile(
-            "/tmp/test-tenex/projects/TENEX-ff3ssq/skills/local-only/SKILL.md`,
+            `${PROJECT_PATH}/.agents/skills/local-only/SKILL.md`,
             createSkillDocument({
                 name: "local-only",
                 description: "Project only description",
