@@ -17,7 +17,7 @@ describe("explicit request preparation order", () => {
         getAnalysisTelemetryConfigSpy = undefined;
     });
 
-    test("applies context management before sanitization without injecting reminders", async () => {
+    test("applies context management before sanitization and passes queued reminders", async () => {
         const prepareRequest = mock(async () => ({
             messages: [
                 { role: "user" as const, content: [] },
@@ -78,6 +78,13 @@ describe("explicit request preparation order", () => {
                 modelId: "gpt-4",
             },
             providerOptions: undefined,
+            queuedReminders: [
+                {
+                    kind: "heuristic",
+                    content: "Service-level reminder.",
+                },
+            ],
+            reminderData: undefined,
             toolChoice: undefined,
             tools: {},
         });
@@ -181,6 +188,8 @@ describe("explicit request preparation order", () => {
             ],
             model: undefined,
             providerOptions: undefined,
+            queuedReminders: [],
+            reminderData: undefined,
             toolChoice: undefined,
             tools: {},
         });
@@ -251,24 +260,26 @@ describe("explicit request preparation order", () => {
         ).toBeGreaterThan(0);
     });
 
-    test("applies anthropic shared-prefix breakpoints and native clear_tool_uses after final prompt preparation", async () => {
-        const observe = mock(() => ({
-            sharedPrefixMessageCount: 2,
-            lastSharedMessageIndex: 1,
-            hasSharedPrefix: true,
-        }));
-
+    test("passes through anthropic cache metadata after final prompt preparation", async () => {
         const contextManagement: ExecutionContextManagement = {
             optionalTools: {},
             requestContext: {
                 conversationId: "conv-1",
                 agentId: "agent-1",
             },
-            promptStabilityTracker: {
-                observe,
-            },
             prepareRequest: async ({ messages }) => ({
-                messages,
+                messages: messages.map((message, index) =>
+                    index === 1
+                        ? {
+                              ...message,
+                              providerOptions: {
+                                  anthropic: {
+                                      cacheControl: { type: "ephemeral", ttl: "1h" },
+                                  },
+                              },
+                          }
+                        : message
+                ),
                 providerOptions: {
                     custom: {
                         prepared: true,
@@ -296,13 +307,6 @@ describe("explicit request preparation order", () => {
             contextManagement,
         });
 
-        expect(observe).toHaveBeenCalledWith([
-            { role: "system", content: "Stable system prompt" },
-            {
-                role: "user",
-                content: [{ type: "text", text: "Request text" }],
-            },
-        ]);
         expect(request.messages[1]?.providerOptions).toEqual({
             anthropic: {
                 cacheControl: { type: "ephemeral", ttl: "1h" },
@@ -311,24 +315,6 @@ describe("explicit request preparation order", () => {
         expect(request.providerOptions).toEqual({
             custom: {
                 prepared: true,
-            },
-            anthropic: {
-                contextManagement: {
-                    edits: [
-                        {
-                            type: "clear_tool_uses_20250919",
-                            trigger: { type: "tool_uses", value: 25 },
-                            keep: { type: "tool_uses", value: 10 },
-                            clearAtLeast: { type: "input_tokens", value: 4000 },
-                            clearToolInputs: true,
-                            excludeTools: [
-                                "delegate",
-                                "delegate_followup",
-                                "delegate_crossproject",
-                            ],
-                        },
-                    ],
-                },
             },
         });
     });

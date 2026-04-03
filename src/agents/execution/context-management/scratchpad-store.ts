@@ -30,7 +30,6 @@ export function toRuntimeScratchpadState(
                 }
                 : {}),
         ...(state.activeNotice ? { activeNotice: state.activeNotice } : {}),
-        omitToolCallIds: state.omitToolCallIds ?? [],
         ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
         ...(state.agentLabel ? { agentLabel: state.agentLabel } : {}),
     };
@@ -46,7 +45,6 @@ export function fromRuntimeScratchpadState(
         ...(entries ? { entries } : {}),
         ...(state.preserveTurns !== undefined ? { preserveTurns: state.preserveTurns } : {}),
         ...(state.activeNotice ? { activeNotice: state.activeNotice } : {}),
-        omitToolCallIds: state.omitToolCallIds,
         ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
         ...(state.agentLabel ?? previousState?.agentLabel
             ? { agentLabel: state.agentLabel ?? previousState?.agentLabel }
@@ -60,8 +58,6 @@ export function toRuntimeScratchpadConversationEntries(
     return (entries ?? []).map((entry) => ({
         agentId: entry.agentId,
         agentLabel: entry.agentLabel,
-        state: toRuntimeScratchpadState(entry.state) ?? {
-            omitToolCallIds: [],
-        },
+        state: toRuntimeScratchpadState(entry.state) ?? {},
     }));
 }

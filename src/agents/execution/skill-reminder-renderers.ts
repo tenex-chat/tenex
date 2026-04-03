@@ -180,7 +180,8 @@ function classifyScope(scope: SkillStoreScope): ScopeGroup {
 }
 
 /**
- * Render the full `<available-skills>` block for the system reminder.
+ * Render the inner content for the `available-skills` system reminder.
+ * The outer `<available-skills>` tag is added by the reminder combiner.
  */
 export async function renderAvailableSkillsBlock(
     agentPubkey: string,
@@ -221,7 +222,7 @@ export async function renderAvailableSkillsBlock(
         }
     }
 
-    const parts: string[] = ["<available-skills>", "Use the IDs exactly as shown below.", ""];
+    const parts: string[] = ["Use the IDs exactly as shown below.", ""];
 
     // Your skills (agent-scoped) — always show structure
     parts.push("<your-skills>");
@@ -283,6 +284,5 @@ export async function renderAvailableSkillsBlock(
     }
     parts.push("</built-in>");
 
-    parts.push("</available-skills>");
     return parts.join("\n");
 }

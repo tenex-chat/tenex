@@ -20,7 +20,7 @@ const TWENTY_FOUR_HOURS_IN_SECONDS = 24 * 60 * 60;
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-interface ActiveConversationEntry {
+export interface ActiveConversationReminderEntry {
     conversationId: string;
     title?: string;
     summary?: string;
@@ -35,15 +35,20 @@ interface ActiveConversationEntry {
 }
 
 interface ConversationTreeNode {
-    entry: ActiveConversationEntry;
+    entry: ActiveConversationReminderEntry;
     children: ConversationTreeNode[];
 }
 
-interface RecentConversationEntry {
+export interface RecentConversationReminderEntry {
     id: string;
     title?: string;
     summary?: string;
     lastActivity: number;
+}
+
+export interface ConversationsReminderSnapshot {
+    active: ActiveConversationReminderEntry[];
+    recent: RecentConversationReminderEntry[];
 }
 
 interface RenderConversationsReminderArgs {
@@ -144,7 +149,7 @@ export function extractParentFromDelegationChain(chain?: DelegationChainEntry[])
 function loadActiveConversations(
     currentConversationId?: string,
     projectId?: ProjectDTag
-): ActiveConversationEntry[] {
+): ActiveConversationReminderEntry[] {
     if (!projectId) {
         return [];
     }
@@ -152,7 +157,7 @@ function loadActiveConversations(
     const ralRegistry = RALRegistry.getInstance();
     const identityService = getIdentityService();
     const activeEntries = ralRegistry.getActiveEntriesForProject(projectId);
-    const candidateEntries: ActiveConversationEntry[] = [];
+    const candidateEntries: ActiveConversationReminderEntry[] = [];
 
     const conversationMap = new Map<string, typeof activeEntries>();
     for (const entry of activeEntries) {
@@ -214,7 +219,7 @@ function loadActiveConversations(
 
 // ── Active conversations: tree building & rendering ────────────────────
 
-export function buildConversationTree(entries: ActiveConversationEntry[]): ConversationTreeNode[] {
+export function buildConversationTree(entries: ActiveConversationReminderEntry[]): ConversationTreeNode[] {
     const nodeMap = new Map<string, ConversationTreeNode>();
     const roots: ConversationTreeNode[] = [];
 
@@ -275,7 +280,7 @@ function sortNodeChildren(node: ConversationTreeNode): ConversationTreeNode {
 /**
  * Render a single conversation line in compact format.
  */
-function renderConversationLine(entry: ActiveConversationEntry): string {
+function renderConversationLine(entry: ActiveConversationReminderEntry): string {
     const title = entry.title || `Conversation ${shortenConversationId(entry.conversationId)}`;
     const duration = formatDuration(entry.startedAt);
     const lastMsg = formatRelativeTimeShort(Math.floor(entry.lastActivityAt / 1000));
@@ -324,7 +329,9 @@ function renderChildren(children: ConversationTreeNode[], indent: string, lines:
     }
 }
 
-function renderActiveConversationsSection(activeConversations: ActiveConversationEntry[]): string | null {
+function renderActiveConversationsSection(
+    activeConversations: ActiveConversationReminderEntry[]
+): string | null {
     if (activeConversations.length === 0) {
         return null;
     }
@@ -347,7 +354,7 @@ function loadRecentConversations(
     currentConversationId?: string,
     projectId?: ProjectDTag,
     activeConversationIds?: Set<string>
-): RecentConversationEntry[] {
+): RecentConversationReminderEntry[] {
     const now = Math.floor(Date.now() / 1000);
     const cutoffTime = now - TWENTY_FOUR_HOURS_IN_SECONDS;
     const effectiveProjectId = projectId ?? ConversationStore.getProjectId();
@@ -389,18 +396,8 @@ function loadRecentConversations(
 }
 
 function renderRecentConversationsSection(
-    agentPubkey: string,
-    currentConversationId?: string,
-    projectId?: ProjectDTag,
-    activeConversationIds?: Set<string>
+    recentConversations: RecentConversationReminderEntry[]
 ): string | null {
-    const recentConversations = loadRecentConversations(
-        agentPubkey,
-        currentConversationId,
-        projectId,
-        activeConversationIds
-    );
-
     if (recentConversations.length === 0) {
         return null;
     }
@@ -421,22 +418,83 @@ ${conversationLines.join("\n\n")}
 
 // ── Public API ─────────────────────────────────────────────────────────
 
-export function renderConversationsReminder({
+function renderConversationReference(
+    entry:
+        | Pick<ActiveConversationReminderEntry, "conversationId" | "title">
+        | Pick<RecentConversationReminderEntry, "id" | "title">
+): string {
+    const conversationId = "conversationId" in entry ? entry.conversationId : entry.id;
+    const title = entry.title || `Conversation ${shortenConversationId(conversationId)}`;
+    return `**${title}** [id: ${shortenConversationId(conversationId)}]`;
+}
+
+function summarizeActiveConversationChanges(
+    previous: ActiveConversationReminderEntry,
+    current: ActiveConversationReminderEntry
+): string[] {
+    const changes: string[] = [];
+
+    if ((previous.title ?? "") !== (current.title ?? "")) {
+        changes.push("title changed");
+    }
+    if ((previous.summary ?? "") !== (current.summary ?? "")) {
+        changes.push("summary changed");
+    }
+    if ((previous.currentTool ?? "") !== (current.currentTool ?? "")) {
+        if (current.currentTool) {
+            changes.push(`tool is now \`${current.currentTool}\``);
+        } else if (previous.currentTool) {
+            changes.push(`tool \`${previous.currentTool}\` finished`);
+        }
+    }
+    if (previous.isStreaming !== current.isStreaming) {
+        changes.push(current.isStreaming ? "streaming started" : "streaming stopped");
+    }
+    if (previous.agentName !== current.agentName) {
+        changes.push(`agent is now ${current.agentName}`);
+    }
+
+    return changes;
+}
+
+function summarizeRecentConversationChanges(
+    previous: RecentConversationReminderEntry,
+    current: RecentConversationReminderEntry
+): string[] {
+    const changes: string[] = [];
+
+    if ((previous.title ?? "") !== (current.title ?? "")) {
+        changes.push("title changed");
+    }
+    if ((previous.summary ?? "") !== (current.summary ?? "")) {
+        changes.push("summary changed");
+    }
+
+    return changes;
+}
+
+export function buildConversationsReminderSnapshot({
     agentPubkey,
     currentConversationId,
     projectId,
-}: RenderConversationsReminderArgs): string | null {
-    const activeConversations = loadActiveConversations(currentConversationId, projectId);
-    const activeSection = renderActiveConversationsSection(activeConversations);
-
-    const activeConversationIds = new Set<string>(activeConversations.map(c => c.conversationId));
-
-    const recentSection = renderRecentConversationsSection(
+}: RenderConversationsReminderArgs): ConversationsReminderSnapshot {
+    const active = loadActiveConversations(currentConversationId, projectId);
+    const activeConversationIds = new Set<string>(active.map((conversation) => conversation.conversationId));
+    const recent = loadRecentConversations(
         agentPubkey,
         currentConversationId,
         projectId,
         activeConversationIds
     );
+
+    return { active, recent };
+}
+
+export function renderConversationsReminderFromSnapshot(
+    snapshot: ConversationsReminderSnapshot
+): string | null {
+    const activeSection = renderActiveConversationsSection(snapshot.active);
+    const recentSection = renderRecentConversationsSection(snapshot.recent);
 
     if (!activeSection && !recentSection) {
         return null;
@@ -447,4 +505,89 @@ export function renderConversationsReminder({
     if (recentSection) sections.push(recentSection);
 
     return sections.join("\n");
+}
+
+export function renderConversationsReminderDelta(
+    previous: ConversationsReminderSnapshot,
+    current: ConversationsReminderSnapshot
+): string | null {
+    const lines: string[] = [];
+    const previousActive = new Map(previous.active.map((entry) => [entry.conversationId, entry]));
+    const currentActive = new Map(current.active.map((entry) => [entry.conversationId, entry]));
+    const previousRecent = new Map(previous.recent.map((entry) => [entry.id, entry]));
+    const currentRecent = new Map(current.recent.map((entry) => [entry.id, entry]));
+
+    for (const [conversationId, entry] of previousActive) {
+        if (currentActive.has(conversationId)) {
+            continue;
+        }
+
+        if (currentRecent.has(conversationId)) {
+            lines.push(
+                `Active conversation moved to recent: ${renderConversationReference(
+                    currentRecent.get(conversationId)!
+                )}.`
+            );
+            continue;
+        }
+
+        lines.push(`Active conversation ended: ${renderConversationReference(entry)}.`);
+    }
+
+    for (const [conversationId, entry] of currentActive) {
+        const previousEntry = previousActive.get(conversationId);
+        if (!previousEntry) {
+            lines.push(`Active conversation started: ${renderConversationReference(entry)}.`);
+            continue;
+        }
+
+        const changes = summarizeActiveConversationChanges(previousEntry, entry);
+        if (changes.length > 0) {
+            lines.push(
+                `Active conversation updated: ${renderConversationReference(entry)} (${changes.join(", ")}).`
+            );
+        }
+    }
+
+    for (const [conversationId, entry] of currentRecent) {
+        if (previousRecent.has(conversationId) || previousActive.has(conversationId)) {
+            continue;
+        }
+
+        lines.push(`Recent conversation added: ${renderConversationReference(entry)}.`);
+    }
+
+    for (const [conversationId, entry] of currentRecent) {
+        const previousEntry = previousRecent.get(conversationId);
+        if (!previousEntry) {
+            continue;
+        }
+
+        const changes = summarizeRecentConversationChanges(previousEntry, entry);
+        if (changes.length > 0) {
+            lines.push(
+                `Recent conversation updated: ${renderConversationReference(entry)} (${changes.join(", ")}).`
+            );
+        }
+    }
+
+    if (lines.length === 0) {
+        return null;
+    }
+
+    return ["<updates>", ...lines.map((line) => `- ${line}`), "</updates>"].join("\n");
+}
+
+export function renderConversationsReminder({
+    agentPubkey,
+    currentConversationId,
+    projectId,
+}: RenderConversationsReminderArgs): string | null {
+    return renderConversationsReminderFromSnapshot(
+        buildConversationsReminderSnapshot({
+            agentPubkey,
+            currentConversationId,
+            projectId,
+        })
+    );
 }

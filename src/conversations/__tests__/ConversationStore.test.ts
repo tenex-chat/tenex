@@ -190,7 +190,6 @@ describe("ConversationStore", () => {
                     notes: "Focus on the failing tests",
                 },
                 preserveTurns: 6,
-                omitToolCallIds: ["tool-call-1"],
                 updatedAt: 123,
                 agentLabel: "agent1",
             });
@@ -205,7 +204,6 @@ describe("ConversationStore", () => {
                     objective: "Focus on parser cleanup",
                 },
                 preserveTurns: 6,
-                omitToolCallIds: ["tool-call-1"],
                 updatedAt: 123,
                 agentLabel: "agent1",
             });
@@ -218,7 +216,6 @@ describe("ConversationStore", () => {
                         objective: "Focus on parser cleanup",
                     },
                     preserveTurns: 6,
-                    omitToolCallIds: ["tool-call-1"],
                     updatedAt: 123,
                     agentLabel: "agent1",
                 },
@@ -232,7 +229,6 @@ describe("ConversationStore", () => {
                 entries: {
                     thesis: "The parser regression is in middleware ordering",
                 },
-                omitToolCallIds: [],
                 agentLabel: "agent1",
             });
 
@@ -240,7 +236,6 @@ describe("ConversationStore", () => {
                 entries: {
                     thesis: "The parser regression is in middleware ordering",
                 },
-                omitToolCallIds: [],
                 agentLabel: "agent1",
             });
         });
@@ -351,7 +346,6 @@ describe("ConversationStore", () => {
                         [AGENT1_PUBKEY]: {
                             notes: "Focus on the failing tests",
                             preserveTurns: 6,
-                            omitToolCallIds: ["tool-call-1"],
                             updatedAt: 123,
                             agentLabel: "agent1",
                         },
@@ -366,7 +360,6 @@ describe("ConversationStore", () => {
                     notes: "Focus on the failing tests",
                 },
                 preserveTurns: 6,
-                omitToolCallIds: ["tool-call-1"],
                 updatedAt: 123,
                 agentLabel: "agent1",
             });

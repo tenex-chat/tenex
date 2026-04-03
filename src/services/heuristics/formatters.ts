@@ -5,8 +5,7 @@
  * Output is wrapped in typed <system-reminder type="{heuristicId}"> tags for consistent injection.
  */
 
-import { wrapInSystemReminder } from "ai-sdk-system-reminders";
-import type { SystemReminderDescriptor } from "ai-sdk-system-reminders";
+import { wrapInSystemReminder, type ReminderDescriptor } from "ai-sdk-context-management";
 import type { HeuristicViolation } from "./types";
 
 /**
@@ -32,7 +31,7 @@ export function formatViolation(violation: HeuristicViolation): string {
  */
 export function createViolationReminders(
   violations: HeuristicViolation[]
-): SystemReminderDescriptor[] {
+): ReminderDescriptor[] {
   return violations.map((violation) => ({
     type: violation.heuristicId,
     content: formatViolation(violation),

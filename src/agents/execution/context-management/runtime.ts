@@ -1,18 +1,16 @@
 import { trace } from "@opentelemetry/api";
 import { generateText, type LanguageModel, type ModelMessage } from "ai";
 import {
+    AnthropicPromptCachingStrategy,
     buildDeterministicSummary,
     buildSummaryTranscript,
     CompactionToolStrategy,
     CONTEXT_MANAGEMENT_KEY,
-    ContextUtilizationReminderStrategy,
-    ContextWindowStatusStrategy,
-    createSharedPrefixTracker,
     type CompactionStore,
     type CompactionToolStrategyOptions,
     type ContextManagementPreparedRequest,
     ScratchpadStrategy,
-    SystemPromptCachingStrategy,
+    RemindersStrategy,
     ToolResultDecayStrategy,
     createContextManagementRuntime,
     createDefaultPromptTokenEstimator,
@@ -21,11 +19,10 @@ import {
     type ContextManagementRuntime,
     type ContextManagementStrategy,
     type DecayedToolContext,
-    type SharedPrefixTracker,
+    type RemindersStrategyOptions,
 } from "ai-sdk-context-management";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
@@ -42,6 +39,11 @@ import {
     getContextManagementSettings,
 } from "./settings";
 import {
+    createTenexReminderProviders,
+    createTenexReminderStateStore,
+    type TenexReminderData,
+} from "../system-reminders";
+import {
     fromRuntimeScratchpadState,
     toRuntimeScratchpadConversationEntries,
     toRuntimeScratchpadState,
@@ -51,7 +53,6 @@ import { createTelemetryCallback } from "./telemetry";
 export interface ExecutionContextManagement {
     optionalTools: Record<string, AISdkTool>;
     requestContext: ContextManagementRequestContext;
-    promptStabilityTracker?: SharedPrefixTracker;
     scratchpadAvailable: boolean;
     prepareRequest(
         options: Omit<PrepareContextManagementRequestOptions, "requestContext">
@@ -152,7 +153,6 @@ function createConversationContextManagementRuntime(options: {
     scratchpadAvailable: boolean;
 }): {
     runtime: ContextManagementRuntime;
-    promptStabilityTracker: SharedPrefixTracker;
 } {
     const settings = getContextManagementSettings();
     const requestEstimator = createDefaultPromptTokenEstimator();
@@ -164,10 +164,6 @@ function createConversationContextManagementRuntime(options: {
     const scratchpadEnabled = options.scratchpadAvailable && !isAnthropicProvider;
 
     const strategies: ContextManagementStrategy[] = [];
-
-    if (settings.strategies.systemPromptCaching) {
-        strategies.push(new SystemPromptCachingStrategy());
-    }
 
     if (scratchpadEnabled && settings.strategies.scratchpad) {
         strategies.push(
@@ -239,21 +235,24 @@ function createConversationContextManagementRuntime(options: {
         );
     }
 
-    if (settings.strategies.contextUtilizationReminder) {
-        strategies.push(
-            new ContextUtilizationReminderStrategy({
+    if (settings.strategies.reminders) {
+        const reminderOptions: RemindersStrategyOptions<TenexReminderData> = {};
+
+        reminderOptions.stateStore = createTenexReminderStateStore({
+            conversationStore: options.conversationStore,
+        });
+        reminderOptions.providers = createTenexReminderProviders();
+        reminderOptions.overlayType = "system-reminders";
+        reminderOptions.contextUtilization = settings.strategies.contextUtilizationReminder
+            ? {
                 budgetProfile: managedBudgetProfile,
                 warningThresholdRatio: settings.utilizationWarningThresholdPercent / 100,
                 mode: scratchpadEnabled ? "scratchpad" : "generic",
-            })
-        );
-    }
+            }
+            : false;
 
-    if (settings.strategies.contextWindowStatus) {
-        strategies.push(
-            new ContextWindowStatusStrategy({
-                budgetProfile: managedBudgetProfile,
-                requestEstimator,
+        reminderOptions.contextWindowStatus = settings.strategies.contextWindowStatus
+            ? {
                 getContextWindow: ({ model }) => {
                     if (!model) {
                         return undefined;
@@ -264,8 +263,14 @@ function createConversationContextManagementRuntime(options: {
                         model.modelId
                     );
                 },
-            })
-        );
+            }
+            : false;
+
+        strategies.push(new RemindersStrategy<TenexReminderData>(reminderOptions));
+    }
+
+    if (settings.strategies.anthropicPromptCaching) {
+        strategies.push(new AnthropicPromptCachingStrategy());
     }
 
     const telemetry = createTelemetryCallback();
@@ -273,11 +278,9 @@ function createConversationContextManagementRuntime(options: {
         strategies,
         telemetry,
         estimator: requestEstimator,
-        systemReminderContext: getSystemReminderContext(),
     });
     return {
         runtime,
-        promptStabilityTracker: createSharedPrefixTracker(),
     };
 }
 
@@ -297,11 +300,8 @@ export function createExecutionContextManagement(options: {
     };
 
     if (!settings.enabled) {
-        // Strategies are disabled, but return a minimal object so Anthropic-specific
-        // prompt caching and clear-tool-uses logic in request-preparation.ts still runs.
         return {
             optionalTools: {},
-            promptStabilityTracker: createSharedPrefixTracker(),
             requestContext,
             scratchpadAvailable: true,
             async prepareRequest(requestOptions) {
@@ -318,7 +318,7 @@ export function createExecutionContextManagement(options: {
     const scratchpadAvailable =
         !options.skillToolPermissions || !isOnlyToolMode(options.skillToolPermissions);
 
-    const { runtime, promptStabilityTracker } = createConversationContextManagementRuntime({
+    const { runtime } = createConversationContextManagementRuntime({
         providerId: options.providerId,
         conversationStore: options.conversationStore,
         conversationId: options.conversationId,
@@ -329,7 +329,6 @@ export function createExecutionContextManagement(options: {
 
     return {
         optionalTools,
-        promptStabilityTracker,
         requestContext,
         scratchpadAvailable,
         async prepareRequest(requestOptions) {

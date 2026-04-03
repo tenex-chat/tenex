@@ -9,6 +9,11 @@
 - [Adding New Code](#adding-new-code)
 - [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
 
+Related architecture notes:
+
+- `docs/system-prompt-architecture.md` covers how TENEX builds the base system prompt.
+- `docs/CONTEXT-MANAGEMENT-AND-REMINDERS.md` covers request-time context management, reminders, prompt-history overlays, and Anthropic cache handling.
+
 ---
 
 ## Core Principles

@@ -567,6 +567,150 @@ describe("Analysis telemetry services", () => {
         db.close(false);
     });
 
+    test("persists compaction analytics fields and provider context edit metadata", async () => {
+        const startedAt = Date.now();
+        const baseContext = {
+            projectId: "project-compaction",
+            conversationId: "conversation-compaction",
+            agentSlug: "executor",
+            agentId: "agent-compaction",
+        };
+
+        const handle = analysisTelemetryService.openRequest({
+            operationKind: "stream",
+            startedAt,
+            provider: "anthropic",
+            model: "claude-sonnet",
+            messages: [buildUserMessage("Continue the parser fix", "msg-compaction", "evt-compaction") as never],
+            requestSeed: {
+                requestId: "request-compaction",
+                telemetryMetadata: {
+                    "analysis.request_id": "request-compaction",
+                },
+            },
+            baseContext,
+        });
+
+        analysisTelemetryService.recordContextManagementEvent(
+            {
+                type: "strategy-complete",
+                strategyName: "compaction-tool",
+                outcome: "applied",
+                reason: "manual-compaction-applied",
+                estimatedTokensBefore: 180,
+                estimatedTokensAfter: 120,
+                workingTokenBudget: 40_000,
+                removedToolExchangesDelta: 0,
+                removedToolExchangesTotal: 0,
+                pinnedToolCallIdsDelta: 0,
+                messageCountBefore: 7,
+                messageCountAfter: 4,
+                strategyPayload: {
+                    kind: "compaction-tool",
+                    mode: "manual",
+                    editCount: 1,
+                    compactedMessageCount: 4,
+                    fromIndex: 1,
+                    toIndex: 4,
+                    summaryCharCount: 128,
+                },
+            } as never,
+            {
+                requestId: "request-compaction",
+                ...baseContext,
+                provider: "anthropic",
+                model: "claude-sonnet",
+            }
+        );
+
+        await handle?.reportSuccess({
+            completedAt: startedAt + 500,
+            finishReason: "stop",
+            usage: {
+                inputTokens: 80,
+                outputTokens: 20,
+                totalTokens: 100,
+            },
+            metadata: {
+                providerContextEditCount: 2,
+                providerContextClearedInputTokens: 320,
+                providerContextClearedToolUses: 3,
+                providerContextClearedThinkingTurns: 1,
+                providerContextEditsJson: JSON.stringify([
+                    {
+                        type: "clear_tool_uses",
+                        clearedInputTokens: 320,
+                        clearedToolUses: 3,
+                        clearedThinkingTurns: 1,
+                    },
+                    {
+                        type: "clear_thinking",
+                        clearedInputTokens: 0,
+                        clearedToolUses: 0,
+                        clearedThinkingTurns: 0,
+                    },
+                ]),
+            },
+        });
+
+        const db = createDb(dbPath, true);
+
+        const requestRow = db.prepare(`
+            SELECT
+                provider_context_edit_count,
+                provider_context_cleared_input_tokens,
+                provider_context_cleared_tool_uses,
+                provider_context_cleared_thinking_turns,
+                provider_context_edits_json
+            FROM llm_requests
+            WHERE request_id = ?
+        `).get("request-compaction") as Record<string, number | string | null>;
+        expect(requestRow).toEqual({
+            provider_context_edit_count: 2,
+            provider_context_cleared_input_tokens: 320,
+            provider_context_cleared_tool_uses: 3,
+            provider_context_cleared_thinking_turns: 1,
+            provider_context_edits_json: JSON.stringify([
+                {
+                    type: "clear_tool_uses",
+                    clearedInputTokens: 320,
+                    clearedToolUses: 3,
+                    clearedThinkingTurns: 1,
+                },
+                {
+                    type: "clear_thinking",
+                    clearedInputTokens: 0,
+                    clearedToolUses: 0,
+                    clearedThinkingTurns: 0,
+                },
+            ]),
+        });
+
+        const contextRow = db.prepare(`
+            SELECT
+                strategy_name,
+                compaction_mode,
+                compaction_edit_count,
+                compaction_message_count,
+                compaction_from_index,
+                compaction_to_index,
+                summary_char_count
+            FROM context_management_events
+            WHERE request_id = ?
+        `).get("request-compaction") as Record<string, number | string | null>;
+        expect(contextRow).toEqual({
+            strategy_name: "compaction-tool",
+            compaction_mode: "manual",
+            compaction_edit_count: 1,
+            compaction_message_count: 4,
+            compaction_from_index: 1,
+            compaction_to_index: 4,
+            summary_char_count: 128,
+        });
+
+        db.close(false);
+    });
+
     test("aggregates canonical runtime savings separately from prepared prompt savings", async () => {
         const baseTime = Date.now();
         const records = [
@@ -938,6 +1082,22 @@ describe("Analysis telemetry services", () => {
                 "shared_prefix_message_count",
                 "shared_prefix_last_message_index",
                 "anthropic_clear_tool_uses_enabled",
+                "provider_context_edit_count",
+                "provider_context_cleared_input_tokens",
+                "provider_context_cleared_tool_uses",
+                "provider_context_cleared_thinking_turns",
+                "provider_context_edits_json",
+            ])
+        );
+
+        const contextColumns = db.prepare("PRAGMA table_info(context_management_events)").all() as Array<{ name: string }>;
+        expect(contextColumns.map((column) => column.name)).toEqual(
+            expect.arrayContaining([
+                "compaction_mode",
+                "compaction_edit_count",
+                "compaction_message_count",
+                "compaction_from_index",
+                "compaction_to_index",
             ])
         );
 
@@ -978,7 +1138,7 @@ describe("Analysis telemetry services", () => {
             FROM analysis_meta
             WHERE key = ?
         `).get("schema_version") as { value: string };
-        expect(schemaVersion.value).toBe("4");
+        expect(schemaVersion.value).toBe("5");
 
         db.close(false);
     });

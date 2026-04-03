@@ -151,7 +151,6 @@ describe("TENEX context management telemetry", () => {
                 setEntries: {
                     notes: "Track the current parser state",
                 },
-                omitToolCallIds: ["call-obsolete"],
             },
             {
                 toolCallId: "tool-call-1",
@@ -204,14 +203,18 @@ describe("TENEX context management telemetry", () => {
         expect(String(runtimeStartEvent?.attributes?.["context_management.summary"])).toContain(
             "Running"
         );
-        expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(5);
+        expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(6);
 
         const strategyOrder = events
             .filter((event) => event.eventName.startsWith("context_management.strategy_complete."))
             .map((event) => String(event.attributes?.["context_management.strategy_name"]));
         expect(strategyOrder.indexOf("scratchpad")).toBeGreaterThanOrEqual(0);
+        expect(strategyOrder.indexOf("compaction-tool")).toBeGreaterThanOrEqual(0);
         expect(strategyOrder.indexOf("tool-result-decay")).toBeGreaterThanOrEqual(0);
         expect(strategyOrder.indexOf("scratchpad")).toBeLessThan(
+            strategyOrder.indexOf("compaction-tool")
+        );
+        expect(strategyOrder.indexOf("compaction-tool")).toBeLessThan(
             strategyOrder.indexOf("tool-result-decay")
         );
 
@@ -269,6 +272,19 @@ describe("TENEX context management telemetry", () => {
         expect(decayEvent).toBeDefined();
         expect(String(decayEvent?.attributes?.["context_management.summary"])).toContain(
             "tool-result decay"
+        );
+
+        const compactionEvent = events.find(
+            (event) =>
+                event.eventName === "context_management.strategy_complete.compaction-tool"
+        );
+        expect(compactionEvent).toBeDefined();
+        expect(compactionEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
+        expect(compactionEvent?.attributes?.["context_management.reason"]).toBe(
+            "no-compaction-requested"
+        );
+        expect(String(compactionEvent?.attributes?.["context_management.summary"])).toContain(
+            "Evaluated compaction"
         );
 
         const toolEvent = events.find(
@@ -341,7 +357,7 @@ describe("TENEX context management telemetry", () => {
                 tokenBudget: 100,
                 forceScratchpadThresholdPercent: 100,
                 utilizationWarningThresholdPercent: 100,
-                summarizationFallbackThresholdPercent: 100,
+                compactionThresholdPercent: 100,
             }) as any
         );
 

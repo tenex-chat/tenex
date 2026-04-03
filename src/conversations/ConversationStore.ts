@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
+import type { ReminderState } from "ai-sdk-context-management";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { NDKKind } from "@/nostr/kinds";
 import type { TodoItem } from "@/services/ral/types";
@@ -139,15 +140,6 @@ function normalizeContextManagementScratchpadState(
             ),
         }
         : undefined;
-    const omitToolCallIds = Array.from(
-        new Set(
-            (Array.isArray(rawState.omitToolCallIds) ? rawState.omitToolCallIds : [])
-                .filter((toolCallId): toolCallId is string =>
-                    typeof toolCallId === "string" && toolCallId.trim().length > 0
-                )
-                .map((toolCallId) => toolCallId.trim())
-        )
-    );
     const agentLabel = typeof rawState.agentLabel === "string" && rawState.agentLabel.trim().length > 0
         ? rawState.agentLabel
         : undefined;
@@ -157,7 +149,6 @@ function normalizeContextManagementScratchpadState(
         ...(entries ? { entries } : {}),
         ...(preserveTurns !== undefined ? { preserveTurns } : {}),
         ...(activeNotice ? { activeNotice } : {}),
-        omitToolCallIds,
         ...(updatedAt !== undefined ? { updatedAt } : {}),
         ...(agentLabel ? { agentLabel } : {}),
     };
@@ -339,6 +330,72 @@ function normalizeLoadedReminderDeltaState(
             return normalized ? [[type, normalized] as const] : [];
         })
     );
+}
+
+function normalizeReminderState(
+    state: ReminderState | Record<string, unknown> | undefined
+): ReminderState | undefined {
+    if (!state || typeof state !== "object") {
+        return undefined;
+    }
+
+    const raw = state as Record<string, unknown>;
+    const providers = normalizeLoadedReminderDeltaState(
+        typeof raw.providers === "object" && raw.providers !== null
+            ? raw.providers as Record<string, PerAgentReminderDeltaState>
+            : undefined
+    );
+    const deferred = Array.isArray(raw.deferred)
+        ? raw.deferred.filter((reminder): reminder is ReminderState["deferred"][number] => {
+            return Boolean(
+                reminder
+                && typeof reminder === "object"
+                && typeof (reminder as { kind?: unknown }).kind === "string"
+                && typeof (reminder as { content?: unknown }).content === "string"
+            );
+        })
+        : [];
+
+    return {
+        providers,
+        deferred: structuredClone(deferred),
+    };
+}
+
+function buildReminderStatesFromLegacyPromptHistories(
+    histories: Record<string, AgentPromptHistoryState>
+): Record<string, ReminderState> {
+    return Object.fromEntries(
+        Object.entries(histories).flatMap(([agentId, history]) => {
+            const providers = normalizeLoadedReminderDeltaState(history.reminderDeltaState);
+            if (Object.keys(providers).length === 0) {
+                return [];
+            }
+
+            return [[agentId, {
+                providers,
+                deferred: [],
+            } satisfies ReminderState] as const];
+        })
+    );
+}
+
+function normalizeLoadedReminderStates(
+    states: Record<string, ReminderState> | undefined,
+    promptHistories: Record<string, AgentPromptHistoryState>
+): Record<string, ReminderState> {
+    const normalized = Object.fromEntries(
+        Object.entries(states ?? {}).flatMap(([agentId, state]) => {
+            const normalizedState = normalizeReminderState(state);
+            return normalizedState ? [[agentId, normalizedState] as const] : [];
+        })
+    );
+
+    if (Object.keys(normalized).length > 0) {
+        return normalized;
+    }
+
+    return buildReminderStatesFromLegacyPromptHistories(promptHistories);
 }
 
 function normalizeFrozenPromptMessage(
@@ -619,6 +676,7 @@ export class ConversationStore {
         contextManagementCompactions: {},
         selfAppliedSkills: {},
         agentPromptHistories: {},
+        contextManagementReminderStates: {},
     };
     private eventIdSet: Set<string> = new Set();
     private blockedAgentsSet: Set<string> = new Set();
@@ -683,7 +741,12 @@ export class ConversationStore {
                         | Record<string, AgentPromptHistoryState>
                         | undefined
                 ),
+                contextManagementReminderStates: {},
             };
+            this.state.contextManagementReminderStates = normalizeLoadedReminderStates(
+                loaded.contextManagementReminderStates as Record<string, ReminderState> | undefined,
+                this.state.agentPromptHistories ?? {}
+            );
             this.eventIdSet = new Set(
                 this.state.messages.map((m) => m.eventId).filter((id): id is string => id !== undefined)
             );
@@ -703,6 +766,7 @@ export class ConversationStore {
                 contextManagementCompactions: {},
                 selfAppliedSkills: {},
                 agentPromptHistories: {},
+                contextManagementReminderStates: {},
             };
             this.eventIdSet = new Set();
             this.blockedAgentsSet = new Set();
@@ -933,9 +997,8 @@ export class ConversationStore {
         const hasEntries = Object.keys(normalizedState?.entries ?? {}).length > 0;
         const hasPreserveTurns = typeof normalizedState?.preserveTurns === "number";
         const hasActiveNotice = normalizedState?.activeNotice !== undefined;
-        const hasOmittedToolCalls = (normalizedState?.omitToolCallIds.length ?? 0) > 0;
 
-        if (!normalizedState || (!hasEntries && !hasPreserveTurns && !hasActiveNotice && !hasOmittedToolCalls)) {
+        if (!normalizedState || (!hasEntries && !hasPreserveTurns && !hasActiveNotice)) {
             delete this.state.contextManagementScratchpads[agentId];
             return;
         }
@@ -1245,6 +1308,24 @@ export class ConversationStore {
     clearAgentPromptHistory(agentPubkey: string): void {
         if (this.state.agentPromptHistories) {
             delete this.state.agentPromptHistories[agentPubkey];
+        }
+    }
+
+    getContextManagementReminderState(agentPubkey: string): ReminderState | undefined {
+        return this.state.contextManagementReminderStates?.[agentPubkey];
+    }
+
+    setContextManagementReminderState(agentPubkey: string, state: ReminderState): void {
+        if (!this.state.contextManagementReminderStates) {
+            this.state.contextManagementReminderStates = {};
+        }
+
+        this.state.contextManagementReminderStates[agentPubkey] = structuredClone(state);
+    }
+
+    clearContextManagementReminderState(agentPubkey: string): void {
+        if (this.state.contextManagementReminderStates) {
+            delete this.state.contextManagementReminderStates[agentPubkey];
         }
     }
 

@@ -17,8 +17,6 @@ import { trace } from "@opentelemetry/api";
 import type { LLMService } from "@/llm/service";
 import { MessageCompiler } from "./MessageCompiler";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { initializeReminderProviders, updateReminderData, collectSystemReminderOverlayMessage } from "./system-reminders";
-import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
 import { FullResultStash, wrapToolsWithOutputTruncation } from "./ToolOutputTruncation";
@@ -300,50 +298,28 @@ export async function setupStreamExecution(
     // Cache the compiled system prompt for reuse by supervision checks
     context.cachedSystemPrompt = compiled.systemPrompt;
 
-    // Initialize providers (idempotent) and set data for this execution
-    initializeReminderProviders();
     getSystemReminderContext().advance();
 
     const rawDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
     const dTag = rawDTag ? createProjectDTag(rawDTag) : undefined;
-    const conversationsContent = renderConversationsReminder({
-        agentPubkey: context.agent.pubkey,
-        currentConversationId: context.conversationId,
-        projectId: dTag,
-    });
-
-    updateReminderData({
+    const reminderData = {
         agent: context.agent,
         conversation,
         respondingToPrincipal: context.triggeringEnvelope.principal,
         pendingDelegations,
         completedDelegations,
-        conversationsContent: conversationsContent ?? undefined,
+        projectId: dTag,
         loadedSkills: skillResult.skills,
         skillToolPermissions: skillResult.toolPermissions,
         projectPath: context.projectBasePath || undefined,
-    });
-
-    const reminderStateBefore = JSON.stringify(
-        conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
-    );
-    const reminderOverlay = await collectSystemReminderOverlayMessage(trace.getActiveSpan());
-    const reminderStateAfter = JSON.stringify(
-        conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
-    );
+    };
     const promptHistoryResult = buildPromptHistoryMessages({
         compiled,
         conversationStore: conversation,
         agentPubkey: context.agent.pubkey,
-        runtimeOverlay: reminderOverlay,
-        reminderStateChanged: reminderStateBefore !== reminderStateAfter,
         span: trace.getActiveSpan(),
     });
     const messages = promptHistoryResult.messages;
-
-    if (promptHistoryResult.didMutateHistory || promptHistoryResult.reminderStateChanged) {
-        await conversation.save();
-    }
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
         "ral.number": ralNumber,
@@ -352,6 +328,9 @@ export async function setupStreamExecution(
         "conversation.count": compiled.counts.conversation,
     });
 
+    const reminderStateBefore = JSON.stringify(
+        conversation.getContextManagementReminderState(context.agent.pubkey) ?? null
+    );
     const request = await prepareLLMRequest({
         messages,
         tools: toolsObject,
@@ -361,6 +340,7 @@ export async function setupStreamExecution(
             modelId: llmService.model,
         },
         contextManagement,
+        reminderData,
         analysisContext: {
             projectId: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
             conversationId: context.conversationId,
@@ -368,6 +348,28 @@ export async function setupStreamExecution(
             agentId: context.agent.pubkey,
         },
     });
+    const reminderStateAfter = JSON.stringify(
+        conversation.getContextManagementReminderState(context.agent.pubkey) ?? null
+    );
+    const reminderStateChanged = reminderStateBefore !== reminderStateAfter;
+    const overlayHistoryResult = request.runtimeOverlays?.length
+        ? buildPromptHistoryMessages({
+            compiled,
+            conversationStore: conversation,
+            agentPubkey: context.agent.pubkey,
+            runtimeOverlays: request.runtimeOverlays,
+            reminderStateChanged,
+            span: trace.getActiveSpan(),
+        })
+        : undefined;
+
+    if (
+        promptHistoryResult.didMutateHistory
+        || overlayHistoryResult?.didMutateHistory
+        || reminderStateChanged
+    ) {
+        await conversation.save();
+    }
 
     return {
         toolsObject,

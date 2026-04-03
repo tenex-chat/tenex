@@ -1,4 +1,11 @@
-import type { ModelMessage } from "ai";
+import type {
+    FilePart,
+    ImagePart,
+    ModelMessage,
+    TextPart,
+    UserContent,
+    UserModelMessage,
+} from "ai";
 import type { Span } from "@opentelemetry/api";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type {
@@ -110,6 +117,69 @@ function thawFrozenPromptMessage(message: FrozenPromptMessage): ModelMessage {
     } as ModelMessage;
 }
 
+type UserContentParts = Array<TextPart | ImagePart | FilePart>;
+
+function createUserTextPart(text: string): TextPart {
+    return { type: "text", text };
+}
+
+function normalizeUserContentParts(content: UserContent): UserContentParts {
+    return typeof content === "string"
+        ? [createUserTextPart(content)]
+        : structuredClone(content);
+}
+
+function mergeUserMessageContent(
+    baseContent: UserContent,
+    overlayContent: UserContent
+): UserContent {
+    if (typeof baseContent === "string" && typeof overlayContent === "string") {
+        return `${baseContent}\n\n${overlayContent}`;
+    }
+
+    const baseParts = normalizeUserContentParts(baseContent);
+    const overlayParts = normalizeUserContentParts(overlayContent);
+
+    for (const part of overlayParts) {
+        if (part.type === "text") {
+            const lastBasePart = baseParts.at(-1);
+            if (lastBasePart?.type === "text") {
+                lastBasePart.text = `${lastBasePart.text}\n\n${part.text}`;
+                continue;
+            }
+        }
+
+        baseParts.push(part);
+    }
+
+    return baseParts;
+}
+
+function materializePromptHistoryMessages(
+    frozenMessages: FrozenPromptMessage[]
+): ModelMessage[] {
+    const materialized: ModelMessage[] = [];
+
+    for (const frozenMessage of frozenMessages) {
+        if (
+            frozenMessage.source.kind === "runtime-overlay"
+            && frozenMessage.role === "user"
+            && materialized.at(-1)?.role === "user"
+        ) {
+            const previousUserMessage = materialized.at(-1) as UserModelMessage;
+            previousUserMessage.content = mergeUserMessageContent(
+                previousUserMessage.content,
+                frozenMessage.content as UserContent
+            );
+            continue;
+        }
+
+        materialized.push(thawFrozenPromptMessage(frozenMessage));
+    }
+
+    return materialized;
+}
+
 function splitCompiledMessages(compiled: CompiledMessages): {
     systemMessages: ModelMessage[];
     canonicalMessages: AddressablePromptMessage[];
@@ -127,6 +197,7 @@ export function buildPromptHistoryMessages(params: {
     conversationStore: ConversationStore;
     agentPubkey: string;
     runtimeOverlay?: RuntimePromptOverlay;
+    runtimeOverlays?: RuntimePromptOverlay[];
     reminderStateChanged?: boolean;
     span?: Span;
 }): PromptHistoryAssemblyResult {
@@ -135,9 +206,13 @@ export function buildPromptHistoryMessages(params: {
         conversationStore,
         agentPubkey,
         runtimeOverlay,
+        runtimeOverlays = [],
         reminderStateChanged = false,
         span,
     } = params;
+    const overlaysToAppend = runtimeOverlay
+        ? [...runtimeOverlays, runtimeOverlay]
+        : runtimeOverlays;
     const { systemMessages, canonicalMessages } = splitCompiledMessages(compiled);
     const history = conversationStore.getAgentPromptHistory(agentPubkey);
     const seenMessageIds = new Set(history.seenMessageIds);
@@ -159,8 +234,8 @@ export function buildPromptHistoryMessages(params: {
         appendedCanonicalCount += 1;
     }
 
-    if (runtimeOverlay) {
-        appendFrozenPromptMessage(history, freezeRuntimeOverlay(history, runtimeOverlay));
+    for (const overlay of overlaysToAppend) {
+        appendFrozenPromptMessage(history, freezeRuntimeOverlay(history, overlay));
         didMutateHistory = true;
     }
 
@@ -169,14 +244,14 @@ export function buildPromptHistoryMessages(params: {
         "prompt_history.canonical_projection_count": canonicalMessages.length,
         "prompt_history.frozen_message_count": history.messages.length,
         "prompt_history.appended_canonical_count": appendedCanonicalCount,
-        "prompt_history.appended_runtime_overlay_count": runtimeOverlay ? 1 : 0,
+        "prompt_history.appended_runtime_overlay_count": overlaysToAppend.length,
         "prompt_history.reminder_state_changed": reminderStateChanged,
     });
 
     return {
         messages: [
             ...systemMessages,
-            ...history.messages.map((message) => thawFrozenPromptMessage(message)),
+            ...materializePromptHistoryMessages(history.messages),
         ],
         didMutateHistory,
         reminderStateChanged,

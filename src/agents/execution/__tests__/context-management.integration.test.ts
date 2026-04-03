@@ -3,7 +3,6 @@ import { mkdir, rm } from "node:fs/promises";
 import type { AgentInstance } from "@/agents/types";
 import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import * as contextWindowCache from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import {
@@ -27,7 +26,7 @@ describe("TENEX context management integration", () => {
             tokenBudget: 40000,
             forceScratchpadThresholdPercent: 70,
             utilizationWarningThresholdPercent: 70,
-            summarizationFallbackThresholdPercent: 90,
+            compactionThresholdPercent: 90,
             ...overrides,
         };
     }
@@ -46,6 +45,33 @@ describe("TENEX context management integration", () => {
             messages: messages as any,
             model,
         });
+    }
+
+    function collectTextContent(message: { content: unknown } | undefined): string {
+        if (!message) {
+            return "";
+        }
+
+        if (typeof message.content === "string") {
+            return message.content;
+        }
+
+        if (!Array.isArray(message.content)) {
+            return JSON.stringify(message.content);
+        }
+
+        return message.content
+            .filter(
+                (part): part is { type: "text"; text: string } =>
+                    typeof part === "object"
+                    && part !== null
+                    && "type" in part
+                    && part.type === "text"
+                    && "text" in part
+                    && typeof part.text === "string"
+            )
+            .map((part) => part.text)
+            .join("\n");
     }
 
     beforeEach(async () => {
@@ -115,21 +141,138 @@ describe("TENEX context management integration", () => {
             { role: "user", content: "Continue working" },
         ]);
 
-        expect(prepared?.messages).toEqual([
-            { role: "system", content: "You are helpful." },
+        expect(prepared?.messages).toHaveLength(4);
+        expect(prepared?.messages[0]).toMatchObject({
+            role: "system",
+            content: "You are helpful.",
+        });
+        expect(prepared?.messages[1]).toMatchObject({
+            role: "user",
+        });
+        expect(collectTextContent(prepared?.messages[1])).toContain("Legacy user request");
+        expect(prepared?.messages[2]).toMatchObject({
+            role: "assistant",
+        });
+        expect(collectTextContent(prepared?.messages[2])).toContain("Legacy assistant reply");
+        expect(prepared?.messages[3]).toMatchObject({
+            role: "user",
+        });
+        expect(collectTextContent(prepared?.messages[3])).toContain("Continue working");
+    });
+
+    test("compact_context persists anchored compactions across prompt rebuilds", async () => {
+        setContextManagementConfig({});
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "openrouter",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        const compactContextTool = contextManagement?.optionalTools.compact_context as {
+            execute: (
+                input: unknown,
+                options: {
+                    toolCallId?: string;
+                    messages?: Array<Record<string, unknown>>;
+                    experimental_context: Record<string, unknown>;
+                }
+            ) => Promise<unknown>;
+        };
+
+        const messages = [
+            { role: "system", content: "You are helpful.", id: "system-1" },
             {
                 role: "user",
-                content: [{ type: "text", text: "Legacy user request" }],
+                id: "msg-user-1",
+                eventId: "evt-user-1",
+                content: [{ type: "text", text: "Initial task: debug the parser regression." }],
             },
             {
                 role: "assistant",
-                content: [{ type: "text", text: "Legacy assistant reply" }],
+                id: "msg-assistant-1",
+                eventId: "evt-assistant-1",
+                content: [{ type: "text", text: "I inspected the parser entrypoint and middleware ordering." }],
             },
             {
                 role: "user",
-                content: [{ type: "text", text: "Continue working" }],
+                id: "msg-user-2",
+                eventId: "evt-user-2",
+                content: [{ type: "text", text: "Please keep the failed test cases in mind." }],
             },
-        ]);
+            {
+                role: "assistant",
+                id: "msg-assistant-2",
+                eventId: "evt-assistant-2",
+                content: [{ type: "text", text: "I reproduced the failure and identified the stale cache layer." }],
+            },
+            {
+                role: "user",
+                id: "msg-user-3",
+                eventId: "evt-user-3",
+                content: [{ type: "text", text: "Continue with the fix and avoid losing the key findings." }],
+            },
+        ] as const;
+
+        const result = await compactContextTool.execute(
+            {
+                message: [
+                    "Task: debug parser regression.",
+                    "Completed: identified middleware ordering issue and stale cache layer.",
+                    "Important Findings: preserve failing test coverage.",
+                    "Open Issues: implement the fix.",
+                    "Next Steps: patch the parser and rerun tests.",
+                    "Persistent Facts: user wants key findings preserved.",
+                ].join("\n"),
+                from: "Initial task: debug the parser regression.",
+                to: "identified the stale cache layer.",
+            },
+            {
+                toolCallId: "compact-tool-1",
+                messages: messages as unknown as Array<Record<string, unknown>>,
+                experimental_context: {
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
+                },
+            }
+        ) as { ok: boolean; compactedMessageCount?: number };
+
+        expect(result.ok).toBe(true);
+        expect(result.compactedMessageCount).toBe(4);
+
+        const prepared = await prepareManagedRequest(contextManagement, [...messages]);
+        const preparedJson = JSON.stringify(prepared?.messages);
+        expect(preparedJson).toContain("Task: debug parser regression.");
+        expect(preparedJson).not.toContain("Initial task: debug the parser regression.");
+        expect(preparedJson).not.toContain("identified the stale cache layer.");
+        expect(preparedJson).toContain("Continue with the fix and avoid losing the key findings.");
+
+        const persistedState = store.getContextManagementCompaction(AGENT_PUBKEY);
+        expect(persistedState?.edits).toHaveLength(1);
+        expect(persistedState?.edits[0]).toEqual(
+            expect.objectContaining({
+                source: "manual",
+                compactedMessageCount: 4,
+                fromText: "Initial task: debug the parser regression.",
+                toText: "identified the stale cache layer.",
+                start: expect.objectContaining({
+                    eventId: "evt-user-1",
+                }),
+                end: expect.objectContaining({
+                    eventId: "evt-assistant-2",
+                }),
+            })
+        );
+
+        const rebuilt = await prepareManagedRequest(contextManagement, [...messages]);
+        const rebuiltJson = JSON.stringify(rebuilt?.messages);
+        expect(rebuiltJson).toContain("Task: debug parser regression.");
+        expect(rebuiltJson).not.toContain("Initial task: debug the parser regression.");
     });
 
     test("scratchpad tool persists state and affects the next prompt projection", async () => {
@@ -156,7 +299,6 @@ describe("TENEX context management integration", () => {
                 setEntries: {
                     notes: "Focus on the parser errors",
                 },
-                omitToolCallIds: ["call-old"],
             },
             {
                 experimental_context: {
@@ -170,7 +312,6 @@ describe("TENEX context management integration", () => {
                 entries: {
                     notes: "Focus on the parser errors",
                 },
-                omitToolCallIds: ["call-old"],
             })
         );
 
@@ -190,17 +331,10 @@ describe("TENEX context management integration", () => {
             },
         ]);
 
-        expect(JSON.stringify(prepared?.messages)).not.toContain("Focus on the parser errors");
-        expect(JSON.stringify(prepared?.messages)).not.toContain("\"toolCallId\":\"call-old\"");
-        const scratchpadReminders = await getSystemReminderContext().collect();
-        expect(scratchpadReminders).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    type: "scratchpad",
-                    content: expect.stringContaining("Focus on the parser errors"),
-                }),
-            ])
-        );
+        const preparedJson = JSON.stringify(prepared?.messages);
+        expect(preparedJson).toContain("Focus on the parser errors");
+        expect(preparedJson).toContain("<scratchpad>");
+        expect(preparedJson).toContain("\"toolCallId\":\"call-old\"");
     });
 
     test("default stack decays stale tool results instead of dropping whole exchanges", async () => {
@@ -319,7 +453,19 @@ describe("TENEX context management integration", () => {
 
         const transformedJson = JSON.stringify(prepared?.messages);
         expect(transformedJson).not.toContain("use fs_read(tool:");
-        expect(contextManagement?.promptStabilityTracker).toBeDefined();
+        expect(prepared?.providerOptions).toEqual(
+            expect.objectContaining({
+                anthropic: expect.objectContaining({
+                    contextManagement: expect.objectContaining({
+                        edits: expect.arrayContaining([
+                            expect.objectContaining({
+                                type: "clear_tool_uses_20250919",
+                            }),
+                        ]),
+                    }),
+                }),
+            })
+        );
     });
 
     test("utilization warning only appears once the working budget threshold is crossed", async () => {
@@ -349,12 +495,9 @@ describe("TENEX context management integration", () => {
             },
         ]);
 
-        expect(JSON.stringify(shortPrompt?.messages)).not.toContain("[Context utilization:");
-        const shortPromptReminders = await getSystemReminderContext().collect();
-        expect(shortPromptReminders.map((reminder) => reminder.type)).toEqual([
-            "scratchpad",
-            "context-window-status",
-        ]);
+        const shortPromptJson = JSON.stringify(shortPrompt?.messages);
+        expect(shortPromptJson).not.toContain("[Context utilization:");
+        expect(shortPromptJson).not.toContain("<context-window-status>");
 
         const longPrompt = await prepareManagedRequest(contextManagement, [
             { role: "system", content: "You are helpful." },
@@ -369,21 +512,10 @@ describe("TENEX context management integration", () => {
             },
         ]);
 
-        expect(JSON.stringify(longPrompt?.messages)).not.toContain("[Context utilization:");
-        const utilizationReminders = await getSystemReminderContext().collect();
-        expect(utilizationReminders).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    type: "context-utilization",
-                    content: expect.stringContaining("[Context utilization:"),
-                }),
-            ])
-        );
-        const utilizationReminder = utilizationReminders.find(
-            (reminder) => reminder.type === "context-utilization"
-        );
-        expect(utilizationReminder?.content).toContain("managed working budget");
-        expect(utilizationReminder?.content).toContain("scratchpad(...)");
+        const longPromptJson = JSON.stringify(longPrompt?.messages);
+        expect(longPromptJson).toContain("[Context utilization:");
+        expect(longPromptJson).toContain("managed working budget");
+        expect(longPromptJson).toContain("scratchpad(...)");
     });
 
     test("managed working budget excludes base system prompts and tool definitions", async () => {
@@ -416,17 +548,9 @@ describe("TENEX context management integration", () => {
             },
         ]);
 
-        expect(JSON.stringify(prepared?.messages)).not.toContain("[Context utilization:");
-        const reminders = await getSystemReminderContext().collect();
-        expect(reminders.map((reminder) => reminder.type)).toEqual([
-            "scratchpad",
-            "context-window-status",
-        ]);
-        const contextStatusReminder = reminders.find(
-            (reminder) => reminder.type === "context-window-status"
-        );
-        expect(contextStatusReminder?.content).toContain("managed working budget");
-        expect(contextStatusReminder?.content).toContain("~9/100 tokens");
+        const preparedJson = JSON.stringify(prepared?.messages);
+        expect(preparedJson).not.toContain("[Context utilization:");
+        expect(preparedJson).not.toContain("<context-window-status>");
     });
 
     test("forced scratchpad tool choice appears once the configured threshold is crossed", async () => {
@@ -526,28 +650,21 @@ describe("TENEX context management integration", () => {
         ]);
 
         expect(prepared?.toolChoice).toBeUndefined();
-        expect(JSON.stringify(prepared?.messages)).not.toContain("Use scratchpad(...) now");
-        const genericReminder = await getSystemReminderContext().collect();
-        expect(genericReminder).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    type: "context-utilization",
-                    content: expect.stringContaining(
-                        "Your managed working budget is getting tight. Trim or summarize stale context before continuing."
-                    ),
-                }),
-            ])
+        const preparedJson = JSON.stringify(prepared?.messages);
+        expect(preparedJson).not.toContain("Use scratchpad(...) now");
+        expect(preparedJson).toContain(
+            "Your managed working budget is getting tight. Trim or summarize stale context before continuing."
         );
-        expect(genericReminder.some((reminder) => reminder.type === "scratchpad")).toBe(false);
+        expect(preparedJson).not.toContain("<scratchpad>");
     });
 
     test("context status reminder reports working budget and raw model window from the final prompt state", async () => {
         setContextManagementConfig({
-            tokenBudget: 400,
+            tokenBudget: 100,
         });
 
         using contextWindowSpy = spyOn(contextWindowCache, "getContextWindow").mockReturnValue(
-            200000
+            200
         );
 
         const agent = {
@@ -568,7 +685,7 @@ describe("TENEX context management integration", () => {
                 { role: "system", content: "You are helpful." },
                 {
                     role: "user",
-                    content: [{ type: "text", text: "Inspect the parser flow and keep the prompt focused." }],
+                    content: [{ type: "text", text: `Inspect the parser flow and keep the prompt focused. ${"x".repeat(620)}` }],
                 },
             ],
             {
@@ -577,23 +694,13 @@ describe("TENEX context management integration", () => {
             }
         );
 
-        expect(JSON.stringify(prepared?.messages)).not.toContain("[Context status]");
-        const contextStatusReminders = await getSystemReminderContext().collect();
-        expect(contextStatusReminders).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    type: "context-window-status",
-                }),
-            ])
-        );
-        expect(contextStatusReminders.some((reminder) => reminder.type === "scratchpad")).toBe(
-            false
-        );
-        const contextStatusReminder = contextStatusReminders.find(
-            (reminder) => reminder.type === "context-window-status"
-        );
-        expect(contextStatusReminder?.content).toContain("managed working budget");
-        expect(contextStatusReminder?.content).toContain("Model window:");
-        expect(contextStatusReminder?.content).toContain("200,000");
+        const preparedJson = JSON.stringify(prepared?.messages);
+        expect(preparedJson).not.toContain("[Context status]");
+        expect(preparedJson).toContain("<context-window-status>");
+        expect(preparedJson).toContain("managed working budget");
+        expect(preparedJson).toContain("Model window:");
+        expect(preparedJson).toContain("/100 tokens");
+        expect(preparedJson).toContain("/200 tokens");
+        expect(preparedJson).not.toContain("<scratchpad>");
     });
 });

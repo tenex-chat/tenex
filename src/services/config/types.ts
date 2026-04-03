@@ -38,12 +38,14 @@ export interface TenexConfig {
         utilizationWarningThresholdPercent?: number; // Managed-context utilization percent for warnings (default: 70)
         compactionThresholdPercent?: number; // Managed-context utilization percent for automatic compaction (default: 90)
         strategies?: {
-            systemPromptCaching?: boolean; // Enable SystemPromptCachingStrategy (default: true)
+            anthropicPromptCaching?: boolean; // Enable AnthropicPromptCachingStrategy (default: true)
+            systemPromptCaching?: boolean; // Legacy alias for anthropicPromptCaching
+            reminders?: boolean; // Enable RemindersStrategy (default: true)
             scratchpad?: boolean; // Enable ScratchpadStrategy (default: true)
             toolResultDecay?: boolean; // Enable ToolResultDecayStrategy (default: true)
             compaction?: boolean; // Enable CompactionToolStrategy (default: true)
-            contextUtilizationReminder?: boolean; // Enable ContextUtilizationReminderStrategy (default: true)
-            contextWindowStatus?: boolean; // Enable ContextWindowStatusStrategy (default: true)
+            contextUtilizationReminder?: boolean; // Enable RemindersStrategy context utilization source (default: true)
+            contextWindowStatus?: boolean; // Enable RemindersStrategy context-window-status source (default: true)
         };
     };
 
@@ -138,7 +140,9 @@ export const TenexConfigSchema = z.object({
             compactionThresholdPercent: z.number().min(0).max(100).optional(),
             strategies: z
                 .object({
+                    anthropicPromptCaching: z.boolean().optional(),
                     systemPromptCaching: z.boolean().optional(),
+                    reminders: z.boolean().optional(),
                     scratchpad: z.boolean().optional(),
                     toolResultDecay: z.boolean().optional(),
                     compaction: z.boolean().optional(),

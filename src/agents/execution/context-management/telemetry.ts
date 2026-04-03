@@ -166,14 +166,6 @@ function buildRuntimeStartSummary(event: Extract<ContextManagementTelemetryEvent
     );
 }
 
-function buildSystemPromptCachingSummary(payload: Extract<ContextManagementStrategyPayload, { kind: "system-prompt-caching" }> | undefined): string {
-    if (!payload) {
-        return "Evaluated system prompt caching.";
-    }
-
-    return `Reordered ${formatCount(payload.systemMessageCountBefore, "system message")} into a stable prefix.`;
-}
-
 function buildToolResultDecaySummary(
     _event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
     payload: Extract<ContextManagementStrategyPayload, { kind: "tool-result-decay" }> | undefined
@@ -199,23 +191,32 @@ function buildScratchpadSummary(payload: Extract<ContextManagementStrategyPayloa
     return "Rendered scratchpad context.";
 }
 
-function buildContextUtilizationReminderSummary(
-    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
-    payload: Extract<ContextManagementStrategyPayload, { kind: "context-utilization-reminder" }> | undefined
+function buildRemindersSummary(
+    payload: Extract<ContextManagementStrategyPayload, { kind: "reminders" }> | undefined
 ): string {
-    if (event.reason === "warning-injected") {
-        return payload?.mode === "scratchpad"
-            ? "Inserted scratchpad context warning."
-            : "Inserted context warning.";
+    if (!payload || payload.emittedCount === 0) {
+        return "Evaluated reminders.";
     }
 
-    return payload?.mode === "scratchpad"
-        ? "Skipped scratchpad context warning because utilization is below threshold."
-        : "Skipped context warning because utilization is below threshold.";
+    return clipTelemetrySummary(
+        `Applied ${formatCount(payload.emittedCount, "reminder")} across ${formatCount(payload.reminderTypes.length, "type")}.`
+    );
 }
 
-function buildContextWindowStatusSummary(): string {
-    return "Inserted context status.";
+function buildAnthropicPromptCachingSummary(
+    payload: Extract<ContextManagementStrategyPayload, { kind: "anthropic-prompt-caching" }> | undefined
+): string {
+    if (!payload) {
+        return "Evaluated Anthropic prompt caching.";
+    }
+
+    if (payload.breakpointApplied) {
+        return `Applied Anthropic cache metadata at ${formatCount(payload.sharedPrefixMessageCount, "shared message")}.`;
+    }
+
+    return payload.clearToolUsesEnabled
+        ? "Enabled Anthropic clear-tool-uses without a shared-prefix breakpoint."
+        : "Skipped Anthropic prompt caching.";
 }
 
 function buildCompactionSummary(payload: Extract<ContextManagementStrategyPayload, { kind: "compaction-tool" }> | undefined): string {
@@ -255,16 +256,14 @@ function buildStrategyCompleteSummary(
     }
 
     switch (payload.kind) {
-        case "system-prompt-caching":
-            return buildSystemPromptCachingSummary(payload);
         case "tool-result-decay":
             return buildToolResultDecaySummary(event, payload);
         case "scratchpad":
             return buildScratchpadSummary(payload);
-        case "context-utilization-reminder":
-            return buildContextUtilizationReminderSummary(event, payload);
-        case "context-window-status":
-            return buildContextWindowStatusSummary();
+        case "reminders":
+            return buildRemindersSummary(payload);
+        case "anthropic-prompt-caching":
+            return buildAnthropicPromptCachingSummary(payload);
         case "compaction-tool":
             return buildCompactionSummary(payload);
         default:
@@ -327,14 +326,6 @@ function buildDerivedTelemetryAttributes(
             }
 
             switch (payload.kind) {
-                case "system-prompt-caching":
-                    attributes["context_management.system_message_count_before"] =
-                        payload.systemMessageCountBefore;
-                    attributes["context_management.system_message_count_after"] =
-                        payload.systemMessageCountAfter;
-                    attributes["context_management.tagged_system_message_count"] =
-                        payload.taggedSystemMessageCount;
-                    break;
                 case "tool-result-decay":
                     addAttribute(attributes, "context_management.current_prompt_tokens", payload.currentPromptTokens);
                     addAttribute(attributes, "context_management.tool_context_tokens", payload.toolContextTokens);
@@ -352,26 +343,22 @@ function buildDerivedTelemetryAttributes(
                 case "scratchpad":
                     attributes["context_management.entry_count"] = payload.entryCount;
                     attributes["context_management.entry_char_count"] = payload.entryCharCount;
-                    attributes["context_management.applied_omit_tool_call_id_count"] = payload.appliedOmitCount;
                     addAttribute(attributes, "context_management.preserve_turns", payload.preserveTurns ?? undefined);
                     attributes["context_management.forced_tool_choice"] = payload.forcedToolChoice;
                     addAttribute(attributes, "context_management.force_threshold_tokens", payload.forceThresholdTokens);
                     attributes["context_management.estimated_prompt_tokens"] = payload.estimatedTokens;
                     break;
-                case "context-utilization-reminder":
-                    attributes["context_management.current_prompt_tokens"] = payload.currentTokens;
-                    attributes["context_management.warning_threshold_tokens"] = payload.warningThresholdTokens;
-                    addAttribute(attributes, "context_management.utilization_percent", payload.utilizationPercent);
+                case "reminders":
+                    attributes["context_management.reminder_count"] = payload.emittedCount;
+                    attributes["context_management.reminder_provider_count"] = payload.providerCount;
+                    attributes["context_management.reminder_built_in_count"] = payload.builtInCount;
+                    attributes["context_management.reminder_deferred_count"] = payload.deferredCount;
                     attributes["context_management.budget_scope"] = MANAGED_CONTEXT_BUDGET_SCOPE;
                     break;
-                case "context-window-status":
-                    attributes["context_management.estimated_prompt_tokens"] = payload.estimatedPromptTokens;
-                    addAttribute(attributes, "context_management.managed_context_tokens", payload.budgetScopedTokens);
-                    addAttribute(attributes, "context_management.static_overhead_tokens", payload.staticOverheadTokens);
-                    addAttribute(attributes, "context_management.working_budget_utilization_percent", payload.workingBudgetUtilizationPercent);
-                    addAttribute(attributes, "context_management.raw_context_window", payload.rawContextWindow);
-                    addAttribute(attributes, "context_management.raw_context_utilization_percent", payload.rawContextUtilizationPercent);
-                    attributes["context_management.budget_scope"] = MANAGED_CONTEXT_BUDGET_SCOPE;
+                case "anthropic-prompt-caching":
+                    attributes["context_management.shared_prefix_message_count"] = payload.sharedPrefixMessageCount;
+                    attributes["context_management.shared_prefix_breakpoint_applied"] = payload.breakpointApplied;
+                    attributes["context_management.anthropic_clear_tool_uses_enabled"] = payload.clearToolUsesEnabled;
                     break;
                 case "compaction-tool":
                     addAttribute(
@@ -423,8 +410,6 @@ function buildDerivedTelemetryAttributes(
                 );
                 attributes["context_management.entry_removal_count"] =
                     getStringArray(event.payloads.input, "removeEntryKeys")?.length ?? 0;
-                attributes["context_management.omit_tool_call_id_count"] =
-                    getStringArray(event.payloads.input, "omitToolCallIds")?.length ?? 0;
                 addAttribute(
                     attributes,
                     "context_management.preserve_turns",

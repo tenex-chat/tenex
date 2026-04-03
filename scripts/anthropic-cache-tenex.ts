@@ -179,7 +179,7 @@ async function withForcedContextSettings<T>(callback: () => Promise<T>): Promise
         tokenBudget: 2500,
         forceScratchpadThresholdPercent: 100,
         utilizationWarningThresholdPercent: 60,
-        summarizationFallbackThresholdPercent: 95,
+        compactionThresholdPercent: 95,
     });
     configService.getSummarizationModelName = () => undefined;
 

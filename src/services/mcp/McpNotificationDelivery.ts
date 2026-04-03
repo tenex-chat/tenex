@@ -17,7 +17,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
-import { wrapInSystemReminder } from "ai-sdk-system-reminders";
+import { wrapInSystemReminder } from "ai-sdk-context-management";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type { McpSubscription } from "./McpSubscriptionService";

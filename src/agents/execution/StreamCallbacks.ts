@@ -29,8 +29,6 @@ import type { ExecutionContextManagement } from "./context-management";
 import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import { prepareLLMRequest } from "./request-preparation";
-import { updateReminderData, collectSystemReminderOverlayMessage } from "./system-reminders";
-import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import { createProjectDTag } from "@/types/project-ids";
 import type { FullRuntimeContext, LLMModelRequest, RALExecutionContext } from "./types";
 import { buildPromptHistoryMessages } from "./prompt-history";
@@ -359,44 +357,24 @@ export function createPrepareStep(
 
             const rawDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
             const dTag = rawDTag ? createProjectDTag(rawDTag) : undefined;
-            const conversationsContent = renderConversationsReminder({
-                agentPubkey: context.agent.pubkey,
-                currentConversationId: context.conversationId,
-                projectId: dTag,
-            });
-
-            updateReminderData({
+            const reminderData = {
                 agent: context.agent,
                 conversation,
                 respondingToPrincipal: context.triggeringEnvelope.principal,
                 pendingDelegations,
                 completedDelegations,
-                conversationsContent: conversationsContent ?? undefined,
+                projectId: dTag,
                 loadedSkills: currentSkillResult.skills,
                 skillToolPermissions,
                 projectPath: context.projectBasePath || undefined,
-            });
-
-            const reminderStateBefore = JSON.stringify(
-                conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
-            );
-            const reminderOverlay = await collectSystemReminderOverlayMessage(executionSpan);
-            const reminderStateAfter = JSON.stringify(
-                conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
-            );
+            };
             const promptHistoryResult = buildPromptHistoryMessages({
                 compiled,
                 conversationStore: conversation,
                 agentPubkey: context.agent.pubkey,
-                runtimeOverlay: reminderOverlay,
-                reminderStateChanged: reminderStateBefore !== reminderStateAfter,
                 span: executionSpan,
             });
             const rebuiltMessages = promptHistoryResult.messages;
-
-            if (promptHistoryResult.didMutateHistory || promptHistoryResult.reminderStateChanged) {
-                await conversation.save();
-            }
 
             // Dynamic model switching
             if (isMetaModel) {
@@ -470,12 +448,16 @@ export function createPrepareStep(
                 fallbackProvider: llmService.provider,
                 fallbackModelId: llmService.model,
             });
+            const reminderStateBefore = JSON.stringify(
+                conversation.getContextManagementReminderState(context.agent.pubkey) ?? null
+            );
             const preparedRequest = await prepareLLMRequest({
                 messages: rebuiltMessages,
                 tools: toolsObject,
                 providerId: preparedModelRef.provider,
                 model: preparedModelRef,
                 contextManagement,
+                reminderData,
                 analysisContext: {
                     projectId:
                         projectContext.project.dTag
@@ -486,6 +468,28 @@ export function createPrepareStep(
                     agentId: context.agent.pubkey,
                 },
             });
+            const reminderStateAfter = JSON.stringify(
+                conversation.getContextManagementReminderState(context.agent.pubkey) ?? null
+            );
+            const reminderStateChanged = reminderStateBefore !== reminderStateAfter;
+            const overlayHistoryResult = preparedRequest.runtimeOverlays?.length
+                ? buildPromptHistoryMessages({
+                    compiled,
+                    conversationStore: conversation,
+                    agentPubkey: context.agent.pubkey,
+                    runtimeOverlays: preparedRequest.runtimeOverlays,
+                    reminderStateChanged,
+                    span: executionSpan,
+                })
+                : undefined;
+
+            if (
+                promptHistoryResult.didMutateHistory
+                || overlayHistoryResult?.didMutateHistory
+                || reminderStateChanged
+            ) {
+                await conversation.save();
+            }
 
             execContext.accumulatedMessages = preparedRequest.messages;
             execContext.pendingContextManagementUsageReporter =

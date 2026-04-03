@@ -96,9 +96,18 @@ export const contextManagementCommand = new Command("context-management")
         const strategyAnswers = await inquirer.prompt([
             {
                 type: "confirm",
-                name: "systemPromptCaching",
-                message: "Enable SystemPromptCachingStrategy:",
-                default: contextManagement.strategies?.systemPromptCaching !== false,
+                name: "anthropicPromptCaching",
+                message: "Enable AnthropicPromptCachingStrategy:",
+                default: (
+                    contextManagement.strategies?.anthropicPromptCaching
+                    ?? contextManagement.strategies?.systemPromptCaching
+                ) !== false,
+            },
+            {
+                type: "confirm",
+                name: "reminders",
+                message: "Enable RemindersStrategy:",
+                default: contextManagement.strategies?.reminders !== false,
             },
             {
                 type: "confirm",
@@ -121,13 +130,13 @@ export const contextManagementCommand = new Command("context-management")
             {
                 type: "confirm",
                 name: "contextUtilizationReminder",
-                message: "Enable ContextUtilizationReminderStrategy:",
+                message: "Enable reminders context-utilization source:",
                 default: contextManagement.strategies?.contextUtilizationReminder !== false,
             },
             {
                 type: "confirm",
                 name: "contextWindowStatus",
-                message: "Enable ContextWindowStatusStrategy:",
+                message: "Enable reminders context-window-status source:",
                 default: contextManagement.strategies?.contextWindowStatus !== false,
             },
         ]);
@@ -139,7 +148,8 @@ export const contextManagementCommand = new Command("context-management")
             utilizationWarningThresholdPercent: Number.parseInt(answers.utilizationWarningThresholdPercent, 10),
             compactionThresholdPercent: Number.parseInt(answers.compactionThresholdPercent, 10),
             strategies: {
-                systemPromptCaching: strategyAnswers.systemPromptCaching,
+                anthropicPromptCaching: strategyAnswers.anthropicPromptCaching,
+                reminders: strategyAnswers.reminders,
                 scratchpad: strategyAnswers.scratchpad,
                 toolResultDecay: strategyAnswers.toolResultDecay,
                 compaction: strategyAnswers.compaction,

@@ -1,5 +1,12 @@
-import type { SystemReminderDescriptor } from "ai-sdk-system-reminders";
-import { combineSystemReminders } from "ai-sdk-system-reminders";
+import type {
+    ReminderDescriptor,
+    ReminderPlacement,
+    ReminderProvider,
+    ReminderProviderDeltaResult,
+    ReminderState,
+    ReminderStateStore,
+} from "ai-sdk-context-management";
+import { RemindersStrategy as RemindersStrategyClass, createContextManagementRuntime as createRuntime } from "ai-sdk-context-management";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
@@ -14,8 +21,21 @@ import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
 import type { Span } from "@opentelemetry/api";
+import type { ProjectDTag } from "@/types/project-ids";
 import type { RuntimePromptOverlay } from "./prompt-history";
 import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
+import {
+    buildConversationsReminderSnapshot,
+    renderConversationsReminderDelta,
+    renderConversationsReminderFromSnapshot,
+    type ConversationsReminderSnapshot,
+} from "@/prompts/reminders/conversations";
+
+let currentReminderData: TenexReminderData | undefined;
+
+function cloneReminderState(state: ReminderState | undefined): ReminderState | undefined {
+    return state ? structuredClone(state) : undefined;
+}
 
 function buildReminderPathVars(data: TenexReminderData): Record<string, string> {
     const vars: Record<string, string> = {
@@ -34,139 +54,59 @@ export interface TenexReminderData {
     respondingToPrincipal: PrincipalRef;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
-    conversationsContent?: string;
+    projectId?: ProjectDTag;
     loadedSkills: SkillData[];
     skillToolPermissions?: SkillToolPermissions;
     projectPath?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Delta state management
-// ---------------------------------------------------------------------------
-
-type DeltaRenderResult = SystemReminderDescriptor | null | "full";
-
-interface DeltaProviderConfig<TSnapshot> {
+type DeltaProviderConfig<TSnapshot> = {
     type: string;
     fullInterval: number;
+    placement?:
+        | ReminderPlacement
+        | ((data: TenexReminderData | undefined) => ReminderPlacement);
+    emptySnapshot: TSnapshot;
     snapshot: (data: TenexReminderData) => TSnapshot | Promise<TSnapshot>;
     renderFull: (
         snapshot: TSnapshot,
         data: TenexReminderData
-    ) => SystemReminderDescriptor | null | Promise<SystemReminderDescriptor | null>;
+    ) => ReminderDescriptor | null | Promise<ReminderDescriptor | null>;
     renderDelta: (
-        prev: TSnapshot,
-        curr: TSnapshot,
+        previous: TSnapshot,
+        current: TSnapshot,
         data: TenexReminderData
-    ) => DeltaRenderResult | Promise<DeltaRenderResult>;
-}
-
-interface DeltaState {
-    snapshot: unknown;
-    turnsSinceFullState: number;
-}
-
-interface ProviderTelemetry {
-    type: string;
-    mode: "full" | "delta" | "skip";
-    contentLength: number;
-}
-
-const deltaTelemetry: ProviderTelemetry[] = [];
-
-function cloneDeltaSnapshot<T>(snapshot: T): T {
-    return structuredClone(snapshot);
-}
-
-function getProviderDeltaState(
-    data: TenexReminderData,
-    type: string
-): DeltaState | undefined {
-    const state = data.conversation.getAgentPromptHistory(data.agent.pubkey).reminderDeltaState[type];
-    if (!state) {
-        return undefined;
-    }
-
-    return {
-        snapshot: state.snapshot,
-        turnsSinceFullState: state.turnsSinceFullState,
-    };
-}
-
-function setProviderDeltaState(
-    data: TenexReminderData,
-    type: string,
-    state: DeltaState
-): void {
-    data.conversation.getAgentPromptHistory(data.agent.pubkey).reminderDeltaState[type] = {
-        snapshot: cloneDeltaSnapshot(state.snapshot),
-        turnsSinceFullState: state.turnsSinceFullState,
-    };
-}
+    ) => ReminderProviderDeltaResult | Promise<ReminderProviderDeltaResult>;
+};
 
 function createDeltaProvider<TSnapshot>(
     config: DeltaProviderConfig<TSnapshot>
-): (data: TenexReminderData | undefined) => Promise<SystemReminderDescriptor | null> {
-    return async (data) => {
-        if (!data) return null;
-
-        const currentSnapshot = await config.snapshot(data);
-        const prevState = getProviderDeltaState(data, config.type);
-
-        // First turn or periodic full refresh
-        if (!prevState || prevState.turnsSinceFullState >= config.fullInterval) {
-            const result = await config.renderFull(currentSnapshot, data);
-            setProviderDeltaState(data, config.type, {
-                snapshot: currentSnapshot,
-                turnsSinceFullState: 0,
-            });
-            deltaTelemetry.push({
-                type: config.type,
-                mode: "full",
-                contentLength: result?.content.length ?? 0,
-            });
-            return result;
-        }
-
-        const deltaResult = await config.renderDelta(
-            prevState.snapshot as TSnapshot,
-            currentSnapshot,
-            data
-        );
-
-        if (deltaResult === null) {
-            setProviderDeltaState(data, config.type, {
-                snapshot: currentSnapshot,
-                turnsSinceFullState: prevState.turnsSinceFullState + 1,
-            });
-            deltaTelemetry.push({ type: config.type, mode: "skip", contentLength: 0 });
-            return null;
-        }
-
-        if (deltaResult === "full") {
-            const result = await config.renderFull(currentSnapshot, data);
-            setProviderDeltaState(data, config.type, {
-                snapshot: currentSnapshot,
-                turnsSinceFullState: 0,
-            });
-            deltaTelemetry.push({
-                type: config.type,
-                mode: "full",
-                contentLength: result?.content.length ?? 0,
-            });
-            return result;
-        }
-
-        setProviderDeltaState(data, config.type, {
-            snapshot: currentSnapshot,
-            turnsSinceFullState: prevState.turnsSinceFullState + 1,
-        });
-        deltaTelemetry.push({
-            type: config.type,
-            mode: "delta",
-            contentLength: deltaResult.content.length,
-        });
-        return deltaResult;
+): ReminderProvider<TenexReminderData, TSnapshot> {
+    return {
+        type: config.type,
+        fullInterval: config.fullInterval,
+        placement: ({ data }) =>
+            typeof config.placement === "function"
+                ? config.placement(data)
+                : config.placement ?? "overlay-user",
+        snapshot: async (data) => {
+            if (!data) {
+                return structuredClone(config.emptySnapshot);
+            }
+            return await config.snapshot(data);
+        },
+        renderFull: async (snapshot, data) => {
+            if (!data) {
+                return null;
+            }
+            return await config.renderFull(snapshot, data);
+        },
+        renderDelta: async (previous, current, data) => {
+            if (!data) {
+                return null;
+            }
+            return await config.renderDelta(previous, current, data);
+        },
     };
 }
 
@@ -234,10 +174,12 @@ function formatTodos(todos: TodoItem[]): string {
 
 const DATETIME_BUCKET_MS = 5 * 60 * 1000;
 
-function createDatetimeProvider() {
+function createDatetimeProvider(): ReminderProvider<TenexReminderData, string> {
     return createDeltaProvider<string>({
         type: "datetime",
         fullInterval: 15,
+        placement: "overlay-user",
+        emptySnapshot: "",
         snapshot: () => {
             const now = new Date(
                 Math.floor(Date.now() / DATETIME_BUCKET_MS) * DATETIME_BUCKET_MS
@@ -249,8 +191,8 @@ function createDatetimeProvider() {
             const date = now.toISOString().slice(0, 10);
             return `now: ${date} ${hour12}.${minutes}${period} UTC`;
         },
-        renderFull: (snapshot) => ({ type: "datetime", content: snapshot }),
-        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+        renderFull: (snapshot) => snapshot ? { type: "datetime", content: snapshot } : null,
+        renderDelta: (previous, current) => (previous === current ? null : "full"),
     });
 }
 
@@ -260,50 +202,54 @@ interface TodoSnapshot {
     status: string;
 }
 
-function createTodoListProvider() {
+function createTodoListProvider(): ReminderProvider<TenexReminderData, TodoSnapshot[]> {
     return createDeltaProvider<TodoSnapshot[]>({
         type: "todo-list",
         fullInterval: 6,
+        placement: "overlay-user",
+        emptySnapshot: [],
         snapshot: (data) => {
             const todos = data.conversation.getTodos(data.agent.pubkey);
-            return todos.map((t) => ({ id: t.id, title: t.title, status: t.status }));
+            return todos.map((todo) => ({ id: todo.id, title: todo.title, status: todo.status }));
         },
         renderFull: (_snapshot, data) => {
             const todos = data.conversation.getTodos(data.agent.pubkey);
             const content = formatTodos(todos);
             return content ? { type: "todo-list", content } : null;
         },
-        renderDelta: (prev, curr) => {
-            if (curr.length === 0 && prev.length === 0) return null;
+        renderDelta: (previous, current) => {
+            if (current.length === 0 && previous.length === 0) {
+                return null;
+            }
 
-            const prevMap = new Map(prev.map((t) => [t.id, t]));
-            const currMap = new Map(curr.map((t) => [t.id, t]));
+            const previousById = new Map(previous.map((todo) => [todo.id, todo]));
+            const currentById = new Map(current.map((todo) => [todo.id, todo]));
             const changes: string[] = [];
 
-            for (const t of curr) {
-                if (!prevMap.has(t.id)) {
-                    changes.push(`New: ${STATUS_MARKER[t.status]} ${t.title} (id: ${t.id})`);
+            for (const todo of current) {
+                if (!previousById.has(todo.id)) {
+                    changes.push(`New: ${STATUS_MARKER[todo.status]} ${todo.title} (id: ${todo.id})`);
                 }
             }
 
-            for (const t of prev) {
-                if (!currMap.has(t.id)) {
-                    changes.push(`Removed: ${t.title} (id: ${t.id})`);
+            for (const todo of previous) {
+                if (!currentById.has(todo.id)) {
+                    changes.push(`Removed: ${todo.title} (id: ${todo.id})`);
                 }
             }
 
-            for (const t of curr) {
-                const prevItem = prevMap.get(t.id);
-                if (prevItem && prevItem.status !== t.status) {
-                    changes.push(
-                        `${t.title} (id: ${t.id}): ${prevItem.status} → ${t.status}`
-                    );
+            for (const todo of current) {
+                const previousTodo = previousById.get(todo.id);
+                if (previousTodo && previousTodo.status !== todo.status) {
+                    changes.push(`${todo.title} (id: ${todo.id}): ${previousTodo.status} → ${todo.status}`);
                 }
             }
 
-            if (changes.length === 0) return null;
+            if (changes.length === 0) {
+                return null;
+            }
 
-            const pending = curr.filter((t) => t.status === "pending");
+            const pending = current.filter((todo) => todo.status === "pending");
             const parts = ["<agent-todos-update>", "", ...changes];
             if (pending.length > 0) {
                 parts.push("", `**ATTENTION:** You have ${pending.length} pending todo item(s).`);
@@ -315,10 +261,12 @@ function createTodoListProvider() {
     });
 }
 
-function createResponseRoutingProvider() {
+function createResponseRoutingProvider(): ReminderProvider<TenexReminderData, string> {
     return createDeltaProvider<string>({
         type: "response-routing",
         fullInterval: 12,
+        placement: "overlay-user",
+        emptySnapshot: "",
         snapshot: (data) => data.respondingToPrincipal.id,
         renderFull: async (_snapshot, data) => {
             const identityService = getIdentityService();
@@ -338,28 +286,32 @@ function createResponseRoutingProvider() {
 
             return { type: "response-routing", content };
         },
-        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+        renderDelta: (previous, current) => (previous === current ? null : "full"),
     });
 }
 
-function createDelegationsProvider() {
+function createDelegationsProvider(): ReminderProvider<TenexReminderData, string> {
     return createDeltaProvider<string>({
         type: "delegations",
         fullInterval: 8,
+        placement: "overlay-user",
+        emptySnapshot: "",
         snapshot: (data) => {
             const allPubkeys = [
-                ...data.pendingDelegations.map((d) => d.recipientPubkey),
-                ...data.completedDelegations.map((d) => d.recipientPubkey),
+                ...data.pendingDelegations.map((delegation) => delegation.recipientPubkey),
+                ...data.completedDelegations.map((delegation) => delegation.recipientPubkey),
             ];
             return [...new Set(allPubkeys)].sort().join(",");
         },
         renderFull: async (_snapshot, data) => {
             const allDelegatedPubkeys = [
-                ...data.pendingDelegations.map((d) => d.recipientPubkey),
-                ...data.completedDelegations.map((d) => d.recipientPubkey),
+                ...data.pendingDelegations.map((delegation) => delegation.recipientPubkey),
+                ...data.completedDelegations.map((delegation) => delegation.recipientPubkey),
             ];
 
-            if (allDelegatedPubkeys.length === 0) return null;
+            if (allDelegatedPubkeys.length === 0) {
+                return null;
+            }
 
             const identityService = getIdentityService();
             const delegatedAgentNames = await Promise.all(
@@ -375,38 +327,58 @@ function createDelegationsProvider() {
                 ].join("\n"),
             };
         },
-        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+        renderDelta: (previous, current) => (previous === current ? null : "full"),
     });
 }
 
-function createConversationsProvider() {
-    return createDeltaProvider<string>({
+function createConversationsProvider(): ReminderProvider<TenexReminderData, ConversationsReminderSnapshot> {
+    return createDeltaProvider<ConversationsReminderSnapshot>({
         type: "conversations",
         fullInterval: 5,
-        snapshot: (data) => data.conversationsContent ?? "",
-        renderFull: (_snapshot, data) => {
-            if (!data.conversationsContent) return null;
-            return { type: "conversations", content: data.conversationsContent };
+        placement: "overlay-user",
+        emptySnapshot: {
+            active: [],
+            recent: [],
         },
-        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+        snapshot: (data) =>
+            buildConversationsReminderSnapshot({
+                agentPubkey: data.agent.pubkey,
+                currentConversationId: data.conversation.getId(),
+                projectId: data.projectId,
+            }),
+        renderFull: (snapshot) => {
+            const content = renderConversationsReminderFromSnapshot(snapshot);
+            return content ? { type: "conversations", content } : null;
+        },
+        renderDelta: (previous, current) => {
+            const content = renderConversationsReminderDelta(previous, current);
+            return content ? { type: "conversations", content } : null;
+        },
     });
 }
 
-function createLoadedSkillsProvider() {
-    return createDeltaProvider<string>({
+function createLoadedSkillsProvider(): ReminderProvider<TenexReminderData, string> {
+    return {
         type: "loaded-skills",
         fullInterval: 10,
-        snapshot: (data) => {
+        placement: "overlay-user",
+        snapshot: async (data) => {
+            if (!data) {
+                return "";
+            }
             const skillParts = data.loadedSkills
-                .map((s) => `${s.identifier}:${s.content.length}`)
+                .map((skill) => `${skill.identifier}:${skill.content.length}`)
                 .sort()
                 .join("|");
-            const permParts = data.skillToolPermissions
+            const permissionParts = data.skillToolPermissions
                 ? JSON.stringify(data.skillToolPermissions)
                 : "";
-            return `${skillParts}||${permParts}`;
+            return `${skillParts}||${permissionParts}`;
         },
-        renderFull: (_snapshot, data) => {
+        renderFull: async (_snapshot, data) => {
+            if (!data) {
+                return null;
+            }
             const content = renderLoadedSkillsBlock(
                 data.loadedSkills,
                 data.skillToolPermissions,
@@ -414,14 +386,16 @@ function createLoadedSkillsProvider() {
             );
             return content ? { type: "loaded-skills", content } : null;
         },
-        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
-    });
+        renderDelta: async (previous, current) => (previous === current ? null : "full"),
+    };
 }
 
-function createAvailableSkillsProvider() {
+function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, string> {
     return createDeltaProvider<string>({
         type: "available-skills",
         fullInterval: 15,
+        placement: "overlay-user",
+        emptySnapshot: "",
         snapshot: async (data) => {
             const { SkillService } = await import("@/services/skill/SkillService");
             const { SkillWhitelistService } = await import("@/services/skill");
@@ -431,84 +405,126 @@ function createAvailableSkillsProvider() {
             });
             const whitelist = SkillWhitelistService.getInstance().getWhitelistedSkills();
             const ids = [
-                ...installed.map((s) => s.identifier).sort(),
-                ...whitelist.map((w) => w.identifier ?? w.shortId ?? w.eventId).sort(),
+                ...installed.map((skill) => skill.identifier).sort(),
+                ...whitelist.map((entry) => entry.identifier ?? entry.shortId ?? entry.eventId).sort(),
             ];
             return ids.join(",");
         },
-        renderFull: async (_snapshot, data) => {
-            const content = await renderAvailableSkillsBlock(
+        renderFull: async (_snapshot, data) => ({
+            type: "available-skills",
+            content: await renderAvailableSkillsBlock(
                 data.agent.pubkey,
                 data.projectPath
-            );
-            return { type: "available-skills", content };
-        },
-        renderDelta: (prev, curr) => (prev === curr ? null : "full"),
+            ),
+        }),
+        renderDelta: (previous, current) => (previous === current ? null : "full"),
     });
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+export function createTenexReminderProviders(): ReminderProvider<TenexReminderData, unknown>[] {
+    return [
+        createDatetimeProvider(),
+        createTodoListProvider(),
+        createResponseRoutingProvider(),
+        createDelegationsProvider(),
+        createConversationsProvider(),
+        createLoadedSkillsProvider(),
+        createAvailableSkillsProvider(),
+    ];
+}
+
+export function createTenexReminderStateStore(options: {
+    conversationStore: ConversationStore;
+}): ReminderStateStore {
+    return {
+        get: ({ agentId }) =>
+            cloneReminderState(
+                options.conversationStore.getContextManagementReminderState(agentId)
+            ),
+        set: ({ agentId }, state) => {
+            options.conversationStore.setContextManagementReminderState(
+                agentId,
+                structuredClone(state)
+            );
+        },
+    };
+}
+
+function createCompatibilityReminderRuntime(
+    data: TenexReminderData
+) {
+    return createRuntime({
+        strategies: [
+            new RemindersStrategyClass<TenexReminderData>({
+                stateStore: createTenexReminderStateStore({
+                    conversationStore: data.conversation,
+                }),
+                providers: createTenexReminderProviders(),
+                overlayType: "system-reminders",
+            }),
+        ],
+    });
+}
 
 export function initializeReminderProviders(): void {
-    const ctx = getSystemReminderContext();
-    ctx.registerProvider("datetime", createDatetimeProvider());
-    ctx.registerProvider("todo-list", createTodoListProvider());
-    ctx.registerProvider("response-routing", createResponseRoutingProvider());
-    ctx.registerProvider("delegations", createDelegationsProvider());
-    ctx.registerProvider("conversations", createConversationsProvider());
-    ctx.registerProvider("loaded-skills", createLoadedSkillsProvider());
-    ctx.registerProvider("available-skills", createAvailableSkillsProvider());
+    // Compatibility no-op. Providers are now created directly by RemindersStrategy.
 }
 
 export function updateReminderData(data: TenexReminderData): void {
-    getSystemReminderContext().setProviderData(data);
+    currentReminderData = data;
 }
 
 export function resetSystemReminders(): void {
+    currentReminderData = undefined;
     getSystemReminderContext().clear();
-    deltaTelemetry.length = 0;
 }
 
 export async function collectSystemReminderOverlayMessage(
     span: Span | undefined,
 ): Promise<RuntimePromptOverlay | undefined> {
-    deltaTelemetry.length = 0;
-    const ctx = getSystemReminderContext();
-    const reminders = await ctx.collect();
-
-    // Log delta telemetry
-    if (span && deltaTelemetry.length > 0) {
-        const emitted = deltaTelemetry.filter((t) => t.mode !== "skip");
-        const skipped = deltaTelemetry.filter((t) => t.mode === "skip");
-        span.addEvent("system-reminders.delta-stats", {
-            "delta.providers": deltaTelemetry.map((t) => `${t.type}:${t.mode}`).join(","),
-            "delta.emitted": emitted.length,
-            "delta.skipped": skipped.length,
-            "delta.skippedTypes": skipped.map((t) => t.type).join(","),
-        });
-    }
-
-    const currentXml = reminders.length > 0 ? combineSystemReminders(reminders) : "";
-
-    if (currentXml !== "") {
-        span?.addEvent("system-reminders.applied", {
-            "reminders.count": reminders.length,
-            "reminders.types": reminders.map((r) => r.type).join(","),
-            "reminders.content": currentXml,
-        });
-    }
-
-    if (currentXml === "") {
+    if (!currentReminderData) {
         return undefined;
     }
 
-    return {
-        overlayType: "system-reminders",
-        message: {
-            role: "user",
-            content: currentXml,
+    const queuedReminders = await getSystemReminderContext().collect();
+    const prepared = await createCompatibilityReminderRuntime(currentReminderData).prepareRequest({
+        requestContext: {
+            conversationId: currentReminderData.conversation.getId(),
+            agentId: currentReminderData.agent.pubkey,
+            agentLabel: currentReminderData.agent.name || currentReminderData.agent.slug,
         },
-    };
+        messages: [],
+        reminderData: currentReminderData,
+        queuedReminders: queuedReminders.map((reminder) => ({
+            kind: reminder.type,
+            content: reminder.content,
+            ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
+            ...(reminder.placement ? { placement: reminder.placement } : {}),
+            ...(reminder.disposition ? { disposition: reminder.disposition } : {}),
+        })),
+    });
+    const runtimeOverlay = prepared.runtimeOverlays?.[0];
+
+    const normalizedRuntimeOverlay =
+        runtimeOverlay?.message.role === "user"
+        && Array.isArray(runtimeOverlay.message.content)
+        && runtimeOverlay.message.content.length === 1
+        && runtimeOverlay.message.content[0]?.type === "text"
+            ? {
+                  ...runtimeOverlay,
+                  message: {
+                      ...runtimeOverlay.message,
+                      content: runtimeOverlay.message.content[0].text,
+                  },
+              }
+            : runtimeOverlay;
+
+    if (normalizedRuntimeOverlay) {
+        span?.addEvent("system-reminders.applied", {
+            "reminders.overlay_type": normalizedRuntimeOverlay.overlayType,
+            "reminders.content": JSON.stringify(normalizedRuntimeOverlay.message.content),
+        });
+    }
+
+    return normalizedRuntimeOverlay;
 }

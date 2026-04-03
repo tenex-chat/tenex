@@ -1,5 +1,6 @@
 import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
+import type { ReminderState } from "ai-sdk-context-management";
 import type { TodoItem } from "@/services/ral/types";
 
 export type MessageType = "text" | "tool-call" | "tool-result" | "delegation-marker";
@@ -130,7 +131,6 @@ export interface ContextManagementScratchpadState {
     entries?: Record<string, string>;
     preserveTurns?: number | null;
     activeNotice?: ContextManagementScratchpadUseNotice;
-    omitToolCallIds: string[];
     updatedAt?: number;
     agentLabel?: string;
 }
@@ -236,4 +236,6 @@ export interface ConversationState {
     selfAppliedSkills?: Record<string, string[]>;
     /** Persisted per-agent prompt-view history used before context management. */
     agentPromptHistories?: Record<string, AgentPromptHistoryState>;
+    /** Persisted per-agent reminder engine state used by ai-sdk-context-management. */
+    contextManagementReminderStates?: Record<string, ReminderState>;
 }

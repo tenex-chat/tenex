@@ -119,7 +119,7 @@ describe("system reminder overlay integration", () => {
         mock.restore();
     });
 
-    it("returns a standalone overlay and keeps canonical user content untouched", async () => {
+    it("coalesces reminder overlays into the user turn while keeping canonical user content untouched", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
@@ -165,13 +165,13 @@ describe("system reminder overlay integration", () => {
             runtimeOverlay: overlay,
         });
 
-        expect(assembled.messages).toHaveLength(3);
+        expect(assembled.messages).toHaveLength(2);
         expect(assembled.messages[1]).toMatchObject({
             role: "user",
-            content: "Hello, can you help me?",
         });
-        expect(assembled.messages[2]?.content).toContain("<system-reminders>");
-        expect(assembled.messages[2]?.content).toContain("<delegations>");
+        expect(String(assembled.messages[1]?.content)).toContain("Hello, can you help me?");
+        expect(String(assembled.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(assembled.messages[1]?.content)).toContain("<delegations>");
     });
 
     it("persists runtime overlays in prompt history without altering canonical transcript content", async () => {
@@ -206,11 +206,13 @@ describe("system reminder overlay integration", () => {
         reloaded.load(projectId, conversationId);
         const history = reloaded.getAgentPromptHistory(agentPubkey);
 
-        expect(assembled.messages).toHaveLength(3);
+        expect(assembled.messages).toHaveLength(2);
         expect(history.messages).toHaveLength(2);
         expect(history.messages[0]?.source.kind).toBe("canonical");
         expect(history.messages[1]?.source.kind).toBe("runtime-overlay");
         expect(history.messages[0]?.content).toBe("Follow up on the task");
         expect(history.messages[1]?.content).toContain("<system-reminders>");
+        expect(String(assembled.messages[1]?.content)).toContain("Follow up on the task");
+        expect(String(assembled.messages[1]?.content)).toContain("<system-reminders>");
     });
 });

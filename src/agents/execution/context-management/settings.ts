@@ -6,7 +6,8 @@ export const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 90;
 export const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 
 export interface ContextManagementStrategyToggles {
-    systemPromptCaching: boolean;
+    anthropicPromptCaching: boolean;
+    reminders: boolean;
     scratchpad: boolean;
     toolResultDecay: boolean;
     compaction: boolean;
@@ -39,6 +40,10 @@ export function getContextManagementSettings(): ContextManagementSettings {
     const raw = configService.getContextManagementConfig();
 
     const rawStrategies = raw?.strategies;
+    const anthropicPromptCaching =
+        rawStrategies?.anthropicPromptCaching
+        ?? rawStrategies?.systemPromptCaching
+        ?? true;
 
     return {
         enabled: raw?.enabled !== false,
@@ -58,7 +63,8 @@ export function getContextManagementSettings(): ContextManagementSettings {
             DEFAULT_COMPACTION_THRESHOLD_PERCENT
         ),
         strategies: {
-            systemPromptCaching: rawStrategies?.systemPromptCaching !== false,
+            anthropicPromptCaching,
+            reminders: rawStrategies?.reminders !== false,
             scratchpad: rawStrategies?.scratchpad !== false,
             toolResultDecay: rawStrategies?.toolResultDecay !== false,
             compaction: rawStrategies?.compaction !== false,
