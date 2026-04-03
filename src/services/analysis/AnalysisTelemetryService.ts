@@ -830,6 +830,7 @@ export class AnalysisTelemetryService {
             return;
         }
 
+        // Extract total cleared tokens from context management edits
         try {
             this.ensureDb().prepare(`
                 UPDATE llm_requests

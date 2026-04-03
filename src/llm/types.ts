@@ -34,6 +34,17 @@ export const AI_SDK_PROVIDERS = [
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 
+export interface ContextManagementAppliedEdit {
+    type: string;
+    clearedToolUses?: number;
+    clearedInputTokens?: number;
+    clearedThinkingTurns?: number;
+}
+
+export interface ContextManagementResponse {
+    appliedEdits?: ContextManagementAppliedEdit[];
+}
+
 export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     costUsd?: number;
     model?: string;
@@ -43,6 +54,8 @@ export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     reasoningTokens?: number;
     /** Model context window size in tokens */
     contextWindow?: number;
+    /** Context management data from Anthropic API */
+    contextManagement?: ContextManagementResponse;
 };
 
 export interface LLMMetadata {
