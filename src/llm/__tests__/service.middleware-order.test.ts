@@ -274,7 +274,7 @@ describe("explicit request preparation order", () => {
                               ...message,
                               providerOptions: {
                                   anthropic: {
-                                      cacheControl: { type: "ephemeral", ttl: "1h" },
+                                      cacheControl: { type: "ephemeral", ttl: "5m" },
                                   },
                               },
                           }
@@ -309,7 +309,7 @@ describe("explicit request preparation order", () => {
 
         expect(request.messages[1]?.providerOptions).toEqual({
             anthropic: {
-                cacheControl: { type: "ephemeral", ttl: "1h" },
+                cacheControl: { type: "ephemeral", ttl: "5m" },
             },
         });
         expect(request.providerOptions).toEqual({

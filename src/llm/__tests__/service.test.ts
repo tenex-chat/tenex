@@ -340,7 +340,7 @@ describe("LLMService", () => {
                 {
                     providerOptions: {
                         anthropic: {
-                            cacheControl: { type: "ephemeral", ttl: "1h" },
+                            cacheControl: { type: "ephemeral", ttl: "5m" },
                         },
                     },
                 }
@@ -348,7 +348,7 @@ describe("LLMService", () => {
 
             const callArgs = mockStreamText.mock.calls[0][0];
             expect(callArgs.providerOptions.anthropic).toEqual({
-                cacheControl: { type: "ephemeral", ttl: "1h" },
+                cacheControl: { type: "ephemeral", ttl: "5m" },
             });
         });
 

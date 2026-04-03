@@ -246,7 +246,7 @@ function scenarioDefinitions(): TraceReplayScenario[] {
             description: "Exact trace prompt with top-level automatic caching only.",
             providerOptions: {
                 anthropic: {
-                    cacheControl: { type: "ephemeral", ttl: "1h" },
+                    cacheControl: { type: "ephemeral", ttl: "5m" },
                 },
             },
         },
@@ -261,7 +261,7 @@ function scenarioDefinitions(): TraceReplayScenario[] {
             prepareMessages: (messages) => addExplicitSystemBreakpoint(messages, "1h"),
             providerOptions: {
                 anthropic: {
-                    cacheControl: { type: "ephemeral", ttl: "1h" },
+                    cacheControl: { type: "ephemeral", ttl: "5m" },
                 },
             },
         },
@@ -277,7 +277,7 @@ function scenarioDefinitions(): TraceReplayScenario[] {
             prepareMessages: (messages) => addExplicitSystemBreakpoint(messages, "1h"),
             providerOptions: {
                 anthropic: {
-                    cacheControl: { type: "ephemeral", ttl: "1h" },
+                    cacheControl: { type: "ephemeral", ttl: "5m" },
                     contextManagement: clearToolUsesProviderOptions.anthropic?.contextManagement,
                 },
             },
@@ -293,7 +293,7 @@ function scenarioDefinitions(): TraceReplayScenario[] {
             attachSharedPrefixBreakpoint: true,
             providerOptions: {
                 anthropic: {
-                    cacheControl: { type: "ephemeral", ttl: "1h" },
+                    cacheControl: { type: "ephemeral", ttl: "5m" },
                 },
             },
         },
@@ -303,7 +303,7 @@ function scenarioDefinitions(): TraceReplayScenario[] {
             attachSharedPrefixBreakpoint: true,
             providerOptions: {
                 anthropic: {
-                    cacheControl: { type: "ephemeral", ttl: "1h" },
+                    cacheControl: { type: "ephemeral", ttl: "5m" },
                     contextManagement: clearToolUsesProviderOptions.anthropic?.contextManagement,
                 },
             },
@@ -314,7 +314,7 @@ function scenarioDefinitions(): TraceReplayScenario[] {
             prepareMessages: applyClientToolDecay,
             providerOptions: {
                 anthropic: {
-                    cacheControl: { type: "ephemeral", ttl: "1h" },
+                    cacheControl: { type: "ephemeral", ttl: "5m" },
                 },
             },
         },

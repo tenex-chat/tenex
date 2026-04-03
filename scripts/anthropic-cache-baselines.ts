@@ -78,7 +78,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         messages: first,
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -87,7 +87,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         messages: second,
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -96,7 +96,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         messages: third,
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -131,7 +131,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         ),
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -143,7 +143,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         ),
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -155,7 +155,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         ),
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -242,7 +242,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         ),
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -254,7 +254,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         ),
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
@@ -266,7 +266,7 @@ function scenarioDefinitions(): ScenarioDefinition[] {
                         ),
                         providerOptions: {
                             anthropic: {
-                                cacheControl: { type: "ephemeral", ttl: "1h" },
+                                cacheControl: { type: "ephemeral", ttl: "5m" },
                             },
                         },
                     },
