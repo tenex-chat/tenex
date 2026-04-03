@@ -76,7 +76,7 @@ describe("agent-home-directory fragment", () => {
 
             expect(result).toContain("<home-directory>");
             expect(result).toContain("(empty)");
-            expect(result).toContain("Feel free to use this space");
+            expect(result).toContain("Use this space for notes, helper scripts, temporary files, or any personal workspace needs.");
         });
 
         it("should show file and directory counts instead of listing names", async () => {
@@ -248,7 +248,7 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({
                 agent: mockAgent,
-                projectDTag: "acme-app",
+                projectId: "acme-app",
             } as never);
 
             expect(result).toContain("/home/abcd1234/projects/acme-app/docs");
@@ -267,7 +267,7 @@ describe("agent-home-directory fragment", () => {
 
             const result = await agentHomeDirectoryFragment.template({
                 agent: mockAgent,
-                projectDTag: "acme-app",
+                projectId: "acme-app",
             } as never);
 
             expect(result).toContain("<memorized-files>");

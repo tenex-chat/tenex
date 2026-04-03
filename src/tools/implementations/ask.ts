@@ -53,13 +53,12 @@ const questionSchema = z.discriminatedUnion("type", [
  */
 const askSchema = z.object({
   title: z.string().describe(
-    "A brief title that encompasses all questions being asked (3-5 words). This helps the user quickly understand the topic at a glance."
+    "A brief title that encompasses all questions being asked (3-5 words)."
   ),
   context: z.string().describe(
     "Background information the user needs to understand and answer the questions. " +
-    "CRITICAL: The user has NO access to your conversation history - include ALL relevant details, " +
+    "The user has NO access to your conversation history - include ALL relevant details, " +
     "prior decisions, constraints, and reasoning. Be comprehensive but concise. " +
-    "DO NOT include the questions themselves in this field - questions go ONLY in the 'questions' array below. " +
     "This field is for context/background ONLY."
   ),
   questions: z.array(questionSchema).min(1).describe(
@@ -99,7 +98,6 @@ function formatQuestions(questions: AskInput["questions"]): string {
 function buildEscalationPrompt(
   input: AskInput,
   context: ToolExecutionContext,
-  agentRole: string,
   delegationChain?: Array<{ displayName: string; pubkey: string }>
 ): string {
   const { title, context: askContext, questions } = input;
@@ -115,7 +113,6 @@ function buildEscalationPrompt(
 
 ## Source
 - Agent: ${context.agent.slug}
-- Role: ${agentRole}
 - Conversation: ${context.conversationId}
 ${chainDisplay}
 ## Questions Requiring Response
@@ -128,7 +125,6 @@ ${askContext}
 ${formattedQuestions}
 
 ## Your Task
-You are acting as the project owner's proxy. Either:
 1. Answer directly if you can make the decision
 2. Use ask() to escalate to the actual human if you need their input
 
@@ -212,12 +208,8 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
           questionCount: questions.length,
         });
 
-        // Get full agent info for role
-        const fullAgent = projectCtx.getAgentByPubkey(context.agent.pubkey);
-        const agentRole = fullAgent?.role || "N/A";
-
         // Build escalation prompt using helper
-        const escalationPrompt = buildEscalationPrompt(input, context, agentRole, delegationChain);
+        const escalationPrompt = buildEscalationPrompt(input, context, delegationChain);
 
         // Delegate to escalation agent
         const eventContext = createEventContext(context);

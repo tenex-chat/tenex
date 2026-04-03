@@ -224,7 +224,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // Add agent home directory context
     systemPromptBuilder.add("agent-home-directory", {
         agent: agentForFragments,
-        projectDTag: dTag,
+        projectId: dTag,
     });
 
     // Explain <system-reminder> tags before agents encounter them

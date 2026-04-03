@@ -22,7 +22,7 @@ export function clearAgentHomePromptCache(): void {
  */
 interface AgentHomeDirectoryArgs {
     agent: AgentInstance;
-    projectDTag?: string;
+    projectId?: string;
 }
 
 /**
@@ -64,12 +64,12 @@ function countHomeFiles(homeDir: string, agentPubkey: string): string {
 export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> = {
     id: "agent-home-directory",
     priority: 2, // Right after agent-identity (priority 1)
-    template: async ({ agent, projectDTag }) => {
+    template: async ({ agent, projectId }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const homeCount = countHomeFiles(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
-        const projectMemoryDir = projectDTag
-            ? getAgentProjectMemoryDirectory(agent.pubkey, projectDTag)
+        const projectMemoryDir = projectId
+            ? getAgentProjectMemoryDirectory(agent.pubkey, projectId)
             : undefined;
 
         const parts: string[] = [];
