@@ -29,10 +29,11 @@ import type { ExecutionContextManagement } from "./context-management";
 import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import { prepareLLMRequest } from "./request-preparation";
-import { updateReminderData, collectAndInjectSystemReminders } from "./system-reminders";
+import { updateReminderData, collectSystemReminderOverlayMessage } from "./system-reminders";
 import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import { createProjectDTag } from "@/types/project-ids";
 import type { FullRuntimeContext, LLMModelRequest, RALExecutionContext } from "./types";
+import { buildPromptHistoryMessages } from "./prompt-history";
 
 /**
  * Step data passed to prepareStep callback
@@ -342,7 +343,7 @@ export function createPrepareStep(
                 }
             }
 
-            let { messages: rebuiltMessages } = await messageCompiler.compile({
+            const compiled = await messageCompiler.compile({
                 agent: context.agent,
                 project: projectContext.project,
                 conversation,
@@ -376,7 +377,26 @@ export function createPrepareStep(
                 projectPath: context.projectBasePath || undefined,
             });
 
-            rebuiltMessages = await collectAndInjectSystemReminders(rebuiltMessages, executionSpan, conversation.getId());
+            const reminderStateBefore = JSON.stringify(
+                conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
+            );
+            const reminderOverlay = await collectSystemReminderOverlayMessage(executionSpan);
+            const reminderStateAfter = JSON.stringify(
+                conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
+            );
+            const promptHistoryResult = buildPromptHistoryMessages({
+                compiled,
+                conversationStore: conversation,
+                agentPubkey: context.agent.pubkey,
+                runtimeOverlay: reminderOverlay,
+                reminderStateChanged: reminderStateBefore !== reminderStateAfter,
+                span: executionSpan,
+            });
+            const rebuiltMessages = promptHistoryResult.messages;
+
+            if (promptHistoryResult.didMutateHistory || promptHistoryResult.reminderStateChanged) {
+                await conversation.save();
+            }
 
             // Dynamic model switching
             if (isMetaModel) {

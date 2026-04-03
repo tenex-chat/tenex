@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { MessageCompiler } from "@/agents/execution/MessageCompiler";
+import { buildPromptHistoryMessages } from "@/agents/execution/prompt-history";
 import {
+    collectSystemReminderOverlayMessage,
     initializeReminderProviders,
     resetSystemReminders,
     updateReminderData,
-    collectAndInjectSystemReminders,
 } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 
@@ -19,25 +19,40 @@ const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
 ]);
 
-const getName = mock(async (pubkey: string) => {
-    const names: Record<string, string> = {
-        "user-pubkey": "User",
-        "delegated-pubkey": "DelegatedAgent",
-    };
-    return names[pubkey] ?? "Unknown";
+const getIdentityService = () => ({
+    getName: async (pubkey: string) => {
+        const names: Record<string, string> = {
+            "user-pubkey": "User",
+            "delegated-pubkey": "DelegatedAgent",
+        };
+        return names[pubkey] ?? "Unknown";
+    },
+    getNameSync: (pubkey: string) => {
+        const names: Record<string, string> = {
+            "user-pubkey": "User",
+            "delegated-pubkey": "DelegatedAgent",
+        };
+        return names[pubkey] ?? "Unknown";
+    },
+    getDisplayName: async (opts: { linkedPubkey?: string; principalId?: string }) =>
+        opts.linkedPubkey === "user-pubkey" || opts.principalId?.includes("user-pubkey")
+            ? "User"
+            : "Unknown",
+    getDisplayNameSync: (opts: { linkedPubkey?: string; principalId?: string }) =>
+        opts.linkedPubkey === "user-pubkey" || opts.principalId?.includes("user-pubkey")
+            ? "User"
+            : "Unknown",
 });
 
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
 }));
 
-mock.module("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getName,
-    }),
+mock.module("@/services/identity", () => ({
+    getIdentityService,
 }));
 
-describe("system reminder injection integration", () => {
+describe("system reminder overlay integration", () => {
     const projectId = "project-1";
     const conversationId = "conv-1";
     const workingDirectory = "/tmp/test-project";
@@ -104,20 +119,13 @@ describe("system reminder injection integration", () => {
         mock.restore();
     });
 
-    it("injects reminders into the last user message, not system messages", async () => {
+    it("returns a standalone overlay and keeps canonical user content untouched", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
             messageType: "text",
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
-
-        const ctx = getSystemReminderContext();
-        ctx.queue({
-            type: "heuristic",
-            content: "Update your todo list before using more tools.",
-        });
-
         const compiled = await compile(ralNumber);
 
         updateReminderData({
@@ -137,55 +145,42 @@ describe("system reminder injection integration", () => {
             completedDelegations: [],
         });
 
-        const result = await collectAndInjectSystemReminders(compiled.messages, undefined);
+        const overlay = await collectSystemReminderOverlayMessage(undefined);
 
-        // Source compiled messages are untouched
+        expect(overlay).toBeDefined();
+        expect(overlay?.overlayType).toBe("system-reminders");
+        expect(overlay?.message.role).toBe("user");
+        expect(overlay?.message.content).toContain("<response-routing>");
+        expect(overlay?.message.content).toContain("<delegations>");
+
         const sourceUserMsg = compiled.messages.find((m) => m.role === "user");
-        expect(typeof sourceUserMsg?.content === "string" ? sourceUserMsg.content : "").toBe("Hello, can you help me?");
+        expect(typeof sourceUserMsg?.content === "string" ? sourceUserMsg.content : "").toBe(
+            "Hello, can you help me?"
+        );
 
-        // Reminders injected into the last user message (new object)
-        const lastUserMsg = result.findLast((m) => m.role === "user");
-        expect(lastUserMsg).toBeDefined();
-        const userContent = typeof lastUserMsg?.content === "string"
-            ? lastUserMsg.content
-            : JSON.stringify(lastUserMsg?.content);
-        expect(userContent).toContain("<response-routing>");
-        expect(userContent).toContain("<delegations>");
-        expect(userContent).toContain("<heuristic>");
+        const assembled = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+            runtimeOverlay: overlay,
+        });
 
-        // System message should be untouched
-        const systemMsg = result.findLast((m) => m.role === "system");
-        expect(systemMsg).toBeDefined();
-        expect(String(systemMsg?.content)).not.toContain("<system-reminders>");
+        expect(assembled.messages).toHaveLength(3);
+        expect(assembled.messages[1]).toMatchObject({
+            role: "user",
+            content: "Hello, can you help me?",
+        });
+        expect(assembled.messages[2]?.content).toContain("<system-reminders>");
+        expect(assembled.messages[2]?.content).toContain("<delegations>");
     });
 
-    it("keeps deferred reminders across turns, injected into last user message", async () => {
+    it("persists runtime overlays in prompt history without altering canonical transcript content", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
-            content: "Initial message",
+            content: "Follow up on the task",
             messageType: "text",
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
-        conversationStore.addMessage({
-            pubkey: agentPubkey,
-            ral: ralNumber,
-            content: "Initial response",
-            messageType: "text",
-        });
-
-        const ctx = getSystemReminderContext();
-        ctx.queue({
-            type: "supervision-message",
-            content: "Task Tracking Suggestion: create a todo before continuing.",
-        });
-        ctx.advance();
-
-        conversationStore.addMessage({
-            pubkey: userPubkey,
-            content: "Follow-up question",
-            messageType: "text",
-        });
-
         const compiled = await compile(ralNumber);
 
         updateReminderData({
@@ -197,53 +192,25 @@ describe("system reminder injection integration", () => {
             completedDelegations: [],
         });
 
-        const result = await collectAndInjectSystemReminders(compiled.messages, undefined);
-
-        expect(compiled.messages).toHaveLength(4);
-        // Same length — no extra message appended
-        expect(result).toHaveLength(4);
-
-        // Reminders injected into last user message
-        const lastUser = result.findLast((m) => m.role === "user");
-        const lastUserContent = typeof lastUser?.content === "string"
-            ? lastUser.content
-            : JSON.stringify(lastUser?.content);
-        expect(lastUserContent).toContain("Follow-up question");
-        expect(lastUserContent).toContain("<response-routing>");
-        expect(lastUserContent).toContain("<supervision-message>");
-
-        // System message untouched
-        const systemMsg = result.findLast((m) => m.role === "system");
-        expect(String(systemMsg?.content)).not.toContain("<system-reminders>");
-    });
-
-    it("injects into user message with array content parts", async () => {
-        const ctx = getSystemReminderContext();
-        ctx.queue({
-            type: "heuristic",
-            content: "Some reminder",
+        const overlay = await collectSystemReminderOverlayMessage(undefined);
+        const assembled = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+            runtimeOverlay: overlay,
         });
 
-        const messagesWithNoSystem = [
-            { role: "user" as const, content: [{ type: "text" as const, text: "Hello" }] },
-        ];
+        await conversationStore.save();
 
-        const result = await collectAndInjectSystemReminders(messagesWithNoSystem, undefined);
+        const reloaded = new ConversationStore(testDir);
+        reloaded.load(projectId, conversationId);
+        const history = reloaded.getAgentPromptHistory(agentPubkey);
 
-        // Same length — injected into existing user message
-        expect(result).toHaveLength(1);
-        expect(result[0]?.role).toBe("user");
-        // Source not mutated
-        const sourceContent = messagesWithNoSystem[0].content;
-        expect(sourceContent[0].text).toBe("Hello");
-
-        // Result has reminder injected into the text part
-        const resultContent = result[0]?.content;
-        expect(Array.isArray(resultContent)).toBe(true);
-        if (Array.isArray(resultContent)) {
-            const textPart = resultContent.find((p: { type: string }) => p.type === "text");
-            expect(textPart?.text).toContain("Hello");
-            expect(textPart?.text).toContain("<heuristic>");
-        }
+        expect(assembled.messages).toHaveLength(3);
+        expect(history.messages).toHaveLength(2);
+        expect(history.messages[0]?.source.kind).toBe("canonical");
+        expect(history.messages[1]?.source.kind).toBe("runtime-overlay");
+        expect(history.messages[0]?.content).toBe("Follow up on the task");
+        expect(history.messages[1]?.content).toContain("<system-reminders>");
     });
 });

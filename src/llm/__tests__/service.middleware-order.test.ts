@@ -17,7 +17,7 @@ describe("explicit request preparation order", () => {
         getAnalysisTelemetryConfigSpy = undefined;
     });
 
-    test("applies context management before sanitization and reminders", async () => {
+    test("applies context management before sanitization without injecting reminders", async () => {
         const prepareRequest = mock(async () => ({
             messages: [
                 { role: "user" as const, content: [] },
@@ -91,8 +91,8 @@ describe("explicit request preparation order", () => {
                 },
             ],
         });
-        expect(JSON.stringify(request.messages)).toContain("Service-level reminder.");
-        expect(JSON.stringify(request.messages)).toContain("<heuristic>");
+        expect(JSON.stringify(request.messages)).not.toContain("Service-level reminder.");
+        expect(JSON.stringify(request.messages)).not.toContain("<heuristic>");
         expect(request.providerOptions).toEqual({
             custom: {
                 prepared: true,
@@ -317,9 +317,15 @@ describe("explicit request preparation order", () => {
                     edits: [
                         {
                             type: "clear_tool_uses_20250919",
-                            trigger: { type: "input_tokens", value: 16000 },
-                            keep: { type: "tool_uses", value: 1 },
+                            trigger: { type: "tool_uses", value: 25 },
+                            keep: { type: "tool_uses", value: 10 },
                             clearAtLeast: { type: "input_tokens", value: 4000 },
+                            clearToolInputs: true,
+                            excludeTools: [
+                                "delegate",
+                                "delegate_followup",
+                                "delegate_crossproject",
+                            ],
                         },
                     ],
                 },

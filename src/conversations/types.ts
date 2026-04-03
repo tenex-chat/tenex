@@ -1,5 +1,5 @@
 import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
-import type { ToolCallPart, ToolResultPart } from "ai";
+import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { TodoItem } from "@/services/ral/types";
 
 export type MessageType = "text" | "tool-call" | "tool-result" | "delegation-marker";
@@ -159,6 +159,34 @@ export interface ExecutionTime {
     lastUpdated: number;
 }
 
+export interface PerAgentReminderDeltaState {
+    snapshot: unknown;
+    turnsSinceFullState: number;
+}
+
+export interface PromptHistorySource {
+    kind: "canonical" | "runtime-overlay" | "mutable-update";
+    sourceMessageId?: string;
+    sourceRecordId?: string;
+    sourceEventId?: string;
+    overlayType?: string;
+}
+
+export interface FrozenPromptMessage {
+    id: string;
+    role: ModelMessage["role"];
+    content: ModelMessage["content"];
+    source: PromptHistorySource;
+    renderHash: string;
+}
+
+export interface AgentPromptHistoryState {
+    messages: FrozenPromptMessage[];
+    sourceVersions: Record<string, string>;
+    reminderDeltaState: Record<string, PerAgentReminderDeltaState>;
+    nextSequence: number;
+}
+
 export interface ConversationState {
     activeRal: Record<string, RalTracker[]>;
     nextRalNumber: Record<string, number>;
@@ -175,4 +203,6 @@ export interface ConversationState {
     contextManagementScratchpads?: Record<string, ContextManagementScratchpadState>;
     /** Authoritative local skill IDs that agents have applied to themselves mid-conversation. Keyed by agent pubkey. */
     selfAppliedSkills?: Record<string, string[]>;
+    /** Persisted per-agent prompt-view history used before context management. */
+    agentPromptHistories?: Record<string, AgentPromptHistoryState>;
 }

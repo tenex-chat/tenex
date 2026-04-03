@@ -25,6 +25,7 @@ import { ensureConversationRecord } from "./record-id";
 import { conversationRegistry } from "./ConversationRegistry";
 import { normalizeScratchpadEntries } from "./utils/normalize-scratchpad-entries";
 import type {
+    AgentPromptHistoryState,
     ConversationRecordInput,
     ConversationRecord,
     ConversationMetadata,
@@ -33,8 +34,10 @@ import type {
     ContextManagementScratchpadState,
     DelegationMarker,
     ExecutionTime,
+    FrozenPromptMessage,
     Injection,
     MessagePrincipalContext,
+    PerAgentReminderDeltaState,
     PrincipalSnapshot,
 } from "./types";
 import { logger } from "@/utils/logger";
@@ -163,6 +166,155 @@ function normalizeLoadedContextManagementScratchpads(
         Object.entries(scratchpads ?? {}).flatMap(([agentId, state]) => {
             const normalizedState = normalizeContextManagementScratchpadState(state);
             return normalizedState ? [[agentId, normalizedState] as const] : [];
+        })
+    );
+}
+
+function createEmptyAgentPromptHistoryState(): AgentPromptHistoryState {
+    return {
+        messages: [],
+        sourceVersions: {},
+        reminderDeltaState: {},
+        nextSequence: 0,
+    };
+}
+
+function isPromptMessageRole(value: unknown): value is FrozenPromptMessage["role"] {
+    return value === "system" || value === "user" || value === "assistant" || value === "tool";
+}
+
+function normalizeReminderDeltaState(
+    state: PerAgentReminderDeltaState | Record<string, unknown> | undefined
+): PerAgentReminderDeltaState | undefined {
+    if (!state || typeof state !== "object") {
+        return undefined;
+    }
+
+    const raw = state as Record<string, unknown>;
+    const turnsSinceFullState = typeof raw.turnsSinceFullState === "number"
+        && Number.isFinite(raw.turnsSinceFullState)
+        ? Math.max(0, Math.floor(raw.turnsSinceFullState))
+        : undefined;
+
+    if (turnsSinceFullState === undefined) {
+        return undefined;
+    }
+
+    return {
+        snapshot: raw.snapshot,
+        turnsSinceFullState,
+    };
+}
+
+function normalizeLoadedReminderDeltaState(
+    states: Record<string, PerAgentReminderDeltaState> | undefined
+): Record<string, PerAgentReminderDeltaState> {
+    return Object.fromEntries(
+        Object.entries(states ?? {}).flatMap(([type, state]) => {
+            const normalized = normalizeReminderDeltaState(state);
+            return normalized ? [[type, normalized] as const] : [];
+        })
+    );
+}
+
+function normalizeFrozenPromptMessage(
+    message: FrozenPromptMessage | Record<string, unknown>,
+    index: number
+): FrozenPromptMessage | undefined {
+    if (!message || typeof message !== "object") {
+        return undefined;
+    }
+
+    const raw = message as Record<string, unknown>;
+    const role = raw.role;
+    const id = typeof raw.id === "string" && raw.id.trim().length > 0
+        ? raw.id
+        : `prompt:${index}`;
+    const renderHash = typeof raw.renderHash === "string" && raw.renderHash.trim().length > 0
+        ? raw.renderHash
+        : "";
+    const source = typeof raw.source === "object" && raw.source !== null
+        ? raw.source as Record<string, unknown>
+        : undefined;
+    const kind = source?.kind;
+
+    if (!isPromptMessageRole(role)) {
+        return undefined;
+    }
+
+    if (
+        kind !== "canonical"
+        && kind !== "runtime-overlay"
+        && kind !== "mutable-update"
+    ) {
+        return undefined;
+    }
+
+    return {
+        id,
+        role,
+        content: raw.content as FrozenPromptMessage["content"],
+        source: {
+            kind,
+            ...(typeof source?.sourceMessageId === "string"
+                ? { sourceMessageId: source.sourceMessageId }
+                : {}),
+            ...(typeof source?.sourceRecordId === "string"
+                ? { sourceRecordId: source.sourceRecordId }
+                : {}),
+            ...(typeof source?.sourceEventId === "string"
+                ? { sourceEventId: source.sourceEventId }
+                : {}),
+            ...(typeof source?.overlayType === "string"
+                ? { overlayType: source.overlayType }
+                : {}),
+        },
+        renderHash,
+    };
+}
+
+function normalizeLoadedAgentPromptHistories(
+    histories: Record<string, AgentPromptHistoryState> | undefined
+): Record<string, AgentPromptHistoryState> {
+    return Object.fromEntries(
+        Object.entries(histories ?? {}).map(([agentId, state]) => {
+            const rawState = (state ?? {}) as unknown as Record<string, unknown>;
+            const messages = Array.isArray(rawState.messages)
+                ? rawState.messages.flatMap((message, index) => {
+                    const normalized = normalizeFrozenPromptMessage(
+                        message as FrozenPromptMessage | Record<string, unknown>,
+                        index
+                    );
+                    return normalized ? [normalized] : [];
+                })
+                : [];
+            const sourceVersions = Object.fromEntries(
+                Object.entries(
+                    typeof rawState.sourceVersions === "object" && rawState.sourceVersions !== null
+                        ? rawState.sourceVersions as Record<string, unknown>
+                        : {}
+                ).flatMap(([key, value]) =>
+                    typeof value === "string" && value.length > 0
+                        ? [[key, value] as const]
+                        : []
+                )
+            );
+            const reminderDeltaState = normalizeLoadedReminderDeltaState(
+                typeof rawState.reminderDeltaState === "object" && rawState.reminderDeltaState !== null
+                    ? rawState.reminderDeltaState as Record<string, PerAgentReminderDeltaState>
+                    : undefined
+            );
+            const nextSequence = typeof rawState.nextSequence === "number"
+                && Number.isFinite(rawState.nextSequence)
+                ? Math.max(0, Math.floor(rawState.nextSequence))
+                : messages.length;
+
+            return [agentId, {
+                messages,
+                sourceVersions,
+                reminderDeltaState,
+                nextSequence,
+            }] as const;
         })
     );
 }
@@ -331,6 +483,7 @@ export class ConversationStore {
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
         contextManagementScratchpads: {},
         selfAppliedSkills: {},
+        agentPromptHistories: {},
     };
     private eventIdSet: Set<string> = new Set();
     private blockedAgentsSet: Set<string> = new Set();
@@ -385,6 +538,11 @@ export class ConversationStore {
                         | undefined
                 ),
                 selfAppliedSkills: loaded.selfAppliedSkills ?? {},
+                agentPromptHistories: normalizeLoadedAgentPromptHistories(
+                    loaded.agentPromptHistories as
+                        | Record<string, AgentPromptHistoryState>
+                        | undefined
+                ),
             };
             this.eventIdSet = new Set(
                 this.state.messages.map((m) => m.eventId).filter((id): id is string => id !== undefined)
@@ -403,6 +561,7 @@ export class ConversationStore {
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 contextManagementScratchpads: {},
                 selfAppliedSkills: {},
+                agentPromptHistories: {},
             };
             this.eventIdSet = new Set();
             this.blockedAgentsSet = new Set();
@@ -896,6 +1055,34 @@ export class ConversationStore {
 
     getSelfAppliedSkillIds(agentPubkey: string): string[] {
         return this.state.selfAppliedSkills?.[agentPubkey] ?? [];
+    }
+
+    // Prompt History Operations
+
+    getAgentPromptHistory(agentPubkey: string): AgentPromptHistoryState {
+        if (!this.state.agentPromptHistories) {
+            this.state.agentPromptHistories = {};
+        }
+
+        if (!this.state.agentPromptHistories[agentPubkey]) {
+            this.state.agentPromptHistories[agentPubkey] = createEmptyAgentPromptHistoryState();
+        }
+
+        return this.state.agentPromptHistories[agentPubkey];
+    }
+
+    setAgentPromptHistory(agentPubkey: string, history: AgentPromptHistoryState): void {
+        if (!this.state.agentPromptHistories) {
+            this.state.agentPromptHistories = {};
+        }
+
+        this.state.agentPromptHistories[agentPubkey] = history;
+    }
+
+    clearAgentPromptHistory(agentPubkey: string): void {
+        if (this.state.agentPromptHistories) {
+            delete this.state.agentPromptHistories[agentPubkey];
+        }
     }
 
     // Envelope Message Operations

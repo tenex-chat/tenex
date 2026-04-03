@@ -14,7 +14,7 @@ import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
 import type { Span } from "@opentelemetry/api";
-import type { ModelMessage, UserModelMessage } from "ai";
+import type { RuntimePromptOverlay } from "./prompt-history";
 import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
 
 function buildReminderPathVars(data: TenexReminderData): Record<string, string> {
@@ -66,12 +66,6 @@ interface DeltaState {
     turnsSinceFullState: number;
 }
 
-const deltaStateStore = new Map<string, DeltaState>();
-
-// Maps conversationId → Map<messageKey, injectedXml>
-const injectionHistory = new Map<string, Map<string, string>>();
-
-
 interface ProviderTelemetry {
     type: string;
     mode: "full" | "delta" | "skip";
@@ -80,20 +74,52 @@ interface ProviderTelemetry {
 
 const deltaTelemetry: ProviderTelemetry[] = [];
 
+function cloneDeltaSnapshot<T>(snapshot: T): T {
+    return structuredClone(snapshot);
+}
+
+function getProviderDeltaState(
+    data: TenexReminderData,
+    type: string
+): DeltaState | undefined {
+    const state = data.conversation.getAgentPromptHistory(data.agent.pubkey).reminderDeltaState[type];
+    if (!state) {
+        return undefined;
+    }
+
+    return {
+        snapshot: state.snapshot,
+        turnsSinceFullState: state.turnsSinceFullState,
+    };
+}
+
+function setProviderDeltaState(
+    data: TenexReminderData,
+    type: string,
+    state: DeltaState
+): void {
+    data.conversation.getAgentPromptHistory(data.agent.pubkey).reminderDeltaState[type] = {
+        snapshot: cloneDeltaSnapshot(state.snapshot),
+        turnsSinceFullState: state.turnsSinceFullState,
+    };
+}
+
 function createDeltaProvider<TSnapshot>(
     config: DeltaProviderConfig<TSnapshot>
 ): (data: TenexReminderData | undefined) => Promise<SystemReminderDescriptor | null> {
     return async (data) => {
         if (!data) return null;
 
-        const stateKey = `${data.conversation.getId()}:${config.type}`;
         const currentSnapshot = await config.snapshot(data);
-        const prevState = deltaStateStore.get(stateKey);
+        const prevState = getProviderDeltaState(data, config.type);
 
         // First turn or periodic full refresh
         if (!prevState || prevState.turnsSinceFullState >= config.fullInterval) {
             const result = await config.renderFull(currentSnapshot, data);
-            deltaStateStore.set(stateKey, { snapshot: currentSnapshot, turnsSinceFullState: 0 });
+            setProviderDeltaState(data, config.type, {
+                snapshot: currentSnapshot,
+                turnsSinceFullState: 0,
+            });
             deltaTelemetry.push({
                 type: config.type,
                 mode: "full",
@@ -109,14 +135,20 @@ function createDeltaProvider<TSnapshot>(
         );
 
         if (deltaResult === null) {
-            prevState.turnsSinceFullState++;
+            setProviderDeltaState(data, config.type, {
+                snapshot: currentSnapshot,
+                turnsSinceFullState: prevState.turnsSinceFullState + 1,
+            });
             deltaTelemetry.push({ type: config.type, mode: "skip", contentLength: 0 });
             return null;
         }
 
         if (deltaResult === "full") {
             const result = await config.renderFull(currentSnapshot, data);
-            deltaStateStore.set(stateKey, { snapshot: currentSnapshot, turnsSinceFullState: 0 });
+            setProviderDeltaState(data, config.type, {
+                snapshot: currentSnapshot,
+                turnsSinceFullState: 0,
+            });
             deltaTelemetry.push({
                 type: config.type,
                 mode: "full",
@@ -125,7 +157,7 @@ function createDeltaProvider<TSnapshot>(
             return result;
         }
 
-        deltaStateStore.set(stateKey, {
+        setProviderDeltaState(data, config.type, {
             snapshot: currentSnapshot,
             turnsSinceFullState: prevState.turnsSinceFullState + 1,
         });
@@ -436,40 +468,12 @@ export function updateReminderData(data: TenexReminderData): void {
 
 export function resetSystemReminders(): void {
     getSystemReminderContext().clear();
-    deltaStateStore.clear();
-    injectionHistory.clear();
     deltaTelemetry.length = 0;
 }
 
-function injectXmlIntoUserMessage(msg: UserModelMessage, xml: string): UserModelMessage {
-    if (typeof msg.content === "string") {
-        return { ...msg, content: `${msg.content}\n\n${xml}` };
-    }
-    const parts = msg.content.map((p) => ({ ...p }));
-    let injected = false;
-    for (let j = parts.length - 1; j >= 0; j--) {
-        if (parts[j].type === "text") {
-            const textPart = parts[j] as { type: "text"; text: string };
-            parts[j] = { ...textPart, text: `${textPart.text}\n\n${xml}` };
-            injected = true;
-            break;
-        }
-    }
-    if (!injected) {
-        parts.push({ type: "text" as const, text: xml });
-    }
-    return { ...msg, content: parts };
-}
-
-function getMessageKey(msg: ModelMessage, index: number): string {
-    return (msg as { id?: string }).id ?? `__idx:${index}`;
-}
-
-export async function collectAndInjectSystemReminders(
-    messages: ModelMessage[],
+export async function collectSystemReminderOverlayMessage(
     span: Span | undefined,
-    conversationId?: string,
-): Promise<ModelMessage[]> {
+): Promise<RuntimePromptOverlay | undefined> {
     deltaTelemetry.length = 0;
     const ctx = getSystemReminderContext();
     const reminders = await ctx.collect();
@@ -496,61 +500,15 @@ export async function collectAndInjectSystemReminders(
         });
     }
 
-    const historyKey = conversationId ?? "__default";
-    let history = injectionHistory.get(historyKey);
-
-    if (!history && currentXml === "") {
-        return messages;
+    if (currentXml === "") {
+        return undefined;
     }
 
-    if (!history) {
-        history = new Map<string, string>();
-        injectionHistory.set(historyKey, history);
-    }
-
-    // Find the last user message index
-    let lastUserIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
-            lastUserIdx = i;
-            break;
-        }
-    }
-
-    if (lastUserIdx === -1 && currentXml === "") {
-        return messages;
-    }
-
-    const result = [...messages];
-
-    for (let i = 0; i < result.length; i++) {
-        if (result[i].role !== "user") continue;
-
-        const key = getMessageKey(result[i], i);
-
-        if (i === lastUserIdx) {
-            const storedXml = history.get(key);
-            if (storedXml && currentXml !== "") {
-                const combined = `${storedXml}\n\n${currentXml}`;
-                history.set(key, combined);
-                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, combined);
-            } else if (storedXml) {
-                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, storedXml);
-            } else if (currentXml !== "") {
-                history.set(key, currentXml);
-                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, currentXml);
-            }
-        } else {
-            const storedXml = history.get(key);
-            if (storedXml) {
-                result[i] = injectXmlIntoUserMessage(result[i] as UserModelMessage, storedXml);
-            }
-        }
-    }
-
-    if (lastUserIdx === -1 && currentXml !== "") {
-        result.push({ role: "user", content: currentXml });
-    }
-
-    return result;
+    return {
+        overlayType: "system-reminders",
+        message: {
+            role: "user",
+            content: currentXml,
+        },
+    };
 }

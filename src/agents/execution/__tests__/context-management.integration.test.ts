@@ -582,12 +582,12 @@ describe("TENEX context management integration", () => {
         expect(contextStatusReminders).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    type: "scratchpad",
-                }),
-                expect.objectContaining({
                     type: "context-window-status",
                 }),
             ])
+        );
+        expect(contextStatusReminders.some((reminder) => reminder.type === "scratchpad")).toBe(
+            false
         );
         const contextStatusReminder = contextStatusReminders.find(
             (reminder) => reminder.type === "context-window-status"

@@ -17,7 +17,7 @@ import { trace } from "@opentelemetry/api";
 import type { LLMService } from "@/llm/service";
 import { MessageCompiler } from "./MessageCompiler";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { initializeReminderProviders, updateReminderData, collectAndInjectSystemReminders } from "./system-reminders";
+import { initializeReminderProviders, updateReminderData, collectSystemReminderOverlayMessage } from "./system-reminders";
 import { renderConversationsReminder } from "@/prompts/reminders/conversations";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
@@ -26,6 +26,7 @@ import {
     createExecutionContextManagement,
     type ExecutionContextManagement,
 } from "./context-management";
+import { buildPromptHistoryMessages } from "./prompt-history";
 import { prepareLLMRequest } from "./request-preparation";
 import type { FullRuntimeContext, LLMModelRequest } from "./types";
 import type { AISdkTool } from "@/tools/types";
@@ -279,7 +280,7 @@ export async function setupStreamExecution(
         ralNumber
     );
 
-    let { messages, systemPrompt, counts } = await messageCompiler.compile({
+    const compiled = await messageCompiler.compile({
         agent: context.agent,
         project: projectContext.project,
         conversation,
@@ -297,7 +298,7 @@ export async function setupStreamExecution(
     });
 
     // Cache the compiled system prompt for reuse by supervision checks
-    context.cachedSystemPrompt = systemPrompt;
+    context.cachedSystemPrompt = compiled.systemPrompt;
 
     // Initialize providers (idempotent) and set data for this execution
     initializeReminderProviders();
@@ -323,13 +324,32 @@ export async function setupStreamExecution(
         projectPath: context.projectBasePath || undefined,
     });
 
-    messages = await collectAndInjectSystemReminders(messages, trace.getActiveSpan(), conversation.getId());
+    const reminderStateBefore = JSON.stringify(
+        conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
+    );
+    const reminderOverlay = await collectSystemReminderOverlayMessage(trace.getActiveSpan());
+    const reminderStateAfter = JSON.stringify(
+        conversation.getAgentPromptHistory(context.agent.pubkey).reminderDeltaState
+    );
+    const promptHistoryResult = buildPromptHistoryMessages({
+        compiled,
+        conversationStore: conversation,
+        agentPubkey: context.agent.pubkey,
+        runtimeOverlay: reminderOverlay,
+        reminderStateChanged: reminderStateBefore !== reminderStateAfter,
+        span: trace.getActiveSpan(),
+    });
+    const messages = promptHistoryResult.messages;
+
+    if (promptHistoryResult.didMutateHistory || promptHistoryResult.reminderStateChanged) {
+        await conversation.save();
+    }
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
         "ral.number": ralNumber,
-        "message.count": counts.total,
-        "system_prompt.count": counts.systemPrompt,
-        "conversation.count": counts.conversation,
+        "message.count": compiled.counts.total,
+        "system_prompt.count": compiled.counts.systemPrompt,
+        "conversation.count": compiled.counts.conversation,
     });
 
     const request = await prepareLLMRequest({

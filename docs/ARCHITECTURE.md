@@ -187,6 +187,12 @@ TENEX conversation storage has two intentional layers:
 - `ConversationStore` is the canonical ledger. It owns full transcript JSON, scratchpads, and save/load semantics.
 - `ConversationCatalogService` is the per-project derived read model backed by `conversation-catalog.db`. It exists for prompt/tool metadata queries such as recent conversations, conversation previews, participant/delegation lookups, and durable embedding indexing state.
 
+`ConversationStore` also carries per-agent prompt-view state that is intentionally separate from the canonical transcript:
+
+- Canonical `ConversationRecord`s remain the source of truth for transcript history.
+- Per-agent frozen prompt histories record the exact pre-context-management prompt view previously sent to that agent, including runtime-only overlay entries such as system reminders.
+- Runtime overlays must never be replayed by mutating historical transcript messages. Append them as prompt-history entries instead.
+
 When adding a new conversation-facing feature, decide explicitly which layer it belongs to:
 
 - If it needs the full transcript or mutates canonical conversation state, use `ConversationStore`.
