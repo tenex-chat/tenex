@@ -341,7 +341,7 @@ function renderActiveConversationsSection(
     const lines = renderTree(sortedRoots);
 
     return `<active>
-The following conversations are currently active in this project (agents working). Use the exact id shown with conversation_get if you need to inspect one:
+The following conversations are currently active in this project (agents working). Use \`conversation_get <id>\` with the short id shown if you need to inspect one:
 
 ${lines.join("\n")}
 </active>`;
@@ -410,7 +410,7 @@ function renderRecentConversationsSection(
     });
 
     return `<recent>
-You participated in the following conversations recently:
+You participated in the following conversations recently. Use \`conversation_get <id>\` with the short id shown if you need to reopen one:
 
 ${conversationLines.join("\n\n")}
 </recent>`;

@@ -303,7 +303,8 @@ describe("TENEX context management integration", () => {
         const prepared = await prepareManagedRequest(contextManagement, [...messages]);
         const preparedJson = JSON.stringify(prepared?.messages);
         expect(preparedJson).toContain(`Continuation from previous work in conversation ${CONVERSATION_ID}.`);
-        expect(preparedJson).toContain(`conversation_get using conversation id ${CONVERSATION_ID}`);
+        expect(preparedJson).toContain("conversation_get");
+        expect(preparedJson).toContain(CONVERSATION_ID);
         expect(preparedJson).toContain("Task: debug parser regression.");
         expect(preparedJson).not.toContain("Initial task: debug the parser regression.");
         expect(preparedJson).not.toContain("identified the stale cache layer.");
@@ -329,7 +330,8 @@ describe("TENEX context management integration", () => {
 
         const rebuilt = await prepareManagedRequest(contextManagement, [...messages]);
         const rebuiltJson = JSON.stringify(rebuilt?.messages);
-        expect(rebuiltJson).toContain(`conversation_get using conversation id ${CONVERSATION_ID}`);
+        expect(rebuiltJson).toContain("conversation_get");
+        expect(rebuiltJson).toContain(CONVERSATION_ID);
         expect(rebuiltJson).toContain("Task: debug parser regression.");
         expect(rebuiltJson).not.toContain("Initial task: debug the parser regression.");
     });
@@ -479,7 +481,7 @@ describe("TENEX context management integration", () => {
         });
 
         const prompt: Array<Record<string, unknown>> = [{ role: "system", content: "You are helpful." }];
-        for (let index = 1; index <= 9; index++) {
+        for (let index = 1; index <= 11; index++) {
             prompt.push({
                 role: "assistant",
                 content: [
@@ -515,7 +517,7 @@ describe("TENEX context management integration", () => {
         const transformedJson = JSON.stringify(prepared?.messages);
         expect(transformedJson).toContain("use fs_read(tool:");
         expect(transformedJson).toContain("[fs_read was used, id: call-1");
-        expect(transformedJson).toContain("\"toolCallId\":\"call-9\"");
+        expect(transformedJson).toContain("\"toolCallId\":\"call-11\"");
     });
 
     test("anthropic stack keeps stale tool results raw and exposes prompt-stability tracking", async () => {
@@ -631,6 +633,190 @@ describe("TENEX context management integration", () => {
             toolName: "scratchpad",
         });
         expect(JSON.stringify(prepared?.messages)).toContain("Your scratchpad (executor):");
+    });
+
+    test("anthropic prompt caching can disable server-side tool editing", async () => {
+        setContextManagementConfig({
+            forceScratchpadThresholdPercent: 100,
+            anthropicPromptCaching: {
+                serverToolEditing: {
+                    enabled: false,
+                },
+            },
+        });
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "anthropic",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Shared repository context." }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: "I already reviewed the shared setup." }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Review parser.ts." }],
+                },
+            ],
+            {
+                provider: "anthropic",
+                modelId: "claude-haiku-4-5",
+            }
+        );
+
+        const prepared = await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Shared repository context." }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: "I already reviewed the shared setup." }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Review tokenizer.ts." }],
+                },
+            ],
+            {
+                provider: "anthropic",
+                modelId: "claude-haiku-4-5",
+            }
+        );
+
+        expect(prepared?.providerOptions).toBeUndefined();
+        expect(prepared?.messages[2]?.providerOptions).toEqual(
+            expect.objectContaining({
+                anthropic: expect.objectContaining({
+                    cacheControl: {
+                        type: "ephemeral",
+                        ttl: "1h",
+                    },
+                }),
+            })
+        );
+    });
+
+    test("anthropic prompt caching applies configured server-side tool editing knobs", async () => {
+        setContextManagementConfig({
+            forceScratchpadThresholdPercent: 100,
+            anthropicPromptCaching: {
+                ttl: "5m",
+                serverToolEditing: {
+                    triggerToolUses: 40,
+                    keepToolUses: 12,
+                    clearAtLeastInputTokens: 8000,
+                    clearToolInputs: false,
+                    excludeTools: ["delegate", "shell"],
+                },
+            },
+        });
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "anthropic",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Shared repository context." }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: "I already reviewed the shared setup." }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Review parser.ts." }],
+                },
+            ],
+            {
+                provider: "anthropic",
+                modelId: "claude-sonnet-4-20250514",
+            }
+        );
+
+        const prepared = await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Shared repository context." }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: "I already reviewed the shared setup." }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Review tokenizer.ts." }],
+                },
+            ],
+            {
+                provider: "anthropic",
+                modelId: "claude-sonnet-4-20250514",
+            }
+        );
+
+        expect(prepared?.providerOptions).toEqual(
+            expect.objectContaining({
+                anthropic: expect.objectContaining({
+                    contextManagement: expect.objectContaining({
+                        edits: expect.arrayContaining([
+                            expect.objectContaining({
+                                type: "clear_tool_uses_20250919",
+                                trigger: { type: "tool_uses", value: 40 },
+                                keep: { type: "tool_uses", value: 12 },
+                                clearAtLeast: { type: "input_tokens", value: 8000 },
+                                clearToolInputs: false,
+                                excludeTools: ["delegate", "shell"],
+                            }),
+                        ]),
+                    }),
+                }),
+            })
+        );
+        expect(prepared?.messages[2]?.providerOptions).toEqual(
+            expect.objectContaining({
+                anthropic: expect.objectContaining({
+                    cacheControl: {
+                        type: "ephemeral",
+                        ttl: "5m",
+                    },
+                }),
+            })
+        );
     });
 
     test("utilization warning only appears once the working budget threshold is crossed", async () => {

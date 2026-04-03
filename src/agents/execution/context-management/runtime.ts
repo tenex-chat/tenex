@@ -29,6 +29,7 @@ import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type SkillToolPermissions } from "@/services/skill";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
+import { shortenConversationId } from "@/utils/conversation-id";
 import {
     buildDecayPlaceholder,
     createManagedContextBudgetProfile,
@@ -99,7 +100,7 @@ const COMPACTION_SUMMARIZER_SYSTEM_PROMPT = [
 function wrapCompactionSummary(summary: string, conversationId: string): string {
     return [
         `Continuation from previous work in conversation ${conversationId}.`,
-        `If more detail is needed, query the full prior transcript with conversation_get using conversation id ${conversationId}.`,
+        `If more detail is needed, query the full prior transcript with \`conversation_get ${shortenConversationId(conversationId)}\`.`,
         "",
         summary.trim(),
     ].join("\n");
@@ -188,7 +189,7 @@ function createConversationContextManagementRuntime(options: {
         requestEstimator
     );
     const isAnthropicProvider = options.providerId === PROVIDER_IDS.ANTHROPIC;
-    const scratchpadEnabled = options.scratchpadAvailable && !isAnthropicProvider;
+    const scratchpadEnabled = options.scratchpadAvailable;
 
     const strategies: ContextManagementStrategy[] = [];
 
@@ -300,7 +301,10 @@ function createConversationContextManagementRuntime(options: {
     }
 
     if (settings.strategies.anthropicPromptCaching) {
-        strategies.push(new AnthropicPromptCachingStrategy());
+        strategies.push(new AnthropicPromptCachingStrategy({
+            ttl: settings.anthropicPromptCaching.ttl,
+            serverToolEditing: settings.anthropicPromptCaching.serverToolEditing,
+        }));
     }
 
     const telemetry = createTelemetryCallback();

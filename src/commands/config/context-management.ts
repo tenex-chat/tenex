@@ -1,3 +1,15 @@
+import {
+    DEFAULT_ANTHROPIC_PROMPT_CACHING_TTL,
+    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_AT_LEAST_INPUT_TOKENS,
+    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_TOOL_INPUTS,
+    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_EXCLUDE_TOOLS,
+    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_KEEP_TOOL_USES,
+    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_TRIGGER_TOOL_USES,
+    DEFAULT_COMPACTION_THRESHOLD_PERCENT,
+    DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT,
+    DEFAULT_WARNING_THRESHOLD_PERCENT,
+    DEFAULT_WORKING_TOKEN_BUDGET,
+} from "@/agents/execution/context-management/settings";
 import { config } from "@/services/ConfigService";
 import { inquirerTheme } from "@/utils/cli-theme";
 import chalk from "chalk";
@@ -10,6 +22,8 @@ export const contextManagementCommand = new Command("context-management")
         const globalPath = config.getGlobalPath();
         const tenexConfig = await config.loadTenexConfig(globalPath);
         const contextManagement = tenexConfig.contextManagement || {};
+        const anthropicPromptCaching = contextManagement.anthropicPromptCaching || {};
+        const anthropicServerToolEditing = anthropicPromptCaching.serverToolEditing || {};
 
         const { action } = await inquirer.prompt([{
             type: "select",
@@ -43,7 +57,7 @@ export const contextManagementCommand = new Command("context-management")
                 type: "input",
                 name: "tokenBudget",
                 message: "Token budget for managed context:",
-                default: contextManagement.tokenBudget ?? 40000,
+                default: contextManagement.tokenBudget ?? DEFAULT_WORKING_TOKEN_BUDGET,
                 validate: (value) => {
                     const num = Number.parseInt(value, 10);
                     if (Number.isNaN(num) || num <= 0) {
@@ -56,7 +70,10 @@ export const contextManagementCommand = new Command("context-management")
                 type: "input",
                 name: "forceScratchpadThresholdPercent",
                 message: "Force scratchpad threshold (%):",
-                default: contextManagement.forceScratchpadThresholdPercent ?? 70,
+                default: (
+                    contextManagement.forceScratchpadThresholdPercent
+                    ?? DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT
+                ),
                 validate: (value) => {
                     const num = Number.parseInt(value, 10);
                     if (Number.isNaN(num) || num < 0 || num > 100) {
@@ -69,7 +86,10 @@ export const contextManagementCommand = new Command("context-management")
                 type: "input",
                 name: "utilizationWarningThresholdPercent",
                 message: "Utilization warning threshold (%):",
-                default: contextManagement.utilizationWarningThresholdPercent ?? 70,
+                default: (
+                    contextManagement.utilizationWarningThresholdPercent
+                    ?? DEFAULT_WARNING_THRESHOLD_PERCENT
+                ),
                 validate: (value) => {
                     const num = Number.parseInt(value, 10);
                     if (Number.isNaN(num) || num < 0 || num > 100) {
@@ -82,7 +102,10 @@ export const contextManagementCommand = new Command("context-management")
                 type: "input",
                 name: "compactionThresholdPercent",
                 message: "Automatic compaction threshold (%):",
-                default: contextManagement.compactionThresholdPercent ?? 90,
+                default: (
+                    contextManagement.compactionThresholdPercent
+                    ?? DEFAULT_COMPACTION_THRESHOLD_PERCENT
+                ),
                 validate: (value) => {
                     const num = Number.parseInt(value, 10);
                     if (Number.isNaN(num) || num < 0 || num > 100) {
@@ -90,6 +113,93 @@ export const contextManagementCommand = new Command("context-management")
                     }
                     return true;
                 },
+            },
+        ]);
+
+        const anthropicAnswers = await inquirer.prompt([
+            {
+                type: "select",
+                name: "ttl",
+                message: "Anthropic cache-control TTL:",
+                choices: [
+                    { name: "1 hour", value: "1h" },
+                    { name: "5 minutes", value: "5m" },
+                ],
+                default: anthropicPromptCaching.ttl ?? DEFAULT_ANTHROPIC_PROMPT_CACHING_TTL,
+                theme: inquirerTheme,
+            },
+            {
+                type: "confirm",
+                name: "serverToolEditingEnabled",
+                message: "Enable Anthropic server-side tool editing:",
+                default: (
+                    anthropicServerToolEditing.enabled
+                    ?? anthropicPromptCaching.clearToolUses
+                ) !== false,
+            },
+            {
+                type: "input",
+                name: "triggerToolUses",
+                message: "Anthropic tool-edit trigger after N tool uses:",
+                default: (
+                    anthropicServerToolEditing.triggerToolUses
+                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_TRIGGER_TOOL_USES
+                ),
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num <= 0) {
+                        return "Please enter a positive integer";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "keepToolUses",
+                message: "Anthropic tool-edit keep count:",
+                default: (
+                    anthropicServerToolEditing.keepToolUses
+                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_KEEP_TOOL_USES
+                ),
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num < 0) {
+                        return "Please enter zero or a positive integer";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "clearAtLeastInputTokens",
+                message: "Anthropic tool-edit minimum cleared input tokens:",
+                default: (
+                    anthropicServerToolEditing.clearAtLeastInputTokens
+                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_AT_LEAST_INPUT_TOKENS
+                ),
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num < 0) {
+                        return "Please enter zero or a positive integer";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "confirm",
+                name: "clearToolInputs",
+                message: "Clear tool inputs during Anthropic server-side editing:",
+                default: anthropicServerToolEditing.clearToolInputs
+                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_TOOL_INPUTS,
+            },
+            {
+                type: "input",
+                name: "excludeTools",
+                message: "Anthropic tool-edit excluded tools (comma-separated):",
+                default: (
+                    anthropicServerToolEditing.excludeTools
+                    ?? [...DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_EXCLUDE_TOOLS]
+                ).join(", "),
             },
         ]);
 
@@ -147,6 +257,23 @@ export const contextManagementCommand = new Command("context-management")
             forceScratchpadThresholdPercent: Number.parseInt(answers.forceScratchpadThresholdPercent, 10),
             utilizationWarningThresholdPercent: Number.parseInt(answers.utilizationWarningThresholdPercent, 10),
             compactionThresholdPercent: Number.parseInt(answers.compactionThresholdPercent, 10),
+            anthropicPromptCaching: {
+                ttl: anthropicAnswers.ttl,
+                serverToolEditing: {
+                    enabled: anthropicAnswers.serverToolEditingEnabled,
+                    triggerToolUses: Number.parseInt(anthropicAnswers.triggerToolUses, 10),
+                    keepToolUses: Number.parseInt(anthropicAnswers.keepToolUses, 10),
+                    clearAtLeastInputTokens: Number.parseInt(
+                        anthropicAnswers.clearAtLeastInputTokens,
+                        10
+                    ),
+                    clearToolInputs: anthropicAnswers.clearToolInputs,
+                    excludeTools: anthropicAnswers.excludeTools
+                        .split(",")
+                        .map((tool: string) => tool.trim())
+                        .filter((tool: string) => tool.length > 0),
+                },
+            },
             strategies: {
                 anthropicPromptCaching: strategyAnswers.anthropicPromptCaching,
                 reminders: strategyAnswers.reminders,
