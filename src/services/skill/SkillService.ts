@@ -25,11 +25,8 @@ import type {
     SkillStoreScope,
 } from "./types";
 import { logger } from "@/utils/logger";
-import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { shortenEventId } from "@/utils/conversation-id";
-
-const tracer = trace.getTracer("tenex.skill-service");
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const MAX_DOWNLOAD_SIZE_BYTES = 10 * 1024 * 1024;
@@ -994,74 +991,41 @@ export class SkillService {
             return emptyResult;
         }
 
-        const span = tracer.startSpan(
-            "tenex.skill.fetch_skills",
-            {
-                attributes: {
-                    "skill.requested_count": skillIdentifiers.length,
-                },
-            },
-            otelContext.active()
-        );
+        try {
+            const skillDataArray: SkillData[] = [];
+            const loadedSkillIds = new Set<string>();
 
-        return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
-            try {
-                const skillDataArray: SkillData[] = [];
-                const loadedSkillIds = new Set<string>();
-
-                for (const skillIdentifier of skillIdentifiers) {
-                    const skillData = await this.resolveAndLoadSkill(
-                        skillIdentifier,
-                        lookupContext
-                    );
-                    if (!skillData) {
-                        continue;
-                    }
-
-                    if (loadedSkillIds.has(skillData.identifier)) {
-                        continue;
-                    }
-
-                    loadedSkillIds.add(skillData.identifier);
-                    skillDataArray.push(skillData);
+            for (const skillIdentifier of skillIdentifiers) {
+                const skillData = await this.resolveAndLoadSkill(
+                    skillIdentifier,
+                    lookupContext
+                );
+                if (!skillData) {
+                    continue;
                 }
 
-                const concatenated = skillDataArray
-                    .map((data) => data.content)
-                    .filter((content) => content.length > 0)
-                    .join("\n\n");
+                if (loadedSkillIds.has(skillData.identifier)) {
+                    continue;
+                }
 
-                span.setAttributes({
-                    "skill.fetched_count": skillDataArray.length,
-                    "skill.content_length": concatenated.length,
-                    "skill.names": skillDataArray
-                        .map((skill) => skill.name || skill.identifier || "untitled")
-                        .join(", "),
-                    "skill.total_files": skillDataArray.reduce(
-                        (count, skill) => count + skill.installedFiles.length,
-                        0
-                    ),
-                });
-
-                span.setStatus({ code: SpanStatusCode.OK });
-                span.end();
-
-                return {
-                    skills: skillDataArray,
-                    content: concatenated,
-                    toolPermissions: {},
-                };
-            } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({
-                    code: SpanStatusCode.ERROR,
-                    message: (error as Error).message,
-                });
-                span.end();
-                logger.error("[SkillService] Failed to fetch skills", { error });
-                return emptyResult;
+                loadedSkillIds.add(skillData.identifier);
+                skillDataArray.push(skillData);
             }
-        });
+
+            const concatenated = skillDataArray
+                .map((data) => data.content)
+                .filter((content) => content.length > 0)
+                .join("\n\n");
+
+            return {
+                skills: skillDataArray,
+                content: concatenated,
+                toolPermissions: {},
+            };
+        } catch (error) {
+            logger.error("[SkillService] Failed to fetch skills", { error });
+            return emptyResult;
+        }
     }
 
     /**

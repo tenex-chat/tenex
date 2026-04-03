@@ -4,14 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { TenexReminderData } from "@/agents/execution/system-reminders";
-import {
-    collectSystemReminderOverlayMessage,
-    initializeReminderProviders,
-    resetSystemReminders,
-    updateReminderData,
-} from "@/agents/execution/system-reminders";
+import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
+import { collectTenexReminderXml } from "./reminder-test-utils";
 
 mock.module("@/services/identity", () => ({
     getIdentityService: () => ({
@@ -70,9 +66,7 @@ describe("delta-based system reminders", () => {
     }
 
     async function collectReminderXml(data: TenexReminderData): Promise<string> {
-        updateReminderData(data);
-        const overlay = await collectSystemReminderOverlayMessage(undefined);
-        return typeof overlay?.message.content === "string" ? overlay.message.content : "";
+        return await collectTenexReminderXml(data);
     }
 
     beforeEach(() => {
@@ -95,7 +89,6 @@ describe("delta-based system reminders", () => {
         } as AgentInstance;
 
         resetSystemReminders();
-        initializeReminderProviders();
     });
 
     afterEach(() => {
@@ -185,6 +178,8 @@ describe("delta-based system reminders", () => {
 
         expect(xml).not.toContain("<datetime>");
         expect(xml).not.toContain("<response-routing>");
-        expect(reloadedStore.getAgentPromptHistory(agentPubkey).reminderDeltaState["datetime"]).toBeDefined();
+        expect(
+            reloadedStore.getContextManagementReminderState(agentPubkey)?.providers["datetime"]
+        ).toBeDefined();
     });
 });

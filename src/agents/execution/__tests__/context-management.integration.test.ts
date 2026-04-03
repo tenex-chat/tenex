@@ -591,6 +591,48 @@ describe("TENEX context management integration", () => {
         );
     });
 
+    test("anthropic provider exposes scratchpad when the strategy is enabled", async () => {
+        setContextManagementConfig({
+            tokenBudget: 200,
+            forceScratchpadThresholdPercent: 70,
+        });
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "anthropic",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        expect(contextManagement?.optionalTools.scratchpad).toBeDefined();
+
+        const prepared = await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
+                },
+            ],
+            {
+                provider: "anthropic",
+                modelId: "claude-sonnet-4-20250514",
+            }
+        );
+
+        expect(prepared?.toolChoice).toEqual({
+            type: "tool",
+            toolName: "scratchpad",
+        });
+        expect(JSON.stringify(prepared?.messages)).toContain("Your scratchpad (executor):");
+    });
+
     test("utilization warning only appears once the working budget threshold is crossed", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
@@ -801,6 +843,7 @@ describe("TENEX context management integration", () => {
             agent,
             conversationStore: store,
         });
+        expect(contextManagement?.optionalTools.scratchpad).toBeDefined();
 
         const prepared = await prepareManagedRequest(
             contextManagement,
@@ -818,11 +861,15 @@ describe("TENEX context management integration", () => {
         );
 
         const preparedJson = JSON.stringify(prepared?.messages);
+        expect(prepared?.toolChoice).toEqual({
+            type: "tool",
+            toolName: "scratchpad",
+        });
         expect(preparedJson).not.toContain("[Context status]");
         expect(preparedJson).not.toContain("<context-window-status>");
         expect(preparedJson).toContain("managed working budget");
         expect(preparedJson).not.toContain("Model window:");
         expect(preparedJson).not.toContain("/200 tokens");
-        expect(preparedJson).not.toContain("<scratchpad>");
+        expect(preparedJson).toContain("<scratchpad>");
     });
 });

@@ -29,11 +29,7 @@ import type { AgentInstance } from "@/agents/types/runtime";
 import type { CompleteEvent } from "@/llm/types";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import {
-    initializeReminderProviders,
-    updateReminderData,
-    resetSystemReminders,
-} from "../system-reminders";
+import { resetSystemReminders } from "../system-reminders";
 import * as projectServices from "@/services/projects";
 import * as systemPromptBuilderModule from "@/prompts/utils/systemPromptBuilder";
 import { SkillService } from "@/services/skill";
@@ -80,7 +76,6 @@ describe("PostCompletionChecker - True Integration Test", () => {
         registry = RALRegistry.getInstance();
         registry.clear(AGENT_PUBKEY, CONVERSATION_ID);
         resetSystemReminders();
-        initializeReminderProviders();
     });
 
     afterEach(async () => {
@@ -414,14 +409,6 @@ describe("PostCompletionChecker - True Integration Test", () => {
 
             // 4. The queued reminder should be available immediately (no advance() needed)
             const ctx = getSystemReminderContext();
-
-            updateReminderData({
-                agent: config.agent,
-                conversation: conversationStore,
-                respondingToPrincipal: config.context.triggeringEnvelope.principal,
-                pendingDelegations: [],
-                completedDelegations: [],
-            });
 
             const reminders = await ctx.collect();
 

@@ -4,17 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import { IdentityBindingStore } from "@/services/identity/IdentityBindingStoreService";
 import { IdentityService } from "@/services/identity/IdentityService";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { MessageCompiler } from "../MessageCompiler";
-import {
-    initializeReminderProviders,
-    resetSystemReminders,
-    updateReminderData,
-} from "../system-reminders";
+import { resetSystemReminders } from "../system-reminders";
+import { collectTenexReminderXml } from "./reminder-test-utils";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
@@ -99,7 +95,6 @@ describe("MessageCompiler and TENEX system reminders", () => {
         buildSystemPromptMessages.mockClear();
         getName.mockClear();
         resetSystemReminders();
-        initializeReminderProviders();
     });
 
     afterEach(() => {
@@ -145,7 +140,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
             { id: "t2", title: "Task 2", description: "", status: "done" },
         ]);
 
-        updateReminderData({
+        const xml = await collectTenexReminderXml({
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
@@ -171,15 +166,9 @@ describe("MessageCompiler and TENEX system reminders", () => {
                 },
             ],
         });
-
-        const reminders = await getSystemReminderContext().collect();
-        const types = reminders.map((r) => r.type);
-
-        expect(types).toEqual(expect.arrayContaining([
-            "todo-list",
-            "response-routing",
-            "delegations",
-        ]));
+        expect(xml).toContain("<todo-list>");
+        expect(xml).toContain("<response-routing>");
+        expect(xml).toContain("<delegations>");
     });
 
     it("recomputes reminders and rebuilds the full prompt on every refresh", async () => {
@@ -197,16 +186,6 @@ describe("MessageCompiler and TENEX system reminders", () => {
         });
 
         const first = await compile(ralNumber);
-        updateReminderData({
-            agent,
-            conversation: conversationStore,
-            respondingToPrincipal,
-            loadedSkills: [],
-            pendingDelegations: [],
-            completedDelegations: [],
-        });
-        await getSystemReminderContext().collect();
-
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Follow-up question",
@@ -220,7 +199,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
         });
 
         const second = await compile(ralNumber);
-        updateReminderData({
+        const xml = await collectTenexReminderXml({
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
@@ -238,13 +217,12 @@ describe("MessageCompiler and TENEX system reminders", () => {
                 },
             ],
         });
-        const reminders = await getSystemReminderContext().collect();
 
         expect(buildSystemPromptMessages).toHaveBeenCalledTimes(2);
         expect(first.messages).toHaveLength(3);
         expect(second.messages).toHaveLength(5);
         expect(second.messages.find((message) => message.role === "user" && message.content === "Initial message")).toBeDefined();
         expect(second.messages.find((message) => message.role === "user" && message.content === "Follow-up question")).toBeDefined();
-        expect(reminders.map((reminder) => reminder.type)).toContain("delegations");
+        expect(xml).toContain("<delegations>");
     });
 });

@@ -5,15 +5,11 @@ import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import { buildPromptHistoryMessages } from "@/agents/execution/prompt-history";
-import {
-    collectSystemReminderOverlayMessage,
-    initializeReminderProviders,
-    resetSystemReminders,
-    updateReminderData,
-} from "@/agents/execution/system-reminders";
+import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { collectTenexReminderOverlay } from "./reminder-test-utils";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
@@ -108,7 +104,6 @@ describe("system reminder overlay integration", () => {
 
         project = {} as NDKProject;
         resetSystemReminders();
-        initializeReminderProviders();
     });
 
     afterEach(() => {
@@ -128,7 +123,7 @@ describe("system reminder overlay integration", () => {
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
 
-        updateReminderData({
+        const overlay = await collectTenexReminderOverlay({
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
@@ -144,8 +139,6 @@ describe("system reminder overlay integration", () => {
             ],
             completedDelegations: [],
         });
-
-        const overlay = await collectSystemReminderOverlayMessage(undefined);
 
         expect(overlay).toBeDefined();
         expect(overlay?.overlayType).toBe("system-reminders");
@@ -183,7 +176,7 @@ describe("system reminder overlay integration", () => {
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
 
-        updateReminderData({
+        const overlay = await collectTenexReminderOverlay({
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
@@ -191,8 +184,6 @@ describe("system reminder overlay integration", () => {
             pendingDelegations: [],
             completedDelegations: [],
         });
-
-        const overlay = await collectSystemReminderOverlayMessage(undefined);
         const assembled = buildPromptHistoryMessages({
             compiled,
             conversationStore,

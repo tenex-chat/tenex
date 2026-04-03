@@ -6,7 +6,6 @@ import type {
     ReminderState,
     ReminderStateStore,
 } from "ai-sdk-context-management";
-import { RemindersStrategy as RemindersStrategyClass, createContextManagementRuntime as createRuntime } from "ai-sdk-context-management";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
@@ -20,9 +19,7 @@ import type {
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
-import type { Span } from "@opentelemetry/api";
 import type { ProjectDTag } from "@/types/project-ids";
-import type { RuntimePromptOverlay } from "./prompt-history";
 import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
 import {
     buildConversationsReminderSnapshot,
@@ -30,8 +27,6 @@ import {
     renderConversationsReminderFromSnapshot,
     type ConversationsReminderSnapshot,
 } from "@/prompts/reminders/conversations";
-
-let currentReminderData: TenexReminderData | undefined;
 
 function cloneReminderState(state: ReminderState | undefined): ReminderState | undefined {
     return state ? structuredClone(state) : undefined;
@@ -450,81 +445,6 @@ export function createTenexReminderStateStore(options: {
     };
 }
 
-function createCompatibilityReminderRuntime(
-    data: TenexReminderData
-) {
-    return createRuntime({
-        strategies: [
-            new RemindersStrategyClass<TenexReminderData>({
-                stateStore: createTenexReminderStateStore({
-                    conversationStore: data.conversation,
-                }),
-                providers: createTenexReminderProviders(),
-                overlayType: "system-reminders",
-            }),
-        ],
-    });
-}
-
-export function initializeReminderProviders(): void {
-    // Compatibility no-op. Providers are now created directly by RemindersStrategy.
-}
-
-export function updateReminderData(data: TenexReminderData): void {
-    currentReminderData = data;
-}
-
 export function resetSystemReminders(): void {
-    currentReminderData = undefined;
     getSystemReminderContext().clear();
-}
-
-export async function collectSystemReminderOverlayMessage(
-    span: Span | undefined,
-): Promise<RuntimePromptOverlay | undefined> {
-    if (!currentReminderData) {
-        return undefined;
-    }
-
-    const queuedReminders = await getSystemReminderContext().collect();
-    const prepared = await createCompatibilityReminderRuntime(currentReminderData).prepareRequest({
-        requestContext: {
-            conversationId: currentReminderData.conversation.getId(),
-            agentId: currentReminderData.agent.pubkey,
-            agentLabel: currentReminderData.agent.name || currentReminderData.agent.slug,
-        },
-        messages: [],
-        reminderData: currentReminderData,
-        queuedReminders: queuedReminders.map((reminder) => ({
-            kind: reminder.type,
-            content: reminder.content,
-            ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
-            ...(reminder.placement ? { placement: reminder.placement } : {}),
-            ...(reminder.disposition ? { disposition: reminder.disposition } : {}),
-        })),
-    });
-    const runtimeOverlay = prepared.runtimeOverlays?.[0];
-
-    const normalizedRuntimeOverlay =
-        runtimeOverlay?.message.role === "user"
-        && Array.isArray(runtimeOverlay.message.content)
-        && runtimeOverlay.message.content.length === 1
-        && runtimeOverlay.message.content[0]?.type === "text"
-            ? {
-                  ...runtimeOverlay,
-                  message: {
-                      ...runtimeOverlay.message,
-                      content: runtimeOverlay.message.content[0].text,
-                  },
-              }
-            : runtimeOverlay;
-
-    if (normalizedRuntimeOverlay) {
-        span?.addEvent("system-reminders.applied", {
-            "reminders.overlay_type": normalizedRuntimeOverlay.overlayType,
-            "reminders.content": JSON.stringify(normalizedRuntimeOverlay.message.content),
-        });
-    }
-
-    return normalizedRuntimeOverlay;
 }

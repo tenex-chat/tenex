@@ -3,16 +3,12 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { join } from "node:path";
 import { MessageCompiler } from "../MessageCompiler";
-import {
-    initializeReminderProviders,
-    resetSystemReminders,
-    updateReminderData,
-} from "../system-reminders";
+import { resetSystemReminders } from "../system-reminders";
+import { collectTenexReminderXml } from "./reminder-test-utils";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "STATIC_SYSTEM_A" } },
@@ -97,7 +93,6 @@ describe("MessageCompiler", () => {
         buildSystemPromptMessages.mockClear();
         getName.mockClear();
         resetSystemReminders();
-        initializeReminderProviders();
     });
 
     afterEach(() => {
@@ -146,7 +141,7 @@ describe("MessageCompiler", () => {
         expect(counts.conversation).toBe(2);
         expect(counts.total).toBe(4);
 
-        updateReminderData({
+        const reminderXml = await collectTenexReminderXml({
             agent,
             conversation: conversationStore,
             respondingToPrincipal,
@@ -161,9 +156,7 @@ describe("MessageCompiler", () => {
             ],
             completedDelegations: [],
         });
-        const reminders = await getSystemReminderContext().collect();
-        const reminderContent = JSON.stringify(reminders);
-        expect(reminderContent).toContain("Your response will be sent to @User.");
+        expect(reminderXml).toContain("Your response will be sent to @User.");
     });
 
     it("rebuilds the full prompt on every compile", async () => {

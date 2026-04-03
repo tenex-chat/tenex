@@ -6,9 +6,7 @@ import type { CompletedDelegation, PendingDelegation } from "@/services/ral/type
 import type { PromptMessage } from "@/conversations/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
-
-const tracer = trace.getTracer("tenex.message-compiler");
+import { trace } from "@opentelemetry/api";
 
 /**
  * CompiledMessage - A message with optional prompt lineage metadata.
@@ -54,87 +52,80 @@ export class MessageCompiler {
     constructor(private conversationStore: ConversationStore) {}
 
     async compile(context: MessageCompilerContext): Promise<CompiledMessages> {
-        return tracer.startActiveSpan("tenex.message.compile", async (span) => {
-            try {
-                // Validate conversation source - context.conversation must match conversationStore
-                if (context.conversation.id !== this.conversationStore.getId()) {
-                    throw new Error(
-                        `Conversation mismatch: context.conversation.id (${context.conversation.id}) ` +
-                        `does not match conversationStore.id (${this.conversationStore.getId()})`
-                    );
-                }
+        // Validate conversation source - context.conversation must match conversationStore
+        if (context.conversation.id !== this.conversationStore.getId()) {
+            throw new Error(
+                `Conversation mismatch: context.conversation.id (${context.conversation.id}) ` +
+                `does not match conversationStore.id (${this.conversationStore.getId()})`
+            );
+        }
 
-                span.setAttribute("agent.slug", context.agent.slug);
-                span.setAttribute("conversation.id", shortenConversationId(context.conversation.id));
-                span.setAttribute("ral.number", context.ralNumber);
+        const activeSpan = trace.getActiveSpan();
+        activeSpan?.setAttribute("agent.slug", context.agent.slug);
+        activeSpan?.setAttribute("conversation.id", shortenConversationId(context.conversation.id));
+        activeSpan?.setAttribute("ral.number", context.ralNumber);
 
-                const messages: ModelMessage[] = [];
-                let systemPromptCount = 0;
-                const dynamicContextCount = 0;
+        const messages: ModelMessage[] = [];
+        let systemPromptCount = 0;
+        const dynamicContextCount = 0;
 
-                let t0 = performance.now();
-                const systemPromptMessages = await buildSystemPromptMessages(context);
-                const systemPromptText = systemPromptMessages.map(sm => sm.message.content).join("\n\n");
-                span.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
+        let t0 = performance.now();
+        const systemPromptMessages = await buildSystemPromptMessages(context);
+        const systemPromptText = systemPromptMessages.map(sm => sm.message.content).join("\n\n");
+        activeSpan?.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
 
-                t0 = performance.now();
-                const conversationMessages = await this.conversationStore.buildMessagesForRal(
-                    context.agent.pubkey,
-                    context.ralNumber,
-                    {
-                        includeMessageIds: true,
-                    }
-                ) as PromptMessage[];
-                span.addEvent("conversation_messages_built", { "duration_ms": Math.round(performance.now() - t0) });
-
-                const systemMessages = systemPromptMessages.map((sm, index) => ({
-                    ...sm.message,
-                    id: `system:${index}`,
-                })) as PromptMessage[];
-
-                if (context.metaModelSystemPrompt) {
-                    systemMessages.push({
-                        id: "system:meta-model",
-                        role: "system",
-                        content: context.metaModelSystemPrompt,
-                    } as PromptMessage);
-                    systemPromptCount++;
-                }
-                if (context.variantSystemPrompt) {
-                    systemMessages.push({
-                        id: "system:variant",
-                        role: "system",
-                        content: context.variantSystemPrompt,
-                    } as PromptMessage);
-                    systemPromptCount++;
-                }
-
-                messages.push(...systemMessages, ...conversationMessages);
-                systemPromptCount += systemPromptMessages.length;
-
-                const conversationCount = messages.length - systemPromptCount - dynamicContextCount;
-
-                const counts = {
-                    systemPrompt: systemPromptCount,
-                    conversation: conversationCount,
-                    dynamicContext: dynamicContextCount,
-                    total: messages.length,
-                };
-
-                span.setAttribute("message.count", messages.length);
-                span.setAttribute("counts.system_prompt", counts.systemPrompt);
-                span.setAttribute("counts.conversation", counts.conversation);
-                span.setAttribute("counts.dynamic_context", counts.dynamicContext);
-                span.setAttribute("counts.total", counts.total);
-
-                return { messages, systemPrompt: systemPromptText, counts };
-            } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({ code: SpanStatusCode.ERROR });
-                throw error;
-            } finally {
-                span.end();
+        t0 = performance.now();
+        const conversationMessages = await this.conversationStore.buildMessagesForRal(
+            context.agent.pubkey,
+            context.ralNumber,
+            {
+                includeMessageIds: true,
             }
+        ) as PromptMessage[];
+        activeSpan?.addEvent("conversation_messages_built", {
+            "duration_ms": Math.round(performance.now() - t0),
         });
+
+        const systemMessages = systemPromptMessages.map((sm, index) => ({
+            ...sm.message,
+            id: `system:${index}`,
+        })) as PromptMessage[];
+
+        if (context.metaModelSystemPrompt) {
+            systemMessages.push({
+                id: "system:meta-model",
+                role: "system",
+                content: context.metaModelSystemPrompt,
+            } as PromptMessage);
+            systemPromptCount++;
+        }
+        if (context.variantSystemPrompt) {
+            systemMessages.push({
+                id: "system:variant",
+                role: "system",
+                content: context.variantSystemPrompt,
+            } as PromptMessage);
+            systemPromptCount++;
+        }
+
+        messages.push(...systemMessages, ...conversationMessages);
+        systemPromptCount += systemPromptMessages.length;
+
+        const conversationCount = messages.length - systemPromptCount - dynamicContextCount;
+
+        const counts = {
+            systemPrompt: systemPromptCount,
+            conversation: conversationCount,
+            dynamicContext: dynamicContextCount,
+            total: messages.length,
+        };
+
+        activeSpan?.setAttribute("message.count", messages.length);
+        activeSpan?.setAttribute("counts.system_prompt", counts.systemPrompt);
+        activeSpan?.setAttribute("counts.conversation", counts.conversation);
+        activeSpan?.setAttribute("counts.dynamic_context", counts.dynamicContext);
+        activeSpan?.setAttribute("counts.total", counts.total);
+
+        return { messages, systemPrompt: systemPromptText, counts };
     }
 }

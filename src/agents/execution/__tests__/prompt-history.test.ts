@@ -5,15 +5,11 @@ import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import { buildPromptHistoryMessages } from "@/agents/execution/prompt-history";
-import {
-    collectSystemReminderOverlayMessage,
-    initializeReminderProviders,
-    resetSystemReminders,
-    updateReminderData,
-} from "@/agents/execution/system-reminders";
+import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { collectTenexReminderOverlay } from "./reminder-test-utils";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
@@ -122,7 +118,6 @@ describe("per-agent prompt history", () => {
         agentB = createAgent("agent-b", "agent-b");
 
         resetSystemReminders();
-        initializeReminderProviders();
     });
 
     afterEach(() => {
@@ -240,7 +235,7 @@ describe("per-agent prompt history", () => {
         ]);
 
         const firstCompiled = await compile(agentA, ralNumber, [agentA]);
-        updateReminderData({
+        const firstOverlay = await collectTenexReminderOverlay({
             agent: agentA,
             conversation: conversationStore,
             respondingToPrincipal,
@@ -248,7 +243,6 @@ describe("per-agent prompt history", () => {
             completedDelegations: [],
             loadedSkills: [],
         });
-        const firstOverlay = await collectSystemReminderOverlayMessage(undefined);
         buildPromptHistoryMessages({
             compiled: firstCompiled,
             conversationStore,
@@ -261,7 +255,7 @@ describe("per-agent prompt history", () => {
         ]);
 
         const secondCompiled = await compile(agentA, ralNumber, [agentA]);
-        updateReminderData({
+        const secondOverlay = await collectTenexReminderOverlay({
             agent: agentA,
             conversation: conversationStore,
             respondingToPrincipal,
@@ -269,7 +263,6 @@ describe("per-agent prompt history", () => {
             completedDelegations: [],
             loadedSkills: [],
         });
-        const secondOverlay = await collectSystemReminderOverlayMessage(undefined);
         buildPromptHistoryMessages({
             compiled: secondCompiled,
             conversationStore,
