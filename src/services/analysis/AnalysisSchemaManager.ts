@@ -1,7 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BunDatabase = any;
 
-const ANALYSIS_SCHEMA_VERSION = "4";
+const ANALYSIS_SCHEMA_VERSION = "5";
 
 export class AnalysisSchemaManager {
     public constructor(private readonly db: BunDatabase) {}
@@ -65,7 +65,12 @@ export class AnalysisSchemaManager {
                 shared_prefix_message_count INTEGER,
                 shared_prefix_last_message_index INTEGER,
                 anthropic_clear_tool_uses_enabled INTEGER,
-                api_key_identity TEXT
+                api_key_identity TEXT,
+                provider_context_edit_count INTEGER,
+                provider_context_cleared_input_tokens INTEGER,
+                provider_context_cleared_tool_uses INTEGER,
+                provider_context_cleared_thinking_turns INTEGER,
+                provider_context_edits_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS llm_request_messages (
@@ -111,6 +116,11 @@ export class AnalysisSchemaManager {
                 message_count_after INTEGER,
                 placeholder_tool_result_count INTEGER,
                 placeholder_tool_input_count INTEGER,
+                compaction_mode TEXT,
+                compaction_edit_count INTEGER,
+                compaction_message_count INTEGER,
+                compaction_from_index INTEGER,
+                compaction_to_index INTEGER,
                 messages_summarized_count INTEGER,
                 summary_char_count INTEGER,
                 entry_count INTEGER,
@@ -229,6 +239,11 @@ export class AnalysisSchemaManager {
                     shared_prefix_message_count,
                     shared_prefix_last_message_index,
                     anthropic_clear_tool_uses_enabled,
+                    provider_context_edit_count,
+                    provider_context_cleared_input_tokens,
+                    provider_context_cleared_tool_uses,
+                    provider_context_cleared_thinking_turns,
+                    provider_context_edits_json,
                     pre_context_estimated_input_tokens,
                     sent_estimated_input_tokens,
                     pre_context_estimated_input_tokens AS prepared_prompt_estimated_input_tokens_before,
@@ -268,6 +283,11 @@ export class AnalysisSchemaManager {
                     message_count_after,
                     placeholder_tool_result_count,
                     placeholder_tool_input_count,
+                    compaction_mode,
+                    compaction_edit_count,
+                    compaction_message_count,
+                    compaction_from_index,
+                    compaction_to_index,
                     messages_summarized_count,
                     summary_char_count,
                     entry_count,
@@ -338,11 +358,15 @@ export class AnalysisSchemaManager {
     private migrateSchema(previousVersion: string | undefined): void {
         const addedRuntimeColumns = this.ensureRequestRuntimeColumns();
         const addedPromptCachingColumns = this.ensureRequestPromptCachingColumns();
+        const addedProviderContextColumns = this.ensureRequestProviderContextColumns();
         const addedApiKeyIdentityColumn = this.ensureApiKeyIdentityColumn();
+        const addedCompactionColumns = this.ensureContextManagementCompactionColumns();
         if (
             addedRuntimeColumns
             || addedPromptCachingColumns
+            || addedProviderContextColumns
             || addedApiKeyIdentityColumn
+            || addedCompactionColumns
             || previousVersion !== ANALYSIS_SCHEMA_VERSION
         ) {
             this.backfillRuntimeMetricsFromContextEvents();
@@ -399,6 +423,68 @@ export class AnalysisSchemaManager {
 
         if (!this.hasColumn("llm_requests", "anthropic_clear_tool_uses_enabled")) {
             this.addColumn("llm_requests", "anthropic_clear_tool_uses_enabled INTEGER");
+            addedColumns = true;
+        }
+
+        return addedColumns;
+    }
+
+    private ensureRequestProviderContextColumns(): boolean {
+        let addedColumns = false;
+
+        if (!this.hasColumn("llm_requests", "provider_context_edit_count")) {
+            this.addColumn("llm_requests", "provider_context_edit_count INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "provider_context_cleared_input_tokens")) {
+            this.addColumn("llm_requests", "provider_context_cleared_input_tokens INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "provider_context_cleared_tool_uses")) {
+            this.addColumn("llm_requests", "provider_context_cleared_tool_uses INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "provider_context_cleared_thinking_turns")) {
+            this.addColumn("llm_requests", "provider_context_cleared_thinking_turns INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("llm_requests", "provider_context_edits_json")) {
+            this.addColumn("llm_requests", "provider_context_edits_json TEXT");
+            addedColumns = true;
+        }
+
+        return addedColumns;
+    }
+
+    private ensureContextManagementCompactionColumns(): boolean {
+        let addedColumns = false;
+
+        if (!this.hasColumn("context_management_events", "compaction_mode")) {
+            this.addColumn("context_management_events", "compaction_mode TEXT");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("context_management_events", "compaction_edit_count")) {
+            this.addColumn("context_management_events", "compaction_edit_count INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("context_management_events", "compaction_message_count")) {
+            this.addColumn("context_management_events", "compaction_message_count INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("context_management_events", "compaction_from_index")) {
+            this.addColumn("context_management_events", "compaction_from_index INTEGER");
+            addedColumns = true;
+        }
+
+        if (!this.hasColumn("context_management_events", "compaction_to_index")) {
+            this.addColumn("context_management_events", "compaction_to_index INTEGER");
             addedColumns = true;
         }
 

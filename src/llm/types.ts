@@ -54,6 +54,11 @@ export interface LLMMetadata {
     toolFileChangeCalls?: number;
     toolMcpCalls?: number;
     toolOtherCalls?: number;
+    providerContextEditCount?: number;
+    providerContextClearedInputTokens?: number;
+    providerContextClearedToolUses?: number;
+    providerContextClearedThinkingTurns?: number;
+    providerContextEditsJson?: string;
 }
 
 /**
@@ -89,6 +94,7 @@ export interface LLMAnalysisRequestHandle {
         completedAt: number;
         usage?: LanguageModelUsageWithCostUsd;
         finishReason?: string;
+        metadata?: LLMMetadata;
     }) => Promise<void> | void;
     reportError: (params: {
         completedAt: number;

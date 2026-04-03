@@ -12,7 +12,7 @@ import {
     extractOpenRouterGenerationId,
     extractUsageMetadata,
 } from "./providers/usage-metadata";
-import type { LLMServiceEventMap, LanguageModelUsageWithCostUsd } from "./types";
+import type { LLMMetadata, LLMServiceEventMap, LanguageModelUsageWithCostUsd } from "./types";
 
 export interface FinishHandlerConfig {
     provider: string;
@@ -34,6 +34,7 @@ export interface FinishHandlerOptions {
     onRequestComplete?: (params: {
         usage: LanguageModelUsageWithCostUsd;
         finishReason?: string;
+        metadata?: LLMMetadata;
     }) => Promise<void> | void;
 }
 
@@ -123,12 +124,29 @@ export function createFinishHandler(
                 latestProviderMetadata
             );
 
+            const metadata = extractLLMMetadata(config.provider, latestProviderMetadata);
             await options?.onFinalStepInputTokens?.(usage.inputTokens);
             await options?.onRequestComplete?.({
                 usage,
                 finishReason: e.finishReason,
+                metadata,
             });
-            const metadata = extractLLMMetadata(config.provider, latestProviderMetadata);
+
+            if (metadata?.providerContextEditCount !== undefined) {
+                activeSpan?.setAttribute(
+                    "llm.provider_context_edit_count",
+                    metadata.providerContextEditCount
+                );
+                activeSpan?.addEvent("llm.provider_context_edits", {
+                    "llm.provider_context_edit_count": metadata.providerContextEditCount,
+                    "llm.provider_context_cleared_input_tokens":
+                        metadata.providerContextClearedInputTokens ?? 0,
+                    "llm.provider_context_cleared_tool_uses":
+                        metadata.providerContextClearedToolUses ?? 0,
+                    "llm.provider_context_cleared_thinking_turns":
+                        metadata.providerContextClearedThinkingTurns ?? 0,
+                });
+            }
 
             // DIAGNOSTIC: Log right before emitting complete event
             const beforeEmitTime = Date.now();

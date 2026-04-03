@@ -287,7 +287,7 @@ describe("per-agent prompt history", () => {
         expect(String(history[0]?.content)).not.toContain("<system-reminders>");
     });
 
-    it("appends mutable updates when delegation markers change render state", async () => {
+    it("appends explicit delegation completion marker records", async () => {
         conversationStore.addMessage({
             pubkey: "user-pubkey",
             content: "Delegate this task",
@@ -334,6 +334,6 @@ describe("per-agent prompt history", () => {
         expect(String(delegationEntries[0]?.content)).toContain("DELEGATION IN PROGRESS");
         expect(delegationEntries[0]?.source.kind).toBe("canonical");
         expect(String(delegationEntries[1]?.content)).toContain("DELEGATION COMPLETED");
-        expect(delegationEntries[1]?.source.kind).toBe("mutable-update");
+        expect(delegationEntries[1]?.source.kind).toBe("canonical");
     });
 });

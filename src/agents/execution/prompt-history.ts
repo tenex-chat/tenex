@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { ModelMessage } from "ai";
 import type { Span } from "@opentelemetry/api";
 import type { ConversationStore } from "@/conversations/ConversationStore";
@@ -25,46 +24,6 @@ export interface PromptHistoryAssemblyResult {
     reminderStateChanged: boolean;
 }
 
-function stableSerialize(value: unknown): string {
-    if (value === null || value === undefined) {
-        return String(value);
-    }
-
-    if (typeof value === "string") {
-        return JSON.stringify(value);
-    }
-
-    if (
-        typeof value === "number"
-        || typeof value === "boolean"
-        || typeof value === "bigint"
-    ) {
-        return String(value);
-    }
-
-    if (Array.isArray(value)) {
-        return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
-    }
-
-    if (typeof value === "object") {
-        const entries = Object.entries(value as Record<string, unknown>)
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableSerialize(entryValue)}`);
-        return `{${entries.join(",")}}`;
-    }
-
-    return JSON.stringify(String(value));
-}
-
-function hashPromptMessage(message: ModelMessage): string {
-    return createHash("sha256")
-        .update(stableSerialize({
-            role: message.role,
-            content: message.content,
-        }))
-        .digest("hex");
-}
-
 function cloneMessageContent(message: ModelMessage): ModelMessage["content"] {
     return structuredClone(message.content);
 }
@@ -74,18 +33,21 @@ function nextPromptHistoryId(history: AgentPromptHistoryState): string {
     return `prompt:${history.nextSequence}`;
 }
 
-function getSourceMessageId(message: AddressablePromptMessage, fallbackIndex: number): string {
-    if (typeof message.sourceRecordId === "string" && message.sourceRecordId.length > 0) {
-        return message.sourceRecordId;
-    }
+function getSourceMessageId(
+    message: AddressablePromptMessage,
+    fallbackIndex: number
+): string {
     if (typeof message.id === "string" && message.id.length > 0) {
         return message.id;
+    }
+    if (typeof message.sourceRecordId === "string" && message.sourceRecordId.length > 0) {
+        return message.sourceRecordId;
     }
     if (typeof message.eventId === "string" && message.eventId.length > 0) {
         return `event:${message.eventId}`;
     }
 
-    return `projection:${fallbackIndex}:${hashPromptMessage(message)}`;
+    return `projection:${fallbackIndex}`;
 }
 
 function appendFrozenPromptMessage(
@@ -98,8 +60,6 @@ function appendFrozenPromptMessage(
 function freezeCanonicalMessage(
     history: AgentPromptHistoryState,
     message: AddressablePromptMessage,
-    kind: "canonical" | "mutable-update",
-    renderHash: string,
     fallbackIndex: number
 ): FrozenPromptMessage {
     const sourceMessageId = getSourceMessageId(message, fallbackIndex);
@@ -109,7 +69,7 @@ function freezeCanonicalMessage(
         role: message.role,
         content: cloneMessageContent(message),
         source: {
-            kind,
+            kind: "canonical",
             sourceMessageId,
             ...(typeof message.sourceRecordId === "string"
                 ? { sourceRecordId: message.sourceRecordId }
@@ -118,7 +78,6 @@ function freezeCanonicalMessage(
                 ? { sourceEventId: message.eventId }
                 : {}),
         },
-        renderHash,
     };
 }
 
@@ -134,7 +93,6 @@ function freezeRuntimeOverlay(
             kind: "runtime-overlay",
             overlayType: overlay.overlayType,
         },
-        renderHash: hashPromptMessage(overlay.message),
     };
 }
 
@@ -182,36 +140,23 @@ export function buildPromptHistoryMessages(params: {
     } = params;
     const { systemMessages, canonicalMessages } = splitCompiledMessages(compiled);
     const history = conversationStore.getAgentPromptHistory(agentPubkey);
+    const seenMessageIds = new Set(history.seenMessageIds);
     let didMutateHistory = false;
     let appendedCanonicalCount = 0;
-    let appendedMutableUpdateCount = 0;
 
     for (let index = 0; index < canonicalMessages.length; index++) {
         const message = canonicalMessages[index];
         const sourceMessageId = getSourceMessageId(message, index);
-        const renderHash = hashPromptMessage(message);
-        const previousHash = history.sourceVersions[sourceMessageId];
 
-        if (!previousHash) {
-            appendFrozenPromptMessage(
-                history,
-                freezeCanonicalMessage(history, message, "canonical", renderHash, index)
-            );
-            history.sourceVersions[sourceMessageId] = renderHash;
-            didMutateHistory = true;
-            appendedCanonicalCount += 1;
+        if (seenMessageIds.has(sourceMessageId)) {
             continue;
         }
 
-        if (previousHash !== renderHash) {
-            appendFrozenPromptMessage(
-                history,
-                freezeCanonicalMessage(history, message, "mutable-update", renderHash, index)
-            );
-            history.sourceVersions[sourceMessageId] = renderHash;
-            didMutateHistory = true;
-            appendedMutableUpdateCount += 1;
-        }
+        appendFrozenPromptMessage(history, freezeCanonicalMessage(history, message, index));
+        history.seenMessageIds.push(sourceMessageId);
+        seenMessageIds.add(sourceMessageId);
+        didMutateHistory = true;
+        appendedCanonicalCount += 1;
     }
 
     if (runtimeOverlay) {
@@ -224,7 +169,6 @@ export function buildPromptHistoryMessages(params: {
         "prompt_history.canonical_projection_count": canonicalMessages.length,
         "prompt_history.frozen_message_count": history.messages.length,
         "prompt_history.appended_canonical_count": appendedCanonicalCount,
-        "prompt_history.appended_mutable_update_count": appendedMutableUpdateCount,
         "prompt_history.appended_runtime_overlay_count": runtimeOverlay ? 1 : 0,
         "prompt_history.reminder_state_changed": reminderStateChanged,
     });

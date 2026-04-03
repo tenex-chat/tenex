@@ -218,12 +218,24 @@ function buildContextWindowStatusSummary(): string {
     return "Inserted context status.";
 }
 
-function buildSummarizationSummary(payload: Extract<ContextManagementStrategyPayload, { kind: "summarization" }> | undefined): string {
-    if (!payload?.messagesSummarizedCount) {
-        return "Evaluated summarization.";
+function buildCompactionSummary(payload: Extract<ContextManagementStrategyPayload, { kind: "compaction-tool" }> | undefined): string {
+    if (!payload) {
+        return "Evaluated compaction.";
     }
 
-    return `Summarized ${formatCount(payload.messagesSummarizedCount, "message")}.`;
+    if (payload.mode === "stored" && payload.editCount > 0) {
+        return "Reapplied stored compactions.";
+    }
+
+    if (payload.mode === "manual" && payload.compactedMessageCount > 0) {
+        return `Applied manual compaction over ${formatCount(payload.compactedMessageCount, "message")}.`;
+    }
+
+    if (payload.mode === "auto" && payload.compactedMessageCount > 0) {
+        return `Auto-compacted ${formatCount(payload.compactedMessageCount, "message")}.`;
+    }
+
+    return "Evaluated compaction.";
 }
 
 function buildFallbackStrategySummary(event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>): string {
@@ -236,6 +248,9 @@ function buildStrategyCompleteSummary(
     const payload = event.strategyPayload;
 
     if (!payload) {
+        if (event.strategyName === "compaction-tool") {
+            return "Evaluated compaction.";
+        }
         return buildFallbackStrategySummary(event);
     }
 
@@ -250,8 +265,8 @@ function buildStrategyCompleteSummary(
             return buildContextUtilizationReminderSummary(event, payload);
         case "context-window-status":
             return buildContextWindowStatusSummary();
-        case "summarization":
-            return buildSummarizationSummary(payload);
+        case "compaction-tool":
+            return buildCompactionSummary(payload);
         default:
             return buildFallbackStrategySummary(event);
     }
@@ -271,6 +286,13 @@ function buildToolExecuteSummary(
 ): string {
     if (event.toolName === "scratchpad" && event.type === "tool-execute-complete") {
         return "Updated scratchpad.";
+    }
+
+    if (event.toolName === "compact_context" && event.type === "tool-execute-complete") {
+        const result = isRecord(event.payloads.result) ? event.payloads.result : undefined;
+        return result?.ok === true
+            ? "Queued context compaction."
+            : "Rejected context compaction request.";
     }
 
     if (event.type === "tool-execute-error") {
@@ -351,9 +373,37 @@ function buildDerivedTelemetryAttributes(
                     addAttribute(attributes, "context_management.raw_context_utilization_percent", payload.rawContextUtilizationPercent);
                     attributes["context_management.budget_scope"] = MANAGED_CONTEXT_BUDGET_SCOPE;
                     break;
-                case "summarization":
-                    addAttribute(attributes, "context_management.messages_summarized_count", payload.messagesSummarizedCount);
-                    addAttribute(attributes, "context_management.summary_char_count", payload.summaryCharCount);
+                case "compaction-tool":
+                    addAttribute(
+                        attributes,
+                        "context_management.compaction_mode",
+                        payload.mode
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.compaction_edit_count",
+                        payload.editCount
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.compaction_message_count",
+                        payload.compactedMessageCount
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.compaction_from_index",
+                        payload.fromIndex
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.compaction_to_index",
+                        payload.toIndex
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.summary_char_count",
+                        payload.summaryCharCount
+                    );
                     break;
                 default:
                     break;
@@ -380,6 +430,27 @@ function buildDerivedTelemetryAttributes(
                     "context_management.preserve_turns",
                     getNumber(event.payloads.input, "preserveTurns")
                 );
+            } else if (event.toolName === "compact_context") {
+                addAttribute(
+                    attributes,
+                    "context_management.summary_char_count",
+                    getString(event.payloads.input, "message")?.length
+                );
+                if (event.type === "tool-execute-complete") {
+                    const result = isRecord(event.payloads.result) ? event.payloads.result : undefined;
+                    addAttribute(
+                        attributes,
+                        "context_management.compaction_requested",
+                        result?.ok === true
+                            ? true
+                            : undefined
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.compaction_message_count",
+                        getNumber(result, "compactedMessageCount")
+                    );
+                }
             }
             break;
         case "runtime-complete":

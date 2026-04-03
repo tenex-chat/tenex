@@ -1,13 +1,17 @@
 import { trace } from "@opentelemetry/api";
-import type { LanguageModel } from "ai";
+import { generateText, type LanguageModel, type ModelMessage } from "ai";
 import {
+    buildDeterministicSummary,
+    buildSummaryTranscript,
+    CompactionToolStrategy,
     CONTEXT_MANAGEMENT_KEY,
     ContextUtilizationReminderStrategy,
     ContextWindowStatusStrategy,
     createSharedPrefixTracker,
+    type CompactionStore,
+    type CompactionToolStrategyOptions,
     type ContextManagementPreparedRequest,
     ScratchpadStrategy,
-    SummarizationStrategy,
     SystemPromptCachingStrategy,
     ToolResultDecayStrategy,
     createContextManagementRuntime,
@@ -72,7 +76,7 @@ function createSummarizationModel(options: {
         return llmService.createLanguageModel();
     } catch {
         trace.getActiveSpan()?.addEvent(
-            "context_management.summarization_model_unavailable",
+            "context_management.compaction_model_unavailable",
             {
                 "context_management.conversation_id": options.conversationId,
                 "context_management.agent_id": options.agent.pubkey,
@@ -80,6 +84,64 @@ function createSummarizationModel(options: {
         );
         return undefined;
     }
+}
+
+const COMPACTION_SUMMARIZER_SYSTEM_PROMPT = [
+    "Compress older TENEX execution context into a continuation summary.",
+    "Return plain text with exactly these sections: Task, Completed, Important Findings, Open Issues, Next Steps, Persistent Facts.",
+    "Preserve exact file paths, commands, tool names, tool-call IDs, errors, failed attempts, decisions, user constraints, and unfinished work when relevant.",
+    "Do not invent progress or verification.",
+    "Aggressively omit solved low-value churn unless it prevents repeated mistakes.",
+].join(" ");
+
+function createCompactionStore(options: {
+    conversationStore: ConversationStore;
+}): CompactionStore {
+    return {
+        get: ({ agentId }) => {
+            return options.conversationStore.getContextManagementCompaction(agentId);
+        },
+        set: async ({ agentId }, state) => {
+            const existing = options.conversationStore.getContextManagementCompaction(agentId);
+            options.conversationStore.setContextManagementCompaction(agentId, {
+                ...state,
+                ...(state.agentLabel ? {} : existing?.agentLabel ? { agentLabel: existing.agentLabel } : {}),
+            });
+            await options.conversationStore.save();
+        },
+    };
+}
+
+function createCompactionCallback(
+    model: LanguageModel
+): NonNullable<CompactionToolStrategyOptions["onCompact"]> {
+    return async ({ messages }) => {
+        const transcript = buildSummaryTranscript(messages);
+        const deterministicFallback = buildDeterministicSummary(messages);
+        const summaryPrompt: ModelMessage[] = [
+            {
+                role: "system",
+                content: COMPACTION_SUMMARIZER_SYSTEM_PROMPT,
+            },
+            {
+                role: "user",
+                content: `Summarize this stale TENEX context so work can continue safely:\n\n${transcript}`,
+            },
+        ];
+
+        try {
+            const { text } = await generateText({
+                model,
+                messages: summaryPrompt,
+                temperature: 0,
+                maxOutputTokens: 1400,
+            });
+            const summary = text.trim();
+            return summary.length > 0 ? summary : deterministicFallback;
+        } catch {
+            return deterministicFallback;
+        }
+    };
 }
 
 function createConversationContextManagementRuntime(options: {
@@ -138,6 +200,34 @@ function createConversationContextManagementRuntime(options: {
         );
     }
 
+    const summarizationModel = createSummarizationModel({
+        conversationId: options.conversationId,
+        agent: options.agent,
+    });
+
+    if (settings.strategies.compaction) {
+        const compactionOptions: CompactionToolStrategyOptions = {
+            compactionStore: createCompactionStore({
+                conversationStore: options.conversationStore,
+            }),
+        };
+
+        if (summarizationModel) {
+            compactionOptions.shouldCompact = ({ prompt }) => {
+                const currentTokens = managedBudgetProfile.estimator.estimatePrompt(prompt);
+                const thresholdTokens =
+                    managedBudgetProfile.tokenBudget
+                    * (settings.compactionThresholdPercent / 100);
+                return currentTokens >= thresholdTokens;
+            };
+            compactionOptions.onCompact = createCompactionCallback(summarizationModel);
+        }
+
+        strategies.push(
+            new CompactionToolStrategy(compactionOptions)
+        );
+    }
+
     if (!isAnthropicProvider && settings.strategies.toolResultDecay) {
         strategies.push(
             new ToolResultDecayStrategy({
@@ -145,24 +235,6 @@ function createConversationContextManagementRuntime(options: {
                 placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
                     return buildDecayPlaceholder(toolName, toolCallId);
                 },
-            })
-        );
-    }
-
-    const summarizationModel = createSummarizationModel({
-        conversationId: options.conversationId,
-        agent: options.agent,
-    });
-
-    if (summarizationModel && !isAnthropicProvider && settings.strategies.summarization) {
-        strategies.push(
-            new SummarizationStrategy({
-                model: summarizationModel,
-                maxPromptTokens: Math.floor(
-                    settings.tokenBudget
-                        * (settings.summarizationFallbackThresholdPercent / 100)
-                ),
-                estimator: managedBudgetProfile.estimator,
             })
         );
     }
@@ -253,9 +325,7 @@ export function createExecutionContextManagement(options: {
         agent: options.agent,
         scratchpadAvailable,
     });
-    const optionalTools = scratchpadAvailable
-        ? (runtime.optionalTools as unknown as Record<string, AISdkTool>)
-        : {};
+    const optionalTools = runtime.optionalTools as unknown as Record<string, AISdkTool>;
 
     return {
         optionalTools,

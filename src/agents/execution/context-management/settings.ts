@@ -2,14 +2,14 @@ import { config as configService } from "@/services/ConfigService";
 
 export const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
 export const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
-export const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
+export const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 90;
 export const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 
 export interface ContextManagementStrategyToggles {
     systemPromptCaching: boolean;
     scratchpad: boolean;
     toolResultDecay: boolean;
-    summarization: boolean;
+    compaction: boolean;
     contextUtilizationReminder: boolean;
     contextWindowStatus: boolean;
 }
@@ -19,7 +19,7 @@ export interface ContextManagementSettings {
     tokenBudget: number;
     forceScratchpadThresholdPercent: number;
     utilizationWarningThresholdPercent: number;
-    summarizationFallbackThresholdPercent: number;
+    compactionThresholdPercent: number;
     strategies: ContextManagementStrategyToggles;
 }
 
@@ -53,15 +53,15 @@ export function getContextManagementSettings(): ContextManagementSettings {
             raw?.utilizationWarningThresholdPercent,
             DEFAULT_WARNING_THRESHOLD_PERCENT
         ),
-        summarizationFallbackThresholdPercent: normalizePercent(
-            raw?.summarizationFallbackThresholdPercent,
-            DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT
+        compactionThresholdPercent: normalizePercent(
+            raw?.compactionThresholdPercent,
+            DEFAULT_COMPACTION_THRESHOLD_PERCENT
         ),
         strategies: {
             systemPromptCaching: rawStrategies?.systemPromptCaching !== false,
             scratchpad: rawStrategies?.scratchpad !== false,
             toolResultDecay: rawStrategies?.toolResultDecay !== false,
-            summarization: rawStrategies?.summarization !== false,
+            compaction: rawStrategies?.compaction !== false,
             contextUtilizationReminder: rawStrategies?.contextUtilizationReminder !== false,
             contextWindowStatus: rawStrategies?.contextWindowStatus !== false,
         },

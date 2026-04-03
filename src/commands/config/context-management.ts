@@ -80,9 +80,9 @@ export const contextManagementCommand = new Command("context-management")
             },
             {
                 type: "input",
-                name: "summarizationFallbackThresholdPercent",
-                message: "Summarization fallback threshold (%):",
-                default: contextManagement.summarizationFallbackThresholdPercent ?? 90,
+                name: "compactionThresholdPercent",
+                message: "Automatic compaction threshold (%):",
+                default: contextManagement.compactionThresholdPercent ?? 90,
                 validate: (value) => {
                     const num = Number.parseInt(value, 10);
                     if (Number.isNaN(num) || num < 0 || num > 100) {
@@ -114,9 +114,9 @@ export const contextManagementCommand = new Command("context-management")
             },
             {
                 type: "confirm",
-                name: "summarization",
-                message: "Enable SummarizationStrategy:",
-                default: contextManagement.strategies?.summarization !== false,
+                name: "compaction",
+                message: "Enable CompactionToolStrategy:",
+                default: contextManagement.strategies?.compaction !== false,
             },
             {
                 type: "confirm",
@@ -137,12 +137,12 @@ export const contextManagementCommand = new Command("context-management")
             tokenBudget: Number.parseInt(answers.tokenBudget, 10),
             forceScratchpadThresholdPercent: Number.parseInt(answers.forceScratchpadThresholdPercent, 10),
             utilizationWarningThresholdPercent: Number.parseInt(answers.utilizationWarningThresholdPercent, 10),
-            summarizationFallbackThresholdPercent: Number.parseInt(answers.summarizationFallbackThresholdPercent, 10),
+            compactionThresholdPercent: Number.parseInt(answers.compactionThresholdPercent, 10),
             strategies: {
                 systemPromptCaching: strategyAnswers.systemPromptCaching,
                 scratchpad: strategyAnswers.scratchpad,
                 toolResultDecay: strategyAnswers.toolResultDecay,
-                summarization: strategyAnswers.summarization,
+                compaction: strategyAnswers.compaction,
                 contextUtilizationReminder: strategyAnswers.contextUtilizationReminder,
                 contextWindowStatus: strategyAnswers.contextWindowStatus,
             },

@@ -245,6 +245,89 @@ describe("ConversationStore", () => {
             });
         });
 
+        it("persists context-management compactions per agent", async () => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+
+            store.setContextManagementCompaction(AGENT1_PUBKEY, {
+                edits: [
+                    {
+                        id: "compact-1",
+                        source: "manual",
+                        start: {
+                            eventId: "evt-user-1",
+                            messageId: "msg-user-1",
+                        },
+                        end: {
+                            eventId: "evt-assistant-2",
+                            messageId: "msg-assistant-2",
+                        },
+                        replacement: "Task: parser fix\nCompleted: isolated stale cache layer",
+                        createdAt: 456,
+                        compactedMessageCount: 4,
+                        fromText: "Initial task",
+                        toText: "stale cache layer",
+                    },
+                ],
+                updatedAt: 789,
+                agentLabel: "agent1",
+            });
+            await store.save();
+
+            const store2 = new ConversationStore(testDir);
+            store2.load(PROJECT_ID, CONVERSATION_ID);
+
+            expect(store2.getContextManagementCompaction(AGENT1_PUBKEY)).toEqual({
+                edits: [
+                    {
+                        id: "compact-1",
+                        source: "manual",
+                        start: {
+                            eventId: "evt-user-1",
+                            messageId: "msg-user-1",
+                        },
+                        end: {
+                            eventId: "evt-assistant-2",
+                            messageId: "msg-assistant-2",
+                        },
+                        replacement: "Task: parser fix\nCompleted: isolated stale cache layer",
+                        createdAt: 456,
+                        compactedMessageCount: 4,
+                        fromText: "Initial task",
+                        toText: "stale cache layer",
+                    },
+                ],
+                updatedAt: 789,
+                agentLabel: "agent1",
+            });
+            expect(store2.listContextManagementCompactions()).toEqual([{
+                agentId: AGENT1_PUBKEY,
+                agentLabel: "agent1",
+                state: {
+                    edits: [
+                        {
+                            id: "compact-1",
+                            source: "manual",
+                            start: {
+                                eventId: "evt-user-1",
+                                messageId: "msg-user-1",
+                            },
+                            end: {
+                                eventId: "evt-assistant-2",
+                                messageId: "msg-assistant-2",
+                            },
+                            replacement: "Task: parser fix\nCompleted: isolated stale cache layer",
+                            createdAt: 456,
+                            compactedMessageCount: 4,
+                            fromText: "Initial task",
+                            toText: "stale cache layer",
+                        },
+                    ],
+                    updatedAt: 789,
+                    agentLabel: "agent1",
+                },
+            }]);
+        });
+
         it("migrates legacy scratchpad notes into structured entries on load", async () => {
             const conversationDir = join(testDir, PROJECT_ID, "conversations");
             await mkdir(conversationDir, { recursive: true });
@@ -413,6 +496,41 @@ describe("ConversationStore", () => {
 
             expect(completionMessages).toHaveLength(1);
             expect(completionMessages[0].content).toContain("second update");
+        });
+
+        it("appends a completed delegation marker instead of rewriting the pending marker", async () => {
+            const ral = store.createRal(AGENT1_PUBKEY);
+
+            store.addDelegationMarker(
+                {
+                    delegationConversationId: "delegation-1",
+                    recipientPubkey: AGENT2_PUBKEY,
+                    parentConversationId: CONVERSATION_ID,
+                    initiatedAt: 100,
+                    status: "pending",
+                },
+                AGENT1_PUBKEY,
+                ral
+            );
+
+            const updated = store.updateDelegationMarker("delegation-1", {
+                status: "completed",
+                completedAt: 200,
+            });
+
+            expect(updated).toBe(true);
+
+            const markers = store.getAllMessages().filter(
+                (message) =>
+                    message.messageType === "delegation-marker"
+                    && message.delegationMarker?.delegationConversationId === "delegation-1"
+            );
+
+            expect(markers).toHaveLength(2);
+            expect(markers[0]?.delegationMarker?.status).toBe("pending");
+            expect(markers[1]?.delegationMarker?.status).toBe("completed");
+            expect(markers[1]?.delegationMarker?.initiatedAt).toBe(100);
+            expect(markers[1]?.delegationMarker?.completedAt).toBe(200);
         });
 
         it("should include all messages from same agent completed RALs", async () => {

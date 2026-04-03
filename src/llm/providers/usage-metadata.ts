@@ -46,6 +46,54 @@ function extractStandardUsage(
     } as LanguageModelUsageWithCostUsd;
 }
 
+function extractAnthropicMetadata(
+    providerMetadata: Record<string, unknown> | undefined
+): LLMMetadata | undefined {
+    const anthropicMetadata = providerMetadata?.anthropic as
+        | {
+            contextManagement?: {
+                appliedEdits?: Array<{
+                    type?: string;
+                    clearedInputTokens?: number;
+                    clearedToolUses?: number;
+                    clearedThinkingTurns?: number;
+                }>;
+            };
+        }
+        | undefined;
+
+    const appliedEdits = Array.isArray(anthropicMetadata?.contextManagement?.appliedEdits)
+        ? anthropicMetadata.contextManagement.appliedEdits
+        : [];
+    if (appliedEdits.length === 0) {
+        return undefined;
+    }
+
+    return {
+        providerContextEditCount: appliedEdits.length,
+        providerContextClearedInputTokens: appliedEdits.reduce(
+            (total, edit) => total + (typeof edit.clearedInputTokens === "number" ? edit.clearedInputTokens : 0),
+            0
+        ),
+        providerContextClearedToolUses: appliedEdits.reduce(
+            (total, edit) => total + (typeof edit.clearedToolUses === "number" ? edit.clearedToolUses : 0),
+            0
+        ),
+        providerContextClearedThinkingTurns: appliedEdits.reduce(
+            (total, edit) => total + (typeof edit.clearedThinkingTurns === "number" ? edit.clearedThinkingTurns : 0),
+            0
+        ),
+        providerContextEditsJson: JSON.stringify(appliedEdits),
+    };
+}
+
+function mergeMetadata(
+    ...items: Array<LLMMetadata | undefined>
+): LLMMetadata | undefined {
+    const merged = Object.assign({}, ...items.filter((item) => item !== undefined));
+    return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 /**
  * Extract usage metadata from provider response
  *
@@ -73,9 +121,14 @@ export function extractLLMMetadata(
 ): LLMMetadata | undefined {
     switch (provider) {
         case PROVIDER_IDS.CODEX:
-            return CodexProvider.extractMetadata(providerMetadata);
+            return mergeMetadata(
+                CodexProvider.extractMetadata(providerMetadata),
+                extractAnthropicMetadata(providerMetadata)
+            );
+        case PROVIDER_IDS.ANTHROPIC:
+            return extractAnthropicMetadata(providerMetadata);
         default:
-            return undefined;
+            return extractAnthropicMetadata(providerMetadata);
     }
 }
 

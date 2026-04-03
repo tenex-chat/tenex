@@ -26,7 +26,7 @@ import { extractLastUserMessage, extractSystemContent } from "./MessageProcessor
 import { getDefaultProviderOptions, mergeProviderOptions } from "./provider-options";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
-import { extractUsageMetadata } from "./providers/usage-metadata";
+import { extractLLMMetadata, extractUsageMetadata } from "./providers/usage-metadata";
 import type {
     LLMAnalysisHooks,
     LLMAnalysisRequestHandle,
@@ -699,10 +699,15 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     stepResult.usage,
                     stepResult.providerMetadata as Record<string, unknown> | undefined
                 );
+                const metadata = extractLLMMetadata(
+                    stepModelIdentity.provider,
+                    stepResult.providerMetadata as Record<string, unknown> | undefined
+                );
                 await handle.reportSuccess({
                     completedAt: Date.now(),
                     usage,
                     finishReason: stepResult.finishReason,
+                    metadata,
                 });
             },
             onFinish: createFinishHandler(this, finishConfig, finishState, {
@@ -1078,9 +1083,14 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     result.usage,
                     result.providerMetadata as Record<string, unknown> | undefined
                 );
+                const metadata = extractLLMMetadata(
+                    this.provider,
+                    result.providerMetadata as Record<string, unknown> | undefined
+                );
                 await analysisHandle?.reportSuccess({
                     completedAt: Date.now(),
                     usage,
+                    metadata,
                 });
 
                 return {
@@ -1158,9 +1168,14 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     result.usage,
                     result.providerMetadata as Record<string, unknown> | undefined
                 );
+                const metadata = extractLLMMetadata(
+                    this.provider,
+                    result.providerMetadata as Record<string, unknown> | undefined
+                );
                 await analysisHandle?.reportSuccess({
                     completedAt: Date.now(),
                     usage,
+                    metadata,
                 });
 
                 return {

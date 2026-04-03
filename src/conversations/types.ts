@@ -13,7 +13,7 @@ export interface MessagePrincipalContext {
 /**
  * Marker stored in conversation history to track delegation lifecycle.
  * Markers are created immediately when a delegation is initiated (status: "pending"),
- * and updated when the delegation completes or is aborted.
+ * and a second marker is appended when the delegation completes or is aborted.
  * Instead of embedding the full transcript inline, we store a reference
  * and lazily expand it when building messages.
  */
@@ -148,6 +148,36 @@ export interface ContextManagementScratchpadEntry {
     state: ContextManagementScratchpadState;
 }
 
+export interface ContextManagementCompactionAnchor {
+    sourceRecordId?: string;
+    eventId?: string;
+    messageId?: string;
+}
+
+export interface ContextManagementCompactionEdit {
+    id: string;
+    source: "manual" | "auto";
+    start: ContextManagementCompactionAnchor;
+    end: ContextManagementCompactionAnchor;
+    replacement: string;
+    createdAt: number;
+    compactedMessageCount: number;
+    fromText?: string;
+    toText?: string;
+}
+
+export interface ContextManagementCompactionState {
+    edits: ContextManagementCompactionEdit[];
+    updatedAt?: number;
+    agentLabel?: string;
+}
+
+export interface ContextManagementCompactionEntry {
+    agentId: string;
+    agentLabel?: string;
+    state: ContextManagementCompactionState;
+}
+
 export interface RalTracker {
     id: number;
 }
@@ -165,7 +195,7 @@ export interface PerAgentReminderDeltaState {
 }
 
 export interface PromptHistorySource {
-    kind: "canonical" | "runtime-overlay" | "mutable-update";
+    kind: "canonical" | "runtime-overlay";
     sourceMessageId?: string;
     sourceRecordId?: string;
     sourceEventId?: string;
@@ -177,12 +207,11 @@ export interface FrozenPromptMessage {
     role: ModelMessage["role"];
     content: ModelMessage["content"];
     source: PromptHistorySource;
-    renderHash: string;
 }
 
 export interface AgentPromptHistoryState {
     messages: FrozenPromptMessage[];
-    sourceVersions: Record<string, string>;
+    seenMessageIds: string[];
     reminderDeltaState: Record<string, PerAgentReminderDeltaState>;
     nextSequence: number;
 }
@@ -201,6 +230,8 @@ export interface ConversationState {
     metaModelVariantOverride?: Record<string, string>; // agentPubkey -> variantName
     /** Per-agent context-management scratchpads used by middleware-managed prompt projection. */
     contextManagementScratchpads?: Record<string, ContextManagementScratchpadState>;
+    /** Per-agent context-management compactions used by middleware-managed prompt projection. */
+    contextManagementCompactions?: Record<string, ContextManagementCompactionState>;
     /** Authoritative local skill IDs that agents have applied to themselves mid-conversation. Keyed by agent pubkey. */
     selfAppliedSkills?: Record<string, string[]>;
     /** Persisted per-agent prompt-view history used before context management. */

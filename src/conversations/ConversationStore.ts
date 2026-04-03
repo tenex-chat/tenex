@@ -26,6 +26,10 @@ import { conversationRegistry } from "./ConversationRegistry";
 import { normalizeScratchpadEntries } from "./utils/normalize-scratchpad-entries";
 import type {
     AgentPromptHistoryState,
+    ContextManagementCompactionAnchor,
+    ContextManagementCompactionEdit,
+    ContextManagementCompactionEntry,
+    ContextManagementCompactionState,
     ConversationRecordInput,
     ConversationRecord,
     ConversationMetadata,
@@ -170,10 +174,130 @@ function normalizeLoadedContextManagementScratchpads(
     );
 }
 
+function normalizeContextManagementCompactionAnchor(
+    anchor: ContextManagementCompactionAnchor | Record<string, unknown> | undefined
+): ContextManagementCompactionAnchor | undefined {
+    if (!anchor || typeof anchor !== "object") {
+        return undefined;
+    }
+
+    const rawAnchor = anchor as Record<string, unknown>;
+    const normalizedAnchor = {
+        ...(typeof rawAnchor.sourceRecordId === "string" && rawAnchor.sourceRecordId.trim().length > 0
+            ? { sourceRecordId: rawAnchor.sourceRecordId.trim() }
+            : {}),
+        ...(typeof rawAnchor.eventId === "string" && rawAnchor.eventId.trim().length > 0
+            ? { eventId: rawAnchor.eventId.trim() }
+            : {}),
+        ...(typeof rawAnchor.messageId === "string" && rawAnchor.messageId.trim().length > 0
+            ? { messageId: rawAnchor.messageId.trim() }
+            : {}),
+    } satisfies ContextManagementCompactionAnchor;
+
+    return normalizedAnchor.sourceRecordId || normalizedAnchor.eventId || normalizedAnchor.messageId
+        ? normalizedAnchor
+        : undefined;
+}
+
+function normalizeContextManagementCompactionEdit(
+    edit: ContextManagementCompactionEdit | Record<string, unknown> | undefined
+): ContextManagementCompactionEdit | undefined {
+    if (!edit || typeof edit !== "object") {
+        return undefined;
+    }
+
+    const rawEdit = edit as Record<string, unknown>;
+    const id = typeof rawEdit.id === "string" && rawEdit.id.trim().length > 0
+        ? rawEdit.id.trim()
+        : undefined;
+    const source = rawEdit.source === "manual" || rawEdit.source === "auto"
+        ? rawEdit.source
+        : undefined;
+    const start = normalizeContextManagementCompactionAnchor(
+        rawEdit.start as ContextManagementCompactionAnchor | Record<string, unknown> | undefined
+    );
+    const end = normalizeContextManagementCompactionAnchor(
+        rawEdit.end as ContextManagementCompactionAnchor | Record<string, unknown> | undefined
+    );
+    const replacement = typeof rawEdit.replacement === "string"
+        ? rawEdit.replacement.trim()
+        : "";
+    const createdAt = typeof rawEdit.createdAt === "number" && Number.isFinite(rawEdit.createdAt)
+        ? rawEdit.createdAt
+        : undefined;
+    const compactedMessageCount = typeof rawEdit.compactedMessageCount === "number"
+        && Number.isFinite(rawEdit.compactedMessageCount)
+        ? Math.max(0, Math.floor(rawEdit.compactedMessageCount))
+        : undefined;
+
+    if (!id || !source || !start || !end || replacement.length === 0 || createdAt === undefined || compactedMessageCount === undefined) {
+        return undefined;
+    }
+
+    return {
+        id,
+        source,
+        start,
+        end,
+        replacement,
+        createdAt,
+        compactedMessageCount,
+        ...(typeof rawEdit.fromText === "string" && rawEdit.fromText.trim().length > 0
+            ? { fromText: rawEdit.fromText.trim() }
+            : {}),
+        ...(typeof rawEdit.toText === "string" && rawEdit.toText.trim().length > 0
+            ? { toText: rawEdit.toText.trim() }
+            : {}),
+    };
+}
+
+function normalizeContextManagementCompactionState(
+    state: ContextManagementCompactionState | Record<string, unknown> | undefined
+): ContextManagementCompactionState | undefined {
+    if (!state || typeof state !== "object") {
+        return undefined;
+    }
+
+    const rawState = state as Record<string, unknown>;
+    const edits = Array.isArray(rawState.edits)
+        ? rawState.edits.flatMap((edit) => {
+            const normalizedEdit = normalizeContextManagementCompactionEdit(
+                edit as ContextManagementCompactionEdit | Record<string, unknown>
+            );
+            return normalizedEdit ? [normalizedEdit] : [];
+        })
+        : [];
+
+    if (edits.length === 0) {
+        return undefined;
+    }
+
+    return {
+        edits,
+        ...(typeof rawState.updatedAt === "number" && Number.isFinite(rawState.updatedAt)
+            ? { updatedAt: rawState.updatedAt }
+            : {}),
+        ...(typeof rawState.agentLabel === "string" && rawState.agentLabel.trim().length > 0
+            ? { agentLabel: rawState.agentLabel }
+            : {}),
+    };
+}
+
+function normalizeLoadedContextManagementCompactions(
+    compactions: Record<string, ContextManagementCompactionState> | undefined
+): Record<string, ContextManagementCompactionState> {
+    return Object.fromEntries(
+        Object.entries(compactions ?? {}).flatMap(([agentId, state]) => {
+            const normalizedState = normalizeContextManagementCompactionState(state);
+            return normalizedState ? [[agentId, normalizedState] as const] : [];
+        })
+    );
+}
+
 function createEmptyAgentPromptHistoryState(): AgentPromptHistoryState {
     return {
         messages: [],
-        sourceVersions: {},
+        seenMessageIds: [],
         reminderDeltaState: {},
         nextSequence: 0,
     };
@@ -230,9 +354,6 @@ function normalizeFrozenPromptMessage(
     const id = typeof raw.id === "string" && raw.id.trim().length > 0
         ? raw.id
         : `prompt:${index}`;
-    const renderHash = typeof raw.renderHash === "string" && raw.renderHash.trim().length > 0
-        ? raw.renderHash
-        : "";
     const source = typeof raw.source === "object" && raw.source !== null
         ? raw.source as Record<string, unknown>
         : undefined;
@@ -245,9 +366,10 @@ function normalizeFrozenPromptMessage(
     if (
         kind !== "canonical"
         && kind !== "runtime-overlay"
-        && kind !== "mutable-update"
     ) {
-        return undefined;
+        if (kind !== "mutable-update") {
+            return undefined;
+        }
     }
 
     return {
@@ -255,7 +377,7 @@ function normalizeFrozenPromptMessage(
         role,
         content: raw.content as FrozenPromptMessage["content"],
         source: {
-            kind,
+            kind: kind === "mutable-update" ? "canonical" : kind,
             ...(typeof source?.sourceMessageId === "string"
                 ? { sourceMessageId: source.sourceMessageId }
                 : {}),
@@ -269,7 +391,6 @@ function normalizeFrozenPromptMessage(
                 ? { overlayType: source.overlayType }
                 : {}),
         },
-        renderHash,
     };
 }
 
@@ -288,16 +409,29 @@ function normalizeLoadedAgentPromptHistories(
                     return normalized ? [normalized] : [];
                 })
                 : [];
-            const sourceVersions = Object.fromEntries(
-                Object.entries(
-                    typeof rawState.sourceVersions === "object" && rawState.sourceVersions !== null
-                        ? rawState.sourceVersions as Record<string, unknown>
-                        : {}
-                ).flatMap(([key, value]) =>
-                    typeof value === "string" && value.length > 0
-                        ? [[key, value] as const]
-                        : []
-                )
+            const seenMessageIds = Array.from(
+                new Set([
+                    ...(
+                        Array.isArray(rawState.seenMessageIds)
+                            ? rawState.seenMessageIds.filter(
+                                (messageId): messageId is string =>
+                                    typeof messageId === "string" && messageId.length > 0
+                            )
+                            : []
+                    ),
+                    ...Object.keys(
+                        typeof rawState.sourceVersions === "object" && rawState.sourceVersions !== null
+                            ? rawState.sourceVersions as Record<string, unknown>
+                            : {}
+                    ),
+                    ...messages.flatMap((message) =>
+                        message.source.kind === "canonical"
+                        && typeof message.source.sourceMessageId === "string"
+                        && message.source.sourceMessageId.length > 0
+                            ? [message.source.sourceMessageId]
+                            : []
+                    ),
+                ])
             );
             const reminderDeltaState = normalizeLoadedReminderDeltaState(
                 typeof rawState.reminderDeltaState === "object" && rawState.reminderDeltaState !== null
@@ -311,7 +445,7 @@ function normalizeLoadedAgentPromptHistories(
 
             return [agentId, {
                 messages,
-                sourceVersions,
+                seenMessageIds,
                 reminderDeltaState,
                 nextSequence,
             }] as const;
@@ -482,6 +616,7 @@ export class ConversationStore {
         blockedAgents: [],
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
         contextManagementScratchpads: {},
+        contextManagementCompactions: {},
         selfAppliedSkills: {},
         agentPromptHistories: {},
     };
@@ -537,6 +672,11 @@ export class ConversationStore {
                         | Record<string, ContextManagementScratchpadState>
                         | undefined
                 ),
+                contextManagementCompactions: normalizeLoadedContextManagementCompactions(
+                    loaded.contextManagementCompactions as
+                        | Record<string, ContextManagementCompactionState>
+                        | undefined
+                ),
                 selfAppliedSkills: loaded.selfAppliedSkills ?? {},
                 agentPromptHistories: normalizeLoadedAgentPromptHistories(
                     loaded.agentPromptHistories as
@@ -560,6 +700,7 @@ export class ConversationStore {
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 contextManagementScratchpads: {},
+                contextManagementCompactions: {},
                 selfAppliedSkills: {},
                 agentPromptHistories: {},
             };
@@ -816,6 +957,38 @@ export class ConversationStore {
         );
     }
 
+    getContextManagementCompaction(agentId: string): ContextManagementCompactionState | undefined {
+        return this.state.contextManagementCompactions?.[agentId];
+    }
+
+    setContextManagementCompaction(agentId: string, state: ContextManagementCompactionState): void {
+        if (!this.state.contextManagementCompactions) {
+            this.state.contextManagementCompactions = {};
+        }
+
+        const normalizedState = normalizeContextManagementCompactionState(state);
+        if (!normalizedState) {
+            delete this.state.contextManagementCompactions[agentId];
+            return;
+        }
+
+        this.state.contextManagementCompactions[agentId] = normalizedState;
+    }
+
+    listContextManagementCompactions(): ContextManagementCompactionEntry[] {
+        const entries = Object.entries(this.state.contextManagementCompactions ?? {}).map(
+            ([agentId, state]) => ({
+                agentId,
+                agentLabel: state.agentLabel,
+                state,
+            })
+        );
+
+        return entries.sort((a, b) =>
+            (a.agentLabel ?? a.agentId).localeCompare(b.agentLabel ?? b.agentId)
+        );
+    }
+
     hasToolCall(toolCallId: string): boolean {
         return this.state.messages.some(
             (m) =>
@@ -860,8 +1033,9 @@ export class ConversationStore {
     }
 
     /**
-     * Update an existing delegation marker to mark it as completed or aborted.
-     * Returns true if marker was found and updated, false otherwise.
+     * Append a new completed/aborted delegation marker when a pending marker exists.
+     * Returns true if the target status is already present or a new marker was appended.
+     * Returns false when no marker for the delegation conversation exists.
      *
      * Idempotent: Returns true if marker is already in the target state.
      */
@@ -873,52 +1047,41 @@ export class ConversationStore {
             abortReason?: string;
         }
     ): boolean {
-        // Find the marker in messages (try pending first, then any status for idempotency)
-        let markerEntry = this.state.messages.find(
+        const existingTargetMarker = this.state.messages.find(
+            (msg) =>
+                msg.messageType === "delegation-marker" &&
+                msg.delegationMarker?.delegationConversationId === delegationConversationId &&
+                msg.delegationMarker?.status === updates.status
+        );
+
+        if (existingTargetMarker) {
+            return true;
+        }
+
+        const markerEntry = this.state.messages.find(
             msg =>
                 msg.messageType === "delegation-marker" &&
                 msg.delegationMarker?.delegationConversationId === delegationConversationId &&
                 msg.delegationMarker?.status === "pending"
         );
 
-        // If no pending marker found, check if it's already completed with the same status (idempotency)
         if (!markerEntry) {
-            markerEntry = this.state.messages.find(
-                msg =>
-                    msg.messageType === "delegation-marker" &&
-                    msg.delegationMarker?.delegationConversationId === delegationConversationId &&
-                    msg.delegationMarker?.status === updates.status
-            );
-
-            // If found and already in target state, return true (idempotent)
-            if (markerEntry) {
-                return true;
-            }
-
-            // Otherwise, no marker found at all
             return false;
         }
 
         const dm = markerEntry.delegationMarker;
         if (!dm) throw new Error(`Delegation marker missing on message of type "delegation-marker" for conversation ${delegationConversationId}`);
-        dm.status = updates.status;
-        dm.completedAt = updates.completedAt;
-        if (updates.abortReason) {
-            dm.abortReason = updates.abortReason;
-        }
 
-        // Move the completed marker to the end of the messages array.
-        // The pending marker was inserted during the delegate tool execution,
-        // which places it BEFORE the agent's post-delegation response text.
-        // When the marker is expanded during message building, it becomes a
-        // user message — if it stays at its original position, the conversation
-        // ends with the agent's trailing assistant message and Anthropic rejects
-        // it with "conversation must end with a user message".
-        const markerIndex = this.state.messages.indexOf(markerEntry);
-        if (markerIndex >= 0 && markerIndex < this.state.messages.length - 1) {
-            this.state.messages.splice(markerIndex, 1);
-            this.state.messages.push(markerEntry);
-        }
+        this.addDelegationMarker(
+            {
+                ...dm,
+                status: updates.status,
+                completedAt: updates.completedAt,
+                ...(updates.abortReason ? { abortReason: updates.abortReason } : {}),
+            },
+            markerEntry.pubkey,
+            markerEntry.ral
+        );
 
         return true;
     }

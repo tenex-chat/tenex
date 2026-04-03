@@ -7,6 +7,7 @@ import type { ModelMessage, Tool as CoreTool, ToolChoice } from "ai";
 import type {
     LLMAnalysisHooks,
     LLMAnalysisRequestHandle,
+    LLMMetadata,
     LLMRequestAnalysisSeed,
     LanguageModelUsageWithCostUsd,
 } from "@/llm/types";
@@ -604,8 +605,8 @@ export class AnalysisTelemetryService {
         return {
             requestId,
             telemetryMetadata,
-            reportSuccess: async ({ completedAt, usage, finishReason }) => {
-                this.finalizeRequestSuccess(requestId, completedAt, usage, finishReason);
+            reportSuccess: async ({ completedAt, usage, finishReason, metadata }) => {
+                this.finalizeRequestSuccess(requestId, completedAt, usage, finishReason, metadata);
             },
             reportError: async ({ completedAt, error }) => {
                 this.finalizeRequestError(requestId, completedAt, error);
@@ -653,6 +654,11 @@ export class AnalysisTelemetryService {
                     message_count_after,
                     placeholder_tool_result_count,
                     placeholder_tool_input_count,
+                    compaction_mode,
+                    compaction_edit_count,
+                    compaction_message_count,
+                    compaction_from_index,
+                    compaction_to_index,
                     messages_summarized_count,
                     summary_char_count,
                     entry_count,
@@ -668,7 +674,7 @@ export class AnalysisTelemetryService {
                     sample_count,
                     payload_json,
                     created_at_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 scope.requestId,
                 scope.projectId ?? null,
@@ -695,6 +701,11 @@ export class AnalysisTelemetryService {
                 payload.messageCountAfter ?? null,
                 payload.placeholderToolResultCount ?? null,
                 payload.placeholderToolInputCount ?? null,
+                payload.compactionMode ?? null,
+                payload.compactionEditCount ?? null,
+                payload.compactionMessageCount ?? null,
+                payload.compactionFromIndex ?? null,
+                payload.compactionToIndex ?? null,
                 payload.messagesSummarizedCount ?? null,
                 payload.summaryCharCount ?? null,
                 payload.entryCount ?? null,
@@ -812,7 +823,8 @@ export class AnalysisTelemetryService {
         requestId: string,
         completedAt: number,
         usage: LanguageModelUsageWithCostUsd | undefined,
-        finishReason: string | undefined
+        finishReason: string | undefined,
+        metadata?: LLMMetadata
     ): void {
         if (!this.isEnabled()) {
             return;
@@ -835,7 +847,12 @@ export class AnalysisTelemetryService {
                     output_reasoning_tokens = ?,
                     cached_input_tokens = ?,
                     reasoning_tokens = ?,
-                    cost_usd = ?
+                    cost_usd = ?,
+                    provider_context_edit_count = ?,
+                    provider_context_cleared_input_tokens = ?,
+                    provider_context_cleared_tool_uses = ?,
+                    provider_context_cleared_thinking_turns = ?,
+                    provider_context_edits_json = ?
                 WHERE request_id = ?
             `).run(
                 completedAt,
@@ -852,6 +869,11 @@ export class AnalysisTelemetryService {
                 usage?.cachedInputTokens ?? null,
                 usage?.reasoningTokens ?? null,
                 usage?.costUsd ?? null,
+                metadata?.providerContextEditCount ?? null,
+                metadata?.providerContextClearedInputTokens ?? null,
+                metadata?.providerContextClearedToolUses ?? null,
+                metadata?.providerContextClearedThinkingTurns ?? null,
+                metadata?.providerContextEditsJson ?? null,
                 requestId
             );
         } catch (error) {
@@ -1061,6 +1083,11 @@ export class AnalysisTelemetryService {
                     messageCountAfter: event.messageCountAfter,
                     placeholderToolResultCount: toOptionalInteger(payload?.placeholderCount),
                     placeholderToolInputCount: toOptionalInteger(payload?.inputPlaceholderCount),
+                    compactionMode: toOptionalString(payload?.mode),
+                    compactionEditCount: toOptionalInteger(payload?.editCount),
+                    compactionMessageCount: toOptionalInteger(payload?.compactedMessageCount),
+                    compactionFromIndex: toOptionalInteger(payload?.fromIndex),
+                    compactionToIndex: toOptionalInteger(payload?.toIndex),
                     messagesSummarizedCount: toOptionalInteger(payload?.messagesSummarizedCount),
                     summaryCharCount: toOptionalInteger(payload?.summaryCharCount),
                     entryCount: toOptionalInteger(payload?.entryCount),
