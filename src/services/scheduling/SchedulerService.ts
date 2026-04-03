@@ -67,6 +67,7 @@ interface ScheduledTask {
     projectId: string; // Usually a project a-tag address; runtime callbacks normalize it to a d-tag
     type?: "cron" | "oneoff"; // Task type - defaults to "cron" for backward compatibility
     executeAt?: string; // ISO timestamp for one-off tasks
+    targetChannel?: string; // Conversation ID or channel identifier to route the task's output into
 }
 
 // Export the type so it can be used by other modules
@@ -163,7 +164,8 @@ export class SchedulerService {
         fromPubkey: string,
         toPubkey: string,
         projectId?: string,
-        title?: string
+        title?: string,
+        targetChannel?: string
     ): Promise<string> {
         // Validate cron expression
         if (!cron.validate(schedule)) {
@@ -195,6 +197,7 @@ export class SchedulerService {
             toPubkey,
             projectId: resolvedProjectId,
             createdAt: new Date().toISOString(),
+            ...(targetChannel && { targetChannel }),
         };
 
         this.taskMetadata.set(taskId, task);
@@ -222,7 +225,8 @@ export class SchedulerService {
         fromPubkey: string,
         toPubkey: string,
         projectId?: string,
-        title?: string
+        title?: string,
+        targetChannel?: string
     ): Promise<string> {
         // Validate execution time is in the future
         const now = new Date();
@@ -258,6 +262,7 @@ export class SchedulerService {
             createdAt: new Date().toISOString(),
             type: "oneoff",
             executeAt: executeAt.toISOString(),
+            ...(targetChannel && { targetChannel }),
         };
 
         this.taskMetadata.set(taskId, task);
@@ -957,6 +962,11 @@ export class SchedulerService {
 
         // Add metadata about the scheduled task
         tags.push(["scheduled-task-id", task.id]);
+
+        // Route into an existing conversation channel if specified
+        if (task.targetChannel) {
+            tags.push(["e", task.targetChannel]);
+        }
 
         // Use appropriate tag based on task type
         if (task.type === "oneoff" && task.executeAt) {

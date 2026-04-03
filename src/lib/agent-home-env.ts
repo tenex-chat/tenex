@@ -37,11 +37,17 @@ export function normalizeNsecToBech32(agentNsec: string): string {
     return nip19.nsecEncode(Buffer.from(privateKey, "hex"));
 }
 
-function buildAgentHomeEnvBootstrap(normalizedNsec: string): string {
+function buildAgentHomeEnvBootstrap(
+    normalizedNsec: string,
+    pubkey: string,
+    npub: string
+): string {
     return [
         "# TENEX agent shell environment",
         "# Shell sessions auto-load this file. Add additional KEY=value entries below.",
         `NSEC=${normalizedNsec}`,
+        `PUBKEY=${pubkey}`,
+        `NPUB=${npub}`,
         "",
     ].join("\n");
 }
@@ -57,11 +63,14 @@ export async function ensureAgentHomeEnvFile(
     const homeDir = getAgentHomeDirectory(agentPubkey);
     const envPath = getAgentHomeEnvPath(agentPubkey);
     const normalizedNsec = normalizeNsecToBech32(agentNsec);
+    const signer = new NDKPrivateKeySigner(normalizedNsec);
+    const pubkey = signer.pubkey;
+    const npub = signer.npub;
 
     await mkdir(homeDir, { recursive: true });
 
     try {
-        await writeFile(envPath, buildAgentHomeEnvBootstrap(normalizedNsec), {
+        await writeFile(envPath, buildAgentHomeEnvBootstrap(normalizedNsec, pubkey, npub), {
             encoding: "utf-8",
             flag: "wx",
             mode: 0o600,

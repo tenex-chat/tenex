@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { nip19 } from "nostr-tools";
 import type { AgentStorage } from "@/agents/AgentStorage";
 import { agentStorage } from "@/agents/AgentStorage";
 import { ensureAgentHomeEnvFile, getAgentHomeEnvPath } from "@/lib/agent-home-env";
@@ -104,6 +105,8 @@ export class AgentEnvironmentService {
 
         // Provide agent home and path variables
         mergedEnv.AGENT_HOME = path.dirname(agentEnvPath);
+        mergedEnv.PUBKEY = params.agentPubkey;
+        mergedEnv.NPUB = nip19.npubEncode(params.agentPubkey);
         if (originalHome !== undefined) {
             mergedEnv.USER_HOME = originalHome;
         }

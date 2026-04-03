@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { nip19 } from "nostr-tools";
 import type { AgentInstance } from "@/agents/types/runtime";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import type { PromptFragment } from "../core/types";
@@ -23,6 +24,8 @@ export const environmentVariablesFragment: PromptFragment<EnvironmentVariablesAr
         parts.push("These variables are available in shell commands and file tool path arguments.");
         parts.push(`$USER_HOME = ${homedir()}`);
         parts.push(`$AGENT_HOME = ${homeDir}`);
+        parts.push(`$PUBKEY = ${agent.pubkey}`);
+        parts.push(`$NPUB = ${nip19.npubEncode(agent.pubkey)}`);
         if (projectBasePath) {
             parts.push(`$PROJECT_BASE = ${projectBasePath}`);
         }
