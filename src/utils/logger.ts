@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolvePath } from "@/lib/fs";
 import chalk from "chalk";
 
 const levels: Record<string, number> = {
@@ -122,7 +123,7 @@ async function initDaemonLogging(): Promise<void> {
 
     const tenexConfig = config.getConfig();
     const defaultLogPath = path.join(config.getConfigPath("daemon"), "daemon.log");
-    logFilePath = tenexConfig.logging?.logFile || defaultLogPath;
+    logFilePath = resolvePath(tenexConfig.logging?.logFile || defaultLogPath);
 
     // Ensure directory exists
     const logDir = path.dirname(logFilePath);
