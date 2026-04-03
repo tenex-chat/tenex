@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
+import { MockLanguageModelV3 } from "ai/test";
 import type { AgentInstance } from "@/agents/types";
 import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -20,6 +21,7 @@ describe("TENEX context management integration", () => {
     let store: ConversationStore;
     let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
     let getSummarizationModelNameSpy: ReturnType<typeof spyOn>;
+    let createLLMServiceSpy: ReturnType<typeof spyOn>;
 
     function buildContextManagementConfig(overrides: Record<string, unknown>) {
         return {
@@ -88,6 +90,7 @@ describe("TENEX context management integration", () => {
         ).mockImplementation(() => {
             throw new Error("summarization model unavailable in tests");
         });
+        createLLMServiceSpy = spyOn(configService, "createLLMService");
         resetSystemReminders();
     });
 
@@ -95,6 +98,7 @@ describe("TENEX context management integration", () => {
         resetSystemReminders();
         getContextManagementConfigSpy?.mockRestore();
         getSummarizationModelNameSpy?.mockRestore();
+        createLLMServiceSpy?.mockRestore();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
@@ -160,8 +164,66 @@ describe("TENEX context management integration", () => {
         expect(collectTextContent(prepared?.messages[3])).toContain("Continue working");
     });
 
+    test("does not inject an empty scratchpad before the agent has used it", async () => {
+        setContextManagementConfig({});
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+
+        const contextManagement = createExecutionContextManagement({
+            providerId: "openrouter",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        const prepared = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [{ type: "text", text: "Hello there." }],
+            },
+        ]);
+
+        const preparedJson = JSON.stringify(prepared?.messages);
+        expect(preparedJson).not.toContain("<scratchpad>");
+        expect(preparedJson).not.toContain("Your scratchpad");
+    });
+
     test("compact_context persists anchored compactions across prompt rebuilds", async () => {
         setContextManagementConfig({});
+        getSummarizationModelNameSpy.mockReturnValue("summarizer");
+        createLLMServiceSpy.mockReturnValue({
+            createLanguageModel: () =>
+                new MockLanguageModelV3({
+                doGenerate: async ({ prompt }) => ({
+                        finishReason: { unified: "stop", raw: "stop" },
+                        usage: {
+                            inputTokens: { total: 100, noCache: 100, cacheRead: undefined, cacheWrite: undefined },
+                            outputTokens: { total: 20, text: 20, reasoning: undefined },
+                        },
+                        warnings: [],
+                        content: [
+                            {
+                                type: "text",
+                                text: [
+                                    "Task: debug parser regression.",
+                                    "Completed: identified middleware ordering issue and stale cache layer.",
+                                    "Important Findings: preserve failing test coverage.",
+                                    "Failures And Dead Ends: none beyond reproduced stale cache issue.",
+                                    "Tool Use And Side Effects: inspected parser entrypoint and middleware ordering.",
+                                    "Open Issues: implement the fix.",
+                                    "Next Steps: patch the parser and rerun tests.",
+                                    `Persistent Facts: steering=${String(prompt.at(-1)?.content).includes("preserve failing test coverage")}.`,
+                                ].join("\n"),
+                            },
+                        ],
+                    }),
+                }),
+        } as any);
 
         const agent = {
             name: "executor",
@@ -222,14 +284,7 @@ describe("TENEX context management integration", () => {
 
         const result = await compactContextTool.execute(
             {
-                message: [
-                    "Task: debug parser regression.",
-                    "Completed: identified middleware ordering issue and stale cache layer.",
-                    "Important Findings: preserve failing test coverage.",
-                    "Open Issues: implement the fix.",
-                    "Next Steps: patch the parser and rerun tests.",
-                    "Persistent Facts: user wants key findings preserved.",
-                ].join("\n"),
+                guidance: "Preserve failing test coverage.",
                 from: "Initial task: debug the parser regression.",
                 to: "identified the stale cache layer.",
             },
@@ -247,6 +302,8 @@ describe("TENEX context management integration", () => {
 
         const prepared = await prepareManagedRequest(contextManagement, [...messages]);
         const preparedJson = JSON.stringify(prepared?.messages);
+        expect(preparedJson).toContain(`Continuation from previous work in conversation ${CONVERSATION_ID}.`);
+        expect(preparedJson).toContain(`conversation_get using conversation id ${CONVERSATION_ID}`);
         expect(preparedJson).toContain("Task: debug parser regression.");
         expect(preparedJson).not.toContain("Initial task: debug the parser regression.");
         expect(preparedJson).not.toContain("identified the stale cache layer.");
@@ -258,6 +315,7 @@ describe("TENEX context management integration", () => {
             expect.objectContaining({
                 source: "manual",
                 compactedMessageCount: 4,
+                steeringMessage: "Preserve failing test coverage.",
                 fromText: "Initial task: debug the parser regression.",
                 toText: "identified the stale cache layer.",
                 start: expect.objectContaining({
@@ -271,8 +329,72 @@ describe("TENEX context management integration", () => {
 
         const rebuilt = await prepareManagedRequest(contextManagement, [...messages]);
         const rebuiltJson = JSON.stringify(rebuilt?.messages);
+        expect(rebuiltJson).toContain(`conversation_get using conversation id ${CONVERSATION_ID}`);
         expect(rebuiltJson).toContain("Task: debug parser regression.");
         expect(rebuiltJson).not.toContain("Initial task: debug the parser regression.");
+    });
+
+    test("compact_context returns an explicit error when no summarization model is available", async () => {
+        setContextManagementConfig({});
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "openrouter",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        const compactContextTool = contextManagement?.optionalTools.compact_context as {
+            execute: (
+                input: unknown,
+                options: {
+                    toolCallId?: string;
+                    messages?: Array<Record<string, unknown>>;
+                    experimental_context: Record<string, unknown>;
+                }
+            ) => Promise<unknown>;
+        };
+
+        const result = await compactContextTool.execute(
+            {},
+            {
+                toolCallId: "compact-tool-unavailable",
+                messages: [
+                    { role: "system", content: "You are helpful.", id: "system-1" },
+                    {
+                        role: "user",
+                        id: "msg-user-1",
+                        eventId: "evt-user-1",
+                        content: [{ type: "text", text: "Initial task: debug the parser regression." }],
+                    },
+                    {
+                        role: "assistant",
+                        id: "msg-assistant-1",
+                        eventId: "evt-assistant-1",
+                        content: [{ type: "text", text: "I inspected the parser entrypoint." }],
+                    },
+                    {
+                        role: "user",
+                        id: "msg-user-2",
+                        eventId: "evt-user-2",
+                        content: [{ type: "text", text: "Continue with the fix." }],
+                    },
+                ] as Array<Record<string, unknown>>,
+                experimental_context: {
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
+                },
+            }
+        );
+
+        expect(result).toEqual({
+            ok: false,
+            error: "compact_context is unavailable because no host compaction summarizer is configured.",
+        });
     });
 
     test("scratchpad tool persists state and affects the next prompt projection", async () => {
@@ -334,7 +456,8 @@ describe("TENEX context management integration", () => {
         const preparedJson = JSON.stringify(prepared?.messages);
         expect(preparedJson).toContain("Focus on the parser errors");
         expect(preparedJson).toContain("<scratchpad>");
-        expect(preparedJson).toContain("\"toolCallId\":\"call-old\"");
+        expect(preparedJson).toContain("[scratchpad used: Capture the parser focus before continuing]");
+        expect(preparedJson).not.toContain("\"toolCallId\":\"call-old\"");
     });
 
     test("default stack decays stale tool results instead of dropping whole exchanges", async () => {
@@ -658,7 +781,7 @@ describe("TENEX context management integration", () => {
         expect(preparedJson).not.toContain("<scratchpad>");
     });
 
-    test("context status reminder reports working budget and raw model window from the final prompt state", async () => {
+    test("context status reminder waits for provider-reported usage before rendering raw model window details", async () => {
         setContextManagementConfig({
             tokenBudget: 100,
         });
@@ -696,11 +819,10 @@ describe("TENEX context management integration", () => {
 
         const preparedJson = JSON.stringify(prepared?.messages);
         expect(preparedJson).not.toContain("[Context status]");
-        expect(preparedJson).toContain("<context-window-status>");
+        expect(preparedJson).not.toContain("<context-window-status>");
         expect(preparedJson).toContain("managed working budget");
-        expect(preparedJson).toContain("Model window:");
-        expect(preparedJson).toContain("/100 tokens");
-        expect(preparedJson).toContain("/200 tokens");
+        expect(preparedJson).not.toContain("Model window:");
+        expect(preparedJson).not.toContain("/200 tokens");
         expect(preparedJson).not.toContain("<scratchpad>");
     });
 });

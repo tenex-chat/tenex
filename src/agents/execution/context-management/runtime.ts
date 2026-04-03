@@ -88,12 +88,22 @@ function createSummarizationModel(options: {
 }
 
 const COMPACTION_SUMMARIZER_SYSTEM_PROMPT = [
-    "Compress older TENEX execution context into a continuation summary.",
-    "Return plain text with exactly these sections: Task, Completed, Important Findings, Open Issues, Next Steps, Persistent Facts.",
-    "Preserve exact file paths, commands, tool names, tool-call IDs, errors, failed attempts, decisions, user constraints, and unfinished work when relevant.",
-    "Do not invent progress or verification.",
-    "Aggressively omit solved low-value churn unless it prevents repeated mistakes.",
+    "Compress prior TENEX execution context into a high-signal continuation summary for future work.",
+    "Return plain text with exactly these sections and headings: Task, Completed, Important Findings, Failures And Dead Ends, Tool Use And Side Effects, Open Issues, Next Steps, Persistent Facts.",
+    "Preserve the current user goal, constraints, decisions, exact file paths, commands, URLs, identifiers, tool names, relevant tool-call IDs, side effects, failures, retries, dead ends, plans, unfinished work, and facts needed to continue safely.",
+    "Keep concrete artifacts over vague gist. Mention what changed, what was tried, what did not work, and what remains.",
+    "Do not invent progress, verification, or results. Do not hide unresolved risk. Do not claim tests passed unless the transcript proves it.",
+    "Summarize only from the provided transcript and steering note.",
 ].join(" ");
+
+function wrapCompactionSummary(summary: string, conversationId: string): string {
+    return [
+        `Continuation from previous work in conversation ${conversationId}.`,
+        `If more detail is needed, query the full prior transcript with conversation_get using conversation id ${conversationId}.`,
+        "",
+        summary.trim(),
+    ].join("\n");
+}
 
 function createCompactionStore(options: {
     conversationStore: ConversationStore;
@@ -114,11 +124,18 @@ function createCompactionStore(options: {
 }
 
 function createCompactionCallback(
-    model: LanguageModel
+    model: LanguageModel,
+    conversationId: string
 ): NonNullable<CompactionToolStrategyOptions["onCompact"]> {
-    return async ({ messages }) => {
+    return async ({ messages, mode, steeringMessage }) => {
         const transcript = buildSummaryTranscript(messages);
-        const deterministicFallback = buildDeterministicSummary(messages);
+        const deterministicFallback = wrapCompactionSummary(
+            buildDeterministicSummary(messages),
+            conversationId
+        );
+        const steeringBlock = steeringMessage
+            ? `\n\nCompaction emphasis from current model:\n${steeringMessage.trim()}`
+            : "";
         const summaryPrompt: ModelMessage[] = [
             {
                 role: "system",
@@ -126,7 +143,15 @@ function createCompactionCallback(
             },
             {
                 role: "user",
-                content: `Summarize this stale TENEX context so work can continue safely:\n\n${transcript}`,
+                content: [
+                    `Compaction mode: ${mode}.`,
+                    "Summarize this TENEX execution transcript so work can continue safely after context compaction.",
+                    "Capture goals, important completed work, findings, failed attempts, tool use, side effects, open issues, next steps, and persistent facts.",
+                    steeringBlock ? steeringBlock.trim() : "",
+                    "",
+                    "Transcript to compact:",
+                    transcript,
+                ].filter((line) => line.length > 0).join("\n"),
             },
         ];
 
@@ -138,7 +163,9 @@ function createCompactionCallback(
                 maxOutputTokens: 1400,
             });
             const summary = text.trim();
-            return summary.length > 0 ? summary : deterministicFallback;
+            return summary.length > 0
+                ? wrapCompactionSummary(summary, conversationId)
+                : deterministicFallback;
         } catch {
             return deterministicFallback;
         }
@@ -216,7 +243,10 @@ function createConversationContextManagementRuntime(options: {
                     * (settings.compactionThresholdPercent / 100);
                 return currentTokens >= thresholdTokens;
             };
-            compactionOptions.onCompact = createCompactionCallback(summarizationModel);
+            compactionOptions.onCompact = createCompactionCallback(
+                summarizationModel,
+                options.conversationId
+            );
         }
 
         strategies.push(

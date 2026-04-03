@@ -162,6 +162,7 @@ export interface ContextManagementCompactionEdit {
     replacement: string;
     createdAt: number;
     compactedMessageCount: number;
+    steeringMessage?: string;
     fromText?: string;
     toText?: string;
 }

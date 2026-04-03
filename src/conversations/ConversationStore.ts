@@ -233,6 +233,9 @@ function normalizeContextManagementCompactionEdit(
         replacement,
         createdAt,
         compactedMessageCount,
+        ...(typeof rawEdit.steeringMessage === "string" && rawEdit.steeringMessage.trim().length > 0
+            ? { steeringMessage: rawEdit.steeringMessage.trim() }
+            : {}),
         ...(typeof rawEdit.fromText === "string" && rawEdit.fromText.trim().length > 0
             ? { fromText: rawEdit.fromText.trim() }
             : {}),
