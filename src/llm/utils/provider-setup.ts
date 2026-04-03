@@ -1,6 +1,7 @@
 import password from "@inquirer/password";
 import input from "@inquirer/input";
 import chalk from "chalk";
+import { serializeApiKeyEntry } from "@/llm/providers/key-manager";
 import { AI_SDK_PROVIDERS } from "@/llm/types";
 import type { ProviderCredentials, TenexProviders } from "@/services/config/types";
 import providerSelectPrompt, {
@@ -74,23 +75,36 @@ export async function runProviderSetup(
 }
 
 async function askForKey(providerId: string, displayName: string, hint?: string): Promise<string | undefined> {
+    let value: string | undefined;
+
     if (isOllama(providerId)) {
         const url = await input({
             message: `${displayName} URL:`,
             default: "http://localhost:11434",
             theme: inquirerTheme,
         });
-        return url.trim() || undefined;
+        value = url.trim() || undefined;
+    } else {
+        if (hint) {
+            console.log(chalk.dim(`  Run ${chalk.bold("claude setup-token")} in another terminal, then paste the key (sk-ant-...) here.`));
+        }
+
+        const key = await password({
+            message: `${displayName} API key:`,
+            mask: "*",
+            theme: inquirerTheme,
+        });
+        value = key.trim() || undefined;
     }
 
-    if (hint) {
-        console.log(chalk.dim(`  Run ${chalk.bold("claude setup-token")} in another terminal, then paste the key (sk-ant-...) here.`));
+    if (!value) {
+        return undefined;
     }
 
-    const key = await password({
-        message: `${displayName} API key:`,
-        mask: "*",
+    const label = await input({
+        message: `${displayName} label ${chalk.dim("(optional)")}:`,
         theme: inquirerTheme,
     });
-    return key.trim() || undefined;
+
+    return serializeApiKeyEntry(value, label);
 }

@@ -180,6 +180,26 @@ describe("ProviderRegistry", () => {
                 Math.random = originalRandom;
             }
         });
+
+        it("tracks configured labels as active key identities", async () => {
+            const originalRandom = Math.random;
+            Math.random = () => 0;
+
+            try {
+                const mockProvider = createMockProviderClass("anthropic");
+                registry.register(mockProvider);
+
+                await registry.initialize({
+                    anthropic: { apiKey: ["sk-a primary", "sk-b backup"] },
+                });
+
+                const active = registry.getActiveApiKey("anthropic");
+                expect(active?.key).toBe("sk-a");
+                expect(active?.identity).toBe("primary");
+            } finally {
+                Math.random = originalRandom;
+            }
+        });
     });
 
     describe("key rotation", () => {

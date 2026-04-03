@@ -22,6 +22,12 @@ export interface KeyEntry {
     identity: string;
 }
 
+export interface ParsedApiKeyEntry {
+    key: string;
+    label?: string;
+    serialized: string;
+}
+
 /**
  * Clock interface for injectable time source (enables deterministic testing)
  */
@@ -84,13 +90,22 @@ export class KeyManager {
      * Normalizes single keys to arrays for uniform handling.
      */
     registerKeys(providerId: string, apiKey: string | string[]): void {
-        const rawKeys = Array.isArray(apiKey) ? [...apiKey] : [apiKey];
-        if (rawKeys.length === 0) {
+        const configuredKeys = Array.isArray(apiKey) ? [...apiKey] : [apiKey];
+        if (configuredKeys.length === 0) {
             return;
         }
-        const entries: KeyEntry[] = rawKeys.map((key, index) => ({
-            key,
-            identity: `${providerId}-key-${index + 1}-****${key.slice(-4)}`,
+
+        const parsedEntries = configuredKeys
+            .map(parseApiKeyEntry)
+            .filter(entry => entry.key.length > 0 && entry.key !== "none");
+
+        if (parsedEntries.length === 0) {
+            return;
+        }
+
+        const entries: KeyEntry[] = parsedEntries.map((entry, index) => ({
+            key: entry.key,
+            identity: entry.label || `${providerId}-key-${index + 1}-****${entry.key.slice(-4)}`,
         }));
         this.keys.set(providerId, entries);
 
@@ -102,8 +117,8 @@ export class KeyManager {
             }
         }
 
-        if (rawKeys.length > 1) {
-            logger.debug(`[KeyManager] Registered ${rawKeys.length} keys for provider "${providerId}"`);
+        if (parsedEntries.length > 1) {
+            logger.debug(`[KeyManager] Registered ${parsedEntries.length} keys for provider "${providerId}"`);
         }
     }
 
@@ -270,15 +285,50 @@ export class KeyManager {
  */
 export const keyManager = new KeyManager();
 
+export function parseApiKeyEntry(value: string): ParsedApiKeyEntry {
+    const serialized = value.trim();
+    if (serialized.length === 0) {
+        return { key: "", serialized };
+    }
+
+    const [keyPart, ...labelParts] = serialized.split(/\s+/);
+    const key = keyPart?.trim() ?? "";
+    const label = labelParts.join(" ").trim() || undefined;
+
+    return {
+        key,
+        label,
+        serialized,
+    };
+}
+
+export function getApiKeyEntries(apiKey: string | string[] | undefined): ParsedApiKeyEntry[] {
+    if (!apiKey) {
+        return [];
+    }
+
+    const values = Array.isArray(apiKey) ? apiKey : [apiKey];
+    return values
+        .map(parseApiKeyEntry)
+        .filter(entry => entry.key.length > 0 && entry.key !== "none");
+}
+
+export function serializeApiKeyEntry(key: string, label?: string): string {
+    const trimmedKey = key.trim();
+    const trimmedLabel = label?.trim();
+    if (!trimmedLabel) {
+        return trimmedKey;
+    }
+    return `${trimmedKey} ${trimmedLabel}`;
+}
+
 /**
  * Resolve an API key that may be a single string or an array.
  * For services that only need a single key (embeddings, image gen),
  * this returns the first key from an array or the string itself.
  */
 export function resolveApiKey(apiKey: string | string[] | undefined): string | undefined {
-    if (!apiKey) return undefined;
-    if (Array.isArray(apiKey)) return apiKey[0];
-    return apiKey;
+    return getApiKeyEntries(apiKey)[0]?.key;
 }
 
 /**
@@ -286,7 +336,5 @@ export function resolveApiKey(apiKey: string | string[] | undefined): string | u
  * Handles string, string[], undefined, and empty values.
  */
 export function hasApiKey(apiKey: string | string[] | undefined): boolean {
-    if (!apiKey) return false;
-    if (Array.isArray(apiKey)) return apiKey.some(k => k.length > 0);
-    return apiKey.length > 0 && apiKey !== "none";
+    return getApiKeyEntries(apiKey).length > 0;
 }

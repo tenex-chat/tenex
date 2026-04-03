@@ -15,6 +15,7 @@ import {
 import type { PartialDeep } from "@inquirer/type";
 import { cursorHide } from "@inquirer/ansi";
 import chalk from "chalk";
+import { getApiKeyEntries, parseApiKeyEntry } from "@/llm/providers/key-manager";
 import type { ProviderCredentials } from "@/services/config/types";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { getProviderDisplayName } from "@/llm/utils/ProviderConfigUI";
@@ -49,9 +50,7 @@ export type ProviderSelectConfig = {
 type Mode = "browse" | "keys";
 
 export function getKeys(apiKey: string | string[] | undefined): string[] {
-    if (!apiKey) return [];
-    if (Array.isArray(apiKey)) return apiKey.filter((k) => k.length > 0);
-    return apiKey.length > 0 && apiKey !== "none" ? [apiKey] : [];
+    return getApiKeyEntries(apiKey).map((entry) => entry.serialized);
 }
 
 function needsApiKey(providerId: string): boolean {
@@ -263,9 +262,11 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
 
         for (const [i, key] of keys.entries()) {
             const pfx = keysActive === i ? `${CURSOR} ` : "  ";
-            const masked = maskKey(pid, key);
+            const parsed = parseApiKeyEntry(key);
+            const masked = maskKey(pid, parsed.key);
+            const label = parsed.label ? chalk.dim(`  ${parsed.label}`) : "";
             const deleteHint = keysActive === i ? chalk.dim("  d delete") : "";
-            out.push(`${pfx}${masked}${deleteHint}`);
+            out.push(`${pfx}${masked}${label}${deleteHint}`);
         }
 
         const addPfx = keysActive === addIndex ? `${CURSOR} ` : "  ";

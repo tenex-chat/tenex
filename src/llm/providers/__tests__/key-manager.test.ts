@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { KeyManager, type KeyEntry } from "../key-manager";
+import {
+    getApiKeyEntries,
+    hasApiKey,
+    KeyManager,
+    parseApiKeyEntry,
+    resolveApiKey,
+    serializeApiKeyEntry,
+    type KeyEntry,
+} from "../key-manager";
 
 describe("KeyManager", () => {
     let km: KeyManager;
@@ -25,6 +33,18 @@ describe("KeyManager", () => {
             const entry = km.selectKey("openai");
             expect(entry).toBeDefined();
             expect(["sk-1", "sk-2", "sk-3"]).toContain(entry!.key);
+        });
+
+        it("uses configured labels as analytics identities", () => {
+            km.registerKeys("openai", ["sk-1 primary", "sk-2 secondary"]);
+            const identities = new Set<string>();
+
+            for (let i = 0; i < 50; i++) {
+                const entry = km.selectKey("openai");
+                if (entry) identities.add(entry.identity);
+            }
+
+            expect(identities).toEqual(new Set(["primary", "secondary"]));
         });
 
         it("ignores empty arrays", () => {
@@ -281,6 +301,45 @@ describe("KeyManager", () => {
             expect(entry?.identity).toBe("anthropic-key-1-****y123");
             expect(km.hasMultipleKeys("anthropic")).toBe(false);
             expect(km.getHealthyKeyCount("anthropic")).toBe(1);
+        });
+    });
+
+    describe("api key entry helpers", () => {
+        it("parses a labeled key entry", () => {
+            expect(parseApiKeyEntry("sk-test-key my label")).toEqual({
+                key: "sk-test-key",
+                label: "my label",
+                serialized: "sk-test-key my label",
+            });
+        });
+
+        it("serializes optional labels", () => {
+            expect(serializeApiKeyEntry("sk-test-key", "primary")).toBe("sk-test-key primary");
+            expect(serializeApiKeyEntry("sk-test-key")).toBe("sk-test-key");
+        });
+
+        it("resolves the raw key from labeled config values", () => {
+            expect(resolveApiKey(["sk-test-key primary", "sk-backup secondary"])).toBe("sk-test-key");
+        });
+
+        it("returns parsed entries for labeled arrays", () => {
+            expect(getApiKeyEntries(["sk-test-key primary", "sk-backup secondary"])).toEqual([
+                {
+                    key: "sk-test-key",
+                    label: "primary",
+                    serialized: "sk-test-key primary",
+                },
+                {
+                    key: "sk-backup",
+                    label: "secondary",
+                    serialized: "sk-backup secondary",
+                },
+            ]);
+        });
+
+        it("treats labeled entries as configured keys", () => {
+            expect(hasApiKey("sk-test-key primary")).toBe(true);
+            expect(hasApiKey("none")).toBe(false);
         });
     });
 });
