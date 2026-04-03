@@ -8,6 +8,10 @@ export interface TelegramAgentConfig {
     allowDMs?: boolean;
     /** Optional API base URL override for tests or self-hosted gateways */
     apiBaseUrl?: string;
+    /** Whether to publish reasoning/thinking blocks to Telegram. Default: false */
+    publishReasoningToTelegram?: boolean;
+    /** Whether to publish intermediate conversation() events to Telegram. Default: false (only complete() is published) */
+    publishConversationToTelegram?: boolean;
 }
 
 /**

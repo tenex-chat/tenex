@@ -66,7 +66,16 @@ export class TelegramRuntimePublisherService implements AgentRuntimePublisher {
                 "telegram.publish.reason": "conversation",
                 "nostr.event.id": event.id,
             });
-            await this.deliverTelegramMessage(context, intent.content, "conversation");
+
+            // Check if we should publish to Telegram based on config
+            const shouldPublishToTelegram = intent.isReasoning
+                ? this.agent.telegram?.publishReasoningToTelegram ?? false
+                : this.agent.telegram?.publishConversationToTelegram ?? false;
+
+            if (shouldPublishToTelegram) {
+                await this.deliverTelegramMessage(context, intent.content, "conversation");
+            }
+
             return event;
         } catch (error) {
             const recoveredEvent = await this.recoverPublishFailure(

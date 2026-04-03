@@ -151,7 +151,8 @@ describe("Schedule Task Tool", () => {
                 mockAgentPubkey,
                 mockAgentPubkey,
                 undefined,
-                "Morning Standup"
+                "Morning Standup",
+                undefined
             );
         });
     });
@@ -252,6 +253,7 @@ describe("Schedule Task Tool", () => {
                 mockAgentPubkey,
                 mockTargetPubkey,
                 undefined,
+                undefined,
                 undefined
             );
         });
@@ -298,6 +300,7 @@ describe("Schedule Task Tool", () => {
                 mockAgentPubkey,
                 mockAgentPubkey,
                 undefined,
+                undefined,
                 undefined
             );
         });
@@ -325,6 +328,7 @@ describe("Schedule Task Tool", () => {
                 "Remind architect",
                 mockAgentPubkey,
                 mockTargetPubkey,
+                undefined,
                 undefined,
                 undefined
             );

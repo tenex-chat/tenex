@@ -163,8 +163,8 @@ describe("ExecutionContextFactory", () => {
             // Setup
             getCurrentBranchSpy.mockResolvedValue("main");
             const mockConversation = { id: "test-conversation" };
-            const originalGet = ConversationStore.get;
-            ConversationStore.get = mock(() => mockConversation) as typeof ConversationStore.get;
+            const originalGetOrLoad = ConversationStore.getOrLoad;
+            ConversationStore.getOrLoad = mock(() => mockConversation) as typeof ConversationStore.getOrLoad;
 
             try {
                 // Execute
@@ -177,10 +177,10 @@ describe("ExecutionContextFactory", () => {
 
                 // Assert
                 expect(context.getConversation()).toBe(mockConversation);
-                expect(ConversationStore.get).toHaveBeenCalledWith("test-conversation");
+                expect(ConversationStore.getOrLoad).toHaveBeenCalledWith("test-conversation");
             } finally {
                 // Restore
-                ConversationStore.get = originalGet;
+                ConversationStore.getOrLoad = originalGetOrLoad;
             }
         });
 

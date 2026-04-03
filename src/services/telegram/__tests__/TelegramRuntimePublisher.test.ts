@@ -110,7 +110,7 @@ describe("TelegramRuntimePublisherService", () => {
         );
     });
 
-    it("delivers conversation updates to Telegram as they are published", async () => {
+    it("does not deliver conversation updates to Telegram by default", async () => {
         const sendReply = mock(async () => undefined);
         const publisher = new TelegramRuntimePublisherService(
             {
@@ -135,9 +135,101 @@ describe("TelegramRuntimePublisherService", () => {
 
         await publisher.conversation({ content: "working on it" }, context);
 
+        // Nostr publishing still happens, but Telegram delivery is disabled by default
+        expect(nostrPublisherMethods.conversation).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledTimes(0);
+    });
+
+    it("delivers conversation updates to Telegram when publishConversationToTelegram is enabled", async () => {
+        const sendReply = mock(async () => undefined);
+        const publisher = new TelegramRuntimePublisherService(
+            {
+                slug: "telegram-agent",
+                pubkey: "a".repeat(64),
+                telegram: {
+                    botToken: "token",
+                    publishConversationToTelegram: true,
+                },
+            } as any,
+            {
+                canHandle: () => true,
+                sendReply,
+            } as any
+        );
+
+        const context: EventContext = {
+            conversationId: "conversation-1b",
+            ralNumber: 1,
+            rootEvent: { id: "root-1b" },
+            triggeringEnvelope: createTelegramEnvelope("1011"),
+        };
+
+        await publisher.conversation({ content: "working on it" }, context);
+
         expect(nostrPublisherMethods.conversation).toHaveBeenCalledTimes(1);
         expect(sendReply).toHaveBeenCalledTimes(1);
         expect(sendReply).toHaveBeenCalledWith(expect.anything(), context, "working on it");
+    });
+
+    it("does not deliver reasoning blocks to Telegram by default", async () => {
+        const sendReply = mock(async () => undefined);
+        const publisher = new TelegramRuntimePublisherService(
+            {
+                slug: "telegram-agent",
+                pubkey: "a".repeat(64),
+                telegram: {
+                    botToken: "token",
+                },
+            } as any,
+            {
+                canHandle: () => true,
+                sendReply,
+            } as any
+        );
+
+        const context: EventContext = {
+            conversationId: "conversation-reasoning",
+            ralNumber: 1,
+            rootEvent: { id: "root-reasoning" },
+            triggeringEnvelope: createTelegramEnvelope("1012"),
+        };
+
+        await publisher.conversation({ content: "thinking...", isReasoning: true }, context);
+
+        // Nostr publishing still happens, but Telegram delivery is disabled by default for reasoning
+        expect(nostrPublisherMethods.conversation).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledTimes(0);
+    });
+
+    it("delivers reasoning blocks to Telegram when publishReasoningToTelegram is enabled", async () => {
+        const sendReply = mock(async () => undefined);
+        const publisher = new TelegramRuntimePublisherService(
+            {
+                slug: "telegram-agent",
+                pubkey: "a".repeat(64),
+                telegram: {
+                    botToken: "token",
+                    publishReasoningToTelegram: true,
+                },
+            } as any,
+            {
+                canHandle: () => true,
+                sendReply,
+            } as any
+        );
+
+        const context: EventContext = {
+            conversationId: "conversation-reasoning",
+            ralNumber: 1,
+            rootEvent: { id: "root-reasoning" },
+            triggeringEnvelope: createTelegramEnvelope("1012"),
+        };
+
+        await publisher.conversation({ content: "thinking...", isReasoning: true }, context);
+
+        expect(nostrPublisherMethods.conversation).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledWith(expect.anything(), context, "thinking...");
     });
 
     it("delivers allowlisted todo_write tool updates to Telegram", async () => {

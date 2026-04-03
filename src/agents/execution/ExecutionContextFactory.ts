@@ -161,7 +161,7 @@ export async function createExecutionContext(params: {
                 isDelegationCompletion: params.isDelegationCompletion,
                 hasPendingDelegations: params.hasPendingDelegations,
                 debug: params.debug,
-                getConversation: () => ConversationStore.get(params.conversationId),
+                getConversation: () => ConversationStore.getOrLoad(params.conversationId),
             };
         } catch (error) {
             span.recordException(error as Error);

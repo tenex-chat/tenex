@@ -28,8 +28,14 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                 .describe(
                     "Target agent slug (e.g., 'architect', 'claude-code'). Defaults to self."
                 ),
+            targetChannel: z
+                .string()
+                .optional()
+                .describe(
+                    "A conversation ID, Telegram channel, or other channel identifier where the scheduled task's output should be sent when it runs. Allows agents to schedule follow-up actions within an existing conversation without creating a new one."
+                ),
         }),
-        execute: async ({ prompt, when, title, targetAgent }) => {
+        execute: async ({ prompt, when, title, targetAgent, targetChannel }) => {
             // Resolve target agent
             let toPubkey: string;
             if (targetAgent) {
@@ -60,7 +66,8 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     fromPubkey,
                     toPubkey,
                     undefined,
-                    title
+                    title,
+                    targetChannel
                 );
 
                 logger.info(
@@ -79,6 +86,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     executeAtFormatted: formatExecuteAt(executeAt.toISOString()),
                     prompt,
                     targetAgent: targetAgent || "self",
+                    targetChannel,
                 };
             }
 
@@ -90,7 +98,8 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     fromPubkey,
                     toPubkey,
                     undefined,
-                    title
+                    title,
+                    targetChannel
                 );
 
                 logger.info(
@@ -106,6 +115,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     schedule: when,
                     prompt,
                     targetAgent: targetAgent || "self",
+                    targetChannel,
                 };
             }
 
