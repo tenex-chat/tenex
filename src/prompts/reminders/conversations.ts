@@ -410,7 +410,7 @@ function renderRecentConversationsSection(
     });
 
     return `<recent>
-You participated in the following conversations recently. This context may help you understand ongoing work. Use the exact id shown with conversation_get if you need to reopen one:
+You participated in the following conversations recently:
 
 ${conversationLines.join("\n\n")}
 </recent>`;

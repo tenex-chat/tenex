@@ -179,7 +179,14 @@ function buildToolResultDecaySummary(
     );
 }
 
-function buildScratchpadSummary(payload: Extract<ContextManagementStrategyPayload, { kind: "scratchpad" }> | undefined): string {
+function buildScratchpadSummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    payload: Extract<ContextManagementStrategyPayload, { kind: "scratchpad" }> | undefined
+): string {
+    if (event.reason === "scratchpad-idle") {
+        return "Skipped scratchpad reminder because no scratchpad state exists yet.";
+    }
+
     if (!payload) {
         return "Rendered scratchpad context.";
     }
@@ -259,7 +266,7 @@ function buildStrategyCompleteSummary(
         case "tool-result-decay":
             return buildToolResultDecaySummary(event, payload);
         case "scratchpad":
-            return buildScratchpadSummary(payload);
+            return buildScratchpadSummary(event, payload);
         case "reminders":
             return buildRemindersSummary(payload);
         case "anthropic-prompt-caching":

@@ -124,8 +124,7 @@ export function renderLoadedSkillsBlock(
         }
     }
 
-    const header = `## Loaded Skills
-
+    const header = `
 The following skills have been loaded for this conversation. These provide additional context and capabilities:
 `;
     const renderedSkills = skills.map((skill) => renderSkill(skill, pathVars));
