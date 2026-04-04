@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { homedir } from "node:os";
 import * as path from "node:path";
 import * as fsPromises from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import * as constantsModule from "@/constants";
 import * as fsLibModule from "@/lib/fs";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -22,6 +23,10 @@ const AGENT_PUBKEY = "a".repeat(64);
 const AGENT_SHORT_PUBKEY = AGENT_PUBKEY.slice(0, 8);
 const PROJECT_PATH = "/path/to/my-project";
 const AVAILABLE_SKILLS_CACHE_TTL_MS = 5_000;
+const BUILT_IN_SKILLS_PATH = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../skills/built-in"
+);
 const LOOKUP_CONTEXT = {
     agentPubkey: AGENT_PUBKEY,
     projectPath: PROJECT_PATH,
@@ -67,11 +72,13 @@ function createSkillDocument({
     description,
     content,
     metadata,
+    tools,
 }: {
     name: string;
     description: string;
     content: string;
     metadata?: Record<string, string>;
+    tools?: string[];
 }): string {
     const lines = [
         "---",
@@ -83,6 +90,13 @@ function createSkillDocument({
         lines.push("metadata:");
         for (const [key, value] of Object.entries(metadata)) {
             lines.push(`  ${key}: ${JSON.stringify(value)}`);
+        }
+    }
+
+    if (tools && tools.length > 0) {
+        lines.push("tools:");
+        for (const toolName of tools) {
+            lines.push(`  - ${toolName}`);
         }
     }
 
@@ -266,6 +280,27 @@ describe("SkillService", () => {
         expect(skills[0].description).toBe("Frontmatter-backed local skill description");
         expect(skills[0].content).toBe("Local skill content");
         expect(skills[0].installedFiles.map((file) => file.relativePath)).toEqual(["helper.ts"]);
+    });
+
+    it("loads the renamed built-in agent-management skill and not the legacy agents-write id", async () => {
+        seedFile(
+            `${BUILT_IN_SKILLS_PATH}/agent-management/SKILL.md`,
+            createSkillDocument({
+                name: "Agent Management",
+                description: "Create and update agent configurations and current project metadata",
+                content: "Built-in skill content",
+                tools: ["agents_write", "modify_project"],
+            }),
+        );
+
+        const skills = await SkillService.getInstance().listAvailableSkills();
+        const fetched = await SkillService.getInstance().fetchSkills(["agent-management"]);
+
+        expect(skills.map((skill) => skill.identifier)).toEqual(["agent-management"]);
+        expect(skills[0]?.toolNames).toEqual(["agents_write", "modify_project"]);
+        expect(skills.some((skill) => skill.identifier === "agents-write")).toBe(false);
+        expect(fetched.skills).toHaveLength(1);
+        expect(fetched.skills[0]?.identifier).toBe("agent-management");
     });
 
     it("reuses cached available skills when the visible skill tree has not changed", async () => {

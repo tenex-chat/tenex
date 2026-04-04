@@ -6,7 +6,7 @@
  * of importing NDKKind directly or using magic numbers.
  */
 
-import { NDKKind as BaseNDKKind } from "@nostr-dev-kit/ndk";
+import { NDKKind as BaseNDKKind, NDKProject } from "@nostr-dev-kit/ndk";
 
 // Re-export all base NDK kinds
 export const NDKKind = {
@@ -22,6 +22,7 @@ export const NDKKind = {
     DelegationMarker: 4203 as BaseNDKKind, // Delegation Marker - lifecycle tracking
     SkillWhitelist: 14202 as BaseNDKKind, // Skill Whitelist - NIP-51-like list of e-tagged skills
     ProjectAgentSnapshot: 14199 as BaseNDKKind, // Owner-agent declaration (replaceable, p-tags agents)
+    Project: NDKProject.kind as BaseNDKKind, // NIP-33 Project definition
 
     // Tenex custom kinds (2xxxx range)
     TenexBootProject: 24000 as BaseNDKKind, // Boot project via a-tag

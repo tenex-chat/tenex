@@ -69,8 +69,8 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         const runtimeContext = runtime.getContext();
 
         const title = project?.tagValue("title") || project?.tagValue("name") || runtimeContext?.project?.tagValue("title") || id;
-        const description = project?.tagValue("description");
-        const repository = project?.tagValue("repository");
+        const description = project?.content || project?.tagValue("description");
+        const repository = project?.tagValue("repo") || project?.tagValue("repository");
 
         // Get agents from runtime context (authoritative for running projects)
         const agents: ProjectAgent[] = [];
@@ -115,8 +115,8 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         processedDTags.add(id);
 
         const title = project.tagValue("title") || project.tagValue("name");
-        const description = project.tagValue("description");
-        const repository = project.tagValue("repository");
+        const description = project.content || project.tagValue("description");
+        const repository = project.tagValue("repo") || project.tagValue("repository");
 
         // Not running - get agents from storage
         const agents: ProjectAgent[] = [];

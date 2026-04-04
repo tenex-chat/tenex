@@ -1,10 +1,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { NDKEvent as NDKEventClass } from "@nostr-dev-kit/ndk";
-import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import { getProjectContext } from "@/services/projects";
+import { getProjectContext, projectEventPublishService } from "@/services/projects";
 import { agentStorage } from "@/agents/AgentStorage";
-import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -312,69 +309,23 @@ async function publishUpdatedProjectEvent(
         return;
     }
 
-    // Get current agents in registry (post-deletion)
-    const currentAgents = projectContext.agentRegistry.getAllAgents();
-    const currentAgentPubkeys = new Set(currentAgents.map((agent) => agent.pubkey));
+    const currentAgentPubkeys = projectContext.agentRegistry
+        .getAllAgents()
+        .map((agent) => agent.pubkey);
 
-    // Rebuild the project event tags, filtering out removed agent pubkeys
-    const updatedTags = currentProject.tags.filter((tag) => {
-        if (tag[0] === "p") {
-            // Keep only agent membership tags that reference agents still in the registry
-            return tag[1] && currentAgentPubkeys.has(tag[1]);
-        }
-        return true;
+    const result = await projectEventPublishService.publishMutation({
+        ownerPubkey,
+        projectDTag,
+        trigger: "agent_deletion_31933",
+        retainAgentPubkeys: currentAgentPubkeys,
     });
 
-    // Build the updated 31933 event
-    const ndk = getNDK();
-    const updatedEvent = new NDKEventClass(ndk, {
-        kind: 31933,
-        content: currentProject.content,
-        tags: updatedTags,
-    });
-
-    const nip46Service = Nip46SigningService.getInstance();
-
-    if (nip46Service.isEnabled()) {
-        const signingLog = Nip46SigningLog.getInstance();
-        const result = await nip46Service.signEvent(ownerPubkey, updatedEvent, "agent_deletion_31933");
-
-        if (result.outcome === "signed") {
-            try {
-                await updatedEvent.publish();
-                signingLog.log({
-                    op: "event_published",
-                    ownerPubkey: Nip46SigningLog.truncatePubkey(ownerPubkey),
-                    eventKind: 31933,
-                    signerType: "nip46",
-                    eventId: updatedEvent.id,
-                });
-                logger.info("[AgentDeletion] Published owner-signed 31933 update", {
-                    ownerPubkey: shortenPubkey(ownerPubkey),
-                    projectDTag,
-                    eventId: shortenOptionalEventId(updatedEvent.id),
-                    agentTagCount: updatedTags.filter((t) => t[0] === "p").length,
-                });
-            } catch (error) {
-                logger.warn("[AgentDeletion] Failed to publish 31933 update", {
-                    ownerPubkey: shortenPubkey(ownerPubkey),
-                    projectDTag,
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            }
-            return;
-        }
-
-        logger.warn("[AgentDeletion] Skipping 31933 publish — signing failed", {
+    if (result.outcome !== "published" && result.outcome !== "no_changes") {
+        logger.warn("[AgentDeletion] Skipping 31933 publish — update failed", {
             ownerPubkey: shortenPubkey(ownerPubkey),
             projectDTag,
             outcome: result.outcome,
-            reason: "reason" in result ? result.reason : undefined,
-        });
-    } else {
-        logger.warn("[AgentDeletion] NIP-46 not enabled — 31933 update skipped", {
-            projectDTag,
-            note: "Stale 31933 on relays will re-introduce deleted agents on daemon restart",
+            reason: result.reason,
         });
     }
 }
