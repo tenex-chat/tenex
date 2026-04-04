@@ -1,4 +1,5 @@
 import { logger } from "@/utils/logger";
+import { shortenEventId, shortenOptionalEventId } from "@/utils/conversation-id";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getNDK } from "@/nostr/ndkClient";
@@ -199,7 +200,7 @@ export class EventHandlerRegistry {
 
         const span = lessonTracer.startSpan("tenex.lesson.received", {
             attributes: {
-                "lesson.event_id": event.id.substring(0, 16),
+                "lesson.event_id": shortenEventId(event.id),
                 "lesson.publisher": event.pubkey.substring(0, 16),
                 "lesson.created_at": event.created_at || 0,
             },
@@ -221,7 +222,7 @@ export class EventHandlerRegistry {
             const lessonAuthorPubkey = event.pubkey;
             span.setAttribute(
                 "lesson.agent_definition_id",
-                agentDefinitionId?.substring(0, 16) || "none"
+                agentDefinitionId ? shortenEventId(agentDefinitionId) : "none"
             );
             span.setAttribute("lesson.author_pubkey", lessonAuthorPubkey.substring(0, 16));
 
@@ -260,14 +261,14 @@ export class EventHandlerRegistry {
                         const agentInfo = allAgents.map((a: AgentInstance) => ({
                             slug: a.slug,
                             pubkey: a.pubkey.substring(0, 16),
-                            eventId: a.eventId?.substring(0, 16) || "none",
+                            eventId: a.eventId ? shortenEventId(a.eventId) : "none",
                         }));
                         span.addEvent("no_matching_agents_in_project", {
                             "project.id": projectId,
                             "project.agent_count": allAgents.length,
                             "project.agents": JSON.stringify(agentInfo),
                             "lesson.agent_definition_id":
-                                agentDefinitionId?.substring(0, 16) || "none",
+                                agentDefinitionId ? shortenEventId(agentDefinitionId) : "none",
                             "lesson.author_pubkey": lessonAuthorPubkey.substring(0, 16),
                         });
                         continue;
@@ -297,7 +298,7 @@ export class EventHandlerRegistry {
                         logger.info("Stored lesson for agent", {
                             agentSlug: agent.slug,
                             lessonTitle: lesson.title,
-                            lessonId: event.id?.substring(0, 8),
+                            lessonId: shortenOptionalEventId(event.id),
                             matchReason,
                         });
                     }
@@ -342,7 +343,7 @@ export class EventHandlerRegistry {
 
         const span = lessonTracer.startSpan("tenex.lesson_comment.received", {
             attributes: {
-                "comment.event_id": event.id.substring(0, 16),
+                "comment.event_id": shortenEventId(event.id),
                 "comment.author": event.pubkey.substring(0, 16),
                 "comment.created_at": event.created_at || 0,
             },
@@ -370,7 +371,7 @@ export class EventHandlerRegistry {
                 return;
             }
 
-            span.setAttribute("comment.lesson_event_id", lessonEventId.substring(0, 16));
+            span.setAttribute("comment.lesson_event_id", shortenEventId(lessonEventId));
 
             // Build the LessonComment object
             const comment = {
@@ -401,8 +402,8 @@ export class EventHandlerRegistry {
                         logger.debug("Stored lesson comment for agent", {
                             projectId,
                             agentSlug: agent.slug,
-                            commentId: event.id?.substring(0, 8),
-                            lessonEventId: lessonEventId.substring(0, 8),
+                            commentId: shortenOptionalEventId(event.id),
+                            lessonEventId: shortenEventId(lessonEventId),
                         });
                     }
                 } else {
@@ -415,8 +416,8 @@ export class EventHandlerRegistry {
                             logger.debug("Stored lesson comment for agent (via lesson scan)", {
                                 projectId,
                                 agentSlug: agent.slug,
-                                commentId: event.id?.substring(0, 8),
-                                lessonEventId: lessonEventId.substring(0, 8),
+                                commentId: shortenOptionalEventId(event.id),
+                                lessonEventId: shortenEventId(lessonEventId),
                             });
                         }
                     }

@@ -3,7 +3,7 @@ import { NDKKind } from "@/nostr/kinds";
 import { logger } from "@/utils/logger";
 import type { NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-import { shortenOptionalEventId } from "@/utils/conversation-id";
+import { shortenEventId, shortenOptionalEventId } from "@/utils/conversation-id";
 import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
 
 const tracer = trace.getTracer("tenex.skill-whitelist-service");
@@ -277,7 +277,7 @@ export class SkillWhitelistService {
                     const dTag = event.tagValue("d") || undefined;
                     const title = event.tagValue("title") || undefined;
                     const name = event.tagValue("name") || undefined;
-                    const shortId = event.id.substring(0, 12).toLowerCase();
+                    const shortId = shortenEventId(event.id);
 
                     if (event.kind === NDKKind.AgentSkill) {
                         skillDrafts.push({

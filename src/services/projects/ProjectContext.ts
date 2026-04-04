@@ -6,6 +6,7 @@ import type { MCPManager } from "@/services/mcp/MCPManager";
 import { SkillWhitelistService, type WhitelistItem } from "@/services/skill";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
+import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
 
@@ -371,7 +372,7 @@ export class ProjectContext {
 
         logger.debug("ProjectContext: removed lesson from cache", {
             agentPubkey: agentPubkey.substring(0, 8),
-            eventId: eventId.substring(0, 8),
+            eventId: shortenEventId(eventId),
             remainingLessons: newLessons.length,
         });
 
@@ -424,8 +425,8 @@ export class ProjectContext {
 
         logger.debug("ProjectContext: added comment for agent", {
             agentPubkey: agentPubkey.substring(0, 8),
-            commentId: comment.id.substring(0, 8),
-            lessonEventId: comment.lessonEventId.substring(0, 8),
+            commentId: shortenEventId(comment.id),
+            lessonEventId: shortenEventId(comment.lessonEventId),
             totalComments: limitedComments.length,
         });
     }

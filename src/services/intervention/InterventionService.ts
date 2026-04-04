@@ -7,7 +7,7 @@ import { PubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenEventId } from "@/utils/conversation-id";
 
 /** Default timeout for user response: 5 minutes */
 const DEFAULT_TIMEOUT_SECONDS = 300;
@@ -897,7 +897,7 @@ export class InterventionService {
             );
 
             logger.info("Intervention review request published", {
-                eventId: eventId.substring(0, 8),
+                eventId: shortenEventId(eventId),
                 conversationId: shortenConversationId(pending.conversationId),
             });
 

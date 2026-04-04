@@ -5,6 +5,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/projects";
 import { tryExtractDTagFromAddress } from "@/types/project-ids";
+import { shortenOptionalEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -994,7 +995,7 @@ export class SchedulerService {
         logger.info("Published scheduled task event", {
             taskId: task.id,
             projectId: task.projectId,
-            eventId: event.id?.substring(0, 8),
+            eventId: shortenOptionalEventId(event.id),
             from: truncatePubkey(signer.pubkey),
             to: truncatePubkey(targetPubkey),
             originalTarget: wasRerouted ? truncatePubkey(task.toPubkey) : undefined,

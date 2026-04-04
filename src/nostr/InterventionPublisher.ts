@@ -1,5 +1,5 @@
 import { config } from "@/services/ConfigService";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenOptionalEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -101,12 +101,12 @@ export class InterventionPublisher {
 
             if (successRelays.length === 0) {
                 logger.warn("Intervention review request published to 0 relays", {
-                    eventId: event.id?.substring(0, 8),
+                    eventId: shortenOptionalEventId(event.id),
                     conversationId: shortConversationId,
                 });
             } else {
                 logger.info("Published intervention review request", {
-                    eventId: event.id?.substring(0, 8),
+                    eventId: shortenOptionalEventId(event.id),
                     conversationId: shortConversationId,
                     targetAgent: humanReplicaPubkey.substring(0, 8),
                     relayCount: successRelays.length,

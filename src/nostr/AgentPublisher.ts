@@ -6,7 +6,7 @@ import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
-import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
+import { shortenConversationId, shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKPublishError } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -103,7 +103,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
             for (const relay of relaySet) {
                 successRelays.push(relay.url);
                 logger.debug(`Relay accepted ${eventType} event`, {
-                    eventId: event.id?.substring(0, 8),
+                    eventId: shortenOptionalEventId(event.id),
                     eventType,
                     relayUrl: relay.url,
                     agent: this.agent.slug,
@@ -116,7 +116,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
                     `Event published to 0 relays - all relays rejected the ${eventType} event`
                 );
                 logger.error("Event published to 0 relays", {
-                    eventId: event.id?.substring(0, 8),
+                    eventId: shortenOptionalEventId(event.id),
                     eventType,
                     agent: this.agent.slug,
                     kind: event.kind,
@@ -128,7 +128,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
             }
 
             logger.info(`Published ${eventType} event to ${successRelays.length} relay(s)`, {
-                eventId: event.id?.substring(0, 8),
+                eventId: shortenOptionalEventId(event.id),
                 eventType,
                 agent: this.agent.slug,
                 relays: successRelays,
@@ -137,7 +137,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
             const relayErrors = error instanceof NDKPublishError ? error.relayErrors : undefined;
             const rawEvent = JSON.stringify(event.rawEvent());
             logger.error(`Failed to publish ${eventType}`, {
-                eventId: event.id?.substring(0, 8),
+                eventId: shortenOptionalEventId(event.id),
                 agent: this.agent.slug,
                 kind: event.kind,
                 contentLength: event.content?.length || 0,
@@ -151,7 +151,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
                 component: "AgentPublisher",
                 message: `Failed to publish ${eventType}`,
                 context: {
-                    eventId: event.id?.substring(0, 8),
+                    eventId: shortenOptionalEventId(event.id),
                     agent: this.agent.slug,
                     relayErrors,
                     rawEvent,

@@ -14,6 +14,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { nip44Decrypt } from "@/nostr/encryption";
 import { NDKKind } from "@/nostr/kinds";
 import { config } from "@/services/ConfigService";
+import { shortenOptionalEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import * as path from "node:path";
 import type { NDKEvent, NDKSubscription, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -128,7 +129,7 @@ export class APNsService {
                     this.handleConfigUpdateEvent(event).catch((err) => {
                         logger.error(`${LOG_PREFIX} Error handling config update event`, {
                             error: err instanceof Error ? err.message : String(err),
-                            eventId: event.id?.substring(0, 8),
+                            eventId: shortenOptionalEventId(event.id),
                         });
                     });
                 },
@@ -188,7 +189,7 @@ export class APNsService {
             logger.error(`${LOG_PREFIX} Failed to process config update event`, {
                 error: error instanceof Error ? error.message : String(error),
                 sender: senderPubkey.substring(0, 8),
-                eventId: event.id?.substring(0, 8),
+                eventId: shortenOptionalEventId(event.id),
             });
         }
     }

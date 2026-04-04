@@ -12,6 +12,7 @@ import { z } from "zod";
 import { RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import { APNsService } from "@/services/apns";
+import { shortenEventId } from "@/utils/conversation-id";
 
 /**
  * Schema for a single-select question.
@@ -287,7 +288,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     // via agentPublisher.ask(). The user will get their question and can respond.
     // Only transcript retrieval will be affected if this fails.
     logger.warn("[ask] Failed to create ConversationStore for ask transcript", {
-      eventId: eventId.substring(0, 8),
+      eventId: shortenEventId(eventId),
       error: error instanceof Error ? error.message : String(error),
     });
   }

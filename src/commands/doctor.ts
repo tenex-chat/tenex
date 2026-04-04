@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { initNDK, getNDK } from "@/nostr/ndkClient";
+import { shortenEventId } from "@/utils/conversation-id";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 const refetchCommand = new Command("refetch")
@@ -119,7 +120,7 @@ async function findOrphanedAgents(purge: boolean): Promise<void> {
 
     console.log(chalk.yellow(`Found ${orphans.length} orphaned agent(s):`));
     for (const { agent, pubkey } of orphans) {
-        const source = agent.eventId ? `nostr:${agent.eventId.substring(0, 8)}...` : "local";
+        const source = agent.eventId ? `nostr:${shortenEventId(agent.eventId)}` : "local";
         console.log(chalk.gray(`  ${agent.slug} (${pubkey.substring(0, 8)}...)  [${source}]`));
     }
 

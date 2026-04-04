@@ -1,5 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { MessageInjector } from "@/llm/types";
+import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { EventEmitter } from "tseep";
@@ -83,8 +84,8 @@ export class LLMOperationsRegistry {
 
         logger.debug("[LLMOpsRegistry] Registered operation", {
             operationId: operationId.substring(0, 8),
-            rootEvent: rootEventId.substring(0, 8),
-            triggeringEnvelope: context.triggeringEnvelope.message.nativeId.substring(0, 8),
+            rootEvent: shortenEventId(rootEventId),
+            triggeringEnvelope: shortenEventId(context.triggeringEnvelope.message.nativeId),
             agent: context.agent.name,
             agentPubkey: context.agent.pubkey.substring(0, 8),
         });
@@ -154,7 +155,7 @@ export class LLMOperationsRegistry {
         const operationDuration = Date.now() - operation.registeredAt;
         logger.debug("[LLMOpsRegistry] Completed operation", {
             operationId: operationId.substring(0, 8),
-            eventId: operation.eventId.substring(0, 8),
+            eventId: shortenEventId(operation.eventId),
             conversationId: operation.conversationId.substring(0, 8),
             duration: operationDuration,
         });
@@ -194,7 +195,7 @@ export class LLMOperationsRegistry {
 
         if (stopped > 0) {
             logger.info("[LLMOpsRegistry] Stopped operations", {
-                eventId: eventId.substring(0, 8),
+                eventId: shortenEventId(eventId),
                 count: stopped,
             });
         }

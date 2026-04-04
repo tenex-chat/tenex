@@ -15,6 +15,7 @@
  * Key: (agentPubkey, conversationId)
  */
 
+import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 
 type RegistryKey = `${string}:${string}`; // agentPubkey:conversationId
@@ -51,7 +52,7 @@ class PendingDelegationsRegistryImpl {
         logger.debug("[PendingDelegationsRegistry] Registered delegation", {
             agentPubkey: agentPubkey.substring(0, 8),
             conversationId: conversationId.substring(0, 8),
-            delegationEventId: delegationEventId.substring(0, 8),
+            delegationEventId: shortenEventId(delegationEventId),
             totalPending: refs.delegations.length,
         });
     }
@@ -75,7 +76,7 @@ class PendingDelegationsRegistryImpl {
                 agentPubkey: agentPubkey.substring(0, 8),
                 conversationId: conversationId.substring(0, 8),
                 count: delegations.length,
-                eventIds: delegations.map((id) => id.substring(0, 8)),
+                eventIds: delegations.map((id) => shortenEventId(id)),
             });
         }
 

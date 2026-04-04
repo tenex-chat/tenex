@@ -18,6 +18,7 @@ import type {
 } from "@/events/runtime/AgentRuntimePublisher";
 import type { EventContext } from "@/nostr/types";
 import { PendingDelegationsRegistry } from "@/services/ral";
+import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { extractErrorDetails } from "./ToolResultUtils";
@@ -485,7 +486,7 @@ export class ToolExecutionTracker {
                 pending.push({
                     toolCallId,
                     toolName: execution.toolName,
-                    startedAt: execution.toolEventId.substring(0, 8), // First 8 chars of event ID
+                    startedAt: shortenEventId(execution.toolEventId), // Standard short event ID
                 });
             }
         }

@@ -355,7 +355,7 @@ export class EventHandler {
 
         if (eTags.length === 0) {
             logger.warn("[EventHandler] Stop event received with no e-tags", {
-                eventId: event.id?.substring(0, 8),
+                eventId: shortenOptionalEventId(event.id),
             });
             return;
         }
@@ -443,7 +443,7 @@ export class EventHandler {
 
         if (!agentDefinitionId) {
             logger.warn("Lesson event missing agent definition ID (e-tag)", {
-                eventId: event.id?.substring(0, 8),
+                eventId: shortenOptionalEventId(event.id),
                 publisher: event.pubkey.substring(0, 8),
             });
             return;

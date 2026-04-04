@@ -6,7 +6,7 @@ import {
     getReplyTarget,
     toNativeId,
 } from "@/events/runtime/envelope-classifier";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenEventId } from "@/utils/conversation-id";
 import { getNDK } from "@/nostr/ndkClient";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { getProjectContext } from "@/services/projects";
@@ -110,14 +110,14 @@ export class ConversationResolver {
                 });
 
                 logger.debug("[ConversationResolver] Built delegation chain for new conversation", {
-                    conversationId: conversation.id.substring(0, 8),
+                    conversationId: shortenConversationId(conversation.id),
                     chainLength: delegationChain.length,
                     chain: delegationChain.map((entry) => entry.displayName).join(" → "),
                 });
             }
         }
 
-        logger.info(chalk.green(`Created new conversation ${conversation.id.substring(0, 8)} from kind:1 event`));
+        logger.info(chalk.green(`Created new conversation ${shortenConversationId(conversation.id)} from kind:1 event`));
         activeSpan?.addEvent("conversation.resolved", {
             "resolution.type": "created_new",
             "conversation.id": shortenConversationId(conversation.id),
@@ -146,7 +146,7 @@ export class ConversationResolver {
 
         logger.info(
             chalk.yellow(
-                `Fetching conversation thread for orphaned reply, target: ${replyTargetId.substring(0, 8)}`
+                `Fetching conversation thread for orphaned reply, target: ${shortenEventId(replyTargetId)}`
             )
         );
 
@@ -167,7 +167,7 @@ export class ConversationResolver {
         const rootEnvelope = rootEvent ? inboundAdapter.toEnvelope(rootEvent) : undefined;
 
         if (!rootEnvelope) {
-            logger.warn(chalk.yellow(`Could not fetch target event ${replyTargetId.substring(0, 8)} from network`));
+            logger.warn(chalk.yellow(`Could not fetch target event ${shortenEventId(replyTargetId)} from network`));
             activeSpan?.addEvent("conversation.fetch_failed", {
                 reason: "target_event_not_found",
                 reply_target_id: replyTargetId,

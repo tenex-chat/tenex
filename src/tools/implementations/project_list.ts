@@ -3,7 +3,7 @@ import { getDaemon } from "@/daemon";
 import { agentStorage } from "@/agents/AgentStorage";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { shortenPubkey } from "@/utils/conversation-id";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -80,7 +80,7 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
             const isPM = agent.pubkey === pmPubkey;
             agents.push({
                 slug: agent.slug,
-                pubkey: agent.pubkey.substring(0, PREFIX_LENGTH),
+                pubkey: shortenPubkey(agent.pubkey),
                 role: agent.role,
                 ...(isPM && { isPM: true }),
             });
@@ -126,7 +126,7 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
             const pubkey = (await signer.user()).pubkey;
             agents.push({
                 slug: storedAgent.slug,
-                pubkey: pubkey.substring(0, PREFIX_LENGTH),
+                pubkey: shortenPubkey(pubkey),
                 role: storedAgent.role,
             });
         }
@@ -162,7 +162,7 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
             const pubkey = (await signer.user()).pubkey;
             agents.push({
                 slug: storedAgent.slug,
-                pubkey: pubkey.substring(0, PREFIX_LENGTH),
+                pubkey: shortenPubkey(pubkey),
                 role: storedAgent.role,
             });
         }
@@ -198,11 +198,7 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
 
 export function createProjectListTool(context: ToolExecutionContext): AISdkTool {
     const coreTool = tool({
-        description:
-            "List ALL known projects with their agents and running status. " +
-            "For each project shows: id, title, description, repository, isRunning flag, and all agents. " +
-            "For each agent shows: slug, pubkey (shortened), role, and isPM (only if true). " +
-            "Includes both running and non-running projects discovered by the daemon.",
+        description: "List ALL known projects with their agents and running status.",
         inputSchema: projectListSchema,
         execute: async () => {
             return await executeProjectList(context);
