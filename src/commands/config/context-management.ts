@@ -1,10 +1,5 @@
 import {
     DEFAULT_ANTHROPIC_PROMPT_CACHING_TTL,
-    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_AT_LEAST_INPUT_TOKENS,
-    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_TOOL_INPUTS,
-    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_EXCLUDE_TOOLS,
-    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_KEEP_TOOL_USES,
-    DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_TRIGGER_TOOL_USES,
     DEFAULT_COMPACTION_THRESHOLD_PERCENT,
     DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT,
     DEFAULT_WARNING_THRESHOLD_PERCENT,
@@ -23,7 +18,6 @@ export const contextManagementCommand = new Command("context-management")
         const tenexConfig = await config.loadTenexConfig(globalPath);
         const contextManagement = tenexConfig.contextManagement || {};
         const anthropicPromptCaching = contextManagement.anthropicPromptCaching || {};
-        const anthropicServerToolEditing = anthropicPromptCaching.serverToolEditing || {};
 
         const { action } = await inquirer.prompt([{
             type: "select",
@@ -128,79 +122,6 @@ export const contextManagementCommand = new Command("context-management")
                 default: anthropicPromptCaching.ttl ?? DEFAULT_ANTHROPIC_PROMPT_CACHING_TTL,
                 theme: inquirerTheme,
             },
-            {
-                type: "confirm",
-                name: "serverToolEditingEnabled",
-                message: "Enable Anthropic server-side tool editing:",
-                default: (
-                    anthropicServerToolEditing.enabled
-                    ?? anthropicPromptCaching.clearToolUses
-                ) !== false,
-            },
-            {
-                type: "input",
-                name: "triggerToolUses",
-                message: "Anthropic tool-edit trigger after N tool uses:",
-                default: (
-                    anthropicServerToolEditing.triggerToolUses
-                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_TRIGGER_TOOL_USES
-                ),
-                validate: (value) => {
-                    const num = Number.parseInt(value, 10);
-                    if (Number.isNaN(num) || num <= 0) {
-                        return "Please enter a positive integer";
-                    }
-                    return true;
-                },
-            },
-            {
-                type: "input",
-                name: "keepToolUses",
-                message: "Anthropic tool-edit keep count:",
-                default: (
-                    anthropicServerToolEditing.keepToolUses
-                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_KEEP_TOOL_USES
-                ),
-                validate: (value) => {
-                    const num = Number.parseInt(value, 10);
-                    if (Number.isNaN(num) || num < 0) {
-                        return "Please enter zero or a positive integer";
-                    }
-                    return true;
-                },
-            },
-            {
-                type: "input",
-                name: "clearAtLeastInputTokens",
-                message: "Anthropic tool-edit minimum cleared input tokens:",
-                default: (
-                    anthropicServerToolEditing.clearAtLeastInputTokens
-                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_AT_LEAST_INPUT_TOKENS
-                ),
-                validate: (value) => {
-                    const num = Number.parseInt(value, 10);
-                    if (Number.isNaN(num) || num < 0) {
-                        return "Please enter zero or a positive integer";
-                    }
-                    return true;
-                },
-            },
-            {
-                type: "confirm",
-                name: "clearToolInputs",
-                message: "Clear tool inputs during Anthropic server-side editing:",
-                default: anthropicServerToolEditing.clearToolInputs
-                    ?? DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_CLEAR_TOOL_INPUTS,
-            },
-            {
-                type: "input",
-                name: "excludeTools",
-                message: "Anthropic tool-edit excluded tools (comma-separated):",
-                default: (
-                    anthropicServerToolEditing.excludeTools
-                    ?? [...DEFAULT_ANTHROPIC_SERVER_TOOL_EDITING_EXCLUDE_TOOLS]
-                ).join(", "),
-            },
         ]);
 
         const strategyAnswers = await inquirer.prompt([
@@ -259,20 +180,6 @@ export const contextManagementCommand = new Command("context-management")
             compactionThresholdPercent: Number.parseInt(answers.compactionThresholdPercent, 10),
             anthropicPromptCaching: {
                 ttl: anthropicAnswers.ttl,
-                serverToolEditing: {
-                    enabled: anthropicAnswers.serverToolEditingEnabled,
-                    triggerToolUses: Number.parseInt(anthropicAnswers.triggerToolUses, 10),
-                    keepToolUses: Number.parseInt(anthropicAnswers.keepToolUses, 10),
-                    clearAtLeastInputTokens: Number.parseInt(
-                        anthropicAnswers.clearAtLeastInputTokens,
-                        10
-                    ),
-                    clearToolInputs: anthropicAnswers.clearToolInputs,
-                    excludeTools: anthropicAnswers.excludeTools
-                        .split(",")
-                        .map((tool: string) => tool.trim())
-                        .filter((tool: string) => tool.length > 0),
-                },
             },
             strategies: {
                 anthropicPromptCaching: strategyAnswers.anthropicPromptCaching,

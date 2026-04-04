@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { ConfigService } from "@/services/ConfigService";
 import { TenexConfigSchema } from "../types";
 
 describe("Analysis telemetry config schema", () => {
@@ -35,5 +38,32 @@ describe("Analysis telemetry config schema", () => {
         });
 
         expect(result.success).toBe(false);
+    });
+
+    it("rejects removed Anthropic server-editing keys with a clear error", async () => {
+        const testDir = path.join("/tmp", `tenex-config-test-${Date.now()}`);
+        const config = new ConfigService();
+        try {
+            await mkdir(testDir, { recursive: true });
+            await writeFile(
+                path.join(testDir, "config.json"),
+                JSON.stringify({
+                    contextManagement: {
+                        anthropicPromptCaching: {
+                            ttl: "1h",
+                            serverToolEditing: {
+                                enabled: true,
+                            },
+                        },
+                    },
+                })
+            );
+
+            await expect(config.loadTenexConfig(testDir)).rejects.toThrow(
+                "Delete it from config.json."
+            );
+        } finally {
+            await rm(testDir, { recursive: true, force: true });
+        }
     });
 });

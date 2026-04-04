@@ -39,15 +39,6 @@ export interface TenexConfig {
         compactionThresholdPercent?: number; // Managed-context utilization percent for automatic compaction (default: 90)
         anthropicPromptCaching?: {
             ttl?: "5m" | "1h"; // Anthropic cache-control TTL (default: 1h)
-            clearToolUses?: boolean; // Legacy alias for serverToolEditing.enabled
-            serverToolEditing?: {
-                enabled?: boolean; // Enable Anthropic server-side tool editing (default: true)
-                triggerToolUses?: number; // Trigger clear_tool_uses after this many tool uses (default: 25)
-                keepToolUses?: number; // Keep this many recent tool uses after clearing (default: 10)
-                clearAtLeastInputTokens?: number; // Require reclaiming at least this many input tokens (default: 4000)
-                clearToolInputs?: boolean; // Clear tool inputs along with tool uses (default: true)
-                excludeTools?: string[]; // Tool names to exempt from Anthropic clearing
-            };
         };
         strategies?: {
             anthropicPromptCaching?: boolean; // Enable AnthropicPromptCachingStrategy (default: true)
@@ -124,6 +115,29 @@ export interface TenexConfig {
     projectNaddr?: string;
 }
 
+const AnthropicPromptCachingSchema = z
+    .object({
+        ttl: z.enum(["5m", "1h"]).optional(),
+    })
+    .passthrough()
+    .superRefine((value, ctx) => {
+        for (const key of Object.keys(value)) {
+            if (key === "ttl") {
+                continue;
+            }
+
+            const suffix = key === "clearToolUses" || key === "serverToolEditing"
+                ? `contextManagement.anthropicPromptCaching.${key} was removed. Delete it from config.json.`
+                : `contextManagement.anthropicPromptCaching.${key} is not supported. Delete it from config.json.`;
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: suffix,
+                path: [key],
+            });
+        }
+    })
+    .transform((value) => (value.ttl === undefined ? {} : { ttl: value.ttl }));
+
 export const TenexConfigSchema = z.object({
     whitelistedPubkeys: z.array(z.string()).optional(),
     whitelistedIdentities: z.array(z.string()).optional(),
@@ -150,22 +164,7 @@ export const TenexConfigSchema = z.object({
             forceScratchpadThresholdPercent: z.number().min(0).max(100).optional(),
             utilizationWarningThresholdPercent: z.number().min(0).max(100).optional(),
             compactionThresholdPercent: z.number().min(0).max(100).optional(),
-            anthropicPromptCaching: z
-                .object({
-                    ttl: z.enum(["5m", "1h"]).optional(),
-                    clearToolUses: z.boolean().optional(),
-                    serverToolEditing: z
-                        .object({
-                            enabled: z.boolean().optional(),
-                            triggerToolUses: z.number().int().positive().optional(),
-                            keepToolUses: z.number().int().min(0).optional(),
-                            clearAtLeastInputTokens: z.number().int().min(0).optional(),
-                            clearToolInputs: z.boolean().optional(),
-                            excludeTools: z.array(z.string()).optional(),
-                        })
-                        .optional(),
-                })
-                .optional(),
+            anthropicPromptCaching: AnthropicPromptCachingSchema.optional(),
             strategies: z
                 .object({
                     anthropicPromptCaching: z.boolean().optional(),

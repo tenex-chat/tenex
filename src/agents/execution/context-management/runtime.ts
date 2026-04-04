@@ -23,7 +23,6 @@ import {
 } from "ai-sdk-context-management";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type SkillToolPermissions } from "@/services/skill";
@@ -188,7 +187,6 @@ function createConversationContextManagementRuntime(options: {
         settings.tokenBudget,
         requestEstimator
     );
-    const isAnthropicProvider = options.providerId === PROVIDER_IDS.ANTHROPIC;
     const scratchpadEnabled = options.scratchpadAvailable;
 
     const strategies: ContextManagementStrategy[] = [];
@@ -255,7 +253,7 @@ function createConversationContextManagementRuntime(options: {
         );
     }
 
-    if (!isAnthropicProvider && settings.strategies.toolResultDecay) {
+    if (settings.strategies.toolResultDecay) {
         strategies.push(
             new ToolResultDecayStrategy({
                 estimator: managedBudgetProfile.estimator,
@@ -303,7 +301,7 @@ function createConversationContextManagementRuntime(options: {
     if (settings.strategies.anthropicPromptCaching) {
         strategies.push(new AnthropicPromptCachingStrategy({
             ttl: settings.anthropicPromptCaching.ttl,
-            serverToolEditing: settings.anthropicPromptCaching.serverToolEditing,
+            serverToolEditing: false,
         }));
     }
 

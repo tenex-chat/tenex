@@ -221,9 +221,7 @@ function buildAnthropicPromptCachingSummary(
         return `Applied Anthropic cache metadata at ${formatCount(payload.sharedPrefixMessageCount, "shared message")}.`;
     }
 
-    return payload.clearToolUsesEnabled
-        ? "Enabled Anthropic clear-tool-uses without a shared-prefix breakpoint."
-        : "Skipped Anthropic prompt caching.";
+    return "Skipped Anthropic prompt caching.";
 }
 
 function buildCompactionSummary(payload: Extract<ContextManagementStrategyPayload, { kind: "compaction-tool" }> | undefined): string {
@@ -365,7 +363,6 @@ function buildDerivedTelemetryAttributes(
                 case "anthropic-prompt-caching":
                     attributes["context_management.shared_prefix_message_count"] = payload.sharedPrefixMessageCount;
                     attributes["context_management.shared_prefix_breakpoint_applied"] = payload.breakpointApplied;
-                    attributes["context_management.anthropic_clear_tool_uses_enabled"] = payload.clearToolUsesEnabled;
                     break;
                 case "compaction-tool":
                     addAttribute(

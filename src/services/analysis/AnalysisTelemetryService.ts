@@ -7,7 +7,6 @@ import type { ModelMessage, Tool as CoreTool, ToolChoice } from "ai";
 import type {
     LLMAnalysisHooks,
     LLMAnalysisRequestHandle,
-    LLMMetadata,
     LLMRequestAnalysisSeed,
     LanguageModelUsageWithCostUsd,
 } from "@/llm/types";
@@ -476,9 +475,8 @@ export class AnalysisTelemetryService {
                     context_runtime_estimated_input_tokens_saved,
                     shared_prefix_breakpoint_applied,
                     shared_prefix_message_count,
-                    shared_prefix_last_message_index,
-                    anthropic_clear_tool_uses_enabled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    shared_prefix_last_message_index
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(request_id) DO UPDATE SET
                     project_id = excluded.project_id,
                     conversation_id = excluded.conversation_id,
@@ -508,7 +506,7 @@ export class AnalysisTelemetryService {
                     shared_prefix_breakpoint_applied = excluded.shared_prefix_breakpoint_applied,
                     shared_prefix_message_count = excluded.shared_prefix_message_count,
                     shared_prefix_last_message_index = excluded.shared_prefix_last_message_index,
-                    anthropic_clear_tool_uses_enabled = excluded.anthropic_clear_tool_uses_enabled
+                    api_key_identity = excluded.api_key_identity
             `).run(
                 requestId,
                 context.projectId ?? null,
@@ -533,12 +531,7 @@ export class AnalysisTelemetryService {
                         ? 1
                         : 0,
                 promptCachingDiagnostics?.sharedPrefixMessageCount ?? null,
-                promptCachingDiagnostics?.sharedPrefixLastMessageIndex ?? null,
-                promptCachingDiagnostics?.anthropicClearToolUsesEnabled === undefined
-                    ? null
-                    : promptCachingDiagnostics.anthropicClearToolUsesEnabled
-                        ? 1
-                        : 0
+                promptCachingDiagnostics?.sharedPrefixLastMessageIndex ?? null
             );
 
             db.prepare("DELETE FROM llm_request_messages WHERE request_id = ?").run(requestId);
@@ -606,7 +599,8 @@ export class AnalysisTelemetryService {
             requestId,
             telemetryMetadata,
             reportSuccess: async ({ completedAt, usage, finishReason, metadata }) => {
-                this.finalizeRequestSuccess(requestId, completedAt, usage, finishReason, metadata);
+                void metadata;
+                this.finalizeRequestSuccess(requestId, completedAt, usage, finishReason);
             },
             reportError: async ({ completedAt, error }) => {
                 this.finalizeRequestError(requestId, completedAt, error);
@@ -823,8 +817,7 @@ export class AnalysisTelemetryService {
         requestId: string,
         completedAt: number,
         usage: LanguageModelUsageWithCostUsd | undefined,
-        finishReason: string | undefined,
-        metadata?: LLMMetadata
+        finishReason: string | undefined
     ): void {
         if (!this.isEnabled()) {
             return;
@@ -848,12 +841,7 @@ export class AnalysisTelemetryService {
                     output_reasoning_tokens = ?,
                     cached_input_tokens = ?,
                     reasoning_tokens = ?,
-                    cost_usd = ?,
-                    provider_context_edit_count = ?,
-                    provider_context_cleared_input_tokens = ?,
-                    provider_context_cleared_tool_uses = ?,
-                    provider_context_cleared_thinking_turns = ?,
-                    provider_context_edits_json = ?
+                    cost_usd = ?
                 WHERE request_id = ?
             `).run(
                 completedAt,
@@ -870,11 +858,6 @@ export class AnalysisTelemetryService {
                 usage?.cachedInputTokens ?? null,
                 usage?.reasoningTokens ?? null,
                 usage?.costUsd ?? null,
-                metadata?.providerContextEditCount ?? null,
-                metadata?.providerContextClearedInputTokens ?? null,
-                metadata?.providerContextClearedToolUses ?? null,
-                metadata?.providerContextClearedThinkingTurns ?? null,
-                metadata?.providerContextEditsJson ?? null,
                 requestId
             );
         } catch (error) {

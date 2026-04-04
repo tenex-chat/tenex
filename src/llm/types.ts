@@ -67,11 +67,6 @@ export interface LLMMetadata {
     toolFileChangeCalls?: number;
     toolMcpCalls?: number;
     toolOtherCalls?: number;
-    providerContextEditCount?: number;
-    providerContextClearedInputTokens?: number;
-    providerContextClearedToolUses?: number;
-    providerContextClearedThinkingTurns?: number;
-    providerContextEditsJson?: string;
 }
 
 /**
@@ -90,7 +85,6 @@ export interface LLMPromptCachingDiagnostics {
     sharedPrefixBreakpointApplied?: boolean;
     sharedPrefixMessageCount?: number;
     sharedPrefixLastMessageIndex?: number;
-    anthropicClearToolUsesEnabled?: boolean;
 }
 
 export interface LLMRequestAnalysisSeed {

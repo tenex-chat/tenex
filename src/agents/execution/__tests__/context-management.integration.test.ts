@@ -520,7 +520,7 @@ describe("TENEX context management integration", () => {
         expect(transformedJson).toContain("\"toolCallId\":\"call-11\"");
     });
 
-    test("anthropic stack keeps stale tool results raw and exposes prompt-stability tracking", async () => {
+    test("anthropic stack decays stale tool results locally and keeps prompt-stability tracking", async () => {
         setContextManagementConfig({
             tokenBudget: 12000,
             forceScratchpadThresholdPercent: 100,
@@ -539,7 +539,7 @@ describe("TENEX context management integration", () => {
         });
 
         const prompt: Array<Record<string, unknown>> = [{ role: "system", content: "You are helpful." }];
-        for (let index = 1; index <= 4; index++) {
+        for (let index = 1; index <= 11; index++) {
             prompt.push({
                 role: "assistant",
                 content: [
@@ -560,7 +560,7 @@ describe("TENEX context management integration", () => {
                         toolName: "fs_read",
                         output: {
                             type: "text",
-                            value: `result-${index} ${"x".repeat(8000)}`,
+                            value: `result-${index} ${"x".repeat(index === 1 ? 12000 : 4000)}`,
                         },
                     },
                 ],
@@ -577,20 +577,10 @@ describe("TENEX context management integration", () => {
         });
 
         const transformedJson = JSON.stringify(prepared?.messages);
-        expect(transformedJson).not.toContain("use fs_read(tool:");
-        expect(prepared?.providerOptions).toEqual(
-            expect.objectContaining({
-                anthropic: expect.objectContaining({
-                    contextManagement: expect.objectContaining({
-                        edits: expect.arrayContaining([
-                            expect.objectContaining({
-                                type: "clear_tool_uses_20250919",
-                            }),
-                        ]),
-                    }),
-                }),
-            })
-        );
+        expect(transformedJson).toContain("use fs_read(tool:");
+        expect(transformedJson).toContain("[fs_read was used, id: call-1");
+        expect(transformedJson).toContain("\"toolCallId\":\"call-11\"");
+        expect(prepared?.providerOptions).toBeUndefined();
     });
 
     test("anthropic provider exposes scratchpad when the strategy is enabled", async () => {
@@ -635,13 +625,11 @@ describe("TENEX context management integration", () => {
         expect(JSON.stringify(prepared?.messages)).toContain("Your scratchpad (executor):");
     });
 
-    test("anthropic prompt caching can disable server-side tool editing", async () => {
+    test("anthropic prompt caching applies cache-control metadata without provider-side edits", async () => {
         setContextManagementConfig({
             forceScratchpadThresholdPercent: 100,
             anthropicPromptCaching: {
-                serverToolEditing: {
-                    enabled: false,
-                },
+                ttl: "5m",
             },
         });
 
@@ -704,109 +692,6 @@ describe("TENEX context management integration", () => {
         );
 
         expect(prepared?.providerOptions).toBeUndefined();
-        expect(prepared?.messages[2]?.providerOptions).toEqual(
-            expect.objectContaining({
-                anthropic: expect.objectContaining({
-                    cacheControl: {
-                        type: "ephemeral",
-                        ttl: "1h",
-                    },
-                }),
-            })
-        );
-    });
-
-    test("anthropic prompt caching applies configured server-side tool editing knobs", async () => {
-        setContextManagementConfig({
-            forceScratchpadThresholdPercent: 100,
-            anthropicPromptCaching: {
-                ttl: "5m",
-                serverToolEditing: {
-                    triggerToolUses: 40,
-                    keepToolUses: 12,
-                    clearAtLeastInputTokens: 8000,
-                    clearToolInputs: false,
-                    excludeTools: ["delegate", "shell"],
-                },
-            },
-        });
-
-        const agent = {
-            name: "executor",
-            slug: "executor",
-            pubkey: AGENT_PUBKEY,
-        } as AgentInstance;
-        const contextManagement = createExecutionContextManagement({
-            providerId: "anthropic",
-            conversationId: CONVERSATION_ID,
-            agent,
-            conversationStore: store,
-        });
-
-        await prepareManagedRequest(
-            contextManagement,
-            [
-                { role: "system", content: "You are helpful." },
-                {
-                    role: "user",
-                    content: [{ type: "text", text: "Shared repository context." }],
-                },
-                {
-                    role: "assistant",
-                    content: [{ type: "text", text: "I already reviewed the shared setup." }],
-                },
-                {
-                    role: "user",
-                    content: [{ type: "text", text: "Review parser.ts." }],
-                },
-            ],
-            {
-                provider: "anthropic",
-                modelId: "claude-sonnet-4-20250514",
-            }
-        );
-
-        const prepared = await prepareManagedRequest(
-            contextManagement,
-            [
-                { role: "system", content: "You are helpful." },
-                {
-                    role: "user",
-                    content: [{ type: "text", text: "Shared repository context." }],
-                },
-                {
-                    role: "assistant",
-                    content: [{ type: "text", text: "I already reviewed the shared setup." }],
-                },
-                {
-                    role: "user",
-                    content: [{ type: "text", text: "Review tokenizer.ts." }],
-                },
-            ],
-            {
-                provider: "anthropic",
-                modelId: "claude-sonnet-4-20250514",
-            }
-        );
-
-        expect(prepared?.providerOptions).toEqual(
-            expect.objectContaining({
-                anthropic: expect.objectContaining({
-                    contextManagement: expect.objectContaining({
-                        edits: expect.arrayContaining([
-                            expect.objectContaining({
-                                type: "clear_tool_uses_20250919",
-                                trigger: { type: "tool_uses", value: 40 },
-                                keep: { type: "tool_uses", value: 12 },
-                                clearAtLeast: { type: "input_tokens", value: 8000 },
-                                clearToolInputs: false,
-                                excludeTools: ["delegate", "shell"],
-                            }),
-                        ]),
-                    }),
-                }),
-            })
-        );
         expect(prepared?.messages[2]?.providerOptions).toEqual(
             expect.objectContaining({
                 anthropic: expect.objectContaining({

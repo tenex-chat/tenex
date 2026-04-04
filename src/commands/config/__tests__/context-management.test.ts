@@ -52,12 +52,6 @@ describe("contextManagementCommand", () => {
             },
             {
                 ttl: "5m",
-                serverToolEditingEnabled: false,
-                triggerToolUses: "40",
-                keepToolUses: "12",
-                clearAtLeastInputTokens: "8000",
-                clearToolInputs: false,
-                excludeTools: "delegate, shell",
             },
             {
                 anthropicPromptCaching: true,
@@ -84,14 +78,6 @@ describe("contextManagementCommand", () => {
                     compactionThresholdPercent: 92,
                     anthropicPromptCaching: {
                         ttl: "5m",
-                        serverToolEditing: {
-                            enabled: false,
-                            triggerToolUses: 40,
-                            keepToolUses: 12,
-                            clearAtLeastInputTokens: 8000,
-                            clearToolInputs: false,
-                            excludeTools: ["delegate", "shell"],
-                        },
                     },
                     strategies: expect.objectContaining({
                         anthropicPromptCaching: true,

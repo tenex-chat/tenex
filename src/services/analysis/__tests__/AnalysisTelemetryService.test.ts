@@ -337,7 +337,6 @@ describe("Analysis telemetry services", () => {
                     sharedPrefixBreakpointApplied: true,
                     sharedPrefixMessageCount: 3,
                     sharedPrefixLastMessageIndex: 2,
-                    anthropicClearToolUsesEnabled: true,
                 },
             },
             baseContext,
@@ -452,7 +451,6 @@ describe("Analysis telemetry services", () => {
                 shared_prefix_breakpoint_applied,
                 shared_prefix_message_count,
                 shared_prefix_last_message_index,
-                anthropic_clear_tool_uses_enabled,
                 input_cache_write_tokens
             FROM llm_requests
             ORDER BY started_at_ms
@@ -472,7 +470,6 @@ describe("Analysis telemetry services", () => {
                 shared_prefix_breakpoint_applied: 1,
                 shared_prefix_message_count: 3,
                 shared_prefix_last_message_index: 2,
-                anthropic_clear_tool_uses_enabled: 1,
                 input_cache_write_tokens: 70,
             },
             {
@@ -489,7 +486,6 @@ describe("Analysis telemetry services", () => {
                 shared_prefix_breakpoint_applied: null,
                 shared_prefix_message_count: null,
                 shared_prefix_last_message_index: null,
-                anthropic_clear_tool_uses_enabled: null,
                 input_cache_write_tokens: null,
             },
             {
@@ -506,7 +502,6 @@ describe("Analysis telemetry services", () => {
                 shared_prefix_breakpoint_applied: null,
                 shared_prefix_message_count: null,
                 shared_prefix_last_message_index: null,
-                anthropic_clear_tool_uses_enabled: null,
                 input_cache_write_tokens: null,
             },
         ]);
@@ -567,7 +562,7 @@ describe("Analysis telemetry services", () => {
         db.close(false);
     });
 
-    test("persists compaction analytics fields and provider context edit metadata", async () => {
+    test("persists compaction analytics fields without provider-side context edit metadata", async () => {
         const startedAt = Date.now();
         const baseContext = {
             projectId: "project-compaction",
@@ -631,60 +626,9 @@ describe("Analysis telemetry services", () => {
                 outputTokens: 20,
                 totalTokens: 100,
             },
-            metadata: {
-                providerContextEditCount: 2,
-                providerContextClearedInputTokens: 320,
-                providerContextClearedToolUses: 3,
-                providerContextClearedThinkingTurns: 1,
-                providerContextEditsJson: JSON.stringify([
-                    {
-                        type: "clear_tool_uses",
-                        clearedInputTokens: 320,
-                        clearedToolUses: 3,
-                        clearedThinkingTurns: 1,
-                    },
-                    {
-                        type: "clear_thinking",
-                        clearedInputTokens: 0,
-                        clearedToolUses: 0,
-                        clearedThinkingTurns: 0,
-                    },
-                ]),
-            },
         });
 
         const db = createDb(dbPath, true);
-
-        const requestRow = db.prepare(`
-            SELECT
-                provider_context_edit_count,
-                provider_context_cleared_input_tokens,
-                provider_context_cleared_tool_uses,
-                provider_context_cleared_thinking_turns,
-                provider_context_edits_json
-            FROM llm_requests
-            WHERE request_id = ?
-        `).get("request-compaction") as Record<string, number | string | null>;
-        expect(requestRow).toEqual({
-            provider_context_edit_count: 2,
-            provider_context_cleared_input_tokens: 320,
-            provider_context_cleared_tool_uses: 3,
-            provider_context_cleared_thinking_turns: 1,
-            provider_context_edits_json: JSON.stringify([
-                {
-                    type: "clear_tool_uses",
-                    clearedInputTokens: 320,
-                    clearedToolUses: 3,
-                    clearedThinkingTurns: 1,
-                },
-                {
-                    type: "clear_thinking",
-                    clearedInputTokens: 0,
-                    clearedToolUses: 0,
-                    clearedThinkingTurns: 0,
-                },
-            ]),
-        });
 
         const contextRow = db.prepare(`
             SELECT
@@ -713,7 +657,25 @@ describe("Analysis telemetry services", () => {
 
     test("aggregates canonical runtime savings separately from prepared prompt savings", async () => {
         const baseTime = Date.now();
-        const records = [
+        const records: Array<{
+            requestId: string;
+            provider: string;
+            model: string;
+            projectId: string;
+            agentSlug: string;
+            agentId: string;
+            startedAt: number;
+            usage: {
+                inputTokens: number;
+                outputTokens: number;
+                totalTokens: number;
+            };
+            runtimeBefore: number;
+            runtimeAfter: number;
+            preparedBefore: number;
+            preparedAfter: number;
+            strategy: string;
+        }> = [
             {
                 requestId: "req-a",
                 provider: "anthropic",
@@ -759,7 +721,7 @@ describe("Analysis telemetry services", () => {
                 preparedAfter: 30,
                 strategy: "scratchpad",
             },
-        ] as const;
+        ];
 
         for (const record of records) {
             recordRuntimeComplete({
@@ -1081,12 +1043,6 @@ describe("Analysis telemetry services", () => {
                 "shared_prefix_breakpoint_applied",
                 "shared_prefix_message_count",
                 "shared_prefix_last_message_index",
-                "anthropic_clear_tool_uses_enabled",
-                "provider_context_edit_count",
-                "provider_context_cleared_input_tokens",
-                "provider_context_cleared_tool_uses",
-                "provider_context_cleared_thinking_turns",
-                "provider_context_edits_json",
             ])
         );
 
@@ -1138,7 +1094,7 @@ describe("Analysis telemetry services", () => {
             FROM analysis_meta
             WHERE key = ?
         `).get("schema_version") as { value: string };
-        expect(schemaVersion.value).toBe("5");
+        expect(schemaVersion.value).toBe("6");
 
         db.close(false);
     });

@@ -132,22 +132,6 @@ export function createFinishHandler(
                 metadata,
             });
 
-            if (metadata?.providerContextEditCount !== undefined) {
-                activeSpan?.setAttribute(
-                    "llm.provider_context_edit_count",
-                    metadata.providerContextEditCount
-                );
-                activeSpan?.addEvent("llm.provider_context_edits", {
-                    "llm.provider_context_edit_count": metadata.providerContextEditCount,
-                    "llm.provider_context_cleared_input_tokens":
-                        metadata.providerContextClearedInputTokens ?? 0,
-                    "llm.provider_context_cleared_tool_uses":
-                        metadata.providerContextClearedToolUses ?? 0,
-                    "llm.provider_context_cleared_thinking_turns":
-                        metadata.providerContextClearedThinkingTurns ?? 0,
-                });
-            }
-
             // DIAGNOSTIC: Log right before emitting complete event
             const beforeEmitTime = Date.now();
             activeSpan?.addEvent("llm.complete_will_emit", {
