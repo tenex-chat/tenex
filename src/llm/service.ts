@@ -35,6 +35,7 @@ import type {
     LLMServiceEventMap,
 } from "./types";
 import { isRetryableKeyError } from "./retryable-key-errors";
+import { getInvalidToolCallsFromStep } from "./utils/tool-errors";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { extractLastStepUsage } from "./utils/usage";
 
@@ -703,8 +704,19 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     stepModelIdentity.provider,
                     stepResult.providerMetadata as Record<string, unknown> | undefined
                 );
+                const completedAt = Date.now();
+                const invalidToolCalls = getInvalidToolCallsFromStep(
+                    stepResult,
+                    stepResult.stepNumber
+                );
+                if (invalidToolCalls.length > 0) {
+                    await handle.reportInvalidToolCalls({
+                        invalidToolCalls,
+                        recordedAt: completedAt,
+                    });
+                }
                 await handle.reportSuccess({
-                    completedAt: Date.now(),
+                    completedAt,
                     usage,
                     finishReason: stepResult.finishReason,
                     metadata,

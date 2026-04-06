@@ -1,5 +1,5 @@
 ---
-name: MCP Resources
+name: mcp
 description: Discover, read, and subscribe to MCP server resources
 tools:
   - mcp_list_resources

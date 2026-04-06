@@ -12,6 +12,7 @@ function createBunDatabase(dbPath: string): SqliteDatabase {
 
 type UsageGroupKey = "project" | "provider" | "agent" | "apiKey";
 type ContextGroupKey = "project" | "provider" | "agent" | "strategy";
+type InvalidToolCallGroupKey = "project" | "provider" | "agent" | "model" | "tool" | "errorType";
 
 const usageGroupColumns: Record<UsageGroupKey, { select: string; group: string }> = {
     project: {
@@ -48,6 +49,33 @@ const contextGroupColumns: Record<ContextGroupKey, { select: string; group: stri
     strategy: {
         select: "strategy_name AS strategyName",
         group: "strategy_name",
+    },
+};
+
+const invalidToolCallGroupColumns: Record<InvalidToolCallGroupKey, { select: string; group: string }> = {
+    project: {
+        select: "project_id AS projectId",
+        group: "project_id",
+    },
+    provider: {
+        select: "provider AS provider",
+        group: "provider",
+    },
+    agent: {
+        select: "agent_slug AS agentSlug",
+        group: "agent_slug",
+    },
+    model: {
+        select: "model AS model",
+        group: "model",
+    },
+    tool: {
+        select: "tool_name AS toolName",
+        group: "tool_name",
+    },
+    errorType: {
+        select: "error_type AS errorType",
+        group: "error_type",
     },
 };
 
@@ -225,6 +253,116 @@ export class AnalysisQueryService {
             WHERE ${clauses.join(" AND ")}
             ${groupByClause}
             ORDER BY rateLimitCount DESC
+        `).all(...values) as Array<Record<string, number | string | null>>;
+    }
+
+    public getInvalidToolCallCounts(options: {
+        since: number;
+        until: number;
+        groupBy: InvalidToolCallGroupKey[];
+        projectIds?: string[];
+        providers?: string[];
+        models?: string[];
+        agentSlugs?: string[];
+        toolNames?: string[];
+        errorTypes?: string[];
+        includeUnscopedProjects?: boolean;
+    }): Array<Record<string, number | string | null>> {
+        const db = this.ensureDb();
+        if (!db) {
+            return [];
+        }
+
+        const clauses = [
+            "created_at_ms >= ?",
+            "created_at_ms <= ?",
+        ];
+        const values: Array<string | number> = [options.since, options.until];
+
+        addInClause(clauses, values, "project_id", options.projectIds);
+        addInClause(clauses, values, "provider", options.providers);
+        addInClause(clauses, values, "model", options.models);
+        addInClause(clauses, values, "agent_slug", options.agentSlugs);
+        addInClause(clauses, values, "tool_name", options.toolNames);
+        addInClause(clauses, values, "error_type", options.errorTypes);
+
+        if (options.groupBy.includes("project") && !options.includeUnscopedProjects) {
+            clauses.push("project_id IS NOT NULL");
+        }
+
+        const selectGroups = options.groupBy.map((key) => invalidToolCallGroupColumns[key].select);
+        const groupColumns = options.groupBy.map((key) => invalidToolCallGroupColumns[key].group);
+        const selectPrefix = selectGroups.length > 0 ? `${selectGroups.join(", ")}, ` : "";
+        const groupByClause = groupColumns.length > 0 ? `GROUP BY ${groupColumns.join(", ")}` : "";
+
+        return db.prepare(`
+            SELECT
+                ${selectPrefix}
+                COUNT(*) AS invalidToolCallCount
+            FROM analysis_invalid_tool_call_rows
+            WHERE ${clauses.join(" AND ")}
+            ${groupByClause}
+            ORDER BY invalidToolCallCount DESC
+        `).all(...values) as Array<Record<string, number | string | null>>;
+    }
+
+    public listInvalidToolCalls(options: {
+        since: number;
+        until: number;
+        projectIds?: string[];
+        providers?: string[];
+        models?: string[];
+        agentSlugs?: string[];
+        toolNames?: string[];
+        errorTypes?: string[];
+        limit?: number;
+    }): Array<Record<string, number | string | null>> {
+        const db = this.ensureDb();
+        if (!db) {
+            return [];
+        }
+
+        const clauses = [
+            "created_at_ms >= ?",
+            "created_at_ms <= ?",
+        ];
+        const values: Array<string | number> = [options.since, options.until];
+
+        addInClause(clauses, values, "project_id", options.projectIds);
+        addInClause(clauses, values, "provider", options.providers);
+        addInClause(clauses, values, "model", options.models);
+        addInClause(clauses, values, "agent_slug", options.agentSlugs);
+        addInClause(clauses, values, "tool_name", options.toolNames);
+        addInClause(clauses, values, "error_type", options.errorTypes);
+
+        const limit = options.limit ?? 100;
+        values.push(limit);
+
+        return db.prepare(`
+            SELECT
+                request_id AS requestId,
+                project_id AS projectId,
+                conversation_id AS conversationId,
+                agent_slug AS agentSlug,
+                agent_id AS agentId,
+                provider,
+                model,
+                api_key_identity AS apiKeyIdentity,
+                operation_kind AS operationKind,
+                started_at_ms AS startedAt,
+                completed_at_ms AS completedAt,
+                step_number AS stepNumber,
+                tool_call_index AS toolCallIndex,
+                tool_name AS toolName,
+                tool_call_id AS toolCallId,
+                error_type AS errorType,
+                error_message AS errorMessage,
+                input_json AS inputJson,
+                created_at_ms AS createdAt
+            FROM analysis_invalid_tool_call_rows
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY created_at_ms DESC, request_id DESC, step_number DESC, tool_call_index DESC
+            LIMIT ?
         `).all(...values) as Array<Record<string, number | string | null>>;
     }
 

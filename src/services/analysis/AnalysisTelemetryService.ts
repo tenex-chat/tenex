@@ -5,6 +5,7 @@ import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provide
 import { createDefaultPromptTokenEstimator, type ContextManagementTelemetryEvent } from "ai-sdk-context-management";
 import type { ModelMessage, Tool as CoreTool, ToolChoice } from "ai";
 import type {
+    InvalidToolCall,
     LLMAnalysisHooks,
     LLMAnalysisRequestHandle,
     LLMRequestAnalysisSeed,
@@ -598,6 +599,9 @@ export class AnalysisTelemetryService {
         return {
             requestId,
             telemetryMetadata,
+            reportInvalidToolCalls: async ({ invalidToolCalls, recordedAt }) => {
+                this.recordInvalidToolCalls(requestId, invalidToolCalls, recordedAt);
+            },
             reportSuccess: async ({ completedAt, usage, finishReason, metadata }) => {
                 void metadata;
                 this.finalizeRequestSuccess(requestId, completedAt, usage, finishReason);
@@ -760,6 +764,65 @@ export class AnalysisTelemetryService {
 
     public resetForTests(): void {
         this.close();
+    }
+
+    public recordInvalidToolCalls(
+        requestId: string,
+        invalidToolCalls: InvalidToolCall[],
+        recordedAt = Date.now()
+    ): void {
+        if (!this.isEnabled() || invalidToolCalls.length === 0) {
+            return;
+        }
+
+        const db = this.ensureDb();
+        const insertInvalidToolCall = db.prepare(`
+            INSERT INTO invalid_tool_calls (
+                request_id,
+                step_number,
+                tool_call_index,
+                tool_name,
+                tool_call_id,
+                error_type,
+                error_message,
+                input_json,
+                created_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(request_id, step_number, tool_call_index) DO UPDATE SET
+                tool_name = excluded.tool_name,
+                tool_call_id = excluded.tool_call_id,
+                error_type = excluded.error_type,
+                error_message = excluded.error_message,
+                input_json = excluded.input_json,
+                created_at_ms = excluded.created_at_ms
+        `);
+
+        db.exec("BEGIN");
+        try {
+            for (const invalidToolCall of invalidToolCalls) {
+                insertInvalidToolCall.run(
+                    requestId,
+                    invalidToolCall.stepNumber,
+                    invalidToolCall.toolCallIndex,
+                    invalidToolCall.toolName,
+                    invalidToolCall.toolCallId ?? null,
+                    invalidToolCall.errorType,
+                    invalidToolCall.errorMessage,
+                    invalidToolCall.input === undefined
+                        ? null
+                        : stringifyJson(invalidToolCall.input),
+                    recordedAt
+                );
+            }
+            db.exec("COMMIT");
+        } catch (error) {
+            db.exec("ROLLBACK");
+            logger.warn("[AnalysisTelemetryService] Failed to write invalid tool call rows", {
+                error: formatAnyError(error),
+                requestId,
+                invalidToolCallCount: invalidToolCalls.length,
+            });
+        }
     }
 
     private consumePendingRuntimeMetrics(requestId: string): PendingRuntimeMetrics | undefined {
@@ -928,6 +991,7 @@ export class AnalysisTelemetryService {
             db.prepare("DELETE FROM llm_request_messages WHERE created_at_ms < ?").run(cutoff);
             db.prepare("DELETE FROM context_management_events WHERE created_at_ms < ?").run(cutoff);
             db.prepare("DELETE FROM message_carry_runs WHERE last_request_started_at_ms < ? AND is_open = 0").run(cutoff);
+            db.prepare("DELETE FROM invalid_tool_calls WHERE created_at_ms < ?").run(cutoff);
             db.prepare("DELETE FROM llm_requests WHERE started_at_ms < ?").run(cutoff);
             db.exec("COMMIT");
         } catch (error) {

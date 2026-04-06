@@ -1,5 +1,5 @@
 ---
-name: Task Scheduling
+name: schedule
 description: Schedule recurring and one-off tasks
 tools:
   - schedule_task
@@ -22,3 +22,8 @@ This skill provides the `schedule_task` tool for creating recurring or one-off s
 Use `targetChannel` to schedule a delayed action that continues inside the current conversation rather than opening a new one. This is useful when you only need to perform something at a specific future time — such as a reminder, a status check, or a deferred response — without fragmenting context across separate conversation threads.
 
 Example: if an agent is mid-conversation and wants to circle back in 30 minutes, it can call `schedule_task` with `when: "30m"` and `targetChannel` set to the current conversation ID. When the task fires, the output is routed back into that same conversation.
+
+## Listing schedules
+
+Project schedules live in `$TENEX_BASE_DIR/projects/<project-id>/schedules.json`.
+Use `node src/skills/built-in/schedule/scripts/list-my-schedules.js <agent-slug>` to list all schedules across that agent's projects in one shot.

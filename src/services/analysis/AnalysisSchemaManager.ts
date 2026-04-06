@@ -1,7 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BunDatabase = any;
 
-const ANALYSIS_SCHEMA_VERSION = "6";
+const ANALYSIS_SCHEMA_VERSION = "7";
 
 export class AnalysisSchemaManager {
     public constructor(private readonly db: BunDatabase) {}
@@ -156,6 +156,19 @@ export class AnalysisSchemaManager {
                 is_open INTEGER NOT NULL DEFAULT 1,
                 dropped INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS invalid_tool_calls (
+                request_id TEXT NOT NULL,
+                step_number INTEGER NOT NULL,
+                tool_call_index INTEGER NOT NULL,
+                tool_name TEXT NOT NULL,
+                tool_call_id TEXT,
+                error_type TEXT,
+                error_message TEXT,
+                input_json TEXT,
+                created_at_ms INTEGER NOT NULL,
+                PRIMARY KEY (request_id, step_number, tool_call_index)
+            );
         `);
     }
 
@@ -187,6 +200,13 @@ export class AnalysisSchemaManager {
                 ON message_carry_runs (thread_key, is_open);
             CREATE INDEX IF NOT EXISTS idx_message_carry_runs_started_at
                 ON message_carry_runs (first_request_started_at_ms);
+
+            CREATE INDEX IF NOT EXISTS idx_invalid_tool_calls_created_at
+                ON invalid_tool_calls (created_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_invalid_tool_calls_tool_name
+                ON invalid_tool_calls (tool_name, created_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_invalid_tool_calls_request
+                ON invalid_tool_calls (request_id);
         `);
     }
 
@@ -196,6 +216,7 @@ export class AnalysisSchemaManager {
             DROP VIEW IF EXISTS analysis_context_impact_rows;
             DROP VIEW IF EXISTS analysis_rate_limit_rows;
             DROP VIEW IF EXISTS analysis_message_carry_rows;
+            DROP VIEW IF EXISTS analysis_invalid_tool_call_rows;
             DROP VIEW IF EXISTS analysis_unfinalized_request_rows;
 
             CREATE VIEW analysis_usage_rows AS
@@ -320,6 +341,31 @@ export class AnalysisSchemaManager {
                     is_open,
                     dropped
                 FROM message_carry_runs;
+
+            CREATE VIEW analysis_invalid_tool_call_rows AS
+                SELECT
+                    itc.request_id,
+                    lr.project_id,
+                    lr.conversation_id,
+                    lr.agent_slug,
+                    lr.agent_id,
+                    lr.provider,
+                    lr.model,
+                    lr.api_key_identity,
+                    lr.operation_kind,
+                    lr.started_at_ms,
+                    lr.completed_at_ms,
+                    itc.step_number,
+                    itc.tool_call_index,
+                    itc.tool_name,
+                    itc.tool_call_id,
+                    itc.error_type,
+                    itc.error_message,
+                    itc.input_json,
+                    itc.created_at_ms
+                FROM invalid_tool_calls itc
+                LEFT JOIN llm_requests lr
+                    ON lr.request_id = itc.request_id;
 
             CREATE VIEW analysis_unfinalized_request_rows AS
                 SELECT *

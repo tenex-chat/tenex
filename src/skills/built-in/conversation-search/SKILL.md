@@ -1,5 +1,5 @@
 ---
-name: Conversations
+name: conversation-search
 description: Access, list, and search across conversation content and history
 tools:
   - conversation_get

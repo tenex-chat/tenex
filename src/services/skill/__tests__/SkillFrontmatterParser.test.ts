@@ -1,3 +1,6 @@
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "bun:test";
 import {
     parseSkillDocument,
@@ -77,5 +80,26 @@ describe("SkillFrontmatterParser", () => {
             name: "my-skill",
             description: "line one\nline two",
         });
+    });
+
+    it("uses slug-safe names for all built-in skills", async () => {
+        const builtInSkillsPath = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            "../../../skills/built-in"
+        );
+        const entries = await readdir(builtInSkillsPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+            if (!entry.isDirectory()) {
+                continue;
+            }
+
+            const skillPath = path.join(builtInSkillsPath, entry.name, "SKILL.md");
+            const document = await readFile(skillPath, "utf8");
+            const parsed = parseSkillDocument(document);
+
+            expect(parsed.metadata?.name).toBe(entry.name);
+            expect(parsed.metadata?.name).toMatch(/^[a-z0-9-]+$/);
+        }
     });
 });

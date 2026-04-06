@@ -901,6 +901,196 @@ describe("Analysis telemetry services", () => {
         ]);
     });
 
+    test("persists invalid tool calls and exposes grouped analytics", async () => {
+        const baseTime = Date.now();
+        const firstHandle = analysisTelemetryService.openRequest({
+            operationKind: "stream",
+            startedAt: baseTime + 1_000,
+            provider: "openrouter",
+            model: "gpt-4.1",
+            messages: [buildUserMessage("Use fs_read", "msg-invalid-1", "evt-invalid-1") as never],
+            requestSeed: {
+                requestId: "invalid-request-1",
+                telemetryMetadata: {
+                    "analysis.request_id": "invalid-request-1",
+                },
+            },
+            baseContext: {
+                projectId: "project-alpha",
+                conversationId: "conversation-invalid-1",
+                agentSlug: "executor",
+                agentId: "agent-invalid-1",
+            },
+        });
+        await firstHandle?.reportInvalidToolCalls({
+            recordedAt: baseTime + 1_100,
+            invalidToolCalls: [
+                {
+                    stepNumber: 0,
+                    toolCallIndex: 0,
+                    toolName: "fs_read",
+                    toolCallId: "bad-tool-1",
+                    errorType: "ValidationError",
+                    errorMessage: "path is required",
+                    input: { path: 42 },
+                },
+                {
+                    stepNumber: 1,
+                    toolCallIndex: 0,
+                    toolName: "fs_read",
+                    toolCallId: "bad-tool-2",
+                    errorType: "ValidationError",
+                    errorMessage: "path must be absolute",
+                    input: { path: "relative.txt" },
+                },
+            ],
+        });
+        await firstHandle?.reportSuccess({
+            completedAt: baseTime + 1_500,
+            finishReason: "stop",
+            usage: {
+                inputTokens: 40,
+                outputTokens: 10,
+                totalTokens: 50,
+            },
+        });
+
+        const secondHandle = analysisTelemetryService.openRequest({
+            operationKind: "stream",
+            startedAt: baseTime + 2_000,
+            provider: "anthropic",
+            model: "claude-sonnet",
+            messages: [buildUserMessage("Delegate this", "msg-invalid-2", "evt-invalid-2") as never],
+            requestSeed: {
+                requestId: "invalid-request-2",
+                telemetryMetadata: {
+                    "analysis.request_id": "invalid-request-2",
+                },
+            },
+            baseContext: {
+                projectId: "project-beta",
+                conversationId: "conversation-invalid-2",
+                agentSlug: "reviewer",
+                agentId: "agent-invalid-2",
+            },
+        });
+        await secondHandle?.reportInvalidToolCalls({
+            recordedAt: baseTime + 2_050,
+            invalidToolCalls: [
+                {
+                    stepNumber: 0,
+                    toolCallIndex: 0,
+                    toolName: "delegate",
+                    toolCallId: "bad-tool-3",
+                    errorType: "ZodError",
+                    errorMessage: "targetAgent is required",
+                    input: {},
+                },
+            ],
+        });
+        await secondHandle?.reportSuccess({
+            completedAt: baseTime + 2_300,
+            finishReason: "stop",
+            usage: {
+                inputTokens: 20,
+                outputTokens: 8,
+                totalTokens: 28,
+            },
+        });
+
+        const db = createDb(dbPath, true);
+        const invalidRows = db.prepare(`
+            SELECT
+                request_id,
+                step_number,
+                tool_call_index,
+                tool_name,
+                tool_call_id,
+                error_type,
+                error_message,
+                input_json
+            FROM invalid_tool_calls
+            ORDER BY request_id, step_number
+        `).all() as Array<Record<string, number | string | null>>;
+        expect(invalidRows).toEqual([
+            {
+                request_id: "invalid-request-1",
+                step_number: 0,
+                tool_call_index: 0,
+                tool_name: "fs_read",
+                tool_call_id: "bad-tool-1",
+                error_type: "ValidationError",
+                error_message: "path is required",
+                input_json: JSON.stringify({ path: 42 }),
+            },
+            {
+                request_id: "invalid-request-1",
+                step_number: 1,
+                tool_call_index: 0,
+                tool_name: "fs_read",
+                tool_call_id: "bad-tool-2",
+                error_type: "ValidationError",
+                error_message: "path must be absolute",
+                input_json: JSON.stringify({ path: "relative.txt" }),
+            },
+            {
+                request_id: "invalid-request-2",
+                step_number: 0,
+                tool_call_index: 0,
+                tool_name: "delegate",
+                tool_call_id: "bad-tool-3",
+                error_type: "ZodError",
+                error_message: "targetAgent is required",
+                input_json: JSON.stringify({}),
+            },
+        ]);
+        db.close(false);
+
+        const countsByTool = analysisQueryService.getInvalidToolCallCounts({
+            since: baseTime,
+            until: baseTime + 10_000,
+            groupBy: ["tool", "model", "agent"],
+        });
+        expect(countsByTool).toEqual([
+            expect.objectContaining({
+                toolName: "fs_read",
+                model: "gpt-4.1",
+                agentSlug: "executor",
+                invalidToolCallCount: 2,
+            }),
+            expect.objectContaining({
+                toolName: "delegate",
+                model: "claude-sonnet",
+                agentSlug: "reviewer",
+                invalidToolCallCount: 1,
+            }),
+        ]);
+
+        const invalidEvents = analysisQueryService.listInvalidToolCalls({
+            since: baseTime,
+            until: baseTime + 10_000,
+            toolNames: ["fs_read"],
+        });
+        expect(invalidEvents).toEqual([
+            expect.objectContaining({
+                requestId: "invalid-request-1",
+                toolName: "fs_read",
+                provider: "openrouter",
+                model: "gpt-4.1",
+                agentSlug: "executor",
+                errorType: "ValidationError",
+            }),
+            expect.objectContaining({
+                requestId: "invalid-request-1",
+                toolName: "fs_read",
+                provider: "openrouter",
+                model: "gpt-4.1",
+                agentSlug: "executor",
+                errorType: "ValidationError",
+            }),
+        ]);
+    });
+
     test("lists unfinalized requests and excludes system carry rows by default", async () => {
         const now = Date.now();
         const baseContext = {
@@ -1094,7 +1284,7 @@ describe("Analysis telemetry services", () => {
             FROM analysis_meta
             WHERE key = ?
         `).get("schema_version") as { value: string };
-        expect(schemaVersion.value).toBe("6");
+        expect(schemaVersion.value).toBe("7");
 
         db.close(false);
     });

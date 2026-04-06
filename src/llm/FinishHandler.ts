@@ -261,12 +261,21 @@ function recordInvalidToolCalls(
     for (const invalidTool of invalidToolCalls) {
         activeSpan.addEvent("invalid_tool_call", {
             "tool.name": invalidTool.toolName,
-            "error.type": invalidTool.error,
+            "tool.call_id": invalidTool.toolCallId,
+            "tool.step_number": invalidTool.stepNumber,
+            "error.type": invalidTool.errorType,
+            "error.message": invalidTool.errorMessage,
         });
     }
 
     logger.error(`[LLMService] Invalid tool calls detected in ${logSuffix}`, {
-        invalidToolCalls,
+        invalidToolCalls: invalidToolCalls.map((invalidTool) => ({
+            stepNumber: invalidTool.stepNumber,
+            toolName: invalidTool.toolName,
+            toolCallId: invalidTool.toolCallId,
+            errorType: invalidTool.errorType,
+            errorMessage: invalidTool.errorMessage,
+        })),
         model,
         provider,
     });

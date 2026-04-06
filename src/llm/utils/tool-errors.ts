@@ -1,4 +1,6 @@
+import { formatAnyError } from "@/lib/error-formatter";
 import type { AISdkTool } from "@/tools/types";
+import type { InvalidToolCall } from "@/llm/types";
 import type { StepResult } from "ai";
 
 /**
@@ -7,35 +9,64 @@ import type { StepResult } from "ai";
  */
 export function getInvalidToolCalls(
     steps: StepResult<Record<string, AISdkTool>>[]
-): Array<{ toolName: string; error: string }> {
-    const invalidToolCalls: Array<{ toolName: string; error: string }> = [];
+): InvalidToolCall[] {
+    return steps.flatMap((step, index) => getInvalidToolCallsFromStep(step, index));
+}
 
-    for (const step of steps) {
-        if (step.toolCalls) {
-            for (const toolCall of step.toolCalls) {
-                // Check if this is a dynamic tool call that's invalid
-                if (
-                    "dynamic" in toolCall &&
-                    toolCall.dynamic === true &&
-                    toolCall.invalid === true &&
-                    toolCall.error
-                ) {
-                    const error =
-                        typeof toolCall.error === "object" &&
-                        toolCall.error !== null &&
-                        "name" in toolCall.error
-                            ? (toolCall.error as { name: string }).name
-                            : "Unknown error";
-                    invalidToolCalls.push({
-                        toolName: toolCall.toolName,
-                        error,
-                    });
-                }
-            }
+export function getInvalidToolCallsFromStep(
+    step: StepResult<Record<string, AISdkTool>>,
+    fallbackStepNumber = 0
+): InvalidToolCall[] {
+    if (!step.toolCalls) {
+        return [];
+    }
+
+    const stepNumber =
+        typeof step.stepNumber === "number" ? step.stepNumber : fallbackStepNumber;
+    const invalidToolCalls: InvalidToolCall[] = [];
+
+    for (const [toolCallIndex, toolCall] of step.toolCalls.entries()) {
+        if (
+            "dynamic" in toolCall &&
+            toolCall.dynamic === true &&
+            toolCall.invalid === true &&
+            toolCall.error
+        ) {
+            invalidToolCalls.push({
+                stepNumber,
+                toolCallIndex,
+                toolName: toolCall.toolName,
+                toolCallId:
+                    typeof toolCall.toolCallId === "string" ? toolCall.toolCallId : undefined,
+                errorType: getInvalidToolCallErrorType(toolCall.error),
+                errorMessage: formatAnyError(toolCall.error) || "Unknown error",
+                input: "input" in toolCall ? toolCall.input : undefined,
+            });
         }
     }
 
     return invalidToolCalls;
+}
+
+function getInvalidToolCallErrorType(error: unknown): string {
+    if (error instanceof Error) {
+        return error.name || error.constructor.name || "Error";
+    }
+
+    if (typeof error === "object" && error !== null) {
+        const namedError = error as { name?: unknown; constructor?: { name?: unknown } };
+        if (typeof namedError.name === "string" && namedError.name.length > 0) {
+            return namedError.name;
+        }
+        if (
+            typeof namedError.constructor?.name === "string" &&
+            namedError.constructor.name.length > 0
+        ) {
+            return namedError.constructor.name;
+        }
+    }
+
+    return typeof error === "string" && error.length > 0 ? "Error" : "UnknownError";
 }
 
 /**

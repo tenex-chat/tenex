@@ -1111,6 +1111,7 @@ describe("LLMService stream()", () => {
     test("opens and finalizes analysis requests for each stream step", async () => {
         const reportSuccesses = [mock(async () => {}), mock(async () => {})];
         const reportErrors = [mock(async () => {}), mock(async () => {})];
+        const reportInvalidToolCalls = [mock(async () => {}), mock(async () => {})];
         const openRequest = mock(async ({ requestSeed }: { requestSeed?: { requestId: string } }) => {
             const index = openRequest.mock.calls.length - 1;
             return {
@@ -1118,6 +1119,7 @@ describe("LLMService stream()", () => {
                 telemetryMetadata: requestSeed
                     ? { "analysis.request_id": requestSeed.requestId }
                     : {},
+                reportInvalidToolCalls: reportInvalidToolCalls[index],
                 reportSuccess: reportSuccesses[index],
                 reportError: reportErrors[index],
             };
@@ -1183,6 +1185,18 @@ describe("LLMService stream()", () => {
                     usage: { inputTokens: 29, outputTokens: 7, totalTokens: 36 },
                     providerMetadata: undefined,
                     model: { provider: "openrouter", modelId: "gpt-4" },
+                    toolCalls: [
+                        {
+                            toolCallId: "bad-call-1",
+                            toolName: "fs_read",
+                            input: { path: 42 },
+                            dynamic: true,
+                            invalid: true,
+                            error: Object.assign(new Error("Expected string, received number"), {
+                                name: "ValidationError",
+                            }),
+                        },
+                    ],
                 });
                 yield { type: "finish", finishReason: "stop" };
             })(),
@@ -1201,14 +1215,31 @@ describe("LLMService stream()", () => {
         expect(reportSuccesses[1]).toHaveBeenCalled();
         expect(reportErrors[0]).not.toHaveBeenCalled();
         expect(reportErrors[1]).not.toHaveBeenCalled();
+        expect(reportInvalidToolCalls[0]).not.toHaveBeenCalled();
+        expect(reportInvalidToolCalls[1]).toHaveBeenCalledWith({
+            invalidToolCalls: [
+                expect.objectContaining({
+                    stepNumber: 1,
+                    toolCallIndex: 0,
+                    toolName: "fs_read",
+                    toolCallId: "bad-call-1",
+                    errorType: "ValidationError",
+                    errorMessage: "Expected string, received number",
+                    input: { path: 42 },
+                }),
+            ],
+            recordedAt: expect.any(Number),
+        });
     });
 
     test("treats a stream without a finish part as an error and finalizes open analysis steps", async () => {
         const reportSuccess = mock(async () => {});
         const reportError = mock(async () => {});
+        const reportInvalidToolCalls = mock(async () => {});
         const openRequest = mock(async () => ({
             requestId: "request-1",
             telemetryMetadata: {},
+            reportInvalidToolCalls,
             reportSuccess,
             reportError,
         }));
@@ -1252,9 +1283,11 @@ describe("LLMService stream()", () => {
     test("treats a stream with a finish part but missing step finish as an error", async () => {
         const reportSuccess = mock(async () => {});
         const reportError = mock(async () => {});
+        const reportInvalidToolCalls = mock(async () => {});
         const openRequest = mock(async () => ({
             requestId: "request-1",
             telemetryMetadata: {},
+            reportInvalidToolCalls,
             reportSuccess,
             reportError,
         }));

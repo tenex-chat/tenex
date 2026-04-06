@@ -94,6 +94,16 @@ export interface LLMRequestAnalysisSeed {
     promptCachingDiagnostics?: LLMPromptCachingDiagnostics;
 }
 
+export interface InvalidToolCall {
+    stepNumber: number;
+    toolCallIndex: number;
+    toolName: string;
+    toolCallId?: string;
+    errorType: string;
+    errorMessage: string;
+    input?: unknown;
+}
+
 export interface LLMAnalysisRequestHandle {
     requestId: string;
     telemetryMetadata: Record<string, string | number | boolean>;
@@ -106,6 +116,10 @@ export interface LLMAnalysisRequestHandle {
     reportError: (params: {
         completedAt: number;
         error: unknown;
+    }) => Promise<void> | void;
+    reportInvalidToolCalls: (params: {
+        invalidToolCalls: InvalidToolCall[];
+        recordedAt?: number;
     }) => Promise<void> | void;
 }
 

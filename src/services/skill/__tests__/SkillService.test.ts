@@ -286,7 +286,7 @@ describe("SkillService", () => {
         seedFile(
             `${BUILT_IN_SKILLS_PATH}/agent-management/SKILL.md`,
             createSkillDocument({
-                name: "Agent Management",
+                name: "agent-management",
                 description: "Create and update agent configurations and current project metadata",
                 content: "Built-in skill content",
                 tools: ["agents_write", "modify_project"],

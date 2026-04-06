@@ -1,5 +1,5 @@
 ---
-name: Write access
+name: write-access
 description: Write and edit files in the project directory
 tools:
   - fs_write
