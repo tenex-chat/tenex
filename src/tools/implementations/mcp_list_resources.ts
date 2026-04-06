@@ -115,7 +115,7 @@ export function createMcpListResourcesTool(context: ToolExecutionContext): AISdk
 
             const sections: string[] = [];
             const serverNames = resourcesPerServer.map((s) => s.serverName);
-            sections.push(`# Available MCP Resources\n`);
+            sections.push("# Available MCP Resources\n");
             sections.push(
                 `Access to ${serverNames.length} server${serverNames.length === 1 ? "" : "s"}: ${serverNames.join(", ")}\n`
             );

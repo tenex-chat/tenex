@@ -7,17 +7,17 @@ import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 
 function buildPathVars(context: ToolExecutionContext): Record<string, string> {
     const vars: Record<string, string> = {
-        '$USER_HOME': homedir(),
-        '$AGENT_HOME': getAgentHomeDirectory(context.agent.pubkey),
+        "$USER_HOME": homedir(),
+        "$AGENT_HOME": getAgentHomeDirectory(context.agent.pubkey),
     };
     if (context.projectBasePath) {
-        vars['$PROJECT_BASE'] = context.projectBasePath;
+        vars["$PROJECT_BASE"] = context.projectBasePath;
     }
     return vars;
 }
 
 function expandPathVars(input: Record<string, unknown>, pathVars: Record<string, string>): void {
-    if (typeof input.path === 'string') {
+    if (typeof input.path === "string") {
         for (const [varName, varValue] of Object.entries(pathVars)) {
             input.path = (input.path as string).replaceAll(varName, varValue);
         }

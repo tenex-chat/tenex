@@ -14,6 +14,7 @@ export const NDKKind = {
 
     // Standard NIP kinds
     Text: 1 as BaseNDKKind, // Regular text note (kind:1) - unified conversation format
+    LongFormArticle: 30023 as BaseNDKKind, // NIP-23 Long-form article
     EventMetadata: 513 as BaseNDKKind, // Event metadata (titles, summaries)
     Comment: 1111 as BaseNDKKind, // NIP-22 Comment - used for lesson refinements
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge

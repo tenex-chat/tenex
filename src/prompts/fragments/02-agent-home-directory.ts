@@ -109,7 +109,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
             parts.push("");
             parts.push("<memorized-files>");
             for (const file of injectedFiles) {
-                const truncatedAttr = file.truncated ? ` truncated="true"` : "";
+                const truncatedAttr = file.truncated ? " truncated=\"true\"" : "";
                 parts.push(`  <file name="${file.filename}"${truncatedAttr}>${file.content}</file>`);
             }
             parts.push("</memorized-files>");

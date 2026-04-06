@@ -65,7 +65,7 @@ export function getVisibleWindow(
 
     const half = Math.floor(maxVisibleItems / 2);
     let start = Math.max(0, activeItemIndex - half);
-    let end = Math.min(totalItems, start + maxVisibleItems);
+    const end = Math.min(totalItems, start + maxVisibleItems);
 
     if (end - start < maxVisibleItems) {
         start = Math.max(0, end - maxVisibleItems);

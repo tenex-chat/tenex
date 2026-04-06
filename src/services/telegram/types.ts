@@ -232,7 +232,7 @@ export interface TelegramChatContextSnapshot {
     administrators?: TelegramChatAdministratorMetadata[];
 }
 
-export type TelegramInboundMediaType = 'voice' | 'audio' | 'document' | 'photo' | 'video';
+export type TelegramInboundMediaType = "voice" | "audio" | "document" | "photo" | "video";
 
 export interface TelegramInboundMediaInfo {
     localPath: string;

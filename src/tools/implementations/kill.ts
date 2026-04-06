@@ -54,14 +54,14 @@ type KillInput = z.infer<typeof killSchema>;
  */
 async function resolveTargetId(input: string): Promise<{
     id: string;
-    type: 'conversation' | 'shell' | 'scheduled' | 'unknown';
+    type: "conversation" | "shell" | "scheduled" | "unknown";
     wasResolved: boolean;
 } | null> {
     const trimmed = input.trim().toLowerCase();
 
     // 64-char hex: already a full ID (use typed guard)
     if (isFullEventId(trimmed)) {
-        return { id: trimmed, type: 'conversation', wasResolved: false };
+        return { id: trimmed, type: "conversation", wasResolved: false };
     }
 
     // 12-char hex: resolve via prefix store or RALRegistry fallback (use typed guard)
@@ -73,7 +73,7 @@ async function resolveTargetId(input: string): Promise<{
                 prefix: trimmed,
                 fullId: shortenEventId(resolved),
             });
-            return { id: resolved, type: 'conversation', wasResolved: true };
+            return { id: resolved, type: "conversation", wasResolved: true };
         }
 
         // Fallback: scan RALRegistry for active delegations
@@ -84,7 +84,7 @@ async function resolveTargetId(input: string): Promise<{
                 prefix: trimmed,
                 fullId: shortenEventId(ralResolved),
             });
-            return { id: ralResolved, type: 'conversation', wasResolved: true };
+            return { id: ralResolved, type: "conversation", wasResolved: true };
         }
 
         // Prefix not found - could still be valid but unknown
@@ -96,12 +96,12 @@ async function resolveTargetId(input: string): Promise<{
 
     // Scheduled task ID: task-{timestamp}-{random} format
     if (/^task-\d+-[a-z0-9]+$/.test(trimmed)) {
-        return { id: trimmed, type: 'scheduled', wasResolved: false };
+        return { id: trimmed, type: "scheduled", wasResolved: false };
     }
 
     // 7-char alphanumeric: shell task ID (different ID space, use typed guard)
     if (isShellTaskId(trimmed)) {
-        return { id: trimmed, type: 'shell', wasResolved: false };
+        return { id: trimmed, type: "shell", wasResolved: false };
     }
 
     // NIP-19 formats (nevent, note)
@@ -111,12 +111,12 @@ async function resolveTargetId(input: string): Promise<{
             const decoded = nip19.decode(normalized);
             if (decoded.type === "note" && typeof decoded.data === "string") {
                 const eventId = decoded.data.toLowerCase();
-                return { id: eventId, type: 'conversation', wasResolved: true };
+                return { id: eventId, type: "conversation", wasResolved: true };
             }
             if (decoded.type === "nevent" && typeof decoded.data === "object" && decoded.data !== null) {
                 const data = decoded.data as { id: string };
                 const eventId = data.id.toLowerCase();
-                return { id: eventId, type: 'conversation', wasResolved: true };
+                return { id: eventId, type: "conversation", wasResolved: true };
             }
         } catch (error) {
             logger.debug("[kill.resolveTargetId] Failed to decode NIP-19 identifier", {
@@ -128,7 +128,7 @@ async function resolveTargetId(input: string): Promise<{
 
     // UUID format (legacy shell task IDs) - check as fallback
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(trimmed)) {
-        return { id: trimmed, type: 'shell', wasResolved: false };
+        return { id: trimmed, type: "shell", wasResolved: false };
     }
 
     return null;
@@ -175,18 +175,18 @@ async function executeKill(input: KillInput, context: ToolExecutionContext): Pro
 
     if (resolved) {
         // Successfully resolved to a known format
-        if (resolved.type === 'scheduled') {
+        if (resolved.type === "scheduled") {
             return killScheduledTask(resolved.id);
         }
 
-        if (resolved.type === 'shell') {
+        if (resolved.type === "shell") {
             // Shell task ID - check if it exists and handle
             const taskInfo = getBackgroundTaskInfo(resolved.id);
             if (taskInfo) {
                 return killShellTask(resolved.id, context);
             }
             // Shell ID format but task not found - fall through to error
-        } else if (resolved.type === 'conversation') {
+        } else if (resolved.type === "conversation") {
             // Conversation ID (64-char hex) - check if it exists
             const isConversationId = ConversationStore.has(resolved.id);
             if (isConversationId) {
