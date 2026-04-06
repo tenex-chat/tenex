@@ -1,4 +1,4 @@
-import type { AISdkTool } from "@/tools/types";
+import type { Tool as CoreTool } from "ai";
 import { logger } from "@/utils/logger";
 import { createSdkMcpServer, tool } from "ai-sdk-provider-claude-code";
 import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
@@ -25,7 +25,7 @@ export class ClaudeCodeToolsAdapter {
      * rather than name-based, to avoid collisions if a user names their
      * external MCP server "tenex".
      */
-    private static isExternalMcpTool(toolName: string, tool: AISdkTool): boolean {
+    private static isExternalMcpTool(toolName: string, tool: CoreTool): boolean {
         // External MCP tools follow the pattern: mcp__<servername>__<toolname>
         if (!toolName.startsWith("mcp__")) {
             return false;
@@ -46,24 +46,20 @@ export class ClaudeCodeToolsAdapter {
     /**
      * Convert TENEX tools to SDK MCP tools for Claude Code
      * Only converts non-MCP tools (MCP tools are handled separately)
+     *
+     * @param tools - The TENEX tools to convert
+     * @param serverName - Unique name for the internal MCP server. Must not collide with
+     *   any external MCP server names passed via mcpConfig. Use chooseInternalMcpServerName
+     *   in ClaudeCodeProvider to derive a collision-free name.
      */
     static createSdkMcpServer(
-        tools: Record<string, AISdkTool>
+        tools: Record<string, CoreTool>,
+        serverName: string
     ): SdkMcpServer | undefined {
-        // Filter out tools that Claude Code has its own version of:
-        // - web_fetch (Claude Code has WebFetch)
-        // - web_search (Claude Code has WebSearch)
-        // fs_* and shell tools are NOT filtered — they pass through so TENEX controls access.
-        // Claude Code's built-in equivalents are always disabled via disallowedTools.
-        const claudeCodeBuiltinTools = new Set([
-            "web_fetch",
-            "web_search",
-        ]);
         // CRITICAL: Filter out external MCP tools - they have JSON Schema format (no .safeParseAsync())
         // and will crash if we try to wrap them with tool() from Claude SDK.
         // External MCP servers are passed directly to Claude Code via mcpConfig.servers instead.
         const localTools = Object.entries(tools).filter(([name, tool]) =>
-            !claudeCodeBuiltinTools.has(name) &&
             !this.isExternalMcpTool(name, tool)
         );
 
@@ -83,9 +79,6 @@ export class ClaudeCodeToolsAdapter {
             logger.debug("[ClaudeCodeToolsAdapter] No local tools to wrap after filtering", {
                 totalTools: Object.keys(tools).length,
                 externalMcpCount: externalMcpTools.length,
-                builtinFilteredCount: Object.keys(tools).filter(name =>
-                    claudeCodeBuiltinTools.has(name)
-                ).length,
             });
             return undefined;
         }
@@ -185,12 +178,12 @@ export class ClaudeCodeToolsAdapter {
         // Create and return the SDK MCP server
         try {
             const server = createSdkMcpServer({
-                name: "tenex",
+                name: serverName,
                 tools: sdkTools,
             });
 
             logger.info("[ClaudeCodeToolsAdapter] SDK MCP server created successfully", {
-                serverName: "tenex",
+                serverName,
                 toolCount: sdkTools.length,
             });
 

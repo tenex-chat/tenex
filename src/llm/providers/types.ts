@@ -5,8 +5,7 @@
  * pluggable LLM providers that can be easily registered and used.
  */
 
-import type { LanguageModel } from "ai";
-import type { AISdkTool } from "@/tools/types";
+import type { LanguageModel, Tool as CoreTool } from "ai";
 import type { OnStreamStartCallback } from "@/llm/types";
 
 /**
@@ -97,7 +96,7 @@ export interface MCPConfig {
  */
 export interface ProviderRuntimeContext {
     /** Available tools for the agent */
-    tools?: Record<string, AISdkTool>;
+    tools?: Record<string, CoreTool>;
     /** Agent name for telemetry */
     agentName?: string;
     /** Working directory for agent execution */

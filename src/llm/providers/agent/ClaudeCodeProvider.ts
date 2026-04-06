@@ -72,6 +72,24 @@ const ALWAYS_DISABLED_BUILTINS = ["Write", "Edit", "Glob", "Grep", "LS", "Notebo
 /** Pattern to detect MCP tools that provide FS capability */
 const MCP_FS_CAPABILITY_PATTERN = /mcp__.*__(fs_read|fs_write|fs_edit|fs_glob|fs_grep|read_file|write_file|edit_file|list_directory)/;
 
+const INTERNAL_TENEX_MCP_SERVER_BASENAME = "tenex";
+
+/**
+ * Choose a unique internal MCP server name that does not collide with any
+ * external MCP server names already reserved by the user's mcpConfig.
+ */
+function chooseInternalMcpServerName(reservedNames: Iterable<string>): string {
+    const usedNames = new Set(reservedNames);
+    if (!usedNames.has(INTERNAL_TENEX_MCP_SERVER_BASENAME)) {
+        return INTERNAL_TENEX_MCP_SERVER_BASENAME;
+    }
+    let suffix = 2;
+    while (usedNames.has(`${INTERNAL_TENEX_MCP_SERVER_BASENAME}_${suffix}`)) {
+        suffix += 1;
+    }
+    return `${INTERNAL_TENEX_MCP_SERVER_BASENAME}_${suffix}`;
+}
+
 /**
  * AI SDK usage with optional extended fields
  */
@@ -143,10 +161,16 @@ export class ClaudeCodeProvider extends AgentProvider {
             "disallowed_builtins": disallowedTools.join(", "),
         });
 
+        // Determine which names are already taken by external MCP servers
+        const externalServerNames = context.mcpConfig?.enabled && context.mcpConfig.servers
+            ? Object.keys(context.mcpConfig.servers)
+            : [];
+        const internalServerName = chooseInternalMcpServerName(externalServerNames);
+
         // Create SDK MCP server for local TENEX tools
         const tenexSdkServer =
             regularTools.length > 0 && context.tools
-                ? ClaudeCodeToolsAdapter.createSdkMcpServer(context.tools)
+                ? ClaudeCodeToolsAdapter.createSdkMcpServer(context.tools, internalServerName)
                 : undefined;
 
         // Build mcpServers configuration
@@ -154,7 +178,7 @@ export class ClaudeCodeProvider extends AgentProvider {
 
         // Add TENEX tools wrapper if enabled
         if (tenexSdkServer) {
-            mcpServersConfig.tenex = tenexSdkServer;
+            mcpServersConfig[internalServerName] = tenexSdkServer;
         }
 
         // Add MCP servers from context (passed from services layer)

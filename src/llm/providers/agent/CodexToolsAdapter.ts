@@ -1,4 +1,4 @@
-import type { AISdkTool } from "@/tools/types";
+import type { Tool as CoreTool } from "ai";
 import { logger } from "@/utils/logger";
 import {
     createLocalMcpServer,
@@ -13,7 +13,7 @@ import { z, type ZodRawShape } from "zod";
 const SDK_MCP_SERVER_MARKER = Symbol.for("ai-sdk-provider-codex-cli.sdkMcpServer");
 
 export function createSdkMcpServer(
-    tools: Record<string, AISdkTool>,
+    tools: Record<string, CoreTool>,
     context: { agentName?: string; serverName?: string }
 ): SdkMcpServer | undefined {
     const localTools = Object.entries(tools);
@@ -145,8 +145,8 @@ function createHttpHeaderAuthenticatedSdkServer(options: {
  * Convert TENEX tools to Codex Tool format
  */
 function convertTools(
-    localTools: [string, AISdkTool][],
-    allTools: Record<string, AISdkTool>
+    localTools: [string, CoreTool][],
+    allTools: Record<string, CoreTool>
 ): Tool[] {
     return localTools.map(([name, tenexTool]) => {
         let zodSchema: unknown = z.object({});
