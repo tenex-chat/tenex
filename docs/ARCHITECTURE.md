@@ -152,6 +152,7 @@ Services should be organized by domain, with related code grouped together:
 ```
 services/
 ├── analysis/            # LLM telemetry schema, migrations, and query services
+├── migrations/          # Explicit TENEX state migrations keyed by config.json version
 ├── dispatch/             # Chat routing + delegation dispatch
 │   ├── AgentDispatchService.ts
 │   ├── AgentRouter.ts

@@ -11,6 +11,7 @@ import { z } from "zod";
 
 export interface TenexConfig {
     // Global fields
+    version?: number; // TENEX state migration version (not app version)
     whitelistedPubkeys?: string[];
     whitelistedIdentities?: string[];
     tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
@@ -139,6 +140,7 @@ const AnthropicPromptCachingSchema = z
     .transform((value) => (value.ttl === undefined ? {} : { ttl: value.ttl }));
 
 export const TenexConfigSchema = z.object({
+    version: z.number().int().nonnegative().optional(),
     whitelistedPubkeys: z.array(z.string()).optional(),
     whitelistedIdentities: z.array(z.string()).optional(),
     tenexPrivateKey: z.string().optional(),

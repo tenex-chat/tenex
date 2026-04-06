@@ -563,16 +563,9 @@ export class ProjectStatusService {
                 return;
             }
 
-            // Build a pubkey-to-slug map from agents for resolving toPubkey
-            const pubkeyToSlug = new Map<string, string>();
-            for (const [slug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
-                pubkeyToSlug.set(agent.pubkey, slug);
-            }
-
             const scheduledTasks: ScheduledTaskInfo[] = [];
 
             for (const task of tasks) {
-                const targetAgent = pubkeyToSlug.get(task.toPubkey) || task.toPubkey.substring(0, 8);
                 const lastRunTimestamp = task.lastRun
                     ? Math.floor(new Date(task.lastRun).getTime() / 1000)
                     : undefined;
@@ -581,7 +574,7 @@ export class ProjectStatusService {
                     id: task.id,
                     title: task.title || task.prompt.substring(0, 50),
                     schedule: task.schedule,
-                    targetAgent,
+                    targetAgent: task.targetAgentSlug,
                     type: task.type || "cron",
                     lastRun: lastRunTimestamp,
                 });

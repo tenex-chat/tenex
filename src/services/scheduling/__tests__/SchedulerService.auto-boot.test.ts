@@ -375,18 +375,14 @@ describe("SchedulerService Auto-Boot", () => {
                 schedule: "* * * * *",
                 prompt: "test",
                 fromPubkey: "from123",
-                toPubkey: "originalTarget123",
+                targetAgentSlug: "architect",
                 projectId: "31933:owner:project",
             };
 
-            // biome-ignore lint/suspicious/noExplicitAny: Testing protected method
-            const result = (service as any).resolveTargetPubkey(task);
-
-            expect(result).toBe("originalTarget123");
-            expect(mockLogger.debug).toHaveBeenCalledWith(
-                "Target pubkey resolver not registered, using original target",
-                expect.anything()
-            );
+            expect(() => {
+                // biome-ignore lint/suspicious/noExplicitAny: Testing protected method
+                (service as any).resolveTargetPubkey(task);
+            }).toThrow('Target pubkey resolver not registered for agent slug "architect"');
         });
 
         it("should use resolver when registered and log rerouting", () => {
@@ -395,28 +391,33 @@ describe("SchedulerService Auto-Boot", () => {
                 schedule: "* * * * *",
                 prompt: "test",
                 fromPubkey: "from123",
-                toPubkey: "originalTarget123",
+                targetAgentSlug: "architect",
                 projectId: "31933:owner:project",
             };
 
             const pmPubkey = "pmPubkey456";
             const mockBootHandler = vi.fn();
             const mockStateResolver = vi.fn();
-            const mockTargetResolver = vi.fn().mockReturnValue(pmPubkey);
+            const mockTargetResolver = vi.fn().mockReturnValue({
+                pubkey: pmPubkey,
+                resolvedSlug: "pm",
+                wasRerouted: true,
+            });
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
             // biome-ignore lint/suspicious/noExplicitAny: Testing protected method
             const result = (service as any).resolveTargetPubkey(task);
 
-            expect(result).toBe(pmPubkey);
-            expect(mockTargetResolver).toHaveBeenCalledWith(task.projectId, task.toPubkey);
+            expect(result.pubkey).toBe(pmPubkey);
+            expect(mockTargetResolver).toHaveBeenCalledWith(task.projectId, task.targetAgentSlug);
             // Should log info about rerouting (pubkey changed)
             expect(mockLogger.info).toHaveBeenCalledWith(
                 "Scheduled task target resolved by daemon",
                 expect.objectContaining({
                     taskId: task.id,
                     projectId: task.projectId,
+                    originalTarget: "architect",
                 })
             );
         });
@@ -427,32 +428,35 @@ describe("SchedulerService Auto-Boot", () => {
                 schedule: "* * * * *",
                 prompt: "test",
                 fromPubkey: "from123",
-                toPubkey: "originalTarget123",
+                targetAgentSlug: "architect",
                 projectId: "31933:owner:project",
             };
 
             const mockBootHandler = vi.fn();
             const mockStateResolver = vi.fn();
-            // Resolver returns the same pubkey
-            const mockTargetResolver = vi.fn().mockReturnValue(task.toPubkey);
+            const mockTargetResolver = vi.fn().mockReturnValue({
+                pubkey: "originalTarget123",
+                resolvedSlug: "architect",
+                wasRerouted: false,
+            });
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
             // biome-ignore lint/suspicious/noExplicitAny: Testing protected method
             const result = (service as any).resolveTargetPubkey(task);
 
-            expect(result).toBe(task.toPubkey);
+            expect(result.pubkey).toBe("originalTarget123");
             // Should NOT log rerouting info
             expect(mockLogger.info).not.toHaveBeenCalled();
         });
 
-        it("should fall back to original target when resolver throws", () => {
+        it("should throw when resolver throws", () => {
             const task: ScheduledTask = {
                 id: "task-1",
                 schedule: "* * * * *",
                 prompt: "test",
                 fromPubkey: "from123",
-                toPubkey: "originalTarget123",
+                targetAgentSlug: "architect",
                 projectId: "31933:owner:project",
             };
 
@@ -464,14 +468,15 @@ describe("SchedulerService Auto-Boot", () => {
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
-            // biome-ignore lint/suspicious/noExplicitAny: Testing protected method
-            const result = (service as any).resolveTargetPubkey(task);
-
-            expect(result).toBe(task.toPubkey);
+            expect(() => {
+                // biome-ignore lint/suspicious/noExplicitAny: Testing protected method
+                (service as any).resolveTargetPubkey(task);
+            }).toThrow("Resolver failed");
             expect(mockLogger.warn).toHaveBeenCalledWith(
-                "Failed to resolve target pubkey, using original",
+                "Failed to resolve target pubkey",
                 expect.objectContaining({
                     taskId: task.id,
+                    targetAgentSlug: "architect",
                     error: "Resolver failed",
                 })
             );
@@ -519,7 +524,7 @@ describe("SchedulerService Auto-Boot", () => {
                 schedule: "* * * * *",
                 prompt: "test prompt",
                 fromPubkey: "from123",
-                toPubkey: "to456",
+                targetAgentSlug: "architect",
                 projectId: "31933:owner:test-project",
             };
 
@@ -565,7 +570,7 @@ describe("SchedulerService Auto-Boot", () => {
                 schedule: "* * * * *",
                 prompt: "test prompt",
                 fromPubkey: "from123",
-                toPubkey: "to456",
+                targetAgentSlug: "architect",
                 projectId: "31933:owner:test-project",
             };
 

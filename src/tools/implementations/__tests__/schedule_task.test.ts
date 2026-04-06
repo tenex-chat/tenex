@@ -16,7 +16,6 @@ import { createScheduleTaskTool } from "../schedule_task";
 describe("Schedule Task Tool", () => {
     const mockAgentPubkey = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
     const mockTargetPubkey = "feb842e2e624cb58e364f8f7cb363c03407be9519ad48326f518f976b3551059";
-
     const createMockContext = (): ToolExecutionContext => ({
         agent: {
             name: "Test Agent",
@@ -149,7 +148,7 @@ describe("Schedule Task Tool", () => {
                 "0 9 * * 1-5",
                 "Start daily standup",
                 mockAgentPubkey,
-                mockAgentPubkey,
+                "test-agent",
                 undefined,
                 "Morning Standup",
                 undefined
@@ -251,7 +250,7 @@ describe("Schedule Task Tool", () => {
                 "0 9 * * *",
                 "Daily standup reminder",
                 mockAgentPubkey,
-                mockTargetPubkey,
+                "architect",
                 undefined,
                 undefined,
                 undefined
@@ -298,7 +297,7 @@ describe("Schedule Task Tool", () => {
                 "0 9 * * *",
                 "Self-reminder",
                 mockAgentPubkey,
-                mockAgentPubkey,
+                "test-agent",
                 undefined,
                 undefined,
                 undefined
@@ -327,7 +326,7 @@ describe("Schedule Task Tool", () => {
                 expect.any(Date),
                 "Remind architect",
                 mockAgentPubkey,
-                mockTargetPubkey,
+                "architect",
                 undefined,
                 undefined,
                 undefined

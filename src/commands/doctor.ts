@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { initNDK, getNDK } from "@/nostr/ndkClient";
+import { migrationService } from "@/services/migrations";
 import { shortenEventId } from "@/utils/conversation-id";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
@@ -22,9 +23,14 @@ const agentsCommand = new Command("agents")
     .addCommand(refetchCommand)
     .addCommand(orphansCommand);
 
+const migrateCommand = new Command("migrate")
+    .description("Apply pending TENEX state migrations")
+    .action(runMigrations);
+
 export const doctorCommand = new Command("doctor")
     .description("Diagnose and repair TENEX state")
-    .addCommand(agentsCommand);
+    .addCommand(agentsCommand)
+    .addCommand(migrateCommand);
 
 function agentChanged(before: StoredAgent, after: StoredAgent): boolean {
     if (before.name !== after.name) return true;
@@ -132,4 +138,38 @@ async function findOrphanedAgents(purge: boolean): Promise<void> {
         console.log(chalk.green(`  ✓ deleted ${agent.slug}`));
     }
     console.log(chalk.blue(`Done: ${orphans.length} deleted`));
+}
+
+async function runMigrations(): Promise<void> {
+    const summary = await migrationService.migrate();
+
+    console.log(
+        chalk.blue(
+            `Current migration version: ${String(summary.currentVersion)} (latest: ${summary.latestVersion})`
+        )
+    );
+
+    if (summary.applied.length === 0) {
+        console.log(chalk.green("No pending migrations."));
+        return;
+    }
+
+    for (const migration of summary.applied) {
+        console.log(
+            chalk.green(
+                `Applied migration ${String(migration.from)} -> ${migration.to}: ${migration.description}`
+            )
+        );
+        console.log(
+            chalk.gray(
+                `  migrated=${migration.result.migratedCount} skipped=${migration.result.skippedCount}`
+            )
+        );
+
+        for (const warning of migration.result.warnings) {
+            console.log(chalk.yellow(`  warning: ${warning}`));
+        }
+    }
+
+    console.log(chalk.blue(`Final migration version: ${String(summary.finalVersion)}`));
 }

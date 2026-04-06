@@ -30,6 +30,7 @@ Layer 0: lib/  (ZERO @/ imports)
 - Use `ConfigService` for all config/path access. Never construct `~/.tenex` paths manually.
 - Tools delegate to services, never hold state.
 - Event kinds live in `src/nostr/kinds.ts`. Never hardcode kind numbers.
+- Backward-compatible state changes go through the migration system. `bun doctor migrate` applies pending migrations using the migration `version` in `config.json`.
 - `MODULE_INVENTORY.md` is the canonical map of components. Consult before writing code.
 
 ## Naming

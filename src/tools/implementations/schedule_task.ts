@@ -37,7 +37,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
         }),
         execute: async ({ prompt, when, title, targetAgent, targetChannel }) => {
             // Resolve target agent
-            let toPubkey: string;
+            let targetAgentSlug: string;
             if (targetAgent) {
                 const resolution = resolveAgentSlug(targetAgent);
                 if (!resolution.pubkey) {
@@ -48,9 +48,9 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                         `Invalid agent slug: "${targetAgent}". Only agent slugs are accepted. ${availableSlugsStr}`
                     );
                 }
-                toPubkey = resolution.pubkey;
+                targetAgentSlug = targetAgent;
             } else {
-                toPubkey = context.agent.pubkey;
+                targetAgentSlug = context.agent.slug;
             }
 
             const schedulerService = SchedulerService.getInstance();
@@ -64,7 +64,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     executeAt,
                     prompt,
                     fromPubkey,
-                    toPubkey,
+                    targetAgentSlug,
                     undefined,
                     title,
                     targetChannel
@@ -96,7 +96,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     when,
                     prompt,
                     fromPubkey,
-                    toPubkey,
+                    targetAgentSlug,
                     undefined,
                     title,
                     targetChannel

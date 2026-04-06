@@ -85,9 +85,9 @@ function formatExecutionTime(isoTimestamp: string): string {
 /**
  * Formats scheduled tasks for display in the agent's system prompt
  */
-function formatScheduledTasks(tasks: ScheduledTask[], agentPubkey: string): string {
+function formatScheduledTasks(tasks: ScheduledTask[], agentSlug: string): string {
     // Filter tasks that belong to this agent (tasks where this agent is the target)
-    const myTasks = tasks.filter((task) => task.toPubkey === agentPubkey);
+    const myTasks = tasks.filter((task) => task.targetAgentSlug === agentSlug);
 
     if (myTasks.length === 0) {
         return "";
@@ -157,7 +157,7 @@ export const scheduledTasksFragment: PromptFragment<ScheduledTasksArgs> = {
     id: "scheduled-tasks",
     priority: 22, // Between voice-mode (20) and retrieved-lessons (24)
     template: ({ agent, scheduledTasks }) => {
-        return formatScheduledTasks(scheduledTasks, agent.pubkey);
+        return formatScheduledTasks(scheduledTasks, agent.slug);
     },
     validateArgs: (args): args is ScheduledTasksArgs => {
         return (

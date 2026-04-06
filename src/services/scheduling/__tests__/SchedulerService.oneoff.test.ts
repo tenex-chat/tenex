@@ -97,7 +97,7 @@ describe("ScheduledTask type with oneoff", () => {
             schedule: "2024-01-30T10:00:00Z",
             prompt: "Test prompt",
             fromPubkey: "abc123",
-            toPubkey: "def456",
+            targetAgentSlug: "architect",
             projectId: "proj-1",
             type: "oneoff" as const,
             executeAt: "2024-01-30T10:00:00Z",
@@ -113,7 +113,7 @@ describe("ScheduledTask type with oneoff", () => {
             schedule: "0 9 * * *",
             prompt: "Daily task",
             fromPubkey: "abc123",
-            toPubkey: "def456",
+            targetAgentSlug: "architect",
             projectId: "proj-1",
             // No type field - backward compatible
         };

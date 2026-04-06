@@ -181,34 +181,37 @@ daemonCommand
                     return daemon.getActiveRuntimes().has(projectId as import("@/types/project-ids").ProjectDTag);
                 },
                 // Target resolver: called to resolve the target pubkey (may reroute to PM)
-                (projectId: string, originalTargetPubkey: string) => {
+                (projectId: string, targetAgentSlug: string) => {
                     const runtime = daemon.getActiveRuntimes().get(projectId as import("@/types/project-ids").ProjectDTag);
                     if (!runtime) {
-                        // Project not running, use original target
-                        return originalTargetPubkey;
+                        return null;
                     }
 
                     const context = runtime.getContext();
                     if (!context) {
-                        // No context available, use original target
-                        return originalTargetPubkey;
+                        return null;
                     }
 
-                    // Check if the target agent is in this project
-                    const targetAgent = context.getAgentByPubkey(originalTargetPubkey);
+                    const targetAgent = context.getAgent(targetAgentSlug);
                     if (targetAgent) {
-                        // Target agent exists in project, use original target
-                        return originalTargetPubkey;
+                        return {
+                            pubkey: targetAgent.pubkey,
+                            resolvedSlug: targetAgent.slug,
+                            wasRerouted: false,
+                        };
                     }
 
                     // Target agent is NOT in this project - route to PM instead
                     const pm = context.projectManager;
                     if (!pm) {
-                        // No PM available, use original target
-                        return originalTargetPubkey;
+                        return null;
                     }
 
-                    return pm.pubkey;
+                    return {
+                        pubkey: pm.pubkey,
+                        resolvedSlug: pm.slug,
+                        wasRerouted: true,
+                    };
                 }
             );
             console.log(chalk.gray("✓ Scheduler callbacks registered"));

@@ -5,22 +5,9 @@ import {
     type ProjectBootHandler,
     type ProjectStateResolver,
     type TargetPubkeyResolver,
+    type TargetResolution,
 } from "@/services/scheduling/SchedulerService";
 
-/**
- * Tests for the PM routing feature in SchedulerService.
- *
- * When a scheduled task runs, if the target agent (toPubkey) is not in the
- * task's project, the event should be routed to the Project Manager (PM)
- * of that project instead.
- *
- * Architecture: SchedulerService uses dependency injection (callbacks)
- * to interact with the daemon layer, avoiding Layer 3 → Layer 4 imports.
- * The target resolution logic is implemented in the daemon layer and injected
- * as a callback to SchedulerService.
- */
-
-// Mock logger to avoid noisy output
 vi.mock("@/utils/logger", () => ({
     logger: {
         info: vi.fn(),
@@ -30,25 +17,13 @@ vi.mock("@/utils/logger", () => ({
     },
 }));
 
-// Import after mocking
 import { logger } from "@/utils/logger";
 
-/**
- * Testable subclass that exposes the protected resolveTargetPubkey method.
- * This allows us to test the actual implementation logic directly.
- */
 class TestableSchedulerService extends SchedulerService {
-    /**
-     * Public wrapper to test the protected resolveTargetPubkey method.
-     * This actually exercises the real implementation code.
-     */
-    public testResolveTargetPubkey(task: ScheduledTask): string {
+    public testResolveTargetPubkey(task: ScheduledTask): TargetResolution {
         return this.resolveTargetPubkey(task);
     }
 
-    /**
-     * Public wrapper to set callbacks directly
-     */
     public setCallbacks(
         bootHandler: ProjectBootHandler,
         stateResolver: ProjectStateResolver,
@@ -57,9 +32,6 @@ class TestableSchedulerService extends SchedulerService {
         this.setProjectCallbacks(bootHandler, stateResolver, targetResolver);
     }
 
-    /**
-     * Clear all callbacks (for test isolation)
-     */
     public clearCallbacks(): void {
         // biome-ignore lint/suspicious/noExplicitAny: Testing requires private access
         (this as any).projectBootHandler = null;
@@ -70,17 +42,11 @@ class TestableSchedulerService extends SchedulerService {
     }
 }
 
-/**
- * Helper to get a testable instance of SchedulerService.
- * We replace the singleton's prototype to add testability while preserving singleton state.
- */
 function getTestableInstance(): TestableSchedulerService {
-    // Get the singleton instance
     const instance = SchedulerService.getInstance();
 
-    // Extend its prototype to add the test methods
     // biome-ignore lint/suspicious/noExplicitAny: Testing requires prototype manipulation
-    (instance as any).testResolveTargetPubkey = function(task: ScheduledTask): string {
+    (instance as any).testResolveTargetPubkey = function(task: ScheduledTask): TargetResolution {
         return TestableSchedulerService.prototype.testResolveTargetPubkey.call(this, task);
     };
 
@@ -111,14 +77,14 @@ describe("SchedulerService PM Routing", () => {
 
     let service: TestableSchedulerService;
 
-    // Test task fixture factory
     const createTask = (overrides?: Partial<ScheduledTask>): ScheduledTask => ({
         id: "task-123",
         schedule: "0 9 * * *",
         prompt: "Test prompt",
         fromPubkey: "sender-pubkey-12345678",
-        toPubkey: "target-pubkey-12345678",
+        targetAgentSlug: "architect",
         projectId: "31933:owner:test-project",
+        projectRef: "31933:owner:test-project",
         ...overrides,
     });
 
@@ -133,260 +99,117 @@ describe("SchedulerService PM Routing", () => {
     });
 
     describe("resolveTargetPubkey with injected callbacks", () => {
-        it("should return original toPubkey when no resolver is registered", () => {
-            // Setup: no callbacks registered (simulating standalone/CLI mode)
+        it("should throw when no resolver is registered", () => {
             const task = createTask();
 
-            // Execute: call the actual resolveTargetPubkey implementation
-            const result = service.testResolveTargetPubkey(task);
-
-            // Assert: should return original toPubkey since no resolver is available
-            expect(result).toBe(task.toPubkey);
-            expect(mockLogger.debug).toHaveBeenCalledWith(
-                "Target pubkey resolver not registered, using original target",
+            expect(() => service.testResolveTargetPubkey(task)).toThrow(
+                'Target pubkey resolver not registered for agent slug "architect"'
+            );
+            expect(mockLogger.warn).toHaveBeenCalledWith(
+                "Failed to resolve target pubkey",
                 expect.objectContaining({
                     taskId: task.id,
-                    projectId: task.projectId,
+                    targetAgentSlug: task.targetAgentSlug,
                 })
             );
         });
 
-        it("should return original toPubkey when resolver returns same pubkey (agent in project)", () => {
+        it("should return original agent when resolver resolves the same slug", () => {
             const targetPubkey = "target-agent-pubkey";
             const projectId = "31933:owner:test-project";
+            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue({
+                pubkey: targetPubkey,
+                resolvedSlug: "architect",
+                wasRerouted: false,
+            });
 
-            // Setup: resolver returns the same pubkey (agent found in project)
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue(targetPubkey);
+            service.setCallbacks(vi.fn(), vi.fn(), mockTargetResolver);
 
-            service.setCallbacks(
-                vi.fn(), // bootHandler
-                vi.fn(), // stateResolver
-                mockTargetResolver
-            );
-
-            const task = createTask({ toPubkey: targetPubkey, projectId });
-
-            // Execute
+            const task = createTask({ targetAgentSlug: "architect", projectId });
             const result = service.testResolveTargetPubkey(task);
 
-            // Assert: should return original target
-            expect(result).toBe(targetPubkey);
-            expect(mockTargetResolver).toHaveBeenCalledWith(projectId, targetPubkey);
-            // No info log when pubkey is unchanged
+            expect(result).toEqual({
+                pubkey: targetPubkey,
+                resolvedSlug: "architect",
+                wasRerouted: false,
+            });
+            expect(mockTargetResolver).toHaveBeenCalledWith(projectId, "architect");
             expect(mockLogger.info).not.toHaveBeenCalled();
         });
 
-        it("should return PM pubkey when resolver reroutes (target agent NOT in project)", () => {
-            const externalAgentPubkey = "external-agent-pubkey";
+        it("should return PM pubkey when resolver reroutes", () => {
             const pmPubkey = "pm-agent-pubkey";
             const projectId = "31933:owner:test-project";
+            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue({
+                pubkey: pmPubkey,
+                resolvedSlug: "pm",
+                wasRerouted: true,
+            });
 
-            // Setup: resolver returns PM pubkey (agent not in project)
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue(pmPubkey);
+            service.setCallbacks(vi.fn(), vi.fn(), mockTargetResolver);
 
-            service.setCallbacks(
-                vi.fn(),
-                vi.fn(),
-                mockTargetResolver
-            );
-
-            const task = createTask({ toPubkey: externalAgentPubkey, projectId });
-
-            // Execute
+            const task = createTask({ targetAgentSlug: "external-agent", projectId });
             const result = service.testResolveTargetPubkey(task);
 
-            // Assert: should return PM pubkey
-            expect(result).toBe(pmPubkey);
-            expect(mockTargetResolver).toHaveBeenCalledWith(projectId, externalAgentPubkey);
-            // Should log rerouting info when pubkey changes
+            expect(result).toEqual({
+                pubkey: pmPubkey,
+                resolvedSlug: "pm",
+                wasRerouted: true,
+            });
+            expect(mockTargetResolver).toHaveBeenCalledWith(projectId, "external-agent");
             expect(mockLogger.info).toHaveBeenCalledWith(
                 "Scheduled task target resolved by daemon",
                 expect.objectContaining({
                     taskId: task.id,
                     projectId,
+                    originalTarget: "external-agent",
+                    resolvedSlug: "pm",
                 })
             );
         });
 
         it("should normalize NIP-33 project addresses before target resolution", () => {
-            const externalAgentPubkey = "external-agent-pubkey";
-            const pmPubkey = "pm-agent-pubkey";
             const projectAddress = `31933:${"b".repeat(64)}:TENEX-ff3ssq`;
             const projectDTag = "TENEX-ff3ssq";
-
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue(pmPubkey);
+            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue({
+                pubkey: "pm-agent-pubkey",
+                resolvedSlug: "pm",
+                wasRerouted: true,
+            });
 
             service.setCallbacks(vi.fn(), vi.fn(), mockTargetResolver);
 
-            const task = createTask({ toPubkey: externalAgentPubkey, projectId: projectAddress });
-            const result = service.testResolveTargetPubkey(task);
+            const task = createTask({ targetAgentSlug: "external-agent", projectId: projectAddress });
+            service.testResolveTargetPubkey(task);
 
-            expect(result).toBe(pmPubkey);
-            expect(mockTargetResolver).toHaveBeenCalledWith(projectDTag, externalAgentPubkey);
+            expect(mockTargetResolver).toHaveBeenCalledWith(projectDTag, "external-agent");
         });
 
-        it("should return original toPubkey when resolver throws (graceful degradation)", () => {
+        it("should throw when resolver returns null", () => {
             const task = createTask();
+            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockReturnValue(null);
 
-            // Setup: resolver throws an error
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockImplementation(() => {
-                throw new Error("Resolver failed");
-            });
+            service.setCallbacks(vi.fn(), vi.fn(), mockTargetResolver);
 
-            service.setCallbacks(
-                vi.fn(),
-                vi.fn(),
-                mockTargetResolver
+            expect(() => service.testResolveTargetPubkey(task)).toThrow(
+                'Could not resolve scheduled task target slug "architect"'
             );
-
-            // Execute
-            const result = service.testResolveTargetPubkey(task);
-
-            // Assert: should fall back to original target on error
-            expect(result).toBe(task.toPubkey);
-            expect(mockLogger.warn).toHaveBeenCalledWith(
-                "Failed to resolve target pubkey, using original",
-                expect.objectContaining({
-                    taskId: task.id,
-                    error: "Resolver failed",
-                })
-            );
-        });
-
-        it("should correctly route different tasks based on resolver response", () => {
-            const projectId = "31933:owner:test-project";
-            const inProjectAgentPubkey = "in-project-agent";
-            const outsideProjectAgentPubkey = "outside-project-agent";
-            const pmPubkey = "pm-agent-pubkey";
-
-            // Setup: resolver that routes based on agent membership
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockImplementation(
-                (_projId: string, originalPubkey: string) => {
-                    if (originalPubkey === inProjectAgentPubkey) {
-                        // Agent in project - return original
-                        return inProjectAgentPubkey;
-                    }
-                    // Agent not in project - return PM
-                    return pmPubkey;
-                }
-            );
-
-            service.setCallbacks(
-                vi.fn(),
-                vi.fn(),
-                mockTargetResolver
-            );
-
-            // Task 1: target agent IS in project
-            const taskInProject = createTask({ toPubkey: inProjectAgentPubkey, projectId });
-            const result1 = service.testResolveTargetPubkey(taskInProject);
-            expect(result1).toBe(inProjectAgentPubkey);
-
-            // Task 2: target agent is NOT in project
-            const taskOutsideProject = createTask({ toPubkey: outsideProjectAgentPubkey, projectId });
-            const result2 = service.testResolveTargetPubkey(taskOutsideProject);
-            expect(result2).toBe(pmPubkey);
-
-            // Verify resolver was called for both
-            expect(mockTargetResolver).toHaveBeenCalledWith(projectId, inProjectAgentPubkey);
-            expect(mockTargetResolver).toHaveBeenCalledWith(projectId, outsideProjectAgentPubkey);
-        });
-    });
-
-    describe("Daemon-layer resolver logic (simulated)", () => {
-        /**
-         * These tests simulate the resolver logic that the daemon layer provides.
-         * They verify that the expected resolver behavior correctly handles
-         * different project states.
-         */
-
-        it("should simulate resolver returning original pubkey when project is not running", () => {
-            const projectId = "31933:owner:test-project";
-            const targetPubkey = "target-agent-pubkey";
-
-            // Simulate daemon resolver: project not running -> return original
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockImplementation(
-                (_projId: string, originalPubkey: string) => {
-                    // Project not running - return original
-                    return originalPubkey;
-                }
-            );
-
-            service.setCallbacks(
-                vi.fn(),
-                vi.fn(),
-                mockTargetResolver
-            );
-
-            const task = createTask({ toPubkey: targetPubkey, projectId });
-            const result = service.testResolveTargetPubkey(task);
-
-            expect(result).toBe(targetPubkey);
-        });
-
-        it("should simulate resolver returning original pubkey when context is not available", () => {
-            const projectId = "31933:owner:test-project";
-            const targetPubkey = "target-agent-pubkey";
-
-            // Simulate daemon resolver: no context -> return original
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockImplementation(
-                (_projId: string, originalPubkey: string) => {
-                    // No context available - return original
-                    return originalPubkey;
-                }
-            );
-
-            service.setCallbacks(
-                vi.fn(),
-                vi.fn(),
-                mockTargetResolver
-            );
-
-            const task = createTask({ toPubkey: targetPubkey, projectId });
-            const result = service.testResolveTargetPubkey(task);
-
-            expect(result).toBe(targetPubkey);
-        });
-
-        it("should simulate resolver returning original pubkey when no PM available", () => {
-            const projectId = "31933:owner:test-project";
-            const externalAgentPubkey = "external-agent-pubkey";
-
-            // Simulate daemon resolver: agent not found AND no PM -> return original
-            const mockTargetResolver: TargetPubkeyResolver = vi.fn().mockImplementation(
-                (_projId: string, originalPubkey: string) => {
-                    // No PM to fallback to - return original
-                    return originalPubkey;
-                }
-            );
-
-            service.setCallbacks(
-                vi.fn(),
-                vi.fn(),
-                mockTargetResolver
-            );
-
-            const task = createTask({ toPubkey: externalAgentPubkey, projectId });
-            const result = service.testResolveTargetPubkey(task);
-
-            expect(result).toBe(externalAgentPubkey);
         });
     });
 
     describe("ScheduledTask structure", () => {
-        it("should have all required fields for PM routing", () => {
+        it("should require targetAgentSlug and projectId for routing", () => {
             const task: ScheduledTask = {
                 id: "task-123",
                 schedule: "0 9 * * *",
                 prompt: "Test prompt",
                 fromPubkey: "sender-pubkey",
-                toPubkey: "target-pubkey",
-                projectId: "31933:owner:test-project",
+                targetAgentSlug: "architect",
+                projectId: "project-1",
             };
 
-            // These fields are required for PM routing logic
-            expect(task.toPubkey).toBeDefined();
-            expect(task.projectId).toBeDefined();
+            expect(task.targetAgentSlug).toBe("architect");
+            expect(task.projectId).toBe("project-1");
         });
 
         it("should preserve title for tasks", () => {
@@ -396,8 +219,8 @@ describe("SchedulerService PM Routing", () => {
                 schedule: "0 9 * * *",
                 prompt: "Run daily standup",
                 fromPubkey: "sender-pubkey",
-                toPubkey: "target-pubkey",
-                projectId: "31933:owner:test-project",
+                targetAgentSlug: "architect",
+                projectId: "project-1",
             };
 
             expect(task.title).toBe("Daily standup reminder");

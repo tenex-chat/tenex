@@ -98,7 +98,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         expect(intent.scheduledTasks).toBeUndefined();
     });
 
-    it("should gather cron tasks and resolve agent slugs from pubkeys", async () => {
+    it("should gather cron tasks and use stored target agent slugs", async () => {
         const agents = new Map<string, AgentInstance>();
         agents.set("architect", createTestAgent("architect", "pubkey-arch"));
         agents.set("reporter", createTestAgent("reporter", "pubkey-reporter"));
@@ -113,7 +113,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     title: "Daily standup",
                     schedule: "0 9 * * *",
                     prompt: "Run the daily standup",
-                    toPubkey: "pubkey-arch",
+                    targetAgentSlug: "architect",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                     type: "cron" as const,
@@ -158,7 +158,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     title: "Release announcement",
                     schedule: "2026-03-01T12:00:00.000Z",
                     prompt: "Announce the v2 release",
-                    toPubkey: "pubkey-reporter",
+                    targetAgentSlug: "reporter",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                     type: "oneoff" as const,
@@ -187,7 +187,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         expect(task.lastRun).toBeUndefined();
     });
 
-    it("should use truncated pubkey when target agent not found in registry", async () => {
+    it("should preserve stored target slug when agent is not in the registry", async () => {
         const agents = new Map<string, AgentInstance>();
         agents.set("pm", createTestAgent("pm", "pubkey-pm"));
 
@@ -201,7 +201,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     title: "Task for unknown agent",
                     schedule: "0 12 * * *",
                     prompt: "Do something",
-                    toPubkey: "abcdef1234567890unknown",
+                    targetAgentSlug: "unknown-agent",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                 },
@@ -218,8 +218,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         });
 
         expect(intent.scheduledTasks).toHaveLength(1);
-        // Should fall back to first 8 chars of pubkey
-        expect(intent.scheduledTasks?.[0].targetAgent).toBe("abcdef12");
+        expect(intent.scheduledTasks?.[0].targetAgent).toBe("unknown-agent");
     });
 
     it("should use prompt substring as title when title is missing", async () => {
@@ -235,7 +234,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     id: "task-no-title",
                     schedule: "0 6 * * 1",
                     prompt: "A very long prompt that describes what the agent should do in great detail",
-                    toPubkey: "pubkey-pm",
+                    targetAgentSlug: "pm",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                 },
@@ -271,7 +270,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     title: "Legacy task",
                     schedule: "*/5 * * * *",
                     prompt: "Check status",
-                    toPubkey: "pubkey-pm",
+                    targetAgentSlug: "pm",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                     // type is intentionally omitted (legacy tasks)
@@ -306,7 +305,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     title: "Morning report",
                     schedule: "0 8 * * *",
                     prompt: "Generate morning report",
-                    toPubkey: "pubkey-reporter",
+                    targetAgentSlug: "reporter",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                     type: "cron" as const,
@@ -316,7 +315,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     title: "Architecture review",
                     schedule: "0 14 * * 5",
                     prompt: "Review architecture",
-                    toPubkey: "pubkey-arch",
+                    targetAgentSlug: "architect",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                     type: "cron" as const,
@@ -327,7 +326,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
                     title: "Deploy release",
                     schedule: "2026-03-01T18:00:00.000Z",
                     prompt: "Deploy the release",
-                    toPubkey: "pubkey-arch",
+                    targetAgentSlug: "architect",
                     fromPubkey: "user-pubkey",
                     projectId: projectTagId,
                     type: "oneoff" as const,

@@ -1,10 +1,11 @@
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { ProjectAlreadyRunningError } from "./errors";
+import { getProjectSchedulesPath, normalizeProjectIdForRuntime } from "./storage";
+import type { ScheduledTask } from "./types";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/projects";
-import { tryExtractDTagFromAddress } from "@/types/project-ids";
+import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { shortenOptionalEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -32,46 +33,30 @@ export type ProjectBootHandler = (projectId: string) => Promise<void>;
 export type ProjectStateResolver = (projectId: string) => boolean;
 
 /**
- * Target pubkey resolver callback type for resolving the target agent.
+ * Target resolution callback type for resolving the target agent.
  * Used to determine the actual target pubkey for a task, potentially rerouting
- * to the project manager if the original target agent is not in the project.
+ * to the project manager if the original target agent slug is not in the project.
  *
  * @param projectId - The project ID
- * @param originalTargetPubkey - The originally specified target pubkey
- * @returns The resolved pubkey (original or PM)
+ * @param targetAgentSlug - The stored target agent slug
+ * @returns The resolved target pubkey and routing metadata, or null if resolution failed
  */
-export type TargetPubkeyResolver = (projectId: string, originalTargetPubkey: string) => string;
+export interface TargetResolution {
+    pubkey: string;
+    resolvedSlug?: string;
+    wasRerouted: boolean;
+}
+
+export type TargetPubkeyResolver = (
+    projectId: string,
+    targetAgentSlug: string
+) => TargetResolution | null;
 
 /** Truncate a pubkey for logging (first 8 characters) */
 function truncatePubkey(pubkey: string): string {
     return pubkey.substring(0, 8);
 }
 
-/**
- * Normalize persisted project identifiers to the daemon's internal d-tag form.
- * Scheduled tasks historically stored NIP-33 project addresses.
- */
-function normalizeProjectIdForRuntime(projectId: string): string {
-    return tryExtractDTagFromAddress(projectId) ?? projectId;
-}
-
-interface ScheduledTask {
-    id: string;
-    title?: string; // Human-readable title for the scheduled task
-    schedule: string; // Cron expression (for recurring) or ISO timestamp (for one-off)
-    prompt: string;
-    lastRun?: string;
-    nextRun?: string;
-    createdAt?: string; // When the task was created
-    fromPubkey: string; // Who scheduled this task (the scheduler)
-    toPubkey: string; // Target agent that should execute the task
-    projectId: string; // Usually a project a-tag address; runtime callbacks normalize it to a d-tag
-    type?: "cron" | "oneoff"; // Task type - defaults to "cron" for backward compatibility
-    executeAt?: string; // ISO timestamp for one-off tasks
-    targetChannel?: string; // Conversation ID or channel identifier to route the task's output into
-}
-
-// Export the type so it can be used by other modules
 export type { ScheduledTask };
 
 interface CatchUpConfig {
@@ -89,7 +74,6 @@ export class SchedulerService {
     private tasks: Map<string, cron.ScheduledTask> = new Map();
     private oneoffTimers: Map<string, NodeJS.Timeout> = new Map(); // Timers for one-off tasks
     private taskMetadata: Map<string, ScheduledTask> = new Map();
-    private taskFilePath: string;
     private ndk: NDK | null = null;
 
     // Callbacks injected by daemon layer for project management
@@ -98,11 +82,7 @@ export class SchedulerService {
     private projectStateResolver: ProjectStateResolver | null = null;
     private targetPubkeyResolver: TargetPubkeyResolver | null = null;
 
-    private constructor() {
-        // Use global location for scheduled tasks since it's a singleton
-        const tenexDir = config.getConfigPath();
-        this.taskFilePath = path.join(tenexDir, "scheduled_tasks.json");
-    }
+    private constructor() {}
 
     /**
      * Set callbacks for project management (injected by daemon layer).
@@ -134,9 +114,7 @@ export class SchedulerService {
     public async initialize(ndk: NDK, _projectPath?: string): Promise<void> {
         this.ndk = ndk;
 
-        // Ensure .tenex directory exists
-        const tenexDir = path.dirname(this.taskFilePath);
-        await fs.mkdir(tenexDir, { recursive: true });
+        await ensureDirectory(config.getConfigPath("projects"));
 
         // Load existing tasks
         await this.loadTasks();
@@ -163,7 +141,7 @@ export class SchedulerService {
         schedule: string,
         prompt: string,
         fromPubkey: string,
-        toPubkey: string,
+        targetAgentSlug: string,
         projectId?: string,
         title?: string,
         targetChannel?: string
@@ -186,6 +164,7 @@ export class SchedulerService {
             }
         }
 
+        const normalizedProjectId = normalizeProjectIdForRuntime(resolvedProjectId);
         const taskId = this.generateTaskId();
 
         // Store locally for cron management
@@ -195,8 +174,9 @@ export class SchedulerService {
             schedule,
             prompt,
             fromPubkey,
-            toPubkey,
-            projectId: resolvedProjectId,
+            targetAgentSlug,
+            projectId: normalizedProjectId,
+            projectRef: resolvedProjectId,
             createdAt: new Date().toISOString(),
             ...(targetChannel && { targetChannel }),
         };
@@ -206,12 +186,12 @@ export class SchedulerService {
         // Start the cron task
         this.startTask(task);
 
-        await this.saveTasks();
+        await this.saveProjectTasks(task.projectId);
 
         logger.info(`Created scheduled task ${taskId} with cron schedule: ${schedule}`, {
-            projectId: resolvedProjectId,
+            projectId: task.projectId,
             fromPubkey: truncatePubkey(fromPubkey),
-            toPubkey: truncatePubkey(toPubkey),
+            targetAgentSlug,
         });
         return taskId;
     }
@@ -224,7 +204,7 @@ export class SchedulerService {
         executeAt: Date,
         prompt: string,
         fromPubkey: string,
-        toPubkey: string,
+        targetAgentSlug: string,
         projectId?: string,
         title?: string,
         targetChannel?: string
@@ -250,6 +230,7 @@ export class SchedulerService {
             }
         }
 
+        const normalizedProjectId = normalizeProjectIdForRuntime(resolvedProjectId);
         const taskId = this.generateTaskId();
 
         const task: ScheduledTask = {
@@ -258,8 +239,9 @@ export class SchedulerService {
             schedule: executeAt.toISOString(), // Store ISO timestamp for display
             prompt,
             fromPubkey,
-            toPubkey,
-            projectId: resolvedProjectId,
+            targetAgentSlug,
+            projectId: normalizedProjectId,
+            projectRef: resolvedProjectId,
             createdAt: new Date().toISOString(),
             type: "oneoff",
             executeAt: executeAt.toISOString(),
@@ -271,14 +253,14 @@ export class SchedulerService {
         // Start the timer for this one-off task
         this.startOneoffTask(task);
 
-        await this.saveTasks();
+        await this.saveProjectTasks(task.projectId);
 
         logger.info(
             `Created one-off scheduled task ${taskId} to execute at: ${executeAt.toISOString()}`,
             {
-                projectId: resolvedProjectId,
+                projectId: task.projectId,
                 fromPubkey: truncatePubkey(fromPubkey),
-                toPubkey: truncatePubkey(toPubkey),
+                targetAgentSlug,
                 executeAt: executeAt.toISOString(),
             }
         );
@@ -287,6 +269,8 @@ export class SchedulerService {
     }
 
     public async removeTask(taskId: string): Promise<boolean> {
+        const task = this.taskMetadata.get(taskId);
+
         // Stop cron task if exists
         const cronTask = this.tasks.get(taskId);
         if (cronTask) {
@@ -303,7 +287,9 @@ export class SchedulerService {
 
         // Remove from local storage
         this.taskMetadata.delete(taskId);
-        await this.saveTasks();
+        if (task) {
+            await this.saveProjectTasks(task.projectId);
+        }
 
         logger.info(`Removed scheduled task ${taskId}`);
         return true;
@@ -422,10 +408,12 @@ export class SchedulerService {
      * Used when a task has invalid data or has already been executed.
      */
     private purgeCorruptedOneoffTask(taskId: string): void {
+        const task = this.taskMetadata.get(taskId);
         this.oneoffTimers.delete(taskId);
         this.taskMetadata.delete(taskId);
         // Save asynchronously - don't block on corrupted task cleanup
-        this.saveTasks().catch((error) => {
+        const persist = task ? this.saveProjectTasks(task.projectId) : Promise.resolve();
+        persist.catch((error) => {
             logger.error(`Failed to save after purging corrupted task ${taskId}:`, error);
         });
 
@@ -446,7 +434,7 @@ export class SchedulerService {
             logger.info(`One-off task ${task.id} executed successfully, auto-deleting`);
             this.oneoffTimers.delete(task.id);
             this.taskMetadata.delete(task.id);
-            await this.saveTasks();
+            await this.saveProjectTasks(task.projectId);
 
             trace.getActiveSpan()?.addEvent("scheduler.oneoff_task_completed", {
                 "task.id": task.id,
@@ -520,11 +508,18 @@ export class SchedulerService {
 
         // Delete all expired tasks
         if (expiredTasks.length > 0) {
+            const affectedProjects = new Set<string>();
             for (const taskId of expiredTasks) {
+                const task = this.taskMetadata.get(taskId);
                 this.oneoffTimers.delete(taskId);
                 this.taskMetadata.delete(taskId);
+                if (task) {
+                    affectedProjects.add(task.projectId);
+                }
             }
-            await this.saveTasks();
+            await Promise.all(
+                Array.from(affectedProjects).map((projectId) => this.saveProjectTasks(projectId))
+            );
 
             trace.getActiveSpan()?.addEvent("scheduler.expired_oneoff_tasks_deleted", {
                 "catchup.expiredTasksDeleted": expiredTasks.length,
@@ -692,7 +687,7 @@ export class SchedulerService {
                     logger.info(`One-off task ${task.id} catch-up completed, auto-deleting`);
                     this.oneoffTimers.delete(task.id);
                     this.taskMetadata.delete(task.id);
-                    await this.saveTasks();
+                    await this.saveProjectTasks(task.projectId);
                 }
 
                 // Add delay between tasks (except after the last one)
@@ -874,7 +869,7 @@ export class SchedulerService {
         // Update last run time ONLY after successful publish
         // This ensures failed tasks can be retried on next startup
         task.lastRun = new Date().toISOString();
-        await this.saveTasks();
+        await this.saveProjectTasks(task.projectId);
 
         trace.getActiveSpan()?.addEvent("scheduler.task_triggered", {
             "task.id": task.id,
@@ -890,49 +885,80 @@ export class SchedulerService {
      * The resolver is provided by the daemon layer during initialization.
      *
      * @param task - The scheduled task to resolve target for
-     * @returns The pubkey to use as the target (either original or PM)
+     * @returns The resolved target pubkey and routing metadata
      */
-    protected resolveTargetPubkey(task: ScheduledTask): string {
-        // If no resolver registered, fall back to original target
-        if (!this.targetPubkeyResolver) {
-            logger.debug("Target pubkey resolver not registered, using original target", {
-                taskId: task.id,
-                projectId: task.projectId,
-            });
-            return task.toPubkey;
-        }
-
+    protected resolveTargetPubkey(task: ScheduledTask): TargetResolution {
         try {
-            const resolvedPubkey = this.targetPubkeyResolver(
+            const resolvedViaContext = this.resolveTargetFromProjectContext(task);
+            if (resolvedViaContext) {
+                return resolvedViaContext;
+            }
+
+            if (!this.targetPubkeyResolver) {
+                throw new Error(
+                    `Target pubkey resolver not registered for agent slug "${task.targetAgentSlug}"`
+                );
+            }
+
+            const resolved = this.targetPubkeyResolver(
                 normalizeProjectIdForRuntime(task.projectId),
-                task.toPubkey
+                task.targetAgentSlug
             );
 
-            // Log if rerouted (pubkey changed)
-            if (resolvedPubkey !== task.toPubkey) {
+            if (!resolved) {
+                throw new Error(
+                    `Could not resolve scheduled task target slug "${task.targetAgentSlug}"`
+                );
+            }
+
+            if (resolved.wasRerouted) {
                 logger.info("Scheduled task target resolved by daemon", {
                     taskId: task.id,
                     projectId: task.projectId,
-                    originalTarget: truncatePubkey(task.toPubkey),
-                    resolvedTarget: truncatePubkey(resolvedPubkey),
+                    originalTarget: task.targetAgentSlug,
+                    resolvedTarget: truncatePubkey(resolved.pubkey),
+                    resolvedSlug: resolved.resolvedSlug,
                 });
 
                 trace.getActiveSpan()?.addEvent("scheduler.task_rerouted", {
                     "task.id": task.id,
-                    "task.original_target": truncatePubkey(task.toPubkey),
-                    "task.resolved_target": truncatePubkey(resolvedPubkey),
+                    "task.original_target": task.targetAgentSlug,
+                    "task.resolved_target": truncatePubkey(resolved.pubkey),
                     "project.id": task.projectId,
                 });
             }
 
-            return resolvedPubkey;
+            return resolved;
         } catch (error) {
-            // If resolver fails, fall back to original target
-            logger.warn("Failed to resolve target pubkey, using original", {
+            logger.warn("Failed to resolve target pubkey", {
                 taskId: task.id,
+                targetAgentSlug: task.targetAgentSlug,
                 error: error instanceof Error ? error.message : String(error),
             });
-            return task.toPubkey;
+            throw error;
+        }
+    }
+
+    private resolveTargetFromProjectContext(task: ScheduledTask): TargetResolution | null {
+        try {
+            const projectContext = getProjectContext();
+            const currentProjectId = normalizeProjectIdForRuntime(projectContext.project.tagId());
+            if (currentProjectId !== normalizeProjectIdForRuntime(task.projectId)) {
+                return null;
+            }
+
+            const targetAgent = projectContext.getAgent(task.targetAgentSlug);
+            if (!targetAgent) {
+                return null;
+            }
+
+            return {
+                pubkey: targetAgent.pubkey,
+                resolvedSlug: targetAgent.slug,
+                wasRerouted: false,
+            };
+        } catch {
+            return null;
         }
     }
 
@@ -948,7 +974,8 @@ export class SchedulerService {
 
         // Resolve the target pubkey - if the target agent is not in the project,
         // route to the PM of that project instead
-        const targetPubkey = this.resolveTargetPubkey(task);
+        const targetResolution = this.resolveTargetPubkey(task);
+        const targetPubkey = targetResolution.pubkey;
 
         const event = new NDKEvent(this.ndk);
         event.kind = 1; // Unified conversation format (kind:1)
@@ -957,7 +984,7 @@ export class SchedulerService {
         // Build tags - use stored projectId instead of getting from context
         // The projectId is stored when the task is created (within project context)
         const tags: string[][] = [
-            ["a", task.projectId], // Project reference (stored at task creation time)
+            ["a", task.projectRef ?? task.projectId], // Project reference (stored at task creation time)
             ["p", targetPubkey], // Target agent that should handle this task (may be PM if original target not in project)
         ];
 
@@ -990,7 +1017,7 @@ export class SchedulerService {
         await event.sign(signer);
         await event.publish();
 
-        const wasRerouted = targetPubkey !== task.toPubkey;
+        const wasRerouted = targetResolution.wasRerouted;
 
         logger.info("Published scheduled task event", {
             taskId: task.id,
@@ -998,7 +1025,8 @@ export class SchedulerService {
             eventId: shortenOptionalEventId(event.id),
             from: truncatePubkey(signer.pubkey),
             to: truncatePubkey(targetPubkey),
-            originalTarget: wasRerouted ? truncatePubkey(task.toPubkey) : undefined,
+            originalTarget: wasRerouted ? task.targetAgentSlug : undefined,
+            resolvedSlug: targetResolution.resolvedSlug,
             reroutedToPM: wasRerouted,
         });
 
@@ -1011,7 +1039,7 @@ export class SchedulerService {
             "event.id": event.id,
             "event.from": truncatePubkey(signer.pubkey),
             "event.to": truncatePubkey(targetPubkey),
-            "event.original_target": wasRerouted ? truncatePubkey(task.toPubkey) : undefined,
+            "event.original_target": wasRerouted ? task.targetAgentSlug : undefined,
             "event.rerouted_to_pm": wasRerouted,
             "project.id": task.projectId,
         });
@@ -1019,15 +1047,51 @@ export class SchedulerService {
 
     private async loadTasks(): Promise<void> {
         try {
-            const data = await fs.readFile(this.taskFilePath, "utf-8");
-            const tasks = JSON.parse(data) as ScheduledTask[];
+            const projectsBase = config.getConfigPath("projects");
+            const entries = await fs.readdir(projectsBase, { withFileTypes: true });
+            let loadedCount = 0;
 
-            for (const task of tasks) {
-                this.taskMetadata.set(task.id, task);
+            for (const entry of entries) {
+                if (!entry.isDirectory()) {
+                    continue;
+                }
+
+                const projectId = entry.name;
+                const filePath = getProjectSchedulesPath(projectId);
+
+                if (!(await fileExists(filePath))) {
+                    continue;
+                }
+
+                const tasks = await readJsonFile<ScheduledTask[]>(filePath);
+                if (!Array.isArray(tasks)) {
+                    logger.warn("Skipping invalid schedules file", { filePath });
+                    continue;
+                }
+
+                for (const task of tasks) {
+                    const normalizedProjectId = normalizeProjectIdForRuntime(
+                        task.projectId || projectId
+                    );
+                    if (!task.targetAgentSlug) {
+                        logger.warn("Skipping schedule without targetAgentSlug", {
+                            taskId: task.id,
+                            filePath,
+                        });
+                        continue;
+                    }
+
+                    this.taskMetadata.set(task.id, {
+                        ...task,
+                        projectId: normalizedProjectId,
+                        projectRef: task.projectRef ?? task.projectId,
+                    });
+                    loadedCount++;
+                }
             }
 
             trace.getActiveSpan()?.addEvent("scheduler.tasks_loaded", {
-                "tasks.count": tasks.length,
+                "tasks.count": loadedCount,
             });
         } catch (error: unknown) {
             if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
@@ -1038,12 +1102,21 @@ export class SchedulerService {
         }
     }
 
-    private async saveTasks(): Promise<void> {
+    private async saveProjectTasks(projectId: string): Promise<void> {
         try {
-            const tasks = Array.from(this.taskMetadata.values());
-            await fs.writeFile(this.taskFilePath, JSON.stringify(tasks, null, 2));
+            const normalizedProjectId = normalizeProjectIdForRuntime(projectId);
+            const filePath = getProjectSchedulesPath(normalizedProjectId);
+            const tasks = Array.from(this.taskMetadata.values())
+                .filter((task) => normalizeProjectIdForRuntime(task.projectId) === normalizedProjectId)
+                .sort((left, right) => left.id.localeCompare(right.id));
+
+            await ensureDirectory(config.getProjectMetadataPath(normalizedProjectId));
+            await writeJsonFile(filePath, tasks);
         } catch (error) {
-            logger.error("Failed to save scheduled tasks:", error);
+            logger.error("Failed to save scheduled tasks:", {
+                projectId,
+                error,
+            });
         }
     }
 
@@ -1074,16 +1147,26 @@ export class SchedulerService {
     }
 
     public async clearAllTasks(): Promise<void> {
-        // Stop and remove all tasks
-        for (const taskId of Array.from(this.tasks.keys())) {
-            await this.removeTask(taskId);
+        const affectedProjects = new Set<string>();
+
+        for (const task of this.taskMetadata.values()) {
+            affectedProjects.add(task.projectId);
         }
 
-        // Clear the tasks file
-        try {
-            await fs.writeFile(this.taskFilePath, JSON.stringify([], null, 2));
-        } catch (error) {
-            logger.error("Failed to clear tasks file:", error);
+        for (const cronTask of this.tasks.values()) {
+            cronTask.stop();
         }
+
+        for (const timer of this.oneoffTimers.values()) {
+            clearTimeout(timer);
+        }
+
+        this.tasks.clear();
+        this.oneoffTimers.clear();
+        this.taskMetadata.clear();
+
+        await Promise.all(
+            Array.from(affectedProjects).map((projectId) => this.saveProjectTasks(projectId))
+        );
     }
 }
