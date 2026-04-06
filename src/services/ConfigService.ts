@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, PROVIDERS_FILE, TENEX_DIR, getTenexBasePath } from "@/constants";
-import { ensureDirectory, fileExists, readJsonFile, resolvePath, writeJsonFile } from "@/lib/fs";
+import { ensureDirectory, fileExists, getFileStats, readJsonFile, resolvePath, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { resolveMetaModel, resolveToVariant, generateSystemPromptFragment, type MetaModelResolution } from "@/llm/meta";
 import { ensureCacheLoaded as ensureModelsDevCacheLoaded } from "@/llm/utils/models-dev-cache";
@@ -75,6 +75,13 @@ export type TenexSubdir =
 export class ConfigService {
     private cache = new Map<string, { data: unknown; timestamp: number }>();
     private loadedConfig?: LoadedConfig;
+    private providersMonitorPath: string | null = null;
+    private providersPollInterval: NodeJS.Timeout | null = null;
+    private providersReloadTimer: NodeJS.Timeout | null = null;
+    private providersReloadPromise: Promise<void> | null = null;
+    private lastAppliedProvidersSignature: string | null = null;
+    private lastObservedProvidersFileState: string | null = null;
+    private providersPollInFlight = false;
 
     // =====================================================================================
     // PATH UTILITIES
@@ -205,8 +212,8 @@ export class ConfigService {
         const loadedConfig = { config, llms, mcp, providers };
         this.loadedConfig = loadedConfig;
 
-        // Initialize the LLM factory with provider configs and global settings
-        await llmServiceFactory.initializeProviders(providers.providers);
+        await this.syncProvidersRuntime(providers, "config load");
+        await this.ensureProvidersMonitor(globalPath);
 
         // Load models.dev cache for model metadata (context windows, output limits)
         await ensureModelsDevCacheLoaded();
@@ -291,6 +298,17 @@ export class ConfigService {
             providers,
             TenexProvidersSchema
         );
+
+        if (basePath === this.getGlobalPath()) {
+            if (this.loadedConfig) {
+                this.loadedConfig = {
+                    ...this.loadedConfig,
+                    providers,
+                };
+            }
+            await this.syncProvidersRuntime(providers, "providers save");
+            await this.ensureProvidersMonitor(basePath);
+        }
     }
 
     // =====================================================================================
@@ -741,6 +759,136 @@ export class ConfigService {
     // PRIVATE IMPLEMENTATION
     // =====================================================================================
 
+    private async ensureProvidersMonitor(globalPath: string): Promise<void> {
+        if (this.providersMonitorPath !== globalPath) {
+            if (this.providersPollInterval) {
+                clearInterval(this.providersPollInterval);
+                this.providersPollInterval = null;
+            }
+            this.providersMonitorPath = globalPath;
+        }
+
+        this.lastObservedProvidersFileState = await this.getProvidersFileState(globalPath);
+
+        if (this.providersPollInterval) {
+            return;
+        }
+
+        this.providersPollInterval = setInterval(() => {
+            void this.pollProvidersFileState();
+        }, 250);
+        this.providersPollInterval.unref?.();
+    }
+
+    private scheduleProvidersReload(): void {
+        if (this.providersReloadTimer) {
+            clearTimeout(this.providersReloadTimer);
+        }
+
+        this.providersReloadTimer = setTimeout(() => {
+            this.providersReloadTimer = null;
+            this.providersReloadPromise = this.reloadProvidersFromDisk().finally(() => {
+                this.providersReloadPromise = null;
+            });
+        }, 100);
+    }
+
+    private async pollProvidersFileState(): Promise<void> {
+        if (this.providersPollInFlight) {
+            return;
+        }
+
+        this.providersPollInFlight = true;
+        try {
+            const globalPath = this.getGlobalPath();
+            const nextState = await this.getProvidersFileState(globalPath);
+            if (nextState === this.lastObservedProvidersFileState) {
+                return;
+            }
+
+            this.lastObservedProvidersFileState = nextState;
+            this.scheduleProvidersReload();
+        } finally {
+            this.providersPollInFlight = false;
+        }
+    }
+
+    private async reloadProvidersFromDisk(): Promise<void> {
+        const globalPath = this.getGlobalPath();
+        const filePath = this.getConfigFilePath(globalPath, PROVIDERS_FILE);
+
+        try {
+            this.clearCache(filePath);
+            const providers = await this.loadTenexProviders(globalPath);
+
+            if (this.loadedConfig) {
+                this.loadedConfig = {
+                    ...this.loadedConfig,
+                    providers,
+                };
+            }
+
+            await this.syncProvidersRuntime(providers, "providers.json file change");
+        } catch (error) {
+            logger.warn("[ConfigService] Failed to reload providers.json; keeping previous runtime config", {
+                globalPath,
+                error: formatAnyError(error),
+            });
+        }
+    }
+
+    private async getProvidersFileState(globalPath: string): Promise<string | null> {
+        const stats = await this.getConfigFileStats(globalPath);
+        if (!stats) {
+            return null;
+        }
+        return `${stats.mtimeMs}:${stats.size}`;
+    }
+
+    private async getConfigFileStats(
+        basePath: string
+    ): Promise<{ mtimeMs: number; size: number } | null> {
+        const filePath = this.getConfigFilePath(basePath, PROVIDERS_FILE);
+        try {
+            const stats = await getFileStats(filePath);
+            if (!stats?.isFile()) {
+                return null;
+            }
+            return {
+                mtimeMs: stats.mtimeMs,
+                size: stats.size,
+            };
+        } catch (error) {
+            logger.debug("[ConfigService] Failed to stat providers.json", {
+                filePath,
+                error: formatAnyError(error),
+            });
+            return null;
+        }
+    }
+
+    private async syncProvidersRuntime(
+        providers: TenexProviders,
+        reason: string
+    ): Promise<void> {
+        if (this.loadedConfig) {
+            this.validateProviderReferences(this.loadedConfig.llms, providers);
+        }
+
+        const signature = JSON.stringify(providers);
+        if (this.lastAppliedProvidersSignature === signature) {
+            return;
+        }
+
+        await llmServiceFactory.initializeProviders(providers.providers);
+        this.lastAppliedProvidersSignature = signature;
+
+        logger.info("[ConfigService] Synchronized provider runtime from providers.json", {
+            reason,
+            providers: Object.keys(providers.providers),
+        });
+    }
+
     private validateProviderReferences(llms: TenexLLMs, providers: TenexProviders): void {
         const missingProviders = new Set<string>();
 
@@ -853,6 +1001,33 @@ export class ConfigService {
         } else {
             this.cache.clear();
         }
+    }
+
+    async waitForPendingProviderReload(): Promise<void> {
+        await this.pollProvidersFileState();
+        if (this.providersReloadTimer) {
+            clearTimeout(this.providersReloadTimer);
+            this.providersReloadTimer = null;
+            this.providersReloadPromise = this.reloadProvidersFromDisk().finally(() => {
+                this.providersReloadPromise = null;
+            });
+        }
+        await this.providersReloadPromise;
+    }
+
+    dispose(): void {
+        if (this.providersReloadTimer) {
+            clearTimeout(this.providersReloadTimer);
+            this.providersReloadTimer = null;
+        }
+        if (this.providersPollInterval) {
+            clearInterval(this.providersPollInterval);
+            this.providersPollInterval = null;
+        }
+        this.providersMonitorPath = null;
+        this.providersReloadPromise = null;
+        this.lastObservedProvidersFileState = null;
+        this.providersPollInFlight = false;
     }
 }
 
