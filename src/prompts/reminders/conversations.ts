@@ -378,7 +378,7 @@ function loadRecentConversations(
                 title: preview.title,
                 summary: preview.summary
                     ? sanitizeForPrompt(preview.summary)
-                    : "[No summary available]",
+                    : undefined,
                 lastActivity: preview.lastActivity,
             }));
 
