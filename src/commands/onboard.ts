@@ -136,13 +136,12 @@ function decodeToPubkey(identifier: string): string {
  * Roles that can be assigned to specific LLM configurations.
  * Each role falls back to the "default" configuration when not explicitly set.
  */
-type LLMRoleKey = "default" | "summarization" | "supervision" | "search" | "promptCompilation";
+type LLMRoleKey = "default" | "summarization" | "supervision" | "promptCompilation";
 
 const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: string }> = [
     { key: "default", label: "Default", recommendation: "The default model all agents get — pick your best all-rounder" },
     { key: "summarization", label: "Summarization", recommendation: "Used for conversation metadata (summaries, titles) — choose a cheap model with a large context window" },
     { key: "supervision", label: "Supervision", recommendation: "Evaluates agent work and decides next steps — choose a model with strong reasoning" },
-    { key: "search", label: "Search", recommendation: "Powers search queries — choose a web-connected model like Perplexity Sonar, or leave as default" },
     { key: "promptCompilation", label: "Prompt Compilation", recommendation: "Distills lessons into system prompts — choose a smart model with a large context window" },
 ];
 
@@ -207,13 +206,6 @@ function autoSelectRoles(
     const promptCompilation = mostExpensive(100_000);
     if (promptCompilation) llmsConfig.promptCompilation = promptCompilation;
 
-    // Search: prefer models with "sonar" in the model ID (Perplexity via OpenRouter)
-    const sonarConfig = configNames.find((name) => {
-        const cfg = llmsConfig.configurations[name] as AnyLLMConfiguration;
-        if (isMetaModelConfiguration(cfg)) return false;
-        return cfg.model.toLowerCase().includes("sonar");
-    });
-    if (sonarConfig) llmsConfig.search = sonarConfig;
 }
 
 /**

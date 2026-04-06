@@ -250,9 +250,6 @@ export class UnifiedSearchService {
 
     /**
      * Use a fast/cheap LLM to extract focused information from search results.
-     *
-     * Uses the 'summarization' config if available, falls back to 'search',
-     * then falls back to the default LLM config.
      */
     private async extractWithLLM(
         query: string,
@@ -260,14 +257,7 @@ export class UnifiedSearchService {
         results: SearchResult[]
     ): Promise<string | undefined> {
         try {
-            // Try to find a fast/cheap model config
-            const configName = this.getExtractionModelConfig();
-            if (!configName) {
-                logger.debug("[UnifiedSearch] No LLM config available for extraction");
-                return undefined;
-            }
-
-            const llmService = configService.createLLMService(configName, {
+            const llmService = configService.createLLMService(undefined, {
                 agentName: "unified-search",
             });
 
@@ -301,23 +291,6 @@ export class UnifiedSearchService {
             logger.warn("[UnifiedSearch] LLM extraction failed", { error: message });
             return undefined;
         }
-    }
-
-    /**
-     * Get the best available LLM config name for extraction.
-     * Priority: search config (typically fast/cheap) > undefined (createLLMService uses default)
-     */
-    private getExtractionModelConfig(): string | undefined {
-        try {
-            // Try search config first (typically configured as a fast/cheap model)
-            const search = configService.getSearchModelName();
-            if (search) return search;
-        } catch {
-            // Not available
-        }
-
-        // Return undefined - createLLMService will use default config with fallback
-        return undefined;
     }
 
     /**

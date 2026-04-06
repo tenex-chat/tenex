@@ -613,15 +613,6 @@ export class ConfigService {
     // =====================================================================================
 
     /**
-     * Get the configured search model name if available.
-     * This is a typed accessor for the search configuration.
-     * @returns The search model config name or undefined if not configured
-     */
-    getSearchModelName(): string | undefined {
-        return this.loadedConfig?.llms?.search;
-    }
-
-    /**
      * Get the configured summarization model name if available.
      * @returns The summarization model config name or undefined if not configured
      */

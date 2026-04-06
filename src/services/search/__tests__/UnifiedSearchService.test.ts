@@ -13,7 +13,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-let mockSearchModelName: string | undefined;
 let mockCreateLLMServiceResult: any;
 
 // Mock RAGService for dynamic collection discovery
@@ -65,7 +64,6 @@ function createFailingProvider(name: string): SearchProvider {
 }
 
 describe("UnifiedSearchService", () => {
-    let getSearchModelNameSpy: ReturnType<typeof spyOn>;
     let createLLMServiceSpy: ReturnType<typeof spyOn>;
     let ragServiceGetInstanceSpy: ReturnType<typeof spyOn>;
     let ragCollectionRegistryGetInstanceSpy: ReturnType<typeof spyOn>;
@@ -73,14 +71,10 @@ describe("UnifiedSearchService", () => {
     beforeEach(() => {
         SearchProviderRegistry.resetInstance();
         UnifiedSearchService.resetInstance();
-        mockSearchModelName = undefined;
         mockCreateLLMServiceResult = undefined;
         mockListCollections = async () => [];
         mockQueryWithFilter = async () => [];
         mockGetMatchingCollections = null;
-        getSearchModelNameSpy = spyOn(config, "getSearchModelName").mockImplementation(
-            () => mockSearchModelName
-        );
         createLLMServiceSpy = spyOn(config, "createLLMService").mockImplementation(
             (..._args: any[]) => mockCreateLLMServiceResult
         );
@@ -109,7 +103,6 @@ describe("UnifiedSearchService", () => {
     afterEach(() => {
         SearchProviderRegistry.resetInstance();
         UnifiedSearchService.resetInstance();
-        getSearchModelNameSpy?.mockRestore();
         createLLMServiceSpy?.mockRestore();
         ragServiceGetInstanceSpy?.mockRestore();
         ragCollectionRegistryGetInstanceSpy?.mockRestore();
@@ -229,13 +222,12 @@ describe("UnifiedSearchService", () => {
         expect(result.results.every((r) => r.source !== "conversations")).toBe(true);
     });
 
-    it("performs LLM extraction when prompt is provided and model is configured", async () => {
+    it("performs LLM extraction when prompt is provided", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
             createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
 
-        mockSearchModelName = "test-search-model";
         mockCreateLLMServiceResult = {
             generateText: async () => ({
                 text: "Extracted information about the query",
@@ -254,14 +246,13 @@ describe("UnifiedSearchService", () => {
         expect(result.extraction).toBe("Extracted information about the query");
     });
 
-    it("returns results without extraction when LLM is not configured", async () => {
+    it("returns results without extraction when LLM call fails", async () => {
         const registry = SearchProviderRegistry.getInstance();
         registry.register(
             createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
 
-        // No LLM config
-        mockSearchModelName = undefined;
+        // LLM service returns undefined (simulate unavailable)
         mockCreateLLMServiceResult = undefined;
 
         const service = UnifiedSearchService.getInstance();
@@ -273,7 +264,7 @@ describe("UnifiedSearchService", () => {
 
         expect(result.success).toBe(true);
         expect(result.totalResults).toBe(1);
-        // Extraction should be undefined since no LLM is available
+        // Extraction should be undefined since LLM call failed
         expect(result.extraction).toBeUndefined();
     });
 
@@ -283,7 +274,6 @@ describe("UnifiedSearchService", () => {
             createMockProvider("knowledge", [createMockResult("knowledge", "r1", 0.9)])
         );
 
-        mockSearchModelName = "test-model";
         mockCreateLLMServiceResult = {
             generateText: async () => {
                 throw new Error("LLM failed");
