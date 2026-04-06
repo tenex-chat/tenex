@@ -81,11 +81,6 @@ export function renderSkill(skill: SkillData, pathVars?: Record<string, string>)
 
     parts.push(`<skill${attrStr}>`);
 
-    if (skill.toolNames && skill.toolNames.length > 0) {
-        parts.push(`**Provides:** ${skill.toolNames.map((t) => `\`${t}\``).join(", ")}`);
-        parts.push("");
-    }
-
     parts.push(skill.content);
 
     const failedFiles = skill.installedFiles.filter((f) => !f.success);
