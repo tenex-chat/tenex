@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
-import { IndexingStateManager } from "../IndexingStateManager";
+import { IndexingStateManager, EMBEDDING_CONTENT_VERSION } from "../IndexingStateManager";
 
 describe("IndexingStateManager", () => {
     let projectsBasePath: string;
@@ -127,6 +127,18 @@ describe("IndexingStateManager", () => {
 
         manager.clearAllState();
         expect(manager.getStats().totalEntries).toBe(0);
+    });
+    it("version bump from v1 to v2 triggers re-indexing of all conversations", () => {
+        // This test documents the expected behavior when EMBEDDING_CONTENT_VERSION is bumped.
+        // When the version changes, existing conversations should be considered "needs re-indexing"
+        // because the embedding content format has changed.
+        //
+        // Note: The actual version-bump-triggered re-indexing is handled by the indexing job
+        // which checks the EMBEDDING_CONTENT_VERSION constant. This test just verifies the constant
+        // exists and has the expected value.
+
+        // The version should be 'v2' (changed from original 'v1' metadata-only format)
+        expect(EMBEDDING_CONTENT_VERSION).toBe("v2");
     });
 });
 

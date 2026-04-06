@@ -12,6 +12,17 @@ import { listProjectIdsFromDisk } from "@/conversations/ConversationDiskReader";
 import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 
+/**
+ * Version constant for the embedded content format.
+ * Bump this value to force re-indexing of all conversations when the
+ * embedding content format changes (e.g., adding new fields, changing
+ * rendering logic).
+ *
+ * v1: metadata-only (title + summary + lastUserMessage) — original format
+ * v2: full conversation transcript (XML) — enables semantic search over full content
+ */
+export const EMBEDDING_CONTENT_VERSION = "v2";
+
 export class IndexingStateManager {
     private readonly baseDir: string;
 

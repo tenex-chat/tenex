@@ -94,8 +94,21 @@ export function wrapToolsWithOutputTruncation(
 ): Record<string, CoreTool<unknown, unknown>> {
     const wrappedTools: Record<string, CoreTool<unknown, unknown>> = {};
 
+    /** Tools from ai-sdk-fs-tools that have their own built-in truncation */
+    const FS_TOOL_NAMES = new Set(["fs_read", "fs_glob", "fs_grep"]);
+
     for (const [toolName, tool] of Object.entries(toolsObject)) {
+        // Skip tools without an execute function
         if (!tool.execute) {
+            wrappedTools[toolName] = tool;
+            continue;
+        }
+
+        // Skip ai-sdk-fs-tools — they have their own line-based truncation
+        // (DEFAULT_LINE_LIMIT=250, MAX_LINE_LENGTH=2000). Wrapping them would
+        // double-truncate, and wrapping fs_read's retrieval results would
+        // create an infinite loop where the agent can never retrieve full output.
+        if (FS_TOOL_NAMES.has(toolName)) {
             wrappedTools[toolName] = tool;
             continue;
         }

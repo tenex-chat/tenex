@@ -20,6 +20,8 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { conversationRegistry } from "@/conversations/ConversationRegistry";
 import type { ProjectDTag } from "@/types/project-ids";
+import { renderConversationXml, type ConversationXmlRenderResult } from "@/conversations/formatters/utils/conversation-transcript-formatter";
+import { createHash } from "node:crypto";
 
 /** Collection name for conversation embeddings */
 const CONVERSATION_COLLECTION = "conversation_embeddings";
@@ -147,31 +149,46 @@ export class ConversationEmbeddingService {
      * Build embedding content from conversation metadata
      * Combines title and summary for richer semantic matching
      */
+    /**
+     * Render conversation messages to XML and compute a transcript fingerprint.
+     *
+     * Uses the shared transcript formatter to produce an XML representation of the
+     * full conversation. This enables semantic search over the complete message
+     * history rather than just metadata (title, summary).
+     *
+     * The fingerprint is a SHA-256 hash of the XML content. It is used by callers
+     * (e.g. the indexing job) to detect when a conversation's transcript has changed
+     * and needs re-embedding.
+     *
+     * Strict error handling: render failures return { kind: 'error' } so callers
+     * can distinguish between "no content" and "something went wrong". We never
+     * silently degrade to metadata-only embeddings.
+     *
+     * @param messages - The full list of messages in the conversation
+     * @returns { kind: 'ok'; transcriptXml: string; fingerprint: string } on success,
+     *          { kind: 'error' } if rendering fails (e.g. missing root event ID)
+     */
     private buildEmbeddingContent(
-        title?: string,
-        summary?: string,
-        lastUserMessage?: string
-    ): string {
-        const parts: string[] = [];
+        messages: import("@/conversations/types").ConversationRecordInput[]
+    ): { kind: "ok"; transcriptXml: string; fingerprint: string } | { kind: "error" } {
+        try {
+            const renderResult: ConversationXmlRenderResult = renderConversationXml(messages, {
+                includeToolCalls: true,
+            });
 
-        if (title) {
-            parts.push(`Title: ${title}`);
+            const fingerprint = createHash("sha256")
+                .update(renderResult.xml)
+                .digest("hex");
+
+            return { kind: "ok", transcriptXml: renderResult.xml, fingerprint };
+        } catch (error) {
+            // renderConversationXml throws if there's no root event ID.
+            // Return { kind: 'error' } so the caller can decide what to do
+            // (skip, retry later, mark as failed, etc.).
+            const message = error instanceof Error ? error.message : String(error);
+            logger.debug(`Failed to render conversation transcript: ${message}`);
+            return { kind: "error" };
         }
-
-        if (summary) {
-            parts.push(`Summary: ${summary}`);
-        }
-
-        // Include last user message for additional context
-        if (lastUserMessage) {
-            // Truncate if too long
-            const truncated = lastUserMessage.length > 500
-                ? `${lastUserMessage.substring(0, 500)}...`
-                : lastUserMessage;
-            parts.push(`Last message: ${truncated}`);
-        }
-
-        return parts.join("\n\n");
     }
 
     /**
@@ -204,14 +221,23 @@ export class ConversationEmbeddingService {
             const messages = resolvedStore?.getAllMessages() ?? [];
             const metadata = resolvedStore?.metadata;
             const title = preview?.title ?? metadata?.title ?? resolvedStore?.title;
-            const summary = preview?.summary ?? metadata?.summary;
-            const lastUserMessage = preview?.lastUserMessage ?? metadata?.lastUserMessage;
 
-            // Build embedding content
-            const embeddingContent = this.buildEmbeddingContent(title, summary, lastUserMessage);
+            // Build embedding content from full transcript XML
+            const renderResult = this.buildEmbeddingContent(messages);
 
-            // Skip if no content to embed
-            if (!embeddingContent.trim()) {
+            // Strict error handling: render failures always return { kind: 'error' },
+            // we never silently degrade to metadata-only embeddings.
+            if (renderResult.kind === "error") {
+                logger.debug(
+                    `Failed to render transcript for conversation ${conversationId.substring(0, 8)}`
+                );
+                return { kind: "error", reason: "Failed to render conversation transcript" };
+            }
+
+            const { transcriptXml, fingerprint } = renderResult;
+
+            // Skip if no content to embed (empty transcript)
+            if (!transcriptXml.trim()) {
                 logger.debug(`No content to embed for conversation ${conversationId.substring(0, 8)}`);
                 return { kind: "noContent" };
             }
@@ -222,15 +248,17 @@ export class ConversationEmbeddingService {
                 kind: "ok",
                 document: {
                     id: documentId,
-                    content: embeddingContent,
+                    content: transcriptXml,
                     metadata: {
                         conversationId,
                         projectId,
                         title: title || "",
-                        summary: summary || "",
+                        summary: preview?.summary ?? metadata?.summary ?? "",
                         messageCount: preview?.messageCount ?? messages.length,
                         createdAt: preview?.createdAt ?? messages[0]?.timestamp,
                         lastActivity: preview?.lastActivity ?? messages[messages.length - 1]?.timestamp,
+                        // Embedding content fingerprint for change detection
+                        embeddingContentFingerprint: fingerprint,
                     },
                     timestamp: preview?.lastActivity || messages[messages.length - 1]?.timestamp || Date.now(),
                     source: "conversation",
