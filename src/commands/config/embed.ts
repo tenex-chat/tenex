@@ -41,6 +41,12 @@ const EMBEDDING_MODELS: Record<string, Array<{ name: string; value: string }>> =
         { name: "openai/text-embedding-3-large", value: "openai/text-embedding-3-large" },
         { name: "openai/text-embedding-ada-002", value: "openai/text-embedding-ada-002" },
     ],
+    ollama: [
+        { name: "nomic-embed-text (recommended, 768-dim)", value: "nomic-embed-text" },
+        { name: "mxbai-embed-large (higher quality, 1024-dim)", value: "mxbai-embed-large" },
+        { name: "all-minilm (fast, 384-dim)", value: "all-minilm" },
+        { name: "snowflake-arctic-embed (high quality, 1024-dim)", value: "snowflake-arctic-embed" },
+    ],
 };
 
 /**
@@ -87,9 +93,10 @@ export const embedCommand = new Command("embed")
             }
             const configuredProviders = Object.keys(providersConfig.providers);
 
-            // Build provider choices: local + any configured embedding-capable providers
+            // Build provider choices: local + ollama + any configured embedding-capable providers
             const providerChoices: Array<{ name: string; value: string }> = [
-                { name: "Local Transformers (runs on your machine)", value: "local" },
+                { name: "Ollama (local, recommended)", value: "ollama" },
+                { name: "Local Transformers (in-process)", value: "local" },
             ];
 
             for (const providerId of EMBEDDING_CAPABLE_PROVIDERS) {
@@ -116,7 +123,40 @@ export const embedCommand = new Command("embed")
 
             let model: string;
 
-            if (provider !== "local") {
+            if (provider === "ollama") {
+                // Ollama provider configuration
+                const modelChoices = EMBEDDING_MODELS.ollama || [];
+
+                // Add custom model option
+                modelChoices.push({ name: "Custom Ollama model", value: "custom" });
+
+                const ollamaAnswers = await inquirer.prompt([
+                    {
+                        type: "select",
+                        name: "model",
+                        message: "Select Ollama embedding model:",
+                        choices: modelChoices,
+                        default: existing?.provider === provider ? existing?.model : "nomic-embed-text",
+                        theme: inquirerTheme,
+                    },
+                ]);
+
+                if (ollamaAnswers.model === "custom") {
+                    const customAnswer = await inquirer.prompt([
+                        {
+                            type: "input",
+                            name: "customModel",
+                            message: "Enter Ollama model name:",
+                            theme: inquirerTheme,
+                            validate: (input: string) =>
+                                input.trim().length > 0 || "Model name cannot be empty",
+                        },
+                    ]);
+                    model = customAnswer.customModel;
+                } else {
+                    model = ollamaAnswers.model;
+                }
+            } else if (provider !== "local") {
                 // OpenAI-compatible provider configuration
                 const displayName = PROVIDER_DISPLAY_NAMES[provider] || provider;
                 const modelChoices = EMBEDDING_MODELS[provider] || [

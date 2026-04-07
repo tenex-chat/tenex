@@ -7,6 +7,7 @@ import {
     type EmbeddingProvider,
     LocalTransformerEmbeddingProvider,
     MockEmbeddingProvider,
+    OllamaEmbeddingProvider,
     OpenAIEmbeddingProvider,
 } from "@/services/embedding";
 
@@ -95,6 +96,11 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
 };
 
 /**
+ * Default base URL for Ollama
+ */
+const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434";
+
+/**
  * Create an embedding provider based on configuration
  */
 export async function createEmbeddingProvider(
@@ -112,6 +118,21 @@ export async function createEmbeddingProvider(
     // Local provider
     if (embeddingConfig.provider === "local") {
         return new LocalTransformerEmbeddingProvider(embeddingConfig.model);
+    }
+
+    // Ollama provider (local, no API key needed)
+    if (embeddingConfig.provider === "ollama") {
+        // Load baseUrl from providers.json if available, otherwise use default
+        let baseUrl = embeddingConfig.baseUrl || OLLAMA_DEFAULT_BASE_URL;
+
+        if (!embeddingConfig.baseUrl) {
+            const creds = await loadProviderCredentials("ollama");
+            if (creds.baseUrl) {
+                baseUrl = creds.baseUrl;
+            }
+        }
+
+        return new OllamaEmbeddingProvider(embeddingConfig.model, baseUrl);
     }
 
     // All other providers are treated as OpenAI-compatible
@@ -167,6 +188,14 @@ async function loadProviderCredentials(providerId: string): Promise<{ apiKey?: s
         const globalPath = config.getGlobalPath();
         const providersConfig = await config.loadTenexProviders(globalPath);
         const providerCreds = providersConfig.providers[providerId];
+
+        // For Ollama, ignore apiKey field (it's just a placeholder) but use baseUrl if provided
+        if (providerId === "ollama") {
+            return {
+                baseUrl: providerCreds?.baseUrl,
+            };
+        }
+
         return {
             apiKey: resolveApiKey(providerCreds?.apiKey),
             baseUrl: providerCreds?.baseUrl,

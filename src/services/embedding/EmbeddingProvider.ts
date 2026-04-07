@@ -229,14 +229,34 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         });
 
         if (!response.ok) {
-            throw new Error(`OpenAI API error: ${response.statusText}`);
+            const errorBody = await response.text();
+            throw new Error(`OpenAI API error: ${response.statusText} - ${errorBody}`);
         }
 
         interface EmbeddingResponse {
             data: Array<{ embedding: number[] }>;
         }
 
-        const data = (await response.json()) as EmbeddingResponse;
+        const responseText = await response.text();
+        let data: EmbeddingResponse;
+
+        try {
+            data = JSON.parse(responseText) as EmbeddingResponse;
+        } catch (parseError) {
+            logger.error("Failed to parse embedding response", {
+                responseText: responseText.substring(0, 500),
+                parseError
+            });
+            throw new Error(`Invalid JSON response from embeddings API: ${parseError}`);
+        }
+
+        if (!data.data) {
+            logger.error("Embedding response missing 'data' field", {
+                response: responseText.substring(0, 500),
+                keys: Object.keys(data)
+            });
+            throw new Error(`Embedding response missing 'data' field. Response keys: ${Object.keys(data).join(", ")}`);
+        }
 
         const embeddings = data.data.map((item) => new Float32Array(item.embedding));
 
@@ -250,6 +270,90 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
     public async getDimensions(): Promise<number> {
         // If we haven't cached dimensions yet, make a test embedding call
+        if (this.dimensions === null) {
+            await this.embed("test");
+        }
+        if (this.dimensions === null) {
+            throw new Error("Failed to determine embedding dimensions after test embed call");
+        }
+        return this.dimensions;
+    }
+
+    public getModelId(): string {
+        return this.modelId;
+    }
+}
+
+/**
+ * Ollama embedding provider
+ * Connects to local Ollama service for embeddings
+ */
+export class OllamaEmbeddingProvider implements EmbeddingProvider {
+    private modelId: string;
+    private baseUrl: string;
+    private dimensions: number | null = null;
+
+    constructor(modelId = "nomic-embed-text", baseUrl = "http://localhost:11434") {
+        this.modelId = modelId;
+        this.baseUrl = baseUrl.replace(/\/$/, ""); // Remove trailing slash
+    }
+
+    public async embed(text: string): Promise<Float32Array> {
+        const embeddings = await this.embedBatch([text]);
+        return embeddings[0];
+    }
+
+    public async embedBatch(texts: string[]): Promise<Float32Array[]> {
+        const embeddings: Float32Array[] = [];
+
+        // Ollama API expects single text per request
+        for (const text of texts) {
+            const response = await fetch(`${this.baseUrl}/api/embed`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    model: this.modelId,
+                    input: text,
+                }),
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Ollama API error: ${response.statusText} - ${errorText}`);
+            }
+
+            interface OllamaEmbedResponse {
+                embeddings?: number[][];
+                embedding?: number[];
+            }
+
+            const data = (await response.json()) as OllamaEmbedResponse;
+
+            // Handle both response formats (some models return 'embedding', others 'embeddings')
+            let embedding: number[];
+            if (data.embeddings && data.embeddings.length > 0) {
+                embedding = data.embeddings[0];
+            } else if (data.embedding) {
+                embedding = data.embedding;
+            } else {
+                throw new Error("Ollama response missing embedding data");
+            }
+
+            const float32Embedding = new Float32Array(embedding);
+            embeddings.push(float32Embedding);
+
+            // Cache dimensions from first successful response
+            if (this.dimensions === null) {
+                this.dimensions = embedding.length;
+            }
+        }
+
+        return embeddings;
+    }
+
+    public async getDimensions(): Promise<number> {
         if (this.dimensions === null) {
             await this.embed("test");
         }
