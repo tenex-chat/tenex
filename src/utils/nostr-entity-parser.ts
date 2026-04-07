@@ -10,7 +10,7 @@ import { isFullEventId, isShortEventId } from "@/types/event-ids";
  * The standard prefix length used for shortened hex IDs throughout the system.
  * Used for delegation IDs, conversation IDs, and other nostr identifiers.
  */
-export const PREFIX_LENGTH = 18;
+export const PREFIX_LENGTH = 6;
 
 /**
  * Parses various Nostr user identifier formats into a pubkey
@@ -146,24 +146,24 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
 }
 
 /**
- * Checks if a string looks like an 18-char hex prefix (potential shorthand ID).
+ * Checks if a string looks like a PREFIX_LENGTH-char hex prefix (potential shorthand ID).
  * Note: This is a pure format check - it doesn't do any lookup.
  * For resolving prefixes to actual IDs, use the appropriate service.
  */
 export function isHexPrefix(input: string | undefined): boolean {
     if (!input) return false;
-    return /^[0-9a-fA-F]{18}$/.test(input.trim());
+    return new RegExp("^[0-9a-fA-F]{" + PREFIX_LENGTH + "}$").test(input.trim());
 }
 
 /**
- * Resolves an 18-character hex prefix to a full 64-character ID using PrefixKVStore.
+ * Resolves a PREFIX_LENGTH-character hex prefix to a full 64-character ID using PrefixKVStore.
  * This enables shorthand references to event IDs and pubkeys.
  *
  * IMPORTANT: This function is TYPE-AGNOSTIC - it returns any matching ID without
  * validating whether it's an event ID or pubkey. For resolving specifically to
  * agent pubkeys, use `resolveAgentSlug` from the AgentResolution service.
  *
- * @param prefix - An 18-character hex string prefix
+ * @param prefix - A PREFIX_LENGTH-character hex string prefix
  * @returns The full 64-character ID, or null if not found or invalid input
  */
 export function resolvePrefixToId(prefix: string | undefined): string | null {
@@ -171,8 +171,8 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
 
     const cleaned = prefix.trim().toLowerCase();
 
-    // Must be exactly 18 hex characters
-    if (!/^[0-9a-f]{18}$/.test(cleaned)) {
+    // Must be exactly PREFIX_LENGTH hex characters
+    if (!new RegExp("^[0-9a-f]{" + PREFIX_LENGTH + "}$").test(cleaned)) {
         return null;
     }
 
@@ -197,7 +197,7 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
  *
  * Accepts:
  * - Full 64-character hex IDs (returns as-is after validation)
- * - 12-character hex prefixes (resolved via PrefixKVStore)
+ * - PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore)
  * - NIP-19 formats: note1..., nevent1...
  * - nostr: prefixed versions of all the above
  *
@@ -218,7 +218,7 @@ export function resolveToFullEventId(input: string | undefined): FullEventId | n
         return normalized;
     }
 
-    // 2. Check for 12-char hex prefix
+    // 2. Check for PREFIX_LENGTH hex prefix
     if (isShortEventId(normalized)) {
         const resolved = resolvePrefixToId(normalized);
         if (resolved && isFullEventId(resolved)) {
@@ -253,7 +253,7 @@ export function resolveToFullEventId(input: string | undefined): FullEventId | n
 /**
  * Type-safe version of resolvePrefixToId that returns a typed FullEventId
  *
- * @param prefix - A ShortEventId (12-char hex prefix)
+ * @param prefix - A ShortEventId (PREFIX_LENGTH hex prefix)
  * @returns A typed FullEventId, or null if not found
  */
 export function resolvePrefixToFullEventId(prefix: ShortEventId): FullEventId | null {
@@ -276,7 +276,7 @@ export type NormalizeLessonEventIdResult =
  *
  * Accepts:
  * - Full 64-character hex IDs
- * - 12-character hex prefixes (resolved via PrefixKVStore or in-memory fallback)
+ * - PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore or in-memory fallback)
  * - NIP-19 formats: note1..., nevent1...
  * - nostr: prefixed versions of all the above
  *
@@ -300,7 +300,7 @@ export function normalizeLessonEventId(
         return { success: true, eventId: cleaned.toLowerCase() };
     }
 
-    // 2. Check for 12-char hex prefix
+    // 2. Check for PREFIX_LENGTH hex prefix
     if (isHexPrefix(cleaned)) {
         const prefix = cleaned.toLowerCase();
 

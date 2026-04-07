@@ -6,7 +6,7 @@
  *
  * Storage location: ~/.tenex/data/prefix-kv/
  *
- * Key format: 18-char prefix -> 64-char full ID
+ * Key format: 18-char prefix -> 64-char full ID (internal storage format; see PREFIX_LENGTH note below)
  * Collision policy: First write wins (collisions are statistically irrelevant)
  *
  * LIFECYCLE: This store is GLOBAL across all projects and uses reference counting.
@@ -34,6 +34,12 @@ import { join } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import { logger } from "@/utils/logger";
 
+// NOTE: This PREFIX_LENGTH is intentionally separate from the display PREFIX_LENGTH in
+// nostr-entity-parser.ts. This value defines the LMDB storage key format used for
+// event ID and pubkey lookups (18-char hex prefix → 64-char full ID). Changing this
+// would invalidate the existing on-disk LMDB database and require a migration.
+// The display truncation length (for UI/tool output) is controlled by PREFIX_LENGTH
+// in src/utils/nostr-entity-parser.ts.
 const PREFIX_LENGTH = 18;
 const FULL_ID_LENGTH = 64;
 
@@ -109,7 +115,7 @@ export class PrefixKVStore {
 
     /**
      * Add an ID (event ID or pubkey) to the store.
-     * Extracts the 12-char prefix and stores the mapping.
+     * Extracts the 18-char prefix and stores the mapping.
      * First write wins - if prefix already exists, this is a no-op.
      */
     async add(fullId: string): Promise<void> {
@@ -160,14 +166,14 @@ export class PrefixKVStore {
      * Look up a full ID by its prefix.
      * Returns the full 64-char ID or null if not found.
      *
-     * @param prefix - Must be exactly 12 hex characters. Returns null otherwise.
+     * @param prefix - Must be exactly 18 hex characters. Returns null otherwise.
      */
     lookup(prefix: string): string | null {
         if (!this.db) {
             throw new Error("[PrefixKVStore] Not initialized. Call initialize() first.");
         }
 
-        // Require exactly 12 characters - no padding or truncation
+        // Require exactly 18 characters - no padding or truncation
         // This prevents confusing behavior where short prefixes would
         // be zero-padded and almost never match anything
         if (!prefix || prefix.length !== PREFIX_LENGTH) {

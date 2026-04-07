@@ -38,7 +38,7 @@ import {
 
 // Test data
 const VALID_FULL_ID = "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd";
-const VALID_SHORT_ID = "a1b2c3d4e5f6a1b2c3";
+const VALID_SHORT_ID = "a1b2c3";
 const VALID_SHELL_ID = "abc1234";
 
 describe("Type Guards", () => {
@@ -77,7 +77,7 @@ describe("Type Guards", () => {
     });
 
     describe("isShortEventId", () => {
-        test("should return true for valid 18-char hex string", () => {
+        test("should return true for valid 6-char hex string", () => {
             expect(isShortEventId(VALID_SHORT_ID)).toBe(true);
         });
 
@@ -85,11 +85,11 @@ describe("Type Guards", () => {
             expect(isShortEventId(VALID_SHORT_ID.toUpperCase())).toBe(false);
         });
 
-        test("should return false for 17-char string", () => {
-            expect(isShortEventId(VALID_SHORT_ID.substring(0, 17))).toBe(false);
+        test("should return false for 5-char string", () => {
+            expect(isShortEventId(VALID_SHORT_ID.substring(0, 5))).toBe(false);
         });
 
-        test("should return false for 19-char string", () => {
+        test("should return false for 7-char string", () => {
             expect(isShortEventId(`${VALID_SHORT_ID}0`)).toBe(false);
         });
 
@@ -254,7 +254,7 @@ describe("Factory Functions", () => {
 
 describe("Conversion Functions", () => {
     describe("shortenEventId", () => {
-        test("should return first 18 characters of full ID", () => {
+        test("should return first 6 characters of full ID", () => {
             const fullId = createFullEventId(VALID_FULL_ID);
             const shortId = shortenEventId(fullId);
             expect(shortId).toBe(shortenEventId(VALID_FULL_ID));
@@ -382,8 +382,8 @@ describe("Constants", () => {
         expect(FULL_EVENT_ID_LENGTH).toBe(64);
     });
 
-    test("SHORT_EVENT_ID_LENGTH should be 18", () => {
-        expect(SHORT_EVENT_ID_LENGTH).toBe(18);
+    test("SHORT_EVENT_ID_LENGTH should be 6", () => {
+        expect(SHORT_EVENT_ID_LENGTH).toBe(6);
     });
 
     test("SHELL_TASK_ID_LENGTH should be 7", () => {
