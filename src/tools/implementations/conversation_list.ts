@@ -26,7 +26,7 @@ const conversationListSchema = z.object({
     limit: z
         .number()
         .optional()
-        .describe("Maximum number of conversations to return. Defaults to 50."),
+        .describe("Maximum number of root conversations to return. Defaults to 50."),
     fromTime: z
         .number()
         .optional()
@@ -46,20 +46,33 @@ const conversationListSchema = z.object({
 
 type ConversationListInput = z.infer<typeof conversationListSchema>;
 
+interface ChildConversationSummary {
+    /** Shortened event ID */
+    id: string;
+    title?: string;
+    /** Recipient agent name */
+    recipient?: string;
+    /** Last activity as human-readable relative time */
+    lastActive?: string;
+    /** Nested child conversations */
+    children: ChildConversationSummary[];
+}
+
 interface ConversationSummary {
-    /** Shortened event ID (12 characters) */
+    /** Shortened event ID (PREFIX_LENGTH characters) */
     id: string;
     projectId?: string;
     title?: string;
     /** Full summary (not truncated) */
     summary?: string;
-    messageCount: number;
-    createdAt?: number;
-    lastActivity?: number;
-    /** Names of participants in this conversation (resolved via stored identity or PubkeyService) */
-    participants: string[];
-    /** Shortened event IDs of delegations that occurred in this conversation */
-    delegations: string[];
+    /** Who started the conversation */
+    sender?: string;
+    /** Agent handling this conversation */
+    recipient?: string;
+    /** Last activity as human-readable relative time */
+    lastActive?: string;
+    /** Nested child conversations (delegations) */
+    children: ChildConversationSummary[];
 }
 
 interface ConversationListOutput {
@@ -73,22 +86,6 @@ interface ConversationListOutput {
  */
 function shortenEventId(fullId: string): string {
     return fullId.substring(0, PREFIX_LENGTH);
-}
-
-/**
- * Extract delegation conversation IDs from delegation markers
- */
-function extractDelegationIds(conversation: ConversationStore): string[] {
-    const messages = conversation.getAllMessages();
-    const delegationIds: string[] = [];
-
-    for (const message of messages) {
-        if (message.messageType === "delegation-marker" && message.delegationMarker) {
-            delegationIds.push(message.delegationMarker.delegationConversationId);
-        }
-    }
-
-    return delegationIds;
 }
 
 function shortenPrincipalId(principalId: string): string {
@@ -123,44 +120,189 @@ function resolveParticipantName(message: ConversationRecord): string {
     return "Unknown";
 }
 
-function extractParticipantNames(conversation: ConversationStore): string[] {
-    const participants = new Map<string, string>();
-
-    for (const message of conversation.getAllMessages()) {
-        const participantKey =
-            getConversationRecordAuthorPrincipalId(message)
-            ?? getConversationRecordAuthorPubkey(message);
-        if (!participantKey || participants.has(participantKey)) {
-            continue;
-        }
-
-        participants.set(participantKey, resolveParticipantName(message));
-    }
-
-    return Array.from(participants.values());
+/**
+ * Resolve a pubkey to a display name using the PubkeyService.
+ */
+function resolveNameFromPubkey(pubkey: string): string {
+    return getPubkeyService().getNameSync(pubkey);
 }
 
-function summarizeConversation(conversation: ConversationStore, projectId?: string): ConversationSummary {
+/**
+ * Get sender name from the first message of a conversation.
+ */
+function extractSender(conversation: ConversationStore): string | undefined {
     const messages = conversation.getAllMessages();
+    if (messages.length === 0) return undefined;
+    return resolveParticipantName(messages[0]);
+}
+
+/**
+ * Get recipient agent name from:
+ * 1. delegationChain last entry (current agent) if present
+ * 2. targetedPubkeys of first message
+ */
+function extractRecipient(conversation: ConversationStore): string | undefined {
+    const metadata = conversation.metadata;
+    const chain = metadata.delegationChain;
+
+    if (chain && chain.length > 0) {
+        const lastEntry = chain[chain.length - 1];
+        return lastEntry.displayName;
+    }
+
+    const messages = conversation.getAllMessages();
+    if (messages.length === 0) return undefined;
+
     const firstMessage = messages[0];
+    const targeted = firstMessage.targetedPubkeys;
+    if (targeted && targeted.length > 0) {
+        return resolveNameFromPubkey(targeted[0]);
+    }
+
+    return undefined;
+}
+
+/**
+ * Format a Unix timestamp as a relative time string like "3 minutes ago", "2 days ago".
+ */
+function formatRelativeTime(timestamp: number | undefined, nowSeconds: number): string | undefined {
+    if (!timestamp) return undefined;
+    const diffSeconds = nowSeconds - timestamp;
+    if (diffSeconds < 0) return "just now";
+    if (diffSeconds < 60) return `${diffSeconds} second${diffSeconds !== 1 ? "s" : ""} ago`;
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes !== 1 ? "s" : ""} ago`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
+    const diffMonths = Math.floor(diffDays / 30);
+    if (diffMonths < 12) return `${diffMonths} month${diffMonths !== 1 ? "s" : ""} ago`;
+    const diffYears = Math.floor(diffMonths / 12);
+    return `${diffYears} year${diffYears !== 1 ? "s" : ""} ago`;
+}
+
+/**
+ * Check if a conversation is a root conversation (not a delegation child).
+ * A conversation is root if its delegationChain metadata is absent or empty.
+ */
+function isRootConversation(store: ConversationStore): boolean {
+    const chain = store.metadata.delegationChain;
+    return !chain || chain.length === 0;
+}
+
+/**
+ * Get the direct parent conversation ID from a child conversation's delegationChain.
+ * The parent is the second-to-last entry in the chain (last entry is the current conversation's agent).
+ * Returns undefined if this is a root conversation or chain is too short.
+ */
+function getParentConversationId(store: ConversationStore): string | undefined {
+    const chain = store.metadata.delegationChain;
+    if (!chain || chain.length < 2) return undefined;
+    return chain[chain.length - 2].conversationId;
+}
+
+function summarizeConversation(
+    conversation: ConversationStore,
+    projectId: string | undefined,
+    children: ChildConversationSummary[],
+    nowSeconds: number
+): ConversationSummary {
+    const messages = conversation.getAllMessages();
     const lastMessage = messages[messages.length - 1];
     const metadata = conversation.metadata;
-
-    // Extract participants and delegations
-    const participantNames = extractParticipantNames(conversation);
-    const delegationIds = extractDelegationIds(conversation);
+    const lastActivity = lastMessage?.timestamp;
 
     return {
         id: shortenEventId(conversation.id),
         projectId,
         title: metadata.title ?? conversation.title,
         summary: metadata.summary,
-        messageCount: messages.length,
-        createdAt: firstMessage?.timestamp,
-        lastActivity: lastMessage?.timestamp,
-        participants: participantNames,
-        delegations: delegationIds.map(shortenEventId),
+        sender: extractSender(conversation),
+        recipient: extractRecipient(conversation),
+        lastActive: lastActivity ? formatRelativeTime(lastActivity, nowSeconds) : undefined,
+        children,
     };
+}
+
+function summarizeChildConversation(
+    conversation: ConversationStore,
+    allConversations: Map<string, LoadedConversation>,
+    nowSeconds: number
+): ChildConversationSummary {
+    const metadata = conversation.metadata;
+    const messages = conversation.getAllMessages();
+    const lastMessage = messages[messages.length - 1];
+    const lastActivity = lastMessage?.timestamp;
+
+    // Collect direct children of this conversation
+    const directChildren = collectDirectChildren(conversation.id, allConversations, nowSeconds);
+
+    return {
+        id: shortenEventId(conversation.id),
+        title: metadata.title ?? conversation.title,
+        recipient: extractRecipient(conversation),
+        lastActive: lastActivity ? formatRelativeTime(lastActivity, nowSeconds) : undefined,
+        children: directChildren,
+    };
+}
+
+/**
+ * Collect and summarize direct children of a given conversation ID.
+ */
+function collectDirectChildren(
+    parentId: string,
+    allConversations: Map<string, LoadedConversation>,
+    nowSeconds: number
+): ChildConversationSummary[] {
+    // First collect children with their last activity timestamps for sorting
+    const childEntries: Array<{ loaded: LoadedConversation; lastActivity: number }> = [];
+
+    for (const [, loaded] of allConversations) {
+        const childParentId = getParentConversationId(loaded.store);
+        if (childParentId === parentId) {
+            const messages = loaded.store.getAllMessages();
+            const lastMessage = messages[messages.length - 1];
+            const lastActivity = lastMessage?.timestamp ?? 0;
+            childEntries.push({ loaded, lastActivity });
+        }
+    }
+
+    // Sort by last activity descending
+    childEntries.sort((a, b) => b.lastActivity - a.lastActivity);
+
+    // Now summarize in sorted order
+    return childEntries.map(({ loaded }) =>
+        summarizeChildConversation(loaded.store, allConversations, nowSeconds)
+    );
+}
+
+/**
+ * Compute the most recent activity time across a conversation and all its descendants.
+ */
+function computeSubtreeLastActivity(
+    convId: string,
+    allConversations: Map<string, LoadedConversation>,
+    visited: Set<string> = new Set()
+): number {
+    if (visited.has(convId)) return 0;
+    visited.add(convId);
+
+    const loaded = allConversations.get(convId);
+    if (!loaded) return 0;
+
+    let maxTime = loaded.store.getLastActivityTime();
+
+    // Find all direct children and recurse
+    for (const [, child] of allConversations) {
+        const childParentId = getParentConversationId(child.store);
+        if (childParentId === convId) {
+            const childTime = computeSubtreeLastActivity(child.store.id, allConversations, visited);
+            if (childTime > maxTime) maxTime = childTime;
+        }
+    }
+
+    return maxTime;
 }
 
 interface LoadedConversation {
@@ -248,6 +390,7 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
 
     // Try to resolve as agent slug (single project only)
     const agentResult = resolveAgentSlug(trimmed);
+
     if (agentResult.pubkey) {
         return agentResult.pubkey;
     }
@@ -273,6 +416,36 @@ function conversationHasParticipant(conversation: ConversationStore, pubkey: str
             return true;
         }
     }
+    return false;
+}
+
+/**
+ * Check if a conversation subtree (root + all descendants) has a specific pubkey as participant.
+ */
+function subtreeHasParticipant(
+    convId: string,
+    allConversations: Map<string, LoadedConversation>,
+    pubkey: string,
+    visited: Set<string> = new Set()
+): boolean {
+    if (visited.has(convId)) return false;
+    visited.add(convId);
+
+    const loaded = allConversations.get(convId);
+    if (!loaded) return false;
+
+    if (conversationHasParticipant(loaded.store, pubkey)) return true;
+
+    // Check children
+    for (const [, child] of allConversations) {
+        const childParentId = getParentConversationId(child.store);
+        if (childParentId === convId) {
+            if (subtreeHasParticipant(child.store.id, allConversations, pubkey, visited)) {
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -304,7 +477,7 @@ async function executeConversationList(
         withPubkey = resolveWithParameter(withParam, isAllProjects);
     }
 
-    logger.info("📋 Listing conversations", {
+    logger.info("📋 Listing conversations (tree view)", {
         limit,
         fromTime,
         toTime,
@@ -315,7 +488,7 @@ async function executeConversationList(
     });
 
     // Load conversations based on projectId parameter
-    let allConversations: LoadedConversation[] = [];
+    let allLoadedConversations: LoadedConversation[] = [];
 
     if (effectiveProjectId === "all") {
         // Only load from all projects when explicitly requested with "ALL"
@@ -323,41 +496,66 @@ async function executeConversationList(
         for (const pid of projectIds) {
             const isCurrentProject = pid === currentProjectId;
             const projectConversations = loadConversationsForProject(pid, isCurrentProject);
-            allConversations.push(...projectConversations);
+            allLoadedConversations.push(...projectConversations);
         }
     } else if (effectiveProjectId) {
         // Load from specific project (current project by default)
         const isCurrentProject = effectiveProjectId === currentProjectId;
-        allConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
+        allLoadedConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
     }
 
-    // Filter by date range if specified
-    let filtered = allConversations;
+    // Build a map of all conversations by full ID for tree traversal
+    const conversationMap = new Map<string, LoadedConversation>();
+    for (const loaded of allLoadedConversations) {
+        conversationMap.set(loaded.store.id, loaded);
+    }
+
+    // Separate root conversations from children
+    const rootConversations = allLoadedConversations.filter(({ store }) => isRootConversation(store));
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    // Compute subtree last activity for each root
+    const rootsWithSubtreeActivity = rootConversations.map((loaded) => ({
+        loaded,
+        subtreeLastActivity: computeSubtreeLastActivity(loaded.store.id, conversationMap),
+    }));
+
+    // Apply date range filter based on subtree activity
+    let filteredRoots = rootsWithSubtreeActivity;
     if (fromTime !== undefined || toTime !== undefined) {
-        filtered = allConversations.filter(({ store }) => {
-            const lastActivity = store.getLastActivityTime();
-            if (fromTime !== undefined && lastActivity < fromTime) return false;
-            if (toTime !== undefined && lastActivity > toTime) return false;
+        filteredRoots = rootsWithSubtreeActivity.filter(({ subtreeLastActivity }) => {
+            if (fromTime !== undefined && subtreeLastActivity < fromTime) return false;
+            if (toTime !== undefined && subtreeLastActivity > toTime) return false;
             return true;
         });
     }
 
-    // Filter by 'with' parameter if specified and resolved
+    // Apply 'with' filter: include root if the root itself or any descendant has the participant
     if (withPubkey) {
-        filtered = filtered.filter(({ store }) => conversationHasParticipant(store, withPubkey));
+        filteredRoots = filteredRoots.filter(({ loaded }) =>
+            subtreeHasParticipant(loaded.store.id, conversationMap, withPubkey)
+        );
     }
 
-    // Sort by last activity (most recent first)
-    const sorted = [...filtered].sort((a, b) => {
-        return b.store.getLastActivityTime() - a.store.getLastActivityTime();
+    // Sort by subtree last activity (most recent first)
+    const sortedRoots = [...filteredRoots].sort((a, b) =>
+        b.subtreeLastActivity - a.subtreeLastActivity
+    );
+
+    // Apply limit to root count
+    const limitedRoots = sortedRoots.slice(0, limit);
+
+    // Build summaries with nested children
+    const summaries = limitedRoots.map(({ loaded }) => {
+        const { store, projectId } = loaded;
+        const children = collectDirectChildren(store.id, conversationMap, nowSeconds);
+        return summarizeConversation(store, projectId, children, nowSeconds);
     });
 
-    const limited = sorted.slice(0, limit);
-    const summaries = limited.map(({ store, projectId }) => summarizeConversation(store, projectId));
-
-    logger.info("✅ Conversations listed", {
-        total: allConversations.length,
-        filtered: filtered.length,
+    logger.info("✅ Conversations listed (tree view)", {
+        total: rootConversations.length,
+        filtered: filteredRoots.length,
         returned: summaries.length,
         projectId: effectiveProjectId,
         with: withParam,
@@ -367,14 +565,20 @@ async function executeConversationList(
     return {
         success: true,
         conversations: summaries,
-        total: filtered.length,
+        total: filteredRoots.length,
     };
 }
 
 export function createConversationListTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "List conversations for this project with summary information including ID, title, summary, participants, delegations, message count, and timestamps. Results are sorted by most recent activity. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). Use the 'with' parameter to filter to conversations where a specific actor was active. Use this to discover available conversations before retrieving specific ones with conversation_get.",
+            "List root conversations for this project as a hierarchical tree. Each root conversation shows " +
+            "its full delegation chain as nested children. Results are sorted by most recent activity in the " +
+            "entire subtree — a root conversation with a recently active delegation will appear near the top " +
+            "even if the root itself is old. The 'limit' parameter controls the number of root conversations " +
+            "returned. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). " +
+            "Use the 'with' parameter to filter to conversations where a specific actor was active. " +
+            "Use this to discover available conversations before retrieving specific ones with conversation_get.",
 
         inputSchema: conversationListSchema,
 
