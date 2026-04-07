@@ -46,7 +46,7 @@ import {
     type AdvancedSearchResult,
     type RawSearchInput,
 } from "./search";
-import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { isHexPrefix, resolvePrefixToId, DISPLAY_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { prefixKVStore } from "@/services/storage";
 
 // ConversationStore class is registered from ConversationStore module to avoid circular imports.
@@ -408,7 +408,7 @@ class ConversationRegistryImpl {
             try {
                 await prefixKVStore.add(nativeId);
             } catch (error) {
-                logger.warn(`[ConversationRegistry] Failed to index conversation ${nativeId.substring(0, PREFIX_LENGTH)} in PrefixKVStore`, { error });
+                logger.warn(`[ConversationRegistry] Failed to index conversation ${nativeId.substring(0, DISPLAY_PREFIX_LENGTH)} in PrefixKVStore`, { error });
             }
         }
 

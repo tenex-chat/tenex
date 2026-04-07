@@ -7,10 +7,11 @@ import type { FullEventId, ShortEventId } from "@/types/event-ids";
 import { isFullEventId, isShortEventId } from "@/types/event-ids";
 
 /**
- * The standard prefix length used for shortened hex IDs throughout the system.
- * Used for delegation IDs, conversation IDs, and other nostr identifiers.
+ * The prefix length used for shortened hex IDs in display output (UI, logs, tool results).
+ * Distinct from STORAGE_PREFIX_LENGTH (18) used in PrefixKVStore for LMDB key lookups.
+ * Provides 24 bits of entropy (2^24 ≈ 16.7 million combinations).
  */
-export const PREFIX_LENGTH = 6;
+export const DISPLAY_PREFIX_LENGTH = 6;
 
 /**
  * Parses various Nostr user identifier formats into a pubkey
@@ -152,7 +153,7 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
  */
 export function isHexPrefix(input: string | undefined): boolean {
     if (!input) return false;
-    return new RegExp("^[0-9a-fA-F]{" + PREFIX_LENGTH + "}$").test(input.trim());
+    return new RegExp("^[0-9a-fA-F]{" + DISPLAY_PREFIX_LENGTH + "}$").test(input.trim());
 }
 
 /**
@@ -171,8 +172,8 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
 
     const cleaned = prefix.trim().toLowerCase();
 
-    // Must be exactly PREFIX_LENGTH hex characters
-    if (!new RegExp("^[0-9a-f]{" + PREFIX_LENGTH + "}$").test(cleaned)) {
+    // Must be exactly DISPLAY_PREFIX_LENGTH hex characters
+    if (!new RegExp("^[0-9a-f]{" + DISPLAY_PREFIX_LENGTH + "}$").test(cleaned)) {
         return null;
     }
 
