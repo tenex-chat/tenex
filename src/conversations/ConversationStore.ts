@@ -837,6 +837,10 @@ export class ConversationStore {
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
+
+            if (this.conversationId) {
+                conversationRegistry.triggerIndexUpdate(this.conversationId);
+            }
         }
     }
 
