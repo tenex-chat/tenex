@@ -80,6 +80,8 @@ export class AgentEventEncoder {
     /**
      * Forward branch tag from triggering event to reply event.
      * Ensures agents carry forward the branch context from the message they're replying to.
+     *
+     * NOTE: Prefer forwardTagPair() to forward both tags together.
      */
     public forwardBranchTag(event: NDKEvent, context: EventContext): void {
         const branchName = context.triggeringEnvelope.metadata.branchName;
@@ -87,6 +89,30 @@ export class AgentEventEncoder {
             event.tag(["branch", branchName]);
             logger.debug("Forwarding branch tag", {
                 branch: branchName,
+                fromEvent: context.triggeringEnvelope.message.nativeId.substring(0, 8),
+            });
+        }
+    }
+
+    /**
+     * Forwards both branch and team tags from the triggering envelope.
+     * Call this instead of calling forwardBranchTag() and forwardTeamTag() separately.
+     */
+    private forwardTagPair(event: NDKEvent, context: EventContext): void {
+        this.forwardBranchTag(event, context);
+        this.forwardTeamTag(event, context);
+    }
+
+    /**
+     * Forward team tag from triggering event to reply event.
+     * Ensures agents carry forward the team context from the message they're replying to.
+     */
+    public forwardTeamTag(event: NDKEvent, context: EventContext): void {
+        const teamName = context.triggeringEnvelope.metadata.teamName;
+        if (teamName) {
+            event.tag(["team", teamName]);
+            logger.debug("Forwarding team tag", {
+                team: teamName,
                 fromEvent: context.triggeringEnvelope.message.nativeId.substring(0, 8),
             });
         }
@@ -140,7 +166,7 @@ export class AgentEventEncoder {
             event.tag(["llm-runtime-total", context.llmRuntimeTotal.toString(), "ms"]);
         }
 
-        this.forwardBranchTag(event, context);
+        this.forwardTagPair(event, context);
 
         logger.debug("Encoded completion event", {
             eventId: event.id,
@@ -177,7 +203,7 @@ export class AgentEventEncoder {
         }
 
         this.addStandardTags(event, context);
-        this.forwardBranchTag(event, context);
+        this.forwardTagPair(event, context);
 
         return event;
     }
@@ -253,7 +279,7 @@ export class AgentEventEncoder {
 
             // Forward branch tag from triggering event if not explicitly set
             if (!delegation.branch) {
-                this.forwardBranchTag(event, context);
+                this.forwardTagPair(event, context);
             }
 
             logger.debug("Encoded delegation request", {
@@ -311,7 +337,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context);
+        this.forwardTagPair(event, context);
 
         logger.debug("Encoded ask event", {
             title: intent.title,
@@ -397,7 +423,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context);
+        this.forwardTagPair(event, context);
 
         return event;
     }
@@ -593,7 +619,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context);
+        this.forwardTagPair(event, context);
 
         // Add LLM usage tags if available (from most recent completed LLM step)
         if (intent.usage) {
@@ -634,7 +660,7 @@ export class AgentEventEncoder {
         event.tag(["stream-seq", intent.sequence.toString()]);
 
         // Forward branch tag when present to preserve worktree context.
-        this.forwardBranchTag(event, context);
+        this.forwardTagPair(event, context);
 
         return event;
     }

@@ -300,6 +300,10 @@ export class AgentPublisher implements AgentRuntimePublisher {
             event.tags.push(["branch", config.branch]);
         }
 
+        if (config.team) {
+            event.tags.push(["team", config.team]);
+        }
+
         // Add skill tags for the delegated agent (deduplicated for robustness)
         if (config.skills && config.skills.length > 0) {
             const uniqueSkills = [...new Set(config.skills)];
@@ -311,9 +315,16 @@ export class AgentPublisher implements AgentRuntimePublisher {
         // Add standard metadata (project tag, model, cost, execution time, etc)
         this.encoder.addStandardTags(event, enhancedContext);
 
-        // Forward branch tag from triggering event if not explicitly set
-        if (!config.branch) {
-            this.encoder.forwardBranchTag(event, enhancedContext);
+        // Forward branch and team tags from triggering event if not explicitly set
+        if (!config.branch && !config.team) {
+            this.encoder.forwardTagPair(event, enhancedContext);
+        } else {
+            if (!config.branch) {
+                this.encoder.forwardBranchTag(event, enhancedContext);
+            }
+            if (!config.team) {
+                this.encoder.forwardTeamTag(event, enhancedContext);
+            }
         }
 
         // Add delegation tag linking to parent conversation

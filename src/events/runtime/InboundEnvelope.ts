@@ -70,6 +70,7 @@ export interface InboundEnvelope {
         toolName?: string;
         statusValue?: string;
         branchName?: string;
+        teamName?: string; // active team tag from incoming job event
         articleReferences?: string[];
         replyTargets?: string[];
         delegationParentConversationId?: string;

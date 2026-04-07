@@ -229,6 +229,8 @@ export interface DelegateConfig {
     branch?: string;
     /** Optional skill event IDs to apply to the delegated agent */
     skills?: string[];
+    /** Optional team name for team-scoped delegation */
+    team?: string;
 }
 
 /**

@@ -10,6 +10,7 @@ import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
+import type { TeamContext } from "@/prompts/fragments/types";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
@@ -51,6 +52,7 @@ export interface BuildSystemPromptOptions {
     availableAgents?: AgentInstance[];
     /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
     scratchpadAvailable?: boolean;
+    teamContext?: TeamContext;
 }
 
 
@@ -166,6 +168,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         availableAgents = [],
         conversation,
         scratchpadAvailable = true,
+        teamContext,
     } = options;
 
     const baseAgentInstructions = agent.instructions || "";
@@ -239,6 +242,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         currentBranch,
         projectDocsPath: projectBasePath ? path.join(projectBasePath, "tenex", "docs") : undefined,
         availableAgents,
+        teamContext,
     });
 
     // Add delegation chain if present (shows agent their position in multi-agent workflow)

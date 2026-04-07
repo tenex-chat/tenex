@@ -7,6 +7,8 @@ import type { PromptMessage } from "@/conversations/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
+import { teamService } from "@/services/teams";
+import type { TeamContext } from "@/prompts/fragments/types";
 
 /**
  * CompiledMessage - A message with optional prompt lineage metadata.
@@ -35,6 +37,7 @@ export interface MessageCompilerContext {
     variantSystemPrompt?: string;
     /** Whether the scratchpad strategy is active. When false, scratchpad-practice prompt is omitted. Defaults to true. */
     scratchpadAvailable?: boolean;
+    teamContext?: TeamContext;
 }
 
 export interface CompiledMessages {
@@ -69,8 +72,24 @@ export class MessageCompiler {
         let systemPromptCount = 0;
         const dynamicContextCount = 0;
 
+        // Compute team context for the current agent
+        const projectDTag = context.project.dTag || context.project.tagValue("d");
+        const activeTeamName = context.triggeringEnvelope?.metadata?.teamName;
+        let teamContext: TeamContext | undefined;
+
+        if (projectDTag && (context.availableAgents?.length ?? 0) > 0) {
+            teamContext = await teamService.computeTeamContext({
+                agentSlug: context.agent.slug,
+                projectId: projectDTag,
+                activeTeamName,
+                availableAgents: context.availableAgents!,
+            });
+        }
+
+        const enrichedContext = { ...context, teamContext };
+
         let t0 = performance.now();
-        const systemPromptMessages = await buildSystemPromptMessages(context);
+        const systemPromptMessages = await buildSystemPromptMessages(enrichedContext);
         const systemPromptText = systemPromptMessages.map(sm => sm.message.content).join("\n\n");
         activeSpan?.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
 

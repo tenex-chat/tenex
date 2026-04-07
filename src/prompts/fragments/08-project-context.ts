@@ -18,6 +18,7 @@ import { shortenPubkey, shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 import type { ProjectDTag } from "@/types/project-ids";
+import type { TeamContext } from "./types";
 
 // =============================================================================
 // Constants
@@ -412,6 +413,7 @@ export interface ProjectContextArgs {
     currentBranch?: string;
     projectDocsPath?: string;
     availableAgents?: AgentInstance[];
+    teamContext?: TeamContext;
 }
 
 export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
@@ -428,6 +430,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         currentBranch,
         projectDocsPath,
         availableAgents,
+        teamContext,
     }) => {
         const parts: string[] = [];
 
@@ -477,21 +480,90 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
             parts.push("  </workspace>");
         }
 
-        // <team> section — filter out current agent
-        const coworkers = (availableAgents ?? []).filter((a) => a.pubkey !== agent.pubkey);
-        if (coworkers.length > 0) {
-            parts.push("");
-            parts.push("  <team>");
-            parts.push("    You are part of a multi-agent team. Stay in your lane, trust your teammates, and defer to their expertise rather than overstepping your own role.");
-            for (const coworker of coworkers) {
-                const criteria = coworker.useCriteria
-                    ? `Use Criteria: ${coworker.useCriteria}`
-                    : coworker.description
-                      ? `Description: ${coworker.description}`
-                      : "";
-                parts.push(`    <${coworker.slug}>${criteria}</${coworker.slug}>`);
+        // <team> section
+        const renderAgentEntry = (a: AgentInstance): string => {
+            const criteria = a.useCriteria
+                ? `Use Criteria: ${a.useCriteria}`
+                : a.description
+                  ? `Description: ${a.description}`
+                  : "";
+            return `    <${a.slug}>${criteria}</${a.slug}>`;
+        };
+
+        const hasTeamContext =
+            teamContext &&
+            (teamContext.memberTeams.length > 0 || teamContext.activeTeam !== undefined);
+
+        if (hasTeamContext) {
+            // Team-aware rendering
+            const { memberTeams, activeTeam, otherTeams, teammates, unaffiliated } = teamContext;
+
+            // <active-team> block
+            if (activeTeam) {
+                parts.push("");
+                parts.push("  <active-team>");
+                parts.push(`    Team: "${activeTeam.name}" — ${activeTeam.description}`);
+                parts.push(`    Lead: ${activeTeam.teamLead}`);
+                parts.push(`    Members: ${activeTeam.members.join(", ")}`);
+                parts.push("  </active-team>");
             }
-            parts.push("  </team>");
+
+            // <my-teams> block — exclude activeTeam if present
+            const myTeams = activeTeam
+                ? memberTeams.filter((t) => t.name !== activeTeam.name)
+                : memberTeams;
+            if (myTeams.length > 0) {
+                parts.push("");
+                parts.push("  <my-teams>");
+                for (const team of myTeams) {
+                    parts.push(`    <${team.name}>${team.description} — Lead: ${team.teamLead}</${team.name}>`);
+                }
+                parts.push("  </my-teams>");
+            }
+
+            // <other-teams> block — one-liner per team, no member listing
+            if (otherTeams.length > 0) {
+                parts.push("");
+                parts.push("  <other-teams>");
+                for (const team of otherTeams) {
+                    parts.push(`    <${team.name}>${team.description} — Lead: ${team.teamLead}</${team.name}>`);
+                }
+                parts.push("  </other-teams>");
+            }
+
+            // <teammates> block — full details
+            if (teammates.length > 0) {
+                parts.push("");
+                parts.push("  <teammates>");
+                parts.push("    You are part of a multi-agent team. Stay in your lane, trust your teammates, and defer to their expertise rather than overstepping your own role.");
+                for (const t of teammates) {
+                    parts.push(renderAgentEntry(t));
+                }
+                parts.push("  </teammates>");
+            }
+
+            // <unaffiliated> block — full details
+            if (unaffiliated.length > 0) {
+                parts.push("");
+                parts.push("  <unaffiliated>");
+                parts.push("    The following agents are not in any team:");
+                for (const u of unaffiliated) {
+                    parts.push(renderAgentEntry(u));
+                }
+                parts.push("  </unaffiliated>");
+            }
+        } else {
+            // Fallback: render all coworkers with full details (backwards compatible)
+            const coworkers = (availableAgents ?? []).filter((a) => a.pubkey !== agent.pubkey);
+            if (coworkers.length > 0) {
+                parts.push("");
+                parts.push("  <team>");
+                parts.push("    You are part of a multi-agent team. Stay in your lane, trust your teammates, and defer to their expertise rather than overstepping your own role.");
+                for (const coworker of coworkers) {
+                    parts.push(renderAgentEntry(coworker));
+                }
+                parts.push("  </team>");
+            }
         }
 
         // <channels> section

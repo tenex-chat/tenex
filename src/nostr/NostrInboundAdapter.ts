@@ -90,6 +90,7 @@ export class NostrInboundAdapter {
                 toolName: getTagValue(event, "tool"),
                 statusValue: getTagValue(event, "status"),
                 branchName: getTagValue(event, "branch"),
+                teamName: getTagValue(event, "team"),
                 articleReferences: articleReferences.length > 0 ? articleReferences : undefined,
                 replyTargets: replyTargets.length > 0 ? replyTargets : undefined,
                 delegationParentConversationId: getTagValue(event, "delegation"),
