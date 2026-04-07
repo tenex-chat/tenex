@@ -94,8 +94,40 @@ export function wrapToolsWithOutputTruncation(
 ): Record<string, CoreTool<unknown, unknown>> {
     const wrappedTools: Record<string, CoreTool<unknown, unknown>> = {};
 
-    /** Tools from ai-sdk-fs-tools that have their own built-in truncation */
-    const FS_TOOL_NAMES = new Set(["fs_read", "fs_glob", "fs_grep"]);
+    /**
+     * Tools exempt from output truncation.
+     *
+     * Two categories:
+     * 1. ai-sdk-fs-tools (fs_read, fs_glob, fs_grep) — have their own line-based
+     *    truncation (DEFAULT_LINE_LIMIT=250, MAX_LINE_LENGTH=2000). Wrapping them
+     *    would double-truncate, and truncating fs_read's retrieval results would
+     *    create an infinite loop where the agent can never retrieve full output.
+     *
+     * 2. Retrieval tools (conversation_get, conversation_list, rag_*) — are
+     *    purpose-built to surface content the agent can't otherwise see. Truncating
+     *    them defeats their purpose: conversation_get has no pagination so a
+     *    truncated result is unrecoverable, and rag_* results need to be read in
+     *    full to be useful.
+     */
+    const TRUNCATION_EXEMPT_TOOLS = new Set([
+        // ai-sdk-fs-tools (own truncation)
+        "fs_read",
+        "fs_glob",
+        "fs_grep",
+        // Conversation retrieval
+        "conversation_get",
+        "conversation_list",
+        // RAG tools
+        "rag_search",
+        "rag_collection_list",
+        "rag_collection_create",
+        "rag_collection_delete",
+        "rag_add_documents",
+        "rag_subscription_create",
+        "rag_subscription_list",
+        "rag_subscription_get",
+        "rag_subscription_delete",
+    ]);
 
     for (const [toolName, tool] of Object.entries(toolsObject)) {
         // Skip tools without an execute function
@@ -104,11 +136,8 @@ export function wrapToolsWithOutputTruncation(
             continue;
         }
 
-        // Skip ai-sdk-fs-tools — they have their own line-based truncation
-        // (DEFAULT_LINE_LIMIT=250, MAX_LINE_LENGTH=2000). Wrapping them would
-        // double-truncate, and wrapping fs_read's retrieval results would
-        // create an infinite loop where the agent can never retrieve full output.
-        if (FS_TOOL_NAMES.has(toolName)) {
+        // Skip exempt tools — see TRUNCATION_EXEMPT_TOOLS comment above.
+        if (TRUNCATION_EXEMPT_TOOLS.has(toolName)) {
             wrappedTools[toolName] = tool;
             continue;
         }
