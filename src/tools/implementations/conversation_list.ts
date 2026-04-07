@@ -42,6 +42,12 @@ const conversationListSchema = z.object({
             "Filter to conversations where this actor was active. " +
             "Accepts an agent slug (e.g., 'claude-code') or a pubkey (hex or npub format)."
         ),
+    participants: z
+        .array(z.string())
+        .optional()
+        .describe(
+            "Filter to conversations where ANY of these actors were active. Accepts agent slugs, pubkeys (hex/npub/nprofile), or shortened hex pubkeys (min 18 chars). OR semantics: matches if any participant is found."
+        ),
 });
 
 type ConversationListInput = z.infer<typeof conversationListSchema>;
@@ -195,15 +201,34 @@ function loadConversationsForProject(
  */
 function looksLikePubkey(value: string): boolean {
     const trimmed = value.trim();
+    // Strip nostr: prefix before classifying
+    const cleaned = trimmed.startsWith("nostr:") ? trimmed.substring(6) : trimmed;
     // 64-char hex pubkey
-    if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    if (/^[0-9a-fA-F]{64}$/.test(cleaned)) {
         return true;
     }
-    // npub or nprofile format
-    if (trimmed.startsWith("npub1") || trimmed.startsWith("nprofile1")) {
+    // npub or nprofile format (with or without nostr: prefix)
+    if (cleaned.startsWith("npub1") || cleaned.startsWith("nprofile1")) {
         return true;
     }
     return false;
+}
+
+/**
+ * Check if a value looks like a shortened hex pubkey (hex prefix between PREFIX_LENGTH and 63 chars).
+ * Checked after looksLikePubkey() returns false (so 64-char hex is already handled).
+ */
+function looksLikeShortenedPubkey(value: string): boolean {
+    const trimmed = value.trim().toLowerCase();
+    return new RegExp(`^[0-9a-f]{${PREFIX_LENGTH},63}$`).test(trimmed);
+}
+
+/**
+ * Check if any entries in the array look like shortened hex pubkeys.
+ * Used to decide between fast path (upfront resolution) and slow path (post-load resolution).
+ */
+function hasShortenedHexEntries(entries: string[]): boolean {
+    return entries.some(e => looksLikeShortenedPubkey(e));
 }
 
 /**
@@ -253,12 +278,101 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
 }
 
 /**
- * Check if a conversation has a specific pubkey as a participant
+ * Resolve a single entry from the participants array to a pubkey.
+ *
+ * @param entry - The entry string to resolve
+ * @param index - Index in the participants array (for error messages)
+ * @param isAllProjects - Whether projectId="all" was specified
+ * @param knownPubkeys - Array of known pubkeys for shortened hex prefix matching (null on fast path)
+ * @throws Error if the entry cannot be resolved
  */
-function conversationHasParticipant(conversation: ConversationStore, pubkey: string): boolean {
-    const messages = conversation.getAllMessages();
-    for (const message of messages) {
-        if (getConversationRecordAuthorPubkey(message) === pubkey) {
+function resolveParticipantEntry(
+    entry: string,
+    index: number,
+    isAllProjects: boolean,
+    knownPubkeys: string[] | null
+): string {
+    const value = entry.trim();
+
+    if (!value) {
+        throw new Error(`participants[${index}]: empty or whitespace-only entry is not valid.`);
+    }
+
+    if (looksLikePubkey(value)) {
+        const parsed = parseNostrUser(value);
+        if (parsed) {
+            return parsed;
+        }
+        throw new Error(
+            `participants[${index}]: "${entry}" looks like a pubkey but could not be parsed. ` +
+            "Please provide a valid 64-character hex pubkey or npub/nprofile format."
+        );
+    }
+
+    if (looksLikeShortenedPubkey(value)) {
+        if (knownPubkeys === null) {
+            // This should never happen — caller ensures knownPubkeys is set on slow path
+            throw new Error(`participants[${index}]: internal error — shortened hex requires known pubkeys.`);
+        }
+        const prefix = value.toLowerCase();
+        const matches = knownPubkeys.filter(pk => pk.startsWith(prefix));
+        if (matches.length === 1) {
+            return matches[0];
+        }
+        if (matches.length === 0) {
+            throw new Error(
+                `participants[${index}]: no known pubkey matches prefix '${value}'. Provide a longer prefix or full pubkey.`
+            );
+        }
+        throw new Error(
+            `participants[${index}]: prefix '${value}' is ambiguous — matches ${matches.length} pubkeys. Provide a longer prefix (at least ${PREFIX_LENGTH} hex chars recommended).`
+        );
+    }
+
+    // Assume slug
+    if (isAllProjects) {
+        throw new Error(
+            `participants[${index}]: agent slug '${value}' cannot be used with projectId=ALL. Use a full pubkey or npub instead.`
+        );
+    }
+
+    const result = resolveAgentSlug(value);
+    if (result.pubkey) {
+        return result.pubkey;
+    }
+
+    throw new Error(
+        `participants[${index}]: failed to resolve '${value}'. Not a known agent slug (available: ${result.availableSlugs.join(", ")}), pubkey, or npub/nprofile.`
+    );
+}
+
+/**
+ * Resolve all entries in the participants array into a Set of pubkeys.
+ * Shortened hex entries require knownPubkeys to be provided (slow path).
+ */
+function resolveParticipantsSet(
+    entries: string[],
+    isAllProjects: boolean,
+    knownPubkeys: string[] | null
+): Set<string> {
+    const result = new Set<string>();
+    for (let i = 0; i < entries.length; i++) {
+        result.add(resolveParticipantEntry(entries[i], i, isAllProjects, knownPubkeys));
+    }
+    return result;
+}
+
+/**
+ * Check if a conversation has any of the given pubkeys as a participant.
+ * Uses Set.has() for O(1) lookup per message. Early exit on first match.
+ */
+function conversationHasAnyParticipant(
+    conversation: ConversationStore,
+    pubkeys: Set<string>
+): boolean {
+    for (const message of conversation.getAllMessages()) {
+        const authorPubkey = getConversationRecordAuthorPubkey(message);
+        if (authorPubkey && pubkeys.has(authorPubkey)) {
             return true;
         }
     }
@@ -272,6 +386,7 @@ async function executeConversationList(
     const limit = input.limit ?? 50;
     const { fromTime, toTime, projectId: requestedProjectId } = input;
     const withParam = input.with;
+    const participantsParam = input.participants;
 
     const currentProjectId = ConversationStore.getProjectId();
 
@@ -286,11 +401,31 @@ async function executeConversationList(
     // Determine if we're querying all projects
     const isAllProjects = effectiveProjectId === "all";
 
-    // Resolve the 'with' parameter to a pubkey if provided
-    // This will throw an error if resolution fails, preventing silent fallback to unfiltered results
-    let withPubkey: string | null = null;
-    if (withParam) {
-        withPubkey = resolveWithParameter(withParam, isAllProjects);
+    // Determine if any participant filtering is needed
+    const hasWithParam = !!withParam;
+    const hasParticipantsParam = !!(participantsParam?.length);
+
+    // Narrowed non-optional references (safe because hasWithParam/hasParticipantsParam guard them)
+    const narrowedWith: string | null = hasWithParam ? (withParam ?? null) : null;
+    const narrowedParticipants: string[] | null = hasParticipantsParam ? (participantsParam ?? null) : null;
+
+    // Determine which path to take for participants resolution
+    const needsParticipantFilter = hasWithParam || hasParticipantsParam;
+    const usesSlowPath = narrowedParticipants !== null && hasShortenedHexEntries(narrowedParticipants);
+
+    // Fast path: resolve all participants upfront (no shortened hex entries)
+    let fastPathPubkeys: Set<string> | null = null;
+    if (needsParticipantFilter && !usesSlowPath) {
+        const pubkeys = new Set<string>();
+        if (narrowedWith !== null) {
+            pubkeys.add(resolveWithParameter(narrowedWith, isAllProjects));
+        }
+        if (narrowedParticipants !== null) {
+            for (const pk of resolveParticipantsSet(narrowedParticipants, isAllProjects, null)) {
+                pubkeys.add(pk);
+            }
+        }
+        fastPathPubkeys = pubkeys;
     }
 
     logger.info("📋 Listing conversations", {
@@ -299,7 +434,7 @@ async function executeConversationList(
         toTime,
         projectId: effectiveProjectId,
         with: withParam,
-        withPubkey: withPubkey ? withPubkey.substring(0, PREFIX_LENGTH) : undefined,
+        participants: participantsParam?.length,
         agent: context.agent.name,
     });
 
@@ -331,9 +466,65 @@ async function executeConversationList(
         });
     }
 
-    // Filter by 'with' parameter if specified and resolved
-    if (withPubkey) {
-        filtered = filtered.filter(({ store }) => conversationHasParticipant(store, withPubkey));
+    // Filter by participant(s) if needed
+    if (needsParticipantFilter) {
+        if (!usesSlowPath) {
+            // Fast path: use pre-resolved pubkeys (fastPathPubkeys is set when !usesSlowPath && needsParticipantFilter)
+            const pubkeySet = fastPathPubkeys ?? new Set<string>();
+            filtered = filtered.filter(({ store }) => conversationHasAnyParticipant(store, pubkeySet));
+        } else {
+            // Slow path: shortened hex present — collect known pubkeys first, then resolve
+            // Resolve non-shortened entries upfront
+            const resolvedPubkeys = new Set<string>();
+
+            if (narrowedWith !== null) {
+                resolvedPubkeys.add(resolveWithParameter(narrowedWith, isAllProjects));
+            }
+
+            // narrowedParticipants is non-null here because usesSlowPath requires it
+            const slowPathParticipants = narrowedParticipants ?? [];
+
+            // Separate shortened and non-shortened entries
+            const nonShortenedEntries: Array<{ entry: string; index: number }> = [];
+            const shortenedEntries: Array<{ entry: string; index: number }> = [];
+            for (let i = 0; i < slowPathParticipants.length; i++) {
+                const entry = slowPathParticipants[i];
+                const trimmed = entry.trim();
+                if (!trimmed) {
+                    throw new Error(`participants[${i}]: empty or whitespace-only entry is not valid.`);
+                }
+                if (looksLikeShortenedPubkey(trimmed)) {
+                    shortenedEntries.push({ entry, index: i });
+                } else {
+                    nonShortenedEntries.push({ entry, index: i });
+                }
+            }
+
+            // Resolve non-shortened entries upfront
+            for (const { entry, index } of nonShortenedEntries) {
+                resolvedPubkeys.add(resolveParticipantEntry(entry, index, isAllProjects, null));
+            }
+
+            // Collect all known pubkeys from ALL loaded conversations (before date filter)
+            // so that shortened prefix resolution is independent of the date range.
+            const knownPubkeysSet = new Set<string>();
+            for (const { store } of allConversations) {
+                for (const message of store.getAllMessages()) {
+                    const pk = getConversationRecordAuthorPubkey(message);
+                    if (pk) {
+                        knownPubkeysSet.add(pk);
+                    }
+                }
+            }
+            const knownPubkeys = Array.from(knownPubkeysSet);
+
+            // Resolve shortened entries against known pubkeys
+            for (const { entry, index } of shortenedEntries) {
+                resolvedPubkeys.add(resolveParticipantEntry(entry, index, isAllProjects, knownPubkeys));
+            }
+
+            filtered = filtered.filter(({ store }) => conversationHasAnyParticipant(store, resolvedPubkeys));
+        }
     }
 
     // Sort by last activity (most recent first)
@@ -363,7 +554,10 @@ async function executeConversationList(
 export function createConversationListTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "List conversations for this project with summary information including the exact stored conversation ID, title, summary, participants, delegations, message count, and timestamps. Results are sorted by most recent activity. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). Use the 'with' parameter to filter to conversations where a specific actor was active. Use the returned id values directly with conversation_get.",
+            "Lists conversations, optionally filtered by project, date range, and participant(s). " +
+            "Use 'with' for single-participant filtering or 'participants' for multi-participant OR filtering. " +
+            "Results include exact stored conversation IDs, titles, summaries, participants, delegations, message counts, and timestamps. " +
+            "Sorted by most recent activity. Use returned id values directly with conversation_get.",
 
         inputSchema: conversationListSchema,
 
