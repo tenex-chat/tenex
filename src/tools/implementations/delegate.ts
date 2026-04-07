@@ -24,6 +24,7 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { DelegationMarker } from "@/conversations/types";
+import { teamService } from "@/services/teams";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -31,7 +32,7 @@ const delegationItemSchema = z.object({
   recipient: z
     .string()
     .describe(
-      "Agent slug (e.g., 'architect', 'claude-code', 'explore-agent'). Only agent slugs are accepted."
+      "Agent slug or team name (e.g., 'architect', 'claude-code', 'explore-agent', 'design-team'). Agent slugs take priority when a value matches both."
     ),
   prompt: z.string().describe("The request or task for this agent"),
   branch: z
@@ -97,48 +98,85 @@ async function executeDelegate(
   // passed forward to delegated agents unless explicitly overridden
   const inheritedSkills = context.triggeringEnvelope.metadata.skillEventIds ?? [];
 
-  // Resolve slug to pubkey - throws if invalid
-    const resolution = resolveAgentSlug(delegation.recipient);
-    if (!resolution.pubkey) {
-      const availableSlugsStr = resolution.availableSlugs.length > 0
-        ? `Available agent slugs: ${resolution.availableSlugs.join(", ")}`
-        : "No agents available in the current project context.";
-      throw new Error(
-        `Invalid agent slug: "${delegation.recipient}". Only agent slugs are accepted. ${availableSlugsStr}`
-      );
-    }
-    const pubkey = resolution.pubkey;
+  const trimmedRecipient = delegation.recipient.trim();
 
-    // Check for circular delegation
-    if (delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
+  // Resolve slug first, then fall back to a team name if no agent slug matches.
+  const resolution = resolveAgentSlug(trimmedRecipient);
+  let pubkey = resolution.pubkey;
+  let resolvedTeamName: string | undefined;
+  let availableTeamNames: string[] = [];
+
+  if (!pubkey) {
+    let projectId: string | undefined;
+    try {
+      const projectContext = getProjectContext();
+      projectId = projectContext.project?.dTag ?? projectContext.project?.tagValue?.("d");
+    } catch {
+      projectId = undefined;
+    }
+
+    availableTeamNames = await teamService.getTeamNames(projectId);
+    const matchedTeamName = availableTeamNames.find(
+      (teamName) => teamName.toLowerCase() === trimmedRecipient.toLowerCase()
+    );
+    if (matchedTeamName) {
+      const teamLeadIdentifier = await teamService.resolveTeamToLead(matchedTeamName, projectId);
+      if (teamLeadIdentifier) {
+        const teamLeadResolution = resolveAgentSlug(teamLeadIdentifier);
+        pubkey = teamLeadResolution.pubkey ?? teamLeadIdentifier;
+        resolvedTeamName = matchedTeamName;
+      }
+    }
+  }
+
+  if (!pubkey) {
+    const availableSlugsStr = resolution.availableSlugs.length > 0
+      ? `Available agent slugs: ${resolution.availableSlugs.join(", ")}`
+      : "No agents available in the current project context.";
+    const availableTeamsStr = availableTeamNames.length > 0
+      ? `Available team names: ${availableTeamNames.join(", ")}`
+      : "No teams available in the current project context.";
+    throw new Error(
+      `Invalid agent slug or team name: "${delegation.recipient}". ${availableSlugsStr} ${availableTeamsStr}`
+    );
+  }
+
+  // Check for circular delegation
+  if (delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
+    let targetName = pubkey.substring(0, 8);
+    try {
       const projectContext = getProjectContext();
       const targetAgent = projectContext.getAgentByPubkey?.(pubkey);
-      const targetName = targetAgent?.slug || pubkey.substring(0, 8);
-      const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
-
-      const warning: CircularDelegationWarning = {
-        recipient: targetName,
-        chain: chainDisplay,
-        message: `"${targetName}" is already in the delegation chain (${chainDisplay}). Delegating would create a cycle.`,
-      };
-
-      // No force flag - throw error to prevent single delegation from proceeding
-      if (!delegation.force) {
-        const error = new Error(
-          `"${targetName}" is already in the delegation chain (${chainDisplay}). Delegating would create a cycle. ` +
-          `Add \`force: true\` to proceed anyway.`
-        );
-        (error as any).circularDelegationWarning = warning;
-        throw error;
-      }
-
-      // Force flag set - log and proceed
-      logger.warn("[delegate] Circular delegation proceeding with force flag", {
-        recipient: delegation.recipient,
-        targetPubkey: pubkey.substring(0, 8),
-        chain: chainDisplay,
-      });
+      targetName = targetAgent?.slug || targetName;
+    } catch {
+      // Project context is optional for this tool path.
     }
+
+    const chainDisplay = delegationChain.map((e) => e.displayName).join(" → ");
+
+    const warning: CircularDelegationWarning = {
+      recipient: targetName,
+      chain: chainDisplay,
+      message: `"${targetName}" is already in the delegation chain (${chainDisplay}). Delegating would create a cycle.`,
+    };
+
+    // No force flag - throw error to prevent single delegation from proceeding
+    if (!delegation.force) {
+      const error = new Error(
+        `"${targetName}" is already in the delegation chain (${chainDisplay}). Delegating would create a cycle. ` +
+        "Add `force: true` to proceed anyway."
+      ) as Error & { circularDelegationWarning?: CircularDelegationWarning };
+      error.circularDelegationWarning = warning;
+      throw error;
+    }
+
+    // Force flag set - log and proceed
+    logger.warn("[delegate] Circular delegation proceeding with force flag", {
+      recipient: delegation.recipient,
+      targetPubkey: pubkey.substring(0, 8),
+      chain: chainDisplay,
+    });
+  }
 
     // Publish delegation event
     const eventContext = createEventContext(context);
@@ -173,6 +211,7 @@ async function executeDelegate(
       content: delegation.prompt,
       branch: delegation.branch,
       skills: uniqueSkills.length > 0 ? uniqueSkills : undefined,
+      team: resolvedTeamName,
     }, eventContext);
 
     const pendingDelegation: PendingDelegation = {

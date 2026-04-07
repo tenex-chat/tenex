@@ -124,6 +124,42 @@ export const contextManagementCommand = new Command("context-management")
             },
         ]);
 
+        const toolDecay = contextManagement.toolResultDecay || {};
+        const toolDecayAnswers = await inquirer.prompt([
+            {
+                type: "input",
+                name: "minTotalSavingsTokens",
+                message: "Tool decay minimum savings threshold (tokens):",
+                default: toolDecay.minTotalSavingsTokens ?? 20_000,
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num < 0) {
+                        return "Please enter a non-negative number";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "minDepth",
+                message: "Tool decay minimum age (messages ago):",
+                default: toolDecay.minDepth ?? 20,
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num < 0) {
+                        return "Please enter a non-negative number";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "excludeToolNames",
+                message: "Tool decay excluded tool names (comma-separated):",
+                default: (toolDecay.excludeToolNames || ["delegate", "delegate_followup"]).join(", "),
+            },
+        ]);
+
         const strategyAnswers = await inquirer.prompt([
             {
                 type: "confirm",
@@ -180,6 +216,14 @@ export const contextManagementCommand = new Command("context-management")
             compactionThresholdPercent: Number.parseInt(answers.compactionThresholdPercent, 10),
             anthropicPromptCaching: {
                 ttl: anthropicAnswers.ttl,
+            },
+            toolResultDecay: {
+                minTotalSavingsTokens: Number.parseInt(toolDecayAnswers.minTotalSavingsTokens, 10),
+                minDepth: Number.parseInt(toolDecayAnswers.minDepth, 10),
+                excludeToolNames: toolDecayAnswers.excludeToolNames
+                    .split(",")
+                    .map((name: string) => name.trim())
+                    .filter((name: string) => name.length > 0),
             },
             strategies: {
                 anthropicPromptCaching: strategyAnswers.anthropicPromptCaching,

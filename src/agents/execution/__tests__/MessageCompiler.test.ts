@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
+import { teamService } from "@/services/teams";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { join } from "node:path";
 import { MessageCompiler } from "../MessageCompiler";
@@ -229,5 +230,37 @@ describe("MessageCompiler", () => {
         expect(systemContents).toContain("VARIANT_PROMPT");
         expect(counts.systemPrompt).toBe(4);
         expect(counts.conversation).toBe(1);
+    });
+
+    it("adds the teams-context summary after the other system fragments", async () => {
+        project = {
+            dTag: projectId,
+            tagValue: (tag: string) => (tag === "d" ? projectId : undefined),
+        } as NDKProject;
+
+        const computeTeamContextSpy = spyOn(teamService, "computeTeamContext").mockResolvedValue(undefined);
+        const getTeamsForAgentSpy = spyOn(teamService, "getTeamsForAgent").mockResolvedValue([
+            {
+                name: "design",
+                description: "Design team",
+                teamLead: "lead-design",
+                members: ["lead-design", "agent-slug"],
+            },
+        ] as never);
+
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        const { messages, systemPrompt, counts } = await compile(ralNumber);
+
+        const systemContents = messages
+            .filter((message) => message.role === "system")
+            .map((message) => message.content);
+
+        expect(computeTeamContextSpy).toHaveBeenCalledTimes(1);
+        expect(getTeamsForAgentSpy).toHaveBeenCalledWith("agent-slug", projectId);
+        expect(systemContents[2]).toContain("<teams-context>");
+        expect(systemContents[2]).toContain("You belong to teams: design");
+        expect(systemPrompt).toContain("You belong to teams: design");
+        expect(counts.systemPrompt).toBe(3);
+        expect(counts.total).toBe(3);
     });
 });

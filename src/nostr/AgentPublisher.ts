@@ -433,8 +433,9 @@ export class AgentPublisher implements AgentRuntimePublisher {
         // Add standard metadata (project tag, model, cost, execution time, runtime, etc)
         this.encoder.addStandardTags(event, enhancedContext);
 
-        // Forward branch tag from triggering event
+        // Forward branch and team tags from the triggering event when not explicitly set
         this.encoder.forwardBranchTag(event, enhancedContext);
+        this.encoder.forwardTeamTag(event, enhancedContext);
 
         injectTraceContext(event);
         await this.agent.sign(event);

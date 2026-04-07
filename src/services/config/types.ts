@@ -41,6 +41,11 @@ export interface TenexConfig {
         anthropicPromptCaching?: {
             ttl?: "5m" | "1h"; // Anthropic cache-control TTL (default: 1h)
         };
+        toolResultDecay?: {
+            minTotalSavingsTokens?: number; // Minimum token savings required before decaying (default: 20000)
+            minDepth?: number; // Minimum message age (turns ago) before considering decay (default: 20)
+            excludeToolNames?: string[]; // Tool names to never decay (default: ["delegate", "delegate_followup"])
+        };
         strategies?: {
             anthropicPromptCaching?: boolean; // Enable AnthropicPromptCachingStrategy (default: true)
             systemPromptCaching?: boolean; // Legacy alias for anthropicPromptCaching
@@ -167,6 +172,13 @@ export const TenexConfigSchema = z.object({
             utilizationWarningThresholdPercent: z.number().min(0).max(100).optional(),
             compactionThresholdPercent: z.number().min(0).max(100).optional(),
             anthropicPromptCaching: AnthropicPromptCachingSchema.optional(),
+            toolResultDecay: z
+                .object({
+                    minTotalSavingsTokens: z.number().int().nonnegative().optional(),
+                    minDepth: z.number().int().nonnegative().optional(),
+                    excludeToolNames: z.array(z.string()).optional(),
+                })
+                .optional(),
             strategies: z
                 .object({
                     anthropicPromptCaching: z.boolean().optional(),

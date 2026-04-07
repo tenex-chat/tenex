@@ -1,0 +1,14 @@
+{
+  "teams": {
+    "design": {
+      "description": "Project-specific design team",
+      "teamLead": "lead-design",
+      "members": ["alice"]
+    },
+    "research": {
+      "description": "Research and discovery team",
+      "teamLead": "lead-research",
+      "members": []
+    }
+  }
+}

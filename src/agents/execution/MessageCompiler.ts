@@ -9,6 +9,7 @@ import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
 import { teamService } from "@/services/teams";
 import type { TeamContext } from "@/prompts/fragments/types";
+import { render as renderTeamsContext } from "@/prompts/fragments/teams-context";
 
 /**
  * CompiledMessage - A message with optional prompt lineage metadata.
@@ -51,6 +52,24 @@ export interface CompiledMessages {
     };
 }
 
+async function buildTeamContext(options: {
+    agentSlug: string;
+    projectId: string;
+    activeTeam?: string;
+}): Promise<string | undefined> {
+    const teams = await teamService.getTeamsForAgent(options.agentSlug, options.projectId);
+    if (teams.length === 0 && !options.activeTeam) {
+        return undefined;
+    }
+
+    const rendered = renderTeamsContext({
+        teams,
+        activeTeam: options.activeTeam,
+    });
+
+    return rendered || undefined;
+}
+
 export class MessageCompiler {
     constructor(private conversationStore: ConversationStore) {}
 
@@ -73,24 +92,33 @@ export class MessageCompiler {
         const dynamicContextCount = 0;
 
         // Compute team context for the current agent
-        const projectDTag = context.project.dTag || context.project.tagValue("d");
+        const projectDTag = context.project.dTag || context.project.tagValue?.("d");
         const activeTeamName = context.triggeringEnvelope?.metadata?.teamName;
         let teamContext: TeamContext | undefined;
+        let teamContextSummary: string | undefined;
+        const availableAgents = context.availableAgents ?? [];
+        let t0 = performance.now();
 
-        if (projectDTag && (context.availableAgents?.length ?? 0) > 0) {
+        if (projectDTag && availableAgents.length > 0) {
             teamContext = await teamService.computeTeamContext({
                 agentSlug: context.agent.slug,
                 projectId: projectDTag,
                 activeTeamName,
-                availableAgents: context.availableAgents!,
+                availableAgents,
+            });
+        }
+
+        if (projectDTag) {
+            teamContextSummary = await buildTeamContext({
+                agentSlug: context.agent.slug,
+                projectId: projectDTag,
+                activeTeam: activeTeamName,
             });
         }
 
         const enrichedContext = { ...context, teamContext };
 
-        let t0 = performance.now();
         const systemPromptMessages = await buildSystemPromptMessages(enrichedContext);
-        const systemPromptText = systemPromptMessages.map(sm => sm.message.content).join("\n\n");
         activeSpan?.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
 
         t0 = performance.now();
@@ -127,8 +155,22 @@ export class MessageCompiler {
             systemPromptCount++;
         }
 
+        if (teamContextSummary) {
+            systemMessages.push({
+                id: "system:teams-context",
+                role: "system",
+                content: teamContextSummary,
+            } as PromptMessage);
+            systemPromptCount++;
+        }
+
         messages.push(...systemMessages, ...conversationMessages);
         systemPromptCount += systemPromptMessages.length;
+        const systemPromptParts = systemPromptMessages.map((sm) => sm.message.content);
+        if (teamContextSummary) {
+            systemPromptParts.push(teamContextSummary);
+        }
+        const systemPromptText = systemPromptParts.join("\n\n");
 
         const conversationCount = messages.length - systemPromptCount - dynamicContextCount;
 

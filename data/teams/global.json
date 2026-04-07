@@ -1,0 +1,14 @@
+{
+  "teams": {
+    "design": {
+      "description": "Design team",
+      "teamLead": "lead-design",
+      "members": ["alice", "bob"]
+    },
+    "ops": {
+      "description": "Operations team",
+      "teamLead": "lead-ops",
+      "members": ["carol"]
+    }
+  }
+}

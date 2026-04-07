@@ -130,6 +130,8 @@ export function parseNostrUser(input: string): { pubkey: string } | null {
 
 **Notes:** Tools stay stateless even when they are runtime-gated. Context-injected capabilities such as `send_message` belong in `src/tools/registry.ts` and must delegate transport work to services like `src/services/telegram/TelegramDeliveryService`. Within the conversation domain, canonical transcripts remain JSON in `ConversationStore`, while metadata-style reads belong on the per-project SQLite catalog in `ConversationCatalogService`. Prompt and tool code should query that catalog or `ConversationRegistry` compatibility APIs instead of reparsing transcript files.
 
+Teams are a local-only service concern. `src/services/teams/` loads JSON definitions from disk, normalizes membership, resolves team names to lead agents for delegation, and feeds prompt-facing team summaries into the prompt layer. Team scope itself is carried across Nostr via `["team", "..."]` tags, not via team objects in relay state.
+
 **Dependencies:** Everything below (layers 0-2)
 
 ---
@@ -166,6 +168,7 @@ services/
 │   ├── ExecutionTimingTracker.ts
 │   ├── types.ts
 │   └── index.ts
+├── teams/                # Local team definitions, prompt context, and delegate resolution
 ├── rag/                  # RAG domain
 │   ├── RAGService.ts
 │   ├── RAGDatabaseService.ts
@@ -203,6 +206,15 @@ When adding a new conversation-facing feature, decide explicitly which layer it 
 
 - If it needs the full transcript or mutates canonical conversation state, use `ConversationStore`.
 - If it only needs queryable metadata or list/filter behavior, use the catalog. Do not add new transcript-scanning helpers for those paths.
+
+### Teams
+
+Teams are local JSON-defined memberships that never become standalone Nostr entities. The runtime resolves them from disk through `src/services/teams/TeamService.ts`, which normalizes the team lead into membership, caches by file state, and resolves team names to lead pubkeys for delegation.
+
+- Team definitions stay local on disk and are not published as Nostr events.
+- Delegation events carry team scope through the `["team", "..."]` tag.
+- Prompt rendering uses the teams-aware project context plus the lightweight `src/prompts/fragments/teams-context` summary fragment.
+- Team names are resolved case-insensitively, with agent slugs still taking priority when a recipient string matches both.
 
 ---
 

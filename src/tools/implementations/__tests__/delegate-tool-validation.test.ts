@@ -12,6 +12,7 @@ import { createDelegateFollowupTool } from "@/tools/implementations/delegate_fol
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { projectContextStore } from "@/services/projects";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+import { teamService } from "@/services/teams";
 
 const createTriggeringEnvelope = () => createMockInboundEnvelope();
 const mockFetchEvent = mock(() => Promise.resolve(null));
@@ -41,6 +42,10 @@ const createMockProjectContext = (): ProjectContext => {
     }
 
     return {
+        project: {
+            dTag: "test-project",
+            tagValue: (tag: string) => (tag === "d" ? "test-project" : undefined),
+        },
         agents,
         agentRegistry: {
             getAllAgentsMap: () => agents,
@@ -163,6 +168,36 @@ describe("Delegation tools - Self-delegation validation", () => {
                 expect(error.message).toContain("agent-pubkey-123");
                 expect(error.message).toContain("Available agent slugs");
             }
+        });
+
+        it("should resolve team names to the team lead and propagate the team name", async () => {
+            const getTeamNamesSpy = spyOn(teamService, "getTeamNames").mockResolvedValue(["design-team"]);
+            const resolveTeamToLeadSpy = spyOn(teamService, "resolveTeamToLead").mockResolvedValue("team-lead-pubkey");
+
+            let capturedConfig: any;
+            const context = {
+                ...createMockContext(1, true),
+                agentPublisher: {
+                    delegate: async (config: any) => {
+                        capturedConfig = config;
+                        return "mock-delegation-id";
+                    },
+                } as any,
+            };
+            const delegateTool = createDelegateTool(context);
+
+            const result = await runWithProjectContext(() =>
+                delegateTool.execute({
+                    recipient: "design-team",
+                    prompt: "Do something",
+                })
+            );
+
+            expect(result.success).toBe(true);
+            expect(getTeamNamesSpy).toHaveBeenCalledWith("test-project");
+            expect(resolveTeamToLeadSpy).toHaveBeenCalledWith("design-team", "test-project");
+            expect(capturedConfig.recipient).toBe("team-lead-pubkey");
+            expect(capturedConfig.team).toBe("design-team");
         });
 
         it("should succeed but include reminder when no todos exist", async () => {
