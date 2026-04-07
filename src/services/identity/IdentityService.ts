@@ -4,7 +4,7 @@ import {
     getIdentityBindingStore,
 } from "@/services/identity/IdentityBindingStoreService";
 import type { IdentityBinding, IdentityLookup } from "@/services/identity/types";
-import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
 
 function pickDisplayName(lookup: IdentityLookup | IdentityBinding): string | undefined {
     if (lookup.displayName?.trim()) {
@@ -22,9 +22,9 @@ function pickDisplayName(lookup: IdentityLookup | IdentityBinding): string | und
 function shortenPrincipalId(principalId: string): string {
     const terminalSegment = principalId.split(":").pop();
     if (terminalSegment?.trim()) {
-        return terminalSegment.substring(0, PREFIX_LENGTH);
+        return terminalSegment.substring(0, PUBKEY_DISPLAY_LENGTH);
     }
-    return principalId.substring(0, PREFIX_LENGTH);
+    return principalId.substring(0, PUBKEY_DISPLAY_LENGTH);
 }
 
 export class IdentityService {
@@ -154,7 +154,7 @@ export class IdentityService {
             return false;
         }
 
-        return name.trim() === lookup.linkedPubkey.substring(0, PREFIX_LENGTH);
+        return name.trim() === lookup.linkedPubkey.substring(0, PUBKEY_DISPLAY_LENGTH);
     }
 
     private getFallbackDisplayName(lookup: IdentityLookup): string {
@@ -168,7 +168,7 @@ export class IdentityService {
         }
 
         if (lookup.linkedPubkey) {
-            return lookup.linkedPubkey.substring(0, PREFIX_LENGTH);
+            return lookup.linkedPubkey.substring(0, PUBKEY_DISPLAY_LENGTH);
         }
 
         return "Unknown";

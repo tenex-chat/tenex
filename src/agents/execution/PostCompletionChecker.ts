@@ -21,7 +21,7 @@ import type { FullRuntimeContext } from "./types";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { DISPLAY_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { trace } from "@opentelemetry/api";
 
 export interface PostCompletionCheckResult {
@@ -144,7 +144,7 @@ export async function checkPostCompletion(
         const maxDelegationsToLog = 5;
         const delegationIds = pendingDelegations
             .slice(0, maxDelegationsToLog)
-            .map(d => d.delegationConversationId.substring(0, DISPLAY_PREFIX_LENGTH));
+            .map(d => d.delegationConversationId.substring(0, STORAGE_PREFIX_LENGTH));
         const truncatedIndicator = pendingDelegationCount > maxDelegationsToLog
             ? ` (+${pendingDelegationCount - maxDelegationsToLog} more)`
             : "";
@@ -157,7 +157,7 @@ export async function checkPostCompletion(
 
         trace.getActiveSpan()?.addEvent("executor.supervision_pending_delegations", {
             "agent.slug": agent.slug,
-            "agent.pubkey": agent.pubkey.substring(0, DISPLAY_PREFIX_LENGTH),
+            "agent.pubkey": agent.pubkey.substring(0, STORAGE_PREFIX_LENGTH),
             "conversation.id": shortenConversationId(context.conversationId),
             "ral.number": ralNumber,
             "delegation.pending_count": pendingDelegationCount,

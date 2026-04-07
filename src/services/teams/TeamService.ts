@@ -1,11 +1,11 @@
 import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
 import { z } from "zod";
-import { fileExists, readJsonFile } from "@/lib/fs/filesystem";
+import { readJsonFile } from "@/lib/fs/filesystem";
 import { config as defaultConfig } from "@/services/ConfigService";
 import type { ConfigService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
-import type { Team, TeamDefinition } from "./types";
+import type { Team } from "./types";
 import type { TeamInfo } from "@/prompts/fragments/types";
 import type { AgentInstance } from "@/agents/types";
 

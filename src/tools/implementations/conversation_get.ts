@@ -14,7 +14,7 @@ import { z } from "zod";
  *
  * Behavior:
  * - Full 64-character hex IDs are canonicalized to lowercase
- * - 12-character hex prefixes are resolved via PrefixKVStore when possible
+ * - 10-character hex prefixes are resolved via PrefixKVStore when possible
  * - Arbitrary transport-native IDs are preserved as-is
  * - Legacy `nostr:` prefixes are stripped only when the remainder matches a hex ID/prefix
  *
@@ -59,13 +59,13 @@ const conversationGetSchema = z.object({
         .string()
         .min(1, "conversationId is required")
         .describe(
-            "The stored conversation ID to retrieve. Pass the exact ID returned by conversation_list or shown in prompt context. For legacy 64-char hex Nostr-backed conversation IDs, 12-character hex prefixes are also resolved when indexed."
+            "The stored conversation ID to retrieve. Pass the exact ID returned by conversation_list or shown in prompt context. For legacy 64-char hex Nostr-backed conversation IDs, 10-character hex prefixes are also resolved when indexed."
         ),
     untilId: z
         .string()
         .optional()
         .describe(
-            "Optional stored message ID to retrieve the conversation slice up to and including that message. Pass the exact message/event ID from the transcript. For legacy 64-char hex Nostr-backed message IDs, 12-character hex prefixes are also resolved when indexed."
+            "Optional stored message ID to retrieve the conversation slice up to and including that message. Pass the exact message/event ID from the transcript. For legacy 64-char hex Nostr-backed message IDs, 10-character hex prefixes are also resolved when indexed."
         ),
     prompt: z
         .string()

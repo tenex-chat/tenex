@@ -317,7 +317,8 @@ export class AgentPublisher implements AgentRuntimePublisher {
 
         // Forward branch and team tags from triggering event if not explicitly set
         if (!config.branch && !config.team) {
-            this.encoder.forwardTagPair(event, enhancedContext);
+            this.encoder.forwardBranchTag(event, enhancedContext);
+            this.encoder.forwardTeamTag(event, enhancedContext);
         } else {
             if (!config.branch) {
                 this.encoder.forwardBranchTag(event, enhancedContext);

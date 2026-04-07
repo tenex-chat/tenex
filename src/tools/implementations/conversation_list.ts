@@ -9,7 +9,7 @@ import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
-import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { resolveAgentSlug } from "@/services/agents/AgentResolution";
 import { parseNostrUser } from "@/utils/nostr-entity-parser";
@@ -59,7 +59,7 @@ interface ChildConversationSummary {
 }
 
 interface ConversationSummary {
-    /** Shortened event ID (PREFIX_LENGTH characters) */
+    /** Shortened event ID (STORAGE_PREFIX_LENGTH characters) */
     id: string;
     projectId?: string;
     title?: string;
@@ -85,15 +85,15 @@ interface ConversationListOutput {
  * Shorten a full 64-char event ID to the standard prefix length
  */
 function shortenEventId(fullId: string): string {
-    return fullId.substring(0, PREFIX_LENGTH);
+    return fullId.substring(0, STORAGE_PREFIX_LENGTH);
 }
 
 function shortenPrincipalId(principalId: string): string {
     const terminalSegment = principalId.split(":").pop();
     if (terminalSegment?.trim()) {
-        return terminalSegment.substring(0, PREFIX_LENGTH);
+        return terminalSegment.substring(0, STORAGE_PREFIX_LENGTH);
     }
-    return principalId.substring(0, PREFIX_LENGTH);
+    return principalId.substring(0, STORAGE_PREFIX_LENGTH);
 }
 
 function resolveParticipantName(message: ConversationRecord): string {

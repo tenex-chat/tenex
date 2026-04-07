@@ -144,7 +144,7 @@ describe("PubkeyService", () => {
             mockNdkFetchEvent = null;
 
             const name = await service.getName("user-without-profile");
-            expect(name).toBe("user-without"); // First 12 chars (PREFIX_LENGTH)
+            expect(name).toBe("user-without"); // First 12 chars (PUBKEY_DISPLAY_LENGTH)
         });
 
         it("should handle malformed profile content", async () => {
@@ -154,7 +154,7 @@ describe("PubkeyService", () => {
             };
 
             const name = await service.getName("user-with-bad-profile");
-            expect(name).toBe("user-with-ba"); // First 12 chars (PREFIX_LENGTH)
+            expect(name).toBe("user-with-ba"); // First 12 chars (PUBKEY_DISPLAY_LENGTH)
         });
     });
 
@@ -212,7 +212,7 @@ describe("PubkeyService", () => {
 
         it("should return shortened pubkey if not cached", () => {
             const name = service.getNameSync("uncached-user-pubkey");
-            expect(name).toBe("uncached-use"); // First 12 chars (PREFIX_LENGTH)
+            expect(name).toBe("uncached-use"); // First 12 chars (PUBKEY_DISPLAY_LENGTH)
         });
     });
 });

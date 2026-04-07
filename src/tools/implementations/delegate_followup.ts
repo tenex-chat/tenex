@@ -4,7 +4,7 @@ import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { isHexPrefix, resolvePrefixToId, STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { createEventContext } from "@/services/event-context";
 import { tool } from "ai";
 import { z } from "zod";
@@ -17,7 +17,7 @@ function isFullHexId(input: string): boolean {
 }
 
 /**
- * Fallback resolver for 12-char hex prefixes when PrefixKVStore is not initialized.
+ * Fallback resolver for 10-char hex prefixes when PrefixKVStore is not initialized.
  *
  * This handles edge cases where:
  * 1. MCP-only execution mode - PrefixKVStore may not be initialized in pure MCP contexts
@@ -27,7 +27,7 @@ function isFullHexId(input: string): boolean {
  * Returns the full 64-char canonical delegation ID if a unique match is found, null otherwise.
  * Note: Unlike PrefixKVStore, this fallback already canonicalizes followup IDs.
  *
- * @param prefix - 12-character hex prefix to resolve
+ * @param prefix - 10-character hex prefix to resolve
  * @param ralRegistry - RALRegistry instance to scan
  * @returns Full 64-char canonical delegation ID if unique match found, null otherwise
  */
@@ -37,7 +37,7 @@ function resolveFromRALFallback(prefix: string, ralRegistry: RALRegistry): strin
 }
 
 /**
- * Attempts to resolve a 12-char hex prefix to a full delegation conversation ID.
+ * Attempts to resolve a 10-char hex prefix to a full delegation conversation ID.
  * Uses PrefixKVStore first, falls back to RALRegistry scan if needed.
  *
  * IMPORTANT: This function always returns the canonical delegation conversation ID.
@@ -45,7 +45,7 @@ function resolveFromRALFallback(prefix: string, ralRegistry: RALRegistry): strin
  * to the original delegation conversation ID. This ensures consistent behavior across
  * daemon mode (PrefixKVStore available) and MCP-only mode (RAL fallback only).
  *
- * @param prefix - 12-character hex prefix to resolve
+ * @param prefix - 10-character hex prefix to resolve
  * @returns Full 64-char canonical delegation ID or null if not found
  */
 function resolveDelegationPrefix(prefix: string): string | null {
@@ -60,8 +60,8 @@ function resolveDelegationPrefix(prefix: string): string | null {
     const canonicalized = ralRegistry.canonicalizeDelegationId(resolved);
     if (canonicalized !== resolved) {
       logger.info("[delegate_followup] Canonicalized followup ID from PrefixKVStore", {
-        followupId: resolved.substring(0, PREFIX_LENGTH),
-        canonicalId: canonicalized.substring(0, PREFIX_LENGTH),
+        followupId: resolved.substring(0, STORAGE_PREFIX_LENGTH),
+        canonicalId: canonicalized.substring(0, STORAGE_PREFIX_LENGTH),
       });
     }
     return canonicalized;
@@ -76,8 +76,8 @@ function resolveDelegationPrefix(prefix: string): string | null {
     // Use info level - MCP-only execution is an expected deployment mode, not a warning condition.
     // PrefixKVStore may intentionally not be initialized in pure MCP contexts.
     logger.info("[delegate_followup] Resolved prefix via RAL fallback", {
-      prefix: prefix.substring(0, PREFIX_LENGTH),
-      resolvedId: fallbackResolved.substring(0, PREFIX_LENGTH),
+      prefix: prefix.substring(0, STORAGE_PREFIX_LENGTH),
+      resolvedId: fallbackResolved.substring(0, STORAGE_PREFIX_LENGTH),
     });
     return fallbackResolved;
   }
@@ -110,12 +110,12 @@ async function executeDelegateFollowup(
   const trimmedConversationId = inputConversationId.trim();
 
   // Resolve input to full canonical delegation conversation ID.
-  // Handles supported input formats: 12-char prefixes and full 64-char hex IDs.
+  // Handles supported input formats: 10-char prefixes and full 64-char hex IDs.
   // All formats are canonicalized to the original delegation conversation ID.
   const ralRegistry = RALRegistry.getInstance();
   let delegation_conversation_id = trimmedConversationId;
 
-  // Step 1: Handle 18-char hex prefix resolution
+  // Step 1: Handle 10-char hex prefix resolution
   if (isHexPrefix(trimmedConversationId)) {
     const resolved = resolveDelegationPrefix(trimmedConversationId);
     if (!resolved) {
@@ -131,8 +131,8 @@ async function executeDelegateFollowup(
     const canonicalized = ralRegistry.canonicalizeDelegationId(normalized);
     if (canonicalized !== normalized) {
       logger.info("[delegate_followup] Canonicalized full hex followup ID", {
-        followupId: normalized.substring(0, PREFIX_LENGTH),
-        canonicalId: canonicalized.substring(0, PREFIX_LENGTH),
+        followupId: normalized.substring(0, STORAGE_PREFIX_LENGTH),
+        canonicalId: canonicalized.substring(0, STORAGE_PREFIX_LENGTH),
       });
     }
     delegation_conversation_id = canonicalized;

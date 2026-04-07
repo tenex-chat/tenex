@@ -35,7 +35,7 @@ import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
-import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
 import { shortenConversationId } from "@/utils/conversation-id";
 
 function clonePrincipalSnapshot(
@@ -140,7 +140,7 @@ export function buildDelegationChain(
         }
 
         // Unknown pubkey - use truncated version
-        return { displayName: pubkey.substring(0, PREFIX_LENGTH), isUser: false };
+        return { displayName: pubkey.substring(0, PUBKEY_DISPLAY_LENGTH), isUser: false };
     };
 
     // Build the chain by walking up through parent conversations
@@ -398,7 +398,7 @@ export function formatDelegationChain(
         const recipientName = `${recipient.displayName}${recipientSuffix}`;
 
         // Get the conversation ID for this link from RECIPIENT.conversationId
-        // Truncate to PREFIX_LENGTH chars for display (full IDs are stored in chain entries)
+        // Truncate to PUBKEY_DISPLAY_LENGTH chars for display (full IDs are stored in chain entries)
         if (!recipient.conversationId) {
             throw new Error("[DelegationChain] Missing recipient conversation id.");
         }

@@ -7,11 +7,18 @@ import type { FullEventId, ShortEventId } from "@/types/event-ids";
 import { isFullEventId, isShortEventId } from "@/types/event-ids";
 
 /**
- * The prefix length used for shortened hex IDs in display output (UI, logs, tool results).
- * Distinct from STORAGE_PREFIX_LENGTH (18) used in PrefixKVStore for LMDB key lookups.
+ * The prefix length used for storage and lookup operations (PrefixKVStore, resolvePrefixToId).
+ * This must match the STORAGE_PREFIX_LENGTH in PrefixKVStore for LMDB key lookups.
+ * Provides 40 bits of entropy (2^40 ≈ 1.1 trillion combinations).
+ * Used for event IDs in storage/lookup operations (pubkeys use PUBKEY_DISPLAY_LENGTH = 6).
+ */
+export const STORAGE_PREFIX_LENGTH = 10;
+
+/**
+ * The prefix length used for displaying pubkeys in UI, logs, and tool results.
  * Provides 24 bits of entropy (2^24 ≈ 16.7 million combinations).
  */
-export const DISPLAY_PREFIX_LENGTH = 6;
+export const PUBKEY_DISPLAY_LENGTH = 6;
 
 /**
  * Parses various Nostr user identifier formats into a pubkey
@@ -147,24 +154,24 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
 }
 
 /**
- * Checks if a string looks like a PREFIX_LENGTH-char hex prefix (potential shorthand ID).
+ * Checks if a string looks like a STORAGE_PREFIX_LENGTH-char hex prefix (potential shorthand ID).
  * Note: This is a pure format check - it doesn't do any lookup.
  * For resolving prefixes to actual IDs, use the appropriate service.
  */
 export function isHexPrefix(input: string | undefined): boolean {
     if (!input) return false;
-    return new RegExp("^[0-9a-fA-F]{" + DISPLAY_PREFIX_LENGTH + "}$").test(input.trim());
+    return new RegExp("^[0-9a-fA-F]{" + STORAGE_PREFIX_LENGTH + "}$").test(input.trim());
 }
 
 /**
- * Resolves a PREFIX_LENGTH-character hex prefix to a full 64-character ID using PrefixKVStore.
+ * Resolves a STORAGE_PREFIX_LENGTH-character hex prefix to a full 64-character ID using PrefixKVStore.
  * This enables shorthand references to event IDs and pubkeys.
  *
  * IMPORTANT: This function is TYPE-AGNOSTIC - it returns any matching ID without
  * validating whether it's an event ID or pubkey. For resolving specifically to
  * agent pubkeys, use `resolveAgentSlug` from the AgentResolution service.
  *
- * @param prefix - A PREFIX_LENGTH-character hex string prefix
+ * @param prefix - A STORAGE_PREFIX_LENGTH-character hex string prefix (10 chars)
  * @returns The full 64-character ID, or null if not found or invalid input
  */
 export function resolvePrefixToId(prefix: string | undefined): string | null {
@@ -172,8 +179,8 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
 
     const cleaned = prefix.trim().toLowerCase();
 
-    // Must be exactly DISPLAY_PREFIX_LENGTH hex characters
-    if (!new RegExp("^[0-9a-f]{" + DISPLAY_PREFIX_LENGTH + "}$").test(cleaned)) {
+    // Must be exactly STORAGE_PREFIX_LENGTH hex characters (18)
+    if (!new RegExp("^[0-9a-f]{" + STORAGE_PREFIX_LENGTH + "}$").test(cleaned)) {
         return null;
     }
 
@@ -198,7 +205,7 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
  *
  * Accepts:
  * - Full 64-character hex IDs (returns as-is after validation)
- * - PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore)
+ * - STORAGE_PREFIX_LENGTH-character hex prefixes (10 chars, resolved via PrefixKVStore)
  * - NIP-19 formats: note1..., nevent1...
  * - nostr: prefixed versions of all the above
  *
@@ -219,7 +226,7 @@ export function resolveToFullEventId(input: string | undefined): FullEventId | n
         return normalized;
     }
 
-    // 2. Check for PREFIX_LENGTH hex prefix
+    // 2. Check for STORAGE_PREFIX_LENGTH hex prefix (18 chars)
     if (isShortEventId(normalized)) {
         const resolved = resolvePrefixToId(normalized);
         if (resolved && isFullEventId(resolved)) {
@@ -254,7 +261,7 @@ export function resolveToFullEventId(input: string | undefined): FullEventId | n
 /**
  * Type-safe version of resolvePrefixToId that returns a typed FullEventId
  *
- * @param prefix - A ShortEventId (PREFIX_LENGTH hex prefix)
+ * @param prefix - A ShortEventId (STORAGE_PREFIX_LENGTH hex prefix, 10 chars)
  * @returns A typed FullEventId, or null if not found
  */
 export function resolvePrefixToFullEventId(prefix: ShortEventId): FullEventId | null {
@@ -277,7 +284,7 @@ export type NormalizeLessonEventIdResult =
  *
  * Accepts:
  * - Full 64-character hex IDs
- * - PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore or in-memory fallback)
+ * - STORAGE_PREFIX_LENGTH-character hex prefixes (10 chars, resolved via PrefixKVStore or in-memory fallback)
  * - NIP-19 formats: note1..., nevent1...
  * - nostr: prefixed versions of all the above
  *
@@ -301,7 +308,7 @@ export function normalizeLessonEventId(
         return { success: true, eventId: cleaned.toLowerCase() };
     }
 
-    // 2. Check for PREFIX_LENGTH hex prefix
+    // 2. Check for STORAGE_PREFIX_LENGTH hex prefix (10 chars)
     if (isHexPrefix(cleaned)) {
         const prefix = cleaned.toLowerCase();
 
