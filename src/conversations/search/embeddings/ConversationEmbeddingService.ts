@@ -146,33 +146,37 @@ export class ConversationEmbeddingService {
     }
 
     /**
-     * Build embedding content from conversation metadata
-     * Combines title and summary for richer semantic matching
-     */
-    /**
-     * Render conversation messages to XML and compute a transcript fingerprint.
+     * Render conversation messages to XML (with plain-text fallback) and compute a transcript fingerprint.
      *
      * Uses the shared transcript formatter to produce an XML representation of the
      * full conversation. This enables semantic search over the complete message
      * history rather than just metadata (title, summary).
      *
-     * The fingerprint is a SHA-256 hash of the XML content. It is used by callers
+     * The fingerprint is a SHA-256 hash of the content. It is used by callers
      * (e.g. the indexing job) to detect when a conversation's transcript has changed
      * and needs re-embedding.
      *
-     * Strict error handling: render failures return { kind: 'error' } so callers
-     * can distinguish between "no content" and "something went wrong". We never
-     * silently degrade to metadata-only embeddings.
+     * When XML rendering fails (e.g. missing root event ID), falls back to a
+     * plain-text representation built from the raw message content so embeddings
+     * are never empty for conversations that have messages.
      *
+     * @param conversationId - The conversation ID, passed to the XML renderer as a
+     *   fallback root event ID when messages lack explicit eventId fields.
      * @param messages - The full list of messages in the conversation
+     * @param fallbackTitle - Optional title for the plain-text fallback content
      * @returns { kind: 'ok'; transcriptXml: string; fingerprint: string } on success,
-     *          { kind: 'error' } if rendering fails (e.g. missing root event ID)
+     *          { kind: 'error' } only when there is truly no content to embed
      */
     private buildEmbeddingContent(
-        messages: import("@/conversations/types").ConversationRecordInput[]
+        conversationId: string,
+        messages: import("@/conversations/types").ConversationRecordInput[],
+        fallbackTitle?: string
     ): { kind: "ok"; transcriptXml: string; fingerprint: string } | { kind: "error" } {
+        // Try XML rendering first, passing conversationId so the renderer can
+        // resolve the root event ID even when message eventId fields are absent.
         try {
             const renderResult: ConversationXmlRenderResult = renderConversationXml(messages, {
+                conversationId,
                 includeToolCalls: true,
             });
 
@@ -182,13 +186,30 @@ export class ConversationEmbeddingService {
 
             return { kind: "ok", transcriptXml: renderResult.xml, fingerprint };
         } catch (error) {
-            // renderConversationXml throws if there's no root event ID.
-            // Return { kind: 'error' } so the caller can decide what to do
-            // (skip, retry later, mark as failed, etc.).
             const message = error instanceof Error ? error.message : String(error);
-            logger.debug(`Failed to render conversation transcript: ${message}`);
+            logger.debug(`XML transcript render failed for ${conversationId.substring(0, 8)}, using plain-text fallback: ${message}`);
+        }
+
+        // Plain-text fallback: concatenate all message contents so we still get
+        // useful embeddings even when the XML renderer cannot produce output.
+        const parts: string[] = [];
+        if (fallbackTitle) {
+            parts.push(fallbackTitle);
+        }
+        for (const msg of messages) {
+            if (typeof msg.content === "string" && msg.content.trim()) {
+                parts.push(msg.content.trim());
+            }
+        }
+
+        if (parts.length === 0) {
+            logger.debug(`No content to embed for conversation ${conversationId.substring(0, 8)}`);
             return { kind: "error" };
         }
+
+        const plainText = parts.join("\n\n");
+        const fingerprint = createHash("sha256").update(plainText).digest("hex");
+        return { kind: "ok", transcriptXml: plainText, fingerprint };
     }
 
     /**
@@ -222,25 +243,15 @@ export class ConversationEmbeddingService {
             const metadata = resolvedStore?.metadata;
             const title = preview?.title ?? metadata?.title ?? resolvedStore?.title;
 
-            // Build embedding content from full transcript XML
-            const renderResult = this.buildEmbeddingContent(messages);
+            // Build embedding content from full transcript XML (with plain-text fallback)
+            const renderResult = this.buildEmbeddingContent(conversationId, messages, title);
 
-            // Strict error handling: render failures always return { kind: 'error' },
-            // we never silently degrade to metadata-only embeddings.
             if (renderResult.kind === "error") {
-                logger.debug(
-                    `Failed to render transcript for conversation ${conversationId.substring(0, 8)}`
-                );
-                return { kind: "error", reason: "Failed to render conversation transcript" };
-            }
-
-            const { transcriptXml, fingerprint } = renderResult;
-
-            // Skip if no content to embed (empty transcript)
-            if (!transcriptXml.trim()) {
                 logger.debug(`No content to embed for conversation ${conversationId.substring(0, 8)}`);
                 return { kind: "noContent" };
             }
+
+            const { transcriptXml, fingerprint } = renderResult;
 
             const documentId = `conv_${projectId}_${conversationId}`;
 
