@@ -129,16 +129,15 @@ describe("Delegation tools - Self-delegation validation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "self-agent", prompt: "Do something" }
-                ],
+                recipient: "self-agent",
+                prompt: "Do something",
             };
 
             // Self-delegation is allowed - now returns normal result (no stop signal)
             const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(1);
+            expect(result.delegationConversationId).toBeDefined();
         });
 
         it("should reject pubkeys (only slugs accepted)", async () => {
@@ -151,9 +150,8 @@ describe("Delegation tools - Self-delegation validation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "agent-pubkey-123", prompt: "Do something" }
-                ],
+                recipient: "agent-pubkey-123",
+                prompt: "Do something",
             };
 
             // Pubkeys are no longer accepted - should throw with helpful error
@@ -177,14 +175,13 @@ describe("Delegation tools - Self-delegation validation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "self-agent", prompt: "Do something" }
-                ],
+                recipient: "self-agent",
+                prompt: "Do something",
             };
 
             const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(1);
+            expect(result.delegationConversationId).toBeDefined();
             expect(result.message).toContain("delegation-todo-nudge");
             expect(result.message).toContain("todo_write()");
         });
@@ -203,41 +200,18 @@ describe("Delegation tools - Self-delegation validation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Task to delegate" }
-                ],
+                recipient: "other-agent",
+                prompt: "Task to delegate",
             };
 
             const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(1);
+            expect(result.delegationConversationId).toBeDefined();
             // No reminder since there's no conversation context to check
             expect(result.message).not.toContain("delegation-todo-nudge");
         });
 
-        it("should allow self in multiple recipients", async () => {
-            const context = {
-                ...createMockContext(1), // Provide ralNumber
-                agentPublisher: {
-                    delegate: async () => "mock-delegation-id",
-                } as any,
-            };
-            const delegateTool = createDelegateTool(context);
-
-            const input = {
-                delegations: [
-                    { recipient: "self-agent", prompt: "Task for self" },
-                    { recipient: "other-agent", prompt: "Task for other" },
-                ],
-            };
-
-            // Self-delegation is allowed - now returns normal result (no stop signal)
-            const result = await runWithProjectContext(() => delegateTool.execute(input));
-            expect(result).toBeDefined();
-            expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(2);
-        });
     });
 
     describe("delegate_followup tool", () => {
@@ -260,8 +234,8 @@ describe("Delegation tools - Self-delegation validation", () => {
                 await followupTool.execute(input);
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                // With NDK mocked to return null, should get "Could not fetch" error
-                expect(error.message).toContain("Could not fetch delegation conversation");
+                // Invalid ID format is rejected before lookup
+                expect(error.message).toContain("Invalid delegation conversation event ID");
             }
         });
     });
@@ -338,9 +312,8 @@ describe("Delegation tools - RAL isolation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "New task" }
-                ],
+                recipient: "other-agent",
+                prompt: "New task",
             };
 
             // This should NOT throw an error - the bug was that it would check RAL 1
@@ -349,7 +322,7 @@ describe("Delegation tools - RAL isolation", () => {
             const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(1);
+            expect(result.delegationConversationId).toBeDefined();
         });
 
         it("should allow delegation even when current RAL has pending delegations", async () => {
@@ -372,9 +345,8 @@ describe("Delegation tools - RAL isolation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Another task" }
-                ],
+                recipient: "other-agent",
+                prompt: "Another task",
             };
 
             // Should succeed - multiple pending delegations are now allowed
@@ -382,7 +354,7 @@ describe("Delegation tools - RAL isolation", () => {
             const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(1);
+            expect(result.delegationConversationId).toBeDefined();
         });
 
         // NOTE: Test "should require ralNumber in context" removed - ralNumber is now required by ToolExecutionContext type
@@ -433,9 +405,8 @@ describe("Delegation tools - RALRegistry state verification", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Test task" }
-                ],
+                recipient: "other-agent",
+                prompt: "Test task",
             };
 
             // Execute the delegation
@@ -454,31 +425,6 @@ describe("Delegation tools - RALRegistry state verification", () => {
             expect(pendingDelegations[0].ralNumber).toBe(ralNumber);
         });
 
-        it("should register multiple pending delegations correctly", async () => {
-            const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber);
-            const delegateTool = createDelegateTool(context);
-
-            const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Task 1" },
-                    { recipient: "other-agent", prompt: "Task 2" },
-                ],
-            };
-
-            const result = await runWithProjectContext(() => delegateTool.execute(input));
-            expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(2);
-
-            // Verify RALRegistry has both delegations
-            const pendingDelegations = registry.getConversationPendingDelegations(
-                agentPubkey,
-                conversationId,
-                ralNumber
-            );
-            expect(pendingDelegations).toHaveLength(2);
-        });
 
         it("should atomically merge delegations from concurrent calls without losing any", async () => {
             const agentPubkey = "agent-pubkey-123";
@@ -500,9 +446,8 @@ describe("Delegation tools - RALRegistry state verification", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "New task" }
-                ],
+                recipient: "other-agent",
+                prompt: "New task",
             };
 
             const result = await runWithProjectContext(() => delegateTool.execute(input));
@@ -583,6 +528,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         const mockConversation = {
             getRootEventId: () => conversationId,
             getTodos: () => hasTodos ? [defaultTodo] : [],
+            getAllMessages: () => [],
             metadata: {
                 delegationChain,
             },
@@ -625,7 +571,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         conversationStoreSpy.mockRestore();
     });
 
-    it("should return soft warning when circular delegation is detected without force flag", async () => {
+    it("should throw error when circular delegation is detected without force flag", async () => {
         const agentPubkey = "agent-pubkey-123";
         const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
@@ -643,26 +589,25 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             metadata: { delegationChain },
             addDelegationMarker: () => {},
             save: async () => {},
+            getAllMessages: () => [],
         } as any);
 
         const delegateTool = createDelegateTool(context);
 
         const input = {
-            delegations: [
-                { recipient: "other-agent", prompt: "This would create a cycle" }
-            ],
+            recipient: "other-agent",
+            prompt: "This would create a cycle",
         };
 
-        const result = await runWithProjectContext(() => delegateTool.execute(input));
-
-        // Should return a soft warning, not throw
-        expect(result.success).toBe(false);
-        expect(result.message).toContain("Circular delegation detected");
-        expect(result.message).toContain("force: true");
-        expect(result.circularDelegationWarning).toBeDefined();
-        // Recipient may be full name or truncated pubkey depending on test context
-        expect(["other-agent", "other-pu"]).toContain(result.circularDelegationWarning?.recipient);
-        expect(result.delegationConversationIds).toHaveLength(0);
+        // Should throw an error
+        try {
+            await runWithProjectContext(() => delegateTool.execute(input));
+            expect(true).toBe(false); // Should not reach here
+        } catch (error: any) {
+            expect(error.message).toContain("already in the delegation chain");
+            expect(error.message).toContain("force: true");
+            expect(error.circularDelegationWarning).toBeDefined();
+        }
     });
 
     it("should proceed with circular delegation when force flag is true", async () => {
@@ -683,24 +628,22 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             metadata: { delegationChain },
             addDelegationMarker: () => {},
             save: async () => {},
+            getAllMessages: () => [],
         } as any);
 
         const delegateTool = createDelegateTool(context);
 
         const input = {
-            delegations: [
-                { recipient: "other-agent", prompt: "Force through the cycle", force: true }
-            ],
+            recipient: "other-agent",
+            prompt: "Force through the cycle",
+            force: true,
         };
 
         const result = await runWithProjectContext(() => delegateTool.execute(input));
 
-        // Should succeed with force flag, but still include the warning
+        // Should succeed with force flag
         expect(result.success).toBe(true);
-        expect(result.delegationConversationIds).toHaveLength(1);
-        // Warning should be present but marked as forced
-        expect(result.circularDelegationWarning).toBeDefined();
-        expect(result.circularDelegationWarning?.forced).toBe(true);
+        expect(result.delegationConversationId).toBeDefined();
     });
 
     it("should allow normal delegation when no circular dependency exists", async () => {
@@ -720,70 +663,24 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             metadata: { delegationChain },
             addDelegationMarker: () => {},
             save: async () => {},
+            getAllMessages: () => [],
         } as any);
 
         const delegateTool = createDelegateTool(context);
 
         const input = {
-            delegations: [
-                { recipient: "other-agent", prompt: "Normal delegation" }
-            ],
+            recipient: "other-agent",
+            prompt: "Normal delegation",
         };
 
         const result = await runWithProjectContext(() => delegateTool.execute(input));
 
         // Should succeed normally
         expect(result.success).toBe(true);
-        expect(result.delegationConversationIds).toHaveLength(1);
+        expect(result.delegationConversationId).toBeDefined();
         expect(result.circularDelegationWarning).toBeUndefined();
     });
 
-    it("should process mixed delegations: non-circular succeeds, circular returns warning", async () => {
-        const agentPubkey = "agent-pubkey-123";
-        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-
-        // Create a delegation chain that includes other-agent but NOT third-agent
-        const delegationChain = [
-            { pubkey: "user-pubkey", displayName: "User" },
-            { pubkey: "other-pubkey-456", displayName: "other-agent" },
-            { pubkey: agentPubkey, displayName: "self-agent" },
-        ];
-
-        const context = createMockContextWithChain(ralNumber, delegationChain);
-
-        // Update the spy mock for this specific test
-        conversationStoreSpy.mockReturnValue({
-            metadata: { delegationChain },
-            addDelegationMarker: () => {},
-            save: async () => {},
-        } as any);
-
-        const delegateTool = createDelegateTool(context);
-
-        // Mixed request: one circular (other-agent), one non-circular (third-agent)
-        const input = {
-            delegations: [
-                { recipient: "other-agent", prompt: "This would create a cycle" },
-                { recipient: "third-agent", prompt: "This is safe" },
-            ],
-        };
-
-        const result = await runWithProjectContext(() => delegateTool.execute(input));
-
-        // Should succeed with the non-circular delegation
-        expect(result.success).toBe(true);
-        expect(result.delegationConversationIds).toHaveLength(1);
-
-        // Should include warning about the circular one
-        expect(result.circularDelegationWarning).toBeDefined();
-        // Recipient may be full name or truncated pubkey depending on test context
-        expect(["other-agent", "other-pu"]).toContain(result.circularDelegationWarning?.recipient);
-        expect(result.circularDelegationWarnings).toHaveLength(1);
-
-        // Message should mention skipped circular delegation (name may be full or truncated)
-        expect(result.message).toContain("Delegated 1 task(s)");
-        expect(result.message).toMatch(/Skipped circular delegation\(s\) to: other-(agent|pu)/);
-    });
 });
 
 describe("delegate_followup - ID handling", () => {
@@ -868,7 +765,7 @@ describe("delegate_followup - ID handling", () => {
             await followupTool.execute(input);
             expect(true).toBe(false);
         } catch (error: any) {
-            expect(error.message).toContain("does not accept note1/nevent1 bech32 IDs");
+            expect(error.message).toContain("Invalid delegation conversation event ID");
         }
     });
 
@@ -887,7 +784,7 @@ describe("delegate_followup - ID handling", () => {
             await followupTool.execute(input);
             expect(true).toBe(false);
         } catch (error: any) {
-            expect(error.message).toContain("does not accept note1/nevent1 bech32 IDs");
+            expect(error.message).toContain("Invalid delegation conversation event ID");
         }
     });
 

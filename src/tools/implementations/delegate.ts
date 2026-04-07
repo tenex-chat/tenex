@@ -50,10 +50,6 @@ const delegationItemSchema = z.object({
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
 
-interface DelegateInput {
-  delegations: DelegationItem[];
-}
-
 interface CircularDelegationWarning {
   recipient: string;
   chain: string;
@@ -64,10 +60,9 @@ interface CircularDelegationWarning {
 interface DelegateOutput {
   success: boolean;
   message: string;
-  /** Truncated delegation conversation IDs (prefixes for compact display) */
-  delegationConversationIds: string[];
+  /** Truncated delegation conversation ID (prefix for compact display) */
+  delegationConversationId: string;
   circularDelegationWarning?: CircularDelegationWarning;
-  circularDelegationWarnings?: CircularDelegationWarning[];
 }
 
 /**
@@ -80,13 +75,13 @@ function hasTodos(context: ToolExecutionContext): boolean {
 }
 
 async function executeDelegate(
-  input: DelegateInput,
+  input: DelegationItem,
   context: ToolExecutionContext
 ): Promise<DelegateOutput> {
-  const { delegations } = input;
+  const delegation = input;
 
-  if (!Array.isArray(delegations) || delegations.length === 0) {
-    throw new Error("At least one delegation is required");
+  if (!delegation.prompt) {
+    throw new Error("Delegation prompt is required");
   }
 
   const ralRegistry = RALRegistry.getInstance();
@@ -102,8 +97,7 @@ async function executeDelegate(
   // passed forward to delegated agents unless explicitly overridden
   const inheritedSkills = context.triggeringEnvelope.metadata.skillEventIds ?? [];
 
-  for (const delegation of delegations) {
-    // Resolve slug to pubkey - throws if invalid
+  // Resolve slug to pubkey - throws if invalid
     const resolution = resolveAgentSlug(delegation.recipient);
     if (!resolution.pubkey) {
       const availableSlugsStr = resolution.availableSlugs.length > 0
@@ -128,23 +122,22 @@ async function executeDelegate(
         message: `"${targetName}" is already in the delegation chain (${chainDisplay}). Delegating would create a cycle.`,
       };
 
+      // No force flag - throw error to prevent single delegation from proceeding
       if (!delegation.force) {
-        logger.info("[delegate] Circular delegation detected, skipping (no force flag)", {
-          recipient: delegation.recipient,
-          targetPubkey: pubkey.substring(0, 8),
-          chain: chainDisplay,
-        });
-        circularWarnings.push(warning);
-        continue;
+        const error = new Error(
+          `"${targetName}" is already in the delegation chain (${chainDisplay}). Delegating would create a cycle. ` +
+          `Add \`force: true\` to proceed anyway.`
+        );
+        (error as any).circularDelegationWarning = warning;
+        throw error;
       }
 
-      // Force flag set - proceed with warning
+      // Force flag set - log and proceed
       logger.warn("[delegate] Circular delegation proceeding with force flag", {
         recipient: delegation.recipient,
         targetPubkey: pubkey.substring(0, 8),
         chain: chainDisplay,
       });
-      circularWarnings.push({ ...warning, forced: true });
     }
 
     // Publish delegation event
@@ -226,72 +219,44 @@ async function executeDelegate(
             initiatedAt,
         });
     }
-  }
-
-  const delegationConversationIds = pendingDelegations.map(d => shortenConversationId(d.delegationConversationId));
-  const unforcedWarnings = circularWarnings.filter(w => !w.forced);
-
-  // All delegations were circular (not forced) - return soft warning
-  if (pendingDelegations.length === 0 && unforcedWarnings.length > 0) {
-    const warningMessages = unforcedWarnings.map(w =>
-      `"${w.recipient}" is already in chain (${w.chain})`
-    ).join("; ");
-
-    return {
-      success: false,
-      message: `Circular delegation detected: ${warningMessages}. Add \`force: true\` to proceed anyway.`,
-      delegationConversationIds: [],
-      circularDelegationWarning: unforcedWarnings[0],
-      circularDelegationWarnings: unforcedWarnings,
-    };
-  }
-
+  // Should never happen with single delegation (error thrown earlier), but keep as safety
   if (pendingDelegations.length === 0) {
     throw new Error("No delegations were published.");
   }
 
-  logger.info("[delegate] Published delegations, agent continues without blocking", {
-    count: pendingDelegations.length,
-    delegationConversationIds,
+  const delegationConversationId = shortenConversationId(pendingDelegations[0].delegationConversationId);
+
+  logger.info("[delegate] Published delegation, agent continues without blocking", {
+    delegationConversationId,
     circularWarningsCount: circularWarnings.length,
     inheritedSkillsCount: inheritedSkills.length,
   });
 
-  let message = `Delegated ${pendingDelegations.length} task(s). The agent(s) will wake you up when ready with the response(s).`;
-  if (unforcedWarnings.length > 0) {
-    const skipped = unforcedWarnings.map(w => w.recipient).join(", ");
-    message += ` Note: Skipped circular delegation(s) to: ${skipped}.`;
-  }
+  let message = "Delegated task. The agent will wake you up when ready with the response.";
 
   if (!hasTodos(context)) {
     message +=
       "\n\n<system-reminder type=\"delegation-todo-nudge\">\n" +
-      "You just delegated task(s) but don't have a todo list yet. Use `todo_write()` to set up a todo list tracking your delegated work and overall workflow.\n" +
+      "You just delegated a task but don't have a todo list yet. Use `todo_write()` to set up a todo list tracking your delegated work and overall workflow.\n" +
       "</system-reminder>";
   }
 
   return {
     success: true,
     message,
-    delegationConversationIds,
+    delegationConversationId,
     ...(circularWarnings.length > 0 && {
       circularDelegationWarning: circularWarnings[0],
-      circularDelegationWarnings: circularWarnings,
     }),
   };
 }
 
 export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
-  const delegateSchema = z.object({
-    delegations: z
-      .array(delegationItemSchema)
-      .min(1)
-      .describe("Array of delegations to execute"),
-  });
+  const delegateSchema = delegationItemSchema;
 
-  const description = `Delegate tasks to one or more agents. Each delegation can have its own prompt and branch. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.
+  const description = `Delegate a task to an agent in the project. Provide the recipient agent slug, prompt, and optional configuration. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.
 
-Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` on an individual delegation to bypass this check.
+Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` to bypass this check.
 
 Skill support: Pass skill IDs from the available-skills list in the \`skills\` array to activate skills on delegated agents. Slugged IDs and short event IDs are resolved automatically before publishing. Skills can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context. Skill inheritance: any skills active on the current agent are automatically forwarded to all delegated agents.`;
 
@@ -299,7 +264,7 @@ Skill support: Pass skill IDs from the available-skills list in the \`skills\` a
     description,
     inputSchema: delegateSchema,
     execute: async (input: unknown) => {
-      return await executeDelegate(input as DelegateInput, context);
+      return await executeDelegate(input as DelegationItem, context);
     },
   });
 

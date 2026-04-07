@@ -120,13 +120,9 @@ describe("Delegate Tool - Skill Propagation", () => {
             const delegateTool = createDelegateTool(context);
 
             const result = await delegateTool.execute({
-                delegations: [
-                    {
-                        recipient: "other-agent",
-                        prompt: "Do something",
-                        skills: ["be-brief"],
-                    }
-                ],
+                recipient: "other-agent",
+                prompt: "Do something",
+                skills: ["be-brief"],
             });
 
             expect(result.success).toBe(true);
@@ -151,9 +147,8 @@ describe("Delegate Tool - Skill Propagation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Do something" }
-                ],
+                recipient: "other-agent",
+                prompt: "Do something",
             };
 
             const result = await delegateTool.execute(input);
@@ -177,13 +172,9 @@ describe("Delegate Tool - Skill Propagation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    {
-                        recipient: "other-agent",
-                        prompt: "Do something",
-                        skills: [explicitSkill],
-                    }
-                ],
+                recipient: "other-agent",
+                prompt: "Do something",
+                skills: [explicitSkill],
             };
 
             const result = await delegateTool.execute(input);
@@ -207,13 +198,9 @@ describe("Delegate Tool - Skill Propagation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    {
-                        recipient: "other-agent",
-                        prompt: "Do something",
-                        skills: [sameSkillId], // Same as inherited
-                    }
-                ],
+                recipient: "other-agent",
+                prompt: "Do something",
+                skills: [sameSkillId], // Same as inherited
             };
 
             const result = await delegateTool.execute(input);
@@ -232,9 +219,8 @@ describe("Delegate Tool - Skill Propagation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Do something" }
-                ],
+                recipient: "other-agent",
+                prompt: "Do something",
             };
 
             const result = await delegateTool.execute(input);
@@ -244,67 +230,6 @@ describe("Delegate Tool - Skill Propagation", () => {
             expect(delegateCallArgs.length).toBe(1);
             const skills = delegateCallArgs[0].skills;
             expect(skills === undefined || skills.length === 0).toBe(true);
-        });
-    });
-
-    describe("multiple delegations", () => {
-        it("should propagate skills to all delegated agents", async () => {
-            const inheritedSkill = "inherited-skill-for-all";
-            const skillTags = [["skill", inheritedSkill]];
-
-            const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, skillTags);
-            const delegateTool = createDelegateTool(context);
-
-            const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Task 1" },
-                    { recipient: "third-agent", prompt: "Task 2" },
-                ],
-            };
-
-            const result = await delegateTool.execute(input);
-            expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(2);
-
-            // Verify BOTH delegations received the inherited skill
-            expect(delegateCallArgs.length).toBe(2);
-            expect(delegateCallArgs[0].skills).toContain(inheritedSkill);
-            expect(delegateCallArgs[1].skills).toContain(inheritedSkill);
-        });
-
-        it("should allow different explicit skills per delegation while still inheriting", async () => {
-            const inheritedSkill = "inherited-skill";
-            const explicitSkill1 = "explicit-skill-1";
-            const explicitSkill2 = "explicit-skill-2";
-
-            const skillTags = [["skill", inheritedSkill]];
-
-            const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            const context = createMockContext(ralNumber, skillTags);
-            const delegateTool = createDelegateTool(context);
-
-            const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Task 1", skills: [explicitSkill1] },
-                    { recipient: "third-agent", prompt: "Task 2", skills: [explicitSkill2] },
-                ],
-            };
-
-            const result = await delegateTool.execute(input);
-            expect(result.success).toBe(true);
-
-            // First delegation: inherited + explicit1
-            expect(delegateCallArgs[0].skills).toContain(inheritedSkill);
-            expect(delegateCallArgs[0].skills).toContain(explicitSkill1);
-            expect(delegateCallArgs[0].skills).not.toContain(explicitSkill2);
-
-            // Second delegation: inherited + explicit2
-            expect(delegateCallArgs[1].skills).toContain(inheritedSkill);
-            expect(delegateCallArgs[1].skills).toContain(explicitSkill2);
-            expect(delegateCallArgs[1].skills).not.toContain(explicitSkill1);
         });
     });
 
@@ -318,13 +243,9 @@ describe("Delegate Tool - Skill Propagation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    {
-                        recipient: "other-agent",
-                        prompt: "Task",
-                        skills: [skillId, skillId, skillId], // Duplicates
-                    }
-                ],
+                recipient: "other-agent",
+                prompt: "Task",
+                skills: [skillId, skillId, skillId], // Duplicates
             };
 
             const result = await delegateTool.execute(input);
