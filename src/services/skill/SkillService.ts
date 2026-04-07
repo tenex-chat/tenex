@@ -934,6 +934,7 @@ export class SkillService {
         const now = Date.now();
 
         if (cached && cached.expiresAt > now) {
+            SkillWhitelistService.getInstance().setInstalledSkills(cached.skills);
             return this.cloneSkillDataArray(cached.skills);
         }
 
@@ -941,12 +942,15 @@ export class SkillService {
 
         if (cached && cached.signature === signature) {
             cached.expiresAt = Date.now() + AVAILABLE_SKILLS_CACHE_TTL_MS;
+            SkillWhitelistService.getInstance().setInstalledSkills(cached.skills);
             return this.cloneSkillDataArray(cached.skills);
         }
 
         const inFlight = this.inFlightAvailableSkills.get(cacheKey);
         if (inFlight && inFlight.signature === signature) {
-            return this.cloneSkillDataArray(await inFlight.promise);
+            const skills = await inFlight.promise;
+            SkillWhitelistService.getInstance().setInstalledSkills(skills);
+            return this.cloneSkillDataArray(skills);
         }
 
         const loadPromise = (async () => {
@@ -967,6 +971,7 @@ export class SkillService {
                 skills,
                 expiresAt: Date.now() + AVAILABLE_SKILLS_CACHE_TTL_MS,
             });
+            SkillWhitelistService.getInstance().setInstalledSkills(skills);
 
             return this.cloneSkillDataArray(skills);
         } finally {

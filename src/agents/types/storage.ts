@@ -26,6 +26,8 @@ export interface AgentDefaultConfig {
     tools?: string[];
     /** Skill IDs that are always active for this agent across all conversations. Local skill directory IDs are authoritative. */
     skills?: string[];
+    /** Skill IDs that are blocked from activation for this agent. */
+    blockedSkills?: string[];
     /** MCP server slugs (from mcp.json) this agent can access. */
     mcpAccess?: string[];
 }
@@ -57,6 +59,8 @@ export interface AgentProjectConfig {
      * - []: disable all always-on skills for this project
      */
     skills?: string[];
+    /** Project-specific blocked skill IDs. Merged (union) with default.blockedSkills. */
+    blockedSkills?: string[];
     /**
      * Project-scoped PM designation.
      * When true, this agent is designated as PM for this specific project.

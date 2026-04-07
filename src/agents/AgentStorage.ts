@@ -1077,6 +1077,7 @@ export class AgentStorage {
             model: agent.default?.model,
             tools: agent.default?.tools,
             skills: agent.default?.skills,
+            blockedSkills: agent.default?.blockedSkills,
         };
 
         const projectConfig = projectDTag
@@ -1130,6 +1131,14 @@ export class AgentStorage {
                 agent.default.skills = updates.skills;
             } else {
                 agent.default.skills = undefined;
+            }
+        }
+
+        if (updates.blockedSkills !== undefined) {
+            if (updates.blockedSkills.length > 0) {
+                agent.default.blockedSkills = updates.blockedSkills;
+            } else {
+                agent.default.blockedSkills = undefined;
             }
         }
 
@@ -1191,6 +1200,7 @@ export class AgentStorage {
                 model: agent.default?.model,
                 tools: agent.default?.tools,
                 skills: agent.default?.skills,
+                blockedSkills: agent.default?.blockedSkills,
             };
 
             const deduplicated = stripUndefinedValues(

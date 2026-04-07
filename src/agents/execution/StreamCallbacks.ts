@@ -12,6 +12,7 @@ import { createViolationReminders } from "@/services/heuristics";
 import { RALRegistry } from "@/services/ral";
 import { SkillService, loadAllSkillTools } from "@/services/skill";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
+import { filterBlockedSkills } from "@/services/skill/skill-blocking";
 import { HOME_FS_FALLBACKS } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -305,8 +306,20 @@ export function createPrepareStep(
                 ...selfAppliedSkillIds,
                 ...agentAlwaysSkillIds,
             ])];
-            const currentSkillResult = requestedSkillIds.length > 0
-                ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
+
+            const { allowed: filteredSkillIds, blocked: blockedFromRehydration } = filterBlockedSkills(
+                requestedSkillIds,
+                context.agent.blockedSkills
+            );
+            if (blockedFromRehydration.length > 0) {
+                logger.warn("[StreamCallbacks] Blocked skills filtered during step rehydration", {
+                    agent: context.agent.slug,
+                    blockedSkills: blockedFromRehydration,
+                    step: step.stepNumber,
+                });
+            }
+            const currentSkillResult = filteredSkillIds.length > 0
+                ? await SkillService.getInstance().fetchSkills(filteredSkillIds, skillLookupContext)
                 : { skills: [] as SkillData[], content: "" };
 
             // Inject any new skill-declared tools into the mutable toolsObject

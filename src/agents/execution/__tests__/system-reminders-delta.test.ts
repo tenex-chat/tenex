@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,8 @@ import type { TenexReminderData } from "@/agents/execution/system-reminders";
 import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
+import { SkillService } from "@/services/skill/SkillService";
+import { SkillWhitelistService } from "@/services/skill";
 import { collectTenexReminderXml } from "./reminder-test-utils";
 
 mock.module("@/services/identity", () => ({
@@ -50,6 +52,8 @@ describe("delta-based system reminders", () => {
     let metadataPath: string;
     let conversationStore: ConversationStore;
     let agent: AgentInstance;
+    let listAvailableSkillsSpy: ReturnType<typeof spyOn>;
+    let whitelistSpy: ReturnType<typeof spyOn>;
 
     function makeData(
         overrides: Partial<TenexReminderData> = {}
@@ -88,6 +92,11 @@ describe("delta-based system reminders", () => {
                 new AgentMetadataStore(convId, "test-agent", metadataPath),
         } as AgentInstance;
 
+        listAvailableSkillsSpy = spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: async () => [],
+        } as never);
+        whitelistSpy = spyOn(SkillWhitelistService.getInstance(), "getWhitelistedSkills").mockReturnValue([]);
+
         resetSystemReminders();
     });
 
@@ -95,6 +104,8 @@ describe("delta-based system reminders", () => {
         if (testDir) {
             rmSync(testDir, { recursive: true, force: true });
         }
+        listAvailableSkillsSpy?.mockRestore();
+        whitelistSpy?.mockRestore();
         resetSystemReminders();
         mock.restore();
     });
@@ -181,5 +192,56 @@ describe("delta-based system reminders", () => {
         expect(
             reloadedStore.getContextManagementReminderState(agentPubkey)?.providers["datetime"]
         ).toBeDefined();
+    });
+
+    it("filters blocked skills from the available-skills reminder snapshot", async () => {
+        agent = {
+            ...agent,
+            blockedSkills: ["local-skill"],
+        };
+        listAvailableSkillsSpy.mockReturnValue({
+            listAvailableSkills: async () => [
+                {
+                    identifier: "local-skill",
+                    eventId: "d".repeat(64),
+                    scope: "shared",
+                    content: "blocked content",
+                    installedFiles: [],
+                },
+                {
+                    identifier: "allowed-skill",
+                    eventId: "e".repeat(64),
+                    scope: "shared",
+                    content: "allowed content",
+                    installedFiles: [],
+                },
+            ],
+        } as never);
+        whitelistSpy.mockReturnValue([
+            {
+                eventId: "d".repeat(64),
+                identifier: "local-skill",
+                shortId: "local-short",
+                kind: 4202 as never,
+                name: "Local Skill",
+                description: "Blocked skill",
+                whitelistedBy: ["pubkey"],
+            },
+            {
+                eventId: "e".repeat(64),
+                identifier: "allowed-skill",
+                shortId: "allowed-short",
+                kind: 4202 as never,
+                name: "Allowed Skill",
+                description: "Allowed skill",
+                whitelistedBy: ["pubkey"],
+            },
+        ] as never);
+
+        const xml = await collectReminderXml(makeData({ agent }));
+
+        expect(xml).toContain("allowed-skill");
+        expect(xml).not.toContain("local-skill");
+        expect(xml).not.toContain("local-short");
     });
 });

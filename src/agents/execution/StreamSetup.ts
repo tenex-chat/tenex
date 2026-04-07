@@ -20,6 +20,7 @@ import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
 import { FullResultStash, wrapToolsWithOutputTruncation } from "./ToolOutputTruncation";
+import { filterBlockedSkills } from "@/services/skill/skill-blocking";
 import {
     createExecutionContextManagement,
     type ExecutionContextManagement,
@@ -80,8 +81,19 @@ export async function setupStreamExecution(
     const selfAppliedSkillIds = context.conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
     const agentAlwaysSkillIds = context.agent.alwaysSkills ?? [];
     const requestedSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds, ...agentAlwaysSkillIds])];
-    const skillResult = requestedSkillIds.length > 0
-        ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
+
+    const { allowed: filteredSkillIds, blocked: blockedFromRequest } = filterBlockedSkills(
+        requestedSkillIds,
+        context.agent.blockedSkills
+    );
+    if (blockedFromRequest.length > 0) {
+        logger.warn("[StreamSetup] Blocked skills filtered from request", {
+            agent: context.agent.slug,
+            blockedSkills: blockedFromRequest,
+        });
+    }
+    const skillResult = filteredSkillIds.length > 0
+        ? await SkillService.getInstance().fetchSkills(filteredSkillIds, skillLookupContext)
         : { skills: [], content: "", toolPermissions: {} };
 
     // Start MCP servers the agent has access to via mcpAccess.

@@ -10,6 +10,7 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import type { MCPConfig } from "@/llm/providers/types";
 import { publishAgentProfile } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
+import { filterBlockedSkills } from "@/services/skill/skill-blocking";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -42,7 +43,20 @@ export function createAgentInstance(
     const effectiveLLMConfig = resolvedConfig.model;
     const effectiveTools = resolvedConfig.tools;
     const effectiveAlwaysSkills = resolvedConfig.skills;
+    const effectiveBlockedSkills = resolvedConfig.blockedSkills;
     const effectiveMcpAccess = resolvedConfig.mcpAccess;
+
+    const { allowed: filteredAlwaysSkills, blocked } = filterBlockedSkills(
+        effectiveAlwaysSkills ?? [],
+        effectiveBlockedSkills
+    );
+
+    if (blocked.length > 0) {
+        logger.warn("[AgentLoader] Blocked skills removed from alwaysSkills", {
+            agent: storedAgent.slug,
+            blockedSkills: blocked,
+        });
+    }
 
     // Process tools using pure functions
     const normalizedTools = processAgentTools(effectiveTools || []);
@@ -76,7 +90,10 @@ export function createAgentInstance(
         isPM: storedAgent.isPM,
         projectOverrides: storedAgent.projectOverrides,
         telegram: storedAgent.telegram,
-        alwaysSkills: effectiveAlwaysSkills,
+        alwaysSkills: filteredAlwaysSkills && filteredAlwaysSkills.length > 0
+            ? filteredAlwaysSkills
+            : undefined,
+        blockedSkills: effectiveBlockedSkills,
         mcpAccess: effectiveMcpAccess ?? [],
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();

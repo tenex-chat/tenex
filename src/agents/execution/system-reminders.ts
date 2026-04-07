@@ -17,6 +17,7 @@ import type {
     TodoItem,
 } from "@/services/ral/types";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
+import { buildExpandedBlockedSet } from "@/services/skill/skill-blocking";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -367,9 +368,16 @@ function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, st
                 projectPath: data.projectPath,
             });
             const whitelist = SkillWhitelistService.getInstance().getWhitelistedSkills();
+            const blockedSet = buildExpandedBlockedSet(data.agent.blockedSkills);
             const ids = [
-                ...installed.map((skill) => skill.identifier).sort(),
-                ...whitelist.map((entry) => entry.identifier ?? entry.shortId ?? entry.eventId).sort(),
+                ...installed
+                    .map((skill) => skill.identifier)
+                    .filter((id): id is string => Boolean(id) && !blockedSet.has(id))
+                    .sort(),
+                ...whitelist
+                    .map((entry) => entry.identifier ?? entry.shortId ?? entry.eventId)
+                    .filter((id): id is string => Boolean(id) && !blockedSet.has(id))
+                    .sort(),
             ];
             return ids.join(",");
         },
@@ -377,7 +385,8 @@ function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, st
             type: "available-skills",
             content: await renderAvailableSkillsBlock(
                 data.agent.pubkey,
-                data.projectPath
+                data.projectPath,
+                data.agent.blockedSkills
             ),
         }),
         renderDelta: (previous, current) => (previous === current ? null : "full"),

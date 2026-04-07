@@ -197,8 +197,21 @@ export class AgentDispatchService {
         principalContext?: MessagePrincipalContext
     ): Promise<void> {
         const delegationResult = await handleDelegationCompletion(envelope);
-        const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
         const senderPubkey = envelope.principal.linkedPubkey;
+
+        if (delegationResult.deferred) {
+            const activeSpan = getSafeActiveSpan();
+            activeSpan?.addEvent("reply.delegation_completion_deferred", {
+                "event.id": envelope.message.nativeId,
+                "event.pubkey": senderPubkey?.substring(0, 8) ?? "",
+            });
+            span.addEvent("dispatch.delegation_completion_deferred", {
+                "event.id": envelope.message.nativeId,
+            });
+            return;
+        }
+
+        const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
 
         if (delegationTarget) {
             span.addEvent("dispatch.delegation_completion_routed", {

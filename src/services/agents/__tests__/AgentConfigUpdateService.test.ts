@@ -81,6 +81,7 @@ describe("AgentConfigUpdateService", () => {
             ["p", "agent-pubkey"],
             ["model", "ollama/qwen3.5:cloud"],
             ["tool", "fs_read"],
+            ["blocked-skill", "shell"],
             ["pm"],
         ]);
 
@@ -92,7 +93,8 @@ describe("AgentConfigUpdateService", () => {
                 pubkey: "agent-pubkey",
                 updates: {
                     model: "ollama/qwen3.5:cloud",
-                    tools: ["fs_read", "fs_glob", "fs_grep"],
+                    tools: ["fs_read"],
+                    blockedSkills: ["shell"],
                 },
                 options: { clearProjectOverrides: true },
             },
@@ -107,6 +109,7 @@ describe("AgentConfigUpdateService", () => {
             ["model", "claude auto"],
             ["tool", "conversation_search"],
             ["tool", "shell"],
+            ["blocked-skill", "shell"],
         ]);
 
         const result = await service.applyEvent(event, { projectDTag: "TENEX-ff3ssq" });
@@ -119,6 +122,7 @@ describe("AgentConfigUpdateService", () => {
                 override: {
                     model: "claude auto",
                     tools: ["+shell"],
+                    blockedSkills: ["shell"],
                 },
                 reset: false,
             },

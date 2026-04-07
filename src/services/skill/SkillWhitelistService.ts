@@ -5,6 +5,7 @@ import type { NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { shortenEventId, shortenOptionalEventId } from "@/utils/conversation-id";
 import { assignCapabilityIdentifiers } from "@/utils/capability-identifiers";
+import type { SkillData } from "./types";
 
 const tracer = trace.getTracer("tenex.skill-whitelist-service");
 
@@ -62,6 +63,7 @@ const FETCH_TIMEOUT_MS = 10_000;
 export class SkillWhitelistService {
     private static instance: SkillWhitelistService;
     private cache: WhitelistCache | null = null;
+    private installedSkills: SkillData[] = [];
     private subscription: NDKSubscription | null = null;
     private whitelistPubkeys: Set<string> = new Set();
     private initialized = false;
@@ -102,6 +104,7 @@ export class SkillWhitelistService {
         this.whitelistPubkeys = new Set(whitelistPubkeys);
         this.initialized = true;
         this.cache = { skills: [], lastUpdated: Date.now() };
+        this.installedSkills = [];
 
         this.startSubscription();
 
@@ -363,6 +366,24 @@ export class SkillWhitelistService {
         return this.cache?.skills || [];
     }
 
+    /**
+     * Get the currently cached installed skills used for alias expansion.
+     */
+    getInstalledSkills(): SkillData[] {
+        return this.installedSkills;
+    }
+
+    /**
+     * Update the cached installed skills used for alias expansion.
+     */
+    setInstalledSkills(skills: SkillData[]): void {
+        this.installedSkills = skills.map((skill) => ({
+            ...skill,
+            installedFiles: skill.installedFiles.map((file) => ({ ...file })),
+            toolNames: skill.toolNames ? [...skill.toolNames] : undefined,
+        }));
+    }
+
     private async notifyCacheUpdated(): Promise<void> {
         for (const listener of this.cacheUpdatedListeners) {
             try {
@@ -413,6 +434,7 @@ export class SkillWhitelistService {
             this.rebuildTimer = null;
         }
         this.cache = null;
+        this.installedSkills = [];
         this.initialized = false;
         this.whitelistPubkeys.clear();
         this.latestWhitelistEvents.clear();

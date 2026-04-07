@@ -8,6 +8,7 @@
 import type { SkillData, SkillStoreScope, SkillToolPermissions, WhitelistItem } from "@/services/skill";
 import { hasToolPermissions, isOnlyToolMode, SkillWhitelistService } from "@/services/skill";
 import { SkillService } from "@/services/skill/SkillService";
+import { buildExpandedBlockedSet } from "@/services/skill/skill-blocking";
 
 // ---------------------------------------------------------------------------
 // Loaded-skills rendering (from former 12-skills.ts)
@@ -179,7 +180,8 @@ function classifyScope(scope: SkillStoreScope): ScopeGroup {
  */
 export async function renderAvailableSkillsBlock(
     agentPubkey: string,
-    projectPath?: string
+    projectPath?: string,
+    blockedSkills?: string[]
 ): Promise<string> {
     const whitelistService = SkillWhitelistService.getInstance();
     const whitelistedItems = whitelistService.getWhitelistedSkills();
@@ -187,24 +189,40 @@ export async function renderAvailableSkillsBlock(
         agentPubkey,
         projectPath,
     });
+    const blockedSet = buildExpandedBlockedSet(blockedSkills);
+    const filteredInstalledSkills = installedSkills.filter((skill) => {
+        if (blockedSet.has(skill.identifier)) return false;
+        if (skill.eventId && blockedSet.has(skill.eventId)) return false;
+        return true;
+    });
+    const filteredWhitelistedItems = whitelistedItems.filter((item) => {
+        const candidateId = item.identifier ?? item.shortId ?? item.eventId;
+        return candidateId ? !blockedSet.has(candidateId) : true;
+    });
 
-    const installedEventIds = new Set(
-        installedSkills.filter(s => s.eventId).map(s => s.eventId!)
-    );
+    const installedEventIds = new Set<string>();
+    for (const skill of filteredInstalledSkills) {
+        if (skill.eventId) {
+            installedEventIds.add(skill.eventId);
+        }
+    }
 
     // Group installed skills by scope group
     const grouped = new Map<ScopeGroup, string[]>();
 
-    for (const skill of installedSkills) {
+    for (const skill of filteredInstalledSkills) {
         const group = classifyScope(skill.scope ?? "shared");
         if (!grouped.has(group)) {
             grouped.set(group, []);
         }
-        grouped.get(group)!.push(formatSkillItem(skill));
+        const groupItems = grouped.get(group);
+        if (groupItems) {
+            groupItems.push(formatSkillItem(skill));
+        }
     }
 
     // Unhydrated whitelisted items go under "shared"
-    const unhydratedWhitelisted = whitelistedItems.filter(
+    const unhydratedWhitelisted = filteredWhitelistedItems.filter(
         item => !installedEventIds.has(item.eventId)
     );
     if (unhydratedWhitelisted.length > 0) {
@@ -212,7 +230,10 @@ export async function renderAvailableSkillsBlock(
             grouped.set("shared", []);
         }
         for (const item of unhydratedWhitelisted) {
-            grouped.get("shared")!.push(formatWhitelistItem(item));
+            const sharedItems = grouped.get("shared");
+            if (sharedItems) {
+                sharedItems.push(formatWhitelistItem(item));
+            }
         }
     }
 

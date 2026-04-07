@@ -4,6 +4,7 @@ import {
     resolveEffectiveTools,
     resolveEffectiveModel,
     resolveEffectiveSkills,
+    resolveEffectiveBlockedSkills,
     resolveEffectiveConfig,
     deduplicateProjectConfig,
     computeToolsDelta,
@@ -123,6 +124,33 @@ describe("ConfigResolver", () => {
         });
     });
 
+    describe("resolveEffectiveBlockedSkills", () => {
+        it("should return undefined when both inputs are undefined", () => {
+            expect(resolveEffectiveBlockedSkills(undefined, undefined)).toBeUndefined();
+        });
+
+        it("should return default list when project list is undefined", () => {
+            expect(resolveEffectiveBlockedSkills(["shell"], undefined)).toEqual(["shell"]);
+        });
+
+        it("should return project list when default list is undefined", () => {
+            expect(resolveEffectiveBlockedSkills(undefined, ["write-access"])).toEqual([
+                "write-access",
+            ]);
+        });
+
+        it("should merge default and project lists with union semantics", () => {
+            expect(resolveEffectiveBlockedSkills(["shell"], ["write-access", "shell"])).toEqual([
+                "shell",
+                "write-access",
+            ]);
+        });
+
+        it("should keep default blocks when project list is empty", () => {
+            expect(resolveEffectiveBlockedSkills(["shell"], [])).toEqual(["shell"]);
+        });
+    });
+
     describe("resolveEffectiveConfig", () => {
         it("should resolve full example from requirements: projectA", () => {
             // agentA has: default: { model: 'modelA', tools: ['tool1', 'tool2'] }
@@ -174,6 +202,17 @@ describe("ConfigResolver", () => {
             const resolved = resolveEffectiveConfig(defaultConfig, projectConfig);
             expect(resolved.skills).toEqual([]);
         });
+
+        it("should resolve blocked skills using union semantics", () => {
+            const defaultConfig = {
+                model: "modelA",
+                tools: ["tool1"],
+                blockedSkills: ["shell"],
+            };
+            const projectConfig = { blockedSkills: ["write-access", "shell"] };
+            const resolved = resolveEffectiveConfig(defaultConfig, projectConfig);
+            expect(resolved.blockedSkills).toEqual(["shell", "write-access"]);
+        });
     });
 
     describe("deduplicateProjectConfig", () => {
@@ -218,6 +257,20 @@ describe("ConfigResolver", () => {
             const projectConfig = { skills: [] };
             const result = deduplicateProjectConfig(defaultConfig, projectConfig);
             expect(result.skills).toEqual([]);
+        });
+
+        it("should deduplicate blocked skills against defaults using union semantics", () => {
+            const defaultConfig = { blockedSkills: ["shell", "write-access"] };
+            const projectConfig = { blockedSkills: ["shell", "read"] };
+            const result = deduplicateProjectConfig(defaultConfig, projectConfig);
+            expect(result.blockedSkills).toEqual(["read"]);
+        });
+
+        it("should clear project blockedSkills when all entries are redundant", () => {
+            const defaultConfig = { blockedSkills: ["shell", "write-access"] };
+            const projectConfig = { blockedSkills: ["write-access", "shell"] };
+            const result = deduplicateProjectConfig(defaultConfig, projectConfig);
+            expect(result.blockedSkills).toBeUndefined();
         });
 
         it("should dedup delta tools when they produce the same result as default", () => {

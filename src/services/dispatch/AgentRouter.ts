@@ -123,7 +123,7 @@ export class AgentRouter {
         delegationResult: DelegationCompletionResult,
         projectContext: ProjectContext
     ): { agent: AgentInstance; conversationId: string } | null {
-        if (!delegationResult.recorded) {
+        if (!delegationResult.recorded || delegationResult.deferred) {
             return null;
         }
 

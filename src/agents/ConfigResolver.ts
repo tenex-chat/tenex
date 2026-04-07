@@ -42,6 +42,8 @@ export interface ResolvedAgentConfig {
     tools?: string[];
     /** Skill IDs always active for this agent after default/project resolution. Local skill directory IDs are authoritative. */
     skills?: string[];
+    /** Skill IDs blocked from activation after default/project resolution. */
+    blockedSkills?: string[];
     /** MCP server slugs this agent can access after default/project resolution. */
     mcpAccess?: string[];
 }
@@ -119,6 +121,28 @@ export function resolveEffectiveSkills(
 }
 
 /**
+ * Resolve the effective blocked skills for a project given defaults and a project override.
+ *
+ * Blocked skills use additive union semantics:
+ * - undefined project blockedSkills => use defaults
+ * - [] project blockedSkills => still use defaults
+ * - project entries add to the default blocked set and can never remove default blocks
+ */
+export function resolveEffectiveBlockedSkills(
+    defaultBlockedSkills: string[] | undefined,
+    projectBlockedSkills: string[] | undefined
+): string[] | undefined {
+    if (!defaultBlockedSkills && !projectBlockedSkills) {
+        return undefined;
+    }
+
+    return [...new Set([
+        ...(defaultBlockedSkills ?? []),
+        ...(projectBlockedSkills ?? []),
+    ])];
+}
+
+/**
  * Resolve the effective MCP server access for a project given defaults and a project override.
  *
  * Uses direct replacement semantics (like skills):
@@ -142,12 +166,17 @@ export function resolveEffectiveConfig(
     const effectiveModel = resolveEffectiveModel(defaultConfig.model, projectConfig?.model);
     const effectiveTools = resolveEffectiveTools(defaultConfig.tools, projectConfig?.tools);
     const effectiveSkills = resolveEffectiveSkills(defaultConfig.skills, projectConfig?.skills);
+    const effectiveBlockedSkills = resolveEffectiveBlockedSkills(
+        defaultConfig.blockedSkills,
+        projectConfig?.blockedSkills
+    );
     const effectiveMcpAccess = resolveEffectiveMcpAccess(defaultConfig.mcpAccess, projectConfig?.mcpAccess);
 
     return {
         model: effectiveModel,
         tools: effectiveTools,
         skills: effectiveSkills,
+        blockedSkills: effectiveBlockedSkills,
         mcpAccess: effectiveMcpAccess,
     };
 }
@@ -241,6 +270,18 @@ export function deduplicateProjectConfig(
         if (arraysEqualUnordered(cleaned.skills, defaultSkills)) {
             cleaned.skills = undefined;
         }
+    }
+
+    // Dedup blockedSkills: union semantics mean project entries already in defaults are redundant.
+    if (cleaned.blockedSkills !== undefined) {
+        const defaultBlockedSkills = new Set(defaultConfig.blockedSkills ?? []);
+        const uniqueProjectBlockedSkills = [...new Set(cleaned.blockedSkills)].filter(
+            (skillId) => !defaultBlockedSkills.has(skillId)
+        );
+
+        cleaned.blockedSkills = uniqueProjectBlockedSkills.length > 0
+            ? uniqueProjectBlockedSkills
+            : undefined;
     }
 
     // Dedup mcpAccess: a project-scoped list is redundant if it matches defaults.
