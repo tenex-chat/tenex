@@ -147,7 +147,7 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
 }
 
 /**
- * Checks if a string looks like a PREFIX_LENGTH-char hex prefix (potential shorthand ID).
+ * Checks if a string looks like a DISPLAY_PREFIX_LENGTH-char hex prefix (potential shorthand ID).
  * Note: This is a pure format check - it doesn't do any lookup.
  * For resolving prefixes to actual IDs, use the appropriate service.
  */
@@ -157,14 +157,14 @@ export function isHexPrefix(input: string | undefined): boolean {
 }
 
 /**
- * Resolves a PREFIX_LENGTH-character hex prefix to a full 64-character ID using PrefixKVStore.
+ * Resolves a DISPLAY_PREFIX_LENGTH-character hex prefix to a full 64-character ID using PrefixKVStore.
  * This enables shorthand references to event IDs and pubkeys.
  *
  * IMPORTANT: This function is TYPE-AGNOSTIC - it returns any matching ID without
  * validating whether it's an event ID or pubkey. For resolving specifically to
  * agent pubkeys, use `resolveAgentSlug` from the AgentResolution service.
  *
- * @param prefix - A PREFIX_LENGTH-character hex string prefix
+ * @param prefix - A DISPLAY_PREFIX_LENGTH-character hex string prefix
  * @returns The full 64-character ID, or null if not found or invalid input
  */
 export function resolvePrefixToId(prefix: string | undefined): string | null {
@@ -198,7 +198,7 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
  *
  * Accepts:
  * - Full 64-character hex IDs (returns as-is after validation)
- * - PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore)
+ * - DISPLAY_PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore)
  * - NIP-19 formats: note1..., nevent1...
  * - nostr: prefixed versions of all the above
  *
@@ -219,7 +219,7 @@ export function resolveToFullEventId(input: string | undefined): FullEventId | n
         return normalized;
     }
 
-    // 2. Check for PREFIX_LENGTH hex prefix
+    // 2. Check for DISPLAY_PREFIX_LENGTH hex prefix
     if (isShortEventId(normalized)) {
         const resolved = resolvePrefixToId(normalized);
         if (resolved && isFullEventId(resolved)) {
@@ -254,7 +254,7 @@ export function resolveToFullEventId(input: string | undefined): FullEventId | n
 /**
  * Type-safe version of resolvePrefixToId that returns a typed FullEventId
  *
- * @param prefix - A ShortEventId (PREFIX_LENGTH hex prefix)
+ * @param prefix - A ShortEventId (DISPLAY_PREFIX_LENGTH hex prefix)
  * @returns A typed FullEventId, or null if not found
  */
 export function resolvePrefixToFullEventId(prefix: ShortEventId): FullEventId | null {
@@ -277,7 +277,7 @@ export type NormalizeLessonEventIdResult =
  *
  * Accepts:
  * - Full 64-character hex IDs
- * - PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore or in-memory fallback)
+ * - DISPLAY_PREFIX_LENGTH-character hex prefixes (resolved via PrefixKVStore or in-memory fallback)
  * - NIP-19 formats: note1..., nevent1...
  * - nostr: prefixed versions of all the above
  *
@@ -301,7 +301,7 @@ export function normalizeLessonEventId(
         return { success: true, eventId: cleaned.toLowerCase() };
     }
 
-    // 2. Check for PREFIX_LENGTH hex prefix
+    // 2. Check for DISPLAY_PREFIX_LENGTH hex prefix
     if (isHexPrefix(cleaned)) {
         const prefix = cleaned.toLowerCase();
 

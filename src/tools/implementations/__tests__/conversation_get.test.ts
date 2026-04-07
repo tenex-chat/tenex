@@ -31,7 +31,7 @@ mock.module("@/services/PubkeyService", () => ({
             if (agentSlug) {
                 return agentSlug;
             }
-            // Fall back to truncated pubkey (PREFIX_LENGTH = 12)
+            // Fall back to truncated pubkey (DISPLAY_PREFIX_LENGTH = 12)
             return pk.slice(0, 12);
         },
     }),
@@ -810,8 +810,8 @@ describe("conversation_get Tool", () => {
             // This test prevents regression to the original bug where uncached pubkeys
             // would be displayed as "User" instead of their truncated pubkey.
             // The mock PubkeyService.getNameSync returns pk.slice(0, 12) to simulate
-            // the real behavior of returning PREFIX_LENGTH-truncated pubkeys.
-            const uncachedPubkey = "abc123def456789xyz"; // 18 chars - longer than PREFIX_LENGTH
+            // the real behavior of returning DISPLAY_PREFIX_LENGTH-truncated pubkeys.
+            const uncachedPubkey = "abc123def456789xyz"; // 18 chars - longer than DISPLAY_PREFIX_LENGTH
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -834,7 +834,7 @@ describe("conversation_get Tool", () => {
             expect(messages).not.toContain("@User");
             expect(messages).not.toContain("[@User]");
 
-            // Should show the first 12 characters of the pubkey (PREFIX_LENGTH)
+            // Should show the first 12 characters of the pubkey (DISPLAY_PREFIX_LENGTH)
             // "abc123def456789xyz" -> "abc123def456"
             const lines = xmlToLegacyLines(messages);
             expect(lines[0]).toContain("@abc123def456");

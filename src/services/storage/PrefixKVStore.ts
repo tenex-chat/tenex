@@ -6,7 +6,7 @@
  *
  * Storage location: ~/.tenex/data/prefix-kv/
  *
- * Key format: 18-char prefix -> 64-char full ID (internal storage format; see PREFIX_LENGTH note below)
+ * Key format: 18-char prefix -> 64-char full ID (internal storage format; see DISPLAY_PREFIX_LENGTH note below)
  * Collision policy: First write wins (collisions are statistically irrelevant)
  *
  * LIFECYCLE: This store is GLOBAL across all projects and uses reference counting.
@@ -34,13 +34,13 @@ import { join } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import { logger } from "@/utils/logger";
 
-// NOTE: This PREFIX_LENGTH is intentionally separate from the display PREFIX_LENGTH in
+// NOTE: This DISPLAY_PREFIX_LENGTH is intentionally separate from the display DISPLAY_PREFIX_LENGTH in
 // nostr-entity-parser.ts. This value defines the LMDB storage key format used for
 // event ID and pubkey lookups (18-char hex prefix → 64-char full ID). Changing this
 // would invalidate the existing on-disk LMDB database and require a migration.
-// The display truncation length (for UI/tool output) is controlled by PREFIX_LENGTH
+// The display truncation length (for UI/tool output) is controlled by DISPLAY_PREFIX_LENGTH
 // in src/utils/nostr-entity-parser.ts.
-const PREFIX_LENGTH = 18;
+const DISPLAY_PREFIX_LENGTH = 18;
 const FULL_ID_LENGTH = 64;
 
 export class PrefixKVStore {
@@ -127,7 +127,7 @@ export class PrefixKVStore {
             return; // Silently ignore invalid IDs
         }
 
-        const prefix = fullId.substring(0, PREFIX_LENGTH);
+        const prefix = fullId.substring(0, DISPLAY_PREFIX_LENGTH);
 
         // First write wins - only add if not exists
         const existing = this.db.get(prefix);
@@ -153,7 +153,7 @@ export class PrefixKVStore {
 
         await db.batch(() => {
             for (const fullId of validIds) {
-                const prefix = fullId.substring(0, PREFIX_LENGTH);
+                const prefix = fullId.substring(0, DISPLAY_PREFIX_LENGTH);
                 const existing = db.get(prefix);
                 if (!existing) {
                     db.put(prefix, fullId);
@@ -176,7 +176,7 @@ export class PrefixKVStore {
         // Require exactly 18 characters - no padding or truncation
         // This prevents confusing behavior where short prefixes would
         // be zero-padded and almost never match anything
-        if (!prefix || prefix.length !== PREFIX_LENGTH) {
+        if (!prefix || prefix.length !== DISPLAY_PREFIX_LENGTH) {
             return null;
         }
 

@@ -6,7 +6,7 @@
 
 import type { ShortEventId, FullEventId } from "@/types/event-ids";
 import { SHORT_EVENT_ID_LENGTH } from "@/types/event-ids";
-import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { DISPLAY_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 
 function shortenHexIdentifier(value: string | FullEventId): ShortEventId {
     return value.substring(0, SHORT_EVENT_ID_LENGTH).toLowerCase() as ShortEventId;
@@ -14,7 +14,7 @@ function shortenHexIdentifier(value: string | FullEventId): ShortEventId {
 
 /**
  * Shorten a conversation ID for Jaeger span attributes.
- * Uses the standard PREFIX_LENGTH (18 characters) for consistency across all traces.
+ * Uses the standard DISPLAY_PREFIX_LENGTH (18 characters) for consistency across all traces.
  * This makes Jaeger UI more readable with reduced length and low collision risk.
  *
  * Note: 18 hex characters provides 72 bits of entropy (2^72 ≈ 4.7 sextillion combinations),
@@ -52,5 +52,5 @@ export function shortenOptionalPubkey(pubkey?: string | null): string | undefine
     return pubkey ? shortenPubkey(pubkey) : undefined;
 }
 
-// Re-export PREFIX_LENGTH for backward compatibility
-export { PREFIX_LENGTH };
+// Re-export DISPLAY_PREFIX_LENGTH for backward compatibility
+export { DISPLAY_PREFIX_LENGTH };

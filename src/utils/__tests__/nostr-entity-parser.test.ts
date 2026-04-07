@@ -440,7 +440,7 @@ describe("nostr-entity-parser", () => {
                 }
             });
 
-            it("should reject hex strings between PREFIX_LENGTH and 64 chars", () => {
+            it("should reject hex strings between DISPLAY_PREFIX_LENGTH and 64 chars", () => {
                 const result = normalizeLessonEventId("82341f882b6eabcd2ba7f1ef90aad961"); // 32 chars
                 expect(result.success).toBe(false);
                 if (!result.success) {

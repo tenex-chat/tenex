@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { IdentityBindingStore } from "@/services/identity/IdentityBindingStoreService";
 import { IdentityService } from "@/services/identity/IdentityService";
-import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { DISPLAY_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -67,7 +67,7 @@ describe("IdentityService", () => {
         const store = new IdentityBindingStore(storagePath);
         const linkedPubkey = "a".repeat(64);
         const service = new IdentityService(store, () => ({
-            getName: async () => linkedPubkey.substring(0, PREFIX_LENGTH),
+            getName: async () => linkedPubkey.substring(0, DISPLAY_PREFIX_LENGTH),
             warmUserProfiles: async () => new Map(),
         }));
 

@@ -8,7 +8,7 @@ import type { Span } from "@opentelemetry/api";
  * and adds conversation.id attributes to all spans. This allows querying Jaeger
  * for all traces with the same conversation.id to see the full timeline.
  *
- * NOTE: Conversation IDs in Jaeger spans are shortened to 12 characters (PREFIX_LENGTH)
+ * NOTE: Conversation IDs in Jaeger spans are shortened to 12 characters (DISPLAY_PREFIX_LENGTH)
  * for better readability in the Jaeger UI with low collision risk.
  * Use shortenConversationId() from @/utils/conversation-id for consistency.
  *
