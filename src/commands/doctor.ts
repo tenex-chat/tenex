@@ -8,6 +8,10 @@ import { shortenEventId } from "@/utils/conversation-id";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { getConversationIndexingJob, getConversationEmbeddingService } from "@/conversations/search/embeddings";
 import { RAGService } from "@/services/rag/RAGService";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
+import { listProjectIdsFromDisk, listConversationIdsFromDiskForProject } from "@/conversations/ConversationDiskReader";
+import { getTenexBasePath } from "@/constants";
+import { join } from "node:path";
 
 const refetchCommand = new Command("refetch")
     .description("Refetch and update all agent definitions from Nostr")
@@ -193,6 +197,38 @@ async function runMigrations(): Promise<void> {
     console.log(chalk.blue(`Final migration version: ${String(summary.finalVersion)}`));
 }
 
+async function getContentVersionBreakdown(): Promise<{
+    total: number;
+    v1: number;
+    v2: number;
+    unknown: number;
+}> {
+    const breakdown = { total: 0, v1: 0, v2: 0, unknown: 0 };
+    const projectsBasePath = join(getTenexBasePath(), "projects");
+    const projectIds = listProjectIdsFromDisk(projectsBasePath);
+
+    for (const projectId of projectIds) {
+        const catalog = ConversationCatalogService.getInstance(projectId, join(projectsBasePath, projectId));
+        const conversationIds = listConversationIdsFromDiskForProject(projectsBasePath, projectId);
+
+        for (const conversationId of conversationIds) {
+            const state = catalog.getEmbeddingState(conversationId);
+            if (state) {
+                breakdown.total++;
+                if (state.contentVersion === "v2") {
+                    breakdown.v2++;
+                } else if (state.contentVersion === "v1") {
+                    breakdown.v1++;
+                } else {
+                    breakdown.unknown++;
+                }
+            }
+        }
+    }
+
+    return breakdown;
+}
+
 async function checkConversationIndexingStatus(): Promise<void> {
     const conversationEmbeddingService = getConversationEmbeddingService();
     const indexingJob = getConversationIndexingJob();
@@ -221,6 +257,23 @@ async function checkConversationIndexingStatus(): Promise<void> {
 
         console.log(chalk.bold("\nIndexing State:"));
         console.log(chalk.gray(`  Tracked conversations: ${jobStatus.stateStats.totalEntries}`));
+
+        const versionBreakdown = await getContentVersionBreakdown();
+        if (versionBreakdown.total > 0) {
+            console.log(chalk.bold("\nContent Versions:"));
+            if (versionBreakdown.v2 > 0) {
+                console.log(chalk.gray(`  v2 (full transcript): ${versionBreakdown.v2}`));
+            }
+            if (versionBreakdown.v1 > 0) {
+                console.log(chalk.yellow(`  v1 (metadata only): ${versionBreakdown.v1}`));
+            }
+            if (versionBreakdown.unknown > 0) {
+                console.log(chalk.gray(`  unknown/legacy: ${versionBreakdown.unknown}`));
+            }
+            if (versionBreakdown.v1 > 0) {
+                console.log(chalk.yellow(`\n  ⚠ ${versionBreakdown.v1} conversation(s) using old format. Run 'reindex' to upgrade to v2.`));
+            }
+        }
 
         if (!hasIndexed) {
             console.log(chalk.yellow("\n⚠ No conversations indexed yet. Run 'tenex doctor conversations reindex' to backfill."));
