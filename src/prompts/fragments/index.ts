@@ -24,7 +24,6 @@ import "./20-voice-mode";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
-import { ragCollectionsFragment } from "./29-rag-collections";
 import { telegramChatContextFragment } from "./33-telegram-chat-context";
 import { telegramDeliveryRulesFragment } from "./34-telegram-delivery-rules";
 
@@ -60,7 +59,6 @@ export function registerAllFragments(): void {
 
     // Context and learning
     fragmentRegistry.register(agentDirectedMonitoringFragment);
-    fragmentRegistry.register(ragCollectionsFragment);
     fragmentRegistry.register(telegramChatContextFragment);
     fragmentRegistry.register(telegramDeliveryRulesFragment);
 }

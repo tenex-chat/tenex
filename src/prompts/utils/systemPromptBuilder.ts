@@ -5,7 +5,6 @@ import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { getProjectContext } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling";
-import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
@@ -98,28 +97,6 @@ async function addCoreAgentFragments(
         builder.add("todo-usage-guidance", {});
     }
 
-    // Add RAG collection attribution - shows agents their contributions to RAG collections
-    // This uses the provenance tracking metadata (agent_pubkey) from document ingestion
-    try {
-        const t0 = performance.now();
-        const ragService = RAGService.getInstance();
-        const collections = await ragService.getCachedAllCollectionStats(agent.pubkey);
-        parentSpan?.addEvent("rag_collection_stats_fetched", { "duration_ms": Math.round(performance.now() - t0) });
-
-        if (collections.length > 0) {
-            builder.add("rag-collections", {
-                agentPubkey: agent.pubkey,
-                collections,
-            });
-            logger.debug("📊 Added RAG collection stats to system prompt", {
-                agent: agent.name,
-                collectionsWithContributions: collections.filter(c => c.agentDocCount > 0).length,
-                totalCollections: collections.length,
-            });
-        }
-    } catch (error) {
-        logger.debug("Could not get RAG collection stats:", error);
-    }
 }
 
 /**
