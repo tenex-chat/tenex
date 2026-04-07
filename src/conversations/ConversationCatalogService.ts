@@ -20,7 +20,7 @@ function createBunDatabase(dbPath: string): BunDatabase {
 }
 
 const CATALOG_DB_FILENAME = "conversation-catalog.db";
-const CATALOG_SCHEMA_VERSION = "1";
+const CATALOG_SCHEMA_VERSION = "2";
 const CATALOG_META_SCHEMA_VERSION_KEY = "schema_version";
 const CATALOG_META_LAST_REBUILD_AT_KEY = "last_rebuild_at";
 const CATALOG_META_LAST_RECONCILE_AT_KEY = "last_reconcile_at";
@@ -106,6 +106,7 @@ interface EmbeddingStateRow {
     metadata_hash: string;
     last_indexed_at: number;
     no_content: number;
+    content_version: string | null;
 }
 
 interface ReconcileRow {
@@ -450,11 +451,12 @@ export class ConversationCatalogService {
         metadataHash: string;
         lastIndexedAt: number;
         noContent: boolean;
+        contentVersion: string | null;
     } | null {
         this.initialize();
 
         const row = this.ensureDb().prepare(
-            `SELECT metadata_hash, last_indexed_at, no_content
+            `SELECT metadata_hash, last_indexed_at, no_content, content_version
              FROM conversation_embedding_state
              WHERE conversation_id = ?`
         ).get(conversationId) as EmbeddingStateRow | undefined;
@@ -467,6 +469,7 @@ export class ConversationCatalogService {
             metadataHash: row.metadata_hash,
             lastIndexedAt: row.last_indexed_at,
             noContent: !!row.no_content,
+            contentVersion: row.content_version ?? null,
         };
     }
 
@@ -476,19 +479,27 @@ export class ConversationCatalogService {
             metadataHash: string;
             lastIndexedAt: number;
             noContent: boolean;
+            contentVersion?: string;
         }
     ): void {
         this.initialize();
 
         this.ensureDb().prepare(
             `INSERT INTO conversation_embedding_state (
-                conversation_id, metadata_hash, last_indexed_at, no_content
-             ) VALUES (?, ?, ?, ?)
+                conversation_id, metadata_hash, last_indexed_at, no_content, content_version
+             ) VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(conversation_id) DO UPDATE SET
                 metadata_hash = excluded.metadata_hash,
                 last_indexed_at = excluded.last_indexed_at,
-                no_content = excluded.no_content`
-        ).run(conversationId, state.metadataHash, state.lastIndexedAt, state.noContent ? 1 : 0);
+                no_content = excluded.no_content,
+                content_version = excluded.content_version`
+        ).run(
+            conversationId,
+            state.metadataHash,
+            state.lastIndexedAt,
+            state.noContent ? 1 : 0,
+            state.contentVersion ?? null
+        );
     }
 
     clearEmbeddingState(conversationId: string): void {
@@ -614,6 +625,7 @@ export class ConversationCatalogService {
                 metadata_hash TEXT NOT NULL,
                 last_indexed_at INTEGER NOT NULL,
                 no_content INTEGER NOT NULL DEFAULT 0,
+                content_version TEXT,
                 FOREIGN KEY (conversation_id)
                     REFERENCES conversations(conversation_id)
                     ON DELETE CASCADE

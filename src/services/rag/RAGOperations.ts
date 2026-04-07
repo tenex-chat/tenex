@@ -71,11 +71,8 @@ export class RAGValidationError extends Error {
 }
 
 export class RAGOperationError extends Error {
-    constructor(
-        message: string,
-        public readonly cause?: Error
-    ) {
-        super(message);
+    constructor(message: string, cause?: Error) {
+        super(message, { cause });
         this.name = "RAGOperationError";
     }
 }

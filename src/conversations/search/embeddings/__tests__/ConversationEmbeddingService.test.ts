@@ -43,8 +43,8 @@ describe("ConversationEmbeddingService", () => {
     describe("buildEmbeddingContent (private, tested via casting)", () => {
         // Access the private method for testing
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const buildEmbeddingContent = (service: ConversationEmbeddingService, messages: readonly ConversationRecordInput[]) =>
-            (service as any).buildEmbeddingContent(messages);
+        const buildEmbeddingContent = (service: ConversationEmbeddingService, messages: readonly ConversationRecordInput[], conversationId = "test-conversation-id") =>
+            (service as any).buildEmbeddingContent(conversationId, messages);
 
         it("returns transcript XML on successful render", () => {
             const service = ConversationEmbeddingService.getInstance();
@@ -65,23 +65,28 @@ describe("ConversationEmbeddingService", () => {
             }
         });
 
-        it("returns { kind: 'error' } when renderConversationXml throws", () => {
-            // This can happen when there's no root event ID (but our makeMessage helper includes one)
-            // To trigger an error, we'd need to construct a message without rootEventId
+        it("falls back to plain-text when renderConversationXml throws (missing rootEventId)", () => {
+            // When messages lack eventId fields, XML rendering fails but the fallback
+            // produces plain-text content from the raw message content.
             const service = ConversationEmbeddingService.getInstance();
             const messages: MessageRecord[] = [
                 {
                     id: "msg-no-root",
                     role: "user",
-                    content: "Test",
+                    content: "Test message content",
                     timestamp: 1000,
-                    // Intentionally missing rootEventId to trigger the error
+                    // Intentionally missing rootEventId to trigger fallback
                 } as MessageRecord,
             ];
 
             const result = buildEmbeddingContent(service, messages);
 
-            expect(result.kind).toBe("error");
+            // With fallback, we get 'ok' with the raw message content
+            expect(result.kind).toBe("ok");
+            if (result.kind === "ok") {
+                expect(result.transcriptXml).toContain("Test message content");
+                expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+            }
         });
 
         it("includes tool call names when includeToolCalls is true", () => {
@@ -134,14 +139,18 @@ describe("ConversationEmbeddingService", () => {
             }
         });
 
-        it("handles empty messages array", () => {
+        it("succeeds for empty messages array when conversationId is provided (XML renders empty conversation)", () => {
             const service = ConversationEmbeddingService.getInstance();
             const messages: ConversationRecordInput[] = [];
 
             const result = buildEmbeddingContent(service, messages);
 
-            // Empty messages cause renderConversationXml to fail (no root event ID)
-            expect(result.kind).toBe("error");
+            // With conversationId, XML renderer resolves the root event ID even without messages.
+            // The result is 'ok' with an (empty) XML string.
+            expect(result.kind).toBe("ok");
+            if (result.kind === "ok") {
+                expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+            }
         });
 
         it("produces different fingerprints for different messages", () => {

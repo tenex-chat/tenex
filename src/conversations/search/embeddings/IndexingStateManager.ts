@@ -88,6 +88,10 @@ export class IndexingStateManager {
             return true;
         }
 
+        if (currentState.contentVersion !== EMBEDDING_CONTENT_VERSION) {
+            return true;
+        }
+
         if (currentState.metadataHash !== currentHash) {
             return true;
         }
@@ -111,6 +115,7 @@ export class IndexingStateManager {
             metadataHash: result.hash,
             lastIndexedAt: Date.now(),
             noContent,
+            contentVersion: EMBEDDING_CONTENT_VERSION,
         });
     }
 

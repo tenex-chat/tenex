@@ -128,16 +128,35 @@ describe("IndexingStateManager", () => {
         manager.clearAllState();
         expect(manager.getStats().totalEntries).toBe(0);
     });
-    it("version bump from v1 to v2 triggers re-indexing of all conversations", () => {
-        // This test documents the expected behavior when EMBEDDING_CONTENT_VERSION is bumped.
-        // When the version changes, existing conversations should be considered "needs re-indexing"
-        // because the embedding content format has changed.
-        //
-        // Note: The actual version-bump-triggered re-indexing is handled by the indexing job
-        // which checks the EMBEDDING_CONTENT_VERSION constant. This test just verifies the constant
-        // exists and has the expected value.
+    it("version bump triggers re-indexing regardless of metadata hash match", () => {
+        const projectId = "project-1";
+        const conversationId = "conv-1";
+        const metadataPath = createConversation(projectsBasePath, projectId, conversationId, {
+            title: "Title",
+            summary: "Summary",
+            lastUserMessage: "Message",
+            lastActivity: 1000,
+        });
 
-        // The version should be 'v2' (changed from original 'v1' metadata-only format)
+        const catalog = ConversationCatalogService.getInstance(projectId, metadataPath);
+        catalog.reconcile();
+
+        const manager = new IndexingStateManager(projectsBasePath);
+        manager.markIndexed(projectsBasePath, projectId, conversationId);
+        expect(manager.needsIndexing(projectsBasePath, projectId, conversationId)).toBe(false);
+
+        // Simulate a stale content_version by writing state with an old version
+        catalog.setEmbeddingState(conversationId, {
+            metadataHash: (catalog.getEmbeddingState(conversationId) as { metadataHash: string }).metadataHash,
+            lastIndexedAt: Date.now(),
+            noContent: false,
+            contentVersion: "v1", // old version — should trigger re-index
+        });
+
+        expect(manager.needsIndexing(projectsBasePath, projectId, conversationId)).toBe(true);
+    });
+
+    it("EMBEDDING_CONTENT_VERSION constant has expected value", () => {
         expect(EMBEDDING_CONTENT_VERSION).toBe("v2");
     });
 });

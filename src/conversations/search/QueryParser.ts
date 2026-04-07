@@ -19,6 +19,7 @@ export interface RawSearchInput {
         agents?: string[];
         since?: string | number;
         after?: string | number;
+        projectId?: string;
     };
 }
 
