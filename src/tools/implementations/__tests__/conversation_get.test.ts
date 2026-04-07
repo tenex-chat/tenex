@@ -1838,7 +1838,7 @@ describe("conversation_get Tool", () => {
             expect(result.message).toContain("conversationId is required");
         });
 
-        it("should accept 18-char prefix for conversationId", async () => {
+        it("should accept 10-char prefix for conversationId", async () => {
             const fullConvId = "abc123def456789012345678901234567890123456789012345678901234abcd";
             mockConversationData = {
                 id: fullConvId,
@@ -1855,7 +1855,7 @@ describe("conversation_get Tool", () => {
 
             // Override getConversation to handle prefix lookup
             mockGetConversation.mockImplementation((id?: string) => {
-                if (id === fullConvId || id === "abc123def456789012") {
+                if (id === fullConvId || id === "abc123def4") {
                     return mockConversationData ? {
                         id: mockConversationData.id,
                         title: mockConversationData.title,
@@ -1870,7 +1870,7 @@ describe("conversation_get Tool", () => {
 
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
-                conversationId: "abc123def456789012", // 18-char prefix
+                conversationId: "abc123def4", // 10-char prefix
             });
 
             expect(result.success).toBe(true);
