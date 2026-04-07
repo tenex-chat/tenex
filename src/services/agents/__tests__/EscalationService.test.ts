@@ -29,6 +29,9 @@ const mockGetConfig = mock(() => ({ escalation: { agent: "test-escalation-agent"
 const mockResolveRecipientToPubkey = mock((_slug: string) => null as string | null);
 
 // Mock registry and project context
+const mockRegistryGetAgent = mock(
+    () => undefined as ReturnType<import("@/agents/AgentRegistry").AgentRegistry["getAgent"]>
+);
 const mockAddAgent = mock(() => {});
 const mockNotifyAgentAdded = mock(() => {});
 const mockGetProjectDTag = mock(() => "test-project-dtag" as string | undefined);
@@ -36,6 +39,7 @@ const mockGetBasePath = mock(() => "/test/path");
 const mockGetMetadataPath = mock(() => "/test/metadata");
 
 const mockAgentRegistry = {
+    getAgent: mockRegistryGetAgent,
     addAgent: mockAddAgent,
     getProjectDTag: mockGetProjectDTag,
     getBasePath: mockGetBasePath,
@@ -119,6 +123,7 @@ describe("EscalationService", () => {
         // Reset all mocks
         mockGetConfig.mockClear();
         mockResolveRecipientToPubkey.mockClear();
+        mockRegistryGetAgent.mockClear();
         mockAddAgent.mockClear();
         mockNotifyAgentAdded.mockClear();
         mockGetProjectDTag.mockClear();
@@ -131,7 +136,9 @@ describe("EscalationService", () => {
         // Set up default mock returns
         mockGetConfig.mockReturnValue({ escalation: { agent: "test-escalation-agent" } });
         mockResolveRecipientToPubkey.mockReturnValue(null);
+        mockRegistryGetAgent.mockReturnValue(undefined);
         mockGetProjectDTag.mockReturnValue("test-project-dtag");
+        mockGetProjectContext.mockImplementation(() => mockProjectContext);
         mockGetAgentBySlug.mockReturnValue(null);
         mockLoadAgent.mockReturnValue(null);
 
@@ -333,6 +340,9 @@ describe("EscalationService", () => {
             it("should return null when project context is not initialized", async () => {
                 mockResolveRecipientToPubkey.mockReturnValue(null);
                 mockGetAgentBySlug.mockReturnValue(testStoredAgent);
+                mockGetProjectContext.mockImplementation(() => {
+                    throw new Error("ProjectContext not available");
+                });
 
                 const result = await resolveEscalationTarget();
 
