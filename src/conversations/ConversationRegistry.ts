@@ -598,8 +598,13 @@ class ConversationRegistryImpl {
             // Parse and validate the query
             const query = parseQuery(input);
 
+            // Use the filter's projectId when provided; fall back to the current project
+            const effectiveProjectId = input.filters?.projectId
+                ? createProjectDTag(input.filters.projectId)
+                : currentProjectId;
+
             // Get or create the index manager for this project
-            const indexManager = getIndexManager(this._basePath, currentProjectId);
+            const indexManager = getIndexManager(this._basePath, effectiveProjectId);
 
             // Get the index (loads from disk or rebuilds if needed)
             const index = indexManager.getIndex();
@@ -610,7 +615,7 @@ class ConversationRegistryImpl {
             logger.debug("[ConversationRegistry] Advanced search completed", {
                 query: input.query,
                 resultCount: results.length,
-                projectId: currentProjectId,
+                projectId: effectiveProjectId,
             });
 
             return {

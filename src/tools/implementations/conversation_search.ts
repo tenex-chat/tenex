@@ -189,9 +189,11 @@ async function hybridSearch(
 async function fullTextSearch(
     query: string,
     filters: ConversationSearchInput["filters"],
-    limit: number
+    limit: number,
+    projectId?: string
 ): Promise<{ results: ConversationSearchResult[]; searchType: "full-text" | "title-only"; error?: string }> {
-    const advancedResult = conversationRegistry.searchAdvanced({ query, filters }, limit);
+    const effectiveFilters = projectId ? { ...filters, projectId } : filters;
+    const advancedResult = conversationRegistry.searchAdvanced({ query, filters: effectiveFilters }, limit);
 
     if (advancedResult.success) {
         if (advancedResult.results.length > 0) {
@@ -293,7 +295,7 @@ async function executeConversationSearch(
             break;
 
         case "full-text": {
-            const fullTextResult = await fullTextSearch(query, filters, limit);
+            const fullTextResult = await fullTextSearch(query, filters, limit, projectId);
             conversations = fullTextResult.results;
             searchType = fullTextResult.searchType;
             if (fullTextResult.error) {

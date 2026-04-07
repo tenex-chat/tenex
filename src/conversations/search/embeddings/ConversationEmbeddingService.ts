@@ -428,7 +428,16 @@ export class ConversationEmbeddingService {
     public async hasIndexedConversations(): Promise<boolean> {
         await this.ensureInitialized();
         const collections = await this.ragService.listCollections();
-        return collections.includes(CONVERSATION_COLLECTION);
+        if (!collections.includes(CONVERSATION_COLLECTION)) {
+            return false;
+        }
+        try {
+            const stats = await this.ragService.getCollectionStats(CONVERSATION_COLLECTION);
+            return stats.totalCount > 0;
+        } catch {
+            logger.warn("[ConversationEmbeddingService] Could not get collection stats for hasIndexedConversations check");
+            return false;
+        }
     }
 
     /**
