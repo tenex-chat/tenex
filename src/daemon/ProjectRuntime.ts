@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
+import { AgentConfigWatcher } from "@/services/agents/AgentConfigWatcher";
 import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
@@ -60,6 +61,7 @@ export class ProjectRuntime {
     private telegramGatewayRegistered = false;
     private mcpManager: MCPManager = new MCPManager();
 
+    private agentConfigWatcher: AgentConfigWatcher | null = null;
     private isRunning = false;
     private startTime: Date | null = null;
     private lastEventTime: Date | null = null;
@@ -274,6 +276,21 @@ export class ProjectRuntime {
             this.operationsStatusPublisher.start();
             trace.getActiveSpan()?.addEvent("project_runtime.operations_status_started");
 
+            // Start watching agent config files for hot-reload
+            const contextRegistry = this.context.agentRegistry;
+            this.agentConfigWatcher = new AgentConfigWatcher(
+                config.getConfigPath("agents"),
+                (pubkey) => contextRegistry.getAgentByPubkey(pubkey) !== undefined,
+                async (pubkey) => {
+                    const reloaded = await contextRegistry.reloadAgent(pubkey);
+                    if (reloaded && this.statusPublisher) {
+                        await this.statusPublisher.publishImmediately();
+                    }
+                }
+            );
+            this.agentConfigWatcher.start();
+            trace.getActiveSpan()?.addEvent("project_runtime.agent_config_watcher_started");
+
             this.isRunning = true;
             this.startTime = new Date();
 
@@ -388,6 +405,12 @@ export class ProjectRuntime {
             "uptime_ms": this.startTime ? Date.now() - this.startTime.getTime() : 0,
             "events.processed": this.eventCount,
         });
+
+        // Stop agent config watcher first to prevent callbacks during teardown
+        if (this.agentConfigWatcher) {
+            this.agentConfigWatcher.stop();
+            this.agentConfigWatcher = null;
+        }
 
         // Stop status publisher
         if (this.telegramGatewayRegistered) {
