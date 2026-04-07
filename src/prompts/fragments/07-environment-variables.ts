@@ -1,7 +1,4 @@
-import { homedir } from "node:os";
-import { nip19 } from "nostr-tools";
 import type { AgentInstance } from "@/agents/types/runtime";
-import { getAgentHomeDirectory } from "@/lib/agent-home";
 import type { PromptFragment } from "../core/types";
 
 interface EnvironmentVariablesArgs {
@@ -11,23 +8,22 @@ interface EnvironmentVariablesArgs {
 
 /**
  * Environment variables fragment.
- * Surfaces path variables that agents can use in shell commands and file tool arguments.
+ * Surfaces available env var names that agents can use in shell commands and file tool arguments.
+ * Values are resolved at runtime by the shell — no need to inline them here.
  */
 export const environmentVariablesFragment: PromptFragment<EnvironmentVariablesArgs> = {
     id: "environment-variables",
     priority: 7,
-    template: async ({ agent, projectBasePath }) => {
-        const homeDir = getAgentHomeDirectory(agent.pubkey);
-
+    template: async ({ projectBasePath }) => {
         const parts: string[] = [];
         parts.push("<environment-variables>");
         parts.push("These variables are available in shell commands and file tool path arguments.");
-        parts.push(`$USER_HOME = ${homedir()}`);
-        parts.push(`$AGENT_HOME = ${homeDir}`);
-        parts.push(`$PUBKEY = ${agent.pubkey}`);
-        parts.push(`$NPUB = ${nip19.npubEncode(agent.pubkey)}`);
+        parts.push("- $USER_HOME — the user's home directory");
+        parts.push("- $AGENT_HOME — this agent's private home directory");
+        parts.push("- $PUBKEY — this agent's hex pubkey");
+        parts.push("- $NPUB — this agent's npub-encoded pubkey");
         if (projectBasePath) {
-            parts.push(`$PROJECT_BASE = ${projectBasePath}`);
+            parts.push("- $PROJECT_BASE — the current project's root directory");
         }
         parts.push("</environment-variables>");
         return parts.join("\n");
