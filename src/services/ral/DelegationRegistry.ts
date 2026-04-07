@@ -1,5 +1,12 @@
 import { trace } from "@opentelemetry/api";
-import type { RALRegistryEntry, PendingDelegation, CompletedDelegation, DelegationMessage } from "./types";
+import type {
+  RALRegistryEntry,
+  PendingDelegation,
+  CompletedDelegation,
+  DelegationMessage,
+  PendingSubDelegationRef,
+  DeferredCompletion,
+} from "./types";
 import { shortenConversationId, shortenEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 
@@ -74,9 +81,11 @@ export class DelegationRegistry {
           this.delegationToRal.delete(d.followupEventId);
           this.followupToCanonical.delete(d.followupEventId);
         }
+        this.removePendingSubDelegationFromAnyParent(id);
       }
       for (const id of convDelegations.completed.keys()) {
         this.delegationToRal.delete(id);
+        this.removePendingSubDelegationFromAnyParent(id);
       }
       this.conversationDelegations.delete(key);
     }
@@ -104,6 +113,233 @@ export class DelegationRegistry {
     if (!delegations) return [];
     const completed = Array.from(delegations.completed.values());
     return ralNumber !== undefined ? completed.filter((d) => d.ralNumber === ralNumber) : completed;
+  }
+
+  registerPendingSubDelegation(
+    parentDelegationConversationId: string,
+    subDelegation: PendingDelegation
+  ): boolean {
+    const location = this.delegationToRal.get(parentDelegationConversationId);
+    if (!location) {
+      return false;
+    }
+
+    const [agentPubkey, conversationId] = location.key.split(":");
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      return false;
+    }
+
+    const canonicalParentId = this.followupToCanonical.get(parentDelegationConversationId)
+      ?? parentDelegationConversationId;
+    const parentDelegation = convDelegations.pending.get(canonicalParentId);
+    if (!parentDelegation) {
+      return false;
+    }
+
+    const existingSubDelegations = parentDelegation.pendingSubDelegations ?? [];
+    if (existingSubDelegations.some((delegation) => delegation.delegationConversationId === subDelegation.delegationConversationId)) {
+      return true;
+    }
+
+    parentDelegation.pendingSubDelegations = [
+      ...existingSubDelegations,
+      {
+        delegationConversationId: subDelegation.delegationConversationId,
+        type: subDelegation.type ?? "standard",
+      } satisfies PendingSubDelegationRef,
+    ];
+
+    const ral = this.deps.getRAL(agentPubkey, conversationId, location.ralNumber);
+    if (ral) {
+      ral.lastActivityAt = Date.now();
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.pending_subdelegation_registered", {
+      "delegation.parent_conversation_id": shortenConversationId(parentDelegationConversationId),
+      "delegation.sub_conversation_id": shortenConversationId(subDelegation.delegationConversationId),
+      "ral.number": location.ralNumber,
+    });
+
+    return true;
+  }
+
+  clearPendingSubDelegation(
+    parentDelegationConversationId: string,
+    subDelegationConversationId: string
+  ): boolean {
+    const location = this.delegationToRal.get(parentDelegationConversationId);
+    if (!location) {
+      return false;
+    }
+
+    const [agentPubkey, conversationId] = location.key.split(":");
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      return false;
+    }
+
+    const canonicalParentId = this.followupToCanonical.get(parentDelegationConversationId)
+      ?? parentDelegationConversationId;
+    const parentDelegation = convDelegations.pending.get(canonicalParentId);
+    if (!parentDelegation?.pendingSubDelegations?.length) {
+      return false;
+    }
+
+    const nextSubDelegations = parentDelegation.pendingSubDelegations.filter(
+      (delegation) => delegation.delegationConversationId !== subDelegationConversationId
+    );
+
+    if (nextSubDelegations.length === parentDelegation.pendingSubDelegations.length) {
+      return false;
+    }
+
+    parentDelegation.pendingSubDelegations = nextSubDelegations.length > 0
+      ? nextSubDelegations
+      : undefined;
+
+    const ral = this.deps.getRAL(agentPubkey, conversationId, location.ralNumber);
+    if (ral) {
+      ral.lastActivityAt = Date.now();
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.pending_subdelegation_cleared", {
+      "delegation.parent_conversation_id": shortenConversationId(parentDelegationConversationId),
+      "delegation.sub_conversation_id": shortenConversationId(subDelegationConversationId),
+      "ral.number": location.ralNumber,
+    });
+
+    if (
+      parentDelegation.pendingSubDelegations === undefined &&
+      parentDelegation.deferredCompletion &&
+      !parentDelegation.killed
+    ) {
+      const deferredCompletion = parentDelegation.deferredCompletion;
+      parentDelegation.deferredCompletion = undefined;
+      this.finalizeDeferredCompletion({
+        agentPubkey,
+        conversationId,
+        ralNumber: location.ralNumber,
+        delegationConversationId: canonicalParentId,
+        pendingDelegation: parentDelegation,
+        deferredCompletion,
+      });
+    }
+
+    return true;
+  }
+
+  private removePendingSubDelegationFromAnyParent(subDelegationConversationId: string): boolean {
+    let removed = false;
+
+    for (const delegations of this.conversationDelegations.values()) {
+      for (const pendingDelegation of delegations.pending.values()) {
+        if (!pendingDelegation.pendingSubDelegations?.length) {
+          continue;
+        }
+
+        const nextChildren = pendingDelegation.pendingSubDelegations.filter(
+          (delegation) => delegation.delegationConversationId !== subDelegationConversationId
+        );
+
+        if (nextChildren.length === pendingDelegation.pendingSubDelegations.length) {
+          continue;
+        }
+
+        pendingDelegation.pendingSubDelegations = nextChildren.length > 0 ? nextChildren : undefined;
+        removed = true;
+      }
+    }
+
+    return removed;
+  }
+
+  private finalizeDeferredCompletion(params: {
+    agentPubkey: string;
+    conversationId: string;
+    ralNumber: number;
+    delegationConversationId: string;
+    pendingDelegation: PendingDelegation;
+    deferredCompletion: DeferredCompletion;
+  }): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined {
+    const {
+      agentPubkey,
+      conversationId,
+      ralNumber,
+      delegationConversationId,
+      pendingDelegation,
+      deferredCompletion,
+    } = params;
+
+    const key = this.makeKey(agentPubkey, conversationId);
+    const convDelegations = this.conversationDelegations.get(key);
+    if (!convDelegations) {
+      return undefined;
+    }
+
+    const existingCompletion = convDelegations.completed.get(delegationConversationId);
+    if (existingCompletion) {
+      if (deferredCompletion.fullTranscript) {
+        existingCompletion.transcript = deferredCompletion.fullTranscript;
+      } else {
+        existingCompletion.transcript = [
+          {
+            senderPubkey: pendingDelegation.senderPubkey,
+            recipientPubkey: pendingDelegation.recipientPubkey,
+            content: pendingDelegation.prompt,
+            timestamp: deferredCompletion.completedAt - 1,
+          },
+          {
+            senderPubkey: deferredCompletion.recipientPubkey,
+            recipientPubkey: pendingDelegation.senderPubkey,
+            content: deferredCompletion.response,
+            timestamp: deferredCompletion.completedAt,
+          },
+        ];
+      }
+
+      existingCompletion.ralNumber = pendingDelegation.ralNumber;
+    } else {
+      const transcript: DelegationMessage[] = deferredCompletion.fullTranscript ?? [
+        {
+          senderPubkey: pendingDelegation.senderPubkey,
+          recipientPubkey: pendingDelegation.recipientPubkey,
+          content: pendingDelegation.prompt,
+          timestamp: deferredCompletion.completedAt - 1,
+        },
+        {
+          senderPubkey: deferredCompletion.recipientPubkey,
+          recipientPubkey: pendingDelegation.senderPubkey,
+          content: deferredCompletion.response,
+          timestamp: deferredCompletion.completedAt,
+        },
+      ];
+
+      convDelegations.completed.set(delegationConversationId, {
+        delegationConversationId,
+        recipientPubkey: deferredCompletion.recipientPubkey,
+        senderPubkey: pendingDelegation.senderPubkey,
+        ralNumber: pendingDelegation.ralNumber,
+        transcript,
+        completedAt: deferredCompletion.completedAt,
+        status: "completed",
+      });
+    }
+
+    convDelegations.pending.delete(delegationConversationId);
+    this.deps.decrementDelegationCounter(agentPubkey, conversationId, ralNumber);
+
+    const ral = this.deps.getRAL(agentPubkey, conversationId, ralNumber);
+    if (ral) {
+      ral.lastActivityAt = Date.now();
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.deferred_completion_released", {
+      "ral.number": ralNumber,
+      "delegation.conversation_id": shortenConversationId(delegationConversationId),
+    });
+
+    return { agentPubkey, conversationId, ralNumber };
   }
 
   clearCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): void {
@@ -253,7 +489,7 @@ export class DelegationRegistry {
     response: string;
     completedAt: number;
     fullTranscript?: DelegationMessage[];
-  }): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined {
+  }): { agentPubkey: string; conversationId: string; ralNumber: number; deferred?: boolean } | undefined {
     const location = this.delegationToRal.get(completion.delegationConversationId);
     if (!location) return undefined;
 
@@ -296,6 +532,30 @@ export class DelegationRegistry {
     const ral = this.deps.getRAL(agentPubkey, conversationId, location.ralNumber);
     if (ral) {
       ral.lastActivityAt = Date.now();
+    }
+
+    const pendingSubDelegations = pendingDelegation.pendingSubDelegations ?? [];
+    if (pendingSubDelegations.length > 0) {
+      pendingDelegation.deferredCompletion = {
+        recipientPubkey: completion.recipientPubkey,
+        response: completion.response,
+        completedAt: completion.completedAt,
+        fullTranscript: completion.fullTranscript,
+      };
+
+      trace.getActiveSpan()?.addEvent("ral.completion_deferred_pending_subdelegations", {
+        "ral.id": ral?.id,
+        "ral.number": location.ralNumber,
+        "delegation.completed_conversation_id": shortenConversationId(completion.delegationConversationId),
+        "delegation.pending_subdelegations": pendingSubDelegations.length,
+      });
+
+      return {
+        agentPubkey,
+        conversationId,
+        ralNumber: location.ralNumber,
+        deferred: true,
+      };
     }
 
     const existingCompletion = convDelegations.completed.get(canonicalId);
@@ -366,6 +626,14 @@ export class DelegationRegistry {
     }
 
     convDelegations.pending.delete(canonicalId);
+
+    if (pendingDelegation.parentDelegationConversationId) {
+      this.clearPendingSubDelegation(
+        pendingDelegation.parentDelegationConversationId,
+        canonicalId
+      );
+    }
+
     this.deps.decrementDelegationCounter(agentPubkey, conversationId, location.ralNumber);
 
     return { agentPubkey, conversationId, ralNumber: location.ralNumber };
@@ -543,6 +811,13 @@ export class DelegationRegistry {
       delegationConversationId: shortenConversationId(canonicalId),
       recipientPubkey: shortenPubkey(pendingDelegation.recipientPubkey),
     });
+
+    if (pendingDelegation.parentDelegationConversationId) {
+      this.clearPendingSubDelegation(
+        pendingDelegation.parentDelegationConversationId,
+        canonicalId
+      );
+    }
 
     return true;
   }

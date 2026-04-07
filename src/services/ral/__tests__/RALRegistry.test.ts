@@ -1244,6 +1244,71 @@ describe("RALRegistry", () => {
       expect(completed[0].delegationConversationId).toBe("conv-001"); // Canonical ID
     });
 
+    it("should defer parent completion until pending sub-delegations resolve", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const parentDelegation: PendingDelegation = {
+        type: "delegate",
+        delegationConversationId: "parent-delegation",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Parent task",
+        ralNumber,
+        pendingSubDelegations: [
+          {
+            delegationConversationId: "child-ask",
+            type: "ask",
+          },
+        ],
+      };
+
+      const childDelegation: PendingDelegation = {
+        type: "ask",
+        delegationConversationId: "child-ask",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Child ask",
+        ralNumber,
+        parentDelegationConversationId: "parent-delegation",
+      };
+
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [parentDelegation, childDelegation]);
+
+      const deferredResult = registry.recordCompletion({
+        delegationConversationId: "parent-delegation",
+        recipientPubkey: "recipient-1",
+        response: "Parent completion should wait",
+        completedAt: Date.now(),
+      });
+
+      expect(deferredResult).toBeDefined();
+      expect(deferredResult?.deferred).toBe(true);
+      expect(registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber)).toHaveLength(2);
+      expect(registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber)).toHaveLength(0);
+
+      const childResult = registry.recordCompletion({
+        delegationConversationId: "child-ask",
+        recipientPubkey: "recipient-1",
+        response: "Child answer",
+        completedAt: Date.now() + 1,
+      });
+
+      expect(childResult).toBeDefined();
+      expect(childResult?.deferred).not.toBe(true);
+
+      const pendingAfterChild = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      const completedAfterChild = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
+
+      expect(pendingAfterChild).toHaveLength(0);
+      expect(completedAfterChild).toHaveLength(2);
+      expect(completedAfterChild.map((item) => item.delegationConversationId).sort()).toEqual([
+        "child-ask",
+        "parent-delegation",
+      ]);
+      expect(completedAfterChild.find((item) => item.delegationConversationId === "parent-delegation")?.transcript[1].content)
+        .toBe("Parent completion should wait");
+    });
+
     it("should clean up followupToCanonical mapping when clearing conversation", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 

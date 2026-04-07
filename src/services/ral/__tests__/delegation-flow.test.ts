@@ -589,5 +589,79 @@ describe("RAL Delegation Flow", () => {
             const completedAfterConvClear = registry.getConversationCompletedDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
             expect(completedAfterConvClear).toHaveLength(0); // Now gone
         });
+
+        it("should defer parent completion while ask sub-delegations are pending", async () => {
+            const delegatingAgent = mockAgent.pubkey;
+            const delegatedAgent = mockAgent2.pubkey;
+            const conversationId = "child-ask-conv";
+            const ralNumber = registry.create(delegatedAgent, conversationId, PROJECT_ID);
+
+            const parentDelegationId = "parent-delegation-event-id";
+            const askDelegationId = "ask-delegation-event-id";
+            const humanPubkey = "human-pubkey-123";
+
+            registry.mergePendingDelegations(delegatedAgent, conversationId, ralNumber, [
+                {
+                    type: "delegate",
+                    delegationConversationId: parentDelegationId,
+                    recipientPubkey: delegatedAgent,
+                    senderPubkey: delegatingAgent,
+                    prompt: "Handle this task",
+                    ralNumber,
+                },
+                {
+                    type: "ask",
+                    delegationConversationId: askDelegationId,
+                    recipientPubkey: humanPubkey,
+                    senderPubkey: delegatedAgent,
+                    prompt: "Need human input",
+                    ralNumber,
+                    parentDelegationConversationId: parentDelegationId,
+                },
+            ]);
+            expect(
+                registry.registerPendingSubDelegation(parentDelegationId, {
+                    type: "ask",
+                    delegationConversationId: askDelegationId,
+                    recipientPubkey: humanPubkey,
+                    senderPubkey: delegatedAgent,
+                    prompt: "Need human input",
+                    ralNumber,
+                    parentDelegationConversationId: parentDelegationId,
+                })
+            ).toBe(true);
+
+            const parentCompletion = createDelegationCompletionEnvelope({
+                messageId: "child-completion-event",
+                senderPubkey: delegatedAgent,
+                content: "Premature completion",
+                replyTargets: [parentDelegationId],
+            });
+
+            const deferredResult = await handleDelegationCompletion(parentCompletion);
+            expect(deferredResult.recorded).toBe(false);
+            expect(deferredResult.deferred).toBe(true);
+            expect(registry.getConversationPendingDelegations(delegatedAgent, conversationId, ralNumber)).toHaveLength(2);
+            expect(registry.getConversationCompletedDelegations(delegatedAgent, conversationId, ralNumber)).toHaveLength(0);
+
+            const askCompletion = createDelegationCompletionEnvelope({
+                messageId: "ask-response-event",
+                senderPubkey: humanPubkey,
+                content: "Here is the answer",
+                replyTargets: [askDelegationId],
+            });
+
+            const askResult = await handleDelegationCompletion(askCompletion);
+            expect(askResult.recorded).toBe(true);
+
+            const parentPendingAfterAsk = registry.getConversationPendingDelegations(delegatedAgent, conversationId, ralNumber);
+            expect(parentPendingAfterAsk).toHaveLength(0);
+            const parentCompletedAfterAsk = registry.getConversationCompletedDelegations(delegatedAgent, conversationId, ralNumber);
+            expect(parentCompletedAfterAsk).toHaveLength(2);
+            const parentCompletionRecord = parentCompletedAfterAsk.find((item) => item.delegationConversationId === parentDelegationId);
+            expect(parentCompletionRecord).toBeDefined();
+            expect(parentCompletionRecord?.transcript[1].content)
+                .toBe("Premature completion");
+        });
     });
 });

@@ -119,7 +119,9 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
   setPendingDelegations(agentPubkey: string, conversationId: string, ralNumber: number, pendingDelegations: PendingDelegation[]): void { this.delegationRegistry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations); }
   mergePendingDelegations(agentPubkey: string, conversationId: string, ralNumber: number, newDelegations: PendingDelegation[]): { insertedCount: number; mergedCount: number } { return this.delegationRegistry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, newDelegations); }
-  recordCompletion(completion: { delegationConversationId: string; recipientPubkey: string; response: string; completedAt: number; fullTranscript?: DelegationMessage[] }): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined { return this.delegationRegistry.recordCompletion(completion); }
+  registerPendingSubDelegation(parentDelegationConversationId: string, subDelegation: PendingDelegation): boolean { return this.delegationRegistry.registerPendingSubDelegation(parentDelegationConversationId, subDelegation); }
+  clearPendingSubDelegation(parentDelegationConversationId: string, subDelegationConversationId: string): boolean { return this.delegationRegistry.clearPendingSubDelegation(parentDelegationConversationId, subDelegationConversationId); }
+  recordCompletion(completion: { delegationConversationId: string; recipientPubkey: string; response: string; completedAt: number; fullTranscript?: DelegationMessage[] }): { agentPubkey: string; conversationId: string; ralNumber: number; deferred?: boolean } | undefined { return this.delegationRegistry.recordCompletion(completion); }
   clearCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): void { this.delegationRegistry.clearCompletedDelegations(agentPubkey, conversationId, ralNumber); }
 
   injectMessage(params: { agentPubkey: string; conversationId: string; message: string; role?: InjectionRole }): InjectionResult {

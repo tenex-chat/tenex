@@ -13,6 +13,7 @@ export interface DelegationCompletionResult {
     agentSlug?: string;
     conversationId?: string;
     pendingCount?: number;
+    deferred?: boolean;
 }
 
 export async function handleDelegationCompletion(
@@ -41,6 +42,7 @@ export async function handleDelegationCompletion(
         const ralRegistry = RALRegistry.getInstance();
         let location = null;
         let delegationEventId = null;
+        let completionDeferred = false;
 
         for (let index = eTags.length - 1; index >= 0; index -= 1) {
             const eTag = eTags[index];
@@ -103,6 +105,11 @@ export async function handleDelegationCompletion(
                 continue;
             }
 
+            if (result.deferred) {
+                completionDeferred = true;
+                break;
+            }
+
             location = result;
             delegationEventId = eTag;
 
@@ -135,7 +142,7 @@ export async function handleDelegationCompletion(
                 "delegation.first_etag": eTags[0],
             });
             span.setStatus({ code: SpanStatusCode.OK });
-            return { recorded: false };
+            return { recorded: false, deferred: completionDeferred };
         }
 
         const resolvedDelegationEventId = delegationEventId;
@@ -188,6 +195,7 @@ export async function handleDelegationCompletion(
             completionEventId: envelope.message.nativeId.substring(0, 8),
             completedCount: completedDelegations.length,
             pendingCount: pendingDelegations.length,
+            deferred: false,
         });
 
         return {
@@ -195,6 +203,7 @@ export async function handleDelegationCompletion(
             agentSlug,
             conversationId: location.conversationId,
             pendingCount: pendingDelegations.length,
+            deferred: false,
         };
     } catch (error) {
         span.recordException(error as Error);

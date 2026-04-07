@@ -927,6 +927,62 @@ describe("conversation_list Tool", () => {
             expect(result.conversations[0].title).toBe("Conv with hex pubkey");
         });
 
+        it("should filter by 09d48a short pubkey prefix", async () => {
+            const hexPubkey = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+            const shortPrefix = hexPubkey.slice(0, 6);
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000, pubkey: hexPubkey },
+                ],
+                metadata: { title: "Conv with short prefix pubkey" },
+                lastActivityTime: 1700000000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [
+                    { timestamp: 1700002000, pubkey: "other-pubkey" },
+                ],
+                metadata: { title: "Conv with other pubkey" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ with: shortPrefix });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].title).toBe("Conv with short prefix pubkey");
+        });
+
+        it("should filter by short pubkey prefix", async () => {
+            const hexPubkey = "09d48a1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+            const shortPrefix = hexPubkey.slice(0, 6);
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000, pubkey: hexPubkey },
+                ],
+                metadata: { title: "Conv with short pubkey prefix" },
+                lastActivityTime: 1700000000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [
+                    { timestamp: 1700002000, pubkey: "other-pubkey" },
+                ],
+                metadata: { title: "Conv with other pubkey" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ with: shortPrefix });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].title).toBe("Conv with short pubkey prefix");
+        });
+
         it("should throw an error when 'with' slug cannot be resolved", async () => {
             (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
 

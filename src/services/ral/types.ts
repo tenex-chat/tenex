@@ -37,11 +37,31 @@ export interface TodoItem {
   updatedAt: number;
 }
 
+export type PendingDelegationType = "standard" | "followup" | "external" | "ask";
+
+export interface PendingSubDelegationRef {
+  delegationConversationId: string;
+  type: PendingDelegationType;
+}
+
+export interface DeferredCompletion {
+  recipientPubkey: string;
+  response: string;
+  completedAt: number;
+  fullTranscript?: DelegationMessage[];
+}
+
 interface BasePendingDelegation {
   delegationConversationId: string;
   recipientPubkey: string;
   senderPubkey: string;
   prompt: string;
+  /** The parent delegation conversation this delegation belongs to, if nested. */
+  parentDelegationConversationId?: string;
+  /** Nested delegations that must resolve before this delegation can be considered complete. */
+  pendingSubDelegations?: PendingSubDelegationRef[];
+  /** Deferred completion captured while waiting for sub-delegations to resolve. */
+  deferredCompletion?: DeferredCompletion;
   /** Which RAL created this delegation (for provenance tracking) */
   ralNumber: number;
   /**

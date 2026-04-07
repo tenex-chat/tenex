@@ -9,10 +9,11 @@ import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
-import { STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { STORAGE_PREFIX_LENGTH, PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { resolveAgentSlug } from "@/services/agents/AgentResolution";
 import { parseNostrUser } from "@/utils/nostr-entity-parser";
+import { shortenPubkey } from "@/utils/conversation-id";
 import { type ProjectDTag, createProjectDTag } from "@/types/project-ids";
 
 const conversationListSchema = z.object({
@@ -40,7 +41,7 @@ const conversationListSchema = z.object({
         .optional()
         .describe(
             "Filter to conversations where this actor was active. " +
-            "Accepts an agent slug (e.g., 'claude-code') or a pubkey (hex or npub format)."
+            "Accepts an agent slug (e.g., 'claude-code'), a pubkey (hex or npub format), or a 6-10 char hex pubkey prefix."
         ),
 });
 
@@ -81,6 +82,10 @@ interface ConversationListOutput {
     total: number;
 }
 
+type WithFilter =
+    | { kind: "exact"; pubkey: string }
+    | { kind: "prefix"; prefix: string };
+
 /**
  * Shorten a full 64-char event ID to the standard prefix length
  */
@@ -94,6 +99,10 @@ function shortenPrincipalId(principalId: string): string {
         return terminalSegment.substring(0, STORAGE_PREFIX_LENGTH);
     }
     return principalId.substring(0, STORAGE_PREFIX_LENGTH);
+}
+
+function isShortPubkeyPrefix(value: string): boolean {
+    return /^[0-9a-fA-F]+$/.test(value) && value.length >= PUBKEY_DISPLAY_LENGTH && value.length <= STORAGE_PREFIX_LENGTH;
 }
 
 function resolveParticipantName(message: ConversationRecord): string {
@@ -339,39 +348,32 @@ function loadConversationsForProject(
 }
 
 /**
- * Check if a value looks like a pubkey (hex or npub format) rather than a slug.
- * This is used to determine if slug resolution should be attempted.
- */
-function looksLikePubkey(value: string): boolean {
-    const trimmed = value.trim();
-    // 64-char hex pubkey
-    if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-        return true;
-    }
-    // npub or nprofile format
-    if (trimmed.startsWith("npub1") || trimmed.startsWith("nprofile1")) {
-        return true;
-    }
-    return false;
-}
-
-/**
  * Resolve the 'with' parameter to a pubkey.
- * Accepts agent slugs (single project only) or pubkeys (hex or npub format).
+ * Accepts agent slugs (single project only), exact pubkeys (hex or npub format),
+ * or short hex pubkey prefixes.
  *
  * @param withValue - The value to resolve
  * @param isAllProjects - Whether projectId="all" was specified
  * @throws Error if the value cannot be resolved to a pubkey
  */
-function resolveWithParameter(withValue: string, isAllProjects: boolean): string {
+function resolveWithParameter(withValue: string, isAllProjects: boolean): WithFilter {
     const trimmed = withValue.trim();
 
-    // If it looks like a pubkey, try to parse it directly
-    if (looksLikePubkey(trimmed)) {
-        const parsedPubkey = parseNostrUser(trimmed);
-        if (parsedPubkey) {
-            return parsedPubkey;
-        }
+    const parsedPubkey = parseNostrUser(trimmed);
+    if (parsedPubkey) {
+        return { kind: "exact", pubkey: parsedPubkey };
+    }
+
+    const normalized = trimmed.startsWith("nostr:") ? trimmed.slice(6) : trimmed;
+    if (isShortPubkeyPrefix(normalized)) {
+        return { kind: "prefix", prefix: normalized.toLowerCase() };
+    }
+
+    if (
+        /^[0-9a-fA-F]{64}$/.test(normalized) ||
+        normalized.startsWith("npub1") ||
+        normalized.startsWith("nprofile1")
+    ) {
         throw new Error(
             `Failed to resolve 'with' parameter: "${withValue}". ` +
             `The value looks like a pubkey but could not be parsed. ` +
@@ -384,7 +386,7 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
         throw new Error(
             `Agent slugs are not supported when projectId='all'. ` +
             `The slug "${withValue}" can only be resolved within the current project. ` +
-            `Please provide a pubkey (hex or npub format) instead.`
+            `Please provide a pubkey (hex, short hex prefix, or npub format) instead.`
         );
     }
 
@@ -392,7 +394,7 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
     const agentResult = resolveAgentSlug(trimmed);
 
     if (agentResult.pubkey) {
-        return agentResult.pubkey;
+        return { kind: "exact", pubkey: agentResult.pubkey };
     }
 
     // Slug resolution failed - provide helpful error with available slugs
@@ -409,10 +411,19 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
 /**
  * Check if a conversation has a specific pubkey as a participant
  */
-function conversationHasParticipant(conversation: ConversationStore, pubkey: string): boolean {
+function conversationHasParticipant(conversation: ConversationStore, filter: WithFilter): boolean {
     const messages = conversation.getAllMessages();
     for (const message of messages) {
-        if (getConversationRecordAuthorPubkey(message) === pubkey) {
+        const authorPubkey = getConversationRecordAuthorPubkey(message);
+        if (!authorPubkey) {
+            continue;
+        }
+
+        const normalizedAuthor = authorPubkey.toLowerCase();
+        if (
+            (filter.kind === "exact" && normalizedAuthor === filter.pubkey.toLowerCase()) ||
+            (filter.kind === "prefix" && normalizedAuthor.startsWith(filter.prefix))
+        ) {
             return true;
         }
     }
@@ -425,7 +436,7 @@ function conversationHasParticipant(conversation: ConversationStore, pubkey: str
 function subtreeHasParticipant(
     convId: string,
     allConversations: Map<string, LoadedConversation>,
-    pubkey: string,
+    filter: WithFilter,
     visited: Set<string> = new Set()
 ): boolean {
     if (visited.has(convId)) return false;
@@ -434,13 +445,13 @@ function subtreeHasParticipant(
     const loaded = allConversations.get(convId);
     if (!loaded) return false;
 
-    if (conversationHasParticipant(loaded.store, pubkey)) return true;
+    if (conversationHasParticipant(loaded.store, filter)) return true;
 
     // Check children
     for (const [, child] of allConversations) {
         const childParentId = getParentConversationId(child.store);
         if (childParentId === convId) {
-            if (subtreeHasParticipant(child.store.id, allConversations, pubkey, visited)) {
+            if (subtreeHasParticipant(child.store.id, allConversations, filter, visited)) {
                 return true;
             }
         }
@@ -472,9 +483,9 @@ async function executeConversationList(
 
     // Resolve the 'with' parameter to a pubkey if provided
     // This will throw an error if resolution fails, preventing silent fallback to unfiltered results
-    let withPubkey: string | null = null;
+    let withFilter: WithFilter | null = null;
     if (withParam) {
-        withPubkey = resolveWithParameter(withParam, isAllProjects);
+        withFilter = resolveWithParameter(withParam, isAllProjects);
     }
 
     logger.info("📋 Listing conversations (tree view)", {
@@ -483,7 +494,11 @@ async function executeConversationList(
         toTime,
         projectId: effectiveProjectId,
         with: withParam,
-        withPubkey: withPubkey ? shortenEventId(withPubkey) : undefined,
+        withPubkey: withFilter
+            ? withFilter.kind === "exact"
+                ? shortenPubkey(withFilter.pubkey)
+                : `${withFilter.prefix}*`
+            : undefined,
         agent: context.agent.name,
     });
 
@@ -532,9 +547,9 @@ async function executeConversationList(
     }
 
     // Apply 'with' filter: include root if the root itself or any descendant has the participant
-    if (withPubkey) {
+    if (withFilter) {
         filteredRoots = filteredRoots.filter(({ loaded }) =>
-            subtreeHasParticipant(loaded.store.id, conversationMap, withPubkey)
+            subtreeHasParticipant(loaded.store.id, conversationMap, withFilter)
         );
     }
 
@@ -578,6 +593,7 @@ export function createConversationListTool(context: ToolExecutionContext): AISdk
             "even if the root itself is old. The 'limit' parameter controls the number of root conversations " +
             "returned. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). " +
             "Use the 'with' parameter to filter to conversations where a specific actor was active. " +
+            "The filter accepts agent slugs, exact pubkeys, and short hex pubkey prefixes. " +
             "Use this to discover available conversations before retrieving specific ones with conversation_get.",
 
         inputSchema: conversationListSchema,

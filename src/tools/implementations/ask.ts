@@ -166,6 +166,9 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     throw new Error("No project owner configured - cannot determine who to ask");
   }
 
+  const conversationStore = context.getConversation?.();
+  const parentDelegationConversationId = conversationStore?.getRootEventId();
+
   // Check for escalation agent configuration using helper
   // This will auto-add the agent to the project if it exists in storage but not in project
   const escalationAgentSlug = await getEscalationTarget();
@@ -231,19 +234,34 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
             senderPubkey: context.agent.pubkey,
             prompt: promptSummary,
             ralNumber: context.ralNumber,
+            parentDelegationConversationId,
           },
         ];
 
-        RALRegistry.getInstance().mergePendingDelegations(
+        const ralRegistry = RALRegistry.getInstance();
+        ralRegistry.mergePendingDelegations(
           context.agent.pubkey,
           context.conversationId,
           context.ralNumber,
           pendingDelegations
         );
 
-        const conversationStore = ConversationStore.get(context.conversationId);
-        if (conversationStore) {
-          conversationStore.save();
+        if (parentDelegationConversationId) {
+          const registered = ralRegistry.registerPendingSubDelegation(
+            parentDelegationConversationId,
+            pendingDelegations[0]
+          );
+          if (!registered) {
+            logger.debug("[ask] Could not register escalation ask as parent sub-delegation", {
+              parentDelegationConversationId: shortenEventId(parentDelegationConversationId),
+              eventId: shortenEventId(eventId),
+            });
+          }
+        }
+
+        const conversationRecord = ConversationStore.get(context.conversationId);
+        if (conversationRecord) {
+          conversationRecord.save();
         }
 
         return {
@@ -325,19 +343,34 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
       senderPubkey: context.agent.pubkey,
       prompt: promptSummary,
       ralNumber: context.ralNumber,
+      parentDelegationConversationId,
     },
   ];
 
-  RALRegistry.getInstance().mergePendingDelegations(
+  const ralRegistry = RALRegistry.getInstance();
+  ralRegistry.mergePendingDelegations(
     context.agent.pubkey,
     context.conversationId,
     context.ralNumber,
     pendingDelegations
   );
 
-  const conversationStore = ConversationStore.get(context.conversationId);
-  if (conversationStore) {
-    conversationStore.save();
+  if (parentDelegationConversationId) {
+    const registered = ralRegistry.registerPendingSubDelegation(
+      parentDelegationConversationId,
+      pendingDelegations[0]
+    );
+    if (!registered) {
+      logger.debug("[ask] Could not register ask as parent sub-delegation", {
+        parentDelegationConversationId: shortenEventId(parentDelegationConversationId),
+        eventId: shortenEventId(eventId),
+      });
+    }
+  }
+
+  const conversationRecord = ConversationStore.get(context.conversationId);
+  if (conversationRecord) {
+    conversationRecord.save();
   }
 
   return {
