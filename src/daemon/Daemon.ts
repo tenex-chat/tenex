@@ -283,6 +283,25 @@ export class Daemon {
                 throw new Error("No whitelisted pubkeys configured. Run 'tenex onboard' first.");
             }
 
+            // 4b. Run migrations if needed
+            logger.debug("Checking for pending migrations");
+            const { migrationService } = await import("@/services/migrations");
+            const currentVersion = loadedConfig.version ?? 0;
+            const latestVersion = migrationService.getLatestVersion();
+            if (currentVersion < latestVersion) {
+                logger.info("[Daemon] Running migrations", {
+                    currentVersion,
+                    latestVersion,
+                });
+                const migrationSummary = await migrationService.migrate();
+                logger.info("[Daemon] Migrations completed", {
+                    applied: migrationSummary.applied.length,
+                    finalVersion: migrationSummary.finalVersion,
+                });
+            } else {
+                logger.debug("[Daemon] No migrations needed", { currentVersion, latestVersion });
+            }
+
             // 5. Get NDK instance (already initialized by daemon command)
             this.ndk = getNDK();
 

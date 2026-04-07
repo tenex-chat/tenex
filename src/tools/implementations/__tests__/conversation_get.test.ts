@@ -31,7 +31,7 @@ mock.module("@/services/PubkeyService", () => ({
             if (agentSlug) {
                 return agentSlug;
             }
-            // Fall back to truncated pubkey (DISPLAY_PREFIX_LENGTH = 12)
+            // Fall back to truncated pubkey (STORAGE_PREFIX_LENGTH = 12)
             return pk.slice(0, 12);
         },
     }),
@@ -810,8 +810,8 @@ describe("conversation_get Tool", () => {
             // This test prevents regression to the original bug where uncached pubkeys
             // would be displayed as "User" instead of their truncated pubkey.
             // The mock PubkeyService.getNameSync returns pk.slice(0, 12) to simulate
-            // the real behavior of returning DISPLAY_PREFIX_LENGTH-truncated pubkeys.
-            const uncachedPubkey = "abc123def456789xyz"; // 18 chars - longer than DISPLAY_PREFIX_LENGTH
+            // the real behavior of returning STORAGE_PREFIX_LENGTH-truncated pubkeys.
+            const uncachedPubkey = "abc123def456789xyz"; // 18 chars - longer than STORAGE_PREFIX_LENGTH
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -834,7 +834,7 @@ describe("conversation_get Tool", () => {
             expect(messages).not.toContain("@User");
             expect(messages).not.toContain("[@User]");
 
-            // Should show the first 12 characters of the pubkey (DISPLAY_PREFIX_LENGTH)
+            // Should show the first 12 characters of the pubkey (STORAGE_PREFIX_LENGTH)
             // "abc123def456789xyz" -> "abc123def456"
             const lines = xmlToLegacyLines(messages);
             expect(lines[0]).toContain("@abc123def456");
@@ -1337,7 +1337,7 @@ describe("conversation_get Tool", () => {
             expect(messages).not.toContain("Second");
         });
 
-        it("should accept and resolve 18-character hex prefixes via PrefixKVStore", async () => {
+        it("should accept and resolve 10-character hex prefixes via PrefixKVStore", async () => {
             const fullEventId = "abc123def456789012345678901234567890123456789012345678901234abcd";
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
@@ -1362,7 +1362,7 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                untilId: "abc123def456789012", // 18-char prefix
+                untilId: "abc123def4", // 10-char prefix
             });
 
             const messages = (result.conversation as any).messages;
@@ -2001,8 +2001,8 @@ describe("conversation_get Tool", () => {
 
             expect(lines).toHaveLength(3);
             expect(lines[0]).toBe("[+0] [@claude-code] I'll delegate this task");
-            // Delegation marker: should show ✅, short ID (12 chars), recipient name, and "completed"
-            expect(lines[1]).toBe("[+10] [@claude-code] ✅ Delegation b12f529a2df8 → architect-orchestrator completed");
+            // Delegation marker: should show ✅, short ID (10 chars), recipient name, and "completed"
+            expect(lines[1]).toBe("[+10] [@claude-code] ✅ Delegation b12f529a2d → architect-orchestrator completed");
             expect(lines[2]).toBe("[+15] [@claude-code] Task completed successfully");
         });
 
@@ -2046,7 +2046,7 @@ describe("conversation_get Tool", () => {
             expect(lines).toHaveLength(2);
             expect(lines[0]).toBe("[+0] [@claude-code] Starting delegation");
             // Aborted delegation: should show ⚠️ and "aborted"
-            expect(lines[1]).toBe("[+10] [@claude-code] ⚠️ Delegation c45f789b3ef9 → debugger aborted");
+            expect(lines[1]).toBe("[+10] [@claude-code] ⚠️ Delegation c45f789b3e → debugger aborted");
         });
 
         it("should display pending delegation markers with hourglass emoji", async () => {
@@ -2087,8 +2087,8 @@ describe("conversation_get Tool", () => {
 
             expect(lines).toHaveLength(2);
             expect(lines[0]).toBe("[+0] [@claude-code] Delegating task now");
-            // Delegation marker: should show ⏳, short ID (12 chars), recipient name, and "in progress"
-            expect(lines[1]).toBe("[+5] [@claude-code] ⏳ Delegation f78g012e3gh4 → explore-agent in progress");
+            // Delegation marker: should show ⏳, short ID (10 chars), recipient name, and "in progress"
+            expect(lines[1]).toBe("[+5] [@claude-code] ⏳ Delegation f78g012e3g → explore-agent in progress");
         });
 
         it("should display delegation markers regardless of includeToolCalls setting", async () => {
@@ -2120,7 +2120,7 @@ describe("conversation_get Tool", () => {
                 includeToolCalls: false,
             });
 
-            expect((resultWithoutTools.conversation as any).messages).toContain("✅ Delegation d56f890c4fa0");
+            expect((resultWithoutTools.conversation as any).messages).toContain("✅ Delegation d56f890c4f");
 
             // Test with includeToolCalls=true
             const resultWithTools = await tool.execute({
@@ -2128,7 +2128,7 @@ describe("conversation_get Tool", () => {
                 includeToolCalls: true,
             });
 
-            expect((resultWithTools.conversation as any).messages).toContain("✅ Delegation d56f890c4fa0");
+            expect((resultWithTools.conversation as any).messages).toContain("✅ Delegation d56f890c4f");
         });
 
         it("should handle delegation markers mixed with tool calls", async () => {
@@ -2186,7 +2186,7 @@ describe("conversation_get Tool", () => {
 
             const linesWithoutTools = xmlToLegacyLines((resultWithoutTools.conversation as any).messages);
             expect(linesWithoutTools).toHaveLength(2); // delegation marker + text
-            expect(linesWithoutTools[0]).toContain("✅ Delegation e67f901d5fb1");
+            expect(linesWithoutTools[0]).toContain("✅ Delegation e67f901d5f");
             expect(linesWithoutTools[1]).toContain("Done!");
 
             // With includeToolCalls: should show both tool calls and delegation marker
@@ -2198,7 +2198,7 @@ describe("conversation_get Tool", () => {
             const linesWithTools = xmlToLegacyLines((resultWithTools.conversation as any).messages);
             expect(linesWithTools).toHaveLength(3); // merged tool call/result + delegation marker + text
             expect(linesWithTools[0]).toContain("[tool-use delegate");
-            expect(linesWithTools[1]).toContain("✅ Delegation e67f901d5fb1");
+            expect(linesWithTools[1]).toContain("✅ Delegation e67f901d5f");
             expect(linesWithTools[2]).toContain("Done!");
         });
 

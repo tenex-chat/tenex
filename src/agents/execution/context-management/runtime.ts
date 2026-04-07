@@ -301,7 +301,6 @@ function createConversationContextManagementRuntime(options: {
     if (settings.strategies.anthropicPromptCaching) {
         strategies.push(new AnthropicPromptCachingStrategy({
             ttl: settings.anthropicPromptCaching.ttl,
-            serverToolEditing: false,
         }));
     }
 

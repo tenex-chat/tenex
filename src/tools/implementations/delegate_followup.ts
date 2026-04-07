@@ -4,7 +4,7 @@ import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { isHexPrefix, resolvePrefixToId, DISPLAY_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { isHexPrefix, resolvePrefixToId, STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { createEventContext } from "@/services/event-context";
 import { tool } from "ai";
 import { z } from "zod";
@@ -60,8 +60,8 @@ function resolveDelegationPrefix(prefix: string): string | null {
     const canonicalized = ralRegistry.canonicalizeDelegationId(resolved);
     if (canonicalized !== resolved) {
       logger.info("[delegate_followup] Canonicalized followup ID from PrefixKVStore", {
-        followupId: resolved.substring(0, DISPLAY_PREFIX_LENGTH),
-        canonicalId: canonicalized.substring(0, DISPLAY_PREFIX_LENGTH),
+        followupId: resolved.substring(0, STORAGE_PREFIX_LENGTH),
+        canonicalId: canonicalized.substring(0, STORAGE_PREFIX_LENGTH),
       });
     }
     return canonicalized;
@@ -76,8 +76,8 @@ function resolveDelegationPrefix(prefix: string): string | null {
     // Use info level - MCP-only execution is an expected deployment mode, not a warning condition.
     // PrefixKVStore may intentionally not be initialized in pure MCP contexts.
     logger.info("[delegate_followup] Resolved prefix via RAL fallback", {
-      prefix: prefix.substring(0, DISPLAY_PREFIX_LENGTH),
-      resolvedId: fallbackResolved.substring(0, DISPLAY_PREFIX_LENGTH),
+      prefix: prefix.substring(0, STORAGE_PREFIX_LENGTH),
+      resolvedId: fallbackResolved.substring(0, STORAGE_PREFIX_LENGTH),
     });
     return fallbackResolved;
   }
@@ -131,8 +131,8 @@ async function executeDelegateFollowup(
     const canonicalized = ralRegistry.canonicalizeDelegationId(normalized);
     if (canonicalized !== normalized) {
       logger.info("[delegate_followup] Canonicalized full hex followup ID", {
-        followupId: normalized.substring(0, DISPLAY_PREFIX_LENGTH),
-        canonicalId: canonicalized.substring(0, DISPLAY_PREFIX_LENGTH),
+        followupId: normalized.substring(0, STORAGE_PREFIX_LENGTH),
+        canonicalId: canonicalized.substring(0, STORAGE_PREFIX_LENGTH),
       });
     }
     delegation_conversation_id = canonicalized;

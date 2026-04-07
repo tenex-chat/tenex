@@ -1,5 +1,6 @@
 import { config } from "@/services/ConfigService";
 import { unknownTo1Migration } from "./migrations/unknown-to-1";
+import { migration1To2 } from "./migrations/1-to-2";
 import type {
     AppliedMigration,
     MigrationSummary,
@@ -7,7 +8,7 @@ import type {
     StateMigration,
 } from "./types";
 
-const MIGRATIONS: StateMigration[] = [unknownTo1Migration];
+const MIGRATIONS: StateMigration[] = [unknownTo1Migration, migration1To2];
 const LATEST_MIGRATION_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.to ?? 0;
 
 export class MigrationService {

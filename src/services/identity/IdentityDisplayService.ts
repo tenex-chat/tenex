@@ -1,5 +1,5 @@
 import { getPubkeyService } from "@/services/PubkeyService";
-import { DISPLAY_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
 
 export interface IdentityDisplayLookup {
     principalId?: string;
@@ -29,7 +29,7 @@ function isFallbackPubkeyLabel(name: string | undefined, pubkey: string | undefi
         return true;
     }
 
-    return pubkey !== undefined && name.trim() === pubkey.substring(0, DISPLAY_PREFIX_LENGTH);
+    return pubkey !== undefined && name.trim() === pubkey.substring(0, PUBKEY_DISPLAY_LENGTH);
 }
 
 function shortenPrincipalId(principalId: string | undefined): string | undefined {
@@ -39,10 +39,10 @@ function shortenPrincipalId(principalId: string | undefined): string | undefined
 
     const terminalSegment = principalId.split(":").pop();
     if (terminalSegment?.trim()) {
-        return terminalSegment.substring(0, DISPLAY_PREFIX_LENGTH);
+        return terminalSegment.substring(0, PUBKEY_DISPLAY_LENGTH);
     }
 
-    return principalId.substring(0, DISPLAY_PREFIX_LENGTH);
+    return principalId.substring(0, PUBKEY_DISPLAY_LENGTH);
 }
 
 export class IdentityDisplayService {
@@ -82,7 +82,7 @@ export class IdentityDisplayService {
 
         return (
             shortenPrincipalId(lookup.principalId) ??
-            (lookup.linkedPubkey ? lookup.linkedPubkey.substring(0, DISPLAY_PREFIX_LENGTH) : undefined) ??
+            (lookup.linkedPubkey ? lookup.linkedPubkey.substring(0, PUBKEY_DISPLAY_LENGTH) : undefined) ??
             "Unknown"
         );
     }

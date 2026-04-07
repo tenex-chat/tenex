@@ -40,16 +40,16 @@
 export type FullEventId = string & { readonly __brand: "FullEventId" };
 
 /**
- * 6-character lowercase hex string (shortened event ID for display)
+ * 10-character lowercase hex string (shortened event ID for display)
  *
  * Used for:
  * - User-facing display (logs, UI, tool outputs)
  * - User input (when typing IDs manually)
  * - Prefix lookups via PrefixKVStore
+ * - Delegation identifiers
  *
- * Provides 24 bits of entropy (2^24 ≈ 16.7 million combinations),
- * giving very low collision probability and preserving uniqueness for
- * structured IDs like Telegram conversation IDs (e.g., tg_599309204_123).
+ * Provides 40 bits of entropy (2^40 ≈ 1.1 trillion combinations),
+ * giving very low collision probability for typical workloads.
  */
 export type ShortEventId = string & { readonly __brand: "ShortEventId" };
 
@@ -84,8 +84,8 @@ export type AnyTaskId = FullEventId | ShortEventId | ShellTaskId;
 /** Length of a full event ID (64 hex characters) */
 export const FULL_EVENT_ID_LENGTH = 64;
 
-/** Length of a short event ID prefix (6 hex characters) */
-export const SHORT_EVENT_ID_LENGTH = 6;
+/** Length of a short event ID prefix (10 hex characters) */
+export const SHORT_EVENT_ID_LENGTH = 10;
 
 /** Length of a shell task ID (7 alphanumeric characters) */
 export const SHELL_TASK_ID_LENGTH = 7;
@@ -102,7 +102,7 @@ export function isFullEventId(id: string): id is FullEventId {
 }
 
 /**
- * Check if a string is a valid short event ID format (6-char lowercase hex)
+ * Check if a string is a valid short event ID format (10-char lowercase hex)
  */
 export function isShortEventId(id: string): id is ShortEventId {
     return new RegExp("^[0-9a-f]{" + SHORT_EVENT_ID_LENGTH + "}$").test(id);
@@ -162,14 +162,14 @@ export function createFullEventId(id: string): FullEventId {
 /**
  * Create a ShortEventId from a string, with validation
  *
- * @throws Error if the input is not a valid 6-char hex string
+ * @throws Error if the input is not a valid 10-char hex string
  */
 export function createShortEventId(id: string): ShortEventId {
     const normalized = id.toLowerCase();
 
     if (!isShortEventId(normalized)) {
         throw new Error(
-            `Invalid ShortEventId: expected 6-char lowercase hex string, got "${id}" (length: ${id.length})`
+            `Invalid ShortEventId: expected 10-char lowercase hex string, got "${id}" (length: ${id.length})`
         );
     }
 
@@ -222,7 +222,7 @@ export function tryCreateShellTaskId(id: string): ShellTaskId | null {
 // =============================================================================
 
 /**
- * Shorten a full event ID to a short event ID (first 6 characters)
+ * Shorten a full event ID to a short event ID (first 10 characters)
  */
 export function shortenEventId(fullId: FullEventId): ShortEventId {
     return fullId.substring(0, SHORT_EVENT_ID_LENGTH) as ShortEventId;
@@ -264,12 +264,12 @@ export function assertFullEventId(id: string): asserts id is FullEventId {
  * lowercase. If you have potentially uppercase input, use createShortEventId()
  * which normalizes and returns the typed ID.
  *
- * @throws Error if the assertion fails (not 6-char lowercase hex)
+ * @throws Error if the assertion fails (not 10-char lowercase hex)
  */
 export function assertShortEventId(id: string): asserts id is ShortEventId {
     if (!isShortEventId(id)) {
         throw new Error(
-            `Assertion failed: expected ShortEventId (6-char lowercase hex), got "${id}" (length: ${id.length}). Use createShortEventId() to normalize uppercase input.`
+            `Assertion failed: expected ShortEventId (10-char lowercase hex), got "${id}" (length: ${id.length}). Use createShortEventId() to normalize uppercase input.`
         );
     }
 }

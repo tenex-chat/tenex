@@ -38,7 +38,7 @@ import {
 
 // Test data
 const VALID_FULL_ID = "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd";
-const VALID_SHORT_ID = "a1b2c3";
+const VALID_SHORT_ID = "a1b2c3d4e5";
 const VALID_SHELL_ID = "abc1234";
 
 describe("Type Guards", () => {
@@ -382,8 +382,8 @@ describe("Constants", () => {
         expect(FULL_EVENT_ID_LENGTH).toBe(64);
     });
 
-    test("SHORT_EVENT_ID_LENGTH should be 6", () => {
-        expect(SHORT_EVENT_ID_LENGTH).toBe(6);
+    test("SHORT_EVENT_ID_LENGTH should be 10", () => {
+        expect(SHORT_EVENT_ID_LENGTH).toBe(10);
     });
 
     test("SHELL_TASK_ID_LENGTH should be 7", () => {

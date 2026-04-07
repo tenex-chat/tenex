@@ -45,16 +45,16 @@ function createEnvelope(
 
 describe("delegation-chain utilities", () => {
     describe("shortenConversationId", () => {
-        it("should truncate to 12 characters", () => {
-            expect(shortenConversationId("4f69d3302cf2abcdef123456")).toBe("4f69d3302cf2");
+        it("should truncate to 10 characters", () => {
+            expect(shortenConversationId("4f69d3302cf2abcdef123456")).toBe("4f69d3302c");
         });
 
         it("should handle short IDs gracefully", () => {
             expect(shortenConversationId("abc")).toBe("abc");
         });
 
-        it("should handle exactly 12 characters", () => {
-            expect(shortenConversationId("4f69d3302cf2")).toBe("4f69d3302cf2");
+        it("should handle exactly 10 characters", () => {
+            expect(shortenConversationId("4f69d3302c")).toBe("4f69d3302c");
         });
     });
 
@@ -68,8 +68,8 @@ describe("delegation-chain utilities", () => {
             ];
 
             const result = formatDelegationChain(chain, "agent-pubkey");
-            // [User -> claude-code] uses recipient.conversationId (truncated to 12 chars for display)
-            expect(result).toBe("[User -> claude-code (you)] [conversation abc123def456]");
+            // [User -> claude-code] uses recipient.conversationId (truncated to 10 chars for display)
+            expect(result).toBe("[User -> claude-code (you)] [conversation abc123def4]");
         });
 
         it("should format a longer delegation chain with multi-line tree format", () => {
@@ -87,10 +87,10 @@ describe("delegation-chain utilities", () => {
             const lines = result.split("\n");
 
             expect(lines).toHaveLength(3);
-            // Each link uses RECIPIENT.conversationId (truncated to 12 chars for display)
-            expect(lines[0]).toBe("[User -> pm-wip] [conversation conv1abc1234]");
-            expect(lines[1]).toBe("  -> [pm-wip -> execution-coordinator] [conversation conv2def5678]");
-            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation conv3ghi9012]");
+            // Each link uses RECIPIENT.conversationId (truncated to 10 chars for display)
+            expect(lines[0]).toBe("[User -> pm-wip] [conversation conv1abc12]");
+            expect(lines[1]).toBe("  -> [pm-wip -> execution-coordinator] [conversation conv2def56]");
+            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation conv3ghi90]");
         });
 
         it("should mark current agent with (you) correctly", () => {
@@ -101,8 +101,8 @@ describe("delegation-chain utilities", () => {
             ];
 
             const result = formatDelegationChain(chain, "pm-pubkey");
-            // Uses recipient.conversationId (truncated to 12 chars)
-            expect(result).toBe("[User -> pm-wip (you)] [conversation conv123abc12]");
+            // Uses recipient.conversationId (truncated to 10 chars)
+            expect(result).toBe("[User -> pm-wip (you)] [conversation conv123abc]");
         });
 
         it("should handle empty chain gracefully", () => {
@@ -118,8 +118,8 @@ describe("delegation-chain utilities", () => {
             ];
 
             const result = formatDelegationChain(chain, "different-pubkey");
-            // Uses recipient.conversationId (truncated to 12 chars)
-            expect(result).toBe("[User -> agent] [conversation conv123abc12]");
+            // Uses recipient.conversationId (truncated to 10 chars)
+            expect(result).toBe("[User -> agent] [conversation conv123abc]");
         });
 
         it("should throw if a conversation ID is missing", () => {
@@ -147,10 +147,10 @@ describe("delegation-chain utilities", () => {
             const lines = result.split("\n");
 
             expect(lines).toHaveLength(2);
-            // [User -> pm-wip] uses pm-wip.conversationId (truncated to 12 chars)
-            expect(lines[0]).toBe("[User -> pm-wip] [conversation userconv1234]");
-            // [pm-wip -> claude-code] uses claude-code.conversationId (truncated to 12 chars)
-            expect(lines[1]).toBe("  -> [pm-wip -> claude-code (you)] [conversation pmconv123456]");
+            // [User -> pm-wip] uses pm-wip.conversationId (truncated to 10 chars)
+            expect(lines[0]).toBe("[User -> pm-wip] [conversation userconv12]");
+            // [pm-wip -> claude-code] uses claude-code.conversationId (truncated to 10 chars)
+            expect(lines[1]).toBe("  -> [pm-wip -> claude-code (you)] [conversation pmconv1234]");
         });
 
         it("should handle single entry chain", () => {
@@ -568,18 +568,18 @@ describe("delegation-chain utilities", () => {
             const formatted = formatDelegationChain(chain!, "agent-pubkey-claude");
 
             // Verify the formatted output has correct structure and conversation IDs
-            // SEMANTICS: [A -> B] shows B.conversationId (truncated to 12 chars for display)
+            // SEMANTICS: [A -> B] shows B.conversationId (truncated to 10 chars for display)
             const lines = formatted.split("\n");
             expect(lines).toHaveLength(3);
 
             // Line 1: [User -> pm-wip] uses pm-wip.conversationId (truncated)
-            expect(lines[0]).toBe("[User -> pm-wip] [conversation userconv1234]");
+            expect(lines[0]).toBe("[User -> pm-wip] [conversation userconv12]");
 
             // Line 2: [pm-wip -> execution-coordinator] uses exec.conversationId (truncated)
-            expect(lines[1]).toBe("  -> [pm-wip -> execution-coordinator] [conversation pm-conv-id-1]");
+            expect(lines[1]).toBe("  -> [pm-wip -> execution-coordinator] [conversation pm-conv-id]");
 
-            // Line 3: [execution-coordinator -> claude-code (you)] uses claude.conversationId (truncated)
-            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation claude-conv-]");
+            // Line 3: [execution-coordinator -> claude-code (you)] uses claude.conversationId (truncated to 10 chars)
+            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation claude-con]");
         });
 
         it("should allow self-delegation: agent appears as both delegator and current agent", () => {
@@ -638,8 +638,8 @@ describe("delegation-chain utilities", () => {
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
-            // Full order validation: unknown first (12-char prefix), current agent last
-            expect(result?.[0].displayName).toBe("unknown12345"); // DISPLAY_PREFIX_LENGTH=12
+            // Full order validation: unknown first (6-char pubkey prefix), current agent last
+            expect(result?.[0].displayName).toBe("unknow"); // PUBKEY_DISPLAY_LENGTH=6
             expect(result?.[1].displayName).toBe("claude-code");
             expect(result?.[1].conversationId).toBe("claude-conv-id-1234567890"); // Current conv ID
         });

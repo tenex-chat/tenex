@@ -72,18 +72,31 @@ describe("MigrationService", () => {
             return [];
         });
 
+        // Mock PrefixKVStore for migration 1→2
+        const { prefixKVStore } = await import("@/services/storage");
+        spyOn(prefixKVStore, "forceClose").mockResolvedValue(undefined);
+        spyOn(prefixKVStore, "initialize").mockResolvedValue(undefined);
+        spyOn(prefixKVStore, "addBatch").mockResolvedValue(undefined);
+
+        // Mock ConversationCatalogService for migration 1→2
+        const { ConversationCatalogService } = await import("@/conversations/ConversationCatalogService");
+        spyOn(ConversationCatalogService, "getInstance").mockReturnValue({
+            initialize: () => {},
+            listConversations: () => [],
+        } as any);
+
         const summary = await migrationService.migrate();
 
         expect(summary.currentVersion).toBe("unknown");
-        expect(summary.finalVersion).toBe(1);
-        expect(summary.applied).toHaveLength(1);
+        expect(summary.finalVersion).toBe(2);
+        expect(summary.applied).toHaveLength(2);
         expect(summary.applied[0].result.migratedCount).toBe(1);
         expect(summary.applied[0].result.skippedCount).toBe(0);
 
         const savedConfig = JSON.parse(
             await fs.readFile(path.join(tempDir, "config.json"), "utf-8")
         );
-        expect(savedConfig.version).toBe(1);
+        expect(savedConfig.version).toBe(2);
 
         const migratedTasks = JSON.parse(
             await fs.readFile(getProjectSchedulesPath("project-1"), "utf-8")
@@ -120,10 +133,23 @@ describe("MigrationService", () => {
         spyOn(agentStorage, "loadAgent").mockResolvedValue(null);
         spyOn(agentStorage, "getAgentProjects").mockResolvedValue([]);
 
+        // Mock PrefixKVStore for migration 1→2
+        const { prefixKVStore } = await import("@/services/storage");
+        spyOn(prefixKVStore, "forceClose").mockResolvedValue(undefined);
+        spyOn(prefixKVStore, "initialize").mockResolvedValue(undefined);
+        spyOn(prefixKVStore, "addBatch").mockResolvedValue(undefined);
+
+        // Mock ConversationCatalogService for migration 1→2
+        const { ConversationCatalogService } = await import("@/conversations/ConversationCatalogService");
+        spyOn(ConversationCatalogService, "getInstance").mockReturnValue({
+            initialize: () => {},
+            listConversations: () => [],
+        } as any);
+
         const summary = await migrationService.migrate();
 
-        expect(summary.finalVersion).toBe(1);
-        expect(summary.applied).toHaveLength(1);
+        expect(summary.finalVersion).toBe(2);
+        expect(summary.applied).toHaveLength(2);
         expect(summary.applied[0].result.migratedCount).toBe(0);
         expect(summary.applied[0].result.skippedCount).toBe(1);
         expect(summary.applied[0].result.warnings.some((warning) =>
@@ -135,12 +161,44 @@ describe("MigrationService", () => {
     });
 
     it("no-ops when the config migration version is already current", async () => {
+        await fs.writeFile(path.join(tempDir, "config.json"), JSON.stringify({ version: 2 }, null, 2));
+
+        const summary = await migrationService.migrate();
+
+        expect(summary.currentVersion).toBe(2);
+        expect(summary.finalVersion).toBe(2);
+        expect(summary.applied).toHaveLength(0);
+    });
+
+    it("applies migration 1-to-2 (PrefixKVStore reindex)", async () => {
+        // Start at version 1
         await fs.writeFile(path.join(tempDir, "config.json"), JSON.stringify({ version: 1 }, null, 2));
+
+        // Mock PrefixKVStore methods
+        const { prefixKVStore } = await import("@/services/storage");
+        spyOn(prefixKVStore, "forceClose").mockResolvedValue(undefined);
+        spyOn(prefixKVStore, "initialize").mockResolvedValue(undefined);
+        spyOn(prefixKVStore, "addBatch").mockResolvedValue(undefined);
+
+        // Mock ConversationCatalogService to return no conversations
+        const { ConversationCatalogService } = await import("@/conversations/ConversationCatalogService");
+        spyOn(ConversationCatalogService, "getInstance").mockReturnValue({
+            initialize: () => {},
+            listConversations: () => [],
+        } as any);
 
         const summary = await migrationService.migrate();
 
         expect(summary.currentVersion).toBe(1);
-        expect(summary.finalVersion).toBe(1);
-        expect(summary.applied).toHaveLength(0);
+        expect(summary.finalVersion).toBe(2);
+        expect(summary.applied).toHaveLength(1);
+        expect(summary.applied[0].from).toBe(1);
+        expect(summary.applied[0].to).toBe(2);
+        expect(summary.applied[0].description).toContain("PrefixKVStore");
+
+        const savedConfig = JSON.parse(
+            await fs.readFile(path.join(tempDir, "config.json"), "utf-8")
+        );
+        expect(savedConfig.version).toBe(2);
     });
 });

@@ -720,7 +720,7 @@ describe("conversation_list Tool", () => {
             expect(result.conversations).toHaveLength(1);
 
             const summary = result.conversations[0];
-            // ID is shortened to DISPLAY_PREFIX_LENGTH (6) characters
+            // ID is shortened to STORAGE_PREFIX_LENGTH (6) characters
             expect(summary.id).toBe("conv1".substring(0, 6));
             expect(summary.title).toBe("Test Conversation");
             expect(summary.summary).toBe("A test summary");
@@ -834,8 +834,8 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             const summary = result.conversations[0];
             expect(summary.children).toHaveLength(1);
-            // Child ID should be shortened to DISPLAY_PREFIX_LENGTH (6) characters
-            expect(summary.children[0].id).toBe(delegationConvId.substring(0, 6));
+            // Child ID should be shortened to STORAGE_PREFIX_LENGTH (10) characters
+            expect(summary.children[0].id).toBe(delegationConvId.substring(0, 10));
         });
     });
 
