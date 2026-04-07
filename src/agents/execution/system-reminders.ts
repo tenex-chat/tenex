@@ -21,12 +21,6 @@ import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
 import type { ProjectDTag } from "@/types/project-ids";
 import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
-import {
-    buildConversationsReminderSnapshot,
-    renderConversationsReminderDelta,
-    renderConversationsReminderFromSnapshot,
-    type ConversationsReminderSnapshot,
-} from "@/prompts/reminders/conversations";
 
 function cloneReminderState(state: ReminderState | undefined): ReminderState | undefined {
     return state ? structuredClone(state) : undefined;
@@ -326,32 +320,6 @@ function createDelegationsProvider(): ReminderProvider<TenexReminderData, string
     });
 }
 
-function createConversationsProvider(): ReminderProvider<TenexReminderData, ConversationsReminderSnapshot> {
-    return createDeltaProvider<ConversationsReminderSnapshot>({
-        type: "conversations",
-        fullInterval: 5,
-        placement: "overlay-user",
-        emptySnapshot: {
-            active: [],
-            recent: [],
-        },
-        snapshot: (data) =>
-            buildConversationsReminderSnapshot({
-                agentPubkey: data.agent.pubkey,
-                currentConversationId: data.conversation.getId(),
-                projectId: data.projectId,
-            }),
-        renderFull: (snapshot) => {
-            const content = renderConversationsReminderFromSnapshot(snapshot);
-            return content ? { type: "conversations", content } : null;
-        },
-        renderDelta: (previous, current) => {
-            const content = renderConversationsReminderDelta(previous, current);
-            return content ? { type: "conversations", content } : null;
-        },
-    });
-}
-
 function createLoadedSkillsProvider(): ReminderProvider<TenexReminderData, string> {
     return {
         type: "loaded-skills",
@@ -422,7 +390,6 @@ export function createTenexReminderProviders(): ReminderProvider<TenexReminderDa
         createTodoListProvider(),
         createResponseRoutingProvider(),
         createDelegationsProvider(),
-        createConversationsProvider(),
         createLoadedSkillsProvider(),
         createAvailableSkillsProvider(),
     ];
