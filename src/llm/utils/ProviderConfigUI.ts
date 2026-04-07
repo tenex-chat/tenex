@@ -18,6 +18,7 @@ export function getProviderDisplayName(provider: string): string {
         [PROVIDER_IDS.OPENAI]: "OpenAI (GPT)",
         [PROVIDER_IDS.OLLAMA]: "Ollama (Local models)",
         [PROVIDER_IDS.CODEX]: "Codex",
+        [PROVIDER_IDS.CLAUDE_CODE]: "Claude Code (Agents)",
     };
     return names[provider] || provider;
 }

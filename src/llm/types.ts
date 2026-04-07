@@ -31,6 +31,7 @@ export const AI_SDK_PROVIDERS = [
     PROVIDER_IDS.OPENAI,
     PROVIDER_IDS.OLLAMA,
     PROVIDER_IDS.CODEX,
+    PROVIDER_IDS.CLAUDE_CODE,
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 

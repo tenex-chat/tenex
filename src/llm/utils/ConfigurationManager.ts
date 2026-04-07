@@ -264,6 +264,7 @@ function getDefaultModelForProvider(provider: AISdkProvider): string {
         [PROVIDER_IDS.OPENAI]: "gpt-4",
         [PROVIDER_IDS.OLLAMA]: "llama3.1:8b",
         [PROVIDER_IDS.CODEX]: "gpt-5.1-codex-max",
+        [PROVIDER_IDS.CLAUDE_CODE]: "",
     };
     return defaults[provider] || "";
 }
