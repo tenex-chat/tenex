@@ -81,6 +81,9 @@ function mapQueuedRemindersToContextManagement(
         ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
         ...(reminder.placement ? { placement: reminder.placement } : {}),
         ...(reminder.disposition ? { disposition: reminder.disposition } : {}),
+        ...(reminder.persistInHistory !== undefined
+            ? { persistInHistory: reminder.persistInHistory }
+            : {}),
     }));
 }
 

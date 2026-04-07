@@ -7,9 +7,10 @@ import { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import { buildPromptHistoryMessages } from "@/agents/execution/prompt-history";
 import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { collectTenexReminderOverlay } from "./reminder-test-utils";
+import { collectTenexReminderOverlay, collectTenexReminderOverlays } from "./reminder-test-utils";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
@@ -67,6 +68,13 @@ describe("system reminder overlay integration", () => {
     let agent: AgentInstance;
     let project: NDKProject;
 
+    function createProjectMock(): NDKProject {
+        return {
+            dTag: projectId,
+            tagValue: (name: string) => (name === "d" ? projectId : undefined),
+        } as NDKProject;
+    }
+
     async function compile(ralNumber: number) {
         const compiler = new MessageCompiler(conversationStore);
         return compiler.compile({
@@ -102,7 +110,7 @@ describe("system reminder overlay integration", () => {
                 new AgentMetadataStore(convId, "test-agent", metadataPath),
         } as AgentInstance;
 
-        project = {} as NDKProject;
+        project = createProjectMock();
         resetSystemReminders();
     });
 
@@ -114,7 +122,7 @@ describe("system reminder overlay integration", () => {
         mock.restore();
     });
 
-    it("coalesces reminder overlays into the user turn while keeping canonical user content untouched", async () => {
+    it("keeps reminder overlays as standalone user messages while preserving canonical user content", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
@@ -158,13 +166,17 @@ describe("system reminder overlay integration", () => {
             runtimeOverlay: overlay,
         });
 
-        expect(assembled.messages).toHaveLength(2);
+        expect(assembled.messages).toHaveLength(3);
         expect(assembled.messages[1]).toMatchObject({
             role: "user",
         });
         expect(String(assembled.messages[1]?.content)).toContain("Hello, can you help me?");
-        expect(String(assembled.messages[1]?.content)).toContain("<system-reminders>");
-        expect(String(assembled.messages[1]?.content)).toContain("<delegations>");
+        expect(String(assembled.messages[1]?.content)).not.toContain("<system-reminders>");
+        expect(assembled.messages[2]).toMatchObject({
+            role: "user",
+        });
+        expect(String(assembled.messages[2]?.content)).toContain("<system-reminders>");
+        expect(String(assembled.messages[2]?.content)).toContain("<delegations>");
     });
 
     it("persists runtime overlays in prompt history without altering canonical transcript content", async () => {
@@ -197,13 +209,60 @@ describe("system reminder overlay integration", () => {
         reloaded.load(projectId, conversationId);
         const history = reloaded.getAgentPromptHistory(agentPubkey);
 
-        expect(assembled.messages).toHaveLength(2);
+        expect(assembled.messages).toHaveLength(3);
         expect(history.messages).toHaveLength(2);
         expect(history.messages[0]?.source.kind).toBe("canonical");
         expect(history.messages[1]?.source.kind).toBe("runtime-overlay");
         expect(history.messages[0]?.content).toBe("Follow up on the task");
         expect(history.messages[1]?.content).toContain("<system-reminders>");
         expect(String(assembled.messages[1]?.content)).toContain("Follow up on the task");
-        expect(String(assembled.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(assembled.messages[1]?.content)).not.toContain("<system-reminders>");
+        expect(String(assembled.messages[2]?.content)).toContain("<system-reminders>");
+    });
+
+    it("does not persist queued current-cycle reminders in prompt history", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "Continue the task",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        const compiled = await compile(ralNumber);
+
+        getSystemReminderContext().queue({
+            type: "supervision-correction",
+            content: "Fix the previous tool call before continuing.",
+        });
+
+        const overlays = await collectTenexReminderOverlays({
+            agent,
+            conversation: conversationStore,
+            respondingToPrincipal,
+            loadedSkills: [],
+            pendingDelegations: [],
+            completedDelegations: [],
+        });
+        const overlay = overlays.find((entry) => entry.persistInHistory === false);
+        const assembled = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+            runtimeOverlays: overlays,
+        });
+
+        expect(overlays).toHaveLength(2);
+        expect(overlay?.persistInHistory).toBe(false);
+        expect(String(overlay?.message.content)).toContain("Fix the previous tool call");
+        expect(assembled.messages).toHaveLength(3);
+        expect(String(assembled.messages[2]?.content)).toContain("<system-reminders>");
+        expect(String(assembled.messages[2]?.content)).not.toContain("Fix the previous tool call");
+
+        const history = conversationStore.getAgentPromptHistory(agentPubkey);
+        expect(history.messages).toHaveLength(2);
+        expect(history.messages[0]?.source.kind).toBe("canonical");
+        expect(history.messages[1]?.source.kind).toBe("runtime-overlay");
+        expect(history.messages[0]?.content).toBe("Continue the task");
+        expect(String(history.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(history.messages[1]?.content)).not.toContain("Fix the previous tool call");
     });
 });

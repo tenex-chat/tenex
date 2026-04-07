@@ -23,6 +23,9 @@ function mapQueuedReminders(
         ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
         ...(reminder.placement ? { placement: reminder.placement } : {}),
         ...(reminder.disposition ? { disposition: reminder.disposition } : {}),
+        ...(reminder.persistInHistory !== undefined
+            ? { persistInHistory: reminder.persistInHistory }
+            : {}),
     }));
 }
 
@@ -47,10 +50,18 @@ function normalizeOverlay(
     } as RuntimePromptOverlay;
 }
 
-export async function collectTenexReminderOverlay(
+function normalizeOverlays(
+    overlays: RuntimePromptOverlay[] | undefined
+): RuntimePromptOverlay[] {
+    return (overlays ?? [])
+        .map((overlay) => normalizeOverlay(overlay))
+        .filter((overlay): overlay is RuntimePromptOverlay => overlay !== undefined);
+}
+
+export async function collectTenexReminderOverlays(
     data: Pick<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">
         & Partial<Omit<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">>
-): Promise<RuntimePromptOverlay | undefined> {
+): Promise<RuntimePromptOverlay[]> {
     const reminderData: TenexReminderData = {
         pendingDelegations: [],
         completedDelegations: [],
@@ -81,9 +92,15 @@ export async function collectTenexReminderOverlay(
         ),
     });
 
-    return normalizeOverlay(
-        prepared.runtimeOverlays?.[0] as RuntimePromptOverlay | undefined
-    );
+    return normalizeOverlays(prepared.runtimeOverlays as RuntimePromptOverlay[] | undefined);
+}
+
+export async function collectTenexReminderOverlay(
+    data: Pick<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">
+        & Partial<Omit<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">>
+): Promise<RuntimePromptOverlay | undefined> {
+    const overlays = await collectTenexReminderOverlays(data);
+    return overlays[0];
 }
 
 export async function collectTenexReminderXml(

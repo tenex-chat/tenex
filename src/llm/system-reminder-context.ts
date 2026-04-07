@@ -7,6 +7,7 @@ export interface TenexSystemReminderDescriptor {
     content: string;
     attributes?: Record<string, string>;
     placement?: ReminderPlacement;
+    persistInHistory?: boolean;
 }
 
 export interface CollectedSystemReminder extends TenexSystemReminderDescriptor {
@@ -35,7 +36,8 @@ function toReminder(reminder: TenexSystemReminderDescriptor): ContextManagementR
         kind: reminder.type,
         content: reminder.content,
         ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
-        ...(reminder.placement ? { placement: reminder.placement } : {}),
+        placement: reminder.placement ?? "overlay-user",
+        persistInHistory: reminder.persistInHistory ?? false,
     };
 }
 
@@ -46,6 +48,9 @@ function toCollectedReminder(reminder: ContextManagementReminder): CollectedSyst
         ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
         ...(reminder.placement ? { placement: reminder.placement } : {}),
         ...(reminder.disposition ? { disposition: reminder.disposition } : {}),
+        ...(reminder.persistInHistory !== undefined
+            ? { persistInHistory: reminder.persistInHistory }
+            : {}),
     };
 }
 

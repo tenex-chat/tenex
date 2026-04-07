@@ -25,7 +25,7 @@
         "@opentelemetry/semantic-conventions": "^1.40.0",
         "@qdrant/js-client-rest": "^1.17.0",
         "ai": "^6.0.145",
-        "ai-sdk-context-management": "^0.12.1",
+        "ai-sdk-context-management": "github:pablof7z/ai-sdk-context-management#0031e5abfc6803286a75d9c8dd28691cf6d94d64",
         "ai-sdk-fs-tools": "0.5.0",
         "ai-sdk-message-sanitizer": "0.1.3",
         "ai-sdk-provider-claude-code": "^3.4.4",
@@ -678,7 +678,7 @@
 
     "ai": ["ai@6.0.145", "", { "dependencies": { "@ai-sdk/gateway": "3.0.87", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.22", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-RbMiFsPZxE4uf5Hhs8rscp5bIwvjQOrqS5dQGWNVRHGM947QZgkKX7Ih5hto8MK/7xkbtneoOZruZ8oSLO828A=="],
 
-    "ai-sdk-context-management": ["ai-sdk-context-management@0.12.1", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-6ctx4OZgqe7rse+yZLPCMDZSEKwnKQmuQwKcgsvAf7Nj6z5laL7db5cUcZfU/GIGgvAkrnoViN8Z2GsYYncXBg=="],
+    "ai-sdk-context-management": ["ai-sdk-context-management@github:pablof7z/ai-sdk-context-management#0031e5a", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "pablof7z-ai-sdk-context-management-0031e5a"],
 
     "ai-sdk-fs-tools": ["ai-sdk-fs-tools@0.5.0", "", { "dependencies": { "ai-sdk-system-reminders": "^0.2.0" }, "peerDependencies": { "ai": "^6.0.0", "zod": "^4.0.0" } }, "sha512-RqPKJQLXvEHjEQgLS8FFuU2/UzFKoJRa3+CpZnu7k/bUsAgw0pC+ff/mAnSYiXeP3iostG8w/Y7pPtZIn0dYhA=="],
 

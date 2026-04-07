@@ -77,6 +77,13 @@ describe("per-agent prompt history", () => {
     let agentA: AgentInstance;
     let agentB: AgentInstance;
 
+    function createProjectMock(): NDKProject {
+        return {
+            dTag: projectId,
+            tagValue: (name: string) => (name === "d" ? projectId : undefined),
+        } as NDKProject;
+    }
+
     function createAgent(pubkey: string, slug: string): AgentInstance {
         return {
             name: slug,
@@ -113,7 +120,7 @@ describe("per-agent prompt history", () => {
 
         conversationStore = new ConversationStore(testDir);
         conversationStore.load(projectId, conversationId);
-        project = {} as NDKProject;
+        project = createProjectMock();
         agentA = createAgent("agent-a", "agent-a");
         agentB = createAgent("agent-b", "agent-b");
 
