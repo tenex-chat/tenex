@@ -477,22 +477,11 @@ export class EventHandlerRegistry {
             hasPM: updateResult.hasPM,
         });
 
-        // Reload agent in all running runtimes that have it
-        const runtimeLifecycle = this.deps.getRuntimeLifecycle();
-        const activeRuntimes = runtimeLifecycle?.getActiveRuntimes() || new Map();
-        for (const [, runtime] of activeRuntimes) {
-            const context = runtime.getContext();
-            if (!context) continue;
-
-            const agent = context.getAgentByPubkey(agentPubkey);
-            if (!agent) continue;
-
-            await context.agentRegistry.reloadAgent(agentPubkey);
-
-            if (context.statusPublisher) {
-                await context.statusPublisher.publishImmediately();
-            }
-        }
+        // Reload and status publish now handled by each runtime's AgentConfigWatcher.
+        // applyEvent() wrote to disk → watcher detects change → reloadAgent() + publishImmediately().
+        logger.debug("Agent config updated on disk, watcher will reload", {
+            agentPubkey: agentPubkey.substring(0, 8),
+        });
     }
 
     /**
