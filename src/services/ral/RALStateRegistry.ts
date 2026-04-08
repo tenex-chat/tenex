@@ -176,6 +176,114 @@ export class RALStateRegistry {
     this.deps.emitUpdated(ral.projectId, conversationId);
   }
 
+  /**
+   * Synchronously attempt to claim an idle RAL for resumption.
+   *
+   * This is the serialization point that prevents two concurrent dispatches
+   * from both invoking `resolveRAL` on the same resumable RAL. Bun's event
+   * loop is single-threaded, so the read-check-and-set in this method is
+   * atomic relative to other registry callers: no `await` exists between
+   * observing `isStreaming`/`executionClaimToken` and assigning the token.
+   *
+   * The claim succeeds only if the RAL exists, is not already streaming, and
+   * is not already claimed by another dispatch. A successful claim returns an
+   * opaque token; the caller MUST eventually pair it with exactly one of:
+   *   - `releaseResumptionClaim(token)` on an early-failure path, or
+   *   - `handOffResumptionClaimToStream(token)` once the stream-execution
+   *     handler has set `isStreaming = true` and taken ownership.
+   *
+   * Returns `undefined` if the claim cannot be acquired.
+   */
+  tryAcquireResumptionClaim(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number
+  ): string | undefined {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return undefined;
+    if (ral.isStreaming) return undefined;
+    if (ral.executionClaimToken !== undefined) return undefined;
+
+    const token = crypto.randomUUID();
+    ral.executionClaimToken = token;
+    ral.lastActivityAt = Date.now();
+
+    trace.getActiveSpan()?.addEvent("ral.resumption_claim_acquired", {
+      "ral.number": ralNumber,
+      "ral.id": ral.id,
+      "claim.token": token,
+    });
+
+    return token;
+  }
+
+  /**
+   * Release a resumption claim acquired via `tryAcquireResumptionClaim`.
+   *
+   * Only releases the claim if the provided token still matches the RAL's
+   * current token. This prevents a late-arriving release from the original
+   * claimant (e.g. a `finally` block running after cleanup) from accidentally
+   * clearing a claim that was re-acquired by a subsequent dispatch.
+   *
+   * Returns true if the claim was released, false if the token no longer
+   * matches (another claim is active) or if the RAL is gone.
+   */
+  releaseResumptionClaim(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    token: string
+  ): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return false;
+    if (ral.executionClaimToken !== token) return false;
+
+    ral.executionClaimToken = undefined;
+    ral.lastActivityAt = Date.now();
+
+    trace.getActiveSpan()?.addEvent("ral.resumption_claim_released", {
+      "ral.number": ralNumber,
+      "ral.id": ral.id,
+      "claim.token": token,
+    });
+
+    return true;
+  }
+
+  /**
+   * Hand off a resumption claim to the stream execution handler.
+   *
+   * Called by `StreamExecutionHandler.execute()` immediately after it flips
+   * `isStreaming` to true: at that point the stream has become the authoritative
+   * owner of the RAL's busy state, and the claim token is redundant. This
+   * method atomically clears the token so that the dispatch-scope finally
+   * block (which uses `releaseResumptionClaim(token)`) will no-op, and
+   * subsequent dispatches are now serialized by the live `isStreaming` flag.
+   *
+   * Returns true if the handoff happened, false if the token no longer matches.
+   */
+  handOffResumptionClaimToStream(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    token: string
+  ): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return false;
+    if (ral.executionClaimToken !== token) return false;
+
+    ral.executionClaimToken = undefined;
+    ral.lastActivityAt = Date.now();
+
+    trace.getActiveSpan()?.addEvent("ral.resumption_claim_handed_off", {
+      "ral.number": ralNumber,
+      "ral.id": ral.id,
+      "claim.token": token,
+    });
+
+    return true;
+  }
+
   requestSilentCompletion(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) return false;

@@ -56,6 +56,19 @@ interface DelegationTarget {
     conversationId: string;
 }
 
+/**
+ * Outcome of `handleDeliveryInjection`. Carries both the skip decision and,
+ * when applicable, the resumption claim that the dispatcher must eventually
+ * release in its own `finally` block (see `dispatchToAgent`).
+ */
+interface DeliveryInjectionResult {
+    skipExecution: boolean;
+    claim?: {
+        ralNumber: number;
+        token: string;
+    };
+}
+
 export class AgentDispatchService {
     private static instance: AgentDispatchService;
     private readonly delegationDebounceState = new Map<
@@ -706,6 +719,14 @@ export class AgentDispatchService {
             dispatchContext
         );
 
+        // Tracks the resumption claim acquired (if any) by this dispatcher in
+        // `handleDeliveryInjection`. Released in the `finally` below unless
+        // the StreamExecutionHandler handed off ownership to the live stream.
+        // Held at dispatchToAgent scope (not AgentExecutor scope) because
+        // `createExecutionContext` can throw before `agentExecutor.execute()`
+        // is even invoked, and we still need to release the claim in that case.
+        let resumptionClaim: { ralNumber: number; token: string } | undefined;
+
         try {
             const projectDTag = projectCtx.project.dTag;
             if (!projectDTag) throw new Error("Project missing d-tag");
@@ -729,7 +750,7 @@ export class AgentDispatchService {
                 "ral.number": activeRal?.ralNumber ?? 0,
             });
 
-            const shouldSkipExecution = await this.handleDeliveryInjection({
+            const deliveryResult = await this.handleDeliveryInjection({
                 activeRal,
                 agent: targetAgent,
                 conversationId,
@@ -741,28 +762,36 @@ export class AgentDispatchService {
                 agentSpan,
             });
 
-            if (shouldSkipExecution) {
+            resumptionClaim = deliveryResult.claim;
+
+            if (deliveryResult.skipExecution) {
                 agentSpan.addEvent("dispatch.execution_skipped_injection_queued");
                 agentSpan.setStatus({ code: SpanStatusCode.OK });
                 return;
             }
 
             let triggeringEnvelopeForContext = envelope;
-            const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversationId);
+            // When we hold a claim, the resumption target is pinned — use
+            // that RAL's original triggering event to preserve thread context.
+            // Otherwise fall back to discovery for the no-claim path (fresh
+            // conversations where `activeRal` was undefined).
+            const resumptionTargetRal = resumptionClaim
+                ? ralRegistry.getRAL(targetAgent.pubkey, conversationId, resumptionClaim.ralNumber)
+                : ralRegistry.findResumableRAL(targetAgent.pubkey, conversationId);
 
-            if (resumableRal?.originalTriggeringEventId) {
+            if (resumptionTargetRal?.originalTriggeringEventId) {
                 const originalEnvelope = ConversationStore.getCachedEnvelope(
-                    resumableRal.originalTriggeringEventId
+                    resumptionTargetRal.originalTriggeringEventId
                 );
                 if (originalEnvelope) {
                     triggeringEnvelopeForContext = originalEnvelope;
                     getSafeActiveSpan()?.addEvent("reply.restored_original_trigger", {
                         "agent.slug": targetAgent.slug,
-                        "original.event_id": resumableRal.originalTriggeringEventId,
+                        "original.event_id": resumptionTargetRal.originalTriggeringEventId,
                         "resumption.event_id": envelope.message.nativeId,
                     });
                     agentSpan.addEvent("dispatch.restored_original_trigger", {
-                        "original.event_id": resumableRal.originalTriggeringEventId,
+                        "original.event_id": resumptionTargetRal.originalTriggeringEventId,
                     });
                 }
             }
@@ -774,6 +803,11 @@ export class AgentDispatchService {
                 triggeringEnvelope: triggeringEnvelopeForContext,
                 mcpManager: projectCtx.mcpManager,
             });
+
+            if (resumptionClaim) {
+                executionContext.preferredRalNumber = resumptionClaim.ralNumber;
+                executionContext.preferredRalClaimToken = resumptionClaim.token;
+            }
 
             await otelContext.with(trace.setSpan(otelContext.active(), agentSpan), async () => {
                 await agentExecutor.execute(executionContext);
@@ -801,6 +835,20 @@ export class AgentDispatchService {
             });
             throw error;
         } finally {
+            // Release the resumption claim on any exit path. `releaseResumptionClaim`
+            // only releases if the token still matches: if StreamExecutionHandler
+            // already handed off the claim (via `handOffResumptionClaimToStream`),
+            // the token has been cleared and this call is a no-op. This prevents
+            // us from clearing a claim that a subsequent dispatch may have
+            // re-acquired after `cleanup()` flipped `isStreaming` back to false.
+            if (resumptionClaim) {
+                ralRegistry.releaseResumptionClaim(
+                    targetAgent.pubkey,
+                    conversationId,
+                    resumptionClaim.ralNumber,
+                    resumptionClaim.token
+                );
+            }
             agentSpan.end();
         }
     }
@@ -846,7 +894,7 @@ export class AgentDispatchService {
         targetedPrincipals?: PrincipalSnapshot[];
         eventId?: string;
         agentSpan: ReturnType<typeof tracer.startSpan>;
-    }): Promise<boolean> {
+    }): Promise<DeliveryInjectionResult> {
         const {
             activeRal,
             agent,
@@ -860,7 +908,7 @@ export class AgentDispatchService {
         } = params;
 
         if (!activeRal) {
-            return false;
+            return { skipExecution: false };
         }
 
         const ralRegistry = RALRegistry.getInstance();
@@ -907,7 +955,38 @@ export class AgentDispatchService {
                 "injection.injector_available": liveInjection.injectorAvailable,
                 "injection.delivered_live": liveInjection.delivered,
             });
-            return true;
+            return { skipExecution: true };
+        }
+
+        // The RAL is idle and potentially resumable. Two concurrent dispatches
+        // may both observe this state via `getState`; without serialization,
+        // both would proceed to execute() and both would resume the same RAL.
+        // Atomically claim the right to wake this RAL up — only one concurrent
+        // dispatch wins. The loser's message has already been queued onto the
+        // same ralNumber above and will be drained by the winner's execution
+        // via `StreamSetup.getAndConsumeInjections`.
+        const claimToken = ralRegistry.tryAcquireResumptionClaim(
+            agent.pubkey,
+            conversationId,
+            activeRal.ralNumber
+        );
+
+        if (claimToken === undefined) {
+            getSafeActiveSpan()?.addEvent("reply.message_queued_concurrent_claim_lost", {
+                "agent.slug": agent.slug,
+                "ral.number": activeRal.ralNumber,
+                "message.length": messageLength,
+            });
+            agentSpan.addEvent("dispatch.injection_resumption_claim_lost", {
+                "ral.number": activeRal.ralNumber,
+                "message.length": messageLength,
+            });
+            logger.info("[reply] Queued message for concurrent dispatch to pick up", {
+                agent: agent.slug,
+                ralNumber: activeRal.ralNumber,
+                injectionLength: messageLength,
+            });
+            return { skipExecution: true };
         }
 
         getSafeActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
@@ -916,9 +995,14 @@ export class AgentDispatchService {
             "message.length": messageLength,
         });
         agentSpan.addEvent("dispatch.injection_resumption", {
+            "ral.number": activeRal.ralNumber,
             "message.length": messageLength,
+            "claim.token": claimToken,
         });
-        return false;
+        return {
+            skipExecution: false,
+            claim: { ralNumber: activeRal.ralNumber, token: claimToken },
+        };
     }
 
     private toMessagePrincipalContext(envelope: InboundEnvelope): MessagePrincipalContext {

@@ -35,6 +35,35 @@ export interface ExecutionContext {
     ralNumber?: number;
     conversationStore?: ConversationStore;
 
+    /**
+     * RAL number pre-claimed by the dispatcher for this execution.
+     *
+     * When set, `AgentExecutor.execute()` passes this to `resolveRAL` as
+     * `preferredRalNumber`, forcing it to resume that specific RAL rather
+     * than independently re-discovering one. This is part of the
+     * serialization contract that prevents two concurrent dispatches from
+     * both resuming the same idle RAL (see RALRegistry.tryAcquireResumptionClaim).
+     *
+     * The matching release token is held by the dispatcher, not passed here:
+     * `AgentDispatchService` releases it in its own finally block, not
+     * `AgentExecutor`'s, because `createExecutionContext` can throw before
+     * `execute()` is even invoked.
+     */
+    preferredRalNumber?: number;
+
+    /**
+     * Opaque claim token for the pre-claimed RAL, paired with
+     * `preferredRalNumber`. The StreamExecutionHandler uses this to call
+     * `handOffResumptionClaimToStream` at the moment it flips `isStreaming`
+     * to true — at that point the stream becomes the authoritative owner of
+     * the RAL's busy state and the claim token is no longer needed.
+     *
+     * Only consumed on the FIRST stream invocation. Supervision re-engagement
+     * re-enters `executeStreaming` without a token (the original claim has
+     * already been handed off by then).
+     */
+    preferredRalClaimToken?: string;
+
     // Execution flags
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;

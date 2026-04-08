@@ -187,6 +187,7 @@ export class AgentExecutor {
                         projectId,
                         triggeringEventId: context.triggeringEnvelope.message.nativeId,
                         span,
+                        preferredRalNumber: context.preferredRalNumber,
                     });
 
                     // Abort before publisher/setup work if the conversation was killed during RAL resolution.
@@ -252,7 +253,8 @@ export class AgentExecutor {
                             fullContext,
                             toolTracker,
                             agentPublisher,
-                            ralNumber
+                            ralNumber,
+                            context.preferredRalClaimToken
                         );
 
                         span.setStatus({ code: SpanStatusCode.OK });
@@ -386,18 +388,24 @@ export class AgentExecutor {
     }
 
     /**
-     * Execute streaming and publish result
+     * Execute streaming and publish result.
+     *
+     * `resumptionClaimToken` is consumed only on the FIRST invocation. On
+     * supervision re-engagement (the recursive call at the end of this
+     * method), the claim has already been handed off by StreamExecutionHandler
+     * on the first pass, so we pass undefined to avoid a stale-token no-op.
      */
     private async executeOnce(
         context: FullRuntimeContext,
         toolTracker: ToolExecutionTracker,
         agentPublisher: AgentRuntimePublisher,
-        ralNumber: number
+        ralNumber: number,
+        resumptionClaimToken?: string
     ): Promise<PublishedMessageRef | undefined> {
         let result: StreamExecutionResult;
 
         try {
-            result = await this.executeStreaming(context, toolTracker, ralNumber);
+            result = await this.executeStreaming(context, toolTracker, ralNumber, resumptionClaimToken);
         } catch (streamError) {
             logger.error("[AgentExecutor] Streaming failed", {
                 agent: context.agent.slug,
@@ -711,7 +719,8 @@ export class AgentExecutor {
     private async executeStreaming(
         context: FullRuntimeContext,
         toolTracker: ToolExecutionTracker,
-        ralNumber: number
+        ralNumber: number,
+        resumptionClaimToken?: string
     ): Promise<StreamExecutionResult> {
         // Setup stream execution (tools, messages, injections, meta model)
         const setup = await setupStreamExecution(
@@ -735,6 +744,7 @@ export class AgentExecutor {
             abortSignal: setup.abortSignal,
             metaModelSystemPrompt: setup.metaModelSystemPrompt,
             variantSystemPrompt: setup.variantSystemPrompt,
+            resumptionClaimToken,
         });
 
         return handler.execute();

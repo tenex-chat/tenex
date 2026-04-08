@@ -56,7 +56,7 @@ describe("AgentDispatchService live message injection", () => {
             agentSpan: { addEvent: mock(() => {}) },
         });
 
-        expect(result).toBe(true);
+        expect(result).toEqual({ skipExecution: true });
         expect(injectMock).toHaveBeenCalledTimes(1);
 
         const state = registry.getRAL(agentPubkey, conversationId, ralNumber);
@@ -81,7 +81,7 @@ describe("AgentDispatchService live message injection", () => {
             agentSpan: { addEvent: mock(() => {}) },
         });
 
-        expect(result).toBe(true);
+        expect(result).toEqual({ skipExecution: true });
         expect(injectMock).toHaveBeenCalledTimes(1);
 
         const state = registry.getRAL(agentPubkey, conversationId, ralNumber);

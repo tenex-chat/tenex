@@ -19,6 +19,21 @@ export interface RALResolutionContext {
     projectId: ProjectDTag;
     triggeringEventId: string;
     span: Span;
+    /**
+     * RAL number pre-claimed by the dispatcher (via
+     * `RALRegistry.tryAcquireResumptionClaim`) for this execution. When set,
+     * `resolveRAL` MUST resume this specific RAL rather than independently
+     * re-running discovery via `findResumableRAL`/`findRALWithInjections`.
+     *
+     * This closes a second race: without threading the claimed ralNumber,
+     * `findResumableRAL` could return a different RAL than the one the
+     * dispatcher observed via `getState` (which returns the highest-numbered
+     * entry) — because `findResumableRAL` returns the first entry with
+     * completed delegations. Different indices mean different RALs in
+     * pathological cases. The claim is on the entry returned by `getState`;
+     * that exact entry is what must be resumed.
+     */
+    preferredRalNumber?: number;
 }
 
 export interface RALResolutionResult {
@@ -44,15 +59,32 @@ export interface RALResolutionResult {
  * 3. New RAL - create fresh for this execution
  */
 export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResolutionResult> {
-    const { agentPubkey, conversationId, projectId, triggeringEventId, span } = ctx;
+    const { agentPubkey, conversationId, projectId, triggeringEventId, span, preferredRalNumber } = ctx;
     const ralRegistry = RALRegistry.getInstance();
 
-    // Check for a resumable RAL (one with completed delegations ready to continue)
-    const resumableRal = ralRegistry.findResumableRAL(agentPubkey, conversationId);
+    // If the dispatcher pre-claimed a specific RAL for us, resume that exact
+    // entry. This is the serialization guarantee: the claim was taken on the
+    // RAL returned by `getState` (highest-numbered), and that RAL is what
+    // must be resumed — not whatever `findResumableRAL` happens to find,
+    // which uses first-match semantics and can pick a different entry.
+    const preferredRal = preferredRalNumber !== undefined
+        ? ralRegistry.getRAL(agentPubkey, conversationId, preferredRalNumber)
+        : undefined;
 
-    // Also check for RAL with queued injections
+    // When a preferred RAL was claimed, pin discovery to that exact entry:
+    // route it through the resumable branch if it has completed delegations
+    // (so markers get processed), otherwise through the injection branch.
+    // The claim itself is sufficient reason to use the preferred RAL even
+    // if it has no outstanding work — the dispatcher has already queued the
+    // triggering message onto it, so the create-new-RAL path is never taken.
+    const resumableRal = preferredRal
+        ? (ralRegistry.getConversationCompletedDelegations(agentPubkey, conversationId, preferredRal.ralNumber).length > 0
+            ? preferredRal
+            : undefined)
+        : ralRegistry.findResumableRAL(agentPubkey, conversationId);
+
     const injectionRal = !resumableRal
-        ? ralRegistry.findRALWithInjections(agentPubkey, conversationId)
+        ? (preferredRal ?? ralRegistry.findRALWithInjections(agentPubkey, conversationId))
         : undefined;
 
     let ralNumber: number;

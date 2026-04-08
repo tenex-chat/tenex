@@ -162,6 +162,23 @@ export interface RALRegistryEntry {
   /** Whether the agent is currently streaming a response */
   isStreaming: boolean;
   /**
+   * Opaque token identifying a dispatch that has claimed the right to wake up
+   * this RAL from an idle/resumable state. Set synchronously by
+   * `RALRegistry.tryAcquireResumptionClaim` when a dispatcher successfully
+   * acquires the claim, and cleared by `releaseResumptionClaim` (on the
+   * early-failure path) or `handOffResumptionClaimToStream` (once the
+   * stream-execution handler flips `isStreaming` to true and takes ownership).
+   *
+   * While this field is set, subsequent dispatches observing the same RAL must
+   * not independently call `resolveRAL` on it — their messages should be
+   * queued via `queueUserMessage` and picked up by the claimant's execution.
+   *
+   * The token is a single-use UUID. Release methods reject stale tokens,
+   * preventing a dispatcher from accidentally releasing a claim that another
+   * dispatcher re-acquired after `cleanup()` cleared the previous owner's flag.
+   */
+  executionClaimToken?: string;
+  /**
    * Map of currently executing tool call IDs to their tool info.
    * Multiple tools can execute concurrently. ACTING state is derived from activeTools.size > 0.
    * Keyed by toolCallId (not toolName) to properly track concurrent calls of the same tool.

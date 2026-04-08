@@ -59,6 +59,16 @@ export interface StreamExecutionConfig {
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
+    /**
+     * Resumption claim token acquired by the dispatcher (see
+     * `AgentDispatchService.dispatchToAgent`). Passed only on the first
+     * stream invocation for a given dispatch; on supervision re-engagement
+     * this is undefined because the original claim has already been handed
+     * off. When present, `execute()` calls `handOffResumptionClaimToStream`
+     * atomically with `setStreaming(true)` so the claim transfers ownership
+     * from the dispatch-scope finally block to the live streaming flag.
+     */
+    resumptionClaimToken?: string;
 }
 
 /**
@@ -115,8 +125,23 @@ export class StreamExecutionHandler {
         this.setupEventHandlers();
 
         try {
-            // Mark this RAL as streaming and start timing LLM runtime
+            // Mark this RAL as streaming and start timing LLM runtime.
+            // If the dispatcher pre-claimed this RAL via tryAcquireResumptionClaim,
+            // hand the claim off to the streaming flag: `isStreaming = true` is
+            // now the authoritative busy marker, and the dispatch-scope finally
+            // block (which calls `releaseResumptionClaim(token)`) will observe
+            // the cleared token and no-op. This ordering — set streaming then
+            // clear token — is safe because both happen synchronously in the
+            // same tick and concurrent dispatches would see isStreaming first.
             ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
+            if (this.config.resumptionClaimToken !== undefined) {
+                ralRegistry.handOffResumptionClaimToStream(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber,
+                    this.config.resumptionClaimToken
+                );
+            }
             const lastUserMessage = extractLastUserMessage(messages);
             ralRegistry.startLLMStream(context.agent.pubkey, context.conversationId, ralNumber, lastUserMessage);
 
