@@ -64,10 +64,11 @@ describe("ClaudeCodeProvider", () => {
             });
         });
 
-        describe("always-disabled built-in tools (FS + Bash)", () => {
+        describe("always-disabled built-in tools (FS + Bash + Cron + Remote + Plan/Worktree + Skill)", () => {
             it("should disable all TENEX-controlled built-ins unconditionally", () => {
                 const disallowed = getDisallowedTools([], []);
 
+                // Core FS and shell tools
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
                 expect(disallowed).toContain("Glob");
@@ -76,6 +77,23 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("NotebookEdit");
                 expect(disallowed).toContain("Bash");
                 expect(disallowed).toContain("TaskOutput");
+
+                // Cron tools
+                expect(disallowed).toContain("CronCreate");
+                expect(disallowed).toContain("CronDelete");
+                expect(disallowed).toContain("CronList");
+
+                // Remote trigger
+                expect(disallowed).toContain("RemoteTrigger");
+
+                // Plan mode and worktree tools
+                expect(disallowed).toContain("EnterPlanMode");
+                expect(disallowed).toContain("ExitPlanMode");
+                expect(disallowed).toContain("EnterWorktree");
+                expect(disallowed).toContain("ExitWorktree");
+
+                // Skill invocation
+                expect(disallowed).toContain("Skill");
             });
 
             it("should NEVER disable Read (needed for Claude Code's large tool result files)", () => {
@@ -92,6 +110,7 @@ describe("ClaudeCodeProvider", () => {
                     []
                 );
 
+                // Core FS and shell tools
                 expect(disallowed).not.toContain("Read");
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
@@ -101,6 +120,17 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("NotebookEdit");
                 expect(disallowed).toContain("Bash");
                 expect(disallowed).toContain("TaskOutput");
+
+                // Cron, remote, plan mode, worktree, and skill tools
+                expect(disallowed).toContain("CronCreate");
+                expect(disallowed).toContain("CronDelete");
+                expect(disallowed).toContain("CronList");
+                expect(disallowed).toContain("RemoteTrigger");
+                expect(disallowed).toContain("EnterPlanMode");
+                expect(disallowed).toContain("ExitPlanMode");
+                expect(disallowed).toContain("EnterWorktree");
+                expect(disallowed).toContain("ExitWorktree");
+                expect(disallowed).toContain("Skill");
             });
         });
 
@@ -234,6 +264,8 @@ describe("ClaudeCodeProvider", () => {
             const settings = model.agentSettings as { disallowedTools?: string[] };
             // Read is NOT disabled here because no fs_read is provided
             expect(settings.disallowedTools).not.toContain("Read");
+
+            // Core FS and shell tools
             expect(settings.disallowedTools).toContain("Write");
             expect(settings.disallowedTools).toContain("Edit");
             expect(settings.disallowedTools).toContain("Glob");
@@ -242,6 +274,17 @@ describe("ClaudeCodeProvider", () => {
             expect(settings.disallowedTools).toContain("NotebookEdit");
             expect(settings.disallowedTools).toContain("Bash");
             expect(settings.disallowedTools).toContain("TaskOutput");
+
+            // Cron, remote, plan mode, worktree, and skill tools
+            expect(settings.disallowedTools).toContain("CronCreate");
+            expect(settings.disallowedTools).toContain("CronDelete");
+            expect(settings.disallowedTools).toContain("CronList");
+            expect(settings.disallowedTools).toContain("RemoteTrigger");
+            expect(settings.disallowedTools).toContain("EnterPlanMode");
+            expect(settings.disallowedTools).toContain("ExitPlanMode");
+            expect(settings.disallowedTools).toContain("EnterWorktree");
+            expect(settings.disallowedTools).toContain("ExitWorktree");
+            expect(settings.disallowedTools).toContain("Skill");
         });
 
         it("should use unique MCP server name when external server is named 'tenex'", () => {

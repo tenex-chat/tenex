@@ -72,7 +72,15 @@ const FS_TOOL_NAMES = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"] a
  * agents only get tools enabled by their skills. */
 const ALWAYS_DISABLED_BUILTINS = [
     "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash", "TaskOutput",
-    "WebFetch", "WebSearch", "Task", "TodoWrite"
+    "WebFetch", "WebSearch", "Task", "TodoWrite",
+    // Cron tools
+    "CronCreate", "CronDelete", "CronList",
+    // Remote trigger
+    "RemoteTrigger",
+    // Plan mode and worktree tools
+    "EnterPlanMode", "ExitPlanMode", "EnterWorktree", "ExitWorktree",
+    // Skill invocation
+    "Skill"
 ] as const;
 
 /** Pattern to detect MCP tools that provide FS capability */
