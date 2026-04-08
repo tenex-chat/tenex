@@ -577,7 +577,18 @@ export class AgentDefinitionMonitor {
         }
 
         const rawCategory = agentDef.category || undefined;
-        const newCategory = rawCategory ? resolveCategory(rawCategory) : undefined;
+        let newCategory = storedAgent.category;
+        if (rawCategory) {
+            const resolvedCategory = resolveCategory(rawCategory);
+            if (resolvedCategory) {
+                newCategory = resolvedCategory;
+            } else {
+                logger.warn("[AgentDefinitionMonitor] Ignoring invalid category from definition update", {
+                    agentSlug: monitoredAgent.slug,
+                    rawCategory,
+                });
+            }
+        }
         if (newCategory !== storedAgent.category) {
             storedAgent.category = newCategory;
             changedFields.push("category");

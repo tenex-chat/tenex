@@ -1,5 +1,4 @@
 import { describe, expect, it, mock } from "bun:test";
-import { createSimpleMock } from "@/test-utils/mock-llm";
 
 let loadConfigCalls = 0;
 let createLLMServiceCalls = 0;
@@ -17,18 +16,20 @@ let loadConfigResult: {
         default: "default-model",
     },
 };
-let llmService = createSimpleMock("worker");
+let llmService = {
+    generateText: async () => ({ text: "worker" }),
+};
 
 const loadConfigMock = mock(async () => {
-    loadConfigCalls++;
-    return loadConfigResult;
-});
+        loadConfigCalls++;
+        return loadConfigResult;
+    });
 
-const createLLMServiceMock = mock((configName?: string) => {
+    const createLLMServiceMock = mock((configName?: string) => {
     createLLMServiceCalls++;
-    lastRequestedConfigName = configName;
-    return llmService;
-});
+        lastRequestedConfigName = configName;
+        return llmService;
+    });
 
 mock.module("@/services/ConfigService", () => ({
     config: {
@@ -47,7 +48,9 @@ describe("categorizeAgent", () => {
         expect(parseCategory("The agent is a domain-expert in NDK")).toBe("domain-expert");
         expect(parseCategory("  reviewer \n")).toBe("reviewer");
 
-        llmService = createSimpleMock("The agent is a worker");
+        llmService = {
+            generateText: async () => ({ text: "The agent is a worker" }),
+        };
         loadConfigResult = {
             llms: {
                 categorization: "categorization-model",
@@ -76,7 +79,9 @@ describe("categorizeAgent", () => {
     it("falls back to summarization when categorization is absent and handles parse failures", async () => {
         const { categorizeAgent } = await categorizeModulePromise;
 
-        llmService = createSimpleMock("The agent is a reviewer");
+        llmService = {
+            generateText: async () => ({ text: "The agent is a reviewer" }),
+        };
         loadConfigResult = {
             llms: {
                 summarization: "summarization-model",
@@ -96,7 +101,9 @@ describe("categorizeAgent", () => {
         expect(category).toBe("reviewer");
         expect(lastRequestedConfigName).toBe("summarization-model");
 
-        llmService = createSimpleMock("I cannot tell");
+        llmService = {
+            generateText: async () => ({ text: "I cannot tell" }),
+        };
         const undefinedCategory = await categorizeAgent({
             name: "Unknown Bot",
             role: "helper",
