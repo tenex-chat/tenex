@@ -191,6 +191,11 @@ export class AgentDispatchService {
                     "conversation.id": shortenConversationId(result.conversation.id),
                 });
             } else {
+                logger.warn("[AgentDispatchService] No conversation found for agent-authored event", {
+                    eventId: envelope.message.nativeId,
+                    replyTarget: getReplyTarget(envelope),
+                    projectBinding: envelope.channel.projectBinding,
+                });
                 getSafeActiveSpan()?.addEvent("reply.no_conversation_found", {
                     "event.id": envelope.message.nativeId,
                 });

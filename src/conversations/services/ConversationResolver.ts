@@ -44,6 +44,26 @@ export class ConversationResolver {
                 return { conversation };
             }
 
+            // Not in memory — try loading from disk before going to the network.
+            // The reply target ID is the conversation's root event ID, which maps directly
+            // to its on-disk file. ConversationStore.get() handles cross-project lookup
+            // automatically, making this the correct path for scheduled tasks that target
+            // conversations in a different project.
+            const conversationFromDisk = ConversationStore.get(nativeReplyTarget);
+            if (conversationFromDisk) {
+                logger.debug("[ConversationResolver] Loaded conversation from disk", {
+                    conversationId: shortenConversationId(conversationFromDisk.id),
+                    replyTargetId: shortenEventId(nativeReplyTarget),
+                    projectBinding: envelope.channel.projectBinding,
+                });
+                activeSpan?.addEvent("conversation.resolved", {
+                    "resolution.type": "found_on_disk",
+                    "conversation.id": shortenConversationId(conversationFromDisk.id),
+                    "conversation.message_count": conversationFromDisk.getAllMessages().length,
+                });
+                return { conversation: conversationFromDisk };
+            }
+
             const mentionedPubkeys = getMentionedPubkeys(envelope);
             const newConversation = await this.handleOrphanedReply(
                 envelope,
@@ -60,6 +80,11 @@ export class ConversationResolver {
                 return { conversation: newConversation, isNew: true };
             }
 
+            logger.warn("[ConversationResolver] Could not resolve conversation for reply target", {
+                replyTargetId: shortenEventId(nativeReplyTarget),
+                eventId: shortenEventId(envelope.message.nativeId),
+                projectBinding: envelope.channel.projectBinding,
+            });
             activeSpan?.addEvent("conversation.resolution_failed", {
                 reason: "conversation_not_found_for_reply_target",
                 "reply_target.id": nativeReplyTarget,
