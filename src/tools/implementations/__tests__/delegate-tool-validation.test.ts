@@ -172,7 +172,8 @@ describe("Delegation tools - Self-delegation validation", () => {
 
         it("should resolve team names to the team lead and propagate the team name", async () => {
             const getTeamNamesSpy = spyOn(teamService, "getTeamNames").mockResolvedValue(["design-team"]);
-            const resolveTeamToLeadSpy = spyOn(teamService, "resolveTeamToLead").mockResolvedValue("team-lead-pubkey");
+            // Returns a valid agent slug that exists in the mock project context
+            const resolveTeamToLeadSpy = spyOn(teamService, "resolveTeamToLead").mockResolvedValue("other-agent");
 
             let capturedConfig: any;
             const context = {
@@ -196,7 +197,8 @@ describe("Delegation tools - Self-delegation validation", () => {
             expect(result.success).toBe(true);
             expect(getTeamNamesSpy).toHaveBeenCalledWith("test-project");
             expect(resolveTeamToLeadSpy).toHaveBeenCalledWith("design-team", "test-project");
-            expect(capturedConfig.recipient).toBe("team-lead-pubkey");
+            // The recipient should be the resolved pubkey, not the raw slug
+            expect(capturedConfig.recipient).toBe("other-pubkey-456");
             expect(capturedConfig.team).toBe("design-team");
         });
 

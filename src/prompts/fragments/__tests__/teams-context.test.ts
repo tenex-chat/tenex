@@ -30,4 +30,33 @@ describe("teams-context", () => {
     it("renders nothing when there are no teams and no active scope", () => {
         expect(render({ teams: [] })).toBe("");
     });
+
+    it("renders active team scope clearly when agent has no team membership", () => {
+        const result = render({
+            teams: [],
+            activeTeam: "frontend",
+        });
+
+        expect(result).toContain("<teams-context>");
+        expect(result).toContain("You are operating in team scope: frontend");
+        expect(result).not.toContain("You belong to teams:");
+        expect(result).toContain("</teams-context>");
+    });
+
+    it("marks active team case-insensitively in member team list", () => {
+        const result = render({
+            teams: [
+                {
+                    name: "Frontend",
+                    description: "Frontend team",
+                    teamLead: "lead-fe",
+                    members: ["lead-fe", "alice"],
+                },
+            ],
+            activeTeam: "frontend",
+        });
+
+        expect(result).toContain("Frontend (active):");
+        expect(result).not.toContain("Active team: frontend");
+    });
 });

@@ -123,7 +123,13 @@ async function executeDelegate(
       const teamLeadIdentifier = await teamService.resolveTeamToLead(matchedTeamName, projectId);
       if (teamLeadIdentifier) {
         const teamLeadResolution = resolveAgentSlug(teamLeadIdentifier);
-        pubkey = teamLeadResolution.pubkey ?? teamLeadIdentifier;
+        if (!teamLeadResolution.pubkey) {
+          throw new Error(
+            `Team lead "${teamLeadIdentifier}" for team "${matchedTeamName}" is not a known agent. ` +
+            `Available agent slugs: ${teamLeadResolution.availableSlugs.join(", ")}`
+          );
+        }
+        pubkey = teamLeadResolution.pubkey;
         resolvedTeamName = matchedTeamName;
       }
     }

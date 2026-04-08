@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentEventEncoder } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { AskConfig } from "@/nostr/types";
+import type { AskConfig, PublishedMessageRef } from "@/nostr/types";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext } from "@/nostr/types";
 import * as ndkClientModule from "@/nostr/ndkClient";
@@ -17,6 +17,7 @@ describe("Ask Tool - Multi-question support", () => {
   let addStandardTagsSpy: ReturnType<typeof spyOn>;
   let injectTraceContextSpy: ReturnType<typeof spyOn>;
   let getNDKSpy: ReturnType<typeof spyOn>;
+  let toPublishedMessageRefSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     capturedEvents = [];
@@ -39,6 +40,12 @@ describe("Ask Tool - Multi-question support", () => {
     safePublishSpy = spyOn(publisher as any, "safePublish").mockImplementation(async (event: NDKEvent) => {
       capturedEvents.push(event);
     });
+    toPublishedMessageRefSpy = spyOn(publisher as any, "toPublishedMessageRef").mockReturnValue({
+      id: "mock-event-id",
+      transport: "nostr",
+      envelope: createMockInboundEnvelope(),
+      encodedId: "nostr:event:mock-event-id",
+    } as PublishedMessageRef);
   });
 
   afterEach(() => {
@@ -47,6 +54,7 @@ describe("Ask Tool - Multi-question support", () => {
     addStandardTagsSpy?.mockRestore();
     injectTraceContextSpy?.mockRestore();
     safePublishSpy?.mockRestore();
+    toPublishedMessageRefSpy?.mockRestore();
     mock.restore();
   });
 
@@ -360,6 +368,52 @@ describe("Ask Tool - Multi-question support", () => {
       const pTag = event.tags.find((tag) => tag[0] === "p");
       expect(pTag).toBeDefined();
       expect(pTag?.[1]).toBe("specific-recipient-pubkey");
+    });
+  });
+
+  describe("Team scope propagation", () => {
+    it("should forward team tag from triggering event on ask", async () => {
+      const context = createTestContext({
+        triggeringEnvelope: createMockInboundEnvelope({
+          message: { id: "triggering-event-id", transport: "nostr", nativeId: "triggering-event-id" },
+          metadata: { teamName: "ops-team" },
+        }),
+      });
+
+      const config: AskConfig = {
+        recipient: "recipient-pubkey",
+        context: "Need clarification on team direction.",
+        title: "Team direction",
+        questions: [{ type: "question", title: "Direction", question: "Which way?" }],
+      };
+
+      await publisher.ask(config, context);
+
+      expect(capturedEvents.length).toBe(1);
+      const event = capturedEvents[0];
+
+      const teamTag = event.tags.find((tag) => tag[0] === "team");
+      expect(teamTag).toBeDefined();
+      expect(teamTag?.[1]).toBe("ops-team");
+    });
+
+    it("should not emit team tag when triggering event has no team scope", async () => {
+      const context = createTestContext();
+
+      const config: AskConfig = {
+        recipient: "recipient-pubkey",
+        context: "Unscoped question.",
+        title: "Question",
+        questions: [{ type: "question", title: "Q", question: "What?" }],
+      };
+
+      await publisher.ask(config, context);
+
+      expect(capturedEvents.length).toBe(1);
+      const event = capturedEvents[0];
+
+      const teamTag = event.tags.find((tag) => tag[0] === "team");
+      expect(teamTag).toBeUndefined();
     });
   });
 
