@@ -1,5 +1,6 @@
 import type { StoredAgent } from "@/agents/AgentStorage";
 import { agentStorage } from "@/agents/AgentStorage";
+import { categorizeAgent } from "@/agents/categorizeAgent";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { resolveCategory } from "@/agents/role-categories";
 import { SkillService } from "@/services/skill/SkillService";
@@ -40,6 +41,7 @@ interface AgentDefinitionStorage {
     getAllStoredAgents(): Promise<StoredAgent[]>;
     saveAgent(agent: StoredAgent): Promise<void>;
     loadAgent(pubkey: string): Promise<StoredAgent | null>;
+    updateInferredCategory(pubkey: string, inferredCategory: NonNullable<StoredAgent["inferredCategory"]>): Promise<boolean>;
 }
 
 /**
@@ -581,6 +583,8 @@ export class AgentDefinitionMonitor {
             changedFields.push("category");
         }
 
+        const shouldInferCategory = !storedAgent.category && !storedAgent.inferredCategory;
+
         const newDescription = agentDef.description || undefined;
         if (newDescription !== storedAgent.description) {
             storedAgent.description = newDescription;
@@ -680,6 +684,13 @@ export class AgentDefinitionMonitor {
                 dTag: monitoredAgent.definitionDTag,
                 eventId: shortenOptionalEventId(event.id),
             });
+
+            monitoredAgent.currentEventId = event.id;
+            monitoredAgent.currentCreatedAt = event.created_at;
+
+            if (shouldInferCategory) {
+                void this.inferAndPersistCategory(monitoredAgent.pubkey, storedAgent);
+            }
             return;
         }
 
@@ -715,6 +726,56 @@ export class AgentDefinitionMonitor {
 
         // Reload agent in all active runtimes
         await this.reloadAgentInRuntimes(monitoredAgent.pubkey, monitoredAgent.slug);
+
+        if (shouldInferCategory) {
+            void this.inferAndPersistCategory(monitoredAgent.pubkey, storedAgent);
+        }
+    }
+
+    /**
+     * Infer and persist an agent's category without blocking the upgrade path.
+     */
+    private async inferAndPersistCategory(pubkey: string, storedAgent: StoredAgent): Promise<void> {
+        if (storedAgent.category || storedAgent.inferredCategory) {
+            return;
+        }
+
+        try {
+            const inferredCategory = await categorizeAgent({
+                name: storedAgent.name,
+                role: storedAgent.role,
+                description: storedAgent.description,
+                instructions: storedAgent.instructions,
+                useCriteria: storedAgent.useCriteria,
+            });
+
+            if (!inferredCategory) {
+                return;
+            }
+
+            const updated = await this.storage.updateInferredCategory(pubkey, inferredCategory);
+            if (!updated) {
+                logger.warn("[AgentDefinitionMonitor] Failed to persist inferred category", {
+                    slug: storedAgent.slug,
+                    pubkey: shortenPubkey(pubkey),
+                    category: inferredCategory,
+                });
+                return;
+            }
+
+            storedAgent.inferredCategory = inferredCategory;
+            logger.info("[AgentDefinitionMonitor] Inferred and persisted category", {
+                slug: storedAgent.slug,
+                pubkey: shortenPubkey(pubkey),
+                category: inferredCategory,
+            });
+        } catch (error) {
+            logger.warn("[AgentDefinitionMonitor] inferAndPersistCategory failed", {
+                slug: storedAgent.slug,
+                pubkey: shortenPubkey(pubkey),
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     /**

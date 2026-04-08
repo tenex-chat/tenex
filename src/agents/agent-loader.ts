@@ -60,7 +60,7 @@ export function createAgentInstance(
     const normalizedTools = processAgentTools(effectiveTools || []);
 
     // Resolve category for organizational purposes (no tool restrictions)
-    const resolvedCategory = resolveCategory(storedAgent.category);
+    const resolvedCategory = resolveCategory(storedAgent.category) ?? resolveCategory(storedAgent.inferredCategory);
 
     // Build agent-specific MCP config from stored mcpServers
     const agentMcpConfig: MCPConfig | undefined = storedAgent.mcpServers

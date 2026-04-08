@@ -1,4 +1,5 @@
-import { agentStorage, createStoredAgent, type StoredAgent } from "@/agents/AgentStorage";
+import { agentStorage, createStoredAgent, deriveAgentPubkeyFromNsec, type StoredAgent } from "@/agents/AgentStorage";
+import { categorizeAgent } from "@/agents/categorizeAgent";
 import { AgentNotFoundError, AgentValidationError } from "@/agents/errors";
 import { resolveCategory, type AgentCategory } from "@/agents/role-categories";
 import { installAgentScripts } from "@/agents/script-installer";
@@ -238,6 +239,32 @@ export async function installAgentFromNostrEvent(
     });
 
     await agentStorage.saveAgent(storedAgent);
+
+    if (!storedAgent.category) {
+        try {
+            const inferredCategory = await categorizeAgent({
+                name: storedAgent.name,
+                role: storedAgent.role,
+                description: storedAgent.description,
+                instructions: storedAgent.instructions,
+                useCriteria: storedAgent.useCriteria,
+            });
+
+            if (inferredCategory) {
+                const pubkey = deriveAgentPubkeyFromNsec(storedAgent.nsec);
+                const updated = await agentStorage.updateInferredCategory(pubkey, inferredCategory);
+                if (updated) {
+                    storedAgent.inferredCategory = inferredCategory;
+                }
+            }
+        } catch (error) {
+            logger.warn("[AgentInstaller] Failed to infer category after install", {
+                slug,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
     logger.info(`Installed agent "${agentData.name}" (${slug}) from Nostr event ${event.id}`);
 
     return storedAgent;

@@ -105,14 +105,6 @@ export async function handleDelegationCompletion(
                 continue;
             }
 
-            if (result.deferred) {
-                completionDeferred = true;
-                break;
-            }
-
-            location = result;
-            delegationEventId = eTag;
-
             const delegationStore = ConversationStore.get(eTag);
             if (delegationStore) {
                 try {
@@ -132,6 +124,14 @@ export async function handleDelegationCompletion(
                     });
                 }
             }
+
+            if (result.deferred) {
+                completionDeferred = true;
+                break;
+            }
+
+            location = result;
+            delegationEventId = eTag;
 
             break;
         }

@@ -11,13 +11,14 @@ import inquirer from "inquirer";
 import { createPrompt, useState, useKeypress, usePrefix, makeTheme, isUpKey, isDownKey, isEnterKey } from "@inquirer/core";
 import { cursorHide } from "@inquirer/ansi";
 
-type LLMRoleKey = "default" | "summarization" | "supervision" | "promptCompilation";
+type LLMRoleKey = "default" | "summarization" | "supervision" | "promptCompilation" | "categorization";
 
 const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: string }> = [
     { key: "default", label: "Default", recommendation: "The default model all agents get — pick your best all-rounder" },
     { key: "summarization", label: "Summarization", recommendation: "Used for conversation metadata (summaries, titles) — choose a cheap model with a large context window" },
     { key: "supervision", label: "Supervision", recommendation: "Evaluates agent work and decides next steps — choose a model with strong reasoning" },
     { key: "promptCompilation", label: "Prompt Compilation", recommendation: "Distills lessons into system prompts — choose a smart model with a large context window" },
+    { key: "categorization", label: "Categorization", recommendation: "Classifies agent roles — choose a cheap, fast model" },
 ];
 
 /**

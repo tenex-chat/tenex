@@ -1066,6 +1066,30 @@ export class AgentStorage {
     }
 
     /**
+     * Update an agent's inferred category without touching the authoritative category field.
+     *
+     * Updates ONLY the stored data on disk. To refresh the in-memory instance,
+     * call AgentRegistry.reloadAgent() after this method when needed.
+     *
+     * @param pubkey - Agent's public key (hex string)
+     * @param inferredCategory - Auto-inferred category to persist
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateInferredCategory(pubkey: string, inferredCategory: AgentCategory): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        agent.inferredCategory = inferredCategory;
+
+        await this.saveAgent(agent);
+        logger.info(`Updated inferred category for agent ${agent.name}`, { inferredCategory });
+        return true;
+    }
+
+    /**
      * Get the effective (resolved) config for an agent, optionally scoped to a project.
      *
      * @param agent - The stored agent

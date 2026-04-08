@@ -243,6 +243,7 @@ describe("agent-installer", () => {
             event.tags = [
                 ["title", "Skill Agent"],
                 ["role", "assistant"],
+                ["category", "generalist"],
                 ["instructions", "Use skills when helpful"],
                 ["skill", "skill-event-1"],
                 ["skill", "skill-event-2"],

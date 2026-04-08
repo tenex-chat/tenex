@@ -344,6 +344,7 @@ export interface TenexLLMs {
     summarization?: string; // Named config to use for generating summaries (kind 513 events)
     supervision?: string; // Named config to use for agent supervision
     promptCompilation?: string; // Named config to use for prompt compilation (compiling lessons into system prompts)
+    categorization?: string; // Named config to use for agent role categorization
 }
 
 /**
@@ -402,6 +403,7 @@ export const TenexLLMsSchema = z.object({
     summarization: z.string().optional(),
     supervision: z.string().optional(),
     promptCompilation: z.string().optional(),
+    categorization: z.string().optional(),
 });
 
 // =====================================================================================

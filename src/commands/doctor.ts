@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
+import { backfillAgentCategories } from "@/agents/backfillAgentCategories";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { initNDK, getNDK } from "@/nostr/ndkClient";
 import { migrationService } from "@/services/migrations";
@@ -24,10 +25,31 @@ const orphansCommand = new Command("orphans")
         await findOrphanedAgents(!!options.purge);
     });
 
+const categorizeCommand = new Command("categorize")
+    .description("Auto-categorize agents that lack an explicit or inferred category")
+    .option("--dry-run", "Show what would be categorized without making changes")
+    .action(async (options) => {
+        try {
+            const result = await backfillAgentCategories(agentStorage, { dryRun: !!options.dryRun });
+
+            console.log(chalk.blue(`Processed: ${result.processed}, Categorized: ${result.categorized}, Skipped: ${result.skipped}, Failed: ${result.failed}`));
+
+            if (result.failed > 0) {
+                console.error(chalk.red(`${result.failed} agent(s) failed categorization — check logs for details`));
+                process.exit(1);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(chalk.red(`Failed to categorize agents: ${message}`));
+            process.exit(1);
+        }
+    });
+
 const agentsCommand = new Command("agents")
     .description("Agent diagnostics and repair")
     .addCommand(refetchCommand)
-    .addCommand(orphansCommand);
+    .addCommand(orphansCommand)
+    .addCommand(categorizeCommand);
 
 const migrateCommand = new Command("migrate")
     .description("Apply pending TENEX state migrations")

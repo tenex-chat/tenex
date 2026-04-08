@@ -3,7 +3,9 @@ import { RALRegistry } from "../RALRegistry";
 import { isStopExecutionSignal } from "../types";
 import type { PendingDelegation, CompletedDelegation } from "../types";
 import { handleDelegationCompletion } from "@/services/dispatch/DelegationCompletionHandler";
+import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import * as projectsModule from "@/services/projects";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Mock getProjectContext
@@ -63,6 +65,8 @@ describe("RAL Delegation Flow", () => {
     let registry: RALRegistry;
     let getProjectContextSpy: ReturnType<typeof spyOn>;
     let isProjectContextInitializedSpy: ReturnType<typeof spyOn>;
+    let conversationStoreGetSpy: ReturnType<typeof spyOn>;
+    let conversationStoreAddEnvelopeSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         // Reset singleton for testing
@@ -74,17 +78,26 @@ describe("RAL Delegation Flow", () => {
                 if (pubkey === mockAgent2.pubkey) return mockAgent2;
                 return undefined;
             },
+            getAgent: (slug: string) => {
+                if (slug === mockAgent.slug) return mockAgent;
+                if (slug === mockAgent2.slug) return mockAgent2;
+                return undefined;
+            },
         } as never);
         isProjectContextInitializedSpy = spyOn(
             projectsModule,
             "isProjectContextInitialized"
         ).mockReturnValue(true as never);
+        conversationStoreGetSpy = spyOn(ConversationStore, "get").mockReturnValue({} as never);
+        conversationStoreAddEnvelopeSpy = spyOn(ConversationStore, "addEnvelope").mockResolvedValue(undefined);
         registry = RALRegistry.getInstance();
     });
 
     afterEach(() => {
         getProjectContextSpy?.mockRestore();
         isProjectContextInitializedSpy?.mockRestore();
+        conversationStoreGetSpy?.mockRestore();
+        conversationStoreAddEnvelopeSpy?.mockRestore();
     });
 
     describe("RALRegistry State Management", () => {
@@ -593,29 +606,33 @@ describe("RAL Delegation Flow", () => {
         it("should defer parent completion while ask sub-delegations are pending", async () => {
             const delegatingAgent = mockAgent.pubkey;
             const delegatedAgent = mockAgent2.pubkey;
-            const conversationId = "child-ask-conv";
-            const ralNumber = registry.create(delegatedAgent, conversationId, PROJECT_ID);
+            const parentConversationId = "parent-delegation-conv";
+            const askConversationId = "ask-subdelegation-conv";
+            const parentRalNumber = registry.create(delegatedAgent, parentConversationId, PROJECT_ID);
+            const askRalNumber = registry.create(delegatedAgent, askConversationId, PROJECT_ID);
 
             const parentDelegationId = "parent-delegation-event-id";
             const askDelegationId = "ask-delegation-event-id";
             const humanPubkey = "human-pubkey-123";
 
-            registry.mergePendingDelegations(delegatedAgent, conversationId, ralNumber, [
+            registry.mergePendingDelegations(delegatedAgent, parentConversationId, parentRalNumber, [
                 {
                     type: "delegate",
                     delegationConversationId: parentDelegationId,
                     recipientPubkey: delegatedAgent,
                     senderPubkey: delegatingAgent,
                     prompt: "Handle this task",
-                    ralNumber,
+                    ralNumber: parentRalNumber,
                 },
+            ]);
+            registry.mergePendingDelegations(delegatedAgent, askConversationId, askRalNumber, [
                 {
                     type: "ask",
                     delegationConversationId: askDelegationId,
                     recipientPubkey: humanPubkey,
                     senderPubkey: delegatedAgent,
                     prompt: "Need human input",
-                    ralNumber,
+                    ralNumber: askRalNumber,
                     parentDelegationConversationId: parentDelegationId,
                 },
             ]);
@@ -626,7 +643,7 @@ describe("RAL Delegation Flow", () => {
                     recipientPubkey: humanPubkey,
                     senderPubkey: delegatedAgent,
                     prompt: "Need human input",
-                    ralNumber,
+                    ralNumber: askRalNumber,
                     parentDelegationConversationId: parentDelegationId,
                 })
             ).toBe(true);
@@ -641,8 +658,9 @@ describe("RAL Delegation Flow", () => {
             const deferredResult = await handleDelegationCompletion(parentCompletion);
             expect(deferredResult.recorded).toBe(false);
             expect(deferredResult.deferred).toBe(true);
-            expect(registry.getConversationPendingDelegations(delegatedAgent, conversationId, ralNumber)).toHaveLength(2);
-            expect(registry.getConversationCompletedDelegations(delegatedAgent, conversationId, ralNumber)).toHaveLength(0);
+            expect(conversationStoreAddEnvelopeSpy).toHaveBeenCalledWith(parentDelegationId, parentCompletion);
+            expect(registry.getConversationPendingDelegations(delegatedAgent, parentConversationId, parentRalNumber)).toHaveLength(1);
+            expect(registry.getConversationCompletedDelegations(delegatedAgent, parentConversationId, parentRalNumber)).toHaveLength(0);
 
             const askCompletion = createDelegationCompletionEnvelope({
                 messageId: "ask-response-event",
@@ -653,15 +671,34 @@ describe("RAL Delegation Flow", () => {
 
             const askResult = await handleDelegationCompletion(askCompletion);
             expect(askResult.recorded).toBe(true);
+            expect(askResult.agentSlug).toBe(mockAgent2.slug);
+            expect(askResult.conversationId).toBe(parentConversationId);
+            expect(
+                AgentRouter.resolveDelegationTarget(
+                    askResult,
+                    projectsModule.getProjectContext()
+                )
+            ).toEqual({
+                agent: mockAgent2,
+                conversationId: parentConversationId,
+            });
 
-            const parentPendingAfterAsk = registry.getConversationPendingDelegations(delegatedAgent, conversationId, ralNumber);
+            expect(conversationStoreAddEnvelopeSpy).toHaveBeenCalledWith(askDelegationId, askCompletion);
+
+            const parentPendingAfterAsk = registry.getConversationPendingDelegations(delegatedAgent, parentConversationId, parentRalNumber);
             expect(parentPendingAfterAsk).toHaveLength(0);
-            const parentCompletedAfterAsk = registry.getConversationCompletedDelegations(delegatedAgent, conversationId, ralNumber);
-            expect(parentCompletedAfterAsk).toHaveLength(2);
+            const parentCompletedAfterAsk = registry.getConversationCompletedDelegations(delegatedAgent, parentConversationId, parentRalNumber);
+            expect(parentCompletedAfterAsk).toHaveLength(1);
             const parentCompletionRecord = parentCompletedAfterAsk.find((item) => item.delegationConversationId === parentDelegationId);
             expect(parentCompletionRecord).toBeDefined();
             expect(parentCompletionRecord?.transcript[1].content)
                 .toBe("Premature completion");
+
+            const askPendingAfterAsk = registry.getConversationPendingDelegations(delegatedAgent, askConversationId, askRalNumber);
+            expect(askPendingAfterAsk).toHaveLength(0);
+            const askCompletedAfterAsk = registry.getConversationCompletedDelegations(delegatedAgent, askConversationId, askRalNumber);
+            expect(askCompletedAfterAsk).toHaveLength(1);
+            expect(askCompletedAfterAsk[0].delegationConversationId).toBe(askDelegationId);
         });
     });
 });

@@ -167,23 +167,23 @@ export class DelegationRegistry {
   clearPendingSubDelegation(
     parentDelegationConversationId: string,
     subDelegationConversationId: string
-  ): boolean {
+  ): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined {
     const location = this.delegationToRal.get(parentDelegationConversationId);
     if (!location) {
-      return false;
+      return undefined;
     }
 
     const [agentPubkey, conversationId] = location.key.split(":");
     const convDelegations = this.conversationDelegations.get(location.key);
     if (!convDelegations) {
-      return false;
+      return undefined;
     }
 
     const canonicalParentId = this.followupToCanonical.get(parentDelegationConversationId)
       ?? parentDelegationConversationId;
     const parentDelegation = convDelegations.pending.get(canonicalParentId);
     if (!parentDelegation?.pendingSubDelegations?.length) {
-      return false;
+      return undefined;
     }
 
     const nextSubDelegations = parentDelegation.pendingSubDelegations.filter(
@@ -191,7 +191,7 @@ export class DelegationRegistry {
     );
 
     if (nextSubDelegations.length === parentDelegation.pendingSubDelegations.length) {
-      return false;
+      return undefined;
     }
 
     parentDelegation.pendingSubDelegations = nextSubDelegations.length > 0
@@ -216,7 +216,7 @@ export class DelegationRegistry {
     ) {
       const deferredCompletion = parentDelegation.deferredCompletion;
       parentDelegation.deferredCompletion = undefined;
-      this.finalizeDeferredCompletion({
+      return this.finalizeDeferredCompletion({
         agentPubkey,
         conversationId,
         ralNumber: location.ralNumber,
@@ -226,7 +226,7 @@ export class DelegationRegistry {
       });
     }
 
-    return true;
+    return undefined;
   }
 
   private removePendingSubDelegationFromAnyParent(subDelegationConversationId: string): boolean {
@@ -627,16 +627,21 @@ export class DelegationRegistry {
 
     convDelegations.pending.delete(canonicalId);
 
+    let completionLocation = { agentPubkey, conversationId, ralNumber: location.ralNumber };
+
     if (pendingDelegation.parentDelegationConversationId) {
-      this.clearPendingSubDelegation(
+      const deferredCompletionLocation = this.clearPendingSubDelegation(
         pendingDelegation.parentDelegationConversationId,
         canonicalId
       );
+      if (deferredCompletionLocation) {
+        completionLocation = deferredCompletionLocation;
+      }
     }
 
     this.deps.decrementDelegationCounter(agentPubkey, conversationId, location.ralNumber);
 
-    return { agentPubkey, conversationId, ralNumber: location.ralNumber };
+    return completionLocation;
   }
 
   resolveDelegationPrefix(prefix: string): string | null {

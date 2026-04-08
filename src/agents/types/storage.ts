@@ -89,6 +89,11 @@ export interface StoredAgentData {
      * When missing or unrecognized, remains undefined.
      */
     category?: AgentCategory;
+    /**
+     * Auto-inferred category written by the categorization service.
+     * Kept separate from `category` so explicit provenance is preserved.
+     */
+    inferredCategory?: AgentCategory;
     description?: string;
     instructions?: string;
     useCriteria?: string;
