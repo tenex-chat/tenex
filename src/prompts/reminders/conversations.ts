@@ -428,50 +428,6 @@ function renderConversationReference(
     return `**${title}** [id: ${shortenConversationId(conversationId)}]`;
 }
 
-function summarizeActiveConversationChanges(
-    previous: ActiveConversationReminderEntry,
-    current: ActiveConversationReminderEntry
-): string[] {
-    const changes: string[] = [];
-
-    if ((previous.title ?? "") !== (current.title ?? "")) {
-        changes.push("title changed");
-    }
-    if ((previous.summary ?? "") !== (current.summary ?? "")) {
-        changes.push("summary changed");
-    }
-    if ((previous.currentTool ?? "") !== (current.currentTool ?? "")) {
-        if (current.currentTool) {
-            changes.push(`tool is now \`${current.currentTool}\``);
-        } else if (previous.currentTool) {
-            changes.push(`tool \`${previous.currentTool}\` finished`);
-        }
-    }
-    if (previous.isStreaming !== current.isStreaming) {
-        changes.push(current.isStreaming ? "streaming started" : "streaming stopped");
-    }
-    if (previous.agentName !== current.agentName) {
-        changes.push(`agent is now ${current.agentName}`);
-    }
-
-    return changes;
-}
-
-function summarizeRecentConversationChanges(
-    previous: RecentConversationReminderEntry,
-    current: RecentConversationReminderEntry
-): string[] {
-    const changes: string[] = [];
-
-    if ((previous.title ?? "") !== (current.title ?? "")) {
-        changes.push("title changed");
-    }
-    if ((previous.summary ?? "") !== (current.summary ?? "")) {
-        changes.push("summary changed");
-    }
-
-    return changes;
-}
 
 export function buildConversationsReminderSnapshot({
     agentPubkey,
@@ -535,17 +491,8 @@ export function renderConversationsReminderDelta(
     }
 
     for (const [conversationId, entry] of currentActive) {
-        const previousEntry = previousActive.get(conversationId);
-        if (!previousEntry) {
+        if (!previousActive.has(conversationId)) {
             lines.push(`Active conversation started: ${renderConversationReference(entry)}.`);
-            continue;
-        }
-
-        const changes = summarizeActiveConversationChanges(previousEntry, entry);
-        if (changes.length > 0) {
-            lines.push(
-                `Active conversation updated: ${renderConversationReference(entry)} (${changes.join(", ")}).`
-            );
         }
     }
 
@@ -555,20 +502,6 @@ export function renderConversationsReminderDelta(
         }
 
         lines.push(`Recent conversation added: ${renderConversationReference(entry)}.`);
-    }
-
-    for (const [conversationId, entry] of currentRecent) {
-        const previousEntry = previousRecent.get(conversationId);
-        if (!previousEntry) {
-            continue;
-        }
-
-        const changes = summarizeRecentConversationChanges(previousEntry, entry);
-        if (changes.length > 0) {
-            lines.push(
-                `Recent conversation updated: ${renderConversationReference(entry)} (${changes.join(", ")}).`
-            );
-        }
     }
 
     if (lines.length === 0) {
