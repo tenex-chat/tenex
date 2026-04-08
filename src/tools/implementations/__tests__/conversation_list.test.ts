@@ -35,6 +35,17 @@ const mockResolveAgentSlug = mock((slug: string) => {
     return { pubkey: null, availableSlugs: ["agent-1", "agent-2"] };
 });
 
+const mockListConversations = mock((projectId: string) => buildCatalogEntriesForProject(projectId));
+
+mock.module("@/conversations/ConversationCatalogService", () => ({
+    ConversationCatalogService: {
+        getInstance: (projectId: string) => ({
+            listConversations: () => mockListConversations(projectId),
+        }),
+        resetAll: () => {},
+    },
+}));
+
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { logger } from "@/utils/logger";
 import { createConversationListTool } from "../conversation_list";
@@ -81,6 +92,79 @@ const mockListConversationIdsFromDiskForProject = mock((projectId: string) => {
     if (projectId === "other-project") return ["conv2"];
     return [];
 });
+
+function listConversationIdsForProject(projectId: string): string[] {
+    return projectId === mockProjectId
+        ? mockListConversationIdsFromDisk()
+        : mockListConversationIdsFromDiskForProject(projectId);
+}
+
+function buildCatalogEntriesForProject(projectId: string) {
+    return listConversationIdsForProject(projectId).map((conversationId) => {
+        const overrides = mockStoreOverrides[`${projectId}:${conversationId}`] ?? {};
+        const messages = buildMessages(overrides);
+        const metadata = buildMetadata(conversationId, overrides);
+        const participants = new Map<
+            string,
+            {
+                participantKey: string;
+                linkedPubkey?: string;
+                principalId?: string;
+                transport?: string;
+                displayName?: string;
+                username?: string;
+                kind?: "agent" | "human" | "system";
+                isAgent: boolean;
+            }
+        >();
+        const delegationIds = new Set<string>();
+
+        for (const message of messages) {
+            const principalId = message.senderPrincipal?.id;
+            const linkedPubkey = message.senderPrincipal?.linkedPubkey
+                ?? (message.pubkey && message.pubkey.length > 0 ? message.pubkey : undefined);
+            const participantKey = principalId ?? linkedPubkey;
+
+            if (participantKey && !participants.has(participantKey)) {
+                const kind = message.senderPrincipal?.kind;
+                participants.set(participantKey, {
+                    participantKey,
+                    linkedPubkey,
+                    principalId,
+                    transport: message.senderPrincipal?.transport,
+                    displayName: message.senderPrincipal?.displayName,
+                    username: message.senderPrincipal?.username,
+                    kind,
+                    isAgent:
+                        kind === "agent"
+                        || linkedPubkey === "agent-pubkey-1"
+                        || linkedPubkey === "agent-pubkey-2",
+                });
+            }
+
+            if (
+                message.messageType === "delegation-marker"
+                && message.delegationMarker?.delegationConversationId
+            ) {
+                delegationIds.add(message.delegationMarker.delegationConversationId);
+            }
+        }
+
+        return {
+            id: conversationId,
+            title: metadata.title,
+            summary: metadata.summary,
+            lastUserMessage: undefined,
+            statusLabel: metadata.statusLabel,
+            statusCurrentActivity: metadata.statusCurrentActivity,
+            messageCount: messages.length,
+            createdAt: messages[0]?.timestamp,
+            lastActivity: messages[messages.length - 1]?.timestamp ?? overrides.lastActivityTime ?? 0,
+            participants: Array.from(participants.values()),
+            delegationIds: Array.from(delegationIds),
+        };
+    });
+}
 
 const buildMessages = (overrides: StoreOverrides) => {
     if (overrides.messages && overrides.messages.length > 0) {
@@ -254,6 +338,8 @@ describe("conversation_list Tool", () => {
         (logger.warn as ReturnType<typeof mock>).mockReset();
         (logger.error as ReturnType<typeof mock>).mockReset();
         (logger.debug as ReturnType<typeof mock>).mockReset();
+        mockListConversations.mockReset();
+        mockListConversations.mockImplementation((projectId: string) => buildCatalogEntriesForProject(projectId));
         inMemoryStores.clear();
 
         // Clear tracked instantiated stores
@@ -595,6 +681,92 @@ describe("conversation_list Tool", () => {
             expect(result.conversations[1].id).toBe("conv3".substring(0, 6)); // 1700003000
             expect(result.conversations[2].id).toBe("conv2".substring(0, 6)); // 1700002000
             expect(result.conversations[3].id).toBe("conv1".substring(0, 6)); // 1700001000
+        });
+
+        it("should build cross-project child trees from catalog delegation ids", async () => {
+            const delegationConvId = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000 },
+                    {
+                        timestamp: 1700001000,
+                        messageType: "delegation-marker",
+                        delegationMarker: {
+                            delegationConversationId: delegationConvId,
+                            recipientPubkey: "recipient-pubkey",
+                            parentConversationId: "conv1",
+                            completedAt: 1700001000000,
+                            status: "completed",
+                        },
+                    },
+                ],
+                metadata: { title: "Parent Conv", delegationChain: [] },
+                lastActivityTime: 1700001000,
+            };
+            mockStoreOverrides[`other-project:${delegationConvId}`] = {
+                messages: [{ timestamp: 1700002000, pubkey: "recipient-pubkey" }],
+                metadata: {
+                    title: "Delegation Conv",
+                    delegationChain: [
+                        { conversationId: "conv1", agentPubkey: "conv1-agent-pubkey" },
+                        { conversationId: delegationConvId, agentPubkey: "recipient-pubkey" },
+                    ],
+                },
+                lastActivityTime: 1700002000,
+            };
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1"]);
+            (ConversationStore.listConversationIdsFromDiskForProject as ReturnType<typeof mock>).mockImplementation((projectId: string) => {
+                if (projectId === "current-project") return ["conv1"];
+                if (projectId === "other-project") return [delegationConvId];
+                return [];
+            });
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ projectId: "all" });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].children).toHaveLength(1);
+            expect(result.conversations[0].children[0].id).toBe(delegationConvId.substring(0, 10));
+        });
+
+        it("should only load returned roots and descendants when projectId='all' is limited", async () => {
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1"]);
+            (ConversationStore.listConversationIdsFromDiskForProject as ReturnType<typeof mock>).mockImplementation((projectId: string) => {
+                if (projectId === "current-project") return ["conv1"];
+                if (projectId === "other-project") return ["conv2", "conv3"];
+                return [];
+            });
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [{ timestamp: 1700001000 }],
+                metadata: { title: "Old current root" },
+                lastActivityTime: 1700001000,
+            };
+            mockStoreOverrides["other-project:conv2"] = {
+                messages: [{ timestamp: 1700005000 }],
+                metadata: { title: "Newest external root" },
+                lastActivityTime: 1700005000,
+            };
+            mockStoreOverrides["other-project:conv3"] = {
+                messages: [{ timestamp: 1700003000 }],
+                metadata: { title: "Older external root" },
+                lastActivityTime: 1700003000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ projectId: "all", limit: 1 });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].id).toBe("conv2".substring(0, 6));
+            expect(mockGetOrLoad).not.toHaveBeenCalledWith("conv1");
+            expect(mockLoad).toHaveBeenCalledTimes(1);
+            expect(instantiatedStores[0]?.loadedWith).toEqual({
+                projectId: "other-project",
+                conversationId: "conv2",
+            });
         });
     });
 

@@ -2,10 +2,10 @@
  * conversation_list tool - builds hierarchical tree view of conversations
  *
  * ARCHITECTURE NOTE:
- * This tool loads directly from ConversationStore (not ConversationCatalogService) because:
- * 1. It needs delegationChain metadata to build parent/child tree structures
- * 2. The catalog service only provides flat lists with delegationIds
- * 3. This tool has special requirements not met by the catalog's data model
+ * This tool uses ConversationCatalogService to index conversations and compute
+ * cross-project tree ordering without loading every transcript into memory.
+ * It still loads ConversationStore on demand for returned conversations so the
+ * response preserves sender/recipient formatting and metadata fallbacks.
  *
  * For ID formatting, it uses the centralized shortenConversationId() helper from
  * @/utils/conversation-id to maintain consistency across the codebase.
@@ -14,9 +14,15 @@
  * for automatic ID formatting.
  */
 
+import { join } from "node:path";
 import type { ToolExecutionContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { ConversationRecord } from "@/conversations/types";
+import {
+    ConversationCatalogService,
+    type ConversationCatalogListEntry,
+    type ConversationCatalogParticipant,
+} from "@/conversations/ConversationCatalogService";
 import {
     getConversationRecordAuthorPrincipalId,
     getConversationRecordAuthorPubkey,
@@ -311,6 +317,17 @@ interface LoadedConversation {
     projectId: ProjectDTag;
 }
 
+interface IndexedConversation {
+    entry: ConversationCatalogListEntry;
+    projectId: ProjectDTag;
+}
+
+interface ConversationGraph {
+    conversationsById: Map<string, IndexedConversation>;
+    childrenByParentId: Map<string, IndexedConversation[]>;
+    rootConversationIds: string[];
+}
+
 function loadConversationsForProject(
     projectId: ProjectDTag,
     isCurrentProject: boolean
@@ -337,6 +354,380 @@ function loadConversationsForProject(
         }
     }
     return conversations;
+}
+
+function loadIndexedConversationsForProject(projectId: ProjectDTag): IndexedConversation[] {
+    const metadataPath = join(ConversationStore.getBasePath(), projectId);
+    try {
+        const catalog = ConversationCatalogService.getInstance(projectId, metadataPath);
+
+        return catalog.listConversations({}).map((entry) => ({
+            entry,
+            projectId,
+        }));
+    } catch (error) {
+        logger.warn("Failed to load catalog-backed conversations; falling back to transcript scan", {
+            projectId,
+            error,
+        });
+
+        const isCurrentProject = projectId === ConversationStore.getProjectId();
+        return loadConversationsForProject(projectId, isCurrentProject).map(buildIndexedConversationFromStore);
+    }
+}
+
+function buildIndexedConversationFromStore(conversation: LoadedConversation): IndexedConversation {
+    const messages = conversation.store.getAllMessages();
+    const firstMessage = messages[0];
+    const lastMessage = messages[messages.length - 1];
+    const metadata = conversation.store.metadata as Record<string, unknown>;
+    const participants = new Map<string, ConversationCatalogParticipant>();
+    const delegationIds = new Set<string>();
+
+    for (const message of messages) {
+        const participantKey =
+            getConversationRecordAuthorPrincipalId(message)
+            ?? getConversationRecordAuthorPubkey(message);
+        if (participantKey && !participants.has(participantKey)) {
+            const linkedPubkey = getConversationRecordAuthorPubkey(message);
+            const kind = message.senderPrincipal?.kind;
+            participants.set(participantKey, {
+                participantKey,
+                linkedPubkey,
+                principalId: getConversationRecordAuthorPrincipalId(message),
+                transport: message.senderPrincipal?.transport,
+                displayName:
+                    typeof message.senderPrincipal?.displayName === "string"
+                    && message.senderPrincipal.displayName.trim().length > 0
+                        ? message.senderPrincipal.displayName
+                        : undefined,
+                username:
+                    typeof message.senderPrincipal?.username === "string"
+                    && message.senderPrincipal.username.trim().length > 0
+                        ? message.senderPrincipal.username
+                        : undefined,
+                kind,
+                isAgent: kind === "agent" || (!!linkedPubkey && ConversationStore.isAgentPubkey(linkedPubkey)),
+            });
+        }
+
+        if (
+            message.messageType === "delegation-marker"
+            && message.delegationMarker?.delegationConversationId
+        ) {
+            delegationIds.add(message.delegationMarker.delegationConversationId);
+        }
+    }
+
+    return {
+        projectId: conversation.projectId,
+        entry: {
+            id: conversation.store.id,
+            title:
+                typeof metadata.title === "string" && metadata.title.trim().length > 0
+                    ? metadata.title
+                    : conversation.store.title,
+            summary:
+                typeof metadata.summary === "string" && metadata.summary.trim().length > 0
+                    ? metadata.summary
+                    : undefined,
+            lastUserMessage:
+                typeof metadata.lastUserMessage === "string" && metadata.lastUserMessage.trim().length > 0
+                    ? metadata.lastUserMessage
+                    : typeof metadata.last_user_message === "string" && metadata.last_user_message.trim().length > 0
+                        ? metadata.last_user_message
+                        : undefined,
+            statusLabel:
+                typeof metadata.statusLabel === "string" && metadata.statusLabel.trim().length > 0
+                    ? metadata.statusLabel
+                    : undefined,
+            statusCurrentActivity:
+                typeof metadata.statusCurrentActivity === "string" && metadata.statusCurrentActivity.trim().length > 0
+                    ? metadata.statusCurrentActivity
+                    : undefined,
+            messageCount: messages.length,
+            createdAt: firstMessage?.timestamp,
+            lastActivity: lastMessage?.timestamp ?? 0,
+            participants: Array.from(participants.values()),
+            delegationIds: Array.from(delegationIds),
+        },
+    };
+}
+
+function buildConversationGraph(conversations: IndexedConversation[]): ConversationGraph {
+    const conversationsById = new Map<string, IndexedConversation>();
+    for (const conversation of conversations) {
+        conversationsById.set(conversation.entry.id, conversation);
+    }
+
+    const childrenByParentId = new Map<string, IndexedConversation[]>();
+    const parentByChildId = new Map<string, string>();
+
+    for (const conversation of conversations) {
+        for (const childId of conversation.entry.delegationIds) {
+            const child = conversationsById.get(childId);
+            if (!child) {
+                continue;
+            }
+
+            const existingParentId = parentByChildId.get(childId);
+            if (existingParentId && existingParentId !== conversation.entry.id) {
+                logger.debug("Conversation referenced by multiple parents in catalog", {
+                    conversationId: childId,
+                    existingParentId,
+                    ignoredParentId: conversation.entry.id,
+                });
+                continue;
+            }
+
+            parentByChildId.set(childId, conversation.entry.id);
+
+            const children = childrenByParentId.get(conversation.entry.id) ?? [];
+            children.push(child);
+            childrenByParentId.set(conversation.entry.id, children);
+        }
+    }
+
+    for (const children of childrenByParentId.values()) {
+        children.sort((a, b) => b.entry.lastActivity - a.entry.lastActivity);
+    }
+
+    const rootConversationIds = conversations
+        .map((conversation) => conversation.entry.id)
+        .filter((conversationId) => !parentByChildId.has(conversationId));
+
+    return {
+        conversationsById,
+        childrenByParentId,
+        rootConversationIds,
+    };
+}
+
+function computeIndexedSubtreeLastActivity(
+    conversationId: string,
+    graph: ConversationGraph,
+    memoizedSubtreeTimes: Map<string, number>,
+    visited: Set<string> = new Set()
+): number {
+    const memoized = memoizedSubtreeTimes.get(conversationId);
+    if (memoized !== undefined) {
+        return memoized;
+    }
+
+    if (visited.has(conversationId)) {
+        return 0;
+    }
+    visited.add(conversationId);
+
+    const conversation = graph.conversationsById.get(conversationId);
+    if (!conversation) {
+        return 0;
+    }
+
+    let maxTime = conversation.entry.lastActivity;
+    const children = graph.childrenByParentId.get(conversationId) ?? [];
+    for (const child of children) {
+        const childTime = computeIndexedSubtreeLastActivity(
+            child.entry.id,
+            graph,
+            memoizedSubtreeTimes,
+            visited
+        );
+        if (childTime > maxTime) {
+            maxTime = childTime;
+        }
+    }
+
+    visited.delete(conversationId);
+    memoizedSubtreeTimes.set(conversationId, maxTime);
+    return maxTime;
+}
+
+function indexedConversationHasParticipant(conversation: IndexedConversation, filter: WithFilter): boolean {
+    for (const participant of conversation.entry.participants) {
+        const participantPubkey =
+            participant.linkedPubkey
+            ?? (/^[0-9a-fA-F]{64}$/.test(participant.participantKey) ? participant.participantKey : undefined);
+        if (!participantPubkey) {
+            continue;
+        }
+
+        const normalizedParticipant = participantPubkey.toLowerCase();
+        if (
+            (filter.kind === "exact" && normalizedParticipant === filter.pubkey.toLowerCase())
+            || (filter.kind === "prefix" && normalizedParticipant.startsWith(filter.prefix))
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function indexedSubtreeHasParticipant(
+    conversationId: string,
+    graph: ConversationGraph,
+    filter: WithFilter,
+    memoizedMatches: Map<string, boolean>,
+    visited: Set<string> = new Set()
+): boolean {
+    const memoized = memoizedMatches.get(conversationId);
+    if (memoized !== undefined) {
+        return memoized;
+    }
+
+    if (visited.has(conversationId)) {
+        return false;
+    }
+    visited.add(conversationId);
+
+    const conversation = graph.conversationsById.get(conversationId);
+    if (!conversation) {
+        return false;
+    }
+
+    if (indexedConversationHasParticipant(conversation, filter)) {
+        memoizedMatches.set(conversationId, true);
+        visited.delete(conversationId);
+        return true;
+    }
+
+    const children = graph.childrenByParentId.get(conversationId) ?? [];
+    for (const child of children) {
+        if (indexedSubtreeHasParticipant(child.entry.id, graph, filter, memoizedMatches, visited)) {
+            memoizedMatches.set(conversationId, true);
+            visited.delete(conversationId);
+            return true;
+        }
+    }
+
+    memoizedMatches.set(conversationId, false);
+    visited.delete(conversationId);
+    return false;
+}
+
+function resolveParticipantNameFromCatalog(participant: ConversationCatalogParticipant): string {
+    if (participant.linkedPubkey) {
+        return resolveNameFromPubkey(participant.linkedPubkey);
+    }
+
+    const displayName = participant.displayName?.trim();
+    if (displayName) {
+        return displayName;
+    }
+
+    const username = participant.username?.trim();
+    if (username) {
+        return username;
+    }
+
+    const principalId = participant.principalId;
+    if (principalId) {
+        const terminalSegment = principalId.split(":").pop();
+        if (terminalSegment?.trim()) {
+            return shortenPubkey(terminalSegment);
+        }
+        return shortenPubkey(principalId);
+    }
+
+    return "Unknown";
+}
+
+function extractSenderFromIndexedConversation(conversation: IndexedConversation): string | undefined {
+    const sender = conversation.entry.participants[0];
+    return sender ? resolveParticipantNameFromCatalog(sender) : undefined;
+}
+
+function extractRecipientFromIndexedConversation(conversation: IndexedConversation): string | undefined {
+    const senderParticipantKey = conversation.entry.participants[0]?.participantKey;
+    const recipient = conversation.entry.participants.find(
+        (participant, index) =>
+            participant.isAgent && (index > 0 || participant.participantKey !== senderParticipantKey)
+    ) ?? conversation.entry.participants.find((participant) => participant.isAgent);
+
+    return recipient ? resolveParticipantNameFromCatalog(recipient) : undefined;
+}
+
+function loadConversationForSummary(
+    conversation: IndexedConversation,
+    currentProjectId: ProjectDTag | null,
+    storeCache: Map<string, ConversationStore | null>
+): ConversationStore | null {
+    const cacheKey = `${conversation.projectId}:${conversation.entry.id}`;
+    const cachedStore = storeCache.get(cacheKey);
+    if (cachedStore !== undefined) {
+        return cachedStore;
+    }
+
+    try {
+        let store: ConversationStore;
+        if (conversation.projectId === currentProjectId) {
+            store = ConversationStore.getOrLoad(conversation.entry.id);
+        } else {
+            store = new ConversationStore(ConversationStore.getBasePath());
+            store.load(conversation.projectId, conversation.entry.id);
+        }
+
+        storeCache.set(cacheKey, store);
+        return store;
+    } catch (error) {
+        logger.debug("Failed to load conversation for summary", {
+            id: conversation.entry.id,
+            projectId: conversation.projectId,
+            error,
+        });
+        storeCache.set(cacheKey, null);
+        return null;
+    }
+}
+
+function summarizeIndexedChildConversation(
+    conversation: IndexedConversation,
+    graph: ConversationGraph,
+    currentProjectId: ProjectDTag | null,
+    storeCache: Map<string, ConversationStore | null>
+): ChildConversationSummary {
+    const store = loadConversationForSummary(conversation, currentProjectId, storeCache);
+    const children = (graph.childrenByParentId.get(conversation.entry.id) ?? []).map((child) =>
+        summarizeIndexedChildConversation(child, graph, currentProjectId, storeCache)
+    );
+
+    return {
+        id: shortenConversationId(conversation.entry.id),
+        fullId: conversation.entry.id,
+        title: store?.metadata.title ?? store?.title ?? conversation.entry.title,
+        recipient: store ? extractRecipient(store) : extractRecipientFromIndexedConversation(conversation),
+        lastActive: conversation.entry.lastActivity
+            ? formatTimeAgo(conversation.entry.lastActivity * 1000)
+            : undefined,
+        children,
+    };
+}
+
+function summarizeIndexedConversation(
+    conversation: IndexedConversation,
+    graph: ConversationGraph,
+    currentProjectId: ProjectDTag | null,
+    storeCache: Map<string, ConversationStore | null>
+): ConversationSummary {
+    const store = loadConversationForSummary(conversation, currentProjectId, storeCache);
+    const children = (graph.childrenByParentId.get(conversation.entry.id) ?? []).map((child) =>
+        summarizeIndexedChildConversation(child, graph, currentProjectId, storeCache)
+    );
+
+    return {
+        id: shortenConversationId(conversation.entry.id),
+        fullId: conversation.entry.id,
+        projectId: conversation.projectId,
+        title: store?.metadata.title ?? store?.title ?? conversation.entry.title,
+        summary: store?.metadata.summary ?? conversation.entry.summary,
+        sender: store ? extractSender(store) : extractSenderFromIndexedConversation(conversation),
+        recipient: store ? extractRecipient(store) : extractRecipientFromIndexedConversation(conversation),
+        lastActive: conversation.entry.lastActivity
+            ? formatTimeAgo(conversation.entry.lastActivity * 1000)
+            : undefined,
+        children,
+    };
 }
 
 /**
@@ -494,18 +885,73 @@ async function executeConversationList(
         agent: context.agent.name,
     });
 
+    if (effectiveProjectId === "all") {
+        const projectIds = ConversationStore.listProjectIdsFromDisk();
+        const indexedConversations = projectIds.flatMap((projectId) =>
+            loadIndexedConversationsForProject(projectId)
+        );
+        const graph = buildConversationGraph(indexedConversations);
+        const memoizedSubtreeTimes = new Map<string, number>();
+
+        const rootsWithSubtreeActivity = graph.rootConversationIds.map((conversationId) => ({
+            conversation: graph.conversationsById.get(conversationId)!,
+            subtreeLastActivity: computeIndexedSubtreeLastActivity(
+                conversationId,
+                graph,
+                memoizedSubtreeTimes
+            ),
+        }));
+
+        let filteredRoots = rootsWithSubtreeActivity;
+        if (fromTime !== undefined || toTime !== undefined) {
+            filteredRoots = rootsWithSubtreeActivity.filter(({ subtreeLastActivity }) => {
+                if (fromTime !== undefined && subtreeLastActivity < fromTime) return false;
+                if (toTime !== undefined && subtreeLastActivity > toTime) return false;
+                return true;
+            });
+        }
+
+        if (withFilter) {
+            const memoizedMatches = new Map<string, boolean>();
+            filteredRoots = filteredRoots.filter(({ conversation }) =>
+                indexedSubtreeHasParticipant(
+                    conversation.entry.id,
+                    graph,
+                    withFilter,
+                    memoizedMatches
+                )
+            );
+        }
+
+        const sortedRoots = [...filteredRoots].sort((a, b) =>
+            b.subtreeLastActivity - a.subtreeLastActivity
+        );
+        const limitedRoots = sortedRoots.slice(0, limit);
+        const storeCache = new Map<string, ConversationStore | null>();
+        const summaries = limitedRoots.map(({ conversation }) =>
+            summarizeIndexedConversation(conversation, graph, currentProjectId, storeCache)
+        );
+
+        logger.info("✅ Conversations listed (tree view)", {
+            total: graph.rootConversationIds.length,
+            filtered: filteredRoots.length,
+            returned: summaries.length,
+            projectId: effectiveProjectId,
+            with: withParam,
+            agent: context.agent.name,
+        });
+
+        return {
+            success: true,
+            conversations: summaries,
+            total: filteredRoots.length,
+        };
+    }
+
     // Load conversations based on projectId parameter
     let allLoadedConversations: LoadedConversation[] = [];
 
-    if (effectiveProjectId === "all") {
-        // Only load from all projects when explicitly requested with "ALL"
-        const projectIds = ConversationStore.listProjectIdsFromDisk();
-        for (const pid of projectIds) {
-            const isCurrentProject = pid === currentProjectId;
-            const projectConversations = loadConversationsForProject(pid, isCurrentProject);
-            allLoadedConversations.push(...projectConversations);
-        }
-    } else if (effectiveProjectId) {
+    if (effectiveProjectId) {
         // Load from specific project (current project by default)
         const isCurrentProject = effectiveProjectId === currentProjectId;
         allLoadedConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
