@@ -169,6 +169,7 @@ export async function checkPostCompletion(
         agentPubkey: agent.pubkey,
         silentCompletionRequested,
         messageContent: completionEvent.message || "",
+        outputTokens: completionEvent.usage.outputTokens ?? 0,
         toolCallsMade,
         systemPrompt,
         conversationHistory: conversationMessages,

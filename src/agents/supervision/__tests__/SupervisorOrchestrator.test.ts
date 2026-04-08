@@ -43,6 +43,7 @@ describe("SupervisorOrchestrator", () => {
         agentSlug: "test-agent",
         agentPubkey: "abc123",
         messageContent: "Hello world",
+        outputTokens: 10,
         toolCallsMade: [],
         systemPrompt: "You are a helpful assistant.",
         conversationHistory: [],

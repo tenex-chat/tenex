@@ -11,6 +11,7 @@ describe("SilentAgentHeuristic", () => {
         agentSlug: "test-agent",
         agentPubkey: "abc123",
         messageContent: "",
+        outputTokens: 0,
         toolCallsMade: [],
         systemPrompt: "You are a helpful assistant.",
         conversationHistory: [],
@@ -48,6 +49,7 @@ describe("SilentAgentHeuristic", () => {
         it("should NOT trigger when agent has meaningful content", async () => {
             const context = createContext({
                 messageContent: "Here is my response to you.",
+                outputTokens: 15,
                 toolCallsMade: [],
             });
 
@@ -99,6 +101,19 @@ describe("SilentAgentHeuristic", () => {
             const result = await heuristic.detect(context);
 
             expect(result.triggered).toBe(true);
+        });
+
+        it("should trigger when LLM returns 0 tokens even if error fallback message exists", async () => {
+            const context = createContext({
+                messageContent: "There was an error capturing the work done, please review the conversation for the results",
+                outputTokens: 0,
+                toolCallsMade: [],
+            });
+
+            const result = await heuristic.detect(context);
+
+            expect(result.triggered).toBe(true);
+            expect(result.reason).toContain("0 output tokens");
         });
     });
 

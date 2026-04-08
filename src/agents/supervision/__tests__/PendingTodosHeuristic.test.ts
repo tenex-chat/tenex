@@ -15,6 +15,7 @@ describe("PendingTodosHeuristic", () => {
         agentSlug: "test-agent",
         agentPubkey: "abc123",
         messageContent: "",
+        outputTokens: 0,
         toolCallsMade: [],
         systemPrompt: "You are a helpful assistant.",
         conversationHistory: [],

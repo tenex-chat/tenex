@@ -13,33 +13,34 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
       };
     }
 
-    const content = context.messageContent?.trim() || "";
-    const hasMeaningfulContent = content.length > 0;
+    const hasLLMOutput = context.outputTokens > 0;
     const hasToolCalls = context.toolCallsMade.length > 0;
 
-    // Silent = no content AND no tool calls that would produce output
+    // Silent = no LLM output AND no tool calls that would produce output
     // Exception: delegate calls are ok since agent is waiting for delegation
     const delegateCalls = context.toolCallsMade.filter((toolName) => isDelegateToolName(toolName));
     const hasOnlyDelegateCalls = hasToolCalls && delegateCalls.length === context.toolCallsMade.length;
 
-    const isSilent = !hasMeaningfulContent && !hasOnlyDelegateCalls;
+    const isSilent = !hasLLMOutput && !hasOnlyDelegateCalls;
 
     return {
       triggered: isSilent,
-      reason: isSilent ? "Agent completed without generating any output or meaningful tool calls" : undefined,
+      reason: isSilent ? `Agent completed with 0 output tokens (LLM failure or empty response)` : undefined,
       evidence: {
-        messageContent: content.substring(0, 100),
+        outputTokens: context.outputTokens,
+        messageContent: context.messageContent.substring(0, 100),
         toolCallsMade: context.toolCallsMade,
       },
     };
   }
 
   buildVerificationPrompt(context: PostCompletionContext, detection: HeuristicDetection): string {
-    const evidence = detection.evidence as { messageContent?: string } | undefined;
-    return `The agent "${context.agentSlug}" completed its turn without producing any visible output.
-This may indicate the agent failed to respond appropriately.
+    const evidence = detection.evidence as { outputTokens?: number; messageContent?: string } | undefined;
+    return `The agent "${context.agentSlug}" completed its turn without producing any LLM output.
+This may indicate the LLM provider failed or the agent encountered an error.
 
 Evidence:
+- Output tokens: ${evidence?.outputTokens ?? 0}
 - Message content: "${evidence?.messageContent || "(empty)"}"
 - Tool calls: ${JSON.stringify(context.toolCallsMade)}
 
