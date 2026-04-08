@@ -14,7 +14,7 @@
  * resolves by that root ID directly to its on-disk file.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,6 +23,7 @@ import { ConversationStore } from "../../ConversationStore";
 import { conversationRegistry } from "../../ConversationRegistry";
 import { ConversationResolver } from "../ConversationResolver";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+import { logger } from "@/utils/logger";
 
 describe("ConversationResolver: cross-project scheduled task lookup", () => {
     // Use a 64-char hex ID as the root conversation anchor.
@@ -108,5 +109,36 @@ describe("ConversationResolver: cross-project scheduled task lookup", () => {
         expect(result.conversation!.getProjectId()).toBe(PROJECT_B);
         // isNew must be falsy — this is a pre-existing conversation, not a new one.
         expect(result.isNew).toBeUndefined();
+    });
+
+    it("returns undefined and logs a warning when replyToId is not found in any project", async () => {
+        // An ID that has no corresponding file in any project directory.
+        const NONEXISTENT_ID = "f".repeat(64);
+
+        const warnSpy = spyOn(logger, "warn");
+        try {
+            const resolver = new ConversationResolver();
+
+            // No recipients → getMentionedPubkeys returns [] → handleOrphanedReply
+            // returns undefined immediately without making network calls.
+            const envelope = createMockInboundEnvelope({
+                message: {
+                    id: "orphaned-trigger-event",
+                    transport: "nostr",
+                    nativeId: "orphaned-trigger-event",
+                    replyToId: NONEXISTENT_ID,
+                },
+            });
+
+            const result = await resolver.resolveConversationForEvent(envelope);
+
+            expect(result.conversation).toBeUndefined();
+            expect(warnSpy).toHaveBeenCalledWith(
+                "[ConversationResolver] Could not resolve conversation for reply target",
+                expect.objectContaining({ replyTargetId: expect.any(String) })
+            );
+        } finally {
+            warnSpy.mockRestore();
+        }
     });
 });
