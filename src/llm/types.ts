@@ -204,6 +204,7 @@ export interface CompleteEvent {
     metadata?: LLMMetadata;
     finishReason?: string;
     reasoning?: string;
+    usedErrorFallback?: boolean;
 }
 
 /**

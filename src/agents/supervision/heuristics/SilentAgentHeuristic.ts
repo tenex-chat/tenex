@@ -13,13 +13,7 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
       };
     }
 
-    // Error fallback message from FinishHandler (src/llm/FinishHandler.ts:83-84)
-    // When LLM returns no content, this message is used as a last resort
-    const ERROR_FALLBACK_MESSAGE =
-      "There was an error capturing the work done, please review the conversation for the results";
-
     const content = context.messageContent.trim();
-    const isErrorFallback = content === ERROR_FALLBACK_MESSAGE;
     const isEmpty = content.length === 0;
     const hasToolCalls = context.toolCallsMade.length > 0;
 
@@ -29,16 +23,16 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
 
     // Silent if:
     // 1. Message is empty (no content at all), OR
-    // 2. Message is the error fallback (indicates LLM failure)
+    // 2. LLM used the error fallback message (indicates LLM failure)
     // This approach avoids false positives from:
     // - Missing usage metadata (some providers don't report tokens)
     // - Multi-step flows where final step has 0 tokens but earlier steps had content
-    const isSilent = (isEmpty || isErrorFallback) && !hasOnlyDelegateCalls;
+    const isSilent = (isEmpty || context.usedErrorFallback === true) && !hasOnlyDelegateCalls;
 
     return {
       triggered: isSilent,
       reason: isSilent
-        ? isErrorFallback
+        ? context.usedErrorFallback
           ? "Agent completed with error fallback message (LLM failure)"
           : "Agent completed without generating any output"
         : undefined,
@@ -46,7 +40,7 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
         outputTokens: context.outputTokens,
         messageContent: content.substring(0, 100),
         toolCallsMade: context.toolCallsMade,
-        isErrorFallback,
+        usedErrorFallback: context.usedErrorFallback,
       },
     };
   }
@@ -55,10 +49,10 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
     const evidence = detection.evidence as {
       outputTokens?: number;
       messageContent?: string;
-      isErrorFallback?: boolean;
+      usedErrorFallback?: boolean;
     } | undefined;
 
-    const reason = evidence?.isErrorFallback
+    const reason = evidence?.usedErrorFallback
       ? "returned the error fallback message (LLM failed to generate content)"
       : "produced no visible output";
 
@@ -67,7 +61,7 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
 Evidence:
 - Message content: "${evidence?.messageContent || "(empty)"}"
 - Output tokens: ${evidence?.outputTokens ?? 0}
-- Error fallback: ${evidence?.isErrorFallback ? "yes" : "no"}
+- Error fallback: ${evidence?.usedErrorFallback ? "yes" : "no"}
 - Tool calls: ${JSON.stringify(context.toolCallsMade)}
 
 Is this acceptable behavior or should the agent be prompted to respond?`;

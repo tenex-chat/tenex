@@ -157,6 +157,7 @@ export function createFinishHandler(
                 },
                 metadata,
                 finishReason: e.finishReason,
+                usedErrorFallback,
             });
 
             // DIAGNOSTIC: Log after emitting complete event

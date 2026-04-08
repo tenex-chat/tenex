@@ -19,6 +19,7 @@ describe("SilentAgentHeuristic", () => {
         hasBeenNudgedAboutTodos: false,
         todos: [],
         pendingDelegationCount: 0,
+        usedErrorFallback: false,
         ...overrides,
     });
 
@@ -103,11 +104,12 @@ describe("SilentAgentHeuristic", () => {
             expect(result.triggered).toBe(true);
         });
 
-        it("should trigger when LLM returns error fallback message", async () => {
+        it("should trigger when LLM uses error fallback", async () => {
             const context = createContext({
                 messageContent: "There was an error capturing the work done, please review the conversation for the results",
                 outputTokens: 0,
                 toolCallsMade: [],
+                usedErrorFallback: true,
             });
 
             const result = await heuristic.detect(context);

@@ -182,6 +182,7 @@ export async function checkPostCompletion(
             description: t.description,
         })),
         pendingDelegationCount,
+        usedErrorFallback: completionEvent.usedErrorFallback,
     };
 
     const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext, executionId);

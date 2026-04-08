@@ -105,6 +105,8 @@ export interface PostCompletionContext {
     todos: Array<{ id: string; title: string; status: TodoStatus; description?: string }>;
     /** Number of pending delegations the agent is waiting for (0 if none) */
     pendingDelegationCount: number;
+    /** Whether the LLM completion used the error fallback message */
+    usedErrorFallback?: boolean;
 }
 
 /**
