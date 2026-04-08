@@ -398,14 +398,15 @@ function loadRecentConversations(
 function renderRecentConversationsSection(
     recentConversations: RecentConversationReminderEntry[]
 ): string | null {
-    if (recentConversations.length === 0) {
+    const conversationsWithTitles = recentConversations.filter((conv) => Boolean(conv.title));
+
+    if (conversationsWithTitles.length === 0) {
         return null;
     }
 
-    const conversationLines = recentConversations.map((conv, index) => {
-        const title = conv.title || `Conversation ${shortenConversationId(conv.id)}`;
+    const conversationLines = conversationsWithTitles.map((conv, index) => {
         const relativeTime = formatRelativeTimeShort(conv.lastActivity);
-        return `${index + 1}. **${title}** (${relativeTime}) [id: ${shortenConversationId(conv.id)}]`;
+        return `${index + 1}. **${conv.title}** (${relativeTime}) [id: ${shortenConversationId(conv.id)}]`;
     });
 
     return `<recent>
