@@ -2,6 +2,7 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
 import { installAgentFromNostr } from "@/agents/agent-installer";
 import { AgentSlugConflictError } from "@/agents/errors";
+import { categorizeAgent } from "@/agents/categorizeAgent";
 import { resolveCategory } from "@/agents/role-categories";
 import { processAgentTools } from "@/agents/tool-normalization";
 import type { AgentInstance } from "@/agents/types";
@@ -25,6 +26,12 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  * Single entry point for loading agents into registry.
  * Handles the complete flow: registry → storage → Nostr
  */
+
+/**
+ * Tracks pubkeys whose lazy categorization is currently in-flight.
+ * Prevents duplicate LLM requests when the same agent is loaded concurrently.
+ */
+const categorizationInFlight = new Set<string>();
 
 /**
  * Create an AgentInstance from stored agent data.
@@ -174,6 +181,43 @@ export async function loadStoredAgentIntoRegistry(
     const storedAgent = await agentStorage.loadAgent(pubkey);
     if (!storedAgent) {
         throw new Error(`Agent ${pubkey} not found in storage`);
+    }
+
+    if (!storedAgent.category && !storedAgent.inferredCategory && !categorizationInFlight.has(pubkey)) {
+        categorizationInFlight.add(pubkey);
+        void (async () => {
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error("categorization timed out after 30s")), 30_000);
+            });
+            try {
+                const inferredCategory = await Promise.race([
+                    categorizeAgent({
+                        name: storedAgent.name,
+                        role: storedAgent.role,
+                        description: storedAgent.description,
+                        instructions: storedAgent.instructions,
+                        useCriteria: storedAgent.useCriteria,
+                    }),
+                    timeoutPromise,
+                ]).finally(() => clearTimeout(timeoutId));
+                if (!inferredCategory) return;
+                // CAS-style guard: re-read the agent immediately before writing so we
+                // don't clobber a concurrent saveAgent call with a stale copy of the file.
+                const current = await agentStorage.loadAgent(pubkey);
+                if (!current || current.inferredCategory || current.category) return;
+                const updated = await agentStorage.updateInferredCategory(pubkey, inferredCategory);
+                if (updated) {
+                    logger.info(`[AgentLoader] Lazily categorized agent "${storedAgent.name}" as "${inferredCategory}"`);
+                } else {
+                    logger.warn(`[AgentLoader] Failed to persist lazy categorization for "${storedAgent.name}"`);
+                }
+            } finally {
+                categorizationInFlight.delete(pubkey);
+            }
+        })().catch((error) => {
+            logger.warn(`[AgentLoader] Lazy categorization failed for "${storedAgent.name}"`, { error });
+        });
     }
 
     const projectDTag = registry.getProjectDTag();
