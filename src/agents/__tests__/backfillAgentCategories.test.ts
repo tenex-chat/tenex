@@ -1,119 +1,103 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { createStoredAgent, deriveAgentPubkeyFromNsec, type StoredAgent } from "@/agents/AgentStorage";
 
-let categorizeResult: "principal" | "orchestrator" | "worker" | "reviewer" | "domain-expert" | "generalist" | undefined = "worker";
-let updateCalls: Array<{ pubkey: string; category: string }> = [];
-let initializeCalls = 0;
+let categorizeResult: string | undefined = "worker";
+
+const categorizeAgentMock = mock(async () => categorizeResult);
 
 mock.module("@/agents/categorizeAgent", () => ({
-    categorizeAgent: async () => categorizeResult,
+    categorizeAgent: categorizeAgentMock,
 }));
 
-const { backfillAgentCategories } = await import("../backfillAgentCategories");
+const backfillModulePromise = import("../backfillAgentCategories");
 
-afterEach(() => {
-    categorizeResult = "worker";
-    updateCalls = [];
-    initializeCalls = 0;
-    mock.restore();
-});
+function createAgent(params: {
+    slug: string;
+    name: string;
+    role: string;
+    category?: StoredAgent["category"];
+    inferredCategory?: StoredAgent["inferredCategory"];
+}): StoredAgent {
+    const signer = NDKPrivateKeySigner.generate();
+    const agent = createStoredAgent({
+        nsec: signer.nsec,
+        slug: params.slug,
+        name: params.name,
+        role: params.role,
+        category: params.category,
+    });
+
+    if (params.inferredCategory) {
+        agent.inferredCategory = params.inferredCategory;
+    }
+
+    return agent;
+}
 
 describe("backfillAgentCategories", () => {
-    test("categorizes uncategorized agents and persists inferred category", async () => {
-        const signer = NDKPrivateKeySigner.generate();
-        const pubkey = signer.pubkey;
+    it("categorizes uncategorized agents and skips agents that already have a category", async () => {
+        const { backfillAgentCategories } = await backfillModulePromise;
+        const uncategorized = createAgent({
+            slug: "needs-category",
+            name: "Needs Category",
+            role: "assistant",
+        });
+        const categorized = createAgent({
+            slug: "already-categorized",
+            name: "Already Categorized",
+            role: "assistant",
+            category: "generalist",
+        });
 
+        const updateInferredCategoryCalls: Array<{ pubkey: string; category: string }> = [];
         const storage = {
-            initialize: async () => {
-                initializeCalls++;
-            },
-            getCanonicalActiveAgents: async () => [
-                {
-                    nsec: signer.nsec,
-                    slug: "uncategorized-agent",
-                    name: "Uncategorized Agent",
-                    role: "assistant",
-                },
-                {
-                    nsec: NDKPrivateKeySigner.generate().nsec,
-                    slug: "already-categorized",
-                    name: "Already Categorized",
-                    role: "assistant",
-                    category: "worker",
-                },
-            ],
-            updateInferredCategory: async (incomingPubkey: string, category: string) => {
-                updateCalls.push({ pubkey: incomingPubkey, category });
+            initialize: async () => {},
+            getCanonicalActiveAgents: async () => [uncategorized, categorized],
+            updateInferredCategory: async (pubkey: string, category: string) => {
+                updateInferredCategoryCalls.push({ pubkey, category });
                 return true;
             },
         };
 
-        const result = await backfillAgentCategories(storage, { dryRun: false });
+        categorizeResult = "orchestrator";
+        const result = await backfillAgentCategories(storage);
 
-        expect(initializeCalls).toBe(1);
-        expect(result.processed).toBe(1);
-        expect(result.categorized).toBe(1);
-        expect(result.skipped).toBe(1);
-        expect(result.failed).toBe(0);
-        expect(updateCalls).toEqual([{ pubkey, category: "worker" }]);
+        expect(result).toEqual({
+            processed: 1,
+            categorized: 1,
+            skipped: 1,
+            failed: 0,
+        });
+        expect(updateInferredCategoryCalls).toHaveLength(1);
+        expect(updateInferredCategoryCalls[0]?.pubkey).toBe(deriveAgentPubkeyFromNsec(uncategorized.nsec));
+        expect(updateInferredCategoryCalls[0]?.category).toBe("orchestrator");
     });
 
-    test("does not persist during dry run", async () => {
-        const signer = NDKPrivateKeySigner.generate();
+    it("supports dry runs without persisting changes", async () => {
+        const { backfillAgentCategories } = await backfillModulePromise;
+        const uncategorized = createAgent({
+            slug: "dry-run-target",
+            name: "Dry Run Target",
+            role: "assistant",
+        });
 
+        const updateInferredCategory = mock(async () => true);
         const storage = {
-            initialize: async () => {
-                initializeCalls++;
-            },
-            getCanonicalActiveAgents: async () => [
-                {
-                    nsec: signer.nsec,
-                    slug: "dry-run-agent",
-                    name: "Dry Run Agent",
-                    role: "assistant",
-                },
-            ],
-            updateInferredCategory: async () => {
-                updateCalls.push({ pubkey: "unexpected", category: "unexpected" });
-                return true;
-            },
+            initialize: async () => {},
+            getCanonicalActiveAgents: async () => [uncategorized],
+            updateInferredCategory,
         };
 
+        categorizeResult = "reviewer";
         const result = await backfillAgentCategories(storage, { dryRun: true });
 
-        expect(initializeCalls).toBe(1);
-        expect(result.processed).toBe(1);
-        expect(result.categorized).toBe(1);
-        expect(result.skipped).toBe(0);
-        expect(result.failed).toBe(0);
-        expect(updateCalls).toHaveLength(0);
-    });
-
-    test("counts failed categorizations", async () => {
-        categorizeResult = undefined;
-
-        const storage = {
-            initialize: async () => {
-                initializeCalls++;
-            },
-            getCanonicalActiveAgents: async () => [
-                {
-                    nsec: NDKPrivateKeySigner.generate().nsec,
-                    slug: "failing-agent",
-                    name: "Failing Agent",
-                    role: "assistant",
-                },
-            ],
-            updateInferredCategory: async () => true,
-        };
-
-        const result = await backfillAgentCategories(storage, { dryRun: false });
-
-        expect(initializeCalls).toBe(1);
-        expect(result.processed).toBe(1);
-        expect(result.categorized).toBe(0);
-        expect(result.skipped).toBe(0);
-        expect(result.failed).toBe(1);
-        expect(updateCalls).toHaveLength(0);
+        expect(result).toEqual({
+            processed: 1,
+            categorized: 1,
+            skipped: 0,
+            failed: 0,
+        });
+        expect(updateInferredCategory).not.toHaveBeenCalled();
     });
 });

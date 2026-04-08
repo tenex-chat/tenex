@@ -36,8 +36,22 @@ function buildSkillAliasIndex(): Map<string, Set<string>> {
             return;
         }
 
+        const mergedAliases = new Set<string>();
         for (const alias of aliases) {
-            aliasIndex.set(alias, aliases);
+            const existing = aliasIndex.get(alias);
+            if (existing) {
+                for (const existingAlias of existing) {
+                    mergedAliases.add(existingAlias);
+                }
+            }
+        }
+
+        for (const alias of aliases) {
+            mergedAliases.add(alias);
+        }
+
+        for (const alias of mergedAliases) {
+            aliasIndex.set(alias, mergedAliases);
         }
     };
 

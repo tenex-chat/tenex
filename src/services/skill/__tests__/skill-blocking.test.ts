@@ -72,6 +72,48 @@ describe("skill-blocking", () => {
         expect(blockedSet.has("b".repeat(64))).toBe(true);
     });
 
+    it("merges alias groups from installed and whitelisted skills", () => {
+        whitelistService.setInstalledSkills([
+            {
+                eventId: "d".repeat(64),
+                identifier: "skill-a",
+                shortId: "skill-b",
+                content: "",
+                installedFiles: [],
+            } as never,
+        ]);
+
+        const originalGetWhitelistedSkills = whitelistService.getWhitelistedSkills.bind(
+            whitelistService
+        );
+
+        try {
+            (whitelistService as typeof whitelistService & {
+                getWhitelistedSkills: () => never[];
+            }).getWhitelistedSkills = () => [
+                {
+                    eventId: "e".repeat(64),
+                    identifier: "skill-b",
+                    shortId: "skill-c",
+                    kind: 4202,
+                    whitelistedBy: ["pubkey"],
+                } as never,
+            ];
+
+            const blockedSet = buildExpandedBlockedSet(["skill-a"]);
+
+            expect(blockedSet.has("skill-a")).toBe(true);
+            expect(blockedSet.has("skill-b")).toBe(true);
+            expect(blockedSet.has("skill-c")).toBe(true);
+            expect(blockedSet.has("d".repeat(64))).toBe(true);
+            expect(blockedSet.has("e".repeat(64))).toBe(true);
+        } finally {
+            (whitelistService as typeof whitelistService & {
+                getWhitelistedSkills: () => never[];
+            }).getWhitelistedSkills = originalGetWhitelistedSkills;
+        }
+    });
+
     it("filters blocked skills and preserves allowed ids", () => {
         const blockedSet = new Set(["blocked"]);
         expect(filterBlockedSkills(["allowed", "blocked", "other"], blockedSet)).toEqual([

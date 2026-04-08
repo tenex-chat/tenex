@@ -1,4 +1,3 @@
-import { llmServiceFactory } from "@/llm";
 import { VALID_CATEGORIES, type AgentCategory, isValidCategory } from "@/agents/role-categories";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
@@ -79,8 +78,7 @@ export async function categorizeAgent(metadata: AgentMetadata): Promise<AgentCat
             return undefined;
         }
 
-        const llmConfig = config.getLLMConfig(configName);
-        const llmService = llmServiceFactory.createService(llmConfig, {
+        const llmService = config.createLLMService(configName, {
             agentName: "agent-categorizer",
         });
 

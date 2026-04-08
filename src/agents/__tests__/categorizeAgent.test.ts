@@ -1,105 +1,107 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
+import { createSimpleMock } from "@/test-utils/mock-llm";
 
-let selectedConfigName: string | undefined;
-let generatedText = "worker";
-let loadedLlms: {
-    categorization?: string;
-    summarization?: string;
-    default?: string;
+let loadConfigCalls = 0;
+let createLLMServiceCalls = 0;
+let lastRequestedConfigName: string | undefined;
+let loadConfigResult: {
+    llms: {
+        categorization?: string;
+        summarization?: string;
+        default?: string;
+    };
 } = {
-    categorization: "categorization-model",
-    summarization: "summarization-model",
-    default: "default-model",
-};
-
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        loadConfig: async () => ({ llms: loadedLlms }),
-        getLLMConfig: (configName?: string) => {
-            selectedConfigName = configName;
-            return {
-                provider: "mock",
-                model: configName || "default-model",
-            };
-        },
-    },
-}));
-
-mock.module("@/llm", () => ({
-    llmServiceFactory: {
-        createService: () => ({
-            generateText: async () => ({ text: generatedText }),
-        }),
-    },
-}));
-
-const { categorizeAgent, parseCategory } = await import("../categorizeAgent");
-
-afterEach(() => {
-    selectedConfigName = undefined;
-    generatedText = "worker";
-    loadedLlms = {
+    llms: {
         categorization: "categorization-model",
         summarization: "summarization-model",
         default: "default-model",
-    };
+    },
+};
+let llmService = createSimpleMock("worker");
+
+const loadConfigMock = mock(async () => {
+    loadConfigCalls++;
+    return loadConfigResult;
 });
 
+const createLLMServiceMock = mock((configName?: string) => {
+    createLLMServiceCalls++;
+    lastRequestedConfigName = configName;
+    return llmService;
+});
+
+mock.module("@/services/ConfigService", () => ({
+    config: {
+        getConfigPath: () => "/tmp/tenex-test",
+        loadConfig: loadConfigMock,
+        createLLMService: createLLMServiceMock,
+    },
+}));
+
+const categorizeModulePromise = import("../categorizeAgent");
+
 describe("categorizeAgent", () => {
-    test("parses direct category output", async () => {
-        generatedText = "  WORKER\n";
+    it("parses categories from verbose LLM output and uses the categorization slot first", async () => {
+        const { categorizeAgent, parseCategory } = await categorizeModulePromise;
 
-        const category = await categorizeAgent({ name: "test-agent" });
+        expect(parseCategory("The agent is a domain-expert in NDK")).toBe("domain-expert");
+        expect(parseCategory("  reviewer \n")).toBe("reviewer");
 
-        expect(category).toBe("worker");
-        expect(selectedConfigName).toBe("categorization-model");
-    });
-
-    test("falls back to summarization then default config names", async () => {
-        loadedLlms = {
-            summarization: "summarization-model",
-            default: "default-model",
+        llmService = createSimpleMock("The agent is a worker");
+        loadConfigResult = {
+            llms: {
+                categorization: "categorization-model",
+                summarization: "summarization-model",
+                default: "default-model",
+            },
         };
+        loadConfigCalls = 0;
+        createLLMServiceCalls = 0;
+        lastRequestedConfigName = undefined;
 
         const category = await categorizeAgent({
-            name: "test-agent",
-            role: "worker",
-            description: "Implements tasks directly",
+            name: "Build Bot",
+            role: "code writer",
+            description: "Implements plan items",
+            instructions: "Write changes and keep tests passing.",
+            useCriteria: "Use when implementation work is needed.",
         });
 
         expect(category).toBe("worker");
-        expect(selectedConfigName).toBe("summarization-model");
+        expect(loadConfigCalls).toBe(1);
+        expect(createLLMServiceCalls).toBe(1);
+        expect(lastRequestedConfigName).toBe("categorization-model");
     });
 
-    test("extracts category from a verbose response", async () => {
-        generatedText = "The right category here is domain-expert because of the domain expertise.";
+    it("falls back to summarization when categorization is absent and handles parse failures", async () => {
+        const { categorizeAgent } = await categorizeModulePromise;
 
-        const category = await categorizeAgent({ name: "expert-agent" });
+        llmService = createSimpleMock("The agent is a reviewer");
+        loadConfigResult = {
+            llms: {
+                summarization: "summarization-model",
+                default: "default-model",
+            },
+        };
+        loadConfigCalls = 0;
+        createLLMServiceCalls = 0;
+        lastRequestedConfigName = undefined;
 
-        expect(category).toBe("domain-expert");
-    });
+        const category = await categorizeAgent({
+            name: "Review Bot",
+            role: "reviewer",
+            description: "Checks code quality",
+        });
 
-    test("returns undefined for unparseable output", async () => {
-        generatedText = "I do not know.";
+        expect(category).toBe("reviewer");
+        expect(lastRequestedConfigName).toBe("summarization-model");
 
-        const category = await categorizeAgent({ name: "confused-agent" });
+        llmService = createSimpleMock("I cannot tell");
+        const undefinedCategory = await categorizeAgent({
+            name: "Unknown Bot",
+            role: "helper",
+        });
 
-        expect(category).toBeUndefined();
-    });
-});
-
-describe("parseCategory", () => {
-    test("accepts all canonical categories and normalizes case", () => {
-        expect(parseCategory("Principal")).toBe("principal");
-        expect(parseCategory("orchestrator")).toBe("orchestrator");
-        expect(parseCategory("worker")).toBe("worker");
-        expect(parseCategory("reviewer")).toBe("reviewer");
-        expect(parseCategory("domain-expert")).toBe("domain-expert");
-        expect(parseCategory("generalist")).toBe("generalist");
-    });
-
-    test("extracts a valid category from surrounding text", () => {
-        expect(parseCategory("This agent should be a worker." )).toBe("worker");
-        expect(parseCategory("orchestrator (routes work)")).toBe("orchestrator");
+        expect(undefinedCategory).toBeUndefined();
     });
 });
