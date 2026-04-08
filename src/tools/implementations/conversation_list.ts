@@ -22,6 +22,7 @@ import {
     ConversationCatalogService,
     type ConversationCatalogListEntry,
     type ConversationCatalogParticipant,
+    buildConversationCatalogProjection,
 } from "@/conversations/ConversationCatalogService";
 import {
     getConversationRecordAuthorPrincipalId,
@@ -190,133 +191,6 @@ function extractRecipient(conversation: ConversationStore): string | undefined {
 }
 
 
-/**
- * Check if a conversation is a root conversation (not a delegation child).
- * A conversation is root if its delegationChain metadata is absent or empty.
- */
-function isRootConversation(store: ConversationStore): boolean {
-    const chain = store.metadata.delegationChain;
-    return !chain || chain.length === 0;
-}
-
-/**
- * Get the direct parent conversation ID from a child conversation's delegationChain.
- * The parent is the second-to-last entry in the chain (last entry is the current conversation's agent).
- * Returns undefined if this is a root conversation or chain is too short.
- */
-function getParentConversationId(store: ConversationStore): string | undefined {
-    const chain = store.metadata.delegationChain;
-    if (!chain || chain.length < 2) return undefined;
-    return chain[chain.length - 2].conversationId;
-}
-
-function summarizeConversation(
-    conversation: ConversationStore,
-    projectId: string | undefined,
-    children: ChildConversationSummary[]
-): ConversationSummary {
-    const messages = conversation.getAllMessages();
-    const lastMessage = messages[messages.length - 1];
-    const metadata = conversation.metadata;
-    const lastActivity = lastMessage?.timestamp;
-
-    return {
-        id: shortenConversationId(conversation.id),
-        fullId: conversation.id,
-        projectId,
-        title: metadata.title ?? conversation.title,
-        summary: metadata.summary,
-        sender: extractSender(conversation),
-        recipient: extractRecipient(conversation),
-        lastActive: lastActivity ? formatTimeAgo(lastActivity * 1000) : undefined,
-        children,
-    };
-}
-
-function summarizeChildConversation(
-    conversation: ConversationStore,
-    allConversations: Map<string, LoadedConversation>
-): ChildConversationSummary {
-    const metadata = conversation.metadata;
-    const messages = conversation.getAllMessages();
-    const lastMessage = messages[messages.length - 1];
-    const lastActivity = lastMessage?.timestamp;
-
-    // Collect direct children of this conversation
-    const directChildren = collectDirectChildren(conversation.id, allConversations);
-
-    return {
-        id: shortenConversationId(conversation.id),
-        fullId: conversation.id,
-        title: metadata.title ?? conversation.title,
-        recipient: extractRecipient(conversation),
-        lastActive: lastActivity ? formatTimeAgo(lastActivity * 1000) : undefined,
-        children: directChildren,
-    };
-}
-
-/**
- * Collect and summarize direct children of a given conversation ID.
- */
-function collectDirectChildren(
-    parentId: string,
-    allConversations: Map<string, LoadedConversation>
-): ChildConversationSummary[] {
-    // First collect children with their last activity timestamps for sorting
-    const childEntries: Array<{ loaded: LoadedConversation; lastActivity: number }> = [];
-
-    for (const [, loaded] of allConversations) {
-        const childParentId = getParentConversationId(loaded.store);
-        if (childParentId === parentId) {
-            const messages = loaded.store.getAllMessages();
-            const lastMessage = messages[messages.length - 1];
-            const lastActivity = lastMessage?.timestamp ?? 0;
-            childEntries.push({ loaded, lastActivity });
-        }
-    }
-
-    // Sort by last activity descending
-    childEntries.sort((a, b) => b.lastActivity - a.lastActivity);
-
-    // Now summarize in sorted order
-    return childEntries.map(({ loaded }) =>
-        summarizeChildConversation(loaded.store, allConversations)
-    );
-}
-
-/**
- * Compute the most recent activity time across a conversation and all its descendants.
- */
-function computeSubtreeLastActivity(
-    convId: string,
-    allConversations: Map<string, LoadedConversation>,
-    visited: Set<string> = new Set()
-): number {
-    if (visited.has(convId)) return 0;
-    visited.add(convId);
-
-    const loaded = allConversations.get(convId);
-    if (!loaded) return 0;
-
-    let maxTime = loaded.store.getLastActivityTime();
-
-    // Find all direct children and recurse
-    for (const [, child] of allConversations) {
-        const childParentId = getParentConversationId(child.store);
-        if (childParentId === convId) {
-            const childTime = computeSubtreeLastActivity(child.store.id, allConversations, visited);
-            if (childTime > maxTime) maxTime = childTime;
-        }
-    }
-
-    return maxTime;
-}
-
-interface LoadedConversation {
-    store: ConversationStore;
-    projectId: ProjectDTag;
-}
-
 interface IndexedConversation {
     entry: ConversationCatalogListEntry;
     projectId: ProjectDTag;
@@ -328,11 +202,12 @@ interface ConversationGraph {
     rootConversationIds: string[];
 }
 
-function loadConversationsForProject(
+function loadIndexedConversationsFromTranscriptScan(
     projectId: ProjectDTag,
-    isCurrentProject: boolean
-): LoadedConversation[] {
-    const conversations: LoadedConversation[] = [];
+    currentProjectId: ProjectDTag | null
+): IndexedConversation[] {
+    const conversations: IndexedConversation[] = [];
+    const isCurrentProject = projectId === currentProjectId;
     const conversationIds = isCurrentProject
         ? ConversationStore.listConversationIdsFromDisk()
         : ConversationStore.listConversationIdsFromDiskForProject(projectId);
@@ -341,14 +216,12 @@ function loadConversationsForProject(
         try {
             let store: ConversationStore;
             if (isCurrentProject) {
-                // Use cached version for current project
                 store = ConversationStore.getOrLoad(id);
             } else {
-                // Load fresh for external projects
                 store = new ConversationStore(ConversationStore.getBasePath());
                 store.load(projectId, id);
             }
-            conversations.push({ store, projectId });
+            conversations.push(buildIndexedConversationFromStore(store, projectId));
         } catch (err) {
             logger.debug("Failed to load conversation", { id, projectId, error: err });
         }
@@ -356,8 +229,12 @@ function loadConversationsForProject(
     return conversations;
 }
 
-function loadIndexedConversationsForProject(projectId: ProjectDTag): IndexedConversation[] {
+function loadIndexedConversationsForProject(
+    projectId: ProjectDTag,
+    currentProjectId: ProjectDTag | null
+): IndexedConversation[] {
     const metadataPath = join(ConversationStore.getBasePath(), projectId);
+    const shouldCloseCatalog = projectId !== currentProjectId;
     try {
         const catalog = ConversationCatalogService.getInstance(projectId, metadataPath);
 
@@ -371,85 +248,30 @@ function loadIndexedConversationsForProject(projectId: ProjectDTag): IndexedConv
             error,
         });
 
-        const isCurrentProject = projectId === ConversationStore.getProjectId();
-        return loadConversationsForProject(projectId, isCurrentProject).map(buildIndexedConversationFromStore);
+        return loadIndexedConversationsFromTranscriptScan(projectId, currentProjectId);
+    } finally {
+        if (shouldCloseCatalog) {
+            ConversationCatalogService.closeProject(projectId, metadataPath);
+        }
     }
 }
 
-function buildIndexedConversationFromStore(conversation: LoadedConversation): IndexedConversation {
-    const messages = conversation.store.getAllMessages();
-    const firstMessage = messages[0];
-    const lastMessage = messages[messages.length - 1];
-    const metadata = conversation.store.metadata as Record<string, unknown>;
-    const participants = new Map<string, ConversationCatalogParticipant>();
-    const delegationIds = new Set<string>();
-
-    for (const message of messages) {
-        const participantKey =
-            getConversationRecordAuthorPrincipalId(message)
-            ?? getConversationRecordAuthorPubkey(message);
-        if (participantKey && !participants.has(participantKey)) {
-            const linkedPubkey = getConversationRecordAuthorPubkey(message);
-            const kind = message.senderPrincipal?.kind;
-            participants.set(participantKey, {
-                participantKey,
-                linkedPubkey,
-                principalId: getConversationRecordAuthorPrincipalId(message),
-                transport: message.senderPrincipal?.transport,
-                displayName:
-                    typeof message.senderPrincipal?.displayName === "string"
-                    && message.senderPrincipal.displayName.trim().length > 0
-                        ? message.senderPrincipal.displayName
-                        : undefined,
-                username:
-                    typeof message.senderPrincipal?.username === "string"
-                    && message.senderPrincipal.username.trim().length > 0
-                        ? message.senderPrincipal.username
-                        : undefined,
-                kind,
-                isAgent: kind === "agent" || (!!linkedPubkey && ConversationStore.isAgentPubkey(linkedPubkey)),
-            });
-        }
-
-        if (
-            message.messageType === "delegation-marker"
-            && message.delegationMarker?.delegationConversationId
-        ) {
-            delegationIds.add(message.delegationMarker.delegationConversationId);
-        }
-    }
+function buildIndexedConversationFromStore(
+    store: ConversationStore,
+    projectId: ProjectDTag
+): IndexedConversation {
+    const projection = buildConversationCatalogProjection(
+        store.metadata as Record<string, unknown> | undefined,
+        store.getAllMessages(),
+        ConversationStore.agentPubkeys
+    );
 
     return {
-        projectId: conversation.projectId,
+        projectId,
         entry: {
-            id: conversation.store.id,
-            title:
-                typeof metadata.title === "string" && metadata.title.trim().length > 0
-                    ? metadata.title
-                    : conversation.store.title,
-            summary:
-                typeof metadata.summary === "string" && metadata.summary.trim().length > 0
-                    ? metadata.summary
-                    : undefined,
-            lastUserMessage:
-                typeof metadata.lastUserMessage === "string" && metadata.lastUserMessage.trim().length > 0
-                    ? metadata.lastUserMessage
-                    : typeof metadata.last_user_message === "string" && metadata.last_user_message.trim().length > 0
-                        ? metadata.last_user_message
-                        : undefined,
-            statusLabel:
-                typeof metadata.statusLabel === "string" && metadata.statusLabel.trim().length > 0
-                    ? metadata.statusLabel
-                    : undefined,
-            statusCurrentActivity:
-                typeof metadata.statusCurrentActivity === "string" && metadata.statusCurrentActivity.trim().length > 0
-                    ? metadata.statusCurrentActivity
-                    : undefined,
-            messageCount: messages.length,
-            createdAt: firstMessage?.timestamp,
-            lastActivity: lastMessage?.timestamp ?? 0,
-            participants: Array.from(participants.values()),
-            delegationIds: Array.from(delegationIds),
+            id: store.id,
+            ...projection,
+            lastActivity: projection.lastActivity ?? 0,
         },
     };
 }
@@ -495,6 +317,9 @@ function buildConversationGraph(conversations: IndexedConversation[]): Conversat
     const rootConversationIds = conversations
         .map((conversation) => conversation.entry.id)
         .filter((conversationId) => !parentByChildId.has(conversationId));
+    // Orphaned delegated conversations are promoted to roots when their parent is
+    // missing from the visible dataset. That keeps the tree connected and listable
+    // instead of silently dropping reachable conversations.
 
     return {
         conversationsById,
@@ -683,20 +508,17 @@ function loadConversationForSummary(
 
 function summarizeIndexedChildConversation(
     conversation: IndexedConversation,
-    graph: ConversationGraph,
-    currentProjectId: ProjectDTag | null,
-    storeCache: Map<string, ConversationStore | null>
+    graph: ConversationGraph
 ): ChildConversationSummary {
-    const store = loadConversationForSummary(conversation, currentProjectId, storeCache);
     const children = (graph.childrenByParentId.get(conversation.entry.id) ?? []).map((child) =>
-        summarizeIndexedChildConversation(child, graph, currentProjectId, storeCache)
+        summarizeIndexedChildConversation(child, graph)
     );
 
     return {
         id: shortenConversationId(conversation.entry.id),
         fullId: conversation.entry.id,
-        title: store?.metadata.title ?? store?.title ?? conversation.entry.title,
-        recipient: store ? extractRecipient(store) : extractRecipientFromIndexedConversation(conversation),
+        title: conversation.entry.title,
+        recipient: extractRecipientFromIndexedConversation(conversation),
         lastActive: conversation.entry.lastActivity
             ? formatTimeAgo(conversation.entry.lastActivity * 1000)
             : undefined,
@@ -712,7 +534,7 @@ function summarizeIndexedConversation(
 ): ConversationSummary {
     const store = loadConversationForSummary(conversation, currentProjectId, storeCache);
     const children = (graph.childrenByParentId.get(conversation.entry.id) ?? []).map((child) =>
-        summarizeIndexedChildConversation(child, graph, currentProjectId, storeCache)
+        summarizeIndexedChildConversation(child, graph)
     );
 
     return {
@@ -791,58 +613,6 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): WithFi
     );
 }
 
-/**
- * Check if a conversation has a specific pubkey as a participant
- */
-function conversationHasParticipant(conversation: ConversationStore, filter: WithFilter): boolean {
-    const messages = conversation.getAllMessages();
-    for (const message of messages) {
-        const authorPubkey = getConversationRecordAuthorPubkey(message);
-        if (!authorPubkey) {
-            continue;
-        }
-
-        const normalizedAuthor = authorPubkey.toLowerCase();
-        if (
-            (filter.kind === "exact" && normalizedAuthor === filter.pubkey.toLowerCase()) ||
-            (filter.kind === "prefix" && normalizedAuthor.startsWith(filter.prefix))
-        ) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Check if a conversation subtree (root + all descendants) has a specific pubkey as participant.
- */
-function subtreeHasParticipant(
-    convId: string,
-    allConversations: Map<string, LoadedConversation>,
-    filter: WithFilter,
-    visited: Set<string> = new Set()
-): boolean {
-    if (visited.has(convId)) return false;
-    visited.add(convId);
-
-    const loaded = allConversations.get(convId);
-    if (!loaded) return false;
-
-    if (conversationHasParticipant(loaded.store, filter)) return true;
-
-    // Check children
-    for (const [, child] of allConversations) {
-        const childParentId = getParentConversationId(child.store);
-        if (childParentId === convId) {
-            if (subtreeHasParticipant(child.store.id, allConversations, filter, visited)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
 async function executeConversationList(
     input: ConversationListInput,
     context: ToolExecutionContext
@@ -885,91 +655,24 @@ async function executeConversationList(
         agent: context.agent.name,
     });
 
-    if (effectiveProjectId === "all") {
-        const projectIds = ConversationStore.listProjectIdsFromDisk();
-        const indexedConversations = projectIds.flatMap((projectId) =>
-            loadIndexedConversationsForProject(projectId)
-        );
-        const graph = buildConversationGraph(indexedConversations);
-        const memoizedSubtreeTimes = new Map<string, number>();
+    const projectIds = effectiveProjectId === "all"
+        ? ConversationStore.listProjectIdsFromDisk()
+        : effectiveProjectId
+            ? [effectiveProjectId]
+            : [];
+    const indexedConversations = projectIds.flatMap((projectId) =>
+        loadIndexedConversationsForProject(projectId, currentProjectId)
+    );
+    const graph = buildConversationGraph(indexedConversations);
+    const memoizedSubtreeTimes = new Map<string, number>();
 
-        const rootsWithSubtreeActivity = graph.rootConversationIds.map((conversationId) => ({
-            conversation: graph.conversationsById.get(conversationId)!,
-            subtreeLastActivity: computeIndexedSubtreeLastActivity(
-                conversationId,
-                graph,
-                memoizedSubtreeTimes
-            ),
-        }));
-
-        let filteredRoots = rootsWithSubtreeActivity;
-        if (fromTime !== undefined || toTime !== undefined) {
-            filteredRoots = rootsWithSubtreeActivity.filter(({ subtreeLastActivity }) => {
-                if (fromTime !== undefined && subtreeLastActivity < fromTime) return false;
-                if (toTime !== undefined && subtreeLastActivity > toTime) return false;
-                return true;
-            });
-        }
-
-        if (withFilter) {
-            const memoizedMatches = new Map<string, boolean>();
-            filteredRoots = filteredRoots.filter(({ conversation }) =>
-                indexedSubtreeHasParticipant(
-                    conversation.entry.id,
-                    graph,
-                    withFilter,
-                    memoizedMatches
-                )
-            );
-        }
-
-        const sortedRoots = [...filteredRoots].sort((a, b) =>
-            b.subtreeLastActivity - a.subtreeLastActivity
-        );
-        const limitedRoots = sortedRoots.slice(0, limit);
-        const storeCache = new Map<string, ConversationStore | null>();
-        const summaries = limitedRoots.map(({ conversation }) =>
-            summarizeIndexedConversation(conversation, graph, currentProjectId, storeCache)
-        );
-
-        logger.info("✅ Conversations listed (tree view)", {
-            total: graph.rootConversationIds.length,
-            filtered: filteredRoots.length,
-            returned: summaries.length,
-            projectId: effectiveProjectId,
-            with: withParam,
-            agent: context.agent.name,
-        });
-
-        return {
-            success: true,
-            conversations: summaries,
-            total: filteredRoots.length,
-        };
-    }
-
-    // Load conversations based on projectId parameter
-    let allLoadedConversations: LoadedConversation[] = [];
-
-    if (effectiveProjectId) {
-        // Load from specific project (current project by default)
-        const isCurrentProject = effectiveProjectId === currentProjectId;
-        allLoadedConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
-    }
-
-    // Build a map of all conversations by full ID for tree traversal
-    const conversationMap = new Map<string, LoadedConversation>();
-    for (const loaded of allLoadedConversations) {
-        conversationMap.set(loaded.store.id, loaded);
-    }
-
-    // Separate root conversations from children
-    const rootConversations = allLoadedConversations.filter(({ store }) => isRootConversation(store));
-
-    // Compute subtree last activity for each root
-    const rootsWithSubtreeActivity = rootConversations.map((loaded) => ({
-        loaded,
-        subtreeLastActivity: computeSubtreeLastActivity(loaded.store.id, conversationMap),
+    const rootsWithSubtreeActivity = graph.rootConversationIds.map((conversationId) => ({
+        conversation: graph.conversationsById.get(conversationId)!,
+        subtreeLastActivity: computeIndexedSubtreeLastActivity(
+            conversationId,
+            graph,
+            memoizedSubtreeTimes
+        ),
     }));
 
     // Apply date range filter based on subtree activity
@@ -984,8 +687,14 @@ async function executeConversationList(
 
     // Apply 'with' filter: include root if the root itself or any descendant has the participant
     if (withFilter) {
-        filteredRoots = filteredRoots.filter(({ loaded }) =>
-            subtreeHasParticipant(loaded.store.id, conversationMap, withFilter)
+        const memoizedMatches = new Map<string, boolean>();
+        filteredRoots = filteredRoots.filter(({ conversation }) =>
+            indexedSubtreeHasParticipant(
+                conversation.entry.id,
+                graph,
+                withFilter,
+                memoizedMatches
+            )
         );
     }
 
@@ -998,14 +707,13 @@ async function executeConversationList(
     const limitedRoots = sortedRoots.slice(0, limit);
 
     // Build summaries with nested children
-    const summaries = limitedRoots.map(({ loaded }) => {
-        const { store, projectId } = loaded;
-        const children = collectDirectChildren(store.id, conversationMap);
-        return summarizeConversation(store, projectId, children);
-    });
+    const storeCache = new Map<string, ConversationStore | null>();
+    const summaries = limitedRoots.map(({ conversation }) =>
+        summarizeIndexedConversation(conversation, graph, currentProjectId, storeCache)
+    );
 
     logger.info("✅ Conversations listed (tree view)", {
-        total: rootConversations.length,
+        total: graph.rootConversationIds.length,
         filtered: filteredRoots.length,
         returned: summaries.length,
         projectId: effectiveProjectId,

@@ -68,6 +68,19 @@ export interface ConversationCatalogParticipant {
     isAgent: boolean;
 }
 
+export interface ConversationCatalogProjection {
+    title?: string;
+    summary?: string;
+    lastUserMessage?: string;
+    statusLabel?: string;
+    statusCurrentActivity?: string;
+    messageCount: number;
+    createdAt?: number;
+    lastActivity?: number;
+    participants: ConversationCatalogParticipant[];
+    delegationIds: string[];
+}
+
 export interface ConversationCatalogListEntry extends ConversationCatalogPreview {
     participants: ConversationCatalogParticipant[];
     delegationIds: string[];
@@ -135,6 +148,60 @@ function asConversationRecords(raw: unknown): ConversationRecordInput[] {
 
 function buildInClause(size: number): string {
     return Array.from({ length: size }, () => "?").join(", ");
+}
+
+export function buildConversationCatalogProjection(
+    rawMetadata: Record<string, unknown> | undefined,
+    messages: ConversationRecordInput[],
+    agentPubkeys: ReadonlySet<string>
+): ConversationCatalogProjection {
+    const metadata = rawMetadata ?? {};
+    const firstMessage = messages[0];
+    const lastMessage = messages[messages.length - 1];
+    const participants = new Map<string, ConversationCatalogParticipant>();
+    const delegationIds = new Set<string>();
+
+    for (const message of messages) {
+        const participantKey =
+            getConversationRecordAuthorPrincipalId(message)
+            ?? getConversationRecordAuthorPubkey(message);
+        if (participantKey && !participants.has(participantKey)) {
+            const linkedPubkey = getConversationRecordAuthorPubkey(message);
+            const kind = message.senderPrincipal?.kind;
+            participants.set(participantKey, {
+                participantKey,
+                linkedPubkey,
+                principalId: getConversationRecordAuthorPrincipalId(message),
+                transport: message.senderPrincipal?.transport,
+                displayName: normalizeOptionalString(message.senderPrincipal?.displayName),
+                username: normalizeOptionalString(message.senderPrincipal?.username),
+                kind,
+                isAgent: kind === "agent" || (!!linkedPubkey && agentPubkeys.has(linkedPubkey)),
+            });
+        }
+
+        if (
+            message.messageType === "delegation-marker"
+            && message.delegationMarker?.delegationConversationId
+        ) {
+            delegationIds.add(message.delegationMarker.delegationConversationId);
+        }
+    }
+
+    return {
+        title: normalizeOptionalString(metadata.title),
+        summary: normalizeOptionalString(metadata.summary),
+        lastUserMessage:
+            normalizeOptionalString(metadata.lastUserMessage)
+            ?? normalizeOptionalString(metadata.last_user_message),
+        statusLabel: normalizeOptionalString(metadata.statusLabel),
+        statusCurrentActivity: normalizeOptionalString(metadata.statusCurrentActivity),
+        messageCount: messages.length,
+        createdAt: normalizeOptionalNumber(firstMessage?.timestamp),
+        lastActivity: normalizeOptionalNumber(lastMessage?.timestamp),
+        participants: Array.from(participants.values()),
+        delegationIds: Array.from(delegationIds),
+    };
 }
 
 export class ConversationCatalogService {
@@ -768,53 +835,15 @@ export class ConversationCatalogService {
         messages: ConversationRecordInput[],
         sourceStats: ConversationSourceStats
     ): CatalogConversationSnapshot {
-        const metadata = rawMetadata ?? {};
-        const firstMessage = messages[0];
-        const lastMessage = messages[messages.length - 1];
-        const participants = new Map<string, ConversationCatalogParticipant>();
-        const delegationIds = new Set<string>();
-
-        for (const message of messages) {
-            const participantKey =
-                getConversationRecordAuthorPrincipalId(message)
-                ?? getConversationRecordAuthorPubkey(message);
-            if (participantKey && !participants.has(participantKey)) {
-                const linkedPubkey = getConversationRecordAuthorPubkey(message);
-                const kind = message.senderPrincipal?.kind;
-                participants.set(participantKey, {
-                    participantKey,
-                    linkedPubkey,
-                    principalId: getConversationRecordAuthorPrincipalId(message),
-                    transport: message.senderPrincipal?.transport,
-                    displayName: normalizeOptionalString(message.senderPrincipal?.displayName),
-                    username: normalizeOptionalString(message.senderPrincipal?.username),
-                    kind,
-                    isAgent: kind === "agent" || (!!linkedPubkey && this.agentPubkeys.has(linkedPubkey)),
-                });
-            }
-
-            if (
-                message.messageType === "delegation-marker"
-                && message.delegationMarker?.delegationConversationId
-            ) {
-                delegationIds.add(message.delegationMarker.delegationConversationId);
-            }
-        }
+        const projection = buildConversationCatalogProjection(
+            rawMetadata,
+            messages,
+            this.agentPubkeys
+        );
 
         return {
             conversationId,
-            title: normalizeOptionalString(metadata.title),
-            summary: normalizeOptionalString(metadata.summary),
-            lastUserMessage:
-                normalizeOptionalString(metadata.lastUserMessage)
-                ?? normalizeOptionalString(metadata.last_user_message),
-            statusLabel: normalizeOptionalString(metadata.statusLabel),
-            statusCurrentActivity: normalizeOptionalString(metadata.statusCurrentActivity),
-            messageCount: messages.length,
-            createdAt: normalizeOptionalNumber(firstMessage?.timestamp),
-            lastActivity: normalizeOptionalNumber(lastMessage?.timestamp),
-            participants: Array.from(participants.values()),
-            delegationIds: Array.from(delegationIds),
+            ...projection,
             sourceStats,
         };
     }

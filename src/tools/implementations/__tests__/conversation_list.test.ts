@@ -36,14 +36,101 @@ const mockResolveAgentSlug = mock((slug: string) => {
 });
 
 const mockListConversations = mock((projectId: string) => buildCatalogEntriesForProject(projectId));
+const mockCloseProject = mock(() => {});
+
+function mockBuildConversationCatalogProjection(
+    rawMetadata: Record<string, unknown> | undefined,
+    messages: Array<{
+        pubkey?: string;
+        senderPrincipal?: {
+            id: string;
+            transport: string;
+            linkedPubkey?: string;
+            displayName?: string;
+            username?: string;
+            kind?: "agent" | "human" | "system";
+        };
+        messageType?: string;
+        delegationMarker?: {
+            delegationConversationId: string;
+        };
+        timestamp: number;
+    }>,
+    agentPubkeys: ReadonlySet<string>
+) {
+    const metadata = rawMetadata ?? {};
+    const participants = new Map<
+        string,
+        {
+            participantKey: string;
+            linkedPubkey?: string;
+            principalId?: string;
+            transport?: string;
+            displayName?: string;
+            username?: string;
+            kind?: "agent" | "human" | "system";
+            isAgent: boolean;
+        }
+    >();
+    const delegationIds = new Set<string>();
+
+    for (const message of messages) {
+        const principalId = message.senderPrincipal?.id;
+        const linkedPubkey = message.senderPrincipal?.linkedPubkey
+            ?? (message.pubkey && message.pubkey.length > 0 ? message.pubkey : undefined);
+        const participantKey = principalId ?? linkedPubkey;
+
+        if (participantKey && !participants.has(participantKey)) {
+            const kind = message.senderPrincipal?.kind;
+            participants.set(participantKey, {
+                participantKey,
+                linkedPubkey,
+                principalId,
+                transport: message.senderPrincipal?.transport,
+                displayName: message.senderPrincipal?.displayName,
+                username: message.senderPrincipal?.username,
+                kind,
+                isAgent: kind === "agent" || (!!linkedPubkey && agentPubkeys.has(linkedPubkey)),
+            });
+        }
+
+        if (
+            message.messageType === "delegation-marker"
+            && message.delegationMarker?.delegationConversationId
+        ) {
+            delegationIds.add(message.delegationMarker.delegationConversationId);
+        }
+    }
+
+    return {
+        title: typeof metadata.title === "string" ? metadata.title : undefined,
+        summary: typeof metadata.summary === "string" ? metadata.summary : undefined,
+        lastUserMessage:
+            typeof metadata.lastUserMessage === "string"
+                ? metadata.lastUserMessage
+                : typeof metadata.last_user_message === "string"
+                    ? metadata.last_user_message
+                    : undefined,
+        statusLabel: typeof metadata.statusLabel === "string" ? metadata.statusLabel : undefined,
+        statusCurrentActivity:
+            typeof metadata.statusCurrentActivity === "string" ? metadata.statusCurrentActivity : undefined,
+        messageCount: messages.length,
+        createdAt: messages[0]?.timestamp,
+        lastActivity: messages[messages.length - 1]?.timestamp,
+        participants: Array.from(participants.values()),
+        delegationIds: Array.from(delegationIds),
+    };
+}
 
 mock.module("@/conversations/ConversationCatalogService", () => ({
     ConversationCatalogService: {
         getInstance: (projectId: string) => ({
             listConversations: () => mockListConversations(projectId),
         }),
+        closeProject: mockCloseProject,
         resetAll: () => {},
     },
+    buildConversationCatalogProjection: mockBuildConversationCatalogProjection,
 }));
 
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -340,6 +427,8 @@ describe("conversation_list Tool", () => {
         (logger.debug as ReturnType<typeof mock>).mockReset();
         mockListConversations.mockReset();
         mockListConversations.mockImplementation((projectId: string) => buildCatalogEntriesForProject(projectId));
+        mockCloseProject.mockReset();
+        mockCloseProject.mockImplementation(() => {});
         inMemoryStores.clear();
 
         // Clear tracked instantiated stores
@@ -458,6 +547,37 @@ describe("conversation_list Tool", () => {
                     projectId: "current-project",
                 })
             );
+        });
+
+        it("should only load returned roots for the current project when limited", async () => {
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2", "conv3"]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [{ timestamp: 1700001000 }],
+                metadata: { title: "Oldest" },
+                lastActivityTime: 1700001000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [{ timestamp: 1700002000 }],
+                metadata: { title: "Middle" },
+                lastActivityTime: 1700002000,
+            };
+            mockStoreOverrides["current-project:conv3"] = {
+                messages: [{ timestamp: 1700003000 }],
+                metadata: { title: "Newest" },
+                lastActivityTime: 1700003000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ limit: 1 });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].id).toBe("conv3".substring(0, 6));
+            expect(mockGetOrLoad).toHaveBeenCalledTimes(1);
+            expect(mockGetOrLoad).toHaveBeenCalledWith("conv3");
+            expect(mockGetOrLoad).not.toHaveBeenCalledWith("conv1");
+            expect(mockGetOrLoad).not.toHaveBeenCalledWith("conv2");
         });
     });
 
@@ -768,6 +888,126 @@ describe("conversation_list Tool", () => {
                 conversationId: "conv2",
             });
         });
+
+        it("should not load child transcripts just to render descendants", async () => {
+            const delegationConvId = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000, pubkey: "user-pubkey" },
+                    {
+                        timestamp: 1700001000,
+                        messageType: "delegation-marker",
+                        delegationMarker: {
+                            delegationConversationId: delegationConvId,
+                            recipientPubkey: "agent-pubkey-2",
+                            parentConversationId: "conv1",
+                            completedAt: 1700001000000,
+                            status: "completed",
+                        },
+                    },
+                ],
+                metadata: { title: "Parent" },
+                lastActivityTime: 1700001000,
+            };
+            mockStoreOverrides[`other-project:${delegationConvId}`] = {
+                messages: [{ timestamp: 1700002000, pubkey: "agent-pubkey-2" }],
+                metadata: { title: "Child" },
+                lastActivityTime: 1700002000,
+            };
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1"]);
+            (ConversationStore.listConversationIdsFromDiskForProject as ReturnType<typeof mock>).mockImplementation((projectId: string) => {
+                if (projectId === "current-project") return ["conv1"];
+                if (projectId === "other-project") return [delegationConvId];
+                return [];
+            });
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ projectId: "all", limit: 1 });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations[0].children).toHaveLength(1);
+            expect(mockGetOrLoad).toHaveBeenCalledTimes(1);
+            expect(mockGetOrLoad).toHaveBeenCalledWith("conv1");
+            expect(mockLoad).not.toHaveBeenCalled();
+        });
+
+        it("should return no roots for cyclic delegation graphs without recursing forever", async () => {
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    {
+                        timestamp: 1700001000,
+                        messageType: "delegation-marker",
+                        delegationMarker: {
+                            delegationConversationId: "conv2",
+                            recipientPubkey: "agent-pubkey-1",
+                            parentConversationId: "conv1",
+                            completedAt: 1700001000000,
+                            status: "completed",
+                        },
+                    },
+                ],
+                metadata: { title: "Conv 1" },
+                lastActivityTime: 1700001000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [
+                    {
+                        timestamp: 1700002000,
+                        messageType: "delegation-marker",
+                        delegationMarker: {
+                            delegationConversationId: "conv1",
+                            recipientPubkey: "agent-pubkey-2",
+                            parentConversationId: "conv2",
+                            completedAt: 1700002000000,
+                            status: "completed",
+                        },
+                    },
+                ],
+                metadata: { title: "Conv 2" },
+                lastActivityTime: 1700002000,
+            };
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({});
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(0);
+            expect(result.total).toBe(0);
+        });
+
+        it("should promote orphaned delegated conversations to roots when the parent is missing", async () => {
+            mockListConversations.mockImplementation(() => {
+                throw new Error("catalog failed");
+            });
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["orphan-child"]);
+            mockStoreOverrides["current-project:orphan-child"] = {
+                messages: [{ timestamp: 1700002000, pubkey: "agent-pubkey-2" }],
+                metadata: {
+                    title: "Orphan Child",
+                    delegationChain: [
+                        {
+                            conversationId: "missing-parent",
+                            displayName: "agent-1",
+                        },
+                        {
+                            conversationId: "orphan-child",
+                            displayName: "agent-2",
+                        },
+                    ],
+                },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({});
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].fullId).toBe("orphan-child");
+            expect(result.conversations[0].title).toBe("Orphan Child");
+        });
     });
 
     describe("Date Range Filtering", () => {
@@ -848,7 +1088,10 @@ describe("conversation_list Tool", () => {
     });
 
     describe("Error Handling", () => {
-        it("should skip conversations that fail to load", async () => {
+        it("should skip conversations that fail to load during transcript-scan fallback", async () => {
+            mockListConversations.mockImplementation(() => {
+                throw new Error("catalog failed");
+            });
             (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "bad-conv", "conv2"]);
 
             mockGetOrLoad.mockImplementation((id: string) => {
@@ -867,6 +1110,116 @@ describe("conversation_list Tool", () => {
                 "Failed to load conversation",
                 expect.objectContaining({ id: "bad-conv" })
             );
+        });
+
+        it("should keep catalog-backed summaries when the root transcript cannot be loaded", async () => {
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1"]);
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    {
+                        pubkey: "",
+                        timestamp: 1700001000,
+                        senderPrincipal: {
+                            id: "tg:user:123",
+                            transport: "telegram",
+                            displayName: "Alice",
+                        },
+                    },
+                    {
+                        timestamp: 1700002000,
+                        senderPrincipal: {
+                            id: "agent:456",
+                            transport: "nostr",
+                            linkedPubkey: "agent-pubkey-1",
+                            kind: "agent",
+                        },
+                    },
+                ],
+                metadata: {
+                    title: "Catalog Title",
+                    summary: "Catalog Summary",
+                },
+                lastActivityTime: 1700002000,
+            };
+            mockGetOrLoad.mockImplementation(() => {
+                throw new Error("summary load failed");
+            });
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({});
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0]).toEqual(
+                expect.objectContaining({
+                    title: "Catalog Title",
+                    summary: "Catalog Summary",
+                    sender: "Alice",
+                    recipient: "agent-1",
+                })
+            );
+            expect(logger.debug).toHaveBeenCalledWith(
+                "Failed to load conversation for summary",
+                expect.objectContaining({ id: "conv1", projectId: "current-project" })
+            );
+        });
+
+        it("should fall back to transcript scanning when catalog listing fails", async () => {
+            mockListConversations.mockImplementation(() => {
+                throw new Error("catalog failed");
+            });
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [{ timestamp: 1700001000 }],
+                metadata: { title: "Older" },
+                lastActivityTime: 1700001000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [{ timestamp: 1700002000 }],
+                metadata: { title: "Newer" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ limit: 1 });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].title).toBe("Newer");
+            expect(logger.warn).toHaveBeenCalledWith(
+                "Failed to load catalog-backed conversations; falling back to transcript scan",
+                expect.objectContaining({ projectId: "current-project" })
+            );
+        });
+
+        it("should close external project catalogs after listing", async () => {
+            mockProjectId = "current-project";
+            (ConversationStore.listProjectIdsFromDisk as ReturnType<typeof mock>).mockReturnValue([
+                "current-project",
+                "other-project",
+            ]);
+            (ConversationStore.listConversationIdsFromDiskForProject as ReturnType<typeof mock>).mockImplementation((projectId: string) => {
+                if (projectId === "other-project") return ["conv2"];
+                return [];
+            });
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [{ timestamp: 1700001000 }],
+                metadata: { title: "Current" },
+                lastActivityTime: 1700001000,
+            };
+            mockStoreOverrides["other-project:conv2"] = {
+                messages: [{ timestamp: 1700002000 }],
+                metadata: { title: "Other" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ projectId: "all" });
+
+            expect(result.success).toBe(true);
+            expect(mockCloseProject).toHaveBeenCalledTimes(1);
+            expect(mockCloseProject).toHaveBeenCalledWith("other-project", "/mock/base/path/other-project");
+            expect(mockCloseProject).not.toHaveBeenCalledWith("current-project", expect.anything());
         });
     });
 
