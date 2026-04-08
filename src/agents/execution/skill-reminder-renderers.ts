@@ -279,13 +279,12 @@ export async function renderAvailableSkillsBlock(
     parts.push("</project-skills>");
     parts.push("");
 
-    // Global/shared skills — always show
+    // Global/shared skills — show count only; agent can call skill_list for full details
     parts.push("<global-skills>");
-    parts.push("Skills in `~/.agents/skills`:");
-    parts.push("");
     const sharedSkills = grouped.get("shared") ?? [];
-    if (sharedSkills.length > 0) {
-        parts.push(...sharedSkills);
+    const totalGlobal = sharedSkills.length;
+    if (totalGlobal > 0) {
+        parts.push(`${totalGlobal} global skill${totalGlobal === 1 ? "" : "s"} available — use \`skill_list\` to see them all`);
     } else {
         parts.push("(none)");
     }

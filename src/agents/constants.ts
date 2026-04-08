@@ -12,6 +12,7 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     // Process control
     "kill", // All agents should be able to terminate processes
     // Skills management
+    "skill_list", // All agents can enumerate available skills on demand
     "skills_set", // All agents can activate/deactivate skills mid-conversation
 ] as const;
 

@@ -57,6 +57,7 @@ export type ToolName =
     | "change_model"
     | "kill"
     | "no_response"
+    | "skill_list"
     | "skills_set"
     | "send_message";
 

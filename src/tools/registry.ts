@@ -37,6 +37,7 @@ import { createNoResponseTool } from "./implementations/no_response";
 import { createTodoWriteTool } from "./implementations/todo";
 
 // Skills tools
+import { createSkillListTool } from "./implementations/skill_list";
 import { createSkillsSetTool } from "./implementations/skills_set";
 
 // Channel messaging tools
@@ -88,6 +89,7 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
     todo_write: createTodoWriteTool as ToolFactory,
 
     // Skills management
+    skill_list: createSkillListTool,
     skills_set: createSkillsSetTool as ToolFactory,
 
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
