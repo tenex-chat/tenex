@@ -25,6 +25,9 @@ export const environmentVariablesFragment: PromptFragment<EnvironmentVariablesAr
         if (projectBasePath) {
             parts.push("- $PROJECT_BASE — the current project's root directory");
         }
+        parts.push("- $TENEX_BASE_DIR — TENEX data directory (agents, projects, teams)");
+        parts.push("- $TENEX_SRC — TENEX source/installation directory (for running built-in skill scripts)");
+        parts.push("- $PROJECT_ID — current project identifier (when executing in a project context)");
         parts.push("</environment-variables>");
         return parts.join("\n");
     },

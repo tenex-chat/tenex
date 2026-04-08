@@ -113,6 +113,11 @@ export class AgentEnvironmentService {
         if (params.projectPath) {
             mergedEnv.PROJECT_BASE = params.projectPath;
         }
+        if (params.projectDTag) {
+            mergedEnv.PROJECT_ID = params.projectDTag;
+        }
+        mergedEnv.TENEX_BASE_DIR = config.getConfigPath();
+        mergedEnv.TENEX_SRC = path.resolve(import.meta.dirname, "../..");
 
         return mergedEnv;
     }

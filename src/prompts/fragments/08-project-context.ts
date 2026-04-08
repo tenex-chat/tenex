@@ -489,7 +489,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         };
 
         const renderTeamBullet = (t: TeamInfo): string =>
-            `      * ${t.name} — ${t.description} (team, lead: ${t.teamLead})`;
+            `      * Team ${t.name} — ${t.description} [${t.members.length} agents]`;
 
         const hasTeamContext =
             teamContext &&
@@ -548,6 +548,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
                 for (const item of alsoAvailableItems) {
                     parts.push(item);
                 }
+                parts.push("      Run team_roster for full roster with use criteria and agent pubkeys.");
                 parts.push("    </also-available>");
             }
 

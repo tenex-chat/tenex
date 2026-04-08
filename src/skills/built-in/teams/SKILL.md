@@ -59,6 +59,16 @@ Example workflow:
 4. Your next delegation or system prompt rebuild reflects the changes
 ```
 
+## Getting Full Roster Details
+
+Use `team_roster` to see all team members with their pubkeys and use criteria:
+
+```
+node $TENEX_SRC/src/skills/built-in/teams/scripts/team-roster.js
+```
+
+Requires `$TENEX_BASE_DIR` (always set) and `$PROJECT_ID` (always set in project context).
+
 ## Effect on System Prompt
 
 - **Agents in a team**: See their teammates in detail (`<teammates>` block with full Use Criteria) and other teams as one-line summaries (`<other-teams>` block).
