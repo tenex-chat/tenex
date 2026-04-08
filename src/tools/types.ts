@@ -62,7 +62,7 @@ export type ToolName =
     | "send_message";
 
 /**
- * AI SDK tool with optional transcript arg declaration and side effect declaration.
+ * AI SDK tool with optional transcript arg declaration.
  */
 export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TOutput> & {
     /**
