@@ -201,7 +201,7 @@ async function ensureEscalationAgentInRegistry(
         return null;
     }
 
-    const instance = createAgentInstance(reloadedAgent, agentRegistry, projectDTag);
+    const instance = await createAgentInstance(reloadedAgent, agentRegistry, projectDTag);
     agentRegistry.addAgent(instance);
     logger.info("[EscalationService] Auto-added escalation agent to project", {
         escalationAgentSlug,

@@ -5,6 +5,7 @@ import type { AgentRegistry } from "../AgentRegistry";
 import type { MCPConfig } from "@/llm/providers/types";
 import { config } from "@/services/ConfigService";
 import { SkillWhitelistService } from "@/services/skill";
+import { SkillService } from "@/services/skill/SkillService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
@@ -28,11 +29,15 @@ describe("MCP Config Merge", () => {
     // Track what mcpConfig was passed to createLLMService
     let capturedMcpConfig: MCPConfig | undefined;
     let whitelistServiceSpy: ReturnType<typeof spyOn>;
+    let skillServiceSpy: ReturnType<typeof spyOn>;
     let warnSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         capturedMcpConfig = undefined;
         SkillWhitelistService.getInstance().setInstalledSkills([]);
+        skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: mock(async () => []),
+        } as never);
         whitelistServiceSpy = spyOn(SkillWhitelistService.getInstance(), "getWhitelistedSkills").mockReturnValue([]);
         warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
 
@@ -47,12 +52,13 @@ describe("MCP Config Merge", () => {
     afterEach(() => {
         SkillWhitelistService.getInstance().setInstalledSkills([]);
         whitelistServiceSpy?.mockRestore();
+        skillServiceSpy?.mockRestore();
         warnSpy?.mockRestore();
         mock.restore();
     });
 
     describe("createAgentInstance MCP config merging", () => {
-        it("should merge project-level and agent-specific MCP configs", () => {
+        it("should merge project-level and agent-specific MCP configs", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
             // Agent has its own MCP server configured
@@ -70,7 +76,7 @@ describe("MCP Config Merge", () => {
                 },
             });
 
-            const instance = createAgentInstance(storedAgent, mockRegistry);
+            const instance = await createAgentInstance(storedAgent, mockRegistry);
 
             // Project-level MCP config passed during createLLMService call
             const projectMcpConfig: MCPConfig = {
@@ -99,7 +105,7 @@ describe("MCP Config Merge", () => {
             );
         });
 
-        it("should give agent-specific servers precedence on name collision", () => {
+        it("should give agent-specific servers precedence on name collision", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
             // Agent has a server named "shared-server" with agent-specific config
@@ -117,7 +123,7 @@ describe("MCP Config Merge", () => {
                 },
             });
 
-            const instance = createAgentInstance(storedAgent, mockRegistry);
+            const instance = await createAgentInstance(storedAgent, mockRegistry);
 
             // Project-level config also has "shared-server" with different config
             const projectMcpConfig: MCPConfig = {
@@ -142,7 +148,7 @@ describe("MCP Config Merge", () => {
             ]);
         });
 
-        it("should use only project MCP config when agent has no MCP servers", () => {
+        it("should use only project MCP config when agent has no MCP servers", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
             // Agent has no MCP servers configured
@@ -154,7 +160,7 @@ describe("MCP Config Merge", () => {
                 eventId: "test-event-id",
             });
 
-            const instance = createAgentInstance(storedAgent, mockRegistry);
+            const instance = await createAgentInstance(storedAgent, mockRegistry);
 
             const projectMcpConfig: MCPConfig = {
                 enabled: true,
@@ -173,7 +179,7 @@ describe("MCP Config Merge", () => {
             expect(capturedMcpConfig?.servers["project-only-server"]).toBeDefined();
         });
 
-        it("should use only agent MCP config when no project config passed", () => {
+        it("should use only agent MCP config when no project config passed", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
             const storedAgent = createStoredAgent({
@@ -190,7 +196,7 @@ describe("MCP Config Merge", () => {
                 },
             });
 
-            const instance = createAgentInstance(storedAgent, mockRegistry);
+            const instance = await createAgentInstance(storedAgent, mockRegistry);
 
             // No mcpConfig passed to createLLMService
             instance.createLLMService({});
@@ -200,7 +206,7 @@ describe("MCP Config Merge", () => {
             expect(capturedMcpConfig?.servers["agent-only-server"]).toBeDefined();
         });
 
-        it("should have undefined MCP config when neither agent nor project has config", () => {
+        it("should have undefined MCP config when neither agent nor project has config", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
             const storedAgent = createStoredAgent({
@@ -211,27 +217,26 @@ describe("MCP Config Merge", () => {
                 eventId: "test-event-id",
             });
 
-            const instance = createAgentInstance(storedAgent, mockRegistry);
+            const instance = await createAgentInstance(storedAgent, mockRegistry);
 
             instance.createLLMService({});
 
             expect(capturedMcpConfig).toBeUndefined();
         });
 
-        it("should filter blocked alwaysSkills at load time", () => {
+        it("should filter blocked alwaysSkills at load time", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
-            whitelistServiceSpy.mockReturnValue([
-                {
-                    eventId: "a".repeat(64),
-                    identifier: "local-skill",
-                    shortId: "short-skill",
-                    kind: 4202 as never,
-                    name: "Local Skill",
-                    description: "Local skill",
-                    whitelistedBy: ["pubkey"],
-                },
-            ] as never);
+            skillServiceSpy.mockReturnValue({
+                listAvailableSkills: mock(async () => [
+                    {
+                        identifier: "local-skill",
+                        eventId: "a".repeat(64),
+                        content: "",
+                        installedFiles: [],
+                    },
+                ]),
+            } as never);
 
             const storedAgent = createStoredAgent({
                 nsec: signer.nsec!,
@@ -245,7 +250,7 @@ describe("MCP Config Merge", () => {
                 },
             });
 
-            const instance = createAgentInstance(storedAgent, mockRegistry);
+            const instance = await createAgentInstance(storedAgent, mockRegistry);
 
             expect(instance.alwaysSkills).toBeUndefined();
             expect(instance.blockedSkills).toEqual(["a".repeat(64)]);
@@ -258,7 +263,7 @@ describe("MCP Config Merge", () => {
             );
         });
 
-        it("should respect project-level enabled:false when merging configs", () => {
+        it("should respect project-level enabled:false when merging configs", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
             // Agent has MCP servers configured
@@ -276,7 +281,7 @@ describe("MCP Config Merge", () => {
                 },
             });
 
-            const instance = createAgentInstance(storedAgent, mockRegistry);
+            const instance = await createAgentInstance(storedAgent, mockRegistry);
 
             // Project-level MCP config explicitly disables MCP
             const projectMcpConfig: MCPConfig = {

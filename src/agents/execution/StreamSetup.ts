@@ -22,8 +22,8 @@ import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
 import { FullResultStash, wrapToolsWithOutputTruncation } from "./ToolOutputTruncation";
 import {
     buildExpandedBlockedSet,
+    buildSkillAliasMap,
     filterBlockedSkills,
-    isSkillBlocked,
 } from "@/services/skill/skill-blocking";
 import {
     createExecutionContextManagement,
@@ -85,13 +85,19 @@ export async function setupStreamExecution(
     const selfAppliedSkillIds = context.conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
     const agentAlwaysSkillIds = context.agent.alwaysSkills ?? [];
     const requestedSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds, ...agentAlwaysSkillIds])];
-    const blockedSet = buildExpandedBlockedSet(context.agent.blockedSkills ?? []);
-    const filteredSkillIds = filterBlockedSkills(requestedSkillIds, blockedSet);
+    const availableSkills = await SkillService.getInstance().listAvailableSkills(skillLookupContext);
+    const availableSkillMap = buildSkillAliasMap(availableSkills);
+    const blockedSet = buildExpandedBlockedSet(context.agent.blockedSkills ?? [], availableSkillMap);
+    const { allowed: filteredSkillIds, blocked } = filterBlockedSkills(
+        requestedSkillIds,
+        blockedSet,
+        availableSkillMap
+    );
 
-    if (filteredSkillIds.length < requestedSkillIds.length) {
+    if (blocked.length > 0) {
         logger.warn("[StreamSetup] Blocked skills filtered from request", {
             agent: context.agent.slug,
-            blockedSkills: requestedSkillIds.filter((skillId) => isSkillBlocked(skillId, blockedSet)),
+            blockedSkills: blocked,
         });
     }
     const skillResult = filteredSkillIds.length > 0

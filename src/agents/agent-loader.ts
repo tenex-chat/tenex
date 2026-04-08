@@ -10,7 +10,12 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import type { MCPConfig } from "@/llm/providers/types";
 import { publishAgentProfile } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
-import { buildExpandedBlockedSet, filterBlockedSkills } from "@/services/skill/skill-blocking";
+import { SkillService } from "@/services/skill";
+import {
+    buildExpandedBlockedSet,
+    buildSkillAliasMap,
+    filterBlockedSkills,
+} from "@/services/skill/skill-blocking";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -30,11 +35,11 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  * @param registry - The agent registry (used for metadata and LLM service creation)
  * @param projectDTag - Optional project dTag for resolving project-scoped config
  */
-export function createAgentInstance(
+export async function createAgentInstance(
     storedAgent: StoredAgent,
     registry: AgentRegistry,
     projectDTag?: string
-): AgentInstance {
+): Promise<AgentInstance> {
     const signer = new NDKPrivateKeySigner(storedAgent.nsec);
     const pubkey = signer.pubkey;
 
@@ -46,13 +51,22 @@ export function createAgentInstance(
     const effectiveBlockedSkills = resolvedConfig.blockedSkills;
     const effectiveMcpAccess = resolvedConfig.mcpAccess;
 
-    const blockedSet = buildExpandedBlockedSet(effectiveBlockedSkills);
-    const filteredAlwaysSkills = filterBlockedSkills(effectiveAlwaysSkills ?? [], blockedSet);
+    const availableSkills = await SkillService.getInstance().listAvailableSkills({
+        agentPubkey: pubkey,
+        projectPath: registry.getBasePath(),
+    });
+    const availableSkillMap = buildSkillAliasMap(availableSkills);
+    const blockedSet = buildExpandedBlockedSet(effectiveBlockedSkills, availableSkillMap);
+    const { allowed, blocked } = filterBlockedSkills(
+        effectiveAlwaysSkills ?? [],
+        blockedSet,
+        availableSkillMap
+    );
 
-    if (filteredAlwaysSkills.length < (effectiveAlwaysSkills?.length ?? 0)) {
+    if (blocked.length > 0) {
         logger.warn("[AgentLoader] Blocked skills removed from alwaysSkills", {
             agent: storedAgent.slug,
-            blockedSkills: (effectiveAlwaysSkills ?? []).filter((skillId) => blockedSet.has(skillId)),
+            blockedSkills: blocked,
         });
     }
 
@@ -88,8 +102,8 @@ export function createAgentInstance(
         isPM: storedAgent.isPM,
         projectOverrides: storedAgent.projectOverrides,
         telegram: storedAgent.telegram,
-        alwaysSkills: filteredAlwaysSkills && filteredAlwaysSkills.length > 0
-            ? filteredAlwaysSkills
+        alwaysSkills: allowed.length > 0
+            ? allowed
             : undefined,
         blockedSkills: effectiveBlockedSkills,
         mcpAccess: effectiveMcpAccess ?? [],
@@ -163,7 +177,7 @@ export async function loadStoredAgentIntoRegistry(
     }
 
     const projectDTag = registry.getProjectDTag();
-    const instance = createAgentInstance(storedAgent, registry, projectDTag);
+    const instance = await createAgentInstance(storedAgent, registry, projectDTag);
     registry.addAgent(instance);
 
     const ndkProject = registry.getNDKProject();
@@ -287,7 +301,7 @@ export async function loadAgentIntoRegistry(
 
     // Create instance and add to registry
     // Pass projectDTag so project-scoped config can be resolved
-    const instance = createAgentInstance(freshAgent, registry, projectDTag);
+    const instance = await createAgentInstance(freshAgent, registry, projectDTag);
     registry.addAgent(instance);
 
     // Publish kind:0 profile for this agent now that it's associated with the project

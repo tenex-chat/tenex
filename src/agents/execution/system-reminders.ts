@@ -17,11 +17,16 @@ import type {
     TodoItem,
 } from "@/services/ral/types";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
-import { buildExpandedBlockedSet, filterBlockedSkills } from "@/services/skill/skill-blocking";
+import {
+    buildExpandedBlockedSet,
+    buildSkillAliasMap,
+    filterBlockedSkills,
+} from "@/services/skill/skill-blocking";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
 import type { ProjectDTag } from "@/types/project-ids";
 import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
+import { logger } from "@/utils/logger";
 
 function cloneReminderState(state: ReminderState | undefined): ReminderState | undefined {
     return state ? structuredClone(state) : undefined;
@@ -367,22 +372,32 @@ function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, st
                 agentPubkey: data.agent.pubkey,
                 projectPath: data.projectPath,
             });
+            const installedSkillMap = buildSkillAliasMap(installed);
             const whitelist = SkillWhitelistService.getInstance().getWhitelistedSkills();
-            const blockedSet = buildExpandedBlockedSet(data.agent.blockedSkills);
-            const installedIds = filterBlockedSkills(
+            const blockedSet = buildExpandedBlockedSet(data.agent.blockedSkills, installedSkillMap);
+            const { allowed: installedIds, blocked: blockedInstalledIds } = filterBlockedSkills(
                 installed.map((skill) => skill.identifier),
-                blockedSet
-            ).sort();
-            const whitelistIds = filterBlockedSkills(
+                blockedSet,
+                installedSkillMap
+            );
+            const { allowed: whitelistIds, blocked: blockedWhitelistIds } = filterBlockedSkills(
                 whitelist
                     .map((entry) => entry.identifier ?? entry.shortId ?? entry.eventId)
                     .filter((id): id is string => Boolean(id)),
-                blockedSet
-            ).sort();
+                blockedSet,
+                installedSkillMap
+            );
+            const blockedSkills = [...new Set([...blockedInstalledIds, ...blockedWhitelistIds])].sort();
             const ids = [
-                ...installedIds,
-                ...whitelistIds,
+                ...installedIds.sort(),
+                ...whitelistIds.sort(),
             ];
+            if (blockedSkills.length > 0) {
+                logger.warn("[SystemReminders] Blocked skills removed from available skills", {
+                    agent: data.agent.slug,
+                    blockedSkills,
+                });
+            }
             return ids.join(",");
         },
         renderFull: async (_snapshot, data) => ({

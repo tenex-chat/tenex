@@ -187,6 +187,48 @@ describe("StreamCallbacks blocked skills", () => {
         expect(fetchSkillsMock).toHaveBeenCalledWith(["allowed-skill"], expect.any(Object));
         expect(warnSpy).not.toHaveBeenCalled();
     });
+
+    it("blocks a local alias before skill fetch during rehydration", async () => {
+        listAvailableSkillsMock.mockResolvedValue([
+            {
+                identifier: "local-skill",
+                eventId: "blocked-event-id",
+                content: "",
+                installedFiles: [],
+            },
+        ]);
+
+        const callback = createPrepareStep({
+            context: createRuntimeContext({
+                blockedSkills: ["blocked-event-id"],
+                delegationSkillIds: ["local-skill"],
+            }),
+            llmService: createLlmServiceStub(),
+            messageCompiler: createMessageCompilerStub(),
+            toolsObject: {},
+            initialRequest: createInitialRequest(),
+            skillToolPermissions: {},
+            ralNumber: 1,
+            execContext: createExecutionContextStub(),
+            modelState: createModelStateStub(),
+        });
+
+        await callback({
+            messages: [],
+            stepNumber: 2,
+            steps: [],
+        });
+
+        expect(fetchSkillsMock).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledWith(
+            "[StreamCallbacks] Blocked skills filtered during step rehydration",
+            expect.objectContaining({
+                agent: "test-agent",
+                blockedSkills: ["local-skill"],
+                step: 2,
+            })
+        );
+    });
 });
 
 function createConversationStoreStub() {

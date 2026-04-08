@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { SkillWhitelistService } from "@/services/skill";
 
 const fetchSkillsMock = mock(async () => ({ skills: [], content: "", toolPermissions: {} }));
+const listAvailableSkillsMock = mock(async () => []);
 const createLLMServiceMock = mock(() => ({
     provider: "mock-provider",
     model: "mock-model",
@@ -56,7 +57,7 @@ mock.module("@/services/skill", () => ({
     SkillService: {
         getInstance: () => ({
             fetchSkills: fetchSkillsMock,
-            listAvailableSkills: mock(async () => []),
+            listAvailableSkills: listAvailableSkillsMock,
         }),
     },
     loadAllSkillTools: mock(async () => ({})),
@@ -138,6 +139,7 @@ describe("StreamSetup", () => {
     beforeEach(() => {
         whitelistService.setInstalledSkills([]);
         fetchSkillsMock.mockClear();
+        listAvailableSkillsMock.mockClear();
         createLLMServiceMock.mockClear();
         compileMock.mockClear();
         prepareLLMRequestMock.mockClear();
@@ -149,19 +151,14 @@ describe("StreamSetup", () => {
     });
 
     it("filters blocked skills before fetchSkills is called", async () => {
-        whitelistService.setInstalledSkills([]);
-        const getWhitelistedSkillsSpy = mock(
-            () => [
-                {
-                    eventId: "a".repeat(64),
-                    identifier: "local-skill",
-                    shortId: "local-short",
-                    kind: 4202 as never,
-                    whitelistedBy: ["pubkey"],
-                },
-            ]
-        );
-        whitelistService.getWhitelistedSkills = getWhitelistedSkillsSpy as never;
+        listAvailableSkillsMock.mockResolvedValue([
+            {
+                identifier: "local-skill",
+                eventId: "a".repeat(64),
+                content: "",
+                installedFiles: [],
+            },
+        ]);
 
         const context = {
             agent: {

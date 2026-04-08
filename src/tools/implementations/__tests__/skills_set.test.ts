@@ -307,7 +307,6 @@ describe("skills_set tool", () => {
             {
                 eventId: SKILL_ID_1,
                 identifier: "shell",
-                shortId: "shell-short",
                 kind: 4202 as never,
                 name: "Shell",
                 description: "Shell skill",
@@ -331,15 +330,6 @@ describe("skills_set tool", () => {
     });
 
     it("should reject an add resolved through an event id alias", async () => {
-        SkillWhitelistService.getInstance().setInstalledSkills([
-            {
-                identifier: "shell",
-                shortId: "shell-short",
-                eventId: SKILL_ID_1,
-                content: "",
-                installedFiles: [],
-            } as any,
-        ]);
         whitelistServiceSpy.mockReturnValue([
             {
                 eventId: SKILL_ID_1,
@@ -349,7 +339,7 @@ describe("skills_set tool", () => {
                 whitelistedBy: ["pubkey"],
             },
         ] as never);
-        mockListAvailableSkills.mockResolvedValue([createAvailableSkill("shell")]);
+        mockListAvailableSkills.mockResolvedValue([createResolvedSkill("shell", SKILL_ID_1)]);
 
         const context = createMockContext();
         (context.agent as any).blockedSkills = ["shell"];

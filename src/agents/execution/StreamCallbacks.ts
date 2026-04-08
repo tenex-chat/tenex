@@ -14,8 +14,8 @@ import { SkillService, loadAllSkillTools } from "@/services/skill";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
 import {
     buildExpandedBlockedSet,
+    buildSkillAliasMap,
     filterBlockedSkills,
-    isSkillBlocked,
 } from "@/services/skill/skill-blocking";
 import { HOME_FS_FALLBACKS } from "@/tools/registry";
 import { logger } from "@/utils/logger";
@@ -310,15 +310,19 @@ export function createPrepareStep(
                 ...selfAppliedSkillIds,
                 ...agentAlwaysSkillIds,
             ])];
-            const blockedSet = buildExpandedBlockedSet(context.agent.blockedSkills ?? []);
-            const filteredSkillIds = filterBlockedSkills(requestedSkillIds, blockedSet);
+            const availableSkills = await SkillService.getInstance().listAvailableSkills(skillLookupContext);
+            const availableSkillMap = buildSkillAliasMap(availableSkills);
+            const blockedSet = buildExpandedBlockedSet(context.agent.blockedSkills ?? [], availableSkillMap);
+            const { allowed: filteredSkillIds, blocked } = filterBlockedSkills(
+                requestedSkillIds,
+                blockedSet,
+                availableSkillMap
+            );
 
-            if (filteredSkillIds.length < requestedSkillIds.length) {
+            if (blocked.length > 0) {
                 logger.warn("[StreamCallbacks] Blocked skills filtered during step rehydration", {
                     agent: context.agent.slug,
-                    blockedSkills: requestedSkillIds.filter((skillId) =>
-                        isSkillBlocked(skillId, blockedSet)
-                    ),
+                    blockedSkills: blocked,
                     step: step.stepNumber,
                 });
             }
