@@ -33,7 +33,7 @@ export function render(options: TeamsContextRenderOptions): string {
     }
 
     if (activeTeam && !teams.some((team) => isActiveTeam(team, activeTeam))) {
-        lines.push(`  Active team: ${activeTeam}`);
+        lines.push(`  You are operating in team scope: ${activeTeam}`);
     }
 
     lines.push("</teams-context>");

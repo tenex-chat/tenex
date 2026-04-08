@@ -59,10 +59,6 @@ export class TeamService {
      */
     async getTeams(projectId?: string): Promise<Team[]> {
         const cacheKey = projectId ?? "__global__";
-        const cached = this.getFromCache(cacheKey);
-        if (cached) {
-            return cached;
-        }
         return await this.loadAndCache(cacheKey, projectId);
     }
 
@@ -206,16 +202,6 @@ export class TeamService {
     // Private: Cache
     // =========================================================================
 
-    private getFromCache(key: string): Team[] | undefined {
-        const entry = this.cache.get(key);
-        if (!entry) return undefined;
-        if (Date.now() > entry.expiresAt) {
-            this.cache.delete(key);
-            return undefined;
-        }
-        return entry.data;
-    }
-
     private async loadAndCache(key: string, projectId?: string): Promise<Team[]> {
         const globalFilePath = path.join(this.config.getConfigPath(), "teams.json");
         const projectFilePath = projectId
@@ -252,14 +238,18 @@ export class TeamService {
             }
         }
 
-        // Load and merge
-        const data = await this.loadAndMergeTeams(globalFilePath, projectFilePath);
+        // Load and merge — use file states from the actual read to avoid TOCTOU skew
+        const {
+            data,
+            globalFileState: readGlobalState,
+            projectFileState: readProjectState,
+        } = await this.loadAndMergeTeams(globalFilePath, projectFilePath);
 
         this.cache.set(key, {
             expiresAt: Date.now() + TeamService.CACHE_TTL_MS,
             data,
-            globalFileState,
-            projectFileState,
+            globalFileState: readGlobalState,
+            projectFileState: readProjectState,
         });
 
         return data;
@@ -286,10 +276,12 @@ export class TeamService {
     private async loadAndMergeTeams(
         globalPath: string,
         projectPath: string | null
-    ): Promise<Team[]> {
+    ): Promise<{ data: Team[]; globalFileState: FileState | null; projectFileState: FileState | null }> {
         const [globalResult, projectResult] = await Promise.all([
             this.loadTeamsFile(globalPath),
-            projectPath ? this.loadTeamsFile(projectPath) : Promise.resolve({ data: [] }),
+            projectPath
+                ? this.loadTeamsFile(projectPath)
+                : Promise.resolve({ data: [] as Team[], fileState: null as FileState | null }),
         ]);
 
         // Merge: per-project overrides global
@@ -301,7 +293,11 @@ export class TeamService {
             merged.set(team.name.toLowerCase(), team);
         }
 
-        return [...merged.values()];
+        return {
+            data: [...merged.values()],
+            globalFileState: globalResult.fileState,
+            projectFileState: projectResult.fileState,
+        };
     }
 
     private async loadTeamsFile(

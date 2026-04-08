@@ -21,7 +21,9 @@ describe("AgentPublisher - Delegation Tag", () => {
 
     beforeEach(() => {
         capturedEvents = [];
-        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({
+            subManager: { seenEvents: new Map() },
+        } as any);
         spyOn(traceContextModule, "injectTraceContext").mockImplementation(() => {});
         spyOn(projectsModule, "getProjectContext").mockReturnValue({
             project: {
@@ -45,6 +47,8 @@ describe("AgentPublisher - Delegation Tag", () => {
             capturedEvents.push(this);
             return mockPublish();
         });
+
+
 
         // Create mock AgentInstance with minimal required properties
         mockAgentInstance = {
@@ -171,6 +175,40 @@ describe("AgentPublisher - Delegation Tag", () => {
             const delegationTag = event.tags.find((tag) => tag[0] === "delegation");
             expect(delegationTag).toBeDefined();
             expect(delegationTag?.[1]).toBe("parent-conversation-id-456");
+        });
+
+        it("should forward team and branch tags from triggering event", async () => {
+            const context = createTestContext({
+                triggeringEnvelope: createMockInboundEnvelope({
+                    metadata: { teamName: "alpha-team", branchName: "feature/xyz" },
+                }),
+            });
+
+            const config: AskConfig = {
+                recipient: "recipient-pubkey",
+                context: "Full context here",
+                title: "Team-scoped question",
+                questions: [
+                    {
+                        type: "question",
+                        title: "Question",
+                        question: "What should I do next?",
+                    },
+                ],
+            };
+
+            await publisher.ask(config, context);
+
+            expect(capturedEvents.length).toBe(1);
+            const event = capturedEvents[0];
+
+            const teamTag = event.tags.find((tag) => tag[0] === "team");
+            expect(teamTag).toBeDefined();
+            expect(teamTag?.[1]).toBe("alpha-team");
+
+            const branchTag = event.tags.find((tag) => tag[0] === "branch");
+            expect(branchTag).toBeDefined();
+            expect(branchTag?.[1]).toBe("feature/xyz");
         });
 
         it("should throw error when conversationId is missing", async () => {
