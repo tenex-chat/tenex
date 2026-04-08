@@ -125,10 +125,14 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("TodoWrite");
             });
 
-            it("should NOT disable conditional built-ins when TENEX does not provide equivalents", () => {
+            it("should always disable web tools to enforce skill-based permissions", () => {
+                // Even when TENEX doesn't provide web_fetch/web_search, the built-ins
+                // should be disabled to ensure agents only get tools via skill configuration
                 const disallowed = getDisallowedTools(["delegate"], []);
-                expect(disallowed).not.toContain("WebFetch");
-                expect(disallowed).not.toContain("WebSearch");
+                expect(disallowed).toContain("WebFetch");
+                expect(disallowed).toContain("WebSearch");
+                expect(disallowed).toContain("Task");
+                expect(disallowed).toContain("TodoWrite");
             });
         });
 
@@ -168,10 +172,10 @@ describe("ClaudeCodeProvider", () => {
         });
 
         describe("restricted agents", () => {
-            it("should disable always-disabled built-ins and mapped tools, allow unmapped conditional built-ins", () => {
+            it("should disable all TENEX-controlled built-ins regardless of provided tools", () => {
                 const disallowed = getDisallowedTools(["delegate", "ask", "lesson_learn"], []);
 
-                // Always disabled
+                // Always disabled FS tools
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
                 expect(disallowed).toContain("Glob");
@@ -181,16 +185,14 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("Bash");
                 expect(disallowed).toContain("TaskOutput");
 
-                // delegate is provided, so Task should be disabled
+                // Always disabled to enforce skill-based permissions
                 expect(disallowed).toContain("Task");
+                expect(disallowed).toContain("TodoWrite");
+                expect(disallowed).toContain("WebFetch");
+                expect(disallowed).toContain("WebSearch");
 
-                // No fs_read provided, so Read should NOT be disabled
-                // (needed for Claude Code's large tool result files)
+                // Read is NEVER disabled (needed for Claude Code's large tool result files)
                 expect(disallowed).not.toContain("Read");
-
-                // No web tools provided, so those built-ins should NOT be disabled
-                expect(disallowed).not.toContain("WebFetch");
-                expect(disallowed).not.toContain("WebSearch");
             });
         });
     });

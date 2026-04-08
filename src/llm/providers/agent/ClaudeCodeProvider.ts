@@ -66,8 +66,14 @@ const FS_TOOL_NAMES = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"] a
 
 /** Built-in tools that TENEX always controls — agents get these only via TENEX's equivalents.
  * Read is excluded: Claude Code saves large MCP tool results to files and needs
- * its built-in Read to let the model access them. */
-const ALWAYS_DISABLED_BUILTINS = ["Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash", "TaskOutput"] as const;
+ * its built-in Read to let the model access them.
+ *
+ * All other tools must go through TENEX's skill-based permission system to ensure
+ * agents only get tools enabled by their skills. */
+const ALWAYS_DISABLED_BUILTINS = [
+    "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash", "TaskOutput",
+    "WebFetch", "WebSearch", "Task", "TodoWrite"
+] as const;
 
 /** Pattern to detect MCP tools that provide FS capability */
 const MCP_FS_CAPABILITY_PATTERN = /mcp__.*__(fs_read|fs_write|fs_edit|fs_glob|fs_grep|read_file|write_file|edit_file|list_directory)/;
