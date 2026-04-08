@@ -57,7 +57,7 @@ describe("skill-reminder-renderers", () => {
 
         // Global skills section shows count only, not individual skill names
         expect(rendered).toContain("<global-skills>");
-        expect(rendered).toContain("2 global skills available — use `skill_list` to see them all");
+        expect(rendered).toContain("1 global skill available — use `skill_list` to see them all");
         expect(rendered).not.toContain("blocked-skill");
     });
 });

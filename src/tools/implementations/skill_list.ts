@@ -17,6 +17,7 @@ interface SkillSummary {
     description?: string;
     scope: SkillStoreScope;
     eventId?: string;
+    hasTools: boolean;
 }
 
 interface SkillListResult {
@@ -101,6 +102,7 @@ export function createSkillListTool(context: ToolExecutionContext): AISdkTool {
                 const summary: SkillSummary = {
                     identifier: skill.identifier,
                     scope: skill.scope ?? "shared",
+                    hasTools: (skill.toolNames?.length ?? 0) > 0,
                     ...(skill.name !== undefined && { name: skill.name }),
                     ...(skill.description !== undefined || skill.content !== undefined
                         ? { description: truncateDescription(skill.description ?? skill.content) }
