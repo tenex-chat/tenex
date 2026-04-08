@@ -91,82 +91,173 @@ export class AgentPublisher implements AgentRuntimePublisher {
     }
 
     /**
-     * Safely publish an event with error handling and comprehensive logging.
-     * Throws an error if no relays accept the event.
+     * Safely publish an event with error handling, retries, and comprehensive logging.
+     * Assumes the event is already signed. Retries only the publishing step.
+     * Throws an error if no relays accept the event after all retries.
      */
     private async safePublish(event: NDKEvent, eventType: string): Promise<void> {
-        try {
-            const relaySet = await event.publish();
+        const maxRetries = 3;
+        const retryDelayMs = 1000;
 
-            // Log relay responses
-            const successRelays: string[] = [];
-            for (const relay of relaySet) {
-                successRelays.push(relay.url);
-                logger.debug(`Relay accepted ${eventType} event`, {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                if (attempt > 1) {
+                    logger.info(`Retry attempt ${attempt}/${maxRetries} for ${eventType} event`, {
+                        eventId: shortenOptionalEventId(event.id),
+                        eventType,
+                        agent: this.agent.slug,
+                        attempt,
+                    });
+                    await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt - 1)));
+                }
+
+                const relaySet = await event.publish();
+
+                // Log relay responses with connectivity information
+                const successRelays: string[] = [];
+                for (const relay of relaySet) {
+                    successRelays.push(relay.url);
+                    const stats = relay.connectivity?.connectionStats;
+                    const status = relay.connectivity?.connected;
+                    logger.debug(`Relay accepted ${eventType} event`, {
+                        eventId: shortenOptionalEventId(event.id),
+                        eventType,
+                        relayUrl: relay.url,
+                        agent: this.agent.slug,
+                        connected: status,
+                        attempts: stats?.attempts,
+                        successCount: stats?.success,
+                    });
+
+                    // Listen for per-relay publish failures
+                    const publishFailHandler = (failedEvent: NDKEvent, error: Error) => {
+                        if (failedEvent.id === event.id) {
+                            logger.error(`Relay rejected ${eventType} event`, {
+                                eventId: shortenOptionalEventId(event.id),
+                                eventType,
+                                relayUrl: relay.url,
+                                agent: this.agent.slug,
+                                error: error.message,
+                            });
+                            relay.off("publish:failed", publishFailHandler);
+                        }
+                    };
+                    relay.once("publish:failed", publishFailHandler);
+
+                    // Listen for successful publish confirmation
+                    const publishedHandler = (publishedEvent: NDKEvent) => {
+                        if (publishedEvent.id === event.id) {
+                            logger.debug(`Relay confirmed publish of ${eventType} event`, {
+                                eventId: shortenOptionalEventId(event.id),
+                                eventType,
+                                relayUrl: relay.url,
+                                agent: this.agent.slug,
+                            });
+                            relay.off("published", publishedHandler);
+                        }
+                    };
+                    relay.once("published", publishedHandler);
+                }
+
+                // Fail explicitly when no relays accept the event
+                if (successRelays.length === 0) {
+                    const error = new Error(
+                        `Event published to 0 relays - all relays rejected the ${eventType} event`
+                    );
+                    logger.error("Event published to 0 relays", {
+                        eventId: shortenOptionalEventId(event.id),
+                        eventType,
+                        agent: this.agent.slug,
+                        kind: event.kind,
+                        contentLength: event.content?.length || 0,
+                        tagCount: event.tags?.length || 0,
+                        rawEvent: JSON.stringify(event.rawEvent()),
+                        attempt,
+                    });
+
+                    if (attempt < maxRetries) {
+                        logger.warn(`Will retry publishing ${eventType} event (attempt ${attempt}/${maxRetries})`, {
+                            eventId: shortenOptionalEventId(event.id),
+                            agent: this.agent.slug,
+                        });
+                        continue;
+                    }
+
+                    throw error;
+                }
+
+                logger.info(`Published ${eventType} event to ${successRelays.length} relay(s)`, {
                     eventId: shortenOptionalEventId(event.id),
                     eventType,
-                    relayUrl: relay.url,
                     agent: this.agent.slug,
+                    relays: successRelays,
+                    attempt: attempt > 1 ? attempt : undefined,
                 });
-            }
 
-            // Fail explicitly when no relays accept the event
-            if (successRelays.length === 0) {
-                const error = new Error(
-                    `Event published to 0 relays - all relays rejected the ${eventType} event`
-                );
-                logger.error("Event published to 0 relays", {
+                return;
+            } catch (error) {
+                const isLastAttempt = attempt === maxRetries;
+                const relayErrors = error instanceof NDKPublishError ? error.relayErrors : undefined;
+                const rawEvent = JSON.stringify(event.rawEvent());
+
+                // Collect relay connectivity information for diagnostics
+                const ndk = getNDK();
+                const relayStatus = Array.from(ndk.pool?.relays.values() || []).map(relay => ({
+                    url: relay.url,
+                    connected: relay.connectivity?.connected,
+                    attempts: relay.connectivity?.connectionStats?.attempts,
+                    successCount: relay.connectivity?.connectionStats?.success,
+                }));
+
+                if (!isLastAttempt) {
+                    logger.warn(`Failed to publish ${eventType} (attempt ${attempt}/${maxRetries}), will retry`, {
+                        eventId: shortenOptionalEventId(event.id),
+                        agent: this.agent.slug,
+                        kind: event.kind,
+                        contentLength: event.content?.length || 0,
+                        tagCount: event.tags?.length || 0,
+                        relayErrors,
+                        relayStatus,
+                        attempt,
+                    });
+                    continue;
+                }
+
+                logger.error(`Failed to publish ${eventType} after ${maxRetries} attempts`, {
                     eventId: shortenOptionalEventId(event.id),
-                    eventType,
                     agent: this.agent.slug,
                     kind: event.kind,
                     contentLength: event.content?.length || 0,
                     tagCount: event.tags?.length || 0,
-                    rawEvent: JSON.stringify(event.rawEvent()),
-                });
-                throw error;
-            }
-
-            logger.info(`Published ${eventType} event to ${successRelays.length} relay(s)`, {
-                eventId: shortenOptionalEventId(event.id),
-                eventType,
-                agent: this.agent.slug,
-                relays: successRelays,
-            });
-        } catch (error) {
-            const relayErrors = error instanceof NDKPublishError ? error.relayErrors : undefined;
-            const rawEvent = JSON.stringify(event.rawEvent());
-            logger.error(`Failed to publish ${eventType}`, {
-                eventId: shortenOptionalEventId(event.id),
-                agent: this.agent.slug,
-                kind: event.kind,
-                contentLength: event.content?.length || 0,
-                tagCount: event.tags?.length || 0,
-                relayErrors,
-                rawEvent,
-            });
-            logger.writeToWarnLog({
-                timestamp: new Date().toISOString(),
-                level: "error",
-                component: "AgentPublisher",
-                message: `Failed to publish ${eventType}`,
-                context: {
-                    eventId: shortenOptionalEventId(event.id),
-                    agent: this.agent.slug,
                     relayErrors,
+                    relayStatus,
                     rawEvent,
-                },
-                error: error instanceof Error ? error.message : String(error),
-            });
-            const message = error instanceof Error ? error.message : String(error);
-            throw new AgentPublishError(
-                `Failed to publish ${eventType}: ${message}`,
-                {
-                    cause: error,
-                    event: this.toPublishedMessageRef(event),
-                    eventType,
-                }
-            );
+                    attempts: maxRetries,
+                });
+                logger.writeToWarnLog({
+                    timestamp: new Date().toISOString(),
+                    level: "error",
+                    component: "AgentPublisher",
+                    message: `Failed to publish ${eventType} after ${maxRetries} attempts`,
+                    context: {
+                        eventId: shortenOptionalEventId(event.id),
+                        agent: this.agent.slug,
+                        relayErrors,
+                        rawEvent,
+                        attempts: maxRetries,
+                    },
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                const message = error instanceof Error ? error.message : String(error);
+                throw new AgentPublishError(
+                    `Failed to publish ${eventType} after ${maxRetries} attempts: ${message}`,
+                    {
+                        cause: error,
+                        event: this.toPublishedMessageRef(event),
+                        eventType,
+                    }
+                );
+            }
         }
     }
 

@@ -31,13 +31,61 @@ export async function initNDK(): Promise<void> {
     // Auto-authenticate with relays that require NIP-42 auth
     ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk });
 
-    // Listen for relay connection events
+    // Listen for relay connection lifecycle events
+    ndk.pool?.on("relay:connecting", (relay) => {
+        logger.debug("Relay connecting", { url: relay.url });
+    });
+
     ndk.pool?.on("relay:connect", (relay) => {
-        logger.info("Relay connected", { url: relay.url });
+        const stats = relay.connectivity?.connectionStats;
+        logger.info("Relay connected", {
+            url: relay.url,
+            attempts: stats?.attempts,
+            successCount: stats?.success,
+        });
+    });
+
+    ndk.pool?.on("relay:ready", (relay) => {
+        logger.info("Relay ready", { url: relay.url });
     });
 
     ndk.pool?.on("relay:disconnect", (relay) => {
-        logger.warn("Relay disconnected", { url: relay.url });
+        const stats = relay.connectivity?.connectionStats;
+        logger.warn("Relay disconnected", {
+            url: relay.url,
+            attempts: stats?.attempts,
+            successCount: stats?.success,
+        });
+    });
+
+    // Listen for relay notices
+    ndk.pool?.on("notice", (relay, notice) => {
+        logger.info("Relay notice", {
+            url: relay.url,
+            notice,
+        });
+    });
+
+    // Listen for relay flapping (unstable connection)
+    ndk.pool?.on("flapping", (relay) => {
+        const stats = relay.connectivity?.connectionStats;
+        logger.warn("Relay flapping detected", {
+            url: relay.url,
+            attempts: stats?.attempts,
+            successCount: stats?.success,
+        });
+    });
+
+    // Listen for relay authentication events
+    ndk.pool?.on("relay:auth", (relay, challenge) => {
+        logger.info("Relay authentication requested", {
+            url: relay.url,
+            challengeLength: challenge.length,
+        });
+    });
+
+    ndk.pool?.on("relay:authed", (relay) => {
+        logger.info("Relay authenticated", { url: relay.url });
     });
 
     // Connect with timeout - don't block daemon startup if relays are unreachable
