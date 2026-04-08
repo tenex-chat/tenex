@@ -70,12 +70,6 @@ export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TO
      * Keys are read from tool input args at execution time and serialized as XML attributes.
      */
     transcriptArgsToInclude?: ToolTranscriptArgSpec[];
-    /**
-     * Whether this tool has side effects (modifies state, writes files, sends messages, etc.)
-     * Default is true (assume side effects unless explicitly declared false).
-     * Read-only tools (queries, reads) should set this to false.
-     */
-    hasSideEffects?: boolean;
 };
 
 /**

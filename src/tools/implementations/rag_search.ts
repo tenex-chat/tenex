@@ -144,11 +144,5 @@ export function createRAGSearchTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(aiTool, "hasSideEffects", {
-        value: false,
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

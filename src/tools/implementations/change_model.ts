@@ -121,12 +121,5 @@ export function createChangeModelTool(context: ConversationToolContext): AISdkTo
         },
     });
 
-    // Mark as having side effects (changes conversation state)
-    Object.defineProperty(aiTool, "hasSideEffects", {
-        value: true,
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

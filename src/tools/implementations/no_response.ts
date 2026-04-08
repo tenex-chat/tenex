@@ -52,11 +52,5 @@ export function createNoResponseTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(aiTool, "hasSideEffects", {
-        value: true,
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }
