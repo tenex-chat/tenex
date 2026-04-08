@@ -19,9 +19,9 @@ export const environmentVariablesFragment: PromptFragment<EnvironmentVariablesAr
         parts.push("<environment-variables>");
         parts.push("These variables are available in shell commands and file tool path arguments.");
         parts.push("- $USER_HOME — the user's home directory");
-        parts.push("- $AGENT_HOME — this agent's private home directory");
-        parts.push("- $PUBKEY — this agent's hex pubkey");
-        parts.push("- $NPUB — this agent's npub-encoded pubkey");
+        parts.push("- $AGENT_HOME — your private home directory");
+        parts.push("- $PUBKEY — your hex pubkey");
+        parts.push("- $NPUB — your npub-encoded pubkey");
         if (projectBasePath) {
             parts.push("- $PROJECT_BASE — the current project's root directory");
         }

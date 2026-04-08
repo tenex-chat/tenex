@@ -405,14 +405,13 @@ function renderRecentConversationsSection(
     const conversationLines = recentConversations.map((conv, index) => {
         const title = conv.title || `Conversation ${shortenConversationId(conv.id)}`;
         const relativeTime = formatRelativeTimeShort(conv.lastActivity);
-        const summaryLine = conv.summary ? `\n   Summary: ${conv.summary}` : "";
-        return `${index + 1}. **${title}** (${relativeTime}) [id: ${shortenConversationId(conv.id)}]${summaryLine}`;
+        return `${index + 1}. **${title}** (${relativeTime}) [id: ${shortenConversationId(conv.id)}]`;
     });
 
     return `<recent>
 You participated in the following conversations recently. Use \`conversation_get <id>\` with the short id shown if you need to reopen one:
 
-${conversationLines.join("\n\n")}
+${conversationLines.join("\n")}
 </recent>`;
 }
 

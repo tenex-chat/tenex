@@ -27,6 +27,12 @@ import { homedir } from "node:os";
 import type { ProjectDTag } from "@/types/project-ids";
 import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
 import { logger } from "@/utils/logger";
+import {
+    buildConversationsReminderSnapshot,
+    renderConversationsReminderDelta,
+    renderConversationsReminderFromSnapshot,
+    type ConversationsReminderSnapshot,
+} from "@/prompts/reminders/conversations";
 
 function cloneReminderState(state: ReminderState | undefined): ReminderState | undefined {
     return state ? structuredClone(state) : undefined;
@@ -326,6 +332,50 @@ function createDelegationsProvider(): ReminderProvider<TenexReminderData, string
     });
 }
 
+const CONVERSATIONS_BUCKET_MS = 5 * 60 * 1000; // 5 minutes
+
+interface ConversationsSnapshotWithTimestamp {
+    timeBucket: number;
+    snapshot: ConversationsReminderSnapshot;
+}
+
+function createConversationsProvider(): ReminderProvider<TenexReminderData, ConversationsSnapshotWithTimestamp> {
+    return createDeltaProvider<ConversationsSnapshotWithTimestamp>({
+        type: "conversations",
+        fullInterval: 10,
+        placement: "overlay-user",
+        emptySnapshot: {
+            timeBucket: 0,
+            snapshot: {
+                active: [],
+                recent: [],
+            },
+        },
+        snapshot: (data) => {
+            const timeBucket = Math.floor(Date.now() / CONVERSATIONS_BUCKET_MS);
+            const snapshot = buildConversationsReminderSnapshot({
+                agentPubkey: data.agent.pubkey,
+                currentConversationId: data.conversation.getId(),
+                projectId: data.projectId,
+            });
+            return { timeBucket, snapshot };
+        },
+        renderFull: (_snapshotWithTime, _data) => {
+            const content = renderConversationsReminderFromSnapshot(_snapshotWithTime.snapshot);
+            return content ? { type: "conversations", content } : null;
+        },
+        renderDelta: (previous, current) => {
+            // Only render if at least 5 minutes have elapsed since last update
+            if (previous.timeBucket === current.timeBucket) {
+                return null;
+            }
+
+            const content = renderConversationsReminderDelta(previous.snapshot, current.snapshot);
+            return content ? { type: "conversations", content } : null;
+        },
+    });
+}
+
 function createLoadedSkillsProvider(): ReminderProvider<TenexReminderData, string> {
     return {
         type: "loaded-skills",
@@ -422,6 +472,7 @@ export function createTenexReminderProviders(): ReminderProvider<TenexReminderDa
         createTodoListProvider(),
         createResponseRoutingProvider(),
         createDelegationsProvider(),
+        createConversationsProvider(),
         createLoadedSkillsProvider(),
         createAvailableSkillsProvider(),
     ];
