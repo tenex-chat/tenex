@@ -231,9 +231,7 @@ export class TeamService {
                       projectFileState.mtimeMs !== existing.projectFileState.mtimeMs ||
                       projectFileState.size !== existing.projectFileState.size;
 
-            if (!globalChanged && !projectChanged) {
-                // Refresh TTL
-                existing.expiresAt = Date.now() + TeamService.CACHE_TTL_MS;
+            if (!globalChanged && !projectChanged && Date.now() < existing.expiresAt) {
                 return existing.data;
             }
         }
@@ -315,13 +313,20 @@ export class TeamService {
             throw err;
         }
 
-        const raw = await readJsonFile<unknown>(filePath);
-        if (raw === null) {
-            // File read/parse error — log and return empty
+        // readJsonFile returns null for ENOENT and throws for JSON parse errors.
+        // Both cases degrade to empty so a malformed file never crashes the service.
+        let raw: unknown;
+        try {
+            raw = await readJsonFile<unknown>(filePath);
+        } catch {
             logger.warn("Could not read teams file, returning empty teams", {
                 filePath,
-                warning: "file read error or parse failure",
+                warning: "file read or parse failure",
             });
+            return { data: [], fileState };
+        }
+        if (raw === null) {
+            // File disappeared between stat and read (TOCTOU)
             return { data: [], fileState };
         }
 
