@@ -12,7 +12,11 @@ import { createViolationReminders } from "@/services/heuristics";
 import { RALRegistry } from "@/services/ral";
 import { SkillService, loadAllSkillTools } from "@/services/skill";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
-import { filterBlockedSkills } from "@/services/skill/skill-blocking";
+import {
+    buildExpandedBlockedSet,
+    filterBlockedSkills,
+    isSkillBlocked,
+} from "@/services/skill/skill-blocking";
 import { HOME_FS_FALLBACKS } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -306,15 +310,15 @@ export function createPrepareStep(
                 ...selfAppliedSkillIds,
                 ...agentAlwaysSkillIds,
             ])];
+            const blockedSet = buildExpandedBlockedSet(context.agent.blockedSkills ?? []);
+            const filteredSkillIds = filterBlockedSkills(requestedSkillIds, blockedSet);
 
-            const { allowed: filteredSkillIds, blocked: blockedFromRehydration } = filterBlockedSkills(
-                requestedSkillIds,
-                context.agent.blockedSkills
-            );
-            if (blockedFromRehydration.length > 0) {
+            if (filteredSkillIds.length < requestedSkillIds.length) {
                 logger.warn("[StreamCallbacks] Blocked skills filtered during step rehydration", {
                     agent: context.agent.slug,
-                    blockedSkills: blockedFromRehydration,
+                    blockedSkills: requestedSkillIds.filter((skillId) =>
+                        isSkillBlocked(skillId, blockedSet)
+                    ),
                     step: step.stepNumber,
                 });
             }

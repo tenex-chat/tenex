@@ -46,7 +46,6 @@ describe("skills_set tool", () => {
 
     const mockSetSelfAppliedSkills = mock();
     const mockGetSelfAppliedSkillIds = mock();
-    let installedSkillsSpy: ReturnType<typeof spyOn>;
     let whitelistServiceSpy: ReturnType<typeof spyOn>;
     let skillServiceSpy: ReturnType<typeof spyOn>;
     let updateDefaultConfigSpy: ReturnType<typeof spyOn>;
@@ -88,11 +87,11 @@ describe("skills_set tool", () => {
     });
 
     beforeEach(() => {
+        SkillWhitelistService.getInstance().setInstalledSkills([]);
         skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
             fetchSkills: mockFetchSkills,
             listAvailableSkills: mockListAvailableSkills,
         } as never);
-        installedSkillsSpy = spyOn(SkillWhitelistService.getInstance(), "getInstalledSkills").mockReturnValue([]);
         whitelistServiceSpy = spyOn(SkillWhitelistService.getInstance(), "getWhitelistedSkills").mockReturnValue([]);
         projectContextSpy = spyOn(projectServices, "getProjectContext").mockReturnValue({
             project: {
@@ -115,7 +114,6 @@ describe("skills_set tool", () => {
 
     afterEach(() => {
         skillServiceSpy?.mockRestore();
-        installedSkillsSpy?.mockRestore();
         whitelistServiceSpy?.mockRestore();
         updateDefaultConfigSpy?.mockRestore();
         projectContextSpy?.mockRestore();
@@ -333,7 +331,7 @@ describe("skills_set tool", () => {
     });
 
     it("should reject an add resolved through an event id alias", async () => {
-        installedSkillsSpy.mockReturnValue([
+        SkillWhitelistService.getInstance().setInstalledSkills([
             {
                 identifier: "shell",
                 shortId: "shell-short",
@@ -354,15 +352,15 @@ describe("skills_set tool", () => {
         mockListAvailableSkills.mockResolvedValue([createAvailableSkill("shell")]);
 
         const context = createMockContext();
-        (context.agent as any).blockedSkills = [SKILL_ID_1];
+        (context.agent as any).blockedSkills = ["shell"];
         const toolDef = createSkillsSetTool(context);
         const result = await toolDef.execute(
-            { add: ["shell"] },
+            { add: [SKILL_ID_1] },
             toolCallOpts("tc-blocked-alias")
         );
 
         expect(result.success).toBe(false);
-        expect(result.message).toContain("Cannot activate blocked skill(s): shell");
+        expect(result.message).toContain(`Cannot activate blocked skill(s): ${SKILL_ID_1}`);
     });
 
     it("should treat removing a blocked skill as a no-op", async () => {

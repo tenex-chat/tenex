@@ -1078,6 +1078,7 @@ export class AgentStorage {
             tools: agent.default?.tools,
             skills: agent.default?.skills,
             blockedSkills: agent.default?.blockedSkills,
+            mcpAccess: agent.default?.mcpAccess,
         };
 
         const projectConfig = projectDTag
@@ -1142,6 +1143,14 @@ export class AgentStorage {
             }
         }
 
+        if (updates.mcpAccess !== undefined) {
+            if (updates.mcpAccess.length > 0) {
+                agent.default.mcpAccess = updates.mcpAccess;
+            } else {
+                agent.default.mcpAccess = undefined;
+            }
+        }
+
         // Clean up empty default block
         if (agent.default && Object.keys(agent.default).length === 0) {
             agent.default = undefined;
@@ -1201,6 +1210,7 @@ export class AgentStorage {
                 tools: agent.default?.tools,
                 skills: agent.default?.skills,
                 blockedSkills: agent.default?.blockedSkills,
+                mcpAccess: agent.default?.mcpAccess,
             };
 
             const deduplicated = stripUndefinedValues(

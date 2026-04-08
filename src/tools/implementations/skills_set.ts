@@ -7,7 +7,7 @@ import { renderSkill } from "@/agents/execution/skill-reminder-renderers";
 import { agentStorage } from "@/agents/AgentStorage";
 import { getProjectContext } from "@/services/projects";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
-import { buildExpandedBlockedSet } from "@/services/skill/skill-blocking";
+import { buildExpandedBlockedSet, isSkillBlocked } from "@/services/skill/skill-blocking";
 
 const skillsSetSchema = z.object({
     add: z
@@ -126,8 +126,8 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
                     .map((skill) => skill.identifier)
                     .filter((skillId): skillId is string => Boolean(skillId))
             );
-            const blockedSet = buildExpandedBlockedSet((agent as { blockedSkills?: string[] }).blockedSkills ?? []);
-            const blockedAttempts = addIds.filter((id) => blockedSet.has(id));
+            const blockedSet = buildExpandedBlockedSet(agent.blockedSkills ?? []);
+            const blockedAttempts = addIds.filter((id) => isSkillBlocked(id, blockedSet));
             if (blockedAttempts.length > 0) {
                 return {
                     success: false,

@@ -20,7 +20,11 @@ import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
 import { FullResultStash, wrapToolsWithOutputTruncation } from "./ToolOutputTruncation";
-import { filterBlockedSkills } from "@/services/skill/skill-blocking";
+import {
+    buildExpandedBlockedSet,
+    filterBlockedSkills,
+    isSkillBlocked,
+} from "@/services/skill/skill-blocking";
 import {
     createExecutionContextManagement,
     type ExecutionContextManagement,
@@ -81,15 +85,13 @@ export async function setupStreamExecution(
     const selfAppliedSkillIds = context.conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
     const agentAlwaysSkillIds = context.agent.alwaysSkills ?? [];
     const requestedSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds, ...agentAlwaysSkillIds])];
+    const blockedSet = buildExpandedBlockedSet(context.agent.blockedSkills ?? []);
+    const filteredSkillIds = filterBlockedSkills(requestedSkillIds, blockedSet);
 
-    const { allowed: filteredSkillIds, blocked: blockedFromRequest } = filterBlockedSkills(
-        requestedSkillIds,
-        context.agent.blockedSkills
-    );
-    if (blockedFromRequest.length > 0) {
+    if (filteredSkillIds.length < requestedSkillIds.length) {
         logger.warn("[StreamSetup] Blocked skills filtered from request", {
             agent: context.agent.slug,
-            blockedSkills: blockedFromRequest,
+            blockedSkills: requestedSkillIds.filter((skillId) => isSkillBlocked(skillId, blockedSet)),
         });
     }
     const skillResult = filteredSkillIds.length > 0

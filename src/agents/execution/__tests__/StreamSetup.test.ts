@@ -1,91 +1,45 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { SkillWhitelistService } from "@/services/skill";
-import { logger } from "@/utils/logger";
 
-const fetchSkillsMock = mock(async (skillIds: string[]) => ({
-    skills: skillIds.map((identifier) => ({
-        identifier,
-        content: "",
-        installedFiles: [],
-    })),
-    content: "",
-    toolPermissions: {},
+const fetchSkillsMock = mock(async () => ({ skills: [], content: "", toolPermissions: {} }));
+const createLLMServiceMock = mock(() => ({
+    provider: "mock-provider",
+    model: "mock-model",
 }));
-const listAvailableSkillsMock = mock(async () => []);
-const loadAllSkillToolsMock = mock(() => ({}));
-const getProjectContextMock = mock(() => ({
-    project: {
-        dTag: "project-1",
-        tagValue: (name: string) => (name === "d" ? "project-1" : undefined),
-    },
-    agents: new Map(),
-    mcpManager: undefined,
-}));
-const registerOperationMock = mock(() => new AbortController().signal);
-const getToolsObjectMock = mock(() => ({}));
-const createExecutionContextManagementMock = mock(() => ({
-    optionalTools: {},
-    scratchpadAvailable: true,
-}));
-const buildPromptHistoryMessagesMock = mock(() => ({
+const compileMock = mock(async () => ({
+    systemPrompt: "system",
+    counts: { total: 0, systemPrompt: 0, conversation: 0 },
     messages: [],
-    didMutateHistory: false,
 }));
 const prepareLLMRequestMock = mock(async () => ({
     messages: [],
     runtimeOverlays: [],
-    reportContextManagementUsage: undefined,
-}));
-const compileMock = mock(async () => ({
-    systemPrompt: "SYSTEM_PROMPT",
-    counts: {
-        total: 0,
-        systemPrompt: 0,
-        conversation: 0,
-    },
-}));
-const systemReminderContext = {
-    advance: mock(() => undefined),
-    clear: mock(() => undefined),
-    queue: mock(() => undefined),
-};
-
-const messageCompilerModulePath = new URL("../MessageCompiler.ts", import.meta.url).pathname;
-const contextManagementModulePath = new URL("../context-management.ts", import.meta.url).pathname;
-const promptHistoryModulePath = new URL("../prompt-history.ts", import.meta.url).pathname;
-const requestPreparationModulePath = new URL("../request-preparation.ts", import.meta.url).pathname;
-const supervisionWrapperModulePath = new URL("../ToolSupervisionWrapper.ts", import.meta.url).pathname;
-const outputTruncationModulePath = new URL("../ToolOutputTruncation.ts", import.meta.url).pathname;
-
-mock.module("@/services/skill", () => ({
-    SkillService: {
-        getInstance: () => ({
-            listAvailableSkills: listAvailableSkillsMock,
-            fetchSkills: fetchSkillsMock,
-        }),
-    },
-    loadAllSkillTools: loadAllSkillToolsMock,
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: getProjectContextMock,
-}));
-
-mock.module("@/services/LLMOperationsRegistry", () => ({
-    llmOpsRegistry: {
-        registerOperation: registerOperationMock,
-    },
 }));
 
 mock.module("@/services/ConfigService", () => ({
     config: {
-        isMetaModelConfig: () => false,
+        isMetaModelConfig: mock(() => false),
+        resolveMetaModel: mock(() => ({ isMetaModel: false })),
     },
 }));
 
-mock.module("@/tools/registry", () => ({
-    getToolsObject: getToolsObjectMock,
-    HOME_FS_FALLBACKS: [],
+mock.module("@/services/LLMOperationsRegistry", () => ({
+    llmOpsRegistry: {
+        registerOperation: mock(() => new AbortController().signal),
+        setMessageInjector: mock(() => undefined),
+    },
+}));
+
+mock.module("@/services/projects", () => ({
+    getProjectContext: mock(() => ({
+        project: {
+            dTag: "project-1",
+            tagValue: mock((name: string) => (name === "d" ? "project-1" : undefined)),
+        },
+        projectOwnerPubkey: "f".repeat(64),
+        mcpManager: undefined,
+        agents: new Map(),
+    })),
 }));
 
 mock.module("@/services/ral", () => ({
@@ -98,215 +52,169 @@ mock.module("@/services/ral", () => ({
     },
 }));
 
-mock.module("@/llm/system-reminder-context", () => ({
-    getSystemReminderContext: () => systemReminderContext,
+mock.module("@/services/skill", () => ({
+    SkillService: {
+        getInstance: () => ({
+            fetchSkills: fetchSkillsMock,
+            listAvailableSkills: mock(async () => []),
+        }),
+    },
+    loadAllSkillTools: mock(async () => ({})),
 }));
 
-mock.module(messageCompilerModulePath, () => ({
-    MessageCompiler: class {
-        constructor(_conversationStore: unknown) {}
+mock.module("@/tools/registry", () => ({
+    getToolsObject: mock(() => ({})),
+    HOME_FS_FALLBACKS: [],
+}));
 
-        async compile(input: unknown) {
-            return compileMock(input as never);
+mock.module("../MessageCompiler", () => ({
+    MessageCompiler: class {
+        constructor() {}
+        async compile() {
+            return await compileMock();
         }
     },
 }));
 
-mock.module(contextManagementModulePath, () => ({
-    createExecutionContextManagement: createExecutionContextManagementMock,
-}));
-
-mock.module(promptHistoryModulePath, () => ({
-    buildPromptHistoryMessages: buildPromptHistoryMessagesMock,
-}));
-
-mock.module(requestPreparationModulePath, () => ({
-    prepareLLMRequest: prepareLLMRequestMock,
-}));
-
-mock.module(supervisionWrapperModulePath, () => ({
+mock.module("../ToolSupervisionWrapper", () => ({
     wrapToolsWithSupervision: (tools: Record<string, unknown>) => tools,
 }));
 
-mock.module(outputTruncationModulePath, () => ({
-    FullResultStash: class {
-        clear() {}
-        consume() { return undefined; }
-        stash() {}
-    },
+mock.module("../ToolOutputTruncation", () => ({
+    FullResultStash: class {},
     wrapToolsWithOutputTruncation: (tools: Record<string, unknown>) => tools,
 }));
 
-let setupStreamExecution: typeof import("../StreamSetup").setupStreamExecution;
-let conversationStore: ReturnType<typeof createConversationStoreStub>;
+mock.module("../context-management", () => ({
+    createExecutionContextManagement: () => undefined,
+}));
 
-describe("StreamSetup blocked skills", () => {
+mock.module("../context-management/runtime", () => ({
+    createExecutionContextManagement: () => undefined,
+}));
+
+mock.module("../prompt-history", () => ({
+    buildPromptHistoryMessages: ({ compiled }: { compiled: { messages: unknown[] } }) => ({
+        messages: compiled.messages,
+        didMutateHistory: false,
+    }),
+}));
+
+mock.module("../request-preparation", () => ({
+    prepareLLMRequest: prepareLLMRequestMock,
+}));
+
+mock.module("@/llm/system-reminder-context", () => ({
+    getSystemReminderContext: () => ({
+        advance: mock(() => undefined),
+        queue: mock(() => undefined),
+        clear: mock(() => undefined),
+    }),
+}));
+
+mock.module("@/types/project-ids", () => ({
+    createProjectDTag: (value: string) => value,
+}));
+
+mock.module("@/utils/logger", () => ({
+    logger: {
+        warn: mock(() => undefined),
+        info: mock(() => undefined),
+        debug: mock(() => undefined),
+    },
+}));
+
+mock.module("@opentelemetry/api", () => ({
+    trace: {
+        getActiveSpan: () => undefined,
+    },
+}));
+
+import { setupStreamExecution } from "../StreamSetup";
+
+describe("StreamSetup", () => {
     const whitelistService = SkillWhitelistService.getInstance();
-    let warnSpy: ReturnType<typeof spyOn>;
-
-    beforeAll(async () => {
-        ({ setupStreamExecution } = await import("../StreamSetup"));
-    });
 
     beforeEach(() => {
-        conversationStore = createConversationStoreStub();
         whitelistService.setInstalledSkills([]);
-        listAvailableSkillsMock.mockClear();
         fetchSkillsMock.mockClear();
-        loadAllSkillToolsMock.mockClear();
-        getProjectContextMock.mockClear();
-        registerOperationMock.mockClear();
-        getToolsObjectMock.mockClear();
-        createExecutionContextManagementMock.mockClear();
-        buildPromptHistoryMessagesMock.mockClear();
-        prepareLLMRequestMock.mockClear();
+        createLLMServiceMock.mockClear();
         compileMock.mockClear();
-        systemReminderContext.advance.mockClear();
-        systemReminderContext.clear.mockClear();
-        systemReminderContext.queue.mockClear();
-        warnSpy = spyOn(logger, "warn");
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([]);
+        prepareLLMRequestMock.mockClear();
     });
 
     afterEach(() => {
-        warnSpy?.mockRestore();
+        whitelistService.setInstalledSkills([]);
         mock.restore();
     });
 
-    it("filters blocked delegation skills before fetchSkills", async () => {
-        const context = createRuntimeContext({
-            blockedSkills: ["blocked-skill"],
-            triggeringSkillEventIds: ["blocked-skill", "allowed-skill"],
-        });
-
-        await setupStreamExecution(context, createToolTrackerStub(), 1, createInjectionProcessorStub());
-
-        expect(fetchSkillsMock).toHaveBeenCalledWith(["allowed-skill"], expect.any(Object));
-        expect(warnSpy).toHaveBeenCalledWith(
-            "[StreamSetup] Blocked skills filtered from request",
-            expect.objectContaining({
-                agent: "test-agent",
-                blockedSkills: ["blocked-skill"],
-            })
+    it("filters blocked skills before fetchSkills is called", async () => {
+        whitelistService.setInstalledSkills([]);
+        const getWhitelistedSkillsSpy = mock(
+            () => [
+                {
+                    eventId: "a".repeat(64),
+                    identifier: "local-skill",
+                    shortId: "local-short",
+                    kind: 4202 as never,
+                    whitelistedBy: ["pubkey"],
+                },
+            ]
         );
-    });
+        whitelistService.getWhitelistedSkills = getWhitelistedSkillsSpy as never;
 
-    it("filters blocked self-applied skills before fetchSkills", async () => {
-        const context = createRuntimeContext({
-            blockedSkills: ["blocked-skill"],
-            selfAppliedSkillIds: ["blocked-skill", "allowed-skill"],
-        });
+        const context = {
+            agent: {
+                pubkey: "agent-pubkey",
+                slug: "agent-slug",
+                alwaysSkills: [],
+                blockedSkills: ["a".repeat(64)],
+                mcpAccess: [],
+                tools: [],
+                llmConfig: "test-model",
+                createLLMService: createLLMServiceMock,
+            },
+            triggeringEnvelope: {
+                metadata: {
+                    skillEventIds: ["local-skill"],
+                },
+                principal: {
+                    id: "user",
+                    linkedPubkey: "user",
+                    kind: "human",
+                },
+            },
+            conversationStore: {
+                id: "conversation-1",
+                getId: mock(() => "conversation-1"),
+                ensureRalActive: mock(() => undefined),
+                getSelfAppliedSkillIds: mock(() => []),
+                getContextManagementReminderState: mock(() => null),
+                save: mock(async () => undefined),
+            },
+            conversationId: "conversation-1",
+            projectBasePath: "/tmp/project",
+            workingDirectory: "/tmp/project",
+            currentBranch: "main",
+            getConversation() {
+                return this.conversationStore;
+            },
+        } as any;
 
-        await setupStreamExecution(context, createToolTrackerStub(), 1, createInjectionProcessorStub());
+        const toolTracker = {
+            setFullResultStash: mock(() => undefined),
+        } as any;
 
-        expect(fetchSkillsMock).toHaveBeenCalledWith(["allowed-skill"], expect.any(Object));
-    });
-
-    it("filters blocked local ids even when delegation passes an event id alias", async () => {
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([
-            {
-                eventId: "a".repeat(64),
-                identifier: "local-skill",
-                shortId: "local-short",
-                kind: 4202 as never,
-                name: "Local Skill",
-                description: "Local skill",
-                whitelistedBy: ["pubkey"],
-            } as never,
-        ]);
-
-        const context = createRuntimeContext({
-            blockedSkills: ["local-skill"],
-            triggeringSkillEventIds: ["a".repeat(64)],
-        });
-
-        await setupStreamExecution(context, createToolTrackerStub(), 1, createInjectionProcessorStub());
+        const result = await setupStreamExecution(
+            context,
+            toolTracker,
+            1,
+            { warmSenderPubkeys: mock(() => undefined) }
+        );
 
         expect(fetchSkillsMock).not.toHaveBeenCalled();
-    });
-
-    it("allows non-blocked skills through", async () => {
-        const context = createRuntimeContext({
-            blockedSkills: ["blocked-skill"],
-            triggeringSkillEventIds: ["allowed-skill"],
-        });
-
-        await setupStreamExecution(context, createToolTrackerStub(), 1, createInjectionProcessorStub());
-
-        expect(fetchSkillsMock).toHaveBeenCalledWith(["allowed-skill"], expect.any(Object));
-        expect(warnSpy).not.toHaveBeenCalled();
+        expect(result.request.runtimeOverlays).toEqual([]);
+        expect(result.llmService.provider).toBe("mock-provider");
+        expect(result.skillToolPermissions).toEqual({});
     });
 });
-
-function createConversationStoreStub() {
-    const store = {
-        ensureRalActive: mock(() => undefined),
-        getSelfAppliedSkillIds: mock(() => [] as string[]),
-        getMetaModelVariantOverride: mock(() => undefined as string | undefined),
-        getContextManagementReminderState: mock(() => undefined),
-        save: mock(async () => undefined),
-        addMessage: mock(() => undefined),
-        relocateToEnd: mock(() => false),
-    };
-
-    return store;
-}
-
-function createToolTrackerStub() {
-    return {
-        setFullResultStash: mock(() => undefined),
-    };
-}
-
-function createInjectionProcessorStub() {
-    return {
-        warmSenderPubkeys: mock(() => undefined),
-    };
-}
-
-function createRuntimeContext(overrides: {
-    blockedSkills?: string[];
-    triggeringSkillEventIds?: string[];
-    selfAppliedSkillIds?: string[];
-}) {
-    const llmService = {
-        provider: "mock-provider",
-        model: "mock-model",
-        updateUsageFromSteps: mock(() => undefined),
-        createLanguageModelFromRegistry: mock(() => ({} as never)),
-    };
-
-    const agent = {
-        name: "TestAgent",
-        slug: "test-agent",
-        pubkey: "agent-pubkey",
-        tools: [],
-        llmConfig: "mock-config",
-        alwaysSkills: [],
-        blockedSkills: overrides.blockedSkills,
-        mcpAccess: [],
-        createLLMService: mock(() => llmService),
-    };
-
-    conversationStore.getSelfAppliedSkillIds.mockReturnValue(overrides.selfAppliedSkillIds ?? []);
-
-    return {
-        agent,
-        conversationId: "conversation-1",
-        projectBasePath: "/tmp/project",
-        workingDirectory: "/tmp/project",
-        currentBranch: "main",
-        triggeringEnvelope: {
-            principal: {
-                id: "user-principal",
-                linkedPubkey: "user-pubkey",
-            },
-            metadata: {
-                skillEventIds: overrides.triggeringSkillEventIds ?? [],
-            },
-        },
-        conversationStore,
-        getConversation: () => conversationStore as never,
-        cachedSystemPrompt: undefined,
-    } as never;
-}

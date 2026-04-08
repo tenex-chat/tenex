@@ -10,7 +10,7 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import type { MCPConfig } from "@/llm/providers/types";
 import { publishAgentProfile } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
-import { filterBlockedSkills } from "@/services/skill/skill-blocking";
+import { buildExpandedBlockedSet, filterBlockedSkills } from "@/services/skill/skill-blocking";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -46,15 +46,13 @@ export function createAgentInstance(
     const effectiveBlockedSkills = resolvedConfig.blockedSkills;
     const effectiveMcpAccess = resolvedConfig.mcpAccess;
 
-    const { allowed: filteredAlwaysSkills, blocked } = filterBlockedSkills(
-        effectiveAlwaysSkills ?? [],
-        effectiveBlockedSkills
-    );
+    const blockedSet = buildExpandedBlockedSet(effectiveBlockedSkills);
+    const filteredAlwaysSkills = filterBlockedSkills(effectiveAlwaysSkills ?? [], blockedSet);
 
-    if (blocked.length > 0) {
+    if (filteredAlwaysSkills.length < (effectiveAlwaysSkills?.length ?? 0)) {
         logger.warn("[AgentLoader] Blocked skills removed from alwaysSkills", {
             agent: storedAgent.slug,
-            blockedSkills: blocked,
+            blockedSkills: (effectiveAlwaysSkills ?? []).filter((skillId) => blockedSet.has(skillId)),
         });
     }
 

@@ -96,6 +96,7 @@ describe("delta-based system reminders", () => {
             listAvailableSkills: async () => [],
         } as never);
         whitelistSpy = spyOn(SkillWhitelistService.getInstance(), "getWhitelistedSkills").mockReturnValue([]);
+        SkillWhitelistService.getInstance().setInstalledSkills([]);
 
         resetSystemReminders();
     });

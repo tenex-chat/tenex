@@ -6,10 +6,11 @@ import * as skillBlocking from "@/services/skill/skill-blocking";
 
 describe("agent-loader", () => {
     it("filters blocked always-on skills when hydrating an agent instance", () => {
-        const filterSpy = spyOn(skillBlocking, "filterBlockedSkills").mockReturnValue({
-            allowed: ["allowed-loader-skill"],
-            blocked: ["blocked-loader-skill"],
-        });
+        const blockedSet = new Set(["blocked-loader-skill"]);
+        const expandedSpy = spyOn(skillBlocking, "buildExpandedBlockedSet").mockReturnValue(blockedSet);
+        const filterSpy = spyOn(skillBlocking, "filterBlockedSkills").mockReturnValue([
+            "allowed-loader-skill",
+        ]);
 
         const signer = NDKPrivateKeySigner.generate();
         const storedAgent = createStoredAgent({
@@ -30,13 +31,15 @@ describe("agent-loader", () => {
 
         const instance = createAgentInstance(storedAgent, registry);
 
+        expect(expandedSpy).toHaveBeenCalledWith(["blocked-loader-skill"]);
         expect(filterSpy).toHaveBeenCalledWith(
             ["allowed-loader-skill", "blocked-loader-skill"],
-            ["blocked-loader-skill"]
+            blockedSet
         );
         expect(instance.alwaysSkills).toEqual(["allowed-loader-skill"]);
         expect(instance.blockedSkills).toEqual(["blocked-loader-skill"]);
 
+        expandedSpy.mockRestore();
         filterSpy.mockRestore();
     });
 });

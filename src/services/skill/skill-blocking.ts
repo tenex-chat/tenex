@@ -4,13 +4,13 @@ function normalizeSkillId(skillId: string): string {
     return skillId.trim();
 }
 
-function collectAliasesForSkill(
-    skill: {
-        identifier?: string;
-        shortId?: string;
-        eventId?: string;
-    }
-): Set<string> {
+type SkillAliasSource = {
+    identifier?: string;
+    shortId?: string;
+    eventId?: string;
+};
+
+function collectAliasesForSkill(skill: SkillAliasSource): Set<string> {
     const aliases = new Set<string>();
 
     if (skill.identifier) {
@@ -26,6 +26,42 @@ function collectAliasesForSkill(
     return aliases;
 }
 
+function buildSkillAliasIndex(): Map<string, Set<string>> {
+    const whitelistService = SkillWhitelistService.getInstance();
+    const aliasIndex = new Map<string, Set<string>>();
+
+    const registerAliases = (skill: SkillAliasSource): void => {
+        const aliases = collectAliasesForSkill(skill);
+        if (aliases.size === 0) {
+            return;
+        }
+
+        for (const alias of aliases) {
+            aliasIndex.set(alias, aliases);
+        }
+    };
+
+    for (const skill of whitelistService.getInstalledSkills?.() ?? []) {
+        registerAliases(skill);
+    }
+
+    for (const item of whitelistService.getWhitelistedSkills?.() ?? []) {
+        registerAliases(item);
+    }
+
+    return aliasIndex;
+}
+
+function expandSkillAliases(skillId: string, aliasIndex: Map<string, Set<string>>): Set<string> {
+    const normalizedSkillId = normalizeSkillId(skillId);
+    if (!normalizedSkillId) {
+        return new Set();
+    }
+
+    const aliases = aliasIndex.get(normalizedSkillId);
+    return aliases ? new Set(aliases) : new Set([normalizedSkillId]);
+}
+
 export function buildExpandedBlockedSet(
     blockedSkillIds: string[] | undefined
 ): Set<string> {
@@ -34,49 +70,11 @@ export function buildExpandedBlockedSet(
     }
 
     const expandedSet = new Set<string>();
-    const whitelistService = SkillWhitelistService.getInstance();
-    const installedSkills = whitelistService.getInstalledSkills();
-    const whitelistedSkills = whitelistService.getWhitelistedSkills();
-    const aliasMap = new Map<string, Set<string>>();
-
-    for (const skill of installedSkills) {
-        const aliases = collectAliasesForSkill(skill);
-        for (const alias of aliases) {
-            aliasMap.set(alias, aliases);
-        }
-    }
-
-    for (const item of whitelistedSkills) {
-        const aliases = aliasMap.get(normalizeSkillId(item.identifier ?? ""))
-            ?? aliasMap.get(normalizeSkillId(item.shortId ?? ""))
-            ?? aliasMap.get(normalizeSkillId(item.eventId ?? ""))
-            ?? new Set<string>();
-
-        if (item.identifier) {
-            aliases.add(normalizeSkillId(item.identifier));
-        }
-        if (item.shortId) {
-            aliases.add(normalizeSkillId(item.shortId));
-        }
-        if (item.eventId) {
-            aliases.add(normalizeSkillId(item.eventId));
-        }
-
-        for (const alias of aliases) {
-            aliasMap.set(alias, aliases);
-        }
-    }
+    const aliasIndex = buildSkillAliasIndex();
 
     for (const blockedId of blockedSkillIds) {
-        const normalizedBlockedId = normalizeSkillId(blockedId);
-        if (!normalizedBlockedId) {
-            continue;
-        }
-
-        expandedSet.add(normalizedBlockedId);
-        const aliases = aliasMap.get(normalizedBlockedId);
-        if (aliases) {
-            for (const alias of aliases) {
+        for (const alias of expandSkillAliases(blockedId, aliasIndex)) {
+            if (alias) {
                 expandedSet.add(alias);
             }
         }
@@ -85,33 +83,33 @@ export function buildExpandedBlockedSet(
     return expandedSet;
 }
 
-export function filterBlockedSkills(
-    skillIds: string[],
-    blockedSkillIds: string[] | undefined
-): { allowed: string[]; blocked: string[] } {
-    const blockedSet = buildExpandedBlockedSet(blockedSkillIds);
+export function filterBlockedSkills(skillIds: string[], blockedSet: Set<string>): string[] {
     if (blockedSet.size === 0) {
-        return { allowed: skillIds, blocked: [] };
+        return skillIds;
     }
 
-    const allowed: string[] = [];
-    const blocked: string[] = [];
+    const aliasIndex = buildSkillAliasIndex();
 
-    for (const id of skillIds) {
-        if (blockedSet.has(normalizeSkillId(id))) {
-            blocked.push(id);
-        } else {
-            allowed.push(id);
+    return skillIds.filter((skillId) => {
+        for (const alias of expandSkillAliases(skillId, aliasIndex)) {
+            if (blockedSet.has(alias)) {
+                return false;
+            }
         }
-    }
-
-    return { allowed, blocked };
+        return true;
+    });
 }
 
-export function isSkillBlocked(
-    skillId: string,
-    blockedSkillIds: string[] | undefined
-): boolean {
-    const blockedSet = buildExpandedBlockedSet(blockedSkillIds);
-    return blockedSet.has(normalizeSkillId(skillId));
+export function isSkillBlocked(skillId: string, blockedSet: Set<string>): boolean {
+    if (blockedSet.size === 0) {
+        return false;
+    }
+
+    const aliasIndex = buildSkillAliasIndex();
+    for (const alias of expandSkillAliases(skillId, aliasIndex)) {
+        if (blockedSet.has(alias)) {
+            return true;
+        }
+    }
+    return false;
 }

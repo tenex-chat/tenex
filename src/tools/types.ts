@@ -82,7 +82,16 @@ export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TO
  */
 export type ToolAgentInfo = Pick<
     AgentInstance,
-    "name" | "pubkey" | "slug" | "signer" | "sign" | "llmConfig" | "tools" | "telegram" | "mcpAccess"
+    | "name"
+    | "pubkey"
+    | "slug"
+    | "signer"
+    | "sign"
+    | "llmConfig"
+    | "tools"
+    | "telegram"
+    | "mcpAccess"
+    | "blockedSkills"
 >;
 
 /**

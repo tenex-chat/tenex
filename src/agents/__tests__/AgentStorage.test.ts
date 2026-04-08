@@ -335,6 +335,27 @@ describe("AgentStorage", () => {
             expect(loaded?.default?.blockedSkills).toEqual(["shell", "write-access"]);
         });
 
+        it("should update default mcpAccess in storage", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { mcpAccess: ["github", "slack"] },
+            });
+
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                mcpAccess: ["github", "notion"],
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.mcpAccess).toEqual(["github", "notion"]);
+        });
+
         it("should clear default blockedSkills when updated with an empty list", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
@@ -946,6 +967,30 @@ describe("AgentStorage", () => {
             expect(config3.blockedSkills).toEqual(["shell"]);
         });
 
+        it("should resolve effective mcpAccess with project override", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { mcpAccess: ["github"] },
+                projectOverrides: {
+                    "project-1": { mcpAccess: ["github", "slack"] },
+                    "project-2": { mcpAccess: [] },
+                },
+            });
+
+            const config1 = storage.getEffectiveConfig(agent, "project-1");
+            expect(config1.mcpAccess).toEqual(["github", "slack"]);
+
+            const config2 = storage.getEffectiveConfig(agent, "project-2");
+            expect(config2.mcpAccess).toEqual([]);
+
+            const config3 = storage.getEffectiveConfig(agent, "project-3");
+            expect(config3.mcpAccess).toEqual(["github"]);
+        });
+
         it("should resolve effective isPM with priority order", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
@@ -1040,6 +1085,28 @@ describe("AgentStorage", () => {
 
             const loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.projectOverrides?.["project-1"]?.blockedSkills).toEqual(["write-access"]);
+        });
+
+        it("should update project override mcpAccess via updateProjectOverride", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { mcpAccess: ["github"] },
+            });
+
+            await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                mcpAccess: ["github", "slack"],
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]?.mcpAccess).toEqual(["github", "slack"]);
         });
 
         it("should update project-scoped isPM via updateProjectScopedIsPM", async () => {

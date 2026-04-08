@@ -8,7 +8,7 @@
 import type { SkillData, SkillStoreScope, SkillToolPermissions, WhitelistItem } from "@/services/skill";
 import { hasToolPermissions, isOnlyToolMode, SkillWhitelistService } from "@/services/skill";
 import { SkillService } from "@/services/skill/SkillService";
-import { buildExpandedBlockedSet } from "@/services/skill/skill-blocking";
+import { buildExpandedBlockedSet, isSkillBlocked } from "@/services/skill/skill-blocking";
 
 // ---------------------------------------------------------------------------
 // Loaded-skills rendering (from former 12-skills.ts)
@@ -191,13 +191,13 @@ export async function renderAvailableSkillsBlock(
     });
     const blockedSet = buildExpandedBlockedSet(blockedSkills);
     const filteredInstalledSkills = installedSkills.filter((skill) => {
-        if (blockedSet.has(skill.identifier)) return false;
-        if (skill.eventId && blockedSet.has(skill.eventId)) return false;
+        if (isSkillBlocked(skill.identifier, blockedSet)) return false;
+        if (skill.eventId && isSkillBlocked(skill.eventId, blockedSet)) return false;
         return true;
     });
     const filteredWhitelistedItems = whitelistedItems.filter((item) => {
         const candidateId = item.identifier ?? item.shortId ?? item.eventId;
-        return candidateId ? !blockedSet.has(candidateId) : true;
+        return candidateId ? !isSkillBlocked(candidateId, blockedSet) : true;
     });
 
     const installedEventIds = new Set<string>();

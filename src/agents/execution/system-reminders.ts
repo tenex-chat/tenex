@@ -17,7 +17,7 @@ import type {
     TodoItem,
 } from "@/services/ral/types";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
-import { buildExpandedBlockedSet } from "@/services/skill/skill-blocking";
+import { buildExpandedBlockedSet, filterBlockedSkills } from "@/services/skill/skill-blocking";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -369,15 +369,19 @@ function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, st
             });
             const whitelist = SkillWhitelistService.getInstance().getWhitelistedSkills();
             const blockedSet = buildExpandedBlockedSet(data.agent.blockedSkills);
-            const ids = [
-                ...installed
-                    .map((skill) => skill.identifier)
-                    .filter((id): id is string => Boolean(id) && !blockedSet.has(id))
-                    .sort(),
-                ...whitelist
+            const installedIds = filterBlockedSkills(
+                installed.map((skill) => skill.identifier),
+                blockedSet
+            ).sort();
+            const whitelistIds = filterBlockedSkills(
+                whitelist
                     .map((entry) => entry.identifier ?? entry.shortId ?? entry.eventId)
-                    .filter((id): id is string => Boolean(id) && !blockedSet.has(id))
-                    .sort(),
+                    .filter((id): id is string => Boolean(id)),
+                blockedSet
+            ).sort();
+            const ids = [
+                ...installedIds,
+                ...whitelistIds,
             ];
             return ids.join(",");
         },

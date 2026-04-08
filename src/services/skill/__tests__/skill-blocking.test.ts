@@ -1,26 +1,17 @@
-import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { NDKKind } from "@/nostr/kinds";
-import { SkillWhitelistService, type WhitelistItem } from "@/services/skill";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { SkillWhitelistService } from "@/services/skill";
 import {
     buildExpandedBlockedSet,
     filterBlockedSkills,
     isSkillBlocked,
 } from "../skill-blocking";
 
-function createWhitelistItem(overrides: Partial<WhitelistItem>): WhitelistItem {
-    return {
-        eventId: overrides.eventId ?? "event-a",
-        identifier: overrides.identifier,
-        shortId: overrides.shortId,
-        kind: NDKKind.AgentSkill,
-        name: overrides.name,
-        description: overrides.description,
-        whitelistedBy: overrides.whitelistedBy ?? ["pubkey"],
-    };
-}
-
 describe("skill-blocking", () => {
     const whitelistService = SkillWhitelistService.getInstance();
+
+    beforeEach(() => {
+        whitelistService.setInstalledSkills([]);
+    });
 
     afterEach(() => {
         mock.restore();
@@ -39,8 +30,6 @@ describe("skill-blocking", () => {
     });
 
     it("includes the raw blocked id when there is no whitelist match", () => {
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([]);
-
         const blockedSet = buildExpandedBlockedSet(["local-only-skill"]);
 
         expect(blockedSet.has("local-only-skill")).toBe(true);
@@ -48,12 +37,14 @@ describe("skill-blocking", () => {
     });
 
     it("expands a blocked local identifier to all known aliases", () => {
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([
-            createWhitelistItem({
+        whitelistService.setInstalledSkills([
+            {
                 eventId: "a".repeat(64),
                 identifier: "local-skill",
                 shortId: "short-skill",
-            }),
+                content: "",
+                installedFiles: [],
+            } as never,
         ]);
 
         const blockedSet = buildExpandedBlockedSet(["local-skill"]);
@@ -64,12 +55,14 @@ describe("skill-blocking", () => {
     });
 
     it("expands a blocked event id to all known aliases", () => {
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([
-            createWhitelistItem({
+        whitelistService.setInstalledSkills([
+            {
                 eventId: "b".repeat(64),
                 identifier: "local-skill",
                 shortId: "short-skill",
-            }),
+                content: "",
+                installedFiles: [],
+            } as never,
         ]);
 
         const blockedSet = buildExpandedBlockedSet(["b".repeat(64)]);
@@ -80,39 +73,33 @@ describe("skill-blocking", () => {
     });
 
     it("filters blocked skills and preserves allowed ids", () => {
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([]);
-
-        expect(filterBlockedSkills(["allowed", "blocked", "other"], ["blocked"])).toEqual({
-            allowed: ["allowed", "other"],
-            blocked: ["blocked"],
-        });
-    });
-
-    it("returns all as allowed when blockedSkillIds is undefined", () => {
-        expect(filterBlockedSkills(["allowed", "blocked"], undefined)).toEqual({
-            allowed: ["allowed", "blocked"],
-            blocked: [],
-        });
+        const blockedSet = new Set(["blocked"]);
+        expect(filterBlockedSkills(["allowed", "blocked", "other"], blockedSet)).toEqual([
+            "allowed",
+            "other",
+        ]);
     });
 
     it("detects blocked skills through any alias", () => {
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([
-            createWhitelistItem({
+        whitelistService.setInstalledSkills([
+            {
                 eventId: "c".repeat(64),
                 identifier: "local-skill",
                 shortId: "short-skill",
-            }),
+                content: "",
+                installedFiles: [],
+            } as never,
         ]);
 
-        expect(isSkillBlocked("local-skill", ["local-skill"])).toBe(true);
-        expect(isSkillBlocked("short-skill", ["local-skill"])).toBe(true);
-        expect(isSkillBlocked("c".repeat(64), ["local-skill"])).toBe(true);
-        expect(isSkillBlocked("other-skill", ["local-skill"])).toBe(false);
+        const blockedSet = buildExpandedBlockedSet(["local-skill"]);
+        expect(isSkillBlocked("local-skill", blockedSet)).toBe(true);
+        expect(isSkillBlocked("short-skill", blockedSet)).toBe(true);
+        expect(isSkillBlocked("c".repeat(64), blockedSet)).toBe(true);
+        expect(isSkillBlocked("other-skill", blockedSet)).toBe(false);
     });
 
     it("returns false for a skill not in the blocked list", () => {
-        spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([]);
-
-        expect(isSkillBlocked("other-skill", ["blocked-skill"])).toBe(false);
+        const blockedSet = buildExpandedBlockedSet(["blocked-skill"]);
+        expect(isSkillBlocked("other-skill", blockedSet)).toBe(false);
     });
 });
