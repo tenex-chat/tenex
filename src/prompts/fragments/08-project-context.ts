@@ -1,12 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
-import { agentStorage } from "@/agents/AgentStorage";
-import { conversationRegistry } from "@/conversations/ConversationRegistry";
-import type { Daemon } from "@/daemon/Daemon";
-import { getDaemon } from "@/daemon";
-import { RALRegistry } from "@/services/ral/RALRegistry";
-import { getPubkeyService } from "@/services/PubkeyService";
 import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { getIdentityBindingStore } from "@/services/identity";
 import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
@@ -27,11 +21,6 @@ import type { TeamContext, TeamInfo } from "./types";
 const WORKTREE_CONTEXT_CACHE_TTL_MS = 30_000;
 const ROOT_AGENTS_MD_CACHE_TTL_MS = 30_000;
 const MAX_ROOT_CONTENT_LENGTH_FOR_SYSTEM_PROMPT = 2000;
-const MAX_OTHER_PROJECTS = 5;
-const MAX_CONVS_PER_PROJECT = 5;
-const MAX_SUMMARY_LENGTH = 150;
-const ELLIPSIS = "...";
-
 // =============================================================================
 // Worktree snapshot cache
 // =============================================================================
@@ -121,168 +110,6 @@ async function getCachedRootAgentsMd(
             return undefined;
         }
         throw error;
-    }
-}
-
-// =============================================================================
-// Other projects context
-// =============================================================================
-
-interface OtherProjectInfo {
-    projectId: ProjectDTag;
-    dTag: string;
-    title: string;
-    activeConversations: ActiveConversationSummary[];
-}
-
-interface ActiveConversationSummary {
-    conversationId: string;
-    title: string;
-    agentName: string;
-    status: string;
-    duration: string;
-}
-
-
-function sanitizeForPrompt(text: string, maxLength: number = MAX_SUMMARY_LENGTH): string {
-    let sanitized = text
-        .replace(/[\r\n]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    if (sanitized.length > maxLength) {
-        sanitized = sanitized.substring(0, maxLength - ELLIPSIS.length) + ELLIPSIS;
-    }
-
-    return sanitized;
-}
-
-function formatDuration(startTimestampMs: number): string {
-    const now = Date.now();
-    const durationMs = now - startTimestampMs;
-    const seconds = Math.floor(durationMs / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-
-    if (hours > 0) {
-        const remainingMinutes = minutes % 60;
-        return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-    }
-    if (minutes > 0) {
-        return `${minutes}m`;
-    }
-    return `${seconds}s`;
-}
-
-async function loadOtherProjectsContext(
-    agentPubkey: string,
-    currentProjectId?: ProjectDTag
-): Promise<OtherProjectInfo[]> {
-    try {
-        const agentProjectDTags = await agentStorage.getAgentProjects(agentPubkey);
-
-        if (agentProjectDTags.length === 0) {
-            return [];
-        }
-
-        let daemon: Daemon;
-        try {
-            daemon = getDaemon();
-        } catch {
-            logger.debug("Meta-project context: daemon not available, skipping");
-            return [];
-        }
-
-        const knownProjects = daemon.getKnownProjects();
-        const ralRegistry = RALRegistry.getInstance();
-        const pubkeyService = getPubkeyService();
-
-        const dTagToProjectId = new Map<string, { projectId: ProjectDTag; title: string }>();
-        for (const [projectId, project] of knownProjects) {
-            if (agentProjectDTags.includes(projectId)) {
-                const title = project.tagValue("title") || projectId;
-                dTagToProjectId.set(projectId, { projectId, title });
-            }
-        }
-
-        const otherProjectDTags = agentProjectDTags.filter((dTag) => {
-            const info = dTagToProjectId.get(dTag);
-            return info && info.projectId !== currentProjectId;
-        });
-
-        const limitedDTags = otherProjectDTags.slice(0, MAX_OTHER_PROJECTS);
-        const results: OtherProjectInfo[] = [];
-
-        for (const dTag of limitedDTags) {
-            const projectInfo = dTagToProjectId.get(dTag);
-            if (!projectInfo) continue;
-
-            const activeEntries = ralRegistry.getActiveEntriesForProject(projectInfo.projectId);
-
-            const conversationMap = new Map<string, (typeof activeEntries)[0]>();
-            for (const entry of activeEntries) {
-                const existing = conversationMap.get(entry.conversationId);
-                if (
-                    !existing ||
-                    entry.isStreaming ||
-                    (entry.currentTool && !existing.isStreaming) ||
-                    entry.lastActivityAt > existing.lastActivityAt
-                ) {
-                    conversationMap.set(entry.conversationId, entry);
-                }
-            }
-
-            const activeConversations: ActiveConversationSummary[] = [];
-            let convCount = 0;
-
-            for (const [conversationId, entry] of conversationMap) {
-                if (convCount >= MAX_CONVS_PER_PROJECT) break;
-
-                let title = `Conversation ${shortenConversationId(conversationId)}`;
-                const store = conversationRegistry.get(conversationId);
-                if (store) {
-                    const metadata = store.getMetadata();
-                    if (metadata.title) {
-                        title = sanitizeForPrompt(metadata.title, 60);
-                    }
-                }
-
-                const agentName = pubkeyService.getNameSync(entry.agentPubkey);
-
-                let status: string;
-                if (entry.isStreaming) {
-                    status = "streaming";
-                } else if (entry.currentTool) {
-                    status = `running ${entry.currentTool}`;
-                } else {
-                    status = "active";
-                }
-
-                const duration = formatDuration(entry.createdAt);
-
-                activeConversations.push({
-                    conversationId,
-                    title,
-                    agentName,
-                    status,
-                    duration,
-                });
-
-                convCount++;
-            }
-
-            results.push({
-                projectId: projectInfo.projectId,
-                dTag,
-                title: projectInfo.title,
-                activeConversations,
-            });
-        }
-
-        return results;
-    } catch (error) {
-        logger.debug("Failed to load meta-project context", { error });
-        return [];
     }
 }
 
@@ -590,17 +417,6 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
             } catch (error) {
                 logger.debug("Could not read root AGENTS.md:", error);
             }
-        }
-
-        // <other-projects> section
-        const otherProjects = await loadOtherProjectsContext(agent.pubkey, projectId);
-        if (otherProjects.length > 0) {
-            parts.push("");
-            parts.push("  <other-projects>");
-            for (const project of otherProjects) {
-                parts.push(`    ${project.title}: (${project.dTag})`);
-            }
-            parts.push("  </other-projects>");
         }
 
         // <memorized-project-files> section

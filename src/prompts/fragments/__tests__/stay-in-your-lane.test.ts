@@ -11,8 +11,8 @@ describe("delegationTipsFragment", () => {
         const result = delegationTipsFragment.template();
 
         expect(result).toContain("## Delegation Tips");
-        expect(result).toContain("BAD:");
-        expect(result).toContain("GOOD:");
+        expect(result).toContain("Delegate what needs to be done, not how");
         expect(result).toContain("async");
+        expect(result).toContain("delegate_followup");
     });
 });
