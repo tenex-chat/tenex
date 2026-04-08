@@ -143,12 +143,6 @@ interface ActiveConversationSummary {
     duration: string;
 }
 
-function truncateConversationIdForDisplay(conversationId: string, maxLength = 12): string {
-    if (conversationId.length <= maxLength) {
-        return conversationId;
-    }
-    return `${conversationId.substring(0, maxLength)}${ELLIPSIS}`;
-}
 
 function sanitizeForPrompt(text: string, maxLength: number = MAX_SUMMARY_LENGTH): string {
     let sanitized = text
@@ -244,7 +238,7 @@ async function loadOtherProjectsContext(
             for (const [conversationId, entry] of conversationMap) {
                 if (convCount >= MAX_CONVS_PER_PROJECT) break;
 
-                let title = `Conversation ${truncateConversationIdForDisplay(conversationId)}`;
+                let title = `Conversation ${shortenConversationId(conversationId)}`;
                 const store = conversationRegistry.get(conversationId);
                 if (store) {
                     const metadata = store.getMetadata();

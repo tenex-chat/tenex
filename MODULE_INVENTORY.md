@@ -33,6 +33,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **Services**: `ConversationResolver`, `ConversationSummarizer`, and `MetadataDebounceManager` coordinate resolution, summarization, and metadata updates.
 - **Prompt Projection**: `PromptBuilder.ts` exposes the canonical prompt-building API for turning `ConversationRecord[]` into provider-facing `PromptMessage[]`, while `MessageBuilder.ts` remains the compatibility implementation module underneath.
 - **Formatting**: `formatters/*` and `formatters/utils/*` produce human-readable outputs for UI/debug tooling.
+- **Presentation**: `presenters/ConversationPresenter` transforms catalog data for display, shortening IDs while preserving full IDs for lookups. The presentation layer sits between `ConversationCatalogService` (data) and tools/UI (consumers).
 - **Responsibility**: Canonical transcript data lives in `ConversationStore`; metadata-style queries should go through `ConversationCatalogService` or `ConversationRegistry` compatibility APIs rather than reparsing transcript files directly.
 
 ### Event Handling & Workflow Orchestration

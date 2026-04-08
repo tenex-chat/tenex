@@ -1,5 +1,5 @@
 import { getPubkeyService } from "@/services/PubkeyService";
-import { PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
+import { shortenPubkey } from "@/utils/conversation-id";
 
 export interface IdentityDisplayLookup {
     principalId?: string;
@@ -29,7 +29,7 @@ function isFallbackPubkeyLabel(name: string | undefined, pubkey: string | undefi
         return true;
     }
 
-    return pubkey !== undefined && name.trim() === pubkey.substring(0, PUBKEY_DISPLAY_LENGTH);
+    return pubkey !== undefined && name.trim() === shortenPubkey(pubkey);
 }
 
 function shortenPrincipalId(principalId: string | undefined): string | undefined {
@@ -39,10 +39,10 @@ function shortenPrincipalId(principalId: string | undefined): string | undefined
 
     const terminalSegment = principalId.split(":").pop();
     if (terminalSegment?.trim()) {
-        return terminalSegment.substring(0, PUBKEY_DISPLAY_LENGTH);
+        return shortenPubkey(terminalSegment);
     }
 
-    return principalId.substring(0, PUBKEY_DISPLAY_LENGTH);
+    return shortenPubkey(principalId);
 }
 
 export class IdentityDisplayService {
@@ -82,7 +82,7 @@ export class IdentityDisplayService {
 
         return (
             shortenPrincipalId(lookup.principalId) ??
-            (lookup.linkedPubkey ? lookup.linkedPubkey.substring(0, PUBKEY_DISPLAY_LENGTH) : undefined) ??
+            (lookup.linkedPubkey ? shortenPubkey(lookup.linkedPubkey) : undefined) ??
             "Unknown"
         );
     }

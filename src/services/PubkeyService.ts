@@ -2,7 +2,7 @@ import { getNDK } from "@/nostr";
 import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
-import { PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
+import { shortenPubkey } from "@/utils/conversation-id";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 
@@ -82,8 +82,8 @@ export class PubkeyService {
             return this.extractDisplayName(cached.profile, pubkey);
         }
 
-        // Return shortened pubkey as fallback using shared PUBKEY_DISPLAY_LENGTH constant
-        return pubkey.substring(0, PUBKEY_DISPLAY_LENGTH);
+        // Return shortened pubkey as fallback
+        return shortenPubkey(pubkey);
     }
 
     /**
@@ -211,7 +211,7 @@ export class PubkeyService {
         }
         // Fallback to shortened pubkey if available
         if (pubkeyFallback) {
-            return pubkeyFallback.substring(0, PUBKEY_DISPLAY_LENGTH);
+            return shortenPubkey(pubkeyFallback);
         }
         // This shouldn't happen as callers should provide pubkeyFallback
         return "Unknown";
@@ -277,10 +277,10 @@ export class PubkeyService {
                                         results.set(pubkey, name);
                                     } catch (error) {
                                         logger.warn("[PUBKEY_SERVICE] Failed to warm profile", {
-                                            pubkey: pubkey.substring(0, PUBKEY_DISPLAY_LENGTH),
+                                            pubkey: shortenPubkey(pubkey),
                                             error: error instanceof Error ? error.message : String(error),
                                         });
-                                        results.set(pubkey, pubkey.substring(0, PUBKEY_DISPLAY_LENGTH));
+                                        results.set(pubkey, shortenPubkey(pubkey));
                                     }
                                 })
                             );

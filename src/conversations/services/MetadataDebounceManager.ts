@@ -1,4 +1,5 @@
 import { logger } from "@/utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 
 interface DebounceState {
     timerId: NodeJS.Timeout | null;
@@ -32,7 +33,7 @@ class MetadataDebounceManager {
             clearTimeout(state.timerId);
             state.timerId = null;
             logger.debug("[MetadataDebounce] Timer reset on agent start", {
-                conversationId: conversationId.substring(0, 8),
+                conversationId: shortenConversationId(conversationId),
             });
         }
     }
@@ -51,7 +52,7 @@ class MetadataDebounceManager {
         // First execution or root event: publish immediately
         if (!state || !state.firstExecutionDone || isRootEvent) {
             logger.debug("[MetadataDebounce] Publishing immediately (first/root)", {
-                conversationId: conversationId.substring(0, 8),
+                conversationId: shortenConversationId(conversationId),
                 isRootEvent,
                 isFirstExecution: !state?.firstExecutionDone,
             });
@@ -73,7 +74,7 @@ class MetadataDebounceManager {
             // Publish immediately (fire and forget)
             publishFn().catch((error) => {
                 logger.error("[MetadataDebounce] Failed to publish metadata", {
-                    conversationId: conversationId.substring(0, 8),
+                    conversationId: shortenConversationId(conversationId),
                     error,
                 });
             });
@@ -95,7 +96,7 @@ class MetadataDebounceManager {
         // Check if we've exceeded max deadline
         if (now >= state.maxDeadline) {
             logger.debug("[MetadataDebounce] Max deadline reached, publishing now", {
-                conversationId: conversationId.substring(0, 8),
+                conversationId: shortenConversationId(conversationId),
             });
 
             // Reset deadline for next batch
@@ -103,7 +104,7 @@ class MetadataDebounceManager {
 
             publishFn().catch((error) => {
                 logger.error("[MetadataDebounce] Failed to publish metadata", {
-                    conversationId: conversationId.substring(0, 8),
+                    conversationId: shortenConversationId(conversationId),
                     error,
                 });
             });
@@ -114,7 +115,7 @@ class MetadataDebounceManager {
         const delay = Math.min(DEBOUNCE_MS, state.maxDeadline - now);
 
         logger.debug("[MetadataDebounce] Scheduling debounced publish", {
-            conversationId: conversationId.substring(0, 8),
+            conversationId: shortenConversationId(conversationId),
             delayMs: delay,
         });
 
@@ -127,7 +128,7 @@ class MetadataDebounceManager {
 
                 currentState.pendingPublishFn().catch((error) => {
                     logger.error("[MetadataDebounce] Failed to publish metadata (debounced)", {
-                        conversationId: conversationId.substring(0, 8),
+                        conversationId: shortenConversationId(conversationId),
                         error,
                     });
                 });
@@ -155,7 +156,7 @@ class MetadataDebounceManager {
             state.firstExecutionDone = true;
         }
         logger.debug("[MetadataDebounce] Marked first publish done", {
-            conversationId: conversationId.substring(0, 8),
+            conversationId: shortenConversationId(conversationId),
         });
     }
 

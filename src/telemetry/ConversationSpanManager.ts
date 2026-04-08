@@ -1,4 +1,5 @@
 import { logger } from "@/utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 import type { Span } from "@opentelemetry/api";
 
 /**
@@ -8,7 +9,7 @@ import type { Span } from "@opentelemetry/api";
  * and adds conversation.id attributes to all spans. This allows querying Jaeger
  * for all traces with the same conversation.id to see the full timeline.
  *
- * NOTE: Conversation IDs in Jaeger spans are shortened to 12 characters (STORAGE_PREFIX_LENGTH)
+ * NOTE: Conversation IDs in Jaeger spans are shortened to 10 characters
  * for better readability in the Jaeger UI with low collision risk.
  * Use shortenConversationId() from @/utils/conversation-id for consistency.
  *
@@ -37,7 +38,7 @@ export class ConversationSpanManager {
         });
 
         logger.debug("Incremented conversation message count", {
-            conversationId: conversationId.substring(0, 8),
+            conversationId: shortenConversationId(conversationId),
             messageSequence: currentCount,
         });
     }

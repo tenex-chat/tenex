@@ -2,10 +2,11 @@ import type { ConversationRecordInput } from "@/conversations/types";
 import { getConversationRecordAuthorPubkey } from "@/conversations/record-author";
 import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getIdentityDisplayService } from "@/services/identity/IdentityDisplayService";
-import { STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { SHORT_EVENT_ID_LENGTH } from "@/types/event-ids";
+import { shortenConversationId } from "@/utils/conversation-id";
 import type { ToolCallPart } from "ai";
 
-const DEFAULT_SHORT_ID_LENGTH = 12;
+const DEFAULT_SHORT_ID_LENGTH = SHORT_EVENT_ID_LENGTH;
 const DEFAULT_MAX_TOOL_DESCRIPTION_LENGTH = 150;
 const DEFAULT_MAX_TOOL_INPUT_JSON_LENGTH = 200;
 
@@ -119,7 +120,7 @@ function formatDelegationMarkerContent(entry: ConversationRecordInput): string |
   }
 
   const identityDisplayService = getIdentityDisplayService();
-  const shortConversationId = marker.delegationConversationId.slice(0, STORAGE_PREFIX_LENGTH);
+  const shortConversationId = shortenConversationId(marker.delegationConversationId);
   const recipientName = identityDisplayService.resolveDisplayNameSync({
     linkedPubkey: marker.recipientPubkey,
   });

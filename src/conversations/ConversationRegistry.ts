@@ -315,7 +315,7 @@ class ConversationRegistryImpl {
                 store.load(otherProjectId, resolvedId);
                 if (store.getAllMessages().length > 0) {
                     this.stores.set(resolvedId, store);
-                    logger.debug(`[ConversationRegistry] Found conversation ${resolvedId.substring(0, 8)} in project ${otherProjectId}`);
+                    logger.debug(`[ConversationRegistry] Found conversation ${shortenConversationId(resolvedId)} in project ${otherProjectId}`);
                     return store;
                 }
             } catch {
@@ -375,7 +375,7 @@ class ConversationRegistryImpl {
 
         const existing = this.stores.get(nativeId);
         if (existing) {
-            logger.debug(`Conversation ${nativeId.substring(0, 8)} already exists`);
+            logger.debug(`Conversation ${shortenConversationId(nativeId)} already exists`);
             return existing;
         }
 
@@ -412,7 +412,7 @@ class ConversationRegistryImpl {
             }
         }
 
-        logger.info(`Starting conversation ${nativeId.substring(0, 8)} - "${envelope.content?.substring(0, 50)}..."`, {
+        logger.info(`Starting conversation ${shortenConversationId(nativeId)} - "${envelope.content?.substring(0, 50)}..."`, {
             projectId: currentProjectId,
         });
 
@@ -650,7 +650,7 @@ class ConversationRegistryImpl {
             indexManager.triggerUpdate(conversationId);
         } catch (error) {
             logger.warn("[ConversationRegistry] Failed to trigger index update", {
-                conversationId: conversationId.substring(0, 8),
+                conversationId: shortenConversationId(conversationId),
                 error,
             });
         }

@@ -1,3 +1,19 @@
+/**
+ * conversation_list tool - builds hierarchical tree view of conversations
+ *
+ * ARCHITECTURE NOTE:
+ * This tool loads directly from ConversationStore (not ConversationCatalogService) because:
+ * 1. It needs delegationChain metadata to build parent/child tree structures
+ * 2. The catalog service only provides flat lists with delegationIds
+ * 3. This tool has special requirements not met by the catalog's data model
+ *
+ * For ID formatting, it uses the centralized shortenConversationId() helper from
+ * @/utils/conversation-id to maintain consistency across the codebase.
+ *
+ * For tools with simpler needs, use ConversationCatalogService + ConversationPresenter
+ * for automatic ID formatting.
+ */
+
 import type { ToolExecutionContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { ConversationRecord } from "@/conversations/types";
@@ -9,12 +25,13 @@ import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
-import { STORAGE_PREFIX_LENGTH, PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
+import { PUBKEY_DISPLAY_LENGTH, STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { resolveAgentSlug } from "@/services/agents/AgentResolution";
 import { parseNostrUser } from "@/utils/nostr-entity-parser";
-import { shortenPubkey } from "@/utils/conversation-id";
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { type ProjectDTag, createProjectDTag } from "@/types/project-ids";
+import { formatTimeAgo } from "@/lib/time";
 
 const conversationListSchema = z.object({
     projectId: z
@@ -86,20 +103,6 @@ type WithFilter =
     | { kind: "exact"; pubkey: string }
     | { kind: "prefix"; prefix: string };
 
-/**
- * Shorten a full 64-char event ID to the standard prefix length
- */
-function shortenEventId(fullId: string): string {
-    return fullId.substring(0, STORAGE_PREFIX_LENGTH);
-}
-
-function shortenPrincipalId(principalId: string): string {
-    const terminalSegment = principalId.split(":").pop();
-    if (terminalSegment?.trim()) {
-        return terminalSegment.substring(0, STORAGE_PREFIX_LENGTH);
-    }
-    return principalId.substring(0, STORAGE_PREFIX_LENGTH);
-}
 
 function isShortPubkeyPrefix(value: string): boolean {
     return /^[0-9a-fA-F]+$/.test(value) && value.length >= PUBKEY_DISPLAY_LENGTH && value.length <= STORAGE_PREFIX_LENGTH;
@@ -123,7 +126,12 @@ function resolveParticipantName(message: ConversationRecord): string {
 
     const principalId = getConversationRecordAuthorPrincipalId(message);
     if (principalId) {
-        return shortenPrincipalId(principalId);
+        // Extract terminal segment from principal ID (e.g., "tg:user:12345" -> "12345")
+        const terminalSegment = principalId.split(":").pop();
+        if (terminalSegment?.trim()) {
+            return shortenPubkey(terminalSegment);
+        }
+        return shortenPubkey(principalId);
     }
 
     return "Unknown";
@@ -171,25 +179,6 @@ function extractRecipient(conversation: ConversationStore): string | undefined {
     return undefined;
 }
 
-/**
- * Format a Unix timestamp as a relative time string like "3 minutes ago", "2 days ago".
- */
-function formatRelativeTime(timestamp: number | undefined, nowSeconds: number): string | undefined {
-    if (!timestamp) return undefined;
-    const diffSeconds = nowSeconds - timestamp;
-    if (diffSeconds < 0) return "just now";
-    if (diffSeconds < 60) return `${diffSeconds} second${diffSeconds !== 1 ? "s" : ""} ago`;
-    const diffMinutes = Math.floor(diffSeconds / 60);
-    if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes !== 1 ? "s" : ""} ago`;
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 30) return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
-    const diffMonths = Math.floor(diffDays / 30);
-    if (diffMonths < 12) return `${diffMonths} month${diffMonths !== 1 ? "s" : ""} ago`;
-    const diffYears = Math.floor(diffMonths / 12);
-    return `${diffYears} year${diffYears !== 1 ? "s" : ""} ago`;
-}
 
 /**
  * Check if a conversation is a root conversation (not a delegation child).
@@ -214,8 +203,7 @@ function getParentConversationId(store: ConversationStore): string | undefined {
 function summarizeConversation(
     conversation: ConversationStore,
     projectId: string | undefined,
-    children: ChildConversationSummary[],
-    nowSeconds: number
+    children: ChildConversationSummary[]
 ): ConversationSummary {
     const messages = conversation.getAllMessages();
     const lastMessage = messages[messages.length - 1];
@@ -223,21 +211,20 @@ function summarizeConversation(
     const lastActivity = lastMessage?.timestamp;
 
     return {
-        id: shortenEventId(conversation.id),
+        id: shortenConversationId(conversation.id),
         projectId,
         title: metadata.title ?? conversation.title,
         summary: metadata.summary,
         sender: extractSender(conversation),
         recipient: extractRecipient(conversation),
-        lastActive: lastActivity ? formatRelativeTime(lastActivity, nowSeconds) : undefined,
+        lastActive: lastActivity ? formatTimeAgo(lastActivity * 1000) : undefined,
         children,
     };
 }
 
 function summarizeChildConversation(
     conversation: ConversationStore,
-    allConversations: Map<string, LoadedConversation>,
-    nowSeconds: number
+    allConversations: Map<string, LoadedConversation>
 ): ChildConversationSummary {
     const metadata = conversation.metadata;
     const messages = conversation.getAllMessages();
@@ -245,13 +232,13 @@ function summarizeChildConversation(
     const lastActivity = lastMessage?.timestamp;
 
     // Collect direct children of this conversation
-    const directChildren = collectDirectChildren(conversation.id, allConversations, nowSeconds);
+    const directChildren = collectDirectChildren(conversation.id, allConversations);
 
     return {
-        id: shortenEventId(conversation.id),
+        id: shortenConversationId(conversation.id),
         title: metadata.title ?? conversation.title,
         recipient: extractRecipient(conversation),
-        lastActive: lastActivity ? formatRelativeTime(lastActivity, nowSeconds) : undefined,
+        lastActive: lastActivity ? formatTimeAgo(lastActivity * 1000) : undefined,
         children: directChildren,
     };
 }
@@ -261,8 +248,7 @@ function summarizeChildConversation(
  */
 function collectDirectChildren(
     parentId: string,
-    allConversations: Map<string, LoadedConversation>,
-    nowSeconds: number
+    allConversations: Map<string, LoadedConversation>
 ): ChildConversationSummary[] {
     // First collect children with their last activity timestamps for sorting
     const childEntries: Array<{ loaded: LoadedConversation; lastActivity: number }> = [];
@@ -282,7 +268,7 @@ function collectDirectChildren(
 
     // Now summarize in sorted order
     return childEntries.map(({ loaded }) =>
-        summarizeChildConversation(loaded.store, allConversations, nowSeconds)
+        summarizeChildConversation(loaded.store, allConversations)
     );
 }
 
@@ -528,8 +514,6 @@ async function executeConversationList(
     // Separate root conversations from children
     const rootConversations = allLoadedConversations.filter(({ store }) => isRootConversation(store));
 
-    const nowSeconds = Math.floor(Date.now() / 1000);
-
     // Compute subtree last activity for each root
     const rootsWithSubtreeActivity = rootConversations.map((loaded) => ({
         loaded,
@@ -564,8 +548,8 @@ async function executeConversationList(
     // Build summaries with nested children
     const summaries = limitedRoots.map(({ loaded }) => {
         const { store, projectId } = loaded;
-        const children = collectDirectChildren(store.id, conversationMap, nowSeconds);
-        return summarizeConversation(store, projectId, children, nowSeconds);
+        const children = collectDirectChildren(store.id, conversationMap);
+        return summarizeConversation(store, projectId, children);
     });
 
     logger.info("✅ Conversations listed (tree view)", {

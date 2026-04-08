@@ -35,8 +35,7 @@ import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
-import { PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 
 function clonePrincipalSnapshot(
     principal: PrincipalSnapshot | undefined
@@ -140,7 +139,7 @@ export function buildDelegationChain(
         }
 
         // Unknown pubkey - use truncated version
-        return { displayName: pubkey.substring(0, PUBKEY_DISPLAY_LENGTH), isUser: false };
+        return { displayName: shortenPubkey(pubkey), isUser: false };
     };
 
     // Build the chain by walking up through parent conversations

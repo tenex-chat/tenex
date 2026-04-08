@@ -62,7 +62,7 @@ describe("conversation-transcript-formatter", () => {
       includeToolCalls: true,
     });
 
-    expect(xml).toContain('<conversation id="111111111111" t0="100">');
+    expect(xml).toContain('<conversation id="1111111111" t0="100">');
     expect(xml).toContain('time="+0"');
     expect(xml).toContain('time="+1"');
     expect(xml).toContain('time="+3"');
@@ -108,6 +108,7 @@ describe("conversation-transcript-formatter", () => {
         content: "transport-linked message",
         messageType: "text",
         timestamp: 150,
+        eventId: "4444444444444444444444444444444444444444444444444444444444444444",
         targetedPubkeys: ["recipient-1-pubkey"],
         targetedPrincipals: [{
           id: "telegram:group:99",

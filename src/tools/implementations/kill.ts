@@ -324,7 +324,7 @@ async function killAgent(
         logger.warn("[kill] Authorization check failed: caller has no project context", {
             callerAgent: context.agent.slug,
             targetConversationId: shortenConversationId(conversationId),
-            targetProjectId: projectId.substring(0, 12),
+            targetProjectId: projectId,
         });
 
         trace.getActiveSpan()?.addEvent("kill.authorization_failed", {
@@ -344,21 +344,21 @@ async function killAgent(
     if (callerProjectId !== projectId) {
         logger.warn("[kill] Authorization check failed: cross-project kill attempt blocked", {
             callerAgent: context.agent.slug,
-            callerProjectId: callerProjectId.substring(0, 12),
+            callerProjectId: callerProjectId,
             targetConversationId: shortenConversationId(conversationId),
-            targetProjectId: projectId.substring(0, 12),
+            targetProjectId: projectId,
         });
 
         trace.getActiveSpan()?.addEvent("kill.authorization_failed", {
             "kill.reason": "cross_project_kill_blocked",
             "kill.caller_agent": context.agent.slug,
-            "kill.caller_project_id": callerProjectId.substring(0, 12),
-            "kill.target_project_id": projectId.substring(0, 12),
+            "kill.caller_project_id": callerProjectId,
+            "kill.target_project_id": projectId,
         });
 
         return {
             success: false,
-            message: `Authorization failed: cannot kill agents in other projects (target: ${projectId.substring(0, 12)}, caller: ${callerProjectId.substring(0, 12)})`,
+            message: `Authorization failed: cannot kill agents in other projects (target: ${projectId}, caller: ${callerProjectId})`,
             target: conversationId,
             targetType: "agent",
         };
@@ -421,7 +421,7 @@ async function killAgent(
     const agentPubkey = Array.from(activeAgentPubkeys)[0];
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_starting", {
-        "kill.project_id": projectId.substring(0, 12),
+        "kill.project_id": projectId,
         "kill.conversation_id": shortenConversationId(conversationId),
         "kill.agent_pubkey": shortenPubkey(agentPubkey),
         "kill.reason": reason,
@@ -429,7 +429,7 @@ async function killAgent(
     });
 
     logger.info("[kill] Aborting agent with cascade", {
-        projectId: projectId.substring(0, 12),
+        projectId: projectId,
         conversationId: shortenConversationId(conversationId),
         agentPubkey: shortenPubkey(agentPubkey),
         reason,
@@ -524,16 +524,16 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
     if (taskInfo.projectId !== callerProjectId) {
         logger.warn("[kill] Authorization check failed: project isolation violation", {
             callerAgent: callerAgentSlug,
-            callerProjectId: callerProjectId.substring(0, 12),
-            taskProjectId: taskInfo.projectId.substring(0, 12),
+            callerProjectId: callerProjectId,
+            taskProjectId: taskInfo.projectId,
             targetTaskId: taskId,
         });
 
         trace.getActiveSpan()?.addEvent("kill.shell_authorization_failed", {
             "kill.reason": "project_mismatch",
             "kill.caller_agent": callerAgentSlug,
-            "kill.caller_project_id": callerProjectId.substring(0, 12),
-            "kill.task_project_id": taskInfo.projectId.substring(0, 12),
+            "kill.caller_project_id": callerProjectId,
+            "kill.task_project_id": taskInfo.projectId,
             "kill.target_task_id": taskId,
         });
 
@@ -549,7 +549,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
     logger.info("[kill] Shell task kill requested", {
         callerAgent: callerAgentSlug,
         callerConversationId: shortenConversationId(context.conversationId),
-        callerProjectId: callerProjectId.substring(0, 12),
+        callerProjectId: callerProjectId,
         targetTaskId: taskId,
         taskCommand: taskInfo?.command,
     });
@@ -602,7 +602,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
             taskId,
             pid: result.pid,
             callerAgent: callerAgentSlug,
-            projectId: callerProjectId.substring(0, 12),
+            projectId: callerProjectId,
         });
     }
 

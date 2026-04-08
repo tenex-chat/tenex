@@ -4,6 +4,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import type { MessageMatch } from "@/conversations/search";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -99,7 +100,7 @@ function legacyTitleSearch(query: string, limit: number): ConversationSearchResu
         const lastMessage = messages[messages.length - 1];
 
         return {
-            id: store.id,
+            id: shortenConversationId(store.id),
             title: store.title,
             messageCount: messages.length,
             createdAt: firstMessage?.timestamp,
@@ -132,7 +133,7 @@ async function semanticSearch(
             projectId,
         });
         return results.map((result: SemanticSearchResult) => ({
-            id: result.conversationId,
+            id: shortenConversationId(result.conversationId),
             projectId: result.projectId,
             title: result.title,
             summary: result.summary,
@@ -200,7 +201,7 @@ async function fullTextSearch(
             return {
                 searchType: "full-text",
                 results: advancedResult.results.map((result) => ({
-                    id: result.conversationId,
+                    id: shortenConversationId(result.conversationId),
                     title: result.title,
                     messageCount: result.messageCount,
                     createdAt: result.createdAt,
