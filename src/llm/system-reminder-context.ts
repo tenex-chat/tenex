@@ -23,34 +23,17 @@ export interface TenexSystemReminderContext {
 }
 
 interface ReminderQueues {
-    queued: ContextManagementReminder[];
-    deferred: ContextManagementReminder[];
+    queued: CollectedSystemReminder[];
+    deferred: CollectedSystemReminder[];
 }
 
-function cloneReminder(reminder: ContextManagementReminder): ContextManagementReminder {
-    return structuredClone(reminder);
-}
-
-function toReminder(reminder: TenexSystemReminderDescriptor): ContextManagementReminder {
+function descriptorToCollected(reminder: TenexSystemReminderDescriptor): CollectedSystemReminder {
     return {
-        kind: reminder.type,
+        type: reminder.type,
         content: reminder.content,
-        ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
         placement: reminder.placement ?? "overlay-user",
-        persistInHistory: reminder.persistInHistory ?? false,
-    };
-}
-
-function toCollectedReminder(reminder: ContextManagementReminder): CollectedSystemReminder {
-    return {
-        type: reminder.kind,
-        content: reminder.content,
         ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
-        ...(reminder.placement ? { placement: reminder.placement } : {}),
-        ...(reminder.disposition ? { disposition: reminder.disposition } : {}),
-        ...(reminder.persistInHistory !== undefined
-            ? { persistInHistory: reminder.persistInHistory }
-            : {}),
+        ...(reminder.persistInHistory !== undefined ? { persistInHistory: reminder.persistInHistory } : {}),
     };
 }
 
@@ -62,11 +45,11 @@ function buildReminderContext(): TenexSystemReminderContext {
 
     return {
         queue(reminder) {
-            queues.queued.push(toReminder(reminder));
+            queues.queued.push(descriptorToCollected(reminder));
         },
         defer(reminder) {
             queues.deferred.push({
-                ...toReminder(reminder),
+                ...descriptorToCollected(reminder),
                 disposition: "defer",
             });
         },
@@ -75,11 +58,11 @@ function buildReminderContext(): TenexSystemReminderContext {
                 return;
             }
 
-            queues.queued.push(...queues.deferred.map((reminder) => cloneReminder(reminder)));
+            queues.queued.push(...queues.deferred.map((r) => structuredClone(r)));
             queues.deferred.length = 0;
         },
         async collect() {
-            const reminders = queues.queued.map((reminder) => toCollectedReminder(cloneReminder(reminder)));
+            const reminders = queues.queued.map((r) => structuredClone(r));
             queues.queued.length = 0;
 
             trace.getActiveSpan()?.addEvent("system_reminders.collected", {

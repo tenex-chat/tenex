@@ -254,9 +254,6 @@ function createConversationContextManagementRuntime(options: {
     }
 
     if (settings.strategies.toolResultDecay) {
-        const raw = configService.getContextManagementConfig();
-        const decayConfig = raw?.toolResultDecay;
-
         strategies.push(
             new ToolResultDecayStrategy({
                 estimator: managedBudgetProfile.estimator,
@@ -269,17 +266,6 @@ function createConversationContextManagementRuntime(options: {
                     { toolTokens: 50_000, depthFactor: 0.2 },
                     { toolTokens: 200_000, depthFactor: 1 },
                 ],
-                // Single-tool pressure only for truly massive results (>50k tokens)
-                singleToolPressureAnchors: [
-                    { toolTokens: 50_000, depthFactor: 0.01 },
-                    { toolTokens: 100_000, depthFactor: 10 },
-                ],
-                // Only decay when savings justify breaking the cache (configurable)
-                minTotalSavingsTokens: decayConfig?.minTotalSavingsTokens ?? 20_000,
-                // Never decay delegation context (configurable)
-                excludeToolNames: decayConfig?.excludeToolNames ?? ["delegate", "delegate_followup"],
-                // Recency protection - don't decay anything from last N messages (configurable)
-                minDepth: decayConfig?.minDepth ?? 20,
             })
         );
     }

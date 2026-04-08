@@ -18,7 +18,7 @@ import { shortenPubkey, shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 import type { ProjectDTag } from "@/types/project-ids";
-import type { TeamContext } from "./types";
+import type { TeamContext, TeamInfo } from "./types";
 
 // =============================================================================
 // Constants
@@ -481,86 +481,86 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         }
 
         // <team> section
-        const renderAgentEntry = (a: AgentInstance): string => {
-            const criteria = a.useCriteria
-                ? `Use Criteria: ${a.useCriteria}`
-                : a.description
-                  ? `Description: ${a.description}`
-                  : "";
-            return `    <${a.slug}>${criteria}</${a.slug}>`;
+        const renderAgentBullet = (a: AgentInstance): string => {
+            const detail = a.useCriteria ?? a.description ?? "";
+            return detail
+                ? `      * ${a.slug} — ${detail}`
+                : `      * ${a.slug}`;
         };
+
+        const renderTeamBullet = (t: TeamInfo): string =>
+            `      * ${t.name} — ${t.description} (team, lead: ${t.teamLead})`;
 
         const hasTeamContext =
             teamContext &&
-            (teamContext.memberTeams.length > 0 || teamContext.activeTeam !== undefined);
+            (teamContext.memberTeams.length > 0 ||
+                teamContext.activeTeam !== undefined ||
+                teamContext.otherTeams.length > 0);
 
         if (hasTeamContext) {
-            // Team-aware rendering
             const { memberTeams, activeTeam, otherTeams, teammates, unaffiliated } = teamContext;
 
-            // <active-team> block
+            parts.push("");
+            parts.push("  <team>");
+
+            // <active-team> — the team context this agent is executing in
             if (activeTeam) {
+                parts.push("    <active-team>");
+                parts.push(`      You are working in team "${activeTeam.name}" — ${activeTeam.description}`);
+                parts.push(`      Delegate within your team first. Only reach outside when a specific expert is a clearly better fit.`);
                 parts.push("");
-                parts.push("  <active-team>");
-                parts.push(`    Team: "${activeTeam.name}" — ${activeTeam.description}`);
-                parts.push(`    Lead: ${activeTeam.teamLead}`);
-                parts.push(`    Members: ${activeTeam.members.join(", ")}`);
-                parts.push("  </active-team>");
+                parts.push("      Teammates:");
+                for (const t of teammates) {
+                    parts.push(renderAgentBullet(t));
+                }
+                parts.push("    </active-team>");
             }
 
-            // <my-teams> block — exclude activeTeam if present
+            // <my-teams> — other teams the agent belongs to (excluding active)
             const myTeams = activeTeam
                 ? memberTeams.filter((t) => t.name !== activeTeam.name)
                 : memberTeams;
             if (myTeams.length > 0) {
                 parts.push("");
-                parts.push("  <my-teams>");
+                parts.push("    <my-teams>");
+                parts.push(activeTeam
+                    ? "      You are also a member of:"
+                    : "      You are a member of:");
                 for (const team of myTeams) {
-                    parts.push(`    <${team.name}>${team.description} — Lead: ${team.teamLead}</${team.name}>`);
+                    parts.push(`      * ${team.name} — ${team.description}`);
                 }
-                parts.push("  </my-teams>");
+                parts.push("    </my-teams>");
             }
 
-            // <other-teams> block — one-liner per team, no member listing
-            if (otherTeams.length > 0) {
-                parts.push("");
-                parts.push("  <other-teams>");
-                for (const team of otherTeams) {
-                    parts.push(`    <${team.name}>${team.description} — Lead: ${team.teamLead}</${team.name}>`);
-                }
-                parts.push("  </other-teams>");
+            // <also-available> — non-member teams + unaffiliated agents
+            const alsoAvailableItems: string[] = [];
+            for (const team of otherTeams) {
+                alsoAvailableItems.push(renderTeamBullet(team));
+            }
+            for (const a of unaffiliated) {
+                alsoAvailableItems.push(renderAgentBullet(a));
             }
 
-            // <teammates> block — full details
-            if (teammates.length > 0) {
+            if (alsoAvailableItems.length > 0) {
                 parts.push("");
-                parts.push("  <teammates>");
-                parts.push("    You are part of a multi-agent team. Stay in your lane, trust your teammates, and defer to their expertise rather than overstepping your own role.");
-                for (const t of teammates) {
-                    parts.push(renderAgentEntry(t));
+                parts.push("    <also-available>");
+                parts.push("      Other teams and agents in this project:");
+                for (const item of alsoAvailableItems) {
+                    parts.push(item);
                 }
-                parts.push("  </teammates>");
+                parts.push("    </also-available>");
             }
 
-            // <unaffiliated> block — full details
-            if (unaffiliated.length > 0) {
-                parts.push("");
-                parts.push("  <unaffiliated>");
-                parts.push("    The following agents are not in any team:");
-                for (const u of unaffiliated) {
-                    parts.push(renderAgentEntry(u));
-                }
-                parts.push("  </unaffiliated>");
-            }
+            parts.push("  </team>");
         } else {
-            // Fallback: render all coworkers with full details (backwards compatible)
+            // No teams defined — flat coworker list
             const coworkers = (availableAgents ?? []).filter((a) => a.pubkey !== agent.pubkey);
             if (coworkers.length > 0) {
                 parts.push("");
                 parts.push("  <team>");
                 parts.push("    You are part of a multi-agent team. Stay in your lane, trust your teammates, and defer to their expertise rather than overstepping your own role.");
                 for (const coworker of coworkers) {
-                    parts.push(renderAgentEntry(coworker));
+                    parts.push(renderAgentBullet(coworker));
                 }
                 parts.push("  </team>");
             }
