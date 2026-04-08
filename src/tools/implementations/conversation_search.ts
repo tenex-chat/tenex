@@ -67,7 +67,10 @@ const conversationSearchSchema = z.object({
 type ConversationSearchInput = z.infer<typeof conversationSearchSchema>;
 
 interface ConversationSearchResult {
+    /** Shortened conversation ID (10 chars) for display */
     id: string;
+    /** Full canonical conversation ID for lookups */
+    fullId: string;
     projectId?: string;
     title?: string;
     summary?: string;
@@ -101,6 +104,7 @@ function legacyTitleSearch(query: string, limit: number): ConversationSearchResu
 
         return {
             id: shortenConversationId(store.id),
+            fullId: store.id,
             title: store.title,
             messageCount: messages.length,
             createdAt: firstMessage?.timestamp,
@@ -134,6 +138,7 @@ async function semanticSearch(
         });
         return results.map((result: SemanticSearchResult) => ({
             id: shortenConversationId(result.conversationId),
+            fullId: result.conversationId,
             projectId: result.projectId,
             title: result.title,
             summary: result.summary,
@@ -164,8 +169,8 @@ async function hybridSearch(
     // First: semantic results (higher quality matches)
     const semanticResults = await semanticSearch(query, limit, minScore, projectId);
     for (const result of semanticResults) {
-        if (!seen.has(result.id)) {
-            seen.add(result.id);
+        if (!seen.has(result.fullId)) {
+            seen.add(result.fullId);
             combined.push(result);
         }
     }
@@ -174,8 +179,8 @@ async function hybridSearch(
     if (combined.length < limit) {
         const keywordResults = keywordSearch(query, limit);
         for (const result of keywordResults) {
-            if (!seen.has(result.id) && combined.length < limit) {
-                seen.add(result.id);
+            if (!seen.has(result.fullId) && combined.length < limit) {
+                seen.add(result.fullId);
                 combined.push(result);
             }
         }
@@ -202,6 +207,7 @@ async function fullTextSearch(
                 searchType: "full-text",
                 results: advancedResult.results.map((result) => ({
                     id: shortenConversationId(result.conversationId),
+                    fullId: result.conversationId,
                     title: result.title,
                     messageCount: result.messageCount,
                     createdAt: result.createdAt,

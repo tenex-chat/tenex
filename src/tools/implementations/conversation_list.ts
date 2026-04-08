@@ -65,8 +65,10 @@ const conversationListSchema = z.object({
 type ConversationListInput = z.infer<typeof conversationListSchema>;
 
 interface ChildConversationSummary {
-    /** Shortened event ID */
+    /** Shortened conversation ID (10 chars) for display */
     id: string;
+    /** Full canonical conversation ID for lookups */
+    fullId: string;
     title?: string;
     /** Recipient agent name */
     recipient?: string;
@@ -77,8 +79,10 @@ interface ChildConversationSummary {
 }
 
 interface ConversationSummary {
-    /** Shortened event ID (STORAGE_PREFIX_LENGTH characters) */
+    /** Shortened conversation ID (10 chars) for display */
     id: string;
+    /** Full canonical conversation ID for lookups */
+    fullId: string;
     projectId?: string;
     title?: string;
     /** Full summary (not truncated) */
@@ -212,6 +216,7 @@ function summarizeConversation(
 
     return {
         id: shortenConversationId(conversation.id),
+        fullId: conversation.id,
         projectId,
         title: metadata.title ?? conversation.title,
         summary: metadata.summary,
@@ -236,6 +241,7 @@ function summarizeChildConversation(
 
     return {
         id: shortenConversationId(conversation.id),
+        fullId: conversation.id,
         title: metadata.title ?? conversation.title,
         recipient: extractRecipient(conversation),
         lastActive: lastActivity ? formatTimeAgo(lastActivity * 1000) : undefined,
