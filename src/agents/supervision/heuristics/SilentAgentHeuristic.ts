@@ -13,35 +13,61 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
       };
     }
 
-    const hasLLMOutput = context.outputTokens > 0;
+    // Error fallback message from FinishHandler (src/llm/FinishHandler.ts:83-84)
+    // When LLM returns no content, this message is used as a last resort
+    const ERROR_FALLBACK_MESSAGE =
+      "There was an error capturing the work done, please review the conversation for the results";
+
+    const content = context.messageContent.trim();
+    const isErrorFallback = content === ERROR_FALLBACK_MESSAGE;
+    const isEmpty = content.length === 0;
     const hasToolCalls = context.toolCallsMade.length > 0;
 
-    // Silent = no LLM output AND no tool calls that would produce output
     // Exception: delegate calls are ok since agent is waiting for delegation
     const delegateCalls = context.toolCallsMade.filter((toolName) => isDelegateToolName(toolName));
     const hasOnlyDelegateCalls = hasToolCalls && delegateCalls.length === context.toolCallsMade.length;
 
-    const isSilent = !hasLLMOutput && !hasOnlyDelegateCalls;
+    // Silent if:
+    // 1. Message is empty (no content at all), OR
+    // 2. Message is the error fallback (indicates LLM failure)
+    // This approach avoids false positives from:
+    // - Missing usage metadata (some providers don't report tokens)
+    // - Multi-step flows where final step has 0 tokens but earlier steps had content
+    const isSilent = (isEmpty || isErrorFallback) && !hasOnlyDelegateCalls;
 
     return {
       triggered: isSilent,
-      reason: isSilent ? `Agent completed with 0 output tokens (LLM failure or empty response)` : undefined,
+      reason: isSilent
+        ? isErrorFallback
+          ? "Agent completed with error fallback message (LLM failure)"
+          : "Agent completed without generating any output"
+        : undefined,
       evidence: {
         outputTokens: context.outputTokens,
-        messageContent: context.messageContent.substring(0, 100),
+        messageContent: content.substring(0, 100),
         toolCallsMade: context.toolCallsMade,
+        isErrorFallback,
       },
     };
   }
 
   buildVerificationPrompt(context: PostCompletionContext, detection: HeuristicDetection): string {
-    const evidence = detection.evidence as { outputTokens?: number; messageContent?: string } | undefined;
-    return `The agent "${context.agentSlug}" completed its turn without producing any LLM output.
-This may indicate the LLM provider failed or the agent encountered an error.
+    const evidence = detection.evidence as {
+      outputTokens?: number;
+      messageContent?: string;
+      isErrorFallback?: boolean;
+    } | undefined;
+
+    const reason = evidence?.isErrorFallback
+      ? "returned the error fallback message (LLM failed to generate content)"
+      : "produced no visible output";
+
+    return `The agent "${context.agentSlug}" completed its turn but ${reason}.
 
 Evidence:
-- Output tokens: ${evidence?.outputTokens ?? 0}
 - Message content: "${evidence?.messageContent || "(empty)"}"
+- Output tokens: ${evidence?.outputTokens ?? 0}
+- Error fallback: ${evidence?.isErrorFallback ? "yes" : "no"}
 - Tool calls: ${JSON.stringify(context.toolCallsMade)}
 
 Is this acceptable behavior or should the agent be prompted to respond?`;

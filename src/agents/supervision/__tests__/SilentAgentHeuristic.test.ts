@@ -103,7 +103,7 @@ describe("SilentAgentHeuristic", () => {
             expect(result.triggered).toBe(true);
         });
 
-        it("should trigger when LLM returns 0 tokens even if error fallback message exists", async () => {
+        it("should trigger when LLM returns error fallback message", async () => {
             const context = createContext({
                 messageContent: "There was an error capturing the work done, please review the conversation for the results",
                 outputTokens: 0,
@@ -113,7 +113,33 @@ describe("SilentAgentHeuristic", () => {
             const result = await heuristic.detect(context);
 
             expect(result.triggered).toBe(true);
-            expect(result.reason).toContain("0 output tokens");
+            expect(result.reason).toContain("error fallback message");
+        });
+
+        it("should NOT trigger when provider has real content but no usage metadata", async () => {
+            // Codex Issue #1: Some providers don't report usage, but have legitimate content
+            const context = createContext({
+                messageContent: "Here is my response to your question.",
+                outputTokens: 0, // Missing usage metadata coalesced to 0
+                toolCallsMade: [],
+            });
+
+            const result = await heuristic.detect(context);
+
+            expect(result.triggered).toBe(false);
+        });
+
+        it("should NOT trigger in multi-step flow where final step has 0 tokens", async () => {
+            // Codex Issue #2: Final message from accumulated steps, but last step outputTokens = 0
+            const context = createContext({
+                messageContent: "Step 1 generated this response text.",
+                outputTokens: 0, // Last step was a tool call with 0 output tokens
+                toolCallsMade: ["read_file"],
+            });
+
+            const result = await heuristic.detect(context);
+
+            expect(result.triggered).toBe(false);
         });
     });
 
