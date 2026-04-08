@@ -359,6 +359,13 @@ function createLoadedSkillsProvider(): ReminderProvider<TenexReminderData, strin
     };
 }
 
+export function buildAvailableSkillsSnapshotIds(
+    installedIds: string[],
+    whitelistIds: string[]
+): string[] {
+    return [...new Set([...installedIds, ...whitelistIds])].sort();
+}
+
 function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, string> {
     return createDeltaProvider<string>({
         type: "available-skills",
@@ -388,10 +395,7 @@ function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, st
                 installedSkillMap
             );
             const blockedSkills = [...new Set([...blockedInstalledIds, ...blockedWhitelistIds])].sort();
-            const ids = [
-                ...installedIds.sort(),
-                ...whitelistIds.sort(),
-            ];
+            const ids = buildAvailableSkillsSnapshotIds(installedIds, whitelistIds);
             if (blockedSkills.length > 0) {
                 logger.warn("[SystemReminders] Blocked skills removed from available skills", {
                     agent: data.agent.slug,

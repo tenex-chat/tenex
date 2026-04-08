@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { TenexReminderData } from "@/agents/execution/system-reminders";
-import { resetSystemReminders } from "@/agents/execution/system-reminders";
+import {
+    buildAvailableSkillsSnapshotIds,
+    resetSystemReminders,
+} from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
 import { SkillService } from "@/services/skill/SkillService";
@@ -244,5 +247,19 @@ describe("delta-based system reminders", () => {
         expect(xml).toContain("allowed-skill");
         expect(xml).not.toContain("local-skill");
         expect(xml).not.toContain("local-short");
+    });
+
+    it("dedupes overlapping installed and whitelisted IDs in the snapshot", () => {
+        const snapshotIds = buildAvailableSkillsSnapshotIds(
+            ["shared-skill", "installed-only"],
+            ["shared-skill", "whitelist-only"]
+        );
+
+        expect(snapshotIds).toEqual([
+            "installed-only",
+            "shared-skill",
+            "whitelist-only",
+        ]);
+        expect(new Set(snapshotIds).size).toBe(snapshotIds.length);
     });
 });
