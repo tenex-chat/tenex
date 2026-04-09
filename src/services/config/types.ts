@@ -38,17 +38,12 @@ export interface TenexConfig {
         forceScratchpadThresholdPercent?: number; // Managed-context utilization percent that forces scratchpad (default: 70)
         utilizationWarningThresholdPercent?: number; // Managed-context utilization percent for warnings (default: 70)
         compactionThresholdPercent?: number; // Managed-context utilization percent for automatic compaction (default: 90)
-        anthropicPromptCaching?: {
-            ttl?: "5m" | "1h"; // Anthropic cache-control TTL (default: 1h)
-        };
         toolResultDecay?: {
             minTotalSavingsTokens?: number; // Minimum token savings required before decaying (default: 20000)
             minDepth?: number; // Minimum message age (turns ago) before considering decay (default: 20)
             excludeToolNames?: string[]; // Tool names to never decay (default: ["delegate", "delegate_followup"])
         };
         strategies?: {
-            anthropicPromptCaching?: boolean; // Enable AnthropicPromptCachingStrategy (default: true)
-            systemPromptCaching?: boolean; // Legacy alias for anthropicPromptCaching
             reminders?: boolean; // Enable RemindersStrategy (default: true)
             scratchpad?: boolean; // Enable ScratchpadStrategy (default: true)
             toolResultDecay?: boolean; // Enable ToolResultDecayStrategy (default: true)
@@ -121,29 +116,6 @@ export interface TenexConfig {
     projectNaddr?: string;
 }
 
-const AnthropicPromptCachingSchema = z
-    .object({
-        ttl: z.enum(["5m", "1h"]).optional(),
-    })
-    .passthrough()
-    .superRefine((value, ctx) => {
-        for (const key of Object.keys(value)) {
-            if (key === "ttl") {
-                continue;
-            }
-
-            const suffix = key === "clearToolUses" || key === "serverToolEditing"
-                ? `contextManagement.anthropicPromptCaching.${key} was removed. Delete it from config.json.`
-                : `contextManagement.anthropicPromptCaching.${key} is not supported. Delete it from config.json.`;
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: suffix,
-                path: [key],
-            });
-        }
-    })
-    .transform((value) => (value.ttl === undefined ? {} : { ttl: value.ttl }));
-
 export const TenexConfigSchema = z.object({
     version: z.number().int().nonnegative().optional(),
     whitelistedPubkeys: z.array(z.string()).optional(),
@@ -171,7 +143,6 @@ export const TenexConfigSchema = z.object({
             forceScratchpadThresholdPercent: z.number().min(0).max(100).optional(),
             utilizationWarningThresholdPercent: z.number().min(0).max(100).optional(),
             compactionThresholdPercent: z.number().min(0).max(100).optional(),
-            anthropicPromptCaching: AnthropicPromptCachingSchema.optional(),
             toolResultDecay: z
                 .object({
                     minTotalSavingsTokens: z.number().int().nonnegative().optional(),
@@ -181,8 +152,6 @@ export const TenexConfigSchema = z.object({
                 .optional(),
             strategies: z
                 .object({
-                    anthropicPromptCaching: z.boolean().optional(),
-                    systemPromptCaching: z.boolean().optional(),
                     reminders: z.boolean().optional(),
                     scratchpad: z.boolean().optional(),
                     toolResultDecay: z.boolean().optional(),

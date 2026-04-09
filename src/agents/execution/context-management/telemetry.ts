@@ -210,20 +210,6 @@ function buildRemindersSummary(
     );
 }
 
-function buildAnthropicPromptCachingSummary(
-    payload: Extract<ContextManagementStrategyPayload, { kind: "anthropic-prompt-caching" }> | undefined
-): string {
-    if (!payload) {
-        return "Evaluated Anthropic prompt caching.";
-    }
-
-    if (payload.breakpointApplied) {
-        return `Applied Anthropic cache metadata at ${formatCount(payload.sharedPrefixMessageCount, "shared message")}.`;
-    }
-
-    return "Skipped Anthropic prompt caching.";
-}
-
 function buildCompactionSummary(payload: Extract<ContextManagementStrategyPayload, { kind: "compaction-tool" }> | undefined): string {
     if (!payload) {
         return "Evaluated compaction.";
@@ -267,8 +253,6 @@ function buildStrategyCompleteSummary(
             return buildScratchpadSummary(event, payload);
         case "reminders":
             return buildRemindersSummary(payload);
-        case "anthropic-prompt-caching":
-            return buildAnthropicPromptCachingSummary(payload);
         case "compaction-tool":
             return buildCompactionSummary(payload);
         default:
@@ -359,10 +343,6 @@ function buildDerivedTelemetryAttributes(
                     attributes["context_management.reminder_built_in_count"] = payload.builtInCount;
                     attributes["context_management.reminder_deferred_count"] = payload.deferredCount;
                     attributes["context_management.budget_scope"] = MANAGED_CONTEXT_BUDGET_SCOPE;
-                    break;
-                case "anthropic-prompt-caching":
-                    attributes["context_management.shared_prefix_message_count"] = payload.sharedPrefixMessageCount;
-                    attributes["context_management.shared_prefix_breakpoint_applied"] = payload.breakpointApplied;
                     break;
                 case "compaction-tool":
                     addAttribute(

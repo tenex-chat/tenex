@@ -1,7 +1,6 @@
 import { trace } from "@opentelemetry/api";
 import { generateText, type LanguageModel, type ModelMessage } from "ai";
 import {
-    AnthropicPromptCachingStrategy,
     buildDeterministicSummary,
     buildSummaryTranscript,
     CompactionToolStrategy,
@@ -302,12 +301,6 @@ function createConversationContextManagementRuntime(options: {
             : false;
 
         strategies.push(new RemindersStrategy<TenexReminderData>(reminderOptions));
-    }
-
-    if (settings.strategies.anthropicPromptCaching) {
-        strategies.push(new AnthropicPromptCachingStrategy({
-            ttl: settings.anthropicPromptCaching.ttl,
-        }));
     }
 
     const telemetry = createTelemetryCallback();

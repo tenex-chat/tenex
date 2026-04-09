@@ -333,11 +333,6 @@ describe("Analysis telemetry services", () => {
                     sentEstimatedInputTokens: 90,
                     estimatedInputTokensSaved: 30,
                 },
-                promptCachingDiagnostics: {
-                    sharedPrefixBreakpointApplied: true,
-                    sharedPrefixMessageCount: 3,
-                    sharedPrefixLastMessageIndex: 2,
-                },
             },
             baseContext,
         });
@@ -467,9 +462,9 @@ describe("Analysis telemetry services", () => {
                 context_runtime_estimated_input_tokens_before: 140,
                 context_runtime_estimated_input_tokens_after: 100,
                 context_runtime_estimated_input_tokens_saved: 40,
-                shared_prefix_breakpoint_applied: 1,
-                shared_prefix_message_count: 3,
-                shared_prefix_last_message_index: 2,
+                shared_prefix_breakpoint_applied: null,
+                shared_prefix_message_count: null,
+                shared_prefix_last_message_index: null,
                 input_cache_write_tokens: 70,
             },
             {

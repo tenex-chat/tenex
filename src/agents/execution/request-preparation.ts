@@ -183,7 +183,6 @@ export async function prepareLLMRequest(options: {
     }));
 
     preparedMessages = prepareMessagesForRequest(preparedMessages, options.providerId);
-    const promptCachingDiagnostics = analysisRequestSeed?.promptCachingDiagnostics;
     const sentEstimatedInputTokens = estimatePromptTokens(preparedMessages);
 
     return {
@@ -208,7 +207,6 @@ export async function prepareLLMRequest(options: {
                           preContextEstimatedInputTokens - sentEstimatedInputTokens
                       ),
                   },
-                  promptCachingDiagnostics,
               }
             : undefined,
         reportContextManagementUsage,

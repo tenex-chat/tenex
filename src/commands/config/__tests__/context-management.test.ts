@@ -39,7 +39,7 @@ describe("contextManagementCommand", () => {
         });
     });
 
-    it("saves Anthropic prompt-caching knobs from the config TUI", async () => {
+    it("saves context management settings from the config TUI", async () => {
         const logSpy = spyOn(console, "log").mockImplementation(() => {});
         promptQueue.push(
             { action: "configure" },
@@ -51,10 +51,11 @@ describe("contextManagementCommand", () => {
                 compactionThresholdPercent: "92",
             },
             {
-                ttl: "5m",
+                minTotalSavingsTokens: "20000",
+                minDepth: "20",
+                excludeToolNames: "delegate, delegate_followup",
             },
             {
-                anthropicPromptCaching: true,
                 reminders: true,
                 scratchpad: true,
                 toolResultDecay: false,
@@ -76,11 +77,7 @@ describe("contextManagementCommand", () => {
                     forceScratchpadThresholdPercent: 75,
                     utilizationWarningThresholdPercent: 65,
                     compactionThresholdPercent: 92,
-                    anthropicPromptCaching: {
-                        ttl: "5m",
-                    },
                     strategies: expect.objectContaining({
-                        anthropicPromptCaching: true,
                         reminders: true,
                         scratchpad: true,
                         toolResultDecay: false,

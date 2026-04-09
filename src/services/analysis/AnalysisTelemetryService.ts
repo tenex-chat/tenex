@@ -435,7 +435,6 @@ export class AnalysisTelemetryService {
             "analysis.request_id": requestId,
         };
         const preparedPromptMetrics = params.requestSeed?.preparedPromptMetrics;
-        const promptCachingDiagnostics = params.requestSeed?.promptCachingDiagnostics;
         const runtimeMetrics = this.consumePendingRuntimeMetrics(requestId);
         const context = {
             projectId: params.baseContext.projectId,
@@ -473,11 +472,8 @@ export class AnalysisTelemetryService {
                     estimated_input_tokens_saved,
                     context_runtime_estimated_input_tokens_before,
                     context_runtime_estimated_input_tokens_after,
-                    context_runtime_estimated_input_tokens_saved,
-                    shared_prefix_breakpoint_applied,
-                    shared_prefix_message_count,
-                    shared_prefix_last_message_index
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    context_runtime_estimated_input_tokens_saved
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(request_id) DO UPDATE SET
                     project_id = excluded.project_id,
                     conversation_id = excluded.conversation_id,
@@ -504,9 +500,6 @@ export class AnalysisTelemetryService {
                         excluded.context_runtime_estimated_input_tokens_saved,
                         llm_requests.context_runtime_estimated_input_tokens_saved
                     ),
-                    shared_prefix_breakpoint_applied = excluded.shared_prefix_breakpoint_applied,
-                    shared_prefix_message_count = excluded.shared_prefix_message_count,
-                    shared_prefix_last_message_index = excluded.shared_prefix_last_message_index,
                     api_key_identity = excluded.api_key_identity
             `).run(
                 requestId,
@@ -525,14 +518,7 @@ export class AnalysisTelemetryService {
                 preparedPromptMetrics?.estimatedInputTokensSaved ?? null,
                 runtimeMetrics?.estimatedInputTokensBefore ?? null,
                 runtimeMetrics?.estimatedInputTokensAfter ?? null,
-                runtimeMetrics?.estimatedInputTokensSaved ?? null,
-                promptCachingDiagnostics?.sharedPrefixBreakpointApplied === undefined
-                    ? null
-                    : promptCachingDiagnostics.sharedPrefixBreakpointApplied
-                        ? 1
-                        : 0,
-                promptCachingDiagnostics?.sharedPrefixMessageCount ?? null,
-                promptCachingDiagnostics?.sharedPrefixLastMessageIndex ?? null
+                runtimeMetrics?.estimatedInputTokensSaved ?? null
             );
 
             db.prepare("DELETE FROM llm_request_messages WHERE request_id = ?").run(requestId);

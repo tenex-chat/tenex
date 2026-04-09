@@ -4,7 +4,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ModelMessage } from "ai";
 import {
-    AnthropicPromptCachingStrategy,
     ToolResultDecayStrategy,
     createContextManagementRuntime,
     createDefaultPromptTokenEstimator,
@@ -201,7 +200,6 @@ async function applyClientToolDecay(messages: ModelMessage[]): Promise<ModelMess
                 placeholder: ({ toolName, toolCallId }) =>
                     buildDecayPlaceholder(toolName, toolCallId),
             }),
-            new AnthropicPromptCachingStrategy(),
         ],
         estimator,
     });

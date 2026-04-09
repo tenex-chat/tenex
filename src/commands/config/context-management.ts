@@ -1,5 +1,4 @@
 import {
-    DEFAULT_ANTHROPIC_PROMPT_CACHING_TTL,
     DEFAULT_COMPACTION_THRESHOLD_PERCENT,
     DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT,
     DEFAULT_WARNING_THRESHOLD_PERCENT,
@@ -17,7 +16,6 @@ export const contextManagementCommand = new Command("context-management")
         const globalPath = config.getGlobalPath();
         const tenexConfig = await config.loadTenexConfig(globalPath);
         const contextManagement = tenexConfig.contextManagement || {};
-        const anthropicPromptCaching = contextManagement.anthropicPromptCaching || {};
 
         const { action } = await inquirer.prompt([{
             type: "select",
@@ -110,20 +108,6 @@ export const contextManagementCommand = new Command("context-management")
             },
         ]);
 
-        const anthropicAnswers = await inquirer.prompt([
-            {
-                type: "select",
-                name: "ttl",
-                message: "Anthropic cache-control TTL:",
-                choices: [
-                    { name: "1 hour", value: "1h" },
-                    { name: "5 minutes", value: "5m" },
-                ],
-                default: anthropicPromptCaching.ttl ?? DEFAULT_ANTHROPIC_PROMPT_CACHING_TTL,
-                theme: inquirerTheme,
-            },
-        ]);
-
         const toolDecay = contextManagement.toolResultDecay || {};
         const toolDecayAnswers = await inquirer.prompt([
             {
@@ -161,15 +145,6 @@ export const contextManagementCommand = new Command("context-management")
         ]);
 
         const strategyAnswers = await inquirer.prompt([
-            {
-                type: "confirm",
-                name: "anthropicPromptCaching",
-                message: "Enable AnthropicPromptCachingStrategy:",
-                default: (
-                    contextManagement.strategies?.anthropicPromptCaching
-                    ?? contextManagement.strategies?.systemPromptCaching
-                ) !== false,
-            },
             {
                 type: "confirm",
                 name: "reminders",
@@ -214,9 +189,6 @@ export const contextManagementCommand = new Command("context-management")
             forceScratchpadThresholdPercent: Number.parseInt(answers.forceScratchpadThresholdPercent, 10),
             utilizationWarningThresholdPercent: Number.parseInt(answers.utilizationWarningThresholdPercent, 10),
             compactionThresholdPercent: Number.parseInt(answers.compactionThresholdPercent, 10),
-            anthropicPromptCaching: {
-                ttl: anthropicAnswers.ttl,
-            },
             toolResultDecay: {
                 minTotalSavingsTokens: Number.parseInt(toolDecayAnswers.minTotalSavingsTokens, 10),
                 minDepth: Number.parseInt(toolDecayAnswers.minDepth, 10),
@@ -226,7 +198,6 @@ export const contextManagementCommand = new Command("context-management")
                     .filter((name: string) => name.length > 0),
             },
             strategies: {
-                anthropicPromptCaching: strategyAnswers.anthropicPromptCaching,
                 reminders: strategyAnswers.reminders,
                 scratchpad: strategyAnswers.scratchpad,
                 toolResultDecay: strategyAnswers.toolResultDecay,

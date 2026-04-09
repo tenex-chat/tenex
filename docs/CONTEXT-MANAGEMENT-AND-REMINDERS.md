@@ -8,7 +8,6 @@ The short version:
 - TENEX keeps a separate per-agent prompt-view history of what was actually sent.
 - Reminders are computed at request time by `RemindersStrategy`.
 - Runtime-only reminders are stored as append-only prompt overlays, not as edits to old user messages.
-- Anthropic cache metadata is applied after reminder placement by `AnthropicPromptCachingStrategy`.
 
 ## Design Invariants
 
@@ -18,7 +17,6 @@ These rules are intentional and should not be broken by future refactors:
 2. Historical prompt state is append-only per agent.
 3. Runtime reminders must not rewrite historical transcript messages.
 4. Reminder delta/full bookkeeping is separate from prompt-history storage.
-5. Provider-specific cache metadata is applied after final prompt assembly, not during reminder selection.
 
 The bug that drove this design was prompt corruption from repeatedly appending runtime reminder content into older user messages. That caused prompt drift, duplicated reminder blocks, and unbounded prompt growth. The current architecture exists to prevent that.
 
@@ -36,11 +34,8 @@ TENEX constructs an `ai-sdk-context-management` runtime per execution context an
 ### Library strategies
 
 - `ai-sdk-context-management/src/strategies/reminders/index.ts`
-- `ai-sdk-context-management/src/strategies/anthropic-prompt-caching/index.ts`
 
 `RemindersStrategy` owns reminder production and placement.
-
-`AnthropicPromptCachingStrategy` owns Anthropic cache-control metadata and shared-prefix breakpointing. It does not decide reminder content or reminder placement.
 
 ### TENEX reminder providers
 
@@ -152,9 +147,8 @@ In `src/agents/execution/context-management/runtime.ts`, TENEX currently wires a
 
 1. `ScratchpadStrategy` when available
 2. `CompactionToolStrategy` when enabled
-3. `ToolResultDecayStrategy` when enabled and not suppressed for Anthropic
+3. `ToolResultDecayStrategy` when enabled
 4. `RemindersStrategy` when enabled
-5. `AnthropicPromptCachingStrategy` when enabled
 
 The exact toggles come from `src/agents/execution/context-management/settings.ts`.
 
@@ -176,16 +170,7 @@ It returns reminder content in one of three placements:
 - `latest-user-append`
 - `fallback-system`
 
-### 8. Anthropic cache metadata is added last
-
-After reminder placement is finalized, `AnthropicPromptCachingStrategy` observes the final prompt and applies:
-
-- Anthropic `cacheControl` on the last shared prefix message
-- Anthropic `clear_tool_uses` edits in provider options
-
-It does not move reminders around.
-
-### 9. Runtime overlays are appended to prompt history
+### 8. Runtime overlays are appended to prompt history
 
 If context management returned `runtimeOverlays`, TENEX performs a second append-only prompt-history pass:
 
@@ -199,7 +184,7 @@ This is the key safety property:
 - old user messages remain unchanged
 - new runtime-only prompt material is stored as new prompt-history entries
 
-### 10. Save only when state changed
+### 9. Save only when state changed
 
 TENEX saves the conversation if any of these changed:
 
@@ -225,25 +210,7 @@ This affects the current request but does not rewrite the canonical transcript s
 
 ### `fallback-system`
 
-Used when reminder content should be emitted as a secondary system message but not treated as a stable Anthropic cached system block.
-
-## Anthropic Prompt Caching Rules
-
-TENEX intentionally follows Anthropic's prompt-caching caveat that changing system content invalidates later cached content.
-
-That means:
-
-1. reminder placement stays provider-agnostic
-2. volatile reminders stay out of any synthetic stable system prefix
-3. cache metadata is applied after final reminder placement, not before
-
-In practice:
-
-- reminders are not promoted into a separate Anthropic-only stable system block
-- todos, delegations, conversations, routing, datetime, loaded-skills, and built-in context warnings stay dynamic
-- Anthropic cache metadata is still applied to the final shared prefix after reminder placement
-
-This is how TENEX heeds the "do not rely on automatic caching over a volatile trailing block" warning.
+Used when reminder content should be emitted as a secondary system message.
 
 ## Reminder State Persistence
 
@@ -304,7 +271,6 @@ These reminders are passed to `RemindersStrategy` as `queuedReminders`, so the p
 
 `src/agents/execution/context-management/settings.ts` currently exposes these strategy toggles:
 
-- `anthropicPromptCaching`
 - `reminders`
 - `scratchpad`
 - `toolResultDecay`
@@ -319,10 +285,6 @@ Other relevant controls:
 - `utilizationWarningThresholdPercent`
 - `compactionThresholdPercent`
 
-Legacy compatibility:
-
-- `systemPromptCaching` is still accepted as an alias for `anthropicPromptCaching`
-
 ## What Changed Compared To The Older Design
 
 Older design:
@@ -335,7 +297,6 @@ Current design:
 
 - reminder orchestration lives in `RemindersStrategy`
 - TENEX supplies facts and reminder providers, not the reminder engine itself
-- Anthropic cache metadata lives in `AnthropicPromptCachingStrategy`
 - prompt history remains append-only
 - runtime overlays remain isolated from canonical transcript history
 
@@ -355,5 +316,4 @@ If you need to change this system, start with these files:
 Then read the library side:
 
 - `../ai-sdk-context-management/src/strategies/reminders/index.ts`
-- `../ai-sdk-context-management/src/strategies/anthropic-prompt-caching/index.ts`
 - `../ai-sdk-context-management/src/types.ts`
