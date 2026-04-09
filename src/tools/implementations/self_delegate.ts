@@ -210,11 +210,15 @@ export function createSelfDelegateTool(context: ConversationToolContext): AISdkT
         ? "Delegate the task to a fresh instance of yourself. Use this when you want a clean child conversation, optionally on a specific meta-model variant."
         : "Delegate the task to a fresh instance of yourself. Use this when you want a clean child conversation with the same agent.";
 
-    return tool({
+    const aiTool = tool({
         description,
         inputSchema,
         execute: async (input: SelfDelegateInput) => {
             return await executeSelfDelegate(input, context);
         },
     });
+
+    // AI SDK tools are structurally compatible with AISdkTool, but the shared
+    // TENEX alias also permits optional transcript metadata attached by some tools.
+    return aiTool as AISdkTool;
 }
