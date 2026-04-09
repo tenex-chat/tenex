@@ -718,6 +718,39 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         expect(result.circularDelegationWarning).toBeUndefined();
     });
 
+    it("should allow self-delegation even when the agent is already in the delegation chain", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        // Chain includes the current agent — this is normal for any delegation scenario
+        const delegationChain = [
+            { pubkey: "user-pubkey", displayName: "User" },
+            { pubkey: agentPubkey, displayName: "self-agent" },
+        ];
+
+        const context = createMockContextWithChain(ralNumber, delegationChain);
+
+        conversationStoreSpy.mockReturnValue({
+            metadata: { delegationChain },
+            addDelegationMarker: () => {},
+            save: async () => {},
+            getAllMessages: () => [],
+        } as any);
+
+        const delegateTool = createDelegateTool(context);
+
+        const input = {
+            recipient: "self-agent", // delegating to itself
+            prompt: "Spawn a sub-task for myself",
+        };
+
+        // Self-delegation must never trigger the circular delegation error
+        const result = await runWithProjectContext(() => delegateTool.execute(input));
+        expect(result.success).toBe(true);
+        expect(result.delegationConversationId).toBeDefined();
+        expect(result.circularDelegationWarning).toBeUndefined();
+    });
+
 });
 
 describe("delegate_followup - ID handling", () => {

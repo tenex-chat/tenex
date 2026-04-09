@@ -147,8 +147,10 @@ async function executeDelegate(
     );
   }
 
-  // Check for circular delegation
-  if (delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
+  // Check for circular delegation — self-delegation (A→A) is exempt: it's a valid
+  // use case and cannot create an infinite loop the way A→B→C→A would.
+  const isSelfDelegation = pubkey === context.agent.pubkey;
+  if (!isSelfDelegation && delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
     let targetName = pubkey.substring(0, 8);
     try {
       const projectContext = getProjectContext();
