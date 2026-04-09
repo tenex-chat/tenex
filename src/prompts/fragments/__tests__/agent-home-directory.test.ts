@@ -179,7 +179,14 @@ describe("agent-home-directory fragment", () => {
             expect(result).toContain("`.env` contents are NOT injected into your prompt");
             expect(result).toContain("Auto-injected files:");
             expect(result).toContain("Files starting with `+`");
-            expect(result).toContain("critical reminders");
+            expect(result).toContain("lean and poignant");
+            expect(result).toContain("100 lines");
+            expect(result).toContain("Do NOT use `+` files for");
+            expect(result).toContain("status reports");
+            expect(result).toContain("task logs");
+            expect(result).toContain("one-off findings");
+            expect(result).toContain("transient state");
+            expect(result).toContain("detailed reference material");
         });
 
         it("should inject +prefixed file contents when present", async () => {
@@ -253,6 +260,7 @@ describe("agent-home-directory fragment", () => {
 
             expect(result).toContain("/home/abcd1234/projects/acme-app/docs");
             expect(result).toContain("injected in the project-context section");
+            expect(result).toContain("keep them lean, and link out to non-`+` files");
         });
 
         it("should inject home-scoped +files only (project files moved to project-context)", async () => {

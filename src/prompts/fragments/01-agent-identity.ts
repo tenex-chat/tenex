@@ -22,10 +22,10 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         if (agent.role) {
             parts.push(`Your role: ${agent.role}`);
         }
+        if (agent.category) {
+            parts.push(`Your category: ${agent.category}`);
+        }
         parts.push(`Your shortened pubkey: ${shortenPubkey(agent.pubkey)}`);
-        parts.push(
-            "Your nsec is available in your home directory's .env file as NSEC. Use it when you encounter a tool that needs an nsec."
-        );
         parts.push("</agent-identity>");
         parts.push("");
 

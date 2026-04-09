@@ -94,14 +94,17 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
         );
         parts.push("");
         parts.push(
-            "**Auto-injected files:** Files starting with `+` (e.g., `+NOTES.md`) are automatically injected into your system prompt. " +
-                "Use these for: critical reminders, preferences, or frequently-referenced notes."
+            "**Auto-injected files:** Files starting with `+` (e.g., `+NOTES.md`) are automatically injected into your system prompt on every execution. " +
+                "Keep `+` files **lean and poignant** — only include things you genuinely need at *every* execution (standing rules, critical reminders, active constraints). " +
+                "Do NOT use `+` files for: status reports, task logs, one-off findings, transient state, or detailed reference material. " +
+                "Instead, write that content in a regular (non-`+`) file and add a brief reference to it from your `+` file so you can read it when relevant. " +
+                "Keep each `+` file under **100 lines** — if it exceeds that, extract the detail into a non-`+` file and replace it with a pointer."
         );
         if (projectMemoryDir) {
             parts.push("");
             parts.push(
                 `**Project-specific memory:** For private persistent notes for this project, use \`${projectMemoryDir}/+<slug>.md\`. ` +
-                "Those `+` files are injected in the project-context section."
+                "Those `+` files are injected in the project-context section. Apply the same rule: keep them lean, and link out to non-`+` files for detailed or situational content."
             );
         }
         // Inject +prefixed file contents

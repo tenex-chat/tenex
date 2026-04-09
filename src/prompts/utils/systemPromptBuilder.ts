@@ -240,7 +240,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         projectBasePath,
         workingDirectory,
         currentBranch,
-        projectDocsPath: projectBasePath ? path.join(projectBasePath, "tenex", "docs") : undefined,
+        projectDocsPath: projectBasePath ? path.join(projectBasePath, "docs") : undefined,
         availableAgents,
         teamContext,
     });

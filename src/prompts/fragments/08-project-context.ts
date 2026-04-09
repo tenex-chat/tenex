@@ -269,14 +269,25 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
 
         // <workspace> section
         if (projectBasePath || workingDirectory || currentBranch) {
+            const relativePath = (p: string): string => {
+                if (!projectBasePath) return p;
+                const rel = path.relative(projectBasePath, p);
+                if (rel === "") return "$PROJECT_BASE";
+                const isOutside = rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
+                if (!isOutside) {
+                    return `$PROJECT_BASE/${rel}`;
+                }
+                return p;
+            };
+
             parts.push("");
             parts.push("  <workspace>");
 
             if (projectBasePath) {
-                parts.push(`    root: ${projectBasePath}`);
+                parts.push("    root: $PROJECT_BASE");
             }
             if (workingDirectory) {
-                parts.push(`    cwd: ${workingDirectory}`);
+                parts.push(`    cwd: ${relativePath(workingDirectory)}`);
             }
             if (currentBranch) {
                 parts.push(`    current-branch: ${currentBranch}`);
@@ -289,13 +300,13 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
                 if (otherWorktrees.length > 0) {
                     parts.push("    other worktrees:");
                     for (const wt of otherWorktrees) {
-                        parts.push(`      ${wt.branch} [Path: ${wt.path}]`);
+                        parts.push(`      ${wt.branch} [Path: ${relativePath(wt.path)}]`);
                     }
                 }
             }
 
             if (projectDocsPath) {
-                parts.push(`    project docs: ${projectDocsPath}`);
+                parts.push(`    project docs: ${relativePath(projectDocsPath)}`);
             }
 
             parts.push("  </workspace>");
