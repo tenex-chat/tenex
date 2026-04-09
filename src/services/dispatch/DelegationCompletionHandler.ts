@@ -19,6 +19,45 @@ export interface DelegationCompletionResult {
 export async function handleDelegationCompletion(
     envelope: InboundEnvelope
 ): Promise<DelegationCompletionResult> {
+    // ── Implicit-kill branch ────────────────────────────────────────────────
+    // Kill-signal envelopes bypass sender validation and recordCompletion().
+    // The local abort state was already committed by markParentDelegationKilled
+    // before the signal was dispatched, so we only need to resolve the parent
+    // wake target and return it.  We must not append anything to the child
+    // conversation store here.
+    if (envelope.metadata.isKillSignal) {
+        const delegationConversationId = envelope.metadata.killSignalDelegationConversationId;
+        if (!delegationConversationId) {
+            logger.debug("[handleDelegationCompletion] Kill signal missing delegationConversationId, ignoring");
+            return { recorded: false };
+        }
+
+        const ralRegistry = RALRegistry.getInstance();
+        const wakeTarget = ralRegistry.findImplicitKillWakeTarget(delegationConversationId);
+        if (!wakeTarget) {
+            logger.debug("[handleDelegationCompletion] Kill signal: no aborted wake target found (already consumed or not committed)", {
+                delegationConversationId: delegationConversationId.substring(0, 8),
+            });
+            return { recorded: false };
+        }
+
+        const projectCtx = getProjectContext();
+        const parentAgent = projectCtx.getAgentByPubkey(wakeTarget.agentPubkey);
+
+        logger.info("[handleDelegationCompletion] Kill signal: resolving implicit aborted completion for parent wake-up", {
+            delegationConversationId: delegationConversationId.substring(0, 8),
+            parentConversationId: wakeTarget.conversationId.substring(0, 8),
+            parentAgentSlug: parentAgent?.slug,
+        });
+
+        return {
+            recorded: true,
+            agentSlug: parentAgent?.slug,
+            conversationId: wakeTarget.conversationId,
+        };
+    }
+    // ── End implicit-kill branch ────────────────────────────────────────────
+
     const eTags = envelope.metadata.replyTargets ?? [];
     if (eTags.length === 0) {
         return { recorded: false };

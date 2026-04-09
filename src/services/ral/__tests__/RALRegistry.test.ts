@@ -2694,4 +2694,66 @@ describe("RALRegistry", () => {
     });
   });
 
+  describe("findImplicitKillWakeTarget", () => {
+    const parentPubkey = "parent-agent-pubkey-abc";
+    const parentConvId = "parent-conv-000";
+    const childConvId = "child-conv-111";
+
+    function setupPendingDelegation(): number {
+      const ralNumber = registry.create(parentPubkey, parentConvId, projectId);
+      registry.mergePendingDelegations(parentPubkey, parentConvId, ralNumber, [
+        {
+          delegationConversationId: childConvId,
+          recipientPubkey: agentPubkey,
+          senderPubkey: parentPubkey,
+          prompt: "do something",
+          ralNumber,
+        },
+      ]);
+      return ralNumber;
+    }
+
+    it("returns the parent location when the delegation is completed/aborted", () => {
+      const ralNumber = setupPendingDelegation();
+
+      // Move delegation to completed/aborted as markParentDelegationKilled does
+      registry.markParentDelegationKilled(childConvId);
+
+      const result = registry.findImplicitKillWakeTarget(childConvId);
+      expect(result).not.toBeNull();
+      expect(result?.agentPubkey).toBe(parentPubkey);
+      expect(result?.conversationId).toBe(parentConvId);
+      expect(result?.ralNumber).toBe(ralNumber);
+    });
+
+    it("returns null when the delegation is still pending (kill not yet committed)", () => {
+      setupPendingDelegation();
+
+      // Delegation is pending, not aborted
+      const result = registry.findImplicitKillWakeTarget(childConvId);
+      expect(result).toBeNull();
+    });
+
+    it("returns null for a successfully completed delegation", () => {
+      const ralNumber = setupPendingDelegation();
+
+      // Record a successful completion (not aborted)
+      registry.recordCompletion({
+        delegationConversationId: childConvId,
+        recipientPubkey: agentPubkey,
+        response: "done",
+        completedAt: Math.floor(Date.now() / 1000),
+      });
+
+      const result = registry.findImplicitKillWakeTarget(childConvId);
+      expect(result).toBeNull();
+    });
+
+    it("returns null for an unknown delegation ID (already consumed or never registered)", () => {
+      // No delegation registered for this ID at all
+      const result = registry.findImplicitKillWakeTarget("unknown-conv-id-999");
+      expect(result).toBeNull();
+    });
+  });
+
 });

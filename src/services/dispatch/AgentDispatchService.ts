@@ -16,6 +16,7 @@ import {
     isFromAgent,
 } from "@/events/runtime/envelope-classifier";
 import { formatAnyError } from "@/lib/error-formatter";
+import { NDKKind } from "@/nostr/kinds";
 import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { config } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
@@ -76,6 +77,12 @@ export class AgentDispatchService {
         { timeout: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void }
     >();
     private readonly delegationDebounceSequence = new Map<string, number>();
+    /**
+     * Stored by EventHandler.initialize() so kill-signal wake-ups can re-enter
+     * the dispatch path without requiring the executor to be threaded through
+     * every tool call site.
+     */
+    private agentExecutor: AgentExecutor | null = null;
 
     private constructor() {}
 
@@ -84,6 +91,79 @@ export class AgentDispatchService {
             AgentDispatchService.instance = new AgentDispatchService();
         }
         return AgentDispatchService.instance;
+    }
+
+    /**
+     * Register the executor that will be used for kill-signal wake-up dispatch.
+     * Must be called once by EventHandler after the executor is created.
+     */
+    setAgentExecutor(executor: AgentExecutor): void {
+        this.agentExecutor = executor;
+    }
+
+    /**
+     * Dispatch a kill-signal wake-up for the immediate parent of a killed delegation.
+     *
+     * This must be called AFTER the local abort state has been committed via
+     * `RALRegistry.markParentDelegationKilled` (or `abortWithCascade`), so the
+     * delegation is already in the `completed/aborted` bucket.  The call is
+     * a no-op if no aborted delegation can be found for `delegationConversationId`.
+     *
+     * The signal is dispatched in-process as a synthetic local envelope; it never
+     * touches Nostr relays and is never appended to any conversation store.
+     */
+    async dispatchKillWakeup(params: {
+        delegationConversationId: string;
+        abortReason: string;
+        completedAt: number;
+    }): Promise<void> {
+        if (!this.agentExecutor) {
+            logger.warn("[AgentDispatchService.dispatchKillWakeup] No executor registered — kill wakeup skipped", {
+                delegationConversationId: shortenConversationId(params.delegationConversationId),
+            });
+            return;
+        }
+
+        const { delegationConversationId, abortReason, completedAt } = params;
+
+        logger.info("[AgentDispatchService.dispatchKillWakeup] Dispatching kill-signal wake-up to parent", {
+            delegationConversationId: shortenConversationId(delegationConversationId),
+            abortReason,
+        });
+
+        // Build a synthetic control-plane-only envelope.  The kill-signal kind
+        // prevents it from being classified as a delegation completion or a
+        // normal user message, so it is silently dropped if the wake target has
+        // already been consumed or never existed.
+        const envelope: InboundEnvelope = {
+            transport: "local",
+            principal: {
+                id: "local:kill-signal",
+                transport: "local",
+                kind: "system",
+            },
+            channel: {
+                id: `local:kill-signal:${delegationConversationId}`,
+                transport: "local",
+                kind: "conversation",
+            },
+            message: {
+                id: `local:kill-signal:${delegationConversationId}:${completedAt}`,
+                transport: "local",
+                nativeId: `kill-signal:${delegationConversationId}`,
+            },
+            recipients: [],
+            content: `Kill signal: delegation aborted. Reason: ${abortReason}`,
+            occurredAt: completedAt,
+            capabilities: [],
+            metadata: {
+                eventKind: NDKKind.TenexKillSignal,
+                isKillSignal: true,
+                killSignalDelegationConversationId: delegationConversationId,
+            },
+        };
+
+        await this.dispatch(envelope, { agentExecutor: this.agentExecutor });
     }
 
     async dispatch(envelope: InboundEnvelope, context: DispatchContext): Promise<void> {
@@ -237,6 +317,17 @@ export class AgentDispatchService {
                 "delegation.conversation_id": shortenConversationId(delegationTarget.conversationId),
             });
             await this.handleDelegationResponse(envelope, delegationTarget, agentExecutor, projectCtx, span);
+            return;
+        }
+
+        // Kill signals that produced no wake target (duplicate, already consumed, or
+        // unknown delegation) are silently dropped.  Do not fall through to the
+        // conversation resolver — that would create spurious conversation records.
+        if (envelope.metadata.isKillSignal) {
+            span.addEvent("dispatch.kill_signal_no_wake_target_dropped", {
+                "delegation.conversation_id": envelope.metadata.killSignalDelegationConversationId?.substring(0, 8) ?? "",
+            });
+            span.setStatus({ code: SpanStatusCode.OK });
             return;
         }
 

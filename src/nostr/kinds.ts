@@ -35,6 +35,9 @@ export const NDKKind = {
     TenexOperationsStatus: 24133 as BaseNDKKind,
     TenexStopCommand: 24134 as BaseNDKKind,
     TenexStreamTextDelta: 24135 as BaseNDKKind,
+    // Control-plane signal: wakes the immediate parent after a delegated conversation is killed.
+    // Must never be appended to conversation transcripts or prompt-history stores.
+    TenexKillSignal: 24136 as BaseNDKKind,
 } as const;
 
 export type NDKKind = (typeof NDKKind)[keyof typeof NDKKind];

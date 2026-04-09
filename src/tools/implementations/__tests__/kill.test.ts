@@ -8,6 +8,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { SchedulerService } from "@/services/scheduling";
+import { AgentDispatchService } from "@/services/dispatch/AgentDispatchService";
 import { prefixKVStore } from "@/services/storage";
 import type { ToolExecutionContext } from "@/tools/types";
 
@@ -793,6 +794,202 @@ describe("kill tool", () => {
             // Restore
             ConversationStore.has = originalHas;
             ConversationStore.get = originalGet;
+        });
+    });
+
+    describe("Kill-signal wake-up dispatch", () => {
+        const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+        const parentConversationId = "parent-conv-1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+        const delegationConversationId = "deleg-conv-1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+        const parentAgentPubkey = "parent-agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef12";
+        const delegateAgentPubkey = "delegate-agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcd";
+
+        function setupParentDelegation() {
+            const ralNumber = ralRegistry.create(parentAgentPubkey, parentConversationId, projectId);
+            ralRegistry.mergePendingDelegations(parentAgentPubkey, parentConversationId, ralNumber, [{
+                delegationConversationId,
+                recipientPubkey: delegateAgentPubkey,
+                senderPubkey: parentAgentPubkey,
+                prompt: "test delegation",
+                ralNumber,
+            }]);
+            return ralNumber;
+        }
+
+        test("cascade kill dispatches a kill-signal wake-up after abortWithCascade completes", async () => {
+            const agentPubkey = delegateAgentPubkey;
+
+            // Conversation with one active agent
+            const mockConversation = {
+                id: delegationConversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map([[agentPubkey, {}]]),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            const abortCallOrder: string[] = [];
+            ralRegistry.abortWithCascade = mock(async () => {
+                abortCallOrder.push("abortWithCascade");
+                return { abortedCount: 1, descendantConversations: [] };
+            }) as any;
+
+            const dispatchService = AgentDispatchService.getInstance();
+            const originalDispatchKillWakeup = dispatchService.dispatchKillWakeup.bind(dispatchService);
+            dispatchService.dispatchKillWakeup = mock(async () => {
+                abortCallOrder.push("dispatchKillWakeup");
+            });
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({
+                target: delegationConversationId,
+                reason: "test cascade kill signal",
+            });
+
+            expect(result.success).toBe(true);
+
+            // dispatchKillWakeup must have been called with the killed delegation's conversation ID
+            expect(dispatchService.dispatchKillWakeup).toHaveBeenCalledWith(
+                expect.objectContaining({ delegationConversationId })
+            );
+
+            // And it must be called AFTER abortWithCascade has completed (ordering guarantee)
+            expect(abortCallOrder).toEqual(["abortWithCascade", "dispatchKillWakeup"]);
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+            dispatchService.dispatchKillWakeup = originalDispatchKillWakeup;
+        });
+
+        test("pre-emptive kill dispatches a kill-signal wake-up after marking the delegation killed", async () => {
+            // Set up a pending delegation in RALRegistry so kill.ts finds the recipient
+            setupParentDelegation();
+
+            // Delegation conversation has no active agents yet
+            const mockDelegationConversation = {
+                id: delegationConversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map(),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockDelegationConversation as any);
+
+            const dispatchService = AgentDispatchService.getInstance();
+            const originalDispatchKillWakeup = dispatchService.dispatchKillWakeup.bind(dispatchService);
+            dispatchService.dispatchKillWakeup = mock(async () => {});
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({
+                target: delegationConversationId,
+                reason: "pre-emptive test kill",
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.message).toContain("Pre-emptive kill");
+
+            // Wake-up must have been dispatched with the delegation's conversation ID
+            expect(dispatchService.dispatchKillWakeup).toHaveBeenCalledWith(
+                expect.objectContaining({ delegationConversationId })
+            );
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            dispatchService.dispatchKillWakeup = originalDispatchKillWakeup;
+        });
+
+        test("does not dispatch a kill-signal when no active agents and no delegation recipient exist", async () => {
+            // Conversation with no active agents and no delegation entry in RALRegistry
+            const lonelyConversationId = "lonely-conv-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+            const mockConversation = {
+                id: lonelyConversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map(),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            const dispatchService = AgentDispatchService.getInstance();
+            const originalDispatchKillWakeup = dispatchService.dispatchKillWakeup.bind(dispatchService);
+            dispatchService.dispatchKillWakeup = mock(async () => {});
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({
+                target: lonelyConversationId,
+                reason: "nothing to kill",
+            });
+
+            // No-op: nothing was found to kill
+            expect(result.success).toBe(false);
+            expect(result.message).toContain("No active agents found");
+
+            // kill-signal must NOT be dispatched when nothing was actually killed
+            expect(dispatchService.dispatchKillWakeup).not.toHaveBeenCalled();
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            dispatchService.dispatchKillWakeup = originalDispatchKillWakeup;
+        });
+
+        test("kill-signal payload includes the delegation conversation ID that was aborted", async () => {
+            const agentPubkey = delegateAgentPubkey;
+
+            const mockConversation = {
+                id: delegationConversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map([[agentPubkey, {}]]),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+            })) as any;
+
+            const capturedParams: Array<{ delegationConversationId: string; abortReason: string }> = [];
+            const dispatchService = AgentDispatchService.getInstance();
+            const originalDispatchKillWakeup = dispatchService.dispatchKillWakeup.bind(dispatchService);
+            dispatchService.dispatchKillWakeup = mock(async (params) => {
+                capturedParams.push(params);
+            });
+
+            const killTool = createKillTool(mockContext);
+            await killTool.execute({
+                target: delegationConversationId,
+                reason: "signal payload test",
+            });
+
+            expect(capturedParams).toHaveLength(1);
+            const param = capturedParams[0];
+            expect(param.delegationConversationId).toBe(delegationConversationId);
+            expect(param.abortReason).toBe("signal payload test");
+            // completedAt should be a unix timestamp close to now
+            expect(typeof (param as any).completedAt).toBe("number");
+            expect((param as any).completedAt).toBeGreaterThan(0);
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+            dispatchService.dispatchKillWakeup = originalDispatchKillWakeup;
         });
     });
 
