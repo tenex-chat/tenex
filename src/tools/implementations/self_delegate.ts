@@ -176,8 +176,8 @@ async function executeSelfDelegate(
     });
 
     let message = input.model
-        ? `Delegated task to a new instance of yourself using the "${input.model}" variant. The agent will wake you up when ready with the response.`
-        : "Delegated task to a new instance of yourself. The agent will wake you up when ready with the response.";
+        ? `Delegated task to a new instance of yourself using the "${input.model}" variant. Stop here — do not take any further actions this turn. You will be re-invoked with the child's response when complete.`
+        : "Delegated task to a new instance of yourself. Stop here — do not take any further actions this turn. You will be re-invoked with the child's response when complete.";
 
     if (!hasTodos(context)) {
         message +=
