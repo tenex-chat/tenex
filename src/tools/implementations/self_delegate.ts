@@ -210,13 +210,11 @@ export function createSelfDelegateTool(context: ConversationToolContext): AISdkT
         ? "Delegate the task to a fresh instance of yourself. Use this when you want a clean child conversation, optionally on a specific meta-model variant."
         : "Delegate the task to a fresh instance of yourself. Use this when you want a clean child conversation with the same agent.";
 
-    const aiTool = tool({
+    return tool({
         description,
         inputSchema,
         execute: async (input: SelfDelegateInput) => {
             return await executeSelfDelegate(input, context);
         },
     });
-
-    return aiTool as AISdkTool;
 }

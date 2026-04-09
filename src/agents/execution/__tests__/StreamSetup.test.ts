@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { config as configService } from "@/services/ConfigService";
 import { SkillWhitelistService } from "@/services/skill";
+import {
+    createMockAgent,
+    createMockConversationStore,
+    createMockExecutionEnvironment,
+    createMockInboundEnvelope,
+} from "@/test-utils";
+import { ToolExecutionTracker } from "../ToolExecutionTracker";
+import type { FullRuntimeContext } from "../types";
 
 const fetchSkillsMock = mock(async () => ({ skills: [], content: "", toolPermissions: {} }));
 const listAvailableSkillsMock = mock(async () => []);
@@ -134,9 +142,82 @@ mock.module("@opentelemetry/api", () => ({
 
 import { setupStreamExecution } from "../StreamSetup";
 
+type MockedConfigService = {
+    isMetaModelConfig: ReturnType<typeof mock>;
+    resolveMetaModel: ReturnType<typeof mock>;
+};
+
+function createTestContext(
+    overrides: {
+        blockedSkills?: string[];
+        llmConfig?: string;
+        skillEventIds?: string[];
+        variantOverride?: string;
+        conversationStoreOverrides?: Record<string, unknown>;
+    } = {}
+): FullRuntimeContext {
+    const conversationStore = Object.assign(
+        createMockConversationStore({ id: "conversation-1" }),
+        {
+            id: "conversation-1",
+            getId: mock(() => "conversation-1"),
+            ensureRalActive: mock(() => undefined),
+            getSelfAppliedSkillIds: mock(() => []),
+            getContextManagementReminderState: mock(() => null),
+            getMetaModelVariantOverride: mock(() => undefined),
+            setMetaModelVariantOverride: mock(() => undefined),
+            clearMetaModelVariantOverride: mock(() => undefined),
+            getFirstUserMessage: mock(() => undefined),
+            save: mock(async () => undefined),
+        },
+        overrides.conversationStoreOverrides ?? {}
+    );
+
+    const agent = createMockAgent({
+        pubkey: "agent-pubkey",
+        slug: "agent-slug",
+        llmConfig: overrides.llmConfig ?? "test-model",
+        alwaysSkills: [],
+        blockedSkills: overrides.blockedSkills ?? [],
+        mcpAccess: [],
+        tools: [],
+        createLLMService: createLLMServiceMock,
+    });
+
+    const triggeringEnvelope = createMockInboundEnvelope({
+        metadata: {
+            skillEventIds: overrides.skillEventIds ?? [],
+            variantOverride: overrides.variantOverride,
+        },
+        principal: {
+            id: "user",
+            linkedPubkey: "user",
+            kind: "human",
+            transport: "nostr",
+        },
+    });
+
+    return {
+        ...createMockExecutionEnvironment({
+            agent,
+            conversationId: "conversation-1",
+            triggeringEnvelope,
+            conversationStore,
+            getConversation: () => conversationStore,
+            projectBasePath: "/tmp/project",
+            workingDirectory: "/tmp/project",
+            currentBranch: "main",
+        }),
+        agent,
+        conversationStore,
+        triggeringEnvelope,
+        getConversation: () => conversationStore,
+    };
+}
+
 describe("StreamSetup", () => {
     const whitelistService = SkillWhitelistService.getInstance();
-    const mockedConfigService = configService as any;
+    const mockedConfigService = configService as unknown as MockedConfigService;
 
     beforeEach(() => {
         whitelistService.setInstalledSkills([]);
@@ -166,47 +247,11 @@ describe("StreamSetup", () => {
             },
         ]);
 
-        const context = {
-            agent: {
-                pubkey: "agent-pubkey",
-                slug: "agent-slug",
-                alwaysSkills: [],
-                blockedSkills: ["a".repeat(64)],
-                mcpAccess: [],
-                tools: [],
-                llmConfig: "test-model",
-                createLLMService: createLLMServiceMock,
-            },
-            triggeringEnvelope: {
-                metadata: {
-                    skillEventIds: ["local-skill"],
-                },
-                principal: {
-                    id: "user",
-                    linkedPubkey: "user",
-                    kind: "human",
-                },
-            },
-            conversationStore: {
-                id: "conversation-1",
-                getId: mock(() => "conversation-1"),
-                ensureRalActive: mock(() => undefined),
-                getSelfAppliedSkillIds: mock(() => []),
-                getContextManagementReminderState: mock(() => null),
-                save: mock(async () => undefined),
-            },
-            conversationId: "conversation-1",
-            projectBasePath: "/tmp/project",
-            workingDirectory: "/tmp/project",
-            currentBranch: "main",
-            getConversation() {
-                return this.conversationStore;
-            },
-        } as any;
-
-        const toolTracker = {
-            setFullResultStash: mock(() => undefined),
-        } as any;
+        const context = createTestContext({
+            blockedSkills: ["a".repeat(64)],
+            skillEventIds: ["local-skill"],
+        });
+        const toolTracker = new ToolExecutionTracker();
 
         const result = await setupStreamExecution(
             context,
@@ -234,52 +279,16 @@ describe("StreamSetup", () => {
         const clearMetaModelVariantOverride = mock(() => undefined);
         const getMetaModelVariantOverride = mock(() => undefined);
 
-        const context = {
-            agent: {
-                pubkey: "agent-pubkey",
-                slug: "agent-slug",
-                alwaysSkills: [],
-                blockedSkills: [],
-                mcpAccess: [],
-                tools: [],
-                llmConfig: "meta-config",
-                createLLMService: createLLMServiceMock,
-            },
-            triggeringEnvelope: {
-                metadata: {
-                    skillEventIds: [],
-                    variantOverride: "deep",
-                },
-                principal: {
-                    id: "user",
-                    linkedPubkey: "user",
-                    kind: "human",
-                },
-            },
-            conversationStore: {
-                id: "conversation-1",
-                getId: mock(() => "conversation-1"),
-                ensureRalActive: mock(() => undefined),
-                getSelfAppliedSkillIds: mock(() => []),
-                getContextManagementReminderState: mock(() => null),
+        const context = createTestContext({
+            llmConfig: "meta-config",
+            variantOverride: "deep",
+            conversationStoreOverrides: {
                 getMetaModelVariantOverride,
                 setMetaModelVariantOverride,
                 clearMetaModelVariantOverride,
-                getFirstUserMessage: mock(() => undefined),
-                save: mock(async () => undefined),
             },
-            conversationId: "conversation-1",
-            projectBasePath: "/tmp/project",
-            workingDirectory: "/tmp/project",
-            currentBranch: "main",
-            getConversation() {
-                return this.conversationStore;
-            },
-        } as any;
-
-        const toolTracker = {
-            setFullResultStash: mock(() => undefined),
-        } as any;
+        });
+        const toolTracker = new ToolExecutionTracker();
 
         await setupStreamExecution(
             context,
