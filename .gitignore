@@ -68,6 +68,7 @@ agents.json
 .wallet.json
 *.bak
 *.tmp
+docs/plans/
 
 # Test artifacts
 test-*.json
