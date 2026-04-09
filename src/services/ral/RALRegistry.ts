@@ -5,9 +5,7 @@ import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 import type {
   CompletedDelegation,
-  DelegationKillSignal,
   DelegationMessage,
-  ImplicitKillWakeTarget,
   InjectionResult,
   InjectionRole,
   PendingDelegation,
@@ -161,7 +159,6 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   resolveDelegationPrefix(prefix: string): string | null { return this.delegationRegistry.resolveDelegationPrefix(prefix); }
   canonicalizeDelegationId(id: string): string { return this.delegationRegistry.canonicalizeDelegationId(id); }
   findDelegation(delegationEventId: string): { pending?: PendingDelegation; completed?: CompletedDelegation; agentPubkey: string; conversationId: string; ralNumber: number } | undefined { return this.delegationRegistry.findDelegation(delegationEventId); }
-  findImplicitKillWakeTarget(delegationConversationId: string): ImplicitKillWakeTarget | undefined { return this.delegationRegistry.findImplicitKillWakeTarget(delegationConversationId); }
   findStateWaitingForDelegation(delegationEventId: string): RALRegistryEntry | undefined { return this.delegationRegistry.findStateWaitingForDelegation(delegationEventId); }
   getRalKeyForDelegation(delegationEventId: string): string | undefined { return this.delegationRegistry.getRalKeyForDelegation(delegationEventId); }
   findResumableRAL(agentPubkey: string, conversationId: string): RALRegistryEntry | undefined { return this.stateRegistry.findResumableRAL(agentPubkey, conversationId); }
@@ -170,7 +167,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
   abortCurrentTool(agentPubkey: string, conversationId: string): void { this.killSwitchRegistry.abortCurrentTool(agentPubkey, conversationId); }
   abortAllForAgent(agentPubkey: string, conversationId: string): number { return this.killSwitchRegistry.abortAllForAgent(agentPubkey, conversationId); }
-  async abortWithCascade(agentPubkey: string, conversationId: string, projectId: ProjectDTag, reason: string, cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }>; killSignal?: DelegationKillSignal }> { return this.killSwitchRegistry.abortWithCascade(agentPubkey, conversationId, projectId, reason, cooldownRegistry); }
+  async abortWithCascade(agentPubkey: string, conversationId: string, projectId: ProjectDTag, reason: string, cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> { return this.killSwitchRegistry.abortWithCascade(agentPubkey, conversationId, projectId, reason, cooldownRegistry); }
   clearAll(): void { this.stateRegistry.clearAll(); this.delegationRegistry.clearAll(); this.killSwitchRegistry.clearAll(); }
 
   markDelegationKilled(delegationConversationId: string): boolean { return this.killSwitchRegistry.markDelegationKilled(delegationConversationId); }
@@ -179,7 +176,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   markAgentConversationKilled(agentPubkey: string, conversationId: string): void { this.killSwitchRegistry.markAgentConversationKilled(agentPubkey, conversationId); }
   isAgentConversationKilled(agentPubkey: string, conversationId: string): boolean { return this.killSwitchRegistry.isAgentConversationKilled(agentPubkey, conversationId); }
   getDelegationRecipientPubkey(delegationConversationId: string): string | null { return this.killSwitchRegistry.getDelegationRecipientPubkey(delegationConversationId); }
-  markParentDelegationKilled(delegationConversationId: string, abortReason?: string): DelegationKillSignal | undefined { return this.killSwitchRegistry.markParentDelegationKilled(delegationConversationId, abortReason); }
+  markParentDelegationKilled(delegationConversationId: string): boolean { return this.killSwitchRegistry.markParentDelegationKilled(delegationConversationId); }
 
   addHeuristicViolations(agentPubkey: string, conversationId: string, ralNumber: number, violations: Array<{ id: string; title: string; message: string; severity: "warning" | "error"; timestamp: number; heuristicId: string }>): void { this.heuristicManager.addHeuristicViolations(this.getRAL(agentPubkey, conversationId, ralNumber), agentPubkey, conversationId, ralNumber, violations); }
   getAndConsumeHeuristicViolations(agentPubkey: string, conversationId: string, ralNumber: number): Array<{ id: string; title: string; message: string; severity: "warning" | "error"; timestamp: number; heuristicId: string }> { return this.heuristicManager.getAndConsumeHeuristicViolations(this.getRAL(agentPubkey, conversationId, ralNumber), agentPubkey, conversationId, ralNumber); }

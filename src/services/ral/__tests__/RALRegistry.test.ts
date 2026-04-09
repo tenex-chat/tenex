@@ -2353,15 +2353,9 @@ describe("RALRegistry", () => {
         expect(pendingBefore[0].delegationConversationId).toBe(childConv);
 
         // Mark the parent's delegation as killed (this simulates what happens when killing the child)
-        const result = registry.markParentDelegationKilled(childConv, "user cancelled");
+        const result = registry.markParentDelegationKilled(childConv);
 
-        expect(result).toEqual({
-          delegationConversationId: childConv,
-          recipientPubkey: childAgent,
-          parentConversationId: parentConv,
-          completedAt: expect.any(Number),
-          abortReason: "user cancelled",
-        });
+        expect(result).toBe(true);
 
         // Verify delegation moved from pending to completed
         const pendingAfter = registry.getConversationPendingDelegations(parentAgent, parentConv);
@@ -2371,12 +2365,12 @@ describe("RALRegistry", () => {
         expect(completed.length).toBe(1);
         expect(completed[0].delegationConversationId).toBe(childConv);
         expect(completed[0].status).toBe("aborted");
-        expect((completed[0] as { abortReason?: string }).abortReason).toBe("user cancelled");
+        expect((completed[0] as { abortReason?: string }).abortReason).toBe("killed via kill tool");
       });
 
-      it("should return nothing for unknown delegation", () => {
+      it("should return false for unknown delegation", () => {
         const result = registry.markParentDelegationKilled("unknown-delegation-id");
-        expect(result).toBeUndefined();
+        expect(result).toBe(false);
       });
 
       it("should decrement delegation counter when marking killed", () => {
@@ -2465,117 +2459,15 @@ describe("RALRegistry", () => {
         registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, [followupDelegation]);
 
         // Kill during followup
-        const result = registry.markParentDelegationKilled(childConv, "followup cancelled");
-        expect(result).toEqual({
-          delegationConversationId: childConv,
-          recipientPubkey: childAgent,
-          parentConversationId: parentConv,
-          completedAt: expect.any(Number),
-          abortReason: "followup cancelled",
-        });
+        const result = registry.markParentDelegationKilled(childConv);
+        expect(result).toBe(true);
 
         // Verify the existing transcript is PRESERVED (not overwritten with empty array)
         const completedAfter = registry.getConversationCompletedDelegations(parentAgent, parentConv);
         expect(completedAfter.length).toBe(1);
         expect(completedAfter[0].transcript.length).toBe(2); // Original transcript preserved!
         expect(completedAfter[0].status).toBe("aborted");
-        expect((completedAfter[0] as { abortReason?: string }).abortReason).toBe("followup cancelled");
-      });
-    });
-
-    describe("findImplicitKillWakeTarget", () => {
-      it("returns the wake target for an aborted delegation completion", () => {
-        const parentAgent = "wake-parent-agent";
-        const parentConv = "wake-parent-conv";
-        const childConv = "wake-child-conv";
-        const childAgent = "wake-child-agent";
-
-        const ralNumber = registry.create(parentAgent, parentConv, projectId);
-        registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, [
-          {
-            type: "standard",
-            delegationConversationId: childConv,
-            recipientPubkey: childAgent,
-            senderPubkey: parentAgent,
-            prompt: "Do it",
-            ralNumber,
-          },
-        ]);
-
-        registry.markParentDelegationKilled(childConv, "killed by operator");
-
-        expect(registry.findImplicitKillWakeTarget(childConv)).toEqual({
-          agentPubkey: parentAgent,
-          conversationId: parentConv,
-          ralNumber,
-          delegationConversationId: childConv,
-          recipientPubkey: childAgent,
-          parentConversationId: parentConv,
-          completedAt: expect.any(Number),
-          abortReason: "killed by operator",
-        });
-      });
-
-      it("returns nothing for pending or successful delegations", () => {
-        const parentAgent = "wake-parent-agent-2";
-        const parentConv = "wake-parent-conv-2";
-        const childConvPending = "wake-child-pending";
-        const childConvCompleted = "wake-child-completed";
-        const childAgent = "wake-child-agent-2";
-
-        const ralNumber = registry.create(parentAgent, parentConv, projectId);
-        registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, [
-          {
-            type: "standard",
-            delegationConversationId: childConvPending,
-            recipientPubkey: childAgent,
-            senderPubkey: parentAgent,
-            prompt: "Pending task",
-            ralNumber,
-          },
-          {
-            type: "standard",
-            delegationConversationId: childConvCompleted,
-            recipientPubkey: childAgent,
-            senderPubkey: parentAgent,
-            prompt: "Completed task",
-            ralNumber,
-          },
-        ]);
-
-        registry.recordCompletion({
-          delegationConversationId: childConvCompleted,
-          recipientPubkey: childAgent,
-          response: "done",
-          completedAt: Date.now(),
-        });
-
-        expect(registry.findImplicitKillWakeTarget(childConvPending)).toBeUndefined();
-        expect(registry.findImplicitKillWakeTarget(childConvCompleted)).toBeUndefined();
-      });
-
-      it("returns nothing after the aborted completion has been consumed", () => {
-        const parentAgent = "wake-parent-agent-3";
-        const parentConv = "wake-parent-conv-3";
-        const childConv = "wake-child-conv-3";
-        const childAgent = "wake-child-agent-3";
-
-        const ralNumber = registry.create(parentAgent, parentConv, projectId);
-        registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, [
-          {
-            type: "standard",
-            delegationConversationId: childConv,
-            recipientPubkey: childAgent,
-            senderPubkey: parentAgent,
-            prompt: "Do it",
-            ralNumber,
-          },
-        ]);
-
-        registry.markParentDelegationKilled(childConv, "killed by operator");
-        registry.clearCompletedDelegations(parentAgent, parentConv, ralNumber);
-
-        expect(registry.findImplicitKillWakeTarget(childConv)).toBeUndefined();
+        expect((completedAfter[0] as { abortReason?: string }).abortReason).toContain("killed via kill tool");
       });
     });
 

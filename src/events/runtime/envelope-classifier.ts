@@ -68,13 +68,6 @@ export function isDelegationCompletion(envelope: InboundEnvelope): boolean {
     return envelope.metadata.eventKind === NDKKind.Text && envelope.metadata.statusValue === "completed";
 }
 
-export function isAbortedDelegationKillSignal(envelope: InboundEnvelope): boolean {
-    return (
-        envelope.metadata.eventKind === NDKKind.DelegationMarker &&
-        envelope.metadata.delegationMarkerStatus === "aborted"
-    );
-}
-
 export function getDelegationRequestId(envelope: InboundEnvelope): string | undefined {
     if (!isDelegationCompletion(envelope)) return undefined;
     const targets = envelope.metadata.replyTargets;

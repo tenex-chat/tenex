@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
-import { NDKKind } from "@/nostr/kinds";
 
 describe("NostrInboundAdapter", () => {
     it("normalizes a project-routed reply into the canonical inbound envelope", () => {
@@ -66,10 +65,6 @@ describe("NostrInboundAdapter", () => {
             articleReferences: undefined,
             replyTargets: ["e".repeat(64)],
             delegationParentConversationId: undefined,
-            delegationConversationId: undefined,
-            delegationMarkerStatus: undefined,
-            delegationCompletedAt: undefined,
-            delegationAbortReason: undefined,
             skillEventIds: undefined,
         });
     });
@@ -114,36 +109,5 @@ describe("NostrInboundAdapter", () => {
         const envelope = adapter.toEnvelope(event);
 
         expect(envelope.metadata.variantOverride).toBe("deep");
-    });
-
-    it("extracts delegation kill-signal metadata from delegation-marker events", () => {
-        const event = new NDKEvent();
-        event.id = "1".repeat(64);
-        event.kind = NDKKind.DelegationMarker;
-        event.pubkey = "2".repeat(64);
-        event.content = "";
-        event.tags = [
-            ["delegation-marker", "aborted"],
-            ["e", "3".repeat(64)],
-            ["e", "4".repeat(64)],
-            ["p", "5".repeat(64)],
-            ["completed-at", "1725000000"],
-            ["abort-reason", "killed by operator"],
-        ];
-
-        const adapter = new NostrInboundAdapter();
-        const envelope = adapter.toEnvelope(event);
-
-        expect(envelope.metadata).toEqual(
-            expect.objectContaining({
-                eventKind: NDKKind.DelegationMarker,
-                replyTargets: ["3".repeat(64), "4".repeat(64)],
-                delegationConversationId: "3".repeat(64),
-                delegationParentConversationId: "4".repeat(64),
-                delegationMarkerStatus: "aborted",
-                delegationCompletedAt: 1725000000,
-                delegationAbortReason: "killed by operator",
-            })
-        );
     });
 });

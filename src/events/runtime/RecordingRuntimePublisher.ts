@@ -84,15 +84,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         conversationId?: string
     ): PublishedMessageRef {
         const id = this.createEventId();
-        const replyTargets = tags
-            .filter((tag) => tag[0] === "e" && typeof tag[1] === "string")
-            .map((tag) => tag[1]);
-        const replyTarget = replyTargets[0];
-        const delegationMarkerStatus = tags.find((tag) => tag[0] === "delegation-marker")?.[1];
-        const delegationCompletedAtRaw = tags.find((tag) => tag[0] === "completed-at")?.[1];
-        const delegationCompletedAt = delegationCompletedAtRaw
-            ? Number.parseInt(delegationCompletedAtRaw, 10)
-            : undefined;
+        const replyTarget = tags.find((tag) => tag[0] === "e")?.[1];
         const channelId = conversationId ?? replyTarget ?? id;
         const envelope: InboundEnvelope = {
             transport: "local",
@@ -129,20 +121,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
                 eventTagCount: tags.length,
                 toolName: tags.find((tag) => tag[0] === "tool")?.[1],
                 statusValue: tags.find((tag) => tag[0] === "status")?.[1],
-                replyTargets: replyTargets.length > 0 ? replyTargets : undefined,
-                delegationParentConversationId:
-                    delegationMarkerStatus ? replyTargets[1] : tags.find((tag) => tag[0] === "delegation")?.[1],
-                delegationConversationId: delegationMarkerStatus ? replyTargets[0] : undefined,
-                delegationMarkerStatus:
-                    delegationMarkerStatus === "pending" ||
-                    delegationMarkerStatus === "completed" ||
-                    delegationMarkerStatus === "aborted"
-                        ? delegationMarkerStatus
-                        : undefined,
-                delegationCompletedAt: Number.isFinite(delegationCompletedAt)
-                    ? delegationCompletedAt
-                    : undefined,
-                delegationAbortReason: tags.find((tag) => tag[0] === "abort-reason")?.[1],
+                delegationParentConversationId: tags.find((tag) => tag[0] === "delegation")?.[1],
             },
         };
 
@@ -323,33 +302,18 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
 
     async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
         const event = this.createEvent(
-            NDKKind.DelegationMarker,
+            NDKKind.Text,
             "",
             [
                 ["delegation-marker", intent.status],
-                ["e", intent.delegationConversationId],
-                ["e", intent.parentConversationId],
-                ["p", intent.recipientPubkey],
-                ...(intent.initiatedAt !== undefined
-                    ? [["initiated-at", intent.initiatedAt.toString()]]
-                    : []),
-                ...(intent.completedAt !== undefined
-                    ? [["completed-at", intent.completedAt.toString()]]
-                    : []),
-                ...(intent.abortReason
-                    ? [["abort-reason", intent.abortReason]]
-                    : []),
-            ],
-            intent.parentConversationId
+                ["delegation-conversation", intent.delegationConversationId],
+            ]
         );
 
         this.record("delegationMarker", undefined, {
             delegationConversationId: intent.delegationConversationId,
             parentConversationId: intent.parentConversationId,
-            recipientPubkey: intent.recipientPubkey,
             status: intent.status,
-            completedAt: intent.completedAt,
-            abortReason: intent.abortReason,
         });
 
         return event;

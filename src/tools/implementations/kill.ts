@@ -15,7 +15,7 @@
 
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { killBackgroundTask, getBackgroundTaskInfo, getAllBackgroundTasks } from "./shell";
-import { RALRegistry, type DelegationKillSignal } from "@/services/ral";
+import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { SchedulerService } from "@/services/scheduling";
@@ -24,7 +24,7 @@ import { z } from "zod";
 import { logger } from "@/utils/logger";
 import { shortenConversationId, shortenEventId, shortenPubkey } from "@/utils/conversation-id";
 import { trace } from "@opentelemetry/api";
-import { isHexPrefix, resolvePrefixToId, normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
+import { resolvePrefixToId, normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { nip19 } from "nostr-tools";
 import { isFullEventId, isShortEventId, isShellTaskId } from "@/types/event-ids";
 
@@ -64,29 +64,31 @@ async function resolveTargetId(input: string): Promise<{
         return { id: trimmed, type: "conversation", wasResolved: false };
     }
 
-    // Hex prefixes: prefer PrefixKVStore for canonical storage prefixes, then fall back
-    // to active delegation resolution for shorter in-memory prefixes.
-    if (isHexPrefix(trimmed) || isShortEventId(trimmed)) {
-        const resolved = isHexPrefix(trimmed) ? resolvePrefixToId(trimmed) : null;
+    // 12-char hex: resolve via prefix store or RALRegistry fallback (use typed guard)
+    if (isShortEventId(trimmed)) {
+        // Try PrefixKVStore first (O(1) lookup)
+        const resolved = resolvePrefixToId(trimmed);
         if (resolved) {
-            logger.debug("[kill.resolveTargetId] Resolved hex prefix via PrefixKVStore", {
+            logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via PrefixKVStore", {
                 prefix: trimmed,
                 fullId: shortenEventId(resolved),
             });
             return { id: resolved, type: "conversation", wasResolved: true };
         }
 
+        // Fallback: scan RALRegistry for active delegations
         const ralRegistry = RALRegistry.getInstance();
         const ralResolved = ralRegistry.resolveDelegationPrefix(trimmed);
         if (ralResolved) {
-            logger.debug("[kill.resolveTargetId] Resolved hex prefix via RALRegistry", {
+            logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via RALRegistry", {
                 prefix: trimmed,
                 fullId: shortenEventId(ralResolved),
             });
             return { id: ralResolved, type: "conversation", wasResolved: true };
         }
 
-        logger.debug("[kill.resolveTargetId] Could not resolve hex prefix", {
+        // Prefix not found - could still be valid but unknown
+        logger.debug("[kill.resolveTargetId] Could not resolve 12-char prefix", {
             prefix: trimmed,
         });
         return null;
@@ -149,89 +151,6 @@ interface KillOutput {
         outputFile: string;
         startTime: string;
     };
-}
-
-async function publishDelegationKillSignal(params: {
-    branch: "pre-emptive" | "cascade";
-    delegationConversationId: string;
-    killSignal?: DelegationKillSignal;
-    context: ToolExecutionContext;
-}): Promise<void> {
-    const { branch, delegationConversationId, killSignal, context } = params;
-
-    if (!killSignal) {
-        trace.getActiveSpan()?.addEvent("kill.signal_publish_skipped", {
-            "kill.branch": branch,
-            "kill.delegation_conversation_id": shortenConversationId(delegationConversationId),
-        });
-        logger.info("[kill] Skipping delegation kill signal publish", {
-            branch,
-            delegationConversationId: shortenConversationId(delegationConversationId),
-            publishStatus: "skipped",
-            reason: "no_parent_wake_target",
-        });
-        return;
-    }
-
-    trace.getActiveSpan()?.addEvent("kill.signal_publish_attempted", {
-        "kill.branch": branch,
-        "kill.delegation_conversation_id": shortenConversationId(killSignal.delegationConversationId),
-        "kill.parent_conversation_id": shortenConversationId(killSignal.parentConversationId),
-    });
-
-    logger.info("[kill] Publishing delegation kill signal", {
-        branch,
-        delegationConversationId: shortenConversationId(killSignal.delegationConversationId),
-        parentConversationId: shortenConversationId(killSignal.parentConversationId),
-        wakeTarget: shortenConversationId(killSignal.parentConversationId),
-        publishStatus: "attempted",
-        completedAt: killSignal.completedAt,
-        recipientPubkey: shortenPubkey(killSignal.recipientPubkey),
-    });
-
-    try {
-        // The kill signal must reflect the committed aborted-completion snapshot.
-        // Publish only after local registry state is written, and never by reparsing history.
-        await context.agentPublisher.delegationMarker({
-            delegationConversationId: killSignal.delegationConversationId,
-            recipientPubkey: killSignal.recipientPubkey,
-            parentConversationId: killSignal.parentConversationId,
-            status: "aborted",
-            completedAt: killSignal.completedAt,
-            abortReason: killSignal.abortReason,
-        });
-
-        trace.getActiveSpan()?.addEvent("kill.signal_publish_succeeded", {
-            "kill.branch": branch,
-            "kill.delegation_conversation_id": shortenConversationId(killSignal.delegationConversationId),
-            "kill.parent_conversation_id": shortenConversationId(killSignal.parentConversationId),
-        });
-        logger.info("[kill] Published delegation kill signal", {
-            branch,
-            delegationConversationId: shortenConversationId(killSignal.delegationConversationId),
-            parentConversationId: shortenConversationId(killSignal.parentConversationId),
-            wakeTarget: shortenConversationId(killSignal.parentConversationId),
-            publishStatus: "succeeded",
-        });
-    } catch (error) {
-        trace.getActiveSpan()?.addEvent("kill.signal_publish_failed", {
-            "kill.branch": branch,
-            "kill.delegation_conversation_id": shortenConversationId(killSignal.delegationConversationId),
-            "kill.parent_conversation_id": shortenConversationId(killSignal.parentConversationId),
-            "error.message": error instanceof Error ? error.message : String(error),
-        });
-        logger.error("[kill] Failed to publish delegation kill signal", {
-            branch,
-            delegationConversationId: shortenConversationId(killSignal.delegationConversationId),
-            parentConversationId: shortenConversationId(killSignal.parentConversationId),
-            wakeTarget: shortenConversationId(killSignal.parentConversationId),
-            publishStatus: "failed",
-            error: error instanceof Error ? error.message : String(error),
-        });
-        throw new Error(
-            `[kill] Aborted ${shortenConversationId(killSignal.delegationConversationId)} locally but failed to publish wake signal for ${shortenConversationId(killSignal.parentConversationId)}: ${error instanceof Error ? error.message : String(error)}`
-        );
-    }
 }
 
 /**
@@ -468,19 +387,12 @@ async function killAgent(
                 reason,
             });
 
-            // Commit local kill state first so the published wake signal reflects the same snapshot.
-            const killSignal = ralRegistry.markParentDelegationKilled(conversationId, reason);
+            // Also mark the parent delegation as killed
+            ralRegistry.markParentDelegationKilled(conversationId);
 
             // Add to cooldown registry
             const cooldownRegistry = CooldownRegistry.getInstance();
             cooldownRegistry.add(projectId, conversationId, delegationRecipient, reason);
-
-            await publishDelegationKillSignal({
-                branch: "pre-emptive",
-                delegationConversationId: conversationId,
-                killSignal,
-                context,
-            });
 
             return {
                 success: true,
@@ -531,13 +443,6 @@ async function killAgent(
         reason,
         cooldownRegistry
     );
-
-    await publishDelegationKillSignal({
-        branch: "cascade",
-        delegationConversationId: conversationId,
-        killSignal: result.killSignal,
-        context,
-    });
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_completed", {
         "kill.conversation_id": shortenConversationId(conversationId),

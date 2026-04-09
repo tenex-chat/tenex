@@ -16,7 +16,6 @@ import { shortenConversationId, shortenOptionalEventId } from "@/utils/conversat
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { getPubkeyGateService } from "@/services/pubkey-gate";
 import { handleAgentDeletion } from "./agentDeletion";
-import { handleKillSignal } from "./kill-signal";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
@@ -160,12 +159,6 @@ export class EventHandler {
         switch (event.kind) {
             case NDKKind.Text: // kind 1 - unified conversation format
                 await handleChatMessage(event, {
-                    agentExecutor: this.agentExecutor,
-                });
-                break;
-
-            case NDKKind.DelegationMarker:
-                await handleKillSignal(event, {
                     agentExecutor: this.agentExecutor,
                 });
                 break;
