@@ -240,6 +240,13 @@ export class AgentDispatchService {
             return;
         }
 
+        if (delegationResult.handled) {
+            span.addEvent("dispatch.delegation_signal_handled_without_wake", {
+                "event.id": envelope.message.nativeId,
+            });
+            return;
+        }
+
         if (isDelegationCompletion(envelope)) {
             const activeSpan = getSafeActiveSpan();
             activeSpan?.addEvent("reply.completion_dropped_no_waiting_ral", {

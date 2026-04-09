@@ -1,5 +1,6 @@
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { NDKKind } from "@/nostr/kinds";
 import { RALRegistry } from "@/services/ral";
 import { getProjectContext } from "@/services/projects";
 import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
@@ -10,6 +11,7 @@ const tracer = trace.getTracer("tenex.delegation");
 
 export interface DelegationCompletionResult {
     recorded: boolean;
+    handled?: boolean;
     agentSlug?: string;
     conversationId?: string;
     pendingCount?: number;
@@ -20,21 +22,31 @@ export async function handleDelegationCompletion(
     envelope: InboundEnvelope
 ): Promise<DelegationCompletionResult> {
     const eTags = envelope.metadata.replyTargets ?? [];
-    if (eTags.length === 0) {
+    const isImplicitKillSignal =
+        envelope.metadata.eventKind === NDKKind.DelegationMarker &&
+        envelope.metadata.delegationMarkerStatus === "aborted";
+    if (eTags.length === 0 && !isImplicitKillSignal) {
         return { recorded: false };
     }
 
     const senderPubkey = envelope.principal.linkedPubkey;
-    if (!senderPubkey) {
+    const candidateDelegationEventIds = isImplicitKillSignal
+        ? [envelope.metadata.delegationConversationId ?? eTags[0]].filter(
+              (value): value is string => Boolean(value)
+          )
+        : eTags;
+
+    if (!isImplicitKillSignal && !senderPubkey) {
         return { recorded: false };
     }
 
     const span = tracer.startSpan("tenex.delegation.completion_check", {
         attributes: {
             "event.id": envelope.message.nativeId,
-            "event.pubkey": senderPubkey,
+            "event.pubkey": senderPubkey ?? "",
             "event.kind": envelope.metadata.eventKind || 0,
-            "delegation.etag_count": eTags.length,
+            "delegation.etag_count": candidateDelegationEventIds.length,
+            "delegation.is_implicit_kill_signal": isImplicitKillSignal,
         },
     }, otelContext.active());
 
@@ -44,105 +56,149 @@ export async function handleDelegationCompletion(
         let delegationEventId = null;
         let completionDeferred = false;
 
-        for (let index = eTags.length - 1; index >= 0; index -= 1) {
-            const eTag = eTags[index];
-            span.addEvent("trying_delegation_etag", {
-                "delegation.event_id": eTag,
-                "etag.index": index,
-            });
-
-            const pendingInfo = ralRegistry.findDelegation(eTag);
-            if (!pendingInfo?.pending) {
-                span.addEvent("no_pending_delegation", {
-                    "delegation.event_id": eTag,
-                });
-                continue;
+        if (isImplicitKillSignal) {
+            const implicitDelegationEventId = candidateDelegationEventIds[0];
+            if (!implicitDelegationEventId) {
+                span.addEvent("kill_signal_missing_delegation_id");
+                span.setStatus({ code: SpanStatusCode.OK });
+                return { recorded: false, handled: true };
             }
 
-            if (senderPubkey !== pendingInfo.pending.recipientPubkey) {
-                span.addEvent("completion_sender_mismatch", {
+            const wakeTarget = ralRegistry.findImplicitKillWakeTarget(implicitDelegationEventId);
+            if (!wakeTarget) {
+                span.addEvent("kill_signal_no_wake_target", {
+                    "delegation.event_id": implicitDelegationEventId,
+                });
+                logger.debug("[handleDelegationCompletion] Ignoring duplicate or stale kill signal", {
+                    delegationEventId: implicitDelegationEventId.substring(0, 8),
+                    completionEventId: envelope.message.nativeId.substring(0, 8),
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return { recorded: false, handled: true };
+            }
+
+            if (ralRegistry.isAgentConversationKilled(wakeTarget.agentPubkey, wakeTarget.conversationId)) {
+                span.addEvent("kill_signal_parent_already_killed", {
+                    "delegation.event_id": implicitDelegationEventId,
+                    "parent.conversation_id": shortenConversationId(wakeTarget.conversationId),
+                });
+                logger.info("[handleDelegationCompletion] Suppressing kill signal for killed parent conversation", {
+                    delegationEventId: implicitDelegationEventId.substring(0, 8),
+                    parentConversationId: wakeTarget.conversationId.substring(0, 8),
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return { recorded: false, handled: true };
+            }
+
+            location = wakeTarget;
+            delegationEventId = wakeTarget.delegationConversationId;
+        } else {
+            if (!senderPubkey) {
+                span.addEvent("completion_missing_sender_pubkey");
+                span.setStatus({ code: SpanStatusCode.OK });
+                return { recorded: false };
+            }
+
+            for (let index = candidateDelegationEventIds.length - 1; index >= 0; index -= 1) {
+                const eTag = candidateDelegationEventIds[index];
+                span.addEvent("trying_delegation_etag", {
+                    "delegation.event_id": eTag,
+                    "etag.index": index,
+                });
+
+                const pendingInfo = ralRegistry.findDelegation(eTag);
+                if (!pendingInfo?.pending) {
+                    span.addEvent("no_pending_delegation", {
+                        "delegation.event_id": eTag,
+                    });
+                    continue;
+                }
+
+                if (senderPubkey !== pendingInfo.pending.recipientPubkey) {
+                    span.addEvent("completion_sender_mismatch", {
+                        "delegation.event_id": eTag,
+                        "expected.recipient_pubkey": shortenPubkey(pendingInfo.pending.recipientPubkey),
+                        "actual.sender_pubkey": shortenPubkey(senderPubkey),
+                        "validation.matched": false,
+                    });
+                    logger.debug("[handleDelegationCompletion] Ignoring event - sender is not the delegated agent", {
+                        delegationEventId: eTag.substring(0, 8),
+                        expectedRecipient: shortenPubkey(pendingInfo.pending.recipientPubkey),
+                        actualSender: shortenPubkey(senderPubkey),
+                    });
+                    continue;
+                }
+
+                span.addEvent("completion_sender_validated", {
                     "delegation.event_id": eTag,
                     "expected.recipient_pubkey": shortenPubkey(pendingInfo.pending.recipientPubkey),
                     "actual.sender_pubkey": shortenPubkey(senderPubkey),
-                    "validation.matched": false,
+                    "validation.matched": true,
                 });
-                logger.debug("[handleDelegationCompletion] Ignoring event - sender is not the delegated agent", {
-                    delegationEventId: eTag.substring(0, 8),
-                    expectedRecipient: shortenPubkey(pendingInfo.pending.recipientPubkey),
-                    actualSender: shortenPubkey(senderPubkey),
-                });
-                continue;
-            }
 
-            span.addEvent("completion_sender_validated", {
-                "delegation.event_id": eTag,
-                "expected.recipient_pubkey": shortenPubkey(pendingInfo.pending.recipientPubkey),
-                "actual.sender_pubkey": shortenPubkey(senderPubkey),
-                "validation.matched": true,
-            });
-
-            if (ralRegistry.isDelegationKilled(eTag)) {
-                span.addEvent("completion_skipped_delegation_killed", {
-                    "delegation.event_id": eTag,
-                    "delegation.killed_at": pendingInfo.pending.killedAt,
-                });
-                logger.info("[handleDelegationCompletion] Ignoring completion - delegation was killed", {
-                    delegationEventId: eTag.substring(0, 8),
-                    killedAt: pendingInfo.pending.killedAt,
-                    completionEventId: envelope.message.nativeId.substring(0, 8),
-                });
-                continue;
-            }
-
-            const result = ralRegistry.recordCompletion({
-                delegationConversationId: eTag,
-                recipientPubkey: senderPubkey,
-                response: envelope.content,
-                completedAt: Math.floor(Date.now() / 1000),
-            });
-
-            if (!result) {
-                continue;
-            }
-
-            const delegationStore = ConversationStore.get(eTag);
-            if (delegationStore) {
-                try {
-                    await ConversationStore.addEnvelope(eTag, envelope);
-                    span.addEvent("completion_event_added_to_delegation_store", {
-                        "delegation.conversation_id": shortenConversationId(eTag),
+                if (ralRegistry.isDelegationKilled(eTag)) {
+                    span.addEvent("completion_skipped_delegation_killed", {
+                        "delegation.event_id": eTag,
+                        "delegation.killed_at": pendingInfo.pending.killedAt,
                     });
-                } catch (addEventError) {
-                    logger.warn("[handleDelegationCompletion] Failed to add completion event to delegation store", {
+                    logger.info("[handleDelegationCompletion] Ignoring completion - delegation was killed", {
                         delegationEventId: eTag.substring(0, 8),
+                        killedAt: pendingInfo.pending.killedAt,
                         completionEventId: envelope.message.nativeId.substring(0, 8),
-                        error: addEventError instanceof Error ? addEventError.message : String(addEventError),
                     });
-                    span.addEvent("completion_event_add_failed", {
-                        "delegation.conversation_id": shortenConversationId(eTag),
-                        error: addEventError instanceof Error ? addEventError.message : String(addEventError),
-                    });
+                    continue;
                 }
-            }
 
-            if (result.deferred) {
-                completionDeferred = true;
+                const result = ralRegistry.recordCompletion({
+                    delegationConversationId: eTag,
+                    recipientPubkey: senderPubkey,
+                    response: envelope.content,
+                    completedAt: Math.floor(Date.now() / 1000),
+                });
+
+                if (!result) {
+                    continue;
+                }
+
+                const delegationStore = ConversationStore.get(eTag);
+                if (delegationStore) {
+                    try {
+                        await ConversationStore.addEnvelope(eTag, envelope);
+                        span.addEvent("completion_event_added_to_delegation_store", {
+                            "delegation.conversation_id": shortenConversationId(eTag),
+                        });
+                    } catch (addEventError) {
+                        logger.warn("[handleDelegationCompletion] Failed to add completion event to delegation store", {
+                            delegationEventId: eTag.substring(0, 8),
+                            completionEventId: envelope.message.nativeId.substring(0, 8),
+                            error: addEventError instanceof Error ? addEventError.message : String(addEventError),
+                        });
+                        span.addEvent("completion_event_add_failed", {
+                            "delegation.conversation_id": shortenConversationId(eTag),
+                            error: addEventError instanceof Error ? addEventError.message : String(addEventError),
+                        });
+                    }
+                }
+
+                if (result.deferred) {
+                    completionDeferred = true;
+                    break;
+                }
+
+                location = result;
+                delegationEventId = eTag;
+
                 break;
             }
-
-            location = result;
-            delegationEventId = eTag;
-
-            break;
         }
 
         if (!location) {
             span.addEvent("no_waiting_ral", {
-                "delegation.etags_checked": eTags.length,
-                "delegation.first_etag": eTags[0],
+                "delegation.etags_checked": candidateDelegationEventIds.length,
+                "delegation.first_etag": candidateDelegationEventIds[0],
             });
             span.setStatus({ code: SpanStatusCode.OK });
-            return { recorded: false, deferred: completionDeferred };
+            return { recorded: false, deferred: completionDeferred, handled: isImplicitKillSignal };
         }
 
         const resolvedDelegationEventId = delegationEventId;
@@ -150,7 +206,7 @@ export async function handleDelegationCompletion(
             const message =
                 `[DelegationCompletionHandler] Missing delegation event id for completion event ${envelope.message.nativeId ?? "unknown"}.`;
             span.addEvent("completion_record_missing_delegation_id", {
-                "responder.pubkey": senderPubkey,
+                "responder.pubkey": senderPubkey ?? "",
                 "completion.event_id": envelope.message.nativeId,
             });
             span.setStatus({ code: SpanStatusCode.ERROR, message });
@@ -183,7 +239,7 @@ export async function handleDelegationCompletion(
 
         span.addEvent("completion_recorded", {
             "delegation.event_id": resolvedDelegationEventId,
-            "responder.pubkey": senderPubkey,
+            "responder.pubkey": senderPubkey ?? "",
             "response.length": envelope.content.length,
         });
         span.setStatus({ code: SpanStatusCode.OK });
@@ -196,10 +252,12 @@ export async function handleDelegationCompletion(
             completedCount: completedDelegations.length,
             pendingCount: pendingDelegations.length,
             deferred: false,
+            implicitKillSignal: isImplicitKillSignal,
         });
 
         return {
             recorded: true,
+            handled: isImplicitKillSignal,
             agentSlug,
             conversationId: location.conversationId,
             pendingCount: pendingDelegations.length,

@@ -4,7 +4,7 @@ import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { logger } from "@/utils/logger";
 import type { ProjectDTag } from "@/types/project-ids";
-import type { RALRegistryEntry } from "./types";
+import type { DelegationKillSignal, RALRegistryEntry } from "./types";
 import type { DelegationRegistry } from "./DelegationRegistry";
 
 interface KillSwitchRegistryDeps {
@@ -91,8 +91,11 @@ export class KillSwitchRegistry {
     return this.delegations.getDelegationRecipientPubkey(delegationConversationId);
   }
 
-  markParentDelegationKilled(delegationConversationId: string): boolean {
-    return this.delegations.markParentDelegationKilled(delegationConversationId);
+  markParentDelegationKilled(
+    delegationConversationId: string,
+    abortReason?: string
+  ): DelegationKillSignal | undefined {
+    return this.delegations.markParentDelegationKilled(delegationConversationId, abortReason);
   }
 
   abortCurrentTool(agentPubkey: string, conversationId: string): void {
@@ -142,12 +145,17 @@ export class KillSwitchRegistry {
     projectId: ProjectDTag,
     reason: string,
     cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }
-  ): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> {
+  ): Promise<{
+    abortedCount: number;
+    descendantConversations: Array<{ conversationId: string; agentPubkey: string }>;
+    killSignal?: DelegationKillSignal;
+  }> {
     if (!reason) {
       throw new Error("[RALRegistry] Missing abort reason for cascade.");
     }
 
     const abortedTuples: Array<{ conversationId: string; agentPubkey: string }> = [];
+    let killSignal: DelegationKillSignal | undefined;
 
     const pendingDelegations = this.delegations.getConversationPendingDelegations(agentPubkey, conversationId);
     const key = this.deps.makeKey(agentPubkey, conversationId);
@@ -174,7 +182,7 @@ export class KillSwitchRegistry {
     if (directAbortCount > 0 || llmAborted) {
       abortedTuples.push({ conversationId, agentPubkey });
 
-      this.markParentDelegationKilled(conversationId);
+      killSignal = this.markParentDelegationKilled(conversationId, reason);
 
       if (cooldownRegistry) {
         cooldownRegistry.add(projectId, conversationId, agentPubkey, reason);
@@ -282,6 +290,7 @@ export class KillSwitchRegistry {
     return {
       abortedCount: directAbortCount + (llmAborted ? 1 : 0),
       descendantConversations: abortedTuples,
+      killSignal,
     };
   }
 

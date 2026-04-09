@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { NDKKind } from "@/nostr/kinds";
 import { RALRegistry } from "../RALRegistry";
 import { isStopExecutionSignal } from "../types";
 import type { PendingDelegation, CompletedDelegation } from "../types";
@@ -57,6 +58,59 @@ function createDelegationCompletionEnvelope(params: {
             eventKind: 1,
             eventTagCount: replyTargets.length + 1,
             replyTargets,
+        },
+    });
+}
+
+function createDelegationKillSignalEnvelope(params: {
+    messageId: string;
+    senderPubkey: string;
+    delegationConversationId: string;
+    parentConversationId: string;
+    recipientPubkey: string;
+    abortReason: string;
+    completedAt?: number;
+}) {
+    const {
+        messageId,
+        senderPubkey,
+        delegationConversationId,
+        parentConversationId,
+        recipientPubkey,
+        abortReason,
+        completedAt = Date.now(),
+    } = params;
+
+    return createMockInboundEnvelope({
+        principal: {
+            id: senderPubkey,
+            transport: "nostr",
+            linkedPubkey: senderPubkey,
+            kind: "agent",
+        },
+        message: {
+            id: messageId,
+            transport: "nostr",
+            nativeId: messageId,
+        },
+        recipients: [
+            {
+                id: recipientPubkey,
+                transport: "nostr",
+                linkedPubkey: recipientPubkey,
+                kind: "agent",
+            },
+        ],
+        content: "",
+        metadata: {
+            eventKind: NDKKind.DelegationMarker,
+            eventTagCount: 5,
+            replyTargets: [delegationConversationId, parentConversationId],
+            delegationConversationId,
+            delegationParentConversationId: parentConversationId,
+            delegationMarkerStatus: "aborted",
+            delegationCompletedAt: completedAt,
+            delegationAbortReason: abortReason,
         },
     });
 }
@@ -357,6 +411,85 @@ describe("RAL Delegation Flow", () => {
             const completed = registry.getConversationCompletedDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
             expect(pending).toHaveLength(0);
             expect(completed).toHaveLength(1);
+        });
+
+        it("resolves an implicit kill signal from an already-aborted completion without appending it to the child transcript", async () => {
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
+                {
+                    type: "delegate",
+                    delegationConversationId: "killed-delegation-id",
+                    recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
+                    prompt: "Please complete this task",
+                    ralNumber,
+                },
+            ]);
+
+            registry.markParentDelegationKilled("killed-delegation-id", "operator cancelled");
+
+            const killSignal = createDelegationKillSignalEnvelope({
+                messageId: "kill-signal-event",
+                senderPubkey: mockAgent.pubkey,
+                delegationConversationId: "killed-delegation-id",
+                parentConversationId: CONVERSATION_ID,
+                recipientPubkey: mockAgent2.pubkey,
+                abortReason: "operator cancelled",
+            });
+
+            const result = await handleDelegationCompletion(killSignal);
+
+            expect(result).toEqual({
+                recorded: true,
+                handled: true,
+                agentSlug: "transparent",
+                conversationId: CONVERSATION_ID,
+                pendingCount: 0,
+                deferred: false,
+            });
+            expect(conversationStoreAddEnvelopeSpy).not.toHaveBeenCalled();
+
+            const completed = registry.getConversationCompletedDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
+            expect(completed).toHaveLength(1);
+            expect(completed[0]).toMatchObject({
+                delegationConversationId: "killed-delegation-id",
+                status: "aborted",
+                abortReason: "operator cancelled",
+            });
+        });
+
+        it("treats duplicate implicit kill signals as handled no-ops", async () => {
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
+                {
+                    type: "delegate",
+                    delegationConversationId: "duplicate-kill-id",
+                    recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
+                    prompt: "Please complete this task",
+                    ralNumber,
+                },
+            ]);
+
+            registry.markParentDelegationKilled("duplicate-kill-id", "operator cancelled");
+            registry.clearCompletedDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
+
+            const killSignal = createDelegationKillSignalEnvelope({
+                messageId: "duplicate-kill-signal-event",
+                senderPubkey: mockAgent.pubkey,
+                delegationConversationId: "duplicate-kill-id",
+                parentConversationId: CONVERSATION_ID,
+                recipientPubkey: mockAgent2.pubkey,
+                abortReason: "operator cancelled",
+            });
+
+            const result = await handleDelegationCompletion(killSignal);
+
+            expect(result).toEqual({
+                recorded: false,
+                handled: true,
+            });
+            expect(conversationStoreAddEnvelopeSpy).not.toHaveBeenCalled();
         });
 
         it("should not record completion for unrelated events", async () => {

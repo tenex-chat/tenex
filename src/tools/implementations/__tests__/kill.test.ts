@@ -15,6 +15,7 @@ describe("kill tool", () => {
     let mockContext: ToolExecutionContext;
     let ralRegistry: RALRegistry;
     let cooldownRegistry: CooldownRegistry;
+    let delegationMarkerMock: ReturnType<typeof mock>;
 
     beforeEach(() => {
         const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
@@ -26,6 +27,9 @@ describe("kill tool", () => {
         };
 
         // Create mock context with all required fields
+        delegationMarkerMock = mock(async () => ({
+            id: "kill-signal-event-id",
+        }));
         mockContext = {
             agent: {
                 slug: "test-agent",
@@ -34,6 +38,9 @@ describe("kill tool", () => {
             },
             conversationId: mockConversation.id,
             getConversation: () => mockConversation,
+            agentPublisher: {
+                delegationMarker: delegationMarkerMock,
+            },
             projectContext: {
                 project: {
                     dTag: projectId,
@@ -225,6 +232,91 @@ describe("kill tool", () => {
             );
 
             // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+        });
+
+        test("publishes a wake signal after cascade abort using the committed post-abort snapshot", async () => {
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const conversationId = "conv-cascade-signal-1234567890abcdef1234567890abcdef1234567890abcdef12";
+            const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            const mockConversation = {
+                id: conversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map([[agentPubkey, {}]]),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+                killSignal: {
+                    delegationConversationId: conversationId,
+                    recipientPubkey: agentPubkey,
+                    parentConversationId: "parent-conversation-id",
+                    completedAt: 1_234_567_890,
+                    abortReason: "cascade cancelled",
+                },
+            })) as any;
+
+            const killTool = createKillTool(mockContext);
+            await killTool.execute({
+                target: conversationId,
+                reason: "cascade cancelled",
+            });
+
+            expect(delegationMarkerMock).toHaveBeenCalledWith({
+                delegationConversationId: conversationId,
+                recipientPubkey: agentPubkey,
+                parentConversationId: "parent-conversation-id",
+                status: "aborted",
+                completedAt: 1_234_567_890,
+                abortReason: "cascade cancelled",
+            });
+
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+        });
+
+        test("does not publish a cascade wake signal when there is no parent delegation to wake", async () => {
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const conversationId = "conv-no-parent-signal-1234567890abcdef1234567890abcdef1234567890abcd";
+            const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            const mockConversation = {
+                id: conversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map([[agentPubkey, {}]]),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+                killSignal: undefined,
+            })) as any;
+
+            const killTool = createKillTool(mockContext);
+            await killTool.execute({
+                target: conversationId,
+                reason: "cascade cancelled",
+            });
+
+            expect(delegationMarkerMock).not.toHaveBeenCalled();
+
             ConversationStore.has = originalHas;
             ConversationStore.get = originalGet;
             ralRegistry.abortWithCascade = originalAbortWithCascade;
@@ -478,10 +570,10 @@ describe("kill tool", () => {
         });
     });
 
-    describe("18-char ID resolution", () => {
-        test("should resolve 18-char prefix to full conversation ID via PrefixKVStore", async () => {
+    describe("10-char ID resolution", () => {
+        test("should resolve 10-char prefix to full conversation ID via PrefixKVStore", async () => {
             const fullConversationId = "a1b2c3d4e5f61234567890abcdef1234567890abcdef1234567890abcdef1234";
-            const shortId = "a1b2c3d4e5f6123456"; // First 18 chars
+            const shortId = "a1b2c3d4e5"; // First 10 chars
             const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -520,7 +612,7 @@ describe("kill tool", () => {
 
             const killTool = createKillTool(mockContext);
             const result = await killTool.execute({
-                target: shortId, // Use short 12-char ID
+                target: shortId,
                 reason: "test kill with short ID"
             });
 
@@ -536,9 +628,9 @@ describe("kill tool", () => {
             ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
-        test("should resolve 18-char prefix via RALRegistry when PrefixKVStore fails", async () => {
+        test("should resolve 10-char prefix via RALRegistry when PrefixKVStore fails", async () => {
             const fullConversationId = "b2c3d4e5f6a71234567890abcdef1234567890abcdef1234567890abcdef1234";
-            const shortId = "b2c3d4e5f6a7123456"; // First 18 chars
+            const shortId = "b2c3d4e5f6"; // First 10 chars
             const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -598,8 +690,8 @@ describe("kill tool", () => {
             ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
-        test("should return error when 18-char prefix cannot be resolved", async () => {
-            const shortId = "c3d4e5f6a7b8c9d0e1"; // Unknown prefix (18 chars)
+        test("should return error when 10-char prefix cannot be resolved", async () => {
+            const shortId = "c3d4e5f6a7"; // Unknown prefix (10 chars)
 
             // Mock PrefixKVStore to not find it
             const originalIsInitialized = prefixKVStore.isInitialized.bind(prefixKVStore);
@@ -761,6 +853,20 @@ describe("kill tool", () => {
 
             // Verify that the agent is marked as killed
             expect(ralRegistry.isAgentConversationKilled(delegateAgentPubkey, delegationConversationId)).toBe(true);
+            expect(delegationMarkerMock).toHaveBeenCalledTimes(1);
+            const signal = delegationMarkerMock.mock.calls[0]?.[0];
+            expect(signal).toEqual({
+                delegationConversationId,
+                recipientPubkey: delegateAgentPubkey,
+                parentConversationId,
+                status: "aborted",
+                completedAt: expect.any(Number),
+                abortReason: "test kill",
+            });
+
+            const wakeTarget = ralRegistry.findImplicitKillWakeTarget(delegationConversationId);
+            expect(wakeTarget?.completedAt).toBe(signal?.completedAt);
+            expect(wakeTarget?.abortReason).toBe("test kill");
 
             // Restore
             ConversationStore.has = originalHas;
@@ -789,6 +895,7 @@ describe("kill tool", () => {
             // Should fail - no agents and no delegation info
             expect(result.success).toBe(false);
             expect(result.message).toContain("No active agents found");
+            expect(delegationMarkerMock).not.toHaveBeenCalled();
 
             // Restore
             ConversationStore.has = originalHas;

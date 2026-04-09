@@ -135,6 +135,20 @@ export type CompletedDelegation =
       abortReason: string;
     };
 
+export interface DelegationKillSignal {
+  delegationConversationId: string;
+  recipientPubkey: string;
+  parentConversationId: string;
+  completedAt: number;
+  abortReason: string;
+}
+
+export interface ImplicitKillWakeTarget extends DelegationKillSignal {
+  agentPubkey: string;
+  conversationId: string;
+  ralNumber: number;
+}
+
 export interface QueuedInjection {
   role: InjectionRole;
   content: string;

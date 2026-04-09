@@ -4,6 +4,8 @@ import type {
   PendingDelegation,
   CompletedDelegation,
   DelegationMessage,
+  DelegationKillSignal,
+  ImplicitKillWakeTarget,
   PendingSubDelegationRef,
   DeferredCompletion,
 } from "./types";
@@ -771,6 +773,38 @@ export class DelegationRegistry {
     return null;
   }
 
+  findImplicitKillWakeTarget(delegationConversationId: string): ImplicitKillWakeTarget | undefined {
+    const location = this.delegationToRal.get(delegationConversationId);
+    if (!location) {
+      return undefined;
+    }
+
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      return undefined;
+    }
+
+    const canonicalId = this.followupToCanonical.get(delegationConversationId)
+      ?? delegationConversationId;
+    const completedDelegation = convDelegations.completed.get(canonicalId);
+
+    if (!completedDelegation || completedDelegation.status !== "aborted") {
+      return undefined;
+    }
+
+    const [agentPubkey, conversationId] = location.key.split(":");
+    return {
+      agentPubkey,
+      conversationId,
+      ralNumber: location.ralNumber,
+      delegationConversationId: canonicalId,
+      recipientPubkey: completedDelegation.recipientPubkey,
+      parentConversationId: conversationId,
+      completedAt: completedDelegation.completedAt,
+      abortReason: completedDelegation.abortReason,
+    };
+  }
+
   markDelegationKilled(delegationConversationId: string): boolean {
     const location = this.delegationToRal.get(delegationConversationId);
     if (!location) {
@@ -879,13 +913,16 @@ export class DelegationRegistry {
     return killedCount;
   }
 
-  markParentDelegationKilled(delegationConversationId: string): boolean {
+  markParentDelegationKilled(
+    delegationConversationId: string,
+    abortReason = "killed via kill tool"
+  ): DelegationKillSignal | undefined {
     const location = this.delegationToRal.get(delegationConversationId);
     if (!location) {
       logger.debug("[RALRegistry.markParentDelegationKilled] No parent found for delegation", {
         delegationConversationId: shortenConversationId(delegationConversationId),
       });
-      return false;
+      return undefined;
     }
 
     const convDelegations = this.conversationDelegations.get(location.key);
@@ -893,7 +930,7 @@ export class DelegationRegistry {
       logger.debug("[RALRegistry.markParentDelegationKilled] No delegations found for parent", {
         parentKey: location.key.substring(0, 20),
       });
-      return false;
+      return undefined;
     }
 
     const canonicalId = this.followupToCanonical.get(delegationConversationId)
@@ -904,7 +941,7 @@ export class DelegationRegistry {
       logger.debug("[RALRegistry.markParentDelegationKilled] No pending delegation found", {
         delegationConversationId: shortenConversationId(canonicalId),
       });
-      return false;
+      return undefined;
     }
 
     if (!pendingDelegation.killed) {
@@ -924,6 +961,7 @@ export class DelegationRegistry {
       });
     }
 
+    const completedAt = Date.now();
     convDelegations.pending.delete(canonicalId);
 
     const existingCompletion = convDelegations.completed.get(canonicalId);
@@ -934,9 +972,9 @@ export class DelegationRegistry {
         senderPubkey: existingCompletion.senderPubkey,
         ralNumber: existingCompletion.ralNumber,
         transcript: existingCompletion.transcript,
-        completedAt: Date.now(),
+        completedAt,
         status: "aborted",
-        abortReason: "killed via kill tool (after partial completion)",
+        abortReason,
       });
 
       trace.getActiveSpan()?.addEvent("ral.parent_delegation_updated_as_aborted", {
@@ -951,9 +989,9 @@ export class DelegationRegistry {
         senderPubkey: pendingDelegation.senderPubkey,
         ralNumber: pendingDelegation.ralNumber,
         transcript: [],
-        completedAt: Date.now(),
+        completedAt,
         status: "aborted",
-        abortReason: "killed via kill tool",
+        abortReason,
       });
 
       trace.getActiveSpan()?.addEvent("ral.parent_delegation_moved_to_completed", {
@@ -968,7 +1006,36 @@ export class DelegationRegistry {
       pendingDelegation.ralNumber
     );
 
-    return true;
+    const [, conversationId] = location.key.split(":");
+    return this.toDelegationKillSignal({
+      conversationId,
+      completedDelegation: convDelegations.completed.get(canonicalId),
+      delegationConversationId: canonicalId,
+    });
+  }
+
+  private toDelegationKillSignal(params: {
+    conversationId: string;
+    delegationConversationId: string;
+    completedDelegation: CompletedDelegation | undefined;
+  }): DelegationKillSignal | undefined {
+    const {
+      conversationId,
+      delegationConversationId,
+      completedDelegation,
+    } = params;
+
+    if (!completedDelegation || completedDelegation.status !== "aborted") {
+      return undefined;
+    }
+
+    return {
+      delegationConversationId,
+      recipientPubkey: completedDelegation.recipientPubkey,
+      parentConversationId: conversationId,
+      completedAt: completedDelegation.completedAt,
+      abortReason: completedDelegation.abortReason,
+    };
   }
 
   private makeKey(agentPubkey: string, conversationId: string): string {
