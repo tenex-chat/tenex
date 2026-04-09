@@ -85,7 +85,7 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
     lesson_learn: createLessonLearnTool,
 
     // Process control
-    kill: createKillTool,
+    kill: createKillTool as ToolFactory,
     no_response: createNoResponseTool,
 
     // Todo tools - require ConversationToolContext (filtered out when no conversation)

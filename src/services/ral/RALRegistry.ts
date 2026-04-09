@@ -156,6 +156,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   clearRAL(agentPubkey: string, conversationId: string, ralNumber: number): void { this.stateRegistry.clearRAL(agentPubkey, conversationId, ralNumber); }
   clear(agentPubkey: string, conversationId: string): void { this.stateRegistry.clear(agentPubkey, conversationId); this.killSwitchRegistry.clearConversation(agentPubkey, conversationId); this.delegationRegistry.clearConversation(agentPubkey, conversationId); }
 
+  consumeImplicitKillWakeTarget(delegationConversationId: string): { agentPubkey: string; conversationId: string; ralNumber: number } | null { return this.delegationRegistry.consumeImplicitKillWakeTarget(delegationConversationId); }
   resolveDelegationPrefix(prefix: string): string | null { return this.delegationRegistry.resolveDelegationPrefix(prefix); }
   canonicalizeDelegationId(id: string): string { return this.delegationRegistry.canonicalizeDelegationId(id); }
   findDelegation(delegationEventId: string): { pending?: PendingDelegation; completed?: CompletedDelegation; agentPubkey: string; conversationId: string; ralNumber: number } | undefined { return this.delegationRegistry.findDelegation(delegationEventId); }

@@ -86,6 +86,93 @@ export class AgentDispatchService {
         return AgentDispatchService.instance;
     }
 
+    /**
+     * Wake up the parent agent of a killed delegation.
+     *
+     * Builds a synthetic local-only kill-signal envelope and routes it through
+     * handleDelegationCompletion's implicit-kill branch, which resolves the parent
+     * agent without touching any transport metadata paths.
+     *
+     * No-ops silently when no parent is found (top-level kill) or the target was
+     * already consumed (first-terminal-state-wins race condition).
+     */
+    async dispatchKillWakeup(delegationConversationId: string, agentExecutor: AgentExecutor): Promise<void> {
+        const syntheticEnvelope: InboundEnvelope = {
+            transport: "local",
+            principal: {
+                id: "kill-signal",
+                transport: "local",
+                kind: "system",
+            },
+            channel: {
+                id: delegationConversationId,
+                transport: "local",
+                kind: "conversation",
+            },
+            message: {
+                id: `kill-wakeup:${delegationConversationId}`,
+                transport: "local",
+                nativeId: `kill-wakeup:${delegationConversationId}`,
+            },
+            recipients: [],
+            content: "",
+            occurredAt: Math.floor(Date.now() / 1000),
+            capabilities: [],
+            metadata: {
+                isKillSignal: true,
+                killSignalDelegationConversationId: delegationConversationId,
+            },
+        };
+
+        await this.handleKillWakeup(syntheticEnvelope, agentExecutor);
+    }
+
+    private async handleKillWakeup(envelope: InboundEnvelope, agentExecutor: AgentExecutor): Promise<void> {
+        const result = await handleDelegationCompletion(envelope);
+
+        if (!result.recorded) {
+            logger.debug("[AgentDispatchService] Kill wake-up: no parent agent to resume (consumed or not found)", {
+                delegationConversationId: shortenConversationId(
+                    envelope.metadata.killSignalDelegationConversationId ?? ""
+                ),
+            });
+            return;
+        }
+
+        const projectCtx = getProjectContext();
+        const delegationTarget = AgentRouter.resolveDelegationTarget(result, projectCtx);
+
+        if (!delegationTarget) {
+            logger.warn("[AgentDispatchService] Kill wake-up: could not resolve delegation target (agent config missing?)", {
+                agentSlug: result.agentSlug,
+                conversationId: result.conversationId ? shortenConversationId(result.conversationId) : undefined,
+            });
+            return;
+        }
+
+        const span = tracer.startSpan("tenex.dispatch.kill_wakeup", {
+            attributes: {
+                "delegation.agent_slug": delegationTarget.agent.slug,
+                "delegation.conversation_id": shortenConversationId(delegationTarget.conversationId),
+            },
+        }, getSafeContext());
+
+        try {
+            await this.handleDelegationResponse(envelope, delegationTarget, agentExecutor, projectCtx, span);
+            span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error) {
+            span.recordException(error as Error);
+            span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+            logger.error("[AgentDispatchService] Kill wake-up: delegation response handling failed", {
+                agentSlug: delegationTarget.agent.slug,
+                conversationId: shortenConversationId(delegationTarget.conversationId),
+                error: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            span.end();
+        }
+    }
+
     async dispatch(envelope: InboundEnvelope, context: DispatchContext): Promise<void> {
         const senderId = envelope.principal.linkedPubkey ?? envelope.principal.id;
         const telegramMetadata = envelope.metadata.transport?.telegram;
@@ -479,16 +566,18 @@ export class AgentDispatchService {
                 }
             }
 
-            const debounceKey = `${delegationTarget.agent.pubkey}:${delegationTarget.conversationId}`;
-            const debounceSequence = await this.waitForDelegationDebounce(debounceKey, span);
-            if (this.delegationDebounceSequence.get(debounceKey) !== debounceSequence) {
-                span.addEvent("dispatch.delegation_debounce_skipped", {
-                    "debounce.sequence": debounceSequence,
-                });
-                span.setStatus({ code: SpanStatusCode.OK });
-                return;
+            if (!envelope.metadata.isKillSignal) {
+                const debounceKey = `${delegationTarget.agent.pubkey}:${delegationTarget.conversationId}`;
+                const debounceSequence = await this.waitForDelegationDebounce(debounceKey, span);
+                if (this.delegationDebounceSequence.get(debounceKey) !== debounceSequence) {
+                    span.addEvent("dispatch.delegation_debounce_skipped", {
+                        "debounce.sequence": debounceSequence,
+                    });
+                    span.setStatus({ code: SpanStatusCode.OK });
+                    return;
+                }
+                this.delegationDebounceSequence.delete(debounceKey);
             }
-            this.delegationDebounceSequence.delete(debounceKey);
 
             const currentRal = ralRegistry.getState(
                 delegationTarget.agent.pubkey,
@@ -557,6 +646,16 @@ export class AgentDispatchService {
                 delegationTarget.conversationId
             );
 
+            if (!resumableRal && envelope.metadata.isKillSignal) {
+                span.addEvent("dispatch.kill_wakeup_no_resumable_ral");
+                logger.warn("[handleDelegationResponse] Kill wake-up: no resumable RAL found for parent agent, skipping", {
+                    agentSlug: delegationTarget.agent.slug,
+                    conversationId: shortenConversationId(delegationTarget.conversationId),
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return;
+            }
+
             let triggeringEnvelopeForContext = envelope;
             if (resumableRal?.originalTriggeringEventId) {
                 const originalEnvelope = ConversationStore.getCachedEnvelope(
@@ -571,6 +670,10 @@ export class AgentDispatchService {
                     span.addEvent("dispatch.delegation_restored_trigger", {
                         "original.event_id": resumableRal.originalTriggeringEventId,
                     });
+                } else if (envelope.metadata.isKillSignal) {
+                    throw new Error(
+                        `[handleDelegationResponse] Kill wake-up: original trigger envelope (${resumableRal.originalTriggeringEventId.substring(0, 8)}) not in cache — cannot safely proceed`
+                    );
                 }
             }
 

@@ -38,6 +38,7 @@ export class DelegationRegistry {
   private readonly conversationDelegations: Map<string, ConversationDelegations> = new Map();
   private readonly delegationToRal: Map<string, DelegationLocation> = new Map();
   private readonly followupToCanonical: Map<string, string> = new Map();
+  private readonly consumedKillWakeTargets: Set<string> = new Set();
 
   constructor(private readonly deps: DelegationRegistryDeps) {}
 
@@ -69,6 +70,7 @@ export class DelegationRegistry {
     this.conversationDelegations.clear();
     this.delegationToRal.clear();
     this.followupToCanonical.clear();
+    this.consumedKillWakeTargets.clear();
   }
 
   clearConversation(agentPubkey: string, conversationId: string): void {
@@ -969,6 +971,51 @@ export class DelegationRegistry {
     );
 
     return true;
+  }
+
+  /**
+   * One-shot lookup for implicit kill wake targets.
+   *
+   * Returns the parent agent location when the delegation has been aborted (killed),
+   * and marks the entry as consumed so a subsequent call for the same delegation
+   * returns null. This prevents double-wakeup of the parent agent.
+   *
+   * Returns null when:
+   * - The delegation is not found in the index
+   * - The completed entry has status !== "aborted"
+   * - The entry was already consumed by a prior call
+   */
+  consumeImplicitKillWakeTarget(
+    delegationConversationId: string
+  ): { agentPubkey: string; conversationId: string; ralNumber: number } | null {
+    const canonicalId =
+      this.followupToCanonical.get(delegationConversationId) ?? delegationConversationId;
+
+    if (this.consumedKillWakeTargets.has(canonicalId)) {
+      return null;
+    }
+
+    const location = this.delegationToRal.get(canonicalId);
+    if (!location) {
+      return null;
+    }
+
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      return null;
+    }
+
+    const completedEntry = convDelegations.completed.get(canonicalId);
+    if (!completedEntry || completedEntry.status !== "aborted") {
+      return null;
+    }
+
+    this.consumedKillWakeTargets.add(canonicalId);
+
+    const colonIndex = location.key.indexOf(":");
+    const agentPubkey = location.key.substring(0, colonIndex);
+    const conversationId = location.key.substring(colonIndex + 1);
+    return { agentPubkey, conversationId, ralNumber: location.ralNumber };
   }
 
   private makeKey(agentPubkey: string, conversationId: string): string {

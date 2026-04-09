@@ -171,25 +171,25 @@ export class KillSwitchRegistry {
       conversation.blockAgent(agentPubkey);
     }
 
-    if (directAbortCount > 0 || llmAborted) {
-      abortedTuples.push({ conversationId, agentPubkey });
+    // Always invoke markParentDelegationKilled regardless of whether there were active
+    // abort controllers or an active LLM request. A paused/resumable child has no active
+    // controllers but its parent is still waiting; markParentDelegationKilled creates the
+    // aborted completion entry that consumeImplicitKillWakeTarget needs to wake the parent.
+    this.markParentDelegationKilled(conversationId);
 
-      this.markParentDelegationKilled(conversationId);
+    if (cooldownRegistry) {
+      cooldownRegistry.add(projectId, conversationId, agentPubkey, reason);
+    }
 
-      if (cooldownRegistry) {
-        cooldownRegistry.add(projectId, conversationId, agentPubkey, reason);
-      }
-
-      if (conversation) {
-        const abortMessage = `This conversation was aborted at ${new Date().toISOString()}. Reason: ${reason}`;
-        conversation.addMessage({
-          pubkey: "system",
-          content: abortMessage,
-          messageType: "text",
-          timestamp: Math.floor(Date.now() / 1000),
-        });
-        await conversation.save();
-      }
+    if (conversation) {
+      const abortMessage = `This conversation was aborted at ${new Date().toISOString()}. Reason: ${reason}`;
+      conversation.addMessage({
+        pubkey: "system",
+        content: abortMessage,
+        messageType: "text",
+        timestamp: Math.floor(Date.now() / 1000),
+      });
+      await conversation.save();
     }
 
     trace.getActiveSpan()?.addEvent("ral.cascade_abort_started", {
@@ -222,6 +222,7 @@ export class KillSwitchRegistry {
         cooldownRegistry
       );
 
+      abortedTuples.push({ conversationId: descendantConvId, agentPubkey: descendantAgentPubkey });
       abortedTuples.push(...descendantResult.descendantConversations);
 
       if (convDelegations) {

@@ -76,6 +76,8 @@ export interface InboundEnvelope {
         replyTargets?: string[];
         delegationParentConversationId?: string;
         skillEventIds?: string[];
+        isKillSignal?: boolean;
+        killSignalDelegationConversationId?: string;
         transport?: {
             telegram?: TelegramTransportMetadata;
         };

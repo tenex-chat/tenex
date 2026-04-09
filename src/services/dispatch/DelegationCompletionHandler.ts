@@ -19,6 +19,32 @@ export interface DelegationCompletionResult {
 export async function handleDelegationCompletion(
     envelope: InboundEnvelope
 ): Promise<DelegationCompletionResult> {
+    // Implicit-kill branch: runs BEFORE replyTargets/sender checks so the synthetic
+    // kill envelope does not need fake transport metadata.
+    if (envelope.metadata.isKillSignal) {
+        const delegationConversationId = envelope.metadata.killSignalDelegationConversationId;
+        if (!delegationConversationId) {
+            return { recorded: false };
+        }
+        const ralRegistry = RALRegistry.getInstance();
+        const wakeTarget = ralRegistry.consumeImplicitKillWakeTarget(delegationConversationId);
+        if (!wakeTarget) {
+            return { recorded: false };
+        }
+        const projectCtx = getProjectContext();
+        const targetAgent = projectCtx.getAgentByPubkey(wakeTarget.agentPubkey);
+        logger.info("[handleDelegationCompletion] Kill signal wake-up: resolved parent agent", {
+            delegationConversationId: shortenConversationId(delegationConversationId),
+            parentConversationId: shortenConversationId(wakeTarget.conversationId),
+            agentSlug: targetAgent?.slug,
+        });
+        return {
+            recorded: true,
+            agentSlug: targetAgent?.slug,
+            conversationId: wakeTarget.conversationId,
+        };
+    }
+
     const eTags = envelope.metadata.replyTargets ?? [];
     if (eTags.length === 0) {
         return { recorded: false };

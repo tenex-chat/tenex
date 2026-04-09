@@ -1,4 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
+import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
@@ -156,6 +157,12 @@ export interface ToolRegistryContext extends ConversationToolContext {
      * Required to avoid ALS context bugs in cross-project delegation scenarios.
      */
     projectContext: ProjectContext;
+    /**
+     * The executor for this project's runtime. Present during real agent execution;
+     * absent in schema-only contexts (prepareLLMRequest). Tools that dispatch
+     * agent work (e.g. kill) must receive this rather than relying on singleton state.
+     */
+    agentExecutor?: AgentExecutor;
 }
 
 export interface ToolError {
