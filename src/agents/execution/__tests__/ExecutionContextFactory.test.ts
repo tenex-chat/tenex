@@ -5,6 +5,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import * as worktreeModule from "@/utils/git/worktree";
 import * as initializeGitRepoModule from "@/utils/git/initializeGitRepo";
+import type { MCPManager } from "@/services/mcp/MCPManager";
 
 type ConversationCoordinator = {
     getConversation: (conversationId: string) => unknown;
@@ -141,6 +142,7 @@ describe("ExecutionContextFactory", () => {
             // Setup
             getCurrentBranchSpy.mockResolvedValue("main");
             const mockPublisher = { publish: mock() };
+            const mockMcpManager = {} as MCPManager;
 
             // Execute
             const context = await createExecutionContext({
@@ -151,12 +153,14 @@ describe("ExecutionContextFactory", () => {
                 agentPublisher: mockPublisher as any,
                 isDelegationCompletion: true,
                 debug: true,
+                mcpManager: mockMcpManager,
             });
 
             // Assert
             expect(context.agentPublisher).toBe(mockPublisher);
             expect(context.isDelegationCompletion).toBe(true);
             expect(context.debug).toBe(true);
+            expect(context.mcpManager).toBe(mockMcpManager);
         });
 
         it("should create getConversation function", async () => {

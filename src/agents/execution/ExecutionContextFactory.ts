@@ -161,6 +161,7 @@ export async function createExecutionContext(params: {
                 isDelegationCompletion: params.isDelegationCompletion,
                 hasPendingDelegations: params.hasPendingDelegations,
                 debug: params.debug,
+                mcpManager: params.mcpManager,
                 getConversation: () => ConversationStore.getOrLoad(params.conversationId),
             };
         } catch (error) {
