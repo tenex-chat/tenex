@@ -70,10 +70,15 @@ export interface InboundEnvelope {
         toolName?: string;
         statusValue?: string;
         branchName?: string;
+        variantOverride?: string;
         teamName?: string; // active team tag from incoming job event
         articleReferences?: string[];
         replyTargets?: string[];
         delegationParentConversationId?: string;
+        delegationConversationId?: string;
+        delegationMarkerStatus?: "pending" | "completed" | "aborted";
+        delegationCompletedAt?: number;
+        delegationAbortReason?: string;
         skillEventIds?: string[];
         transport?: {
             telegram?: TelegramTransportMetadata;

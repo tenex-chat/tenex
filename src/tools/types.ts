@@ -34,6 +34,7 @@ export type ToolName =
     | "modify_project"
     | "delegate"
     | "delegate_followup"
+    | "self_delegate"
     | "ask"
     | "project_list"
     | "delegate_crossproject"

@@ -11,7 +11,7 @@ Actions that agents can invoke. Tools own validation, call into services or lowe
 
 ## Current Tool Families
 
-- Agent orchestration: `agents_write`, `ask`, `delegate`, `delegate_crossproject`, `delegate_followup`
+- Agent orchestration: `agents_write`, `ask`, `delegate`, `delegate_crossproject`, `delegate_followup`, `self_delegate`
 - Project and conversation context: `project_list`, `modify_project`, `conversation_get`, `conversation_list`, `conversation_search`, `todo_write`, `lesson_learn`
 - Knowledge and indexing: `rag_*`, `skills_set`
 - Execution control: `shell`, `kill`, `schedule_task`, `no_response` (Telegram-triggered turns only)
@@ -31,5 +31,5 @@ Actions that agents can invoke. Tools own validation, call into services or lowe
 - Tools are thin: validate params via Zod, delegate to a service or approved lower-layer wrapper, return structured results.
 - No module-level state or caches inside tool implementations. If state must persist across calls, move it to a service.
 - Conversation-required tools must be safe to filter when no conversation context is available.
-- Auto-injected tools (`change_model`, `home_fs_*`, `mcp_subscription_stop`, `send_message`) are registry/runtime concerns, not per-agent configuration.
+- Auto-injected tools (`self_delegate`, `change_model`, `home_fs_*`, `mcp_subscription_stop`, `send_message`) are registry/runtime concerns, not per-agent configuration.
 - Do not access NDK, config paths, or storage ad hoc from tools. Use `src/nostr/` wrappers, `ConfigService`, and the owning service.

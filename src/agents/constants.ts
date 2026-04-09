@@ -14,6 +14,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     // Skills management
     "skill_list", // All agents can enumerate available skills on demand
     "skills_set", // All agents can activate/deactivate skills mid-conversation
+    // Self-orchestration
+    "self_delegate", // All agents can spin up a fresh instance of themselves
 ] as const;
 
 /**

@@ -21,8 +21,21 @@ describe("AgentPublisher - Delegation Tag", () => {
 
     beforeEach(() => {
         capturedEvents = [];
+        const mockRelay = {
+            url: "wss://relay.test",
+            once: mock(() => undefined),
+            off: mock(() => undefined),
+            connectivity: {
+                connected: true,
+                connectionStats: {
+                    attempts: 1,
+                    success: 1,
+                },
+            },
+        };
         spyOn(ndkClientModule, "getNDK").mockReturnValue({
             subManager: { seenEvents: new Map() },
+            pool: { relays: new Map([[mockRelay.url, mockRelay]]) },
         } as any);
         spyOn(traceContextModule, "injectTraceContext").mockImplementation(() => {});
         spyOn(projectsModule, "getProjectContext").mockReturnValue({
@@ -40,7 +53,7 @@ describe("AgentPublisher - Delegation Tag", () => {
 
         // Mock NDKEvent.publish to capture events
         mockPublish = mock(() =>
-            Promise.resolve(new Set([{ url: "wss://relay.test" }] as Array<{ url: string }>))
+            Promise.resolve(new Set([mockRelay]))
         );
 
         publishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
@@ -144,6 +157,25 @@ describe("AgentPublisher - Delegation Tag", () => {
             await expect(
                 publisher.delegate(config, contextWithEmptyConversationId)
             ).rejects.toThrow("Cannot add delegation tag: conversationId is required in context for delegation events");
+        });
+
+        it("should add a variant tag when provided", async () => {
+            const context = createTestContext();
+
+            const config: DelegateConfig = {
+                recipient: "recipient-pubkey",
+                content: "Please do this task",
+                variant: "deep",
+            };
+
+            await publisher.delegate(config, context);
+
+            expect(capturedEvents.length).toBe(1);
+            const event = capturedEvents[0];
+
+            const variantTag = event.tags.find((tag) => tag[0] === "variant");
+            expect(variantTag).toBeDefined();
+            expect(variantTag?.[1]).toBe("deep");
         });
     });
 

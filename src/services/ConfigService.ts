@@ -507,7 +507,7 @@ export class ConfigService {
 
         let resolution: MetaModelResolution;
         if (variantOverride) {
-            // Use the override variant directly (from change_model tool)
+            // Use the override variant directly (from change_model or self_delegate)
             resolution = resolveToVariant(metaConfig, variantOverride);
         } else {
             // Resolve based on keywords in the message

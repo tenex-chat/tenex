@@ -39,10 +39,24 @@ export class NostrInboundAdapter {
         const nativeMessageId = event.id ?? buildFallbackMessageId(event);
         const messageId = toMessageId(nativeMessageId);
         const conversationAnchor = replyTarget ?? nativeMessageId;
+        const delegationMarkerStatus = getTagValue(event, "delegation-marker");
 
         const articleReferences = getTagValues(event, "a").filter(v => v.startsWith("30023:"));
         const replyTargets = getTagValues(event, "e");
         const skillEventIds = getTagValues(event, "skill");
+        const delegationConversationId = delegationMarkerStatus ? replyTargets[0] : undefined;
+        const delegationParentConversationId = delegationMarkerStatus
+            ? replyTargets[1]
+            : getTagValue(event, "delegation");
+        const delegationCompletedAtRaw = delegationMarkerStatus
+            ? getTagValue(event, "completed-at")
+            : undefined;
+        const delegationCompletedAt = delegationCompletedAtRaw
+            ? Number.parseInt(delegationCompletedAtRaw, 10)
+            : undefined;
+        const delegationAbortReason = delegationMarkerStatus
+            ? getTagValue(event, "abort-reason")
+            : undefined;
 
         const channel = projectBinding
             ? {
@@ -90,10 +104,22 @@ export class NostrInboundAdapter {
                 toolName: getTagValue(event, "tool"),
                 statusValue: getTagValue(event, "status"),
                 branchName: getTagValue(event, "branch"),
+                variantOverride: getTagValue(event, "variant"),
                 teamName: getTagValue(event, "team"),
                 articleReferences: articleReferences.length > 0 ? articleReferences : undefined,
                 replyTargets: replyTargets.length > 0 ? replyTargets : undefined,
-                delegationParentConversationId: getTagValue(event, "delegation"),
+                delegationParentConversationId,
+                delegationConversationId,
+                delegationMarkerStatus:
+                    delegationMarkerStatus === "pending" ||
+                    delegationMarkerStatus === "completed" ||
+                    delegationMarkerStatus === "aborted"
+                        ? delegationMarkerStatus
+                        : undefined,
+                delegationCompletedAt: Number.isFinite(delegationCompletedAt)
+                    ? delegationCompletedAt
+                    : undefined,
+                delegationAbortReason,
                 skillEventIds: skillEventIds.length > 0 ? skillEventIds : undefined,
             },
         };

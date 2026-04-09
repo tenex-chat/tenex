@@ -1,5 +1,6 @@
 import { describe, expect, it, mock, spyOn } from "bun:test";
 import type { TelegramAgentConfig } from "@/agents/types";
+import { config as configService } from "@/services/ConfigService";
 import * as transportBindingsModule from "@/services/ingress/TransportBindingStoreService";
 import { projectContextStore } from "@/services/projects";
 import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
@@ -145,6 +146,30 @@ describe("Tool Registry", () => {
 
             const telegramTools = await getToolsObject([], telegramContext);
             expect(telegramTools.no_response).toBeDefined();
+        });
+
+        it("auto-injects self_delegate as a core tool", async () => {
+            const tools = await getToolsObject([], mockContext);
+            expect(tools.self_delegate).toBeDefined();
+        });
+
+        it("keeps change_model auto-injected for meta-model agents", async () => {
+            const getRawLLMConfigSpy = spyOn(configService, "getRawLLMConfig").mockReturnValue({
+                provider: "meta",
+                default: "fast",
+                variants: {
+                    fast: { model: "fast-model" },
+                },
+            } as any);
+
+            const tools = await getToolsObject([], createMockExecutionEnvironment({
+                agent: createMockAgent({
+                    llmConfig: "meta-config",
+                }),
+            }));
+
+            expect(tools.change_model).toBeDefined();
+            getRawLLMConfigSpy.mockRestore();
         });
     });
 });

@@ -257,7 +257,7 @@ export function resolve(
 
 /**
  * Resolve directly to a specific variant by name.
- * Used when there's a variant override set (e.g., via change_model tool).
+ * Used when there's a variant override set (e.g., via change_model or self_delegate).
  *
  * @param config The meta model configuration
  * @param variantName The name of the variant to resolve to
@@ -299,7 +299,9 @@ export function resolveToVariant(
 export function generateSystemPromptFragment(config: MetaModelConfiguration): string {
     const lines: string[] = [];
 
-    lines.push("You have access to the following models via change_model() tool:");
+    lines.push(
+        "You have access to the following models. Use change_model() to switch within this conversation, or self_delegate() to start a fresh self-delegated run on a specific model:"
+    );
 
     for (const [variantName, variant] of Object.entries(config.variants)) {
         const description = variant.description || `Model variant "${variantName}"`;

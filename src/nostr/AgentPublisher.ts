@@ -153,7 +153,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
                     });
 
                     // Listen for per-relay publish failures
-                    const publishFailHandler = (failedEvent: NDKEvent, error: Error) => {
+                    const publishFailHandler = (failedEvent: NDKEvent, error: Error): void => {
                         if (failedEvent.id === event.id) {
                             logger.error(`Relay rejected ${eventType} event`, {
                                 eventId: shortenOptionalEventId(event.id),
@@ -168,7 +168,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
                     relay.once("publish:failed", publishFailHandler);
 
                     // Listen for successful publish confirmation
-                    const publishedHandler = (publishedEvent: NDKEvent) => {
+                    const publishedHandler = (publishedEvent: NDKEvent): void => {
                         if (publishedEvent.id === event.id) {
                             logger.debug(`Relay confirmed publish of ${eventType} event`, {
                                 eventId: shortenOptionalEventId(event.id),
@@ -426,6 +426,10 @@ export class AgentPublisher implements AgentRuntimePublisher {
             for (const skillId of uniqueSkills) {
                 event.tags.push(["skill", skillId]);
             }
+        }
+
+        if (config.variant) {
+            event.tags.push(["variant", config.variant]);
         }
 
         // Add standard metadata (project tag, model, cost, execution time, etc)

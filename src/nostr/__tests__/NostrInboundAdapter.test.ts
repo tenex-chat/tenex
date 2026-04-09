@@ -60,6 +60,8 @@ describe("NostrInboundAdapter", () => {
             toolName: undefined,
             statusValue: undefined,
             branchName: undefined,
+            variantOverride: undefined,
+            teamName: undefined,
             articleReferences: undefined,
             replyTargets: ["e".repeat(64)],
             delegationParentConversationId: undefined,
@@ -90,5 +92,22 @@ describe("NostrInboundAdapter", () => {
         expect(envelope.metadata.articleReferences).toEqual([
             "30023:owner-pubkey:weekly-report",
         ]);
+    });
+
+    it("extracts delegation variant overrides from variant tags", () => {
+        const event = new NDKEvent();
+        event.id = "f".repeat(64);
+        event.kind = 1;
+        event.pubkey = "b".repeat(64);
+        event.content = "self delegated";
+        event.tags = [
+            ["p", "c".repeat(64)],
+            ["variant", "deep"],
+        ];
+
+        const adapter = new NostrInboundAdapter();
+        const envelope = adapter.toEnvelope(event);
+
+        expect(envelope.metadata.variantOverride).toBe("deep");
     });
 });

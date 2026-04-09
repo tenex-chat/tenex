@@ -6,7 +6,7 @@
  * meta model resolution, and initial message compilation.
  */
 
-import { config as configService } from "@/services/ConfigService";
+import { config as configService, type MetaModelResolutionResult } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SkillService, type SkillToolPermissions, loadAllSkillTools } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
@@ -214,14 +214,43 @@ export async function setupStreamExecution(
     let variantSystemPrompt: string | undefined;
 
     if (configService.isMetaModelConfig(context.agent.llmConfig)) {
-        const variantOverride = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+        let variantOverride = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+        const delegationVariantOverride = context.triggeringEnvelope.metadata.variantOverride;
+
+        if (delegationVariantOverride && delegationVariantOverride !== variantOverride) {
+            conversationStore.setMetaModelVariantOverride(context.agent.pubkey, delegationVariantOverride);
+            variantOverride = delegationVariantOverride;
+        }
+
         const firstUserMessage = conversationStore.getFirstUserMessage();
 
-        const resolution = configService.resolveMetaModel(
-            context.agent.llmConfig,
-            firstUserMessage?.content,
-            variantOverride
-        );
+        let resolution: MetaModelResolutionResult;
+        try {
+            resolution = configService.resolveMetaModel(
+                context.agent.llmConfig,
+                firstUserMessage?.content,
+                variantOverride
+            );
+        } catch (error) {
+            if (!variantOverride) {
+                throw error;
+            }
+
+            logger.warn("[StreamSetup] Invalid meta model variant override, falling back to default resolution", {
+                agent: context.agent.slug,
+                invalidVariant: variantOverride,
+                source: delegationVariantOverride ? "delegation-event" : "conversation-store",
+                error: error instanceof Error ? error.message : String(error),
+            });
+
+            conversationStore.clearMetaModelVariantOverride(context.agent.pubkey);
+            variantOverride = undefined;
+            resolution = configService.resolveMetaModel(
+                context.agent.llmConfig,
+                firstUserMessage?.content,
+                undefined
+            );
+        }
 
         if (resolution.isMetaModel) {
             resolvedConfigName = resolution.configName;

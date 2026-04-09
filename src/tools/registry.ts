@@ -45,6 +45,7 @@ import { createSendMessageTool } from "./implementations/send_message";
 
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
+import { createSelfDelegateTool } from "./implementations/self_delegate";
 
 // Home-scoped filesystem tools
 import { getOrCreateHomeFsTools } from "./implementations/fs-tools-factory";
@@ -56,6 +57,7 @@ import { getOrCreateHomeFsTools } from "./implementations/fs-tools-factory";
 const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
     "todo_write",
     "change_model", // Needs conversation to persist variant override
+    "self_delegate", // Needs conversation state for delegation registration/markers
     "skills_set", // Needs conversation to store self-applied skills
 ]);
 
@@ -77,6 +79,7 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
     delegate_crossproject: createDelegateCrossProjectTool,
     delegate_followup: createDelegateFollowupTool,
     delegate: createDelegateTool,
+    self_delegate: createSelfDelegateTool as ToolFactory,
 
     // Lesson tools
     lesson_learn: createLessonLearnTool,

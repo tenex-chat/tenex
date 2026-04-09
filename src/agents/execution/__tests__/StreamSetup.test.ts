@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { config as configService } from "@/services/ConfigService";
 import { SkillWhitelistService } from "@/services/skill";
 
 const fetchSkillsMock = mock(async () => ({ skills: [], content: "", toolPermissions: {} }));
@@ -135,6 +136,7 @@ import { setupStreamExecution } from "../StreamSetup";
 
 describe("StreamSetup", () => {
     const whitelistService = SkillWhitelistService.getInstance();
+    const mockedConfigService = configService as any;
 
     beforeEach(() => {
         whitelistService.setInstalledSkills([]);
@@ -143,6 +145,10 @@ describe("StreamSetup", () => {
         createLLMServiceMock.mockClear();
         compileMock.mockClear();
         prepareLLMRequestMock.mockClear();
+        mockedConfigService.isMetaModelConfig.mockReset();
+        mockedConfigService.isMetaModelConfig.mockReturnValue(false);
+        mockedConfigService.resolveMetaModel.mockReset();
+        mockedConfigService.resolveMetaModel.mockReturnValue({ isMetaModel: false });
     });
 
     afterEach(() => {
@@ -213,5 +219,81 @@ describe("StreamSetup", () => {
         expect(result.request.runtimeOverlays).toEqual([]);
         expect(result.llmService.provider).toBe("mock-provider");
         expect(result.skillToolPermissions).toEqual({});
+    });
+
+    it("applies delegation variant overrides before meta-model resolution", async () => {
+        mockedConfigService.isMetaModelConfig.mockReturnValue(true);
+        mockedConfigService.resolveMetaModel.mockReturnValue({
+            isMetaModel: true,
+            configName: "deep-model",
+            metaModelSystemPrompt: "meta-system",
+            variantSystemPrompt: "variant-system",
+        });
+
+        const setMetaModelVariantOverride = mock(() => undefined);
+        const clearMetaModelVariantOverride = mock(() => undefined);
+        const getMetaModelVariantOverride = mock(() => undefined);
+
+        const context = {
+            agent: {
+                pubkey: "agent-pubkey",
+                slug: "agent-slug",
+                alwaysSkills: [],
+                blockedSkills: [],
+                mcpAccess: [],
+                tools: [],
+                llmConfig: "meta-config",
+                createLLMService: createLLMServiceMock,
+            },
+            triggeringEnvelope: {
+                metadata: {
+                    skillEventIds: [],
+                    variantOverride: "deep",
+                },
+                principal: {
+                    id: "user",
+                    linkedPubkey: "user",
+                    kind: "human",
+                },
+            },
+            conversationStore: {
+                id: "conversation-1",
+                getId: mock(() => "conversation-1"),
+                ensureRalActive: mock(() => undefined),
+                getSelfAppliedSkillIds: mock(() => []),
+                getContextManagementReminderState: mock(() => null),
+                getMetaModelVariantOverride,
+                setMetaModelVariantOverride,
+                clearMetaModelVariantOverride,
+                getFirstUserMessage: mock(() => undefined),
+                save: mock(async () => undefined),
+            },
+            conversationId: "conversation-1",
+            projectBasePath: "/tmp/project",
+            workingDirectory: "/tmp/project",
+            currentBranch: "main",
+            getConversation() {
+                return this.conversationStore;
+            },
+        } as any;
+
+        const toolTracker = {
+            setFullResultStash: mock(() => undefined),
+        } as any;
+
+        await setupStreamExecution(
+            context,
+            toolTracker,
+            1,
+            { warmSenderPubkeys: mock(() => undefined) }
+        );
+
+        expect(setMetaModelVariantOverride).toHaveBeenCalledWith("agent-pubkey", "deep");
+        expect(mockedConfigService.resolveMetaModel).toHaveBeenCalledWith(
+            "meta-config",
+            undefined,
+            "deep"
+        );
+        expect(clearMetaModelVariantOverride).not.toHaveBeenCalled();
     });
 });

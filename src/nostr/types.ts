@@ -227,6 +227,8 @@ export interface DelegateConfig {
     content: string;
     /** Optional branch for worktree support */
     branch?: string;
+    /** Optional meta-model variant for the delegated agent */
+    variant?: string;
     /** Optional skill event IDs to apply to the delegated agent */
     skills?: string[];
     /** Optional team name for team-scoped delegation */
