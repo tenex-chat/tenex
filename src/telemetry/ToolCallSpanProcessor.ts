@@ -1,7 +1,7 @@
 import type { Context } from "@opentelemetry/api";
 import type { ReadableSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { Span } from "@opentelemetry/sdk-trace-base";
-import { setLLMSpanId } from "./LLMSpanRegistry";
+import { setLLMSpanId, getApiKeyIdentity } from "./LLMSpanRegistry";
 
 /**
  * Span processor that enriches tool call span names with the actual tool name.
@@ -53,6 +53,12 @@ export class ToolCallSpanProcessor implements SpanProcessor {
         if (span.name === "ai.streamText.doStream") {
             const spanContext = span.spanContext();
             setLLMSpanId(spanContext.traceId, spanContext.spanId);
+
+            // Add API key identity as a tag for provider attribution
+            const apiKeyIdentity = getApiKeyIdentity(spanContext.traceId);
+            if (apiKeyIdentity) {
+                (span as ReadableSpan & { attributes: Record<string, unknown> }).attributes["llm.api_key_identity"] = apiKeyIdentity;
+            }
         }
     }
 

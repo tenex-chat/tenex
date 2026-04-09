@@ -38,6 +38,7 @@ import { isRetryableKeyError } from "./retryable-key-errors";
 import { getInvalidToolCallsFromStep } from "./utils/tool-errors";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { extractLastStepUsage } from "./utils/usage";
+import { setApiKeyIdentity } from "@/telemetry/LLMSpanRegistry";
 
 /**
  * Accessor for live provider state. Called per-request so LLMService
@@ -531,6 +532,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         };
 
         const activeSpan = trace.getActiveSpan();
+        if (activeSpan && apiKeyIdentity) {
+            activeSpan.setAttribute("llm.api_key_identity", apiKeyIdentity);
+            // Store in trace registry so span processor can add it to ai.streamText.doStream spans
+            const traceId = activeSpan.spanContext().traceId;
+            setApiKeyIdentity(traceId, apiKeyIdentity);
+        }
         activeSpan?.addEvent("llm.streamText_preparing", {
             "stream.messages_count": preparedMessages.length,
             "stream.tools_count": this.capabilities.builtInTools ? 0 : Object.keys(tools).length,
