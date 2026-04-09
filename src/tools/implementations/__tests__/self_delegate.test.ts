@@ -42,7 +42,6 @@ describe("self_delegate tool", () => {
         todos?: unknown[];
         agentPublisher?: {
             delegate?: ReturnType<typeof mock>;
-            delegationMarker?: ReturnType<typeof mock>;
         };
     }) {
         const agentPubkey = "self-agent-pubkey";
@@ -50,8 +49,6 @@ describe("self_delegate tool", () => {
         const addDelegationMarker = mock(() => undefined);
         const save = mock(async () => undefined);
         const delegate = overrides?.agentPublisher?.delegate ?? mock(async () => "delegation-event-id-1234567890");
-        const delegationMarker = overrides?.agentPublisher?.delegationMarker ??
-            mock(async () => ({ id: "marker-event-id" }));
 
         const context = {
             agent: {
@@ -68,7 +65,6 @@ describe("self_delegate tool", () => {
             }),
             agentPublisher: {
                 delegate,
-                delegationMarker,
             } as any,
             ralNumber,
             projectBasePath: "/tmp/project",
@@ -88,7 +84,6 @@ describe("self_delegate tool", () => {
             addDelegationMarker,
             save,
             delegate,
-            delegationMarker,
         };
     }
 
@@ -124,7 +119,7 @@ describe("self_delegate tool", () => {
             resolveSkillIdentifier,
         } as any);
 
-        const { context, delegate, delegationMarker, addDelegationMarker, save } = createContext({
+        const { context, delegate, addDelegationMarker, save } = createContext({
             llmConfig: "meta-config",
             skillEventIds: ["inherited-skill-id"],
         });
@@ -147,12 +142,11 @@ describe("self_delegate tool", () => {
         });
         expect(addDelegationMarker).toHaveBeenCalledTimes(1);
         expect(save).toHaveBeenCalledTimes(1);
-        expect(delegationMarker).toHaveBeenCalledTimes(1);
     });
 
     it("returns a validation error and does not publish for an unknown variant", async () => {
         spyOn(configService, "getRawLLMConfig").mockReturnValue(metaConfig as any);
-        const { context, delegate, delegationMarker } = createContext({ llmConfig: "meta-config" });
+        const { context, delegate } = createContext({ llmConfig: "meta-config" });
         const tool = createSelfDelegateTool(context);
 
         const result = await tool.execute({
@@ -166,6 +160,5 @@ describe("self_delegate tool", () => {
             selectedVariant: "unknown",
         });
         expect(delegate).not.toHaveBeenCalled();
-        expect(delegationMarker).not.toHaveBeenCalled();
     });
 });

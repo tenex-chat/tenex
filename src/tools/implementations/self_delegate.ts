@@ -167,14 +167,6 @@ async function executeSelfDelegate(
     parentStore.addDelegationMarker(marker, context.agent.pubkey, context.ralNumber);
     await parentStore.save();
 
-    await context.agentPublisher.delegationMarker({
-        delegationConversationId: eventId,
-        recipientPubkey: context.agent.pubkey,
-        parentConversationId: context.conversationId,
-        status: "pending",
-        initiatedAt,
-    });
-
     const delegationConversationId = shortenConversationId(eventId);
     logger.info("[self_delegate] Published self-delegation", {
         delegationConversationId,

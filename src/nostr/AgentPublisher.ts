@@ -19,7 +19,6 @@ import type {
     CompletionIntent,
     ConversationIntent,
     DelegateConfig,
-    DelegationMarkerIntent,
     ErrorIntent,
     EventContext,
     LessonIntent,
@@ -635,22 +634,5 @@ export class AgentPublisher implements AgentRuntimePublisher {
                 deltaLength: intent.delta.length,
             });
         }
-    }
-
-    /**
-     * Publish a delegation marker event.
-     * Delegation markers track the lifecycle of delegation conversations.
-     *
-     * Note: This does NOT consume runtime from RAL since markers are not part of
-     * the agent's reasoning/action loop. They are metadata events for tracking.
-     */
-    async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
-        const event = this.encoder.encodeDelegationMarker(intent);
-
-        injectTraceContext(event);
-        await this.agent.sign(event);
-        await this.safePublish(event, `delegation-marker:${intent.status}`);
-
-        return this.toPublishedMessageRef(event);
     }
 }

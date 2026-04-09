@@ -257,14 +257,6 @@ async function executeDelegate(
             context.ralNumber
         );
         await parentStore.save();
-
-        await context.agentPublisher.delegationMarker({
-            delegationConversationId: eventId,
-            recipientPubkey: pubkey,
-            parentConversationId: context.conversationId,
-            status: "pending",
-            initiatedAt,
-        });
     }
   // Should never happen with single delegation (error thrown earlier), but keep as safety
   if (pendingDelegations.length === 0) {

@@ -142,28 +142,6 @@ export interface InterventionReviewIntent {
     agentName: string;
 }
 
-/**
- * Intent for delegation marker events.
- * Delegation markers track the lifecycle of delegation conversations.
- * They are created when a delegation is initiated and updated when it completes/aborts.
- */
-export interface DelegationMarkerIntent {
-    /** The delegation conversation ID (the child conversation) */
-    delegationConversationId: string;
-    /** The agent pubkey that received the delegation */
-    recipientPubkey: string;
-    /** The parent conversation ID (where the delegator is working) */
-    parentConversationId: string;
-    /** Delegation status: pending, completed, or aborted */
-    status: "pending" | "completed" | "aborted";
-    /** When the delegation was initiated (Unix timestamp in seconds) */
-    initiatedAt?: number;
-    /** When the delegation completed (Unix timestamp in seconds) - only for completed/aborted */
-    completedAt?: number;
-    /** If aborted, the reason for the abort */
-    abortReason?: string;
-}
-
 export type AgentIntent =
     | CompletionIntent
     | ConversationIntent
@@ -174,8 +152,7 @@ export type AgentIntent =
     | StatusIntent
     | ToolUseIntent
     | StreamTextDeltaIntent
-    | InterventionReviewIntent
-    | DelegationMarkerIntent;
+    | InterventionReviewIntent;
 
 // ============================================================================
 // Event Context - Execution context provided by RAL

@@ -39,15 +39,6 @@ export interface RALResolutionContext {
 export interface RALResolutionResult {
     ralNumber: number;
     isResumption: boolean;
-    /** Delegation markers that need to be published to Nostr */
-    markersToPublish?: Array<{
-        delegationConversationId: string;
-        recipientPubkey: string;
-        parentConversationId: string;
-        status: "completed" | "aborted";
-        completedAt: number;
-        abortReason?: string;
-    }>;
 }
 
 /**
@@ -89,15 +80,6 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
 
     let ralNumber: number;
     let isResumption = false;
-    const markersToPublish: Array<{
-        delegationConversationId: string;
-        recipientPubkey: string;
-        parentConversationId: string;
-        status: "completed" | "aborted";
-        completedAt: number;
-        abortReason?: string;
-    }> = [];
-
     if (resumableRal) {
         // Resume existing RAL instead of creating a new one
         ralNumber = resumableRal.ralNumber;
@@ -141,15 +123,6 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
                     parentStore.addDelegationMarker(marker, agentPubkey, ralNumber);
                 }
 
-                // Collect markers to publish to Nostr
-                markersToPublish.push({
-                    delegationConversationId: completion.delegationConversationId,
-                    recipientPubkey: completion.recipientPubkey,
-                    parentConversationId: conversationId,
-                    status: completion.status,
-                    completedAt: completion.completedAt,
-                    abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
-                });
             }
 
             // Save the store after adding/updating markers
@@ -205,6 +178,5 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
     return {
         ralNumber,
         isResumption,
-        markersToPublish: markersToPublish.length > 0 ? markersToPublish : undefined,
     };
 }

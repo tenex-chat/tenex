@@ -11,7 +11,6 @@ import type {
     CompletionIntent,
     ConversationIntent,
     DelegateConfig,
-    DelegationMarkerIntent,
     ErrorIntent,
     EventContext,
     LessonIntent,
@@ -29,7 +28,6 @@ export interface PublishedRuntimeRecord {
         | "conversation"
         | "delegate"
         | "delegateFollowup"
-        | "delegationMarker"
         | "error"
         | "lesson"
         | "streamTextDelta"
@@ -298,25 +296,6 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
             deltaLength: intent.delta.length,
             sequence: intent.sequence,
         });
-    }
-
-    async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
-        const event = this.createEvent(
-            NDKKind.Text,
-            "",
-            [
-                ["delegation-marker", intent.status],
-                ["delegation-conversation", intent.delegationConversationId],
-            ]
-        );
-
-        this.record("delegationMarker", undefined, {
-            delegationConversationId: intent.delegationConversationId,
-            parentConversationId: intent.parentConversationId,
-            status: intent.status,
-        });
-
-        return event;
     }
 }
 

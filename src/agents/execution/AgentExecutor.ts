@@ -75,7 +75,6 @@ function createSchemaOnlyPublisher(): AgentRuntimePublisher {
         lesson: async () => failSchemaOnlyAccess("agentPublisher.lesson"),
         toolUse: async () => failSchemaOnlyAccess("agentPublisher.toolUse"),
         streamTextDelta: async () => failSchemaOnlyAccess("agentPublisher.streamTextDelta"),
-        delegationMarker: async () => failSchemaOnlyAccess("agentPublisher.delegationMarker"),
     };
 }
 
@@ -181,7 +180,7 @@ export class AgentExecutor {
                     }
                     const projectId = createProjectDTag(dTagValue);
 
-                    const { ralNumber, isResumption, markersToPublish } = await resolveRAL({
+                    const { ralNumber, isResumption } = await resolveRAL({
                         agentPubkey: context.agent.pubkey,
                         conversationId: context.conversationId,
                         projectId,
@@ -215,26 +214,6 @@ export class AgentExecutor {
                     const contextWithRal = { ...context, ralNumber };
                     const { fullContext, toolTracker, agentPublisher, cleanup } =
                         this.prepareExecution(contextWithRal);
-
-                    // Publish delegation marker updates to Nostr
-                    // This happens after RAL resolution when delegations have completed
-                    if (markersToPublish && markersToPublish.length > 0) {
-                        span.addEvent("executor.publishing_delegation_markers", {
-                            "marker.count": markersToPublish.length,
-                        });
-
-                        for (const marker of markersToPublish) {
-                            try {
-                                await agentPublisher.delegationMarker(marker);
-                            } catch (error) {
-                                logger.warn("Failed to publish delegation marker", {
-                                    delegationConversationId: shortenConversationId(marker.delegationConversationId),
-                                    status: marker.status,
-                                    error: formatAnyError(error),
-                                });
-                            }
-                        }
-                    }
 
                     const conversation = fullContext.getConversation();
                     if (conversation) {

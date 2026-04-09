@@ -10,7 +10,6 @@ import type {
     CompletionIntent,
     ConversationIntent,
     DelegateConfig,
-    DelegationMarkerIntent,
     ErrorIntent,
     EventContext,
     LessonIntent,
@@ -189,11 +188,6 @@ export class TelegramRuntimePublisherService implements AgentRuntimePublisher {
     async streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void> {
         return this.nostrPublisher.streamTextDelta(intent, context);
     }
-
-    async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
-        return this.nostrPublisher.delegationMarker(intent);
-    }
-
     private async deliverTelegramMessage(
         context: EventContext,
         content: string,

@@ -14,7 +14,6 @@ const nostrPublisherMethods = {
     lesson: mock(async () => ({}) as any),
     toolUse: mock(async () => ({}) as any),
     streamTextDelta: mock(async () => undefined),
-    delegationMarker: mock(async () => ({}) as any),
 };
 
 const createTelegramEnvelope = (messageId: string) =>
@@ -50,7 +49,6 @@ describe("TelegramRuntimePublisherService", () => {
         nostrPublisherMethods.lesson.mockImplementation(async () => ({}) as any);
         nostrPublisherMethods.toolUse.mockImplementation(async () => ({}) as any);
         nostrPublisherMethods.streamTextDelta.mockImplementation(async () => undefined);
-        nostrPublisherMethods.delegationMarker.mockImplementation(async () => ({}) as any);
 
         spyOn(AgentPublisher.prototype, "complete").mockImplementation(nostrPublisherMethods.complete);
         spyOn(AgentPublisher.prototype, "conversation").mockImplementation(
@@ -66,9 +64,6 @@ describe("TelegramRuntimePublisherService", () => {
         spyOn(AgentPublisher.prototype, "toolUse").mockImplementation(nostrPublisherMethods.toolUse);
         spyOn(AgentPublisher.prototype, "streamTextDelta").mockImplementation(
             nostrPublisherMethods.streamTextDelta
-        );
-        spyOn(AgentPublisher.prototype, "delegationMarker").mockImplementation(
-            nostrPublisherMethods.delegationMarker
         );
     });
 

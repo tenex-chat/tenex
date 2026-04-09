@@ -4,7 +4,6 @@ import type {
     CompletionIntent,
     ConversationIntent,
     DelegateConfig,
-    DelegationMarkerIntent,
     ErrorIntent,
     EventContext,
     LessonIntent,
@@ -44,5 +43,4 @@ export interface AgentRuntimePublisher {
     lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef>;
     toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef>;
     streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void>;
-    delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef>;
 }
