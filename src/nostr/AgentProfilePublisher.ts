@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { getIdentityRelayUrls, getRelayUrls } from "@/nostr/relays";
 import { config } from "@/services/ConfigService";
 import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { getSystemPubkeyListService } from "@/services/trust-pubkeys/SystemPubkeyListService";
@@ -10,6 +11,7 @@ import { logger } from "@/utils/logger";
 import {
     NDKEvent,
     NDKPrivateKeySigner,
+    NDKRelaySet,
     type NDKProject,
 } from "@nostr-dev-kit/ndk";
 
@@ -380,15 +382,21 @@ export async function publishAgentProfile(
 
         await profileEvent.sign(signer, { pTags: false });
 
+        const ndk = getNDK();
+        const profileRelaySet = NDKRelaySet.fromRelayUrls(
+            [...new Set([...getRelayUrls(), ...getIdentityRelayUrls()])],
+            ndk
+        );
+
         // Don't await
-        profileEvent.publish()
+        profileEvent.publish(profileRelaySet)
             .catch((publishError) => {
-                logger.warn("Failed to publish agent profile (may already exist)", {
-                    error: publishError,
-                    agentName,
-                    pubkey: signer.pubkey.substring(0, 8),
-                });
+            logger.warn("Failed to publish agent profile (may already exist)", {
+                error: publishError,
+                agentName,
+                pubkey: signer.pubkey.substring(0, 8),
             });
+        });
 
         // Schedule debounced 14199 snapshot publish for this project
         const projectTag = projectEvent.dTag;
@@ -458,9 +466,14 @@ export async function publishBackendProfile(
         await profileEvent.sign(signer, { pTags: false });
 
         try {
+            const ndk = getNDK();
+            const profileRelaySet = NDKRelaySet.fromRelayUrls(
+                [...new Set([...getRelayUrls(), ...getIdentityRelayUrls()])],
+                ndk
+            );
             // Publish with timeout - don't block daemon startup if relays are slow
             await Promise.race([
-                profileEvent.publish(),
+                profileEvent.publish(profileRelaySet),
                 new Promise((_, reject) =>
                     setTimeout(() => reject(new Error("Publish timeout")), PUBLISH_TIMEOUT_MS)
                 ),
@@ -550,9 +563,14 @@ export async function publishCompiledInstructions(
         await profileEvent.sign(signer, { pTags: false });
 
         try {
+            const ndk = getNDK();
+            const profileRelaySet = NDKRelaySet.fromRelayUrls(
+                [...new Set([...getRelayUrls(), ...getIdentityRelayUrls()])],
+                ndk
+            );
             // Publish with timeout to prevent blocking
             await Promise.race([
-                profileEvent.publish(),
+                profileEvent.publish(profileRelaySet),
                 new Promise((_, reject) =>
                     setTimeout(() => reject(new Error("Publish timeout")), PUBLISH_TIMEOUT_MS)
                 ),

@@ -18,6 +18,7 @@ export interface TenexConfig {
     backendName?: string; // Name for the TENEX backend profile (default: "tenex backend")
     projectsBase?: string; // Base directory for all projects (default: ~/tenex)
     relays?: string[]; // Nostr relay URLs
+    identityRelays?: string[]; // Additional relays for publishing kind:0 identity events (default: wss://purplepag.es)
     blossomServerUrl?: string; // Blossom server URL for blob uploads (default: https://blossom.primal.net)
 
     // Logging configuration
@@ -124,6 +125,7 @@ export const TenexConfigSchema = z.object({
     backendName: z.string().optional(),
     projectsBase: z.string().optional(),
     relays: z.array(z.string()).optional(),
+    identityRelays: z.array(z.string()).optional(),
     blossomServerUrl: z.string().optional(),
     logging: z
         .object({
