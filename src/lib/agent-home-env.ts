@@ -40,16 +40,23 @@ export function normalizeNsecToBech32(agentNsec: string): string {
 function buildAgentHomeEnvBootstrap(
     normalizedNsec: string,
     pubkey: string,
-    npub: string
+    npub: string,
+    relays?: string[]
 ): string {
-    return [
+    const lines = [
         "# TENEX agent shell environment",
         "# Shell sessions auto-load this file. Add additional KEY=value entries below.",
         `NSEC=${normalizedNsec}`,
         `PUBKEY=${pubkey}`,
         `NPUB=${npub}`,
-        "",
-    ].join("\n");
+    ];
+
+    if (relays && relays.length > 0) {
+        lines.push(`RELAYS=${relays.join(",")}`);
+    }
+
+    lines.push("");
+    return lines.join("\n");
 }
 
 export function getAgentHomeEnvPath(agentPubkey: string): string {
@@ -58,7 +65,8 @@ export function getAgentHomeEnvPath(agentPubkey: string): string {
 
 export async function ensureAgentHomeEnvFile(
     agentPubkey: string,
-    agentNsec: string
+    agentNsec: string,
+    relays?: string[]
 ): Promise<EnsureAgentHomeEnvFileResult> {
     const homeDir = getAgentHomeDirectory(agentPubkey);
     const envPath = getAgentHomeEnvPath(agentPubkey);
@@ -70,7 +78,7 @@ export async function ensureAgentHomeEnvFile(
     await mkdir(homeDir, { recursive: true });
 
     try {
-        await writeFile(envPath, buildAgentHomeEnvBootstrap(normalizedNsec, pubkey, npub), {
+        await writeFile(envPath, buildAgentHomeEnvBootstrap(normalizedNsec, pubkey, npub, relays), {
             encoding: "utf-8",
             flag: "wx",
             mode: 0o600,

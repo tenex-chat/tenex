@@ -57,7 +57,16 @@ export class AgentEnvironmentService {
         params: EnsureAgentHomeEnvParams
     ): Promise<{ path: string; created: boolean }> {
         const agentNsec = await this.resolveAgentNsec(params);
-        return ensureAgentHomeEnvFile(params.agentPubkey, agentNsec);
+        let relays: string[] | undefined;
+        try {
+            const tenexConfig = config.getConfig();
+            if (tenexConfig.relays && tenexConfig.relays.length > 0) {
+                relays = tenexConfig.relays;
+            }
+        } catch {
+            // Config not loaded yet
+        }
+        return ensureAgentHomeEnvFile(params.agentPubkey, agentNsec, relays);
     }
 
     async resolveShellEnvironment(

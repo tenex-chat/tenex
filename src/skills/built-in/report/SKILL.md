@@ -1,20 +1,38 @@
 ---
 name: report
 description: Publish NIP-23 Long-form Articles (kind 30023) to Nostr, signed by this agent
-tools:
-  - report_publish
 ---
 
 # Report Publishing
 
-This skill provides a tool for publishing NIP-23 Long-form Articles (kind 30023) to Nostr.
-Articles are signed using this agent's own keys and reference the current project.
+Publish markdown files as Nostr long-form articles (NIP-23, kind 30023), signed with this agent's keys.
 
-## Tool: `report_publish`
+## Script
 
-Publish a markdown file or directory of markdown files as Nostr long-form articles.
+```
+node $TENEX_SRC/src/skills/built-in/report/scripts/publish.js <path> [--project 31933:pubkey:dtag]
+```
 
-- **Single file**: publishes one article; the filename becomes the article identifier
-- **Directory**: recursively publishes all files; each file is identified by its relative path within the directory
+**Arguments:**
+- `<path>` — path to a single markdown file or a directory. If a directory, all files inside are published recursively.
+- `--project <atag>` — optional project association tag (e.g. `31933:abc123def456:my-project`)
 
-Each published event includes an `a` tag referencing the kind:31933 project this agent belongs to.
+**Environment (auto-set by shell):**
+- `NSEC` — agent private key (from agent `.env`)
+- `RELAYS` — comma-separated relay URLs (from agent `.env`); falls back to `$TENEX_BASE_DIR/config.json`, then `wss://tenex.chat`
+
+**Article identifiers:**
+- Single file: d-tag = filename (e.g. `report.md`)
+- Directory: d-tag = `dirname/relative-path` for each file
+
+## Examples
+
+Publish a single file:
+```
+node $TENEX_SRC/src/skills/built-in/report/scripts/publish.js /path/to/report.md
+```
+
+Publish a directory with project association:
+```
+node $TENEX_SRC/src/skills/built-in/report/scripts/publish.js /path/to/reports/ --project 31933:abc123:my-project
+```

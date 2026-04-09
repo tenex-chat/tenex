@@ -26,10 +26,22 @@ function isValidWebSocketUrl(url: string): boolean {
 
 /**
  * Get relay URLs for NDK connection
- * Priority: config file > defaults
+ * Priority: env $RELAYS > config file > defaults
  * @returns Array of validated WebSocket relay URLs
  */
 export function getRelayUrls(): string[] {
+    // Check environment variable first (agent-specific relays)
+    const envRelays = process.env.RELAYS;
+    if (envRelays) {
+        const urls = envRelays
+            .split(",")
+            .map((url) => url.trim())
+            .filter((url) => url && isValidWebSocketUrl(url));
+        if (urls.length > 0) {
+            return urls;
+        }
+    }
+
     // Check config file
     try {
         const tenexConfig = config.getConfig();
