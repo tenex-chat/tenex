@@ -1,7 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, createExpectedError } from "@/tools/utils";
-import { extractAgentMcpServers } from "@/services/mcp/mcp-utils";
 import { getProjectContext } from "@/services/projects";
 import { tool } from "ai";
 import { z } from "zod";
@@ -51,7 +50,7 @@ async function executeReadResource(
     }
 
     // Validate agent has access to this server
-    const agentMcpServers = extractAgentMcpServers(context.agent.tools);
+    const agentMcpServers = context.agent.mcpAccess ?? [];
 
     if (!agentMcpServers.includes(serverName)) {
         return createExpectedError(

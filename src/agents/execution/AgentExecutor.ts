@@ -351,6 +351,7 @@ export class AgentExecutor {
             conversationStore,
             getConversation: () => conversationStore,
             projectContext,
+            mcpManager: context.mcpManager,
             agentExecutor: this,
             isDelegationCompletion: context.isDelegationCompletion,
             hasPendingDelegations: context.hasPendingDelegations,

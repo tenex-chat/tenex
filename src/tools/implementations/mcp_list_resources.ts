@@ -1,7 +1,6 @@
 import type { Resource, ResourceTemplate } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AISdkTool } from "@/tools/types";
-import { extractAgentMcpServers } from "@/services/mcp/mcp-utils";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -67,7 +66,7 @@ export function createMcpListResourcesTool(context: ToolExecutionContext): AISdk
                 return "MCP manager not available. No MCP servers are configured for this project.";
             }
 
-            const agentMcpServers = extractAgentMcpServers(context.agent.tools);
+            const agentMcpServers = context.agent.mcpAccess ?? [];
             if (agentMcpServers.length === 0) {
                 return "You have no MCP server access. No tools matching mcp__*__* found in your tool list.";
             }
