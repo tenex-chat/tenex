@@ -91,6 +91,29 @@ export class AgentPublisher implements AgentRuntimePublisher {
     }
 
     /**
+     * Publish a failure notification event when an event cannot be published after all retries.
+     * Attaches the serialized failed event as a "failed-event" tag for observability on the relay.
+     * Best-effort: errors are silently swallowed so the caller can proceed to throw.
+     */
+    private publishFailureNotification(failedEvent: NDKEvent, eventType: string): void {
+        void (async () => {
+            try {
+                const notification = new NDKEvent(getNDK());
+                notification.kind = NDKKind.Text as number;
+                notification.content = `Failed to publish ${eventType}`;
+                notification.tags = [
+                    ["error", "publish_failure"],
+                    ["failed-event", failedEvent.inspect],
+                ];
+                await this.agent.sign(notification);
+                await notification.publish();
+            } catch {
+                // Best-effort — if this also fails, there is nothing more we can do
+            }
+        })();
+    }
+
+    /**
      * Safely publish an event with error handling, retries, and comprehensive logging.
      * Assumes the event is already signed. Retries only the publishing step.
      * Throws an error if no relays accept the event after all retries.
@@ -183,6 +206,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
                         continue;
                     }
 
+                    this.publishFailureNotification(event, eventType);
                     throw error;
                 }
 
@@ -248,6 +272,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
                     },
                     error: error instanceof Error ? error.message : String(error),
                 });
+                this.publishFailureNotification(event, eventType);
                 const message = error instanceof Error ? error.message : String(error);
                 throw new AgentPublishError(
                     `Failed to publish ${eventType} after ${maxRetries} attempts: ${message}`,
