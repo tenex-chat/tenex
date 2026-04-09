@@ -38,7 +38,7 @@ export class AgentEventEncoder {
      */
     private addConversationTags(event: NDKEvent, context: EventContext): void {
         if (context.rootEvent.id) {
-            event.tag(["e", context.rootEvent.id]);
+            event.tag(["e", context.rootEvent.id, "", "root"]);
         }
     }
 
@@ -549,10 +549,10 @@ export class AgentEventEncoder {
         const followUpEvent = responseEvent.reply();
 
         // Handle e-tag to avoid deep nesting
-        const eTagVal = responseEvent.tagValue("e");
+        const eTagVal = responseEvent.tagValue("e", "root") ?? responseEvent.tagValue("e");
         if (eTagVal) {
             followUpEvent.removeTag("e");
-            followUpEvent.tags.push(["e", eTagVal]); // Root thread tag
+            followUpEvent.tags.push(["e", eTagVal, "", "root"]);
         }
 
         // Prepend recipient to content for follow-ups (single recipient)
@@ -701,7 +701,7 @@ export class AgentEventEncoder {
         event.tag(["context", "intervention-review"]);
 
         // Reference to the conversation (e-tag for event reference)
-        event.tag(["e", intent.conversationId]);
+        event.tag(["e", intent.conversationId, "", "root"]);
 
         // Add project tag (intervention events need project association)
         this.aTagProject(event);

@@ -67,7 +67,7 @@ describe("AgentEventEncoder.encodeStreamTextDelta", () => {
         expect(event.kind).toBe(NDKKind.TenexStreamTextDelta);
         expect(event.content).toBe("hello world");
 
-        expect(event.tags).toContainEqual(["e", "root-conv-id"]);
+        expect(event.tags).toContainEqual(["e", "root-conv-id", "", "root"]);
         expect(event.tags).toContainEqual(["a", "31933:testpubkey:test-project"]);
         expect(event.tags).toContainEqual(["llm-model", "anthropic:claude-haiku-4-5"]);
         expect(event.tags).toContainEqual(["llm-ral", "7"]);

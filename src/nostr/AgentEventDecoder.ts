@@ -54,10 +54,10 @@ export function isEventFromAgent(event: NDKEvent, systemAgents: ReadonlyMap<stri
 
 /**
  * Get the event ID this event is replying to (if any).
- * For kind:1 events, this is the 'e' tag value.
+ * Prefers the NIP-10 "root" marker; falls back to any e-tag for events without markers.
  */
 export function getReplyTarget(event: NDKEvent): string | undefined {
-    return event.tagValue("e");
+    return event.tagValue("e", "root") ?? event.tagValue("e");
 }
 
 /**

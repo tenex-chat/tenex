@@ -518,11 +518,11 @@ export class AgentPublisher implements AgentRuntimePublisher {
         event.tags.push(["p", params.recipient]);
 
         // Add reference to the original delegation event
-        event.tags.push(["e", params.delegationEventId]);
+        event.tags.push(["e", params.delegationEventId, "", "root"]);
 
         // Reply to specific response event if provided (for threading)
         if (params.replyToEventId) {
-            event.tags.push(["e", params.replyToEventId]);
+            event.tags.push(["e", params.replyToEventId, "", "reply"]);
         }
 
         // Add standard metadata (project tag, model, cost, execution time, runtime, etc)
