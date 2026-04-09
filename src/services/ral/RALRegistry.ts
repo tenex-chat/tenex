@@ -178,26 +178,6 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   getDelegationRecipientPubkey(delegationConversationId: string): string | null { return this.killSwitchRegistry.getDelegationRecipientPubkey(delegationConversationId); }
   markParentDelegationKilled(delegationConversationId: string): boolean { return this.killSwitchRegistry.markParentDelegationKilled(delegationConversationId); }
 
-  /**
-   * Look up the immediate parent agent/conversation that should be woken after
-   * a kill signal.  Returns the parent location only when the delegation
-   * identified by `delegationConversationId` is currently in the `completed`
-   * bucket with `status === "aborted"` — which is the state produced by
-   * `markParentDelegationKilled`.
-   *
-   * Returns null for:
-   * - delegations that are still pending (kill not committed yet)
-   * - delegations that completed successfully
-   * - unknown delegation IDs (already consumed or never registered)
-   */
-  findImplicitKillWakeTarget(delegationConversationId: string): { agentPubkey: string; conversationId: string; ralNumber: number } | null {
-    const found = this.delegationRegistry.findDelegation(delegationConversationId);
-    if (!found) return null;
-    const { completed, agentPubkey, conversationId, ralNumber } = found;
-    if (!completed || completed.status !== "aborted") return null;
-    return { agentPubkey, conversationId, ralNumber };
-  }
-
   addHeuristicViolations(agentPubkey: string, conversationId: string, ralNumber: number, violations: Array<{ id: string; title: string; message: string; severity: "warning" | "error"; timestamp: number; heuristicId: string }>): void { this.heuristicManager.addHeuristicViolations(this.getRAL(agentPubkey, conversationId, ralNumber), agentPubkey, conversationId, ralNumber, violations); }
   getAndConsumeHeuristicViolations(agentPubkey: string, conversationId: string, ralNumber: number): Array<{ id: string; title: string; message: string; severity: "warning" | "error"; timestamp: number; heuristicId: string }> { return this.heuristicManager.getAndConsumeHeuristicViolations(this.getRAL(agentPubkey, conversationId, ralNumber), agentPubkey, conversationId, ralNumber); }
   hasPendingHeuristicViolations(agentPubkey: string, conversationId: string, ralNumber: number): boolean { return this.heuristicManager.hasPendingHeuristicViolations(this.getRAL(agentPubkey, conversationId, ralNumber)); }

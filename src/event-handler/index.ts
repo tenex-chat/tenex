@@ -18,8 +18,6 @@ import { getPubkeyGateService } from "@/services/pubkey-gate";
 import { handleAgentDeletion } from "./agentDeletion";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
-import { handleKillSignalEvent } from "./kill-signal";
-import { AgentDispatchService } from "@/services/dispatch/AgentDispatchService";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
 /**
  * Index event ID and pubkey into the prefix KV store.
@@ -67,9 +65,6 @@ export class EventHandler {
 
     async initialize(): Promise<void> {
         this.agentExecutor = this.options.agentExecutor ?? new AgentExecutor();
-        // Register executor with the dispatch service so kill-signal wake-ups can
-        // re-enter the dispatch path without threading agentExecutor through tools.
-        AgentDispatchService.getInstance().setAgentExecutor(this.agentExecutor);
     }
 
     async handleEvent(event: NDKEvent): Promise<void> {
@@ -210,10 +205,6 @@ export class EventHandler {
 
             case NDKKind.AgentLesson:
                 await this.handleLessonEvent(event);
-                break;
-
-            case NDKKind.TenexKillSignal: // kind 24136 — control-plane parent wake-up
-                await handleKillSignalEvent(event, this.agentExecutor);
                 break;
 
             default:

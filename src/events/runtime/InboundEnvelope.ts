@@ -79,13 +79,5 @@ export interface InboundEnvelope {
         transport?: {
             telegram?: TelegramTransportMetadata;
         };
-        /**
-         * Control-plane flag: set to true for kill-signal envelopes.
-         * Kill signals are never appended to conversation stores or prompt history.
-         * They exist solely to wake the immediate parent after a child delegation is aborted.
-         */
-        isKillSignal?: true;
-        /** The killed child delegation's conversation ID, carried by kill-signal envelopes. */
-        killSignalDelegationConversationId?: string;
     };
 }

@@ -17,7 +17,6 @@ import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { killBackgroundTask, getBackgroundTaskInfo, getAllBackgroundTasks } from "./shell";
 import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
-import { AgentDispatchService } from "@/services/dispatch/AgentDispatchService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { SchedulerService } from "@/services/scheduling";
 import { tool } from "ai";
@@ -388,31 +387,12 @@ async function killAgent(
                 reason,
             });
 
-            // Also mark the parent delegation as killed.
-            // Local abort state is now fully committed — publish the wake signal second.
+            // Also mark the parent delegation as killed
             ralRegistry.markParentDelegationKilled(conversationId);
 
             // Add to cooldown registry
             const cooldownRegistry = CooldownRegistry.getInstance();
             cooldownRegistry.add(projectId, conversationId, delegationRecipient, reason);
-
-            // Wake the immediate parent now that local abort state is committed.
-            // Fire-and-forget: failure here must not fail the kill operation itself.
-            const completedAt = Math.floor(Date.now() / 1000);
-            logger.info("[kill] Pre-emptive kill: publishing kill-signal wake-up to parent", {
-                delegationConversationId: shortenConversationId(conversationId),
-                reason,
-            });
-            AgentDispatchService.getInstance().dispatchKillWakeup({
-                delegationConversationId: conversationId,
-                abortReason: reason ?? "pre-emptive kill via kill tool",
-                completedAt,
-            }).catch((err) => {
-                logger.warn("[kill] Kill-signal wake-up dispatch failed (pre-emptive)", {
-                    delegationConversationId: shortenConversationId(conversationId),
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            });
 
             return {
                 success: true,
@@ -470,26 +450,6 @@ async function killAgent(
         "kill.direct_aborted": result.abortedCount,
         "kill.cascade_aborted": result.descendantConversations.length,
         "kill.total_aborted": result.abortedCount + result.descendantConversations.length,
-    });
-
-    // Local abort state is fully committed by abortWithCascade (including
-    // markParentDelegationKilled for this conversation's parent).
-    // Publish the wake signal second so the parent's RAL resumes.
-    const completedAt = Math.floor(Date.now() / 1000);
-    logger.info("[kill] Cascade kill: publishing kill-signal wake-up to parent", {
-        delegationConversationId: shortenConversationId(conversationId),
-        cascadeAborted: result.descendantConversations.length,
-        reason,
-    });
-    AgentDispatchService.getInstance().dispatchKillWakeup({
-        delegationConversationId: conversationId,
-        abortReason: reason,
-        completedAt,
-    }).catch((err) => {
-        logger.warn("[kill] Kill-signal wake-up dispatch failed (cascade)", {
-            delegationConversationId: shortenConversationId(conversationId),
-            error: err instanceof Error ? err.message : String(err),
-        });
     });
 
     const totalAborted = result.abortedCount + result.descendantConversations.length;
