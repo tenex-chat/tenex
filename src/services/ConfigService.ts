@@ -169,7 +169,7 @@ export class ConfigService {
                 typeof analysis?.maxPreviewChars === "number" && Number.isFinite(analysis.maxPreviewChars)
                     ? Math.max(1, Math.floor(analysis.maxPreviewChars))
                     : 256,
-            storeFullMessageText: analysis?.storeFullMessageText ?? false,
+            storeFullMessageText: analysis?.storeFullMessageText ?? true,
         };
     }
 

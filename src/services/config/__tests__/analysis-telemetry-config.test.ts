@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { TenexConfigSchema } from "../types";
+import { ConfigService } from "../ConfigService";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 describe("Analysis telemetry config schema", () => {
     it("accepts the analysis telemetry block", () => {
@@ -37,4 +40,55 @@ describe("Analysis telemetry config schema", () => {
         expect(result.success).toBe(false);
     });
 
+    it("defaults to storing full prompt text when analysis telemetry is enabled", async () => {
+        const testDir = path.join("/tmp", `tenex-analysis-defaults-${Date.now()}`);
+        const config = new ConfigService();
+
+        try {
+            await mkdir(testDir, { recursive: true });
+            await writeFile(
+                path.join(testDir, "config.json"),
+                JSON.stringify({
+                    telemetry: {
+                        analysis: {
+                            enabled: true,
+                        },
+                    },
+                })
+            );
+
+            await config.loadConfig(testDir);
+
+            expect(config.getAnalysisTelemetryConfig().storeFullMessageText).toBe(true);
+        } finally {
+            await rm(testDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects removed Anthropic server-editing keys with a clear error", async () => {
+        const testDir = path.join("/tmp", `tenex-config-test-${Date.now()}`);
+        const config = new ConfigService();
+        try {
+            await mkdir(testDir, { recursive: true });
+            await writeFile(
+                path.join(testDir, "config.json"),
+                JSON.stringify({
+                    contextManagement: {
+                        anthropicPromptCaching: {
+                            ttl: "1h",
+                            serverToolEditing: {
+                                enabled: true,
+                            },
+                        },
+                    },
+                })
+            );
+
+            await expect(config.loadTenexConfig(testDir)).rejects.toThrow(
+                "Delete it from config.json."
+            );
+        } finally {
+            await rm(testDir, { recursive: true, force: true });
+        }
+    });
 });

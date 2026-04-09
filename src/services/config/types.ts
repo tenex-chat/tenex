@@ -65,7 +65,7 @@ export interface TenexConfig {
             largeMessageThresholdTokens?: number; // Threshold for carry tracking (default: 2000)
             storeMessagePreviews?: boolean; // Store short prompt previews (default: true)
             maxPreviewChars?: number; // Preview length cap (default: 256)
-            storeFullMessageText?: boolean; // Store full prompt text in analysis DB (default: false)
+            storeFullMessageText?: boolean; // Store full prompt text in analysis DB (default: true)
         };
     };
 
