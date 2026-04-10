@@ -106,14 +106,14 @@ export class AgentPublisher implements AgentRuntimePublisher {
                 ];
                 await this.agent.sign(notification);
                 await notification.publish();
-                logger.info("Published failure notification for failed event", {
+                logger.warn("[PUBLISHERROR] Published failure notification for failed event", {
                     failedEventId: shortenOptionalEventId(failedEvent.id),
                     failedEventType: eventType,
                     notificationId: notification.id,
                     agent: this.agent.slug,
                 });
             } catch (error) {
-                logger.warn("Failed to publish failure notification", {
+                logger.warn("[PUBLISHERROR] Failed to publish failure notification", {
                     failedEventId: shortenOptionalEventId(failedEvent.id),
                     failedEventType: eventType,
                     agent: this.agent.slug,
