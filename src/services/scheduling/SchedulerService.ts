@@ -82,6 +82,9 @@ export class SchedulerService {
     private projectStateResolver: ProjectStateResolver | null = null;
     private targetPubkeyResolver: TargetPubkeyResolver | null = null;
 
+    // When true, cron/missed-task execution will not auto-boot projects that aren't running
+    private cronAutoBootDisabled = false;
+
     private constructor() {}
 
     /**
@@ -102,6 +105,15 @@ export class SchedulerService {
         this.projectStateResolver = stateResolver;
         this.targetPubkeyResolver = targetResolver;
         logger.debug("Project callbacks registered with SchedulerService");
+    }
+
+    /**
+     * Disable auto-booting projects for cron/missed-task execution.
+     * When disabled, scheduled tasks will be skipped for projects that are not already running.
+     */
+    public disableCronAutoBooting(): void {
+        this.cronAutoBootDisabled = true;
+        logger.debug("Cron auto-booting disabled (--only mode)");
     }
 
     public static getInstance(): SchedulerService {
@@ -742,6 +754,14 @@ export class SchedulerService {
             if (this.projectStateResolver(runtimeProjectId)) {
                 // Project already running, nothing to do
                 return true;
+            }
+
+            // In --only mode, don't auto-boot projects for cron tasks
+            if (this.cronAutoBootDisabled) {
+                logger.info("Skipping auto-boot for cron task (--only mode active)", {
+                    projectId,
+                });
+                return false;
             }
 
             logger.info("Project not running, booting for scheduled task", {

@@ -28,6 +28,7 @@ daemonCommand
     }, [])
     .option("--supervised", "Run in supervised mode (enables graceful restart via SIGHUP)")
     .option("--foreground", "Run in the foreground instead of forking to the background")
+    .option("--only", "Only start projects explicitly specified via -b or via Nostr; cron tasks will not auto-boot projects")
     .action(async (options) => {
         // Enable verbose logging if requested
         if (options.verbose) {
@@ -215,6 +216,12 @@ daemonCommand
                 }
             );
             console.log(chalk.gray("✓ Scheduler callbacks registered"));
+
+            // In --only mode, prevent cron tasks from auto-booting projects
+            if (options.only) {
+                schedulerService.disableCronAutoBooting();
+                console.log(chalk.yellow("🔒 Only mode: cron tasks will not auto-boot projects"));
+            }
 
             // Initialize scheduler AFTER callbacks are registered
             // This ensures catch-up tasks can use ensureProjectRunning() for auto-boot
