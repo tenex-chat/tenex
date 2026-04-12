@@ -3,7 +3,7 @@ import { config } from "@/services/ConfigService";
 /**
  * Default Nostr relay URLs for TENEX
  */
-const DEFAULT_RELAY_URLS = ["wss://tenex.chat"];
+const DEFAULT_RELAY_URLS = ["wss://relay.tenex.chat"];
 
 /**
  * Default identity relay URLs - used for publishing kind:0 profile events

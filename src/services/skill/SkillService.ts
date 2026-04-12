@@ -243,6 +243,13 @@ export class SkillService {
     ): Promise<SkillStoreDirectory[]> {
         const directories: SkillStoreDirectory[] = [];
 
+        // Built-in skills bundled with source code take highest precedence
+        const thisDir = path.dirname(fileURLToPath(import.meta.url));
+        directories.push({
+            scope: "built-in",
+            dir: path.resolve(thisDir, "../../skills/built-in"),
+        });
+
         if (lookupContext.agentPubkey) {
             directories.push({
                 scope: "agent",
@@ -267,13 +274,6 @@ export class SkillService {
         directories.push({
             scope: "shared",
             dir: await this.getSharedSkillsBaseDir(false),
-        });
-
-        // Built-in skills bundled with source code
-        const thisDir = path.dirname(fileURLToPath(import.meta.url));
-        directories.push({
-            scope: "built-in",
-            dir: path.resolve(thisDir, "../../skills/built-in"),
         });
 
         return directories;

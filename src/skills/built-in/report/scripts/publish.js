@@ -16,7 +16,7 @@ import * as os from "node:os";
 import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 const LONG_FORM_ARTICLE_KIND = 30023;
-const DEFAULT_RELAY = "wss://tenex.chat";
+const DEFAULT_RELAY = "wss://relay.tenex.chat";
 
 const NSEC = process.env.NSEC;
 const TENEX_BASE_DIR = process.env.TENEX_BASE_DIR ?? path.join(os.homedir(), ".tenex");
