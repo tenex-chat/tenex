@@ -211,6 +211,55 @@ describe("system reminder prompt integration", () => {
         expect(String(prepared.messages[1]?.content)).toContain("<system-reminders>");
     });
 
+    it("does not repeat delegation reminders when the conversation already has a delegation marker", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "Delegate this task",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        conversationStore.addDelegationMarker(
+            {
+                delegationConversationId: "delegation-1",
+                recipientPubkey: "delegated-pubkey",
+                parentConversationId: conversationId,
+                initiatedAt: Math.floor(Date.now() / 1000),
+                status: "pending",
+            },
+            agentPubkey,
+            ralNumber
+        );
+        const compiled = await compile(ralNumber);
+
+        const prepared = await prepareTenexReminderRequest({
+            messages: compiled.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [
+                    {
+                        delegationConversationId: "delegation-1",
+                        recipientPubkey: "delegated-pubkey",
+                        senderPubkey: agentPubkey,
+                        prompt: "Do a task",
+                        ralNumber,
+                    },
+                ],
+                completedDelegations: [],
+            },
+        });
+
+        const renderedPrompt = prepared.messages
+            .map((message) => String(message.content))
+            .join("\n\n");
+
+        expect(renderedPrompt).toContain("DELEGATION IN PROGRESS");
+        expect(renderedPrompt).not.toContain("<delegations>");
+        expect(renderedPrompt).not.toContain("You have delegations to:");
+    });
+
     it("does not repeat delegation reminders when the latest tool result already shows the delegation", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
@@ -292,6 +341,7 @@ describe("system reminder prompt integration", () => {
             content: "Continue the task",
             messageType: "text",
         });
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
         const promptHistoryResult = buildPromptHistoryMessages({
@@ -340,4 +390,44 @@ describe("system reminder prompt integration", () => {
         expect(String(history.messages[1]?.content)).not.toContain("Fix the previous tool call");
     });
 
+    it("does not persist durable reminder overlays before cache is anchored", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "Continue the task",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        const compiled = await compile(ralNumber);
+        const promptHistoryResult = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+        });
+
+        const prepared = await prepareTenexReminderRequest({
+            messages: promptHistoryResult.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [],
+                completedDelegations: [],
+            },
+        });
+        const assembled = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+            runtimeOverlays: prepared.runtimeOverlays,
+        });
+
+        expect(prepared.runtimeOverlays).toHaveLength(1);
+        expect(assembled.messages).toHaveLength(2);
+
+        const history = conversationStore.getAgentPromptHistory(agentPubkey);
+        expect(history.messages).toHaveLength(1);
+        expect(history.messages[0]?.source.kind).toBe("canonical");
+        expect(String(history.messages[0]?.content)).not.toContain("<system-reminders>");
+    });
 });
