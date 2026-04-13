@@ -4,7 +4,6 @@ import { createEventContext } from "@/services/event-context";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
 import { SkillIdentifierResolver } from "@/services/skill";
-import type { DelegationMarker } from "@/conversations/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { isMetaModelConfiguration, type MetaModelConfiguration } from "@/services/config/types";
@@ -153,19 +152,6 @@ async function executeSelfDelegate(
         context.ralNumber,
         [pendingDelegation]
     );
-
-    const parentStore = context.getConversation();
-    const initiatedAt = Math.floor(Date.now() / 1000);
-    const marker: DelegationMarker = {
-        delegationConversationId: eventId,
-        recipientPubkey: context.agent.pubkey,
-        parentConversationId: context.conversationId,
-        initiatedAt,
-        status: "pending",
-    };
-
-    parentStore.addDelegationMarker(marker, context.agent.pubkey, context.ralNumber);
-    await parentStore.save();
 
     const delegationConversationId = shortenConversationId(eventId);
     logger.info("[self_delegate] Published self-delegation", {

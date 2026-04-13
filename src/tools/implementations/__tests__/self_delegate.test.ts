@@ -140,8 +140,8 @@ describe("self_delegate tool", () => {
             variant: "deep",
             skills: ["inherited-skill-id", "resolved-skill-id"],
         });
-        expect(addDelegationMarker).toHaveBeenCalledTimes(1);
-        expect(save).toHaveBeenCalledTimes(1);
+        expect(addDelegationMarker).not.toHaveBeenCalled();
+        expect(save).not.toHaveBeenCalled();
     });
 
     it("returns a validation error and does not publish for an unknown variant", async () => {

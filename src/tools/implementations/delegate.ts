@@ -12,6 +12,7 @@
  * @module delegate
  */
 import type { ToolExecutionContext } from "@/tools/types";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
@@ -22,8 +23,6 @@ import { logger } from "@/utils/logger";
 import { createEventContext } from "@/services/event-context";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
-import { ConversationStore } from "@/conversations/ConversationStore";
-import type { DelegationMarker } from "@/conversations/types";
 import { teamService } from "@/services/teams";
 import { tool } from "ai";
 import { z } from "zod";
@@ -239,25 +238,6 @@ async function executeDelegate(
       [pendingDelegation]
     );
 
-    // Create pending marker immediately to show delegation in real-time
-    const parentStore = ConversationStore.get(context.conversationId);
-    if (parentStore) {
-        const initiatedAt = Math.floor(Date.now() / 1000);
-        const marker: DelegationMarker = {
-            delegationConversationId: eventId,
-        recipientPubkey: pubkey,
-        parentConversationId: context.conversationId,
-            initiatedAt,
-            status: "pending",
-        };
-
-        parentStore.addDelegationMarker(
-            marker,
-            context.agent.pubkey,
-            context.ralNumber
-        );
-        await parentStore.save();
-    }
   // Should never happen with single delegation (error thrown earlier), but keep as safety
   if (pendingDelegations.length === 0) {
     throw new Error("No delegations were published.");

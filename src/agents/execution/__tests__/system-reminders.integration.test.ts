@@ -10,7 +10,9 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { collectTenexReminderOverlay, collectTenexReminderOverlays } from "./reminder-test-utils";
+import {
+    prepareTenexReminderRequest,
+} from "./reminder-test-utils";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
@@ -49,7 +51,7 @@ mock.module("@/services/identity", () => ({
     getIdentityService,
 }));
 
-describe("system reminder overlay integration", () => {
+describe("system reminder prompt integration", () => {
     const projectId = "project-1";
     const conversationId = "conv-1";
     const workingDirectory = "/tmp/test-project";
@@ -122,7 +124,7 @@ describe("system reminder overlay integration", () => {
         mock.restore();
     });
 
-    it("keeps reminder overlays as standalone user messages while preserving canonical user content", async () => {
+    it("appends reminder blocks to the latest user message in the outgoing request", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
@@ -131,55 +133,44 @@ describe("system reminder overlay integration", () => {
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
 
-        const overlay = await collectTenexReminderOverlay({
-            agent,
-            conversation: conversationStore,
-            respondingToPrincipal,
-            loadedSkills: [],
-            pendingDelegations: [
-                {
-                    delegationConversationId: "delegation-1",
-                    recipientPubkey: "delegated-pubkey",
-                    senderPubkey: agentPubkey,
-                    prompt: "Do a task",
-                    ralNumber,
-                },
-            ],
-            completedDelegations: [],
+        const prepared = await prepareTenexReminderRequest({
+            messages: compiled.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [
+                    {
+                        delegationConversationId: "delegation-1",
+                        recipientPubkey: "delegated-pubkey",
+                        senderPubkey: agentPubkey,
+                        prompt: "Do a task",
+                        ralNumber,
+                    },
+                ],
+                completedDelegations: [],
+            },
         });
 
-        expect(overlay).toBeDefined();
-        expect(overlay?.overlayType).toBe("system-reminders");
-        expect(overlay?.message.role).toBe("user");
-        expect(overlay?.message.content).toContain("<response-routing>");
-        expect(overlay?.message.content).toContain("<delegations>");
+        expect(prepared.runtimeOverlays).toHaveLength(1);
+        expect(String(prepared.runtimeOverlays[0]?.message.content)).toContain("<delegations>");
 
         const sourceUserMsg = compiled.messages.find((m) => m.role === "user");
         expect(typeof sourceUserMsg?.content === "string" ? sourceUserMsg.content : "").toBe(
             "Hello, can you help me?"
         );
 
-        const assembled = buildPromptHistoryMessages({
-            compiled,
-            conversationStore,
-            agentPubkey,
-            runtimeOverlay: overlay,
-        });
-
-        expect(assembled.messages).toHaveLength(3);
-        expect(assembled.messages[1]).toMatchObject({
+        expect(prepared.messages).toHaveLength(2);
+        expect(prepared.messages[1]).toMatchObject({
             role: "user",
         });
-        expect(String(assembled.messages[1]?.content)).toContain("Hello, can you help me?");
-        expect(String(assembled.messages[1]?.content)).not.toContain("<system-reminders>");
-        expect(assembled.messages[2]).toMatchObject({
-            role: "user",
-        });
-        expect(String(assembled.messages[2]?.content)).toContain("<system-reminders>");
-        expect(String(assembled.messages[2]?.content)).toContain("<delegations>");
+        expect(String(prepared.messages[1]?.content)).toContain("Hello, can you help me?");
+        expect(String(prepared.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(prepared.messages[1]?.content)).toContain("<delegations>");
     });
 
-    it("persists runtime overlays in prompt history without altering canonical transcript content", async () => {
+    it("does not mutate canonical transcript records when latest-user-append reminders are applied", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Follow up on the task",
@@ -187,20 +178,22 @@ describe("system reminder overlay integration", () => {
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
-
-        const overlay = await collectTenexReminderOverlay({
-            agent,
-            conversation: conversationStore,
-            respondingToPrincipal,
-            loadedSkills: [],
-            pendingDelegations: [],
-            completedDelegations: [],
-        });
-        const assembled = buildPromptHistoryMessages({
+        const promptHistoryResult = buildPromptHistoryMessages({
             compiled,
             conversationStore,
             agentPubkey,
-            runtimeOverlay: overlay,
+        });
+
+        const prepared = await prepareTenexReminderRequest({
+            messages: promptHistoryResult.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [],
+                completedDelegations: [],
+            },
         });
 
         await conversationStore.save();
@@ -209,15 +202,137 @@ describe("system reminder overlay integration", () => {
         reloaded.load(projectId, conversationId);
         const history = reloaded.getAgentPromptHistory(agentPubkey);
 
-        expect(assembled.messages).toHaveLength(3);
-        expect(history.messages).toHaveLength(2);
+        expect(prepared.runtimeOverlays).toHaveLength(1);
+        expect(prepared.messages).toHaveLength(2);
+        expect(history.messages).toHaveLength(1);
         expect(history.messages[0]?.source.kind).toBe("canonical");
-        expect(history.messages[1]?.source.kind).toBe("runtime-overlay");
         expect(history.messages[0]?.content).toBe("Follow up on the task");
-        expect(history.messages[1]?.content).toContain("<system-reminders>");
-        expect(String(assembled.messages[1]?.content)).toContain("Follow up on the task");
-        expect(String(assembled.messages[1]?.content)).not.toContain("<system-reminders>");
-        expect(String(assembled.messages[2]?.content)).toContain("<system-reminders>");
+        expect(String(prepared.messages[1]?.content)).toContain("Follow up on the task");
+        expect(String(prepared.messages[1]?.content)).toContain("<system-reminders>");
+    });
+
+    it("does not repeat delegation reminders when the conversation already has a delegation marker", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "Delegate this task",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        conversationStore.addDelegationMarker(
+            {
+                delegationConversationId: "delegation-1",
+                recipientPubkey: "delegated-pubkey",
+                parentConversationId: conversationId,
+                initiatedAt: Math.floor(Date.now() / 1000),
+                status: "pending",
+            },
+            agentPubkey,
+            ralNumber
+        );
+        const compiled = await compile(ralNumber);
+
+        const prepared = await prepareTenexReminderRequest({
+            messages: compiled.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [
+                    {
+                        delegationConversationId: "delegation-1",
+                        recipientPubkey: "delegated-pubkey",
+                        senderPubkey: agentPubkey,
+                        prompt: "Do a task",
+                        ralNumber,
+                    },
+                ],
+                completedDelegations: [],
+            },
+        });
+
+        const renderedPrompt = prepared.messages
+            .map((message) => String(message.content))
+            .join("\n\n");
+
+        expect(renderedPrompt).toContain("DELEGATION IN PROGRESS");
+        expect(renderedPrompt).not.toContain("<delegations>");
+        expect(renderedPrompt).not.toContain("You have delegations to:");
+    });
+
+    it("does not repeat delegation reminders when the latest tool result already shows the delegation", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "Delegate this task",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        conversationStore.addMessage({
+            pubkey: agentPubkey,
+            ral: ralNumber,
+            content: "",
+            messageType: "tool-call",
+            toolData: [
+                {
+                    type: "tool-call",
+                    toolCallId: "call-1",
+                    toolName: "delegate",
+                    input: {
+                        recipient: "delegated-agent",
+                        prompt: "Do a task",
+                    },
+                },
+            ],
+        });
+        conversationStore.addMessage({
+            pubkey: agentPubkey,
+            ral: ralNumber,
+            content: "",
+            messageType: "tool-result",
+            toolData: [
+                {
+                    type: "tool-result",
+                    toolCallId: "call-1",
+                    toolName: "delegate",
+                    output: {
+                        type: "json",
+                        value: {
+                            success: true,
+                            message: "Delegated task. The agent will wake you up when ready with the response.",
+                            delegationConversationId: "delegation-1",
+                        },
+                    },
+                },
+            ],
+        });
+        const compiled = await compile(ralNumber);
+
+        const prepared = await prepareTenexReminderRequest({
+            messages: compiled.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [
+                    {
+                        delegationConversationId: "delegation-1234567890abcdef",
+                        recipientPubkey: "delegated-pubkey",
+                        senderPubkey: agentPubkey,
+                        prompt: "Do a task",
+                        ralNumber,
+                    },
+                ],
+                completedDelegations: [],
+            },
+        });
+
+        const renderedPrompt = prepared.messages
+            .map((message) => String(message.content))
+            .join("\n\n");
+
+        expect(renderedPrompt).not.toContain("<delegations>");
+        expect(renderedPrompt).not.toContain("You have delegations to:");
     });
 
     it("does not persist queued current-cycle reminders in prompt history", async () => {
@@ -226,33 +341,42 @@ describe("system reminder overlay integration", () => {
             content: "Continue the task",
             messageType: "text",
         });
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
+        const promptHistoryResult = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+        });
 
         getSystemReminderContext().queue({
             type: "supervision-correction",
             content: "Fix the previous tool call before continuing.",
         });
 
-        const overlays = await collectTenexReminderOverlays({
-            agent,
-            conversation: conversationStore,
-            respondingToPrincipal,
-            loadedSkills: [],
-            pendingDelegations: [],
-            completedDelegations: [],
+        const prepared = await prepareTenexReminderRequest({
+            messages: promptHistoryResult.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [],
+                completedDelegations: [],
+            },
         });
-        const overlay = overlays.find((entry) => entry.persistInHistory === false);
         const assembled = buildPromptHistoryMessages({
             compiled,
             conversationStore,
             agentPubkey,
-            runtimeOverlays: overlays,
+            runtimeOverlays: prepared.runtimeOverlays,
         });
 
-        expect(overlays).toHaveLength(2);
-        expect(overlay?.persistInHistory).toBe(false);
-        expect(String(overlay?.message.content)).toContain("Fix the previous tool call");
+        expect(prepared.runtimeOverlays).toHaveLength(1);
+        expect(String(prepared.runtimeOverlays[0]?.message.content)).not.toContain("Fix the previous tool call");
+        expect(String(prepared.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(prepared.messages[1]?.content)).toContain("Fix the previous tool call");
         expect(assembled.messages).toHaveLength(3);
         expect(String(assembled.messages[2]?.content)).toContain("<system-reminders>");
         expect(String(assembled.messages[2]?.content)).not.toContain("Fix the previous tool call");
@@ -264,5 +388,46 @@ describe("system reminder overlay integration", () => {
         expect(history.messages[0]?.content).toBe("Continue the task");
         expect(String(history.messages[1]?.content)).toContain("<system-reminders>");
         expect(String(history.messages[1]?.content)).not.toContain("Fix the previous tool call");
+    });
+
+    it("does not persist durable reminder overlays before cache is anchored", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "Continue the task",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        const compiled = await compile(ralNumber);
+        const promptHistoryResult = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+        });
+
+        const prepared = await prepareTenexReminderRequest({
+            messages: promptHistoryResult.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [],
+                completedDelegations: [],
+            },
+        });
+        const assembled = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+            runtimeOverlays: prepared.runtimeOverlays,
+        });
+
+        expect(prepared.runtimeOverlays).toHaveLength(1);
+        expect(assembled.messages).toHaveLength(2);
+
+        const history = conversationStore.getAgentPromptHistory(agentPubkey);
+        expect(history.messages).toHaveLength(1);
+        expect(history.messages[0]?.source.kind).toBe("canonical");
+        expect(String(history.messages[0]?.content)).not.toContain("<system-reminders>");
     });
 });

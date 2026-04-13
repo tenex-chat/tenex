@@ -43,6 +43,96 @@ function buildReminderPathVars(data: TenexReminderData): Record<string, string> 
     return vars;
 }
 
+function getDelegationIdsAlreadyRepresentedInConversation(
+    data: TenexReminderData
+): Set<string> {
+    const representedIds = new Set<string>();
+
+    for (const message of data.conversation.getAllMessages()) {
+        if (message.messageType !== "delegation-marker") {
+            continue;
+        }
+
+        const marker = message.delegationMarker;
+        if (!marker?.delegationConversationId) {
+            continue;
+        }
+
+        const isTargetedToCurrentAgent =
+            message.targetedPubkeys?.includes(data.agent.pubkey)
+            || message.pubkey === data.agent.pubkey;
+
+        if (!isTargetedToCurrentAgent) {
+            continue;
+        }
+
+        representedIds.add(marker.delegationConversationId);
+    }
+
+    return representedIds;
+}
+
+function getDelegationIdsRepresentedByTrailingToolResults(
+    data: TenexReminderData
+): string[] {
+    const representedIds: string[] = [];
+    const messages = data.conversation.getAllMessages();
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        const isFromCurrentAgent = message.pubkey === data.agent.pubkey;
+
+        if (
+            isFromCurrentAgent
+            && message.messageType === "tool-result"
+            && Array.isArray(message.toolData)
+        ) {
+            for (const part of message.toolData) {
+                if (
+                    part.type !== "tool-result"
+                    || !part.output
+                    || part.output.type !== "json"
+                    || typeof part.output.value !== "object"
+                    || !part.output.value
+                ) {
+                    continue;
+                }
+
+                const maybeDelegationId = (part.output.value as Record<string, unknown>).delegationConversationId;
+                if (typeof maybeDelegationId === "string" && maybeDelegationId.trim().length > 0) {
+                    representedIds.push(maybeDelegationId.trim());
+                }
+            }
+            continue;
+        }
+
+        if (isFromCurrentAgent && message.messageType === "tool-call") {
+            continue;
+        }
+
+        break;
+    }
+
+    return representedIds;
+}
+
+function isDelegationAlreadyRepresented(
+    delegationConversationId: string,
+    representedIds: Iterable<string>
+): boolean {
+    for (const representedId of representedIds) {
+        if (
+            representedId === delegationConversationId
+            || delegationConversationId.startsWith(representedId)
+            || representedId.startsWith(delegationConversationId)
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export interface TenexReminderData {
     agent: AgentInstance;
     conversation: ConversationStore;
@@ -173,7 +263,7 @@ function createDatetimeProvider(): ReminderProvider<TenexReminderData, string> {
     return createDeltaProvider<string>({
         type: "datetime",
         fullInterval: 15,
-        placement: "overlay-user",
+        placement: "latest-user-append",
         emptySnapshot: "",
         snapshot: () => {
             const now = new Date(
@@ -201,7 +291,7 @@ function createTodoListProvider(): ReminderProvider<TenexReminderData, TodoSnaps
     return createDeltaProvider<TodoSnapshot[]>({
         type: "todo-list",
         fullInterval: 6,
-        placement: "overlay-user",
+        placement: "latest-user-append",
         emptySnapshot: [],
         snapshot: (data) => {
             const todos = data.conversation.getTodos(data.agent.pubkey);
@@ -260,7 +350,7 @@ function createResponseRoutingProvider(): ReminderProvider<TenexReminderData, st
     return createDeltaProvider<string>({
         type: "response-routing",
         fullInterval: 12,
-        placement: "overlay-user",
+        placement: "latest-user-append",
         emptySnapshot: "",
         snapshot: (data) => data.respondingToPrincipal.id,
         renderFull: async (_snapshot, data) => {
@@ -289,7 +379,7 @@ function createDelegationsProvider(): ReminderProvider<TenexReminderData, string
     return createDeltaProvider<string>({
         type: "delegations",
         fullInterval: 8,
-        placement: "overlay-user",
+        placement: "latest-user-append",
         emptySnapshot: "",
         snapshot: (data) => {
             const allPubkeys = [
@@ -299,9 +389,31 @@ function createDelegationsProvider(): ReminderProvider<TenexReminderData, string
             return [...new Set(allPubkeys)].sort().join(",");
         },
         renderFull: async (_snapshot, data) => {
+            const markerRepresentedDelegationIds =
+                getDelegationIdsAlreadyRepresentedInConversation(data);
+            const trailingToolResultDelegationIds =
+                getDelegationIdsRepresentedByTrailingToolResults(data);
+            const pendingDelegations = data.pendingDelegations.filter(
+                (delegation) =>
+                    !isDelegationAlreadyRepresented(
+                        delegation.delegationConversationId,
+                        markerRepresentedDelegationIds
+                    )
+                    && !isDelegationAlreadyRepresented(
+                        delegation.delegationConversationId,
+                        trailingToolResultDelegationIds
+                    )
+            );
+            const completedDelegations = data.completedDelegations.filter(
+                (delegation) =>
+                    !isDelegationAlreadyRepresented(
+                        delegation.delegationConversationId,
+                        markerRepresentedDelegationIds
+                    )
+            );
             const allDelegatedPubkeys = [
-                ...data.pendingDelegations.map((delegation) => delegation.recipientPubkey),
-                ...data.completedDelegations.map((delegation) => delegation.recipientPubkey),
+                ...pendingDelegations.map((delegation) => delegation.recipientPubkey),
+                ...completedDelegations.map((delegation) => delegation.recipientPubkey),
             ];
 
             if (allDelegatedPubkeys.length === 0) {
@@ -337,7 +449,7 @@ function createConversationsProvider(): ReminderProvider<TenexReminderData, Conv
     return createDeltaProvider<ConversationsSnapshotWithTimestamp>({
         type: "conversations",
         fullInterval: 10,
-        placement: "overlay-user",
+        placement: "latest-user-append",
         emptySnapshot: {
             timeBucket: 0,
             snapshot: {
@@ -374,7 +486,7 @@ function createLoadedSkillsProvider(): ReminderProvider<TenexReminderData, strin
     return {
         type: "loaded-skills",
         fullInterval: 10,
-        placement: "overlay-user",
+        placement: "latest-user-append",
         snapshot: async (data) => {
             if (!data) {
                 return "";

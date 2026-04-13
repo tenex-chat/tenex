@@ -13,10 +13,10 @@ export interface MessagePrincipalContext {
 
 /**
  * Marker stored in conversation history to track delegation lifecycle.
- * Markers are created immediately when a delegation is initiated (status: "pending"),
- * and a second marker is appended when the delegation completes or is aborted.
- * Instead of embedding the full transcript inline, we store a reference
- * and lazily expand it when building messages.
+ * Markers preserve delegation lifecycle events in the parent transcript.
+ * Completed and aborted delegations are recorded durably; legacy transcripts
+ * may also contain pending markers. Instead of embedding the full transcript
+ * inline, we store a reference and lazily expand it when building messages.
  */
 export interface DelegationMarker {
     /** The delegation conversation ID (used to retrieve transcript) */

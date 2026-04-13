@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import {
     getDefaultHeuristics,
     todoBeforeDelegationHeuristic,
-    todoReminderOnToolUseHeuristic,
 } from "../rules";
 import type { HeuristicContext } from "../types";
 
@@ -58,36 +57,8 @@ describe("todoBeforeDelegationHeuristic", () => {
     });
 });
 
-describe("todoReminderOnToolUseHeuristic", () => {
-    it("triggers on non-todo tools when no todo list exists", () => {
-        const context = createBaseContext();
-
-        const result = todoReminderOnToolUseHeuristic.evaluate(context);
-        expect(result?.heuristicId).toBe("todo-reminder-on-tool-use");
-        expect(result?.message).toContain("todo_write()");
-    });
-
-    it("does not trigger for todo_write tools", () => {
-        const context = createBaseContext();
-        context.tool.name = "mcp__tenex__todo_write";
-
-        const result = todoReminderOnToolUseHeuristic.evaluate(context);
-        expect(result).toBeNull();
-    });
-
-    it("does not trigger once todo state exists", () => {
-        const context = createBaseContext();
-        context.state.hasTodoWrite = true;
-
-        const result = todoReminderOnToolUseHeuristic.evaluate(context);
-        expect(result).toBeNull();
-    });
-});
-
 describe("getDefaultHeuristics", () => {
-    it("registers only the active default heuristics", () => {
-        expect(getDefaultHeuristics().map((heuristic) => heuristic.id)).toEqual([
-            "todo-reminder-on-tool-use",
-        ]);
+    it("registers no default heuristics", () => {
+        expect(getDefaultHeuristics()).toEqual([]);
     });
 });
