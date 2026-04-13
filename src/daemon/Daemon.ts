@@ -797,6 +797,12 @@ export class Daemon {
             return;
         }
 
+        const isUserEvent = this.whitelistedPubkeys.includes(event.pubkey);
+
+        if (!isUserEvent) {
+            return;
+        }
+
         try {
             await interventionService.setProject(projectId);
         } catch (error) {
@@ -806,25 +812,7 @@ export class Daemon {
             });
         }
 
-        const isUserEvent = this.whitelistedPubkeys.includes(event.pubkey);
-        const isAgentEv = this.agentPubkeyToProjects.has(event.pubkey);
-
-        if (isUserEvent) {
-            interventionService.onUserResponse(conversationId, eventTimestamp, event.pubkey);
-        } else if (isAgentEv) {
-            const pTags = event.tags.filter((t) => t[0] === "p").map((t) => t[1]);
-            const pTagsRootAuthor = pTags.includes(rootAuthorPubkey);
-
-            if (pTagsRootAuthor) {
-                interventionService.onAgentCompletion(
-                    conversationId,
-                    eventTimestamp,
-                    event.pubkey,
-                    rootAuthorPubkey,
-                    projectId
-                );
-            }
-        }
+        interventionService.onUserResponse(conversationId, eventTimestamp, event.pubkey);
     }
 
     /** Create an agent resolver for InterventionService */
