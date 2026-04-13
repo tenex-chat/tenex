@@ -1,6 +1,7 @@
 import { trace } from "@opentelemetry/api";
 import { generateText, type LanguageModel, type ModelMessage } from "ai";
 import {
+    AnthropicPromptCachingStrategy,
     buildDeterministicSummary,
     buildSummaryTranscript,
     CompactionToolStrategy,
@@ -256,6 +257,7 @@ function createConversationContextManagementRuntime(options: {
         strategies.push(
             new ToolResultDecayStrategy({
                 estimator: managedBudgetProfile.estimator,
+                minPlaceholderBatchSize: 1,
                 placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
                     return buildDecayPlaceholder(toolName, toolCallId);
                 },
@@ -264,6 +266,13 @@ function createConversationContextManagementRuntime(options: {
                     { toolTokens: 10_000, depthFactor: 0.05 },
                     { toolTokens: 50_000, depthFactor: 0.2 },
                     { toolTokens: 200_000, depthFactor: 1 },
+                ],
+                // Preserve TENEX's historical behavior for oversized single results
+                // regardless of upstream library default changes.
+                singleToolPressureAnchors: [
+                    { toolTokens: 500, depthFactor: 0.01 },
+                    { toolTokens: 5_000, depthFactor: 1 },
+                    { toolTokens: 50_000, depthFactor: 10 },
                 ],
             })
         );
@@ -302,6 +311,8 @@ function createConversationContextManagementRuntime(options: {
 
         strategies.push(new RemindersStrategy<TenexReminderData>(reminderOptions));
     }
+
+    strategies.push(new AnthropicPromptCachingStrategy());
 
     const telemetry = createTelemetryCallback();
     const runtime = createContextManagementRuntime({

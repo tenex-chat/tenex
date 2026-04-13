@@ -182,7 +182,7 @@ describe("TENEX context management telemetry", () => {
         expect(events.some((event) => event.eventName === "context_management.runtime_complete")).toBe(true);
         expect(
             events.some((event) =>
-                event.eventName === "context_management.strategy_complete.context-utilization-reminder"
+                event.eventName === "context_management.strategy_complete.reminders"
             )
         ).toBe(true);
         expect(
@@ -203,7 +203,7 @@ describe("TENEX context management telemetry", () => {
         expect(String(runtimeStartEvent?.attributes?.["context_management.summary"])).toContain(
             "Running"
         );
-        expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(6);
+        expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(5);
 
         const strategyOrder = events
             .filter((event) => event.eventName.startsWith("context_management.strategy_complete."))
@@ -211,29 +211,35 @@ describe("TENEX context management telemetry", () => {
         expect(strategyOrder.indexOf("scratchpad")).toBeGreaterThanOrEqual(0);
         expect(strategyOrder.indexOf("compaction-tool")).toBeGreaterThanOrEqual(0);
         expect(strategyOrder.indexOf("tool-result-decay")).toBeGreaterThanOrEqual(0);
+        expect(strategyOrder.indexOf("reminders")).toBeGreaterThanOrEqual(0);
+        expect(strategyOrder.indexOf("anthropic-prompt-caching")).toBeGreaterThanOrEqual(0);
         expect(strategyOrder.indexOf("scratchpad")).toBeLessThan(
             strategyOrder.indexOf("compaction-tool")
         );
         expect(strategyOrder.indexOf("compaction-tool")).toBeLessThan(
             strategyOrder.indexOf("tool-result-decay")
         );
+        expect(strategyOrder.indexOf("tool-result-decay")).toBeLessThan(
+            strategyOrder.indexOf("reminders")
+        );
+        expect(strategyOrder.indexOf("reminders")).toBeLessThan(
+            strategyOrder.indexOf("anthropic-prompt-caching")
+        );
 
-        const warningEvent = events.find(
+        const remindersEvent = events.find(
             (event) =>
                 event.eventName ===
-                    "context_management.strategy_complete.context-utilization-reminder" &&
-                event.attributes?.["context_management.strategy_name"] === "context-utilization-reminder"
+                    "context_management.strategy_complete.reminders" &&
+                event.attributes?.["context_management.strategy_name"] === "reminders"
         );
-        expect(warningEvent).toBeDefined();
-        expect(warningEvent?.attributes?.["context_management.warning_threshold_tokens"]).toBe(
-            28000
-        );
-        expect(warningEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
-        expect(warningEvent?.attributes?.["context_management.budget_scope"]).toBe(
+        expect(remindersEvent).toBeDefined();
+        expect(remindersEvent?.attributes?.["context_management.outcome"]).toBe("applied");
+        expect(remindersEvent?.attributes?.["context_management.budget_scope"]).toBe(
             "managed-context"
         );
-        expect(String(warningEvent?.attributes?.["context_management.summary"])).toContain(
-            "Skipped scratchpad context warning"
+        expect(remindersEvent?.attributes?.["context_management.reminder_count"]).toBe(1);
+        expect(String(remindersEvent?.attributes?.["context_management.summary"])).toContain(
+            "Applied 1 reminder"
         );
 
         const scratchpadEvent = events.find(
@@ -250,19 +256,15 @@ describe("TENEX context management telemetry", () => {
             "Rendered scratchpad context"
         );
 
-        const statusEvent = events.find(
+        const anthropicCachingEvent = events.find(
             (event) =>
-                event.eventName === "context_management.strategy_complete.context-window-status" &&
-                event.attributes?.["context_management.strategy_name"] === "context-window-status"
+                event.eventName === "context_management.strategy_complete.anthropic-prompt-caching" &&
+                event.attributes?.["context_management.strategy_name"] === "anthropic-prompt-caching"
         );
-        expect(statusEvent).toBeDefined();
-        expect(statusEvent?.attributes?.["context_management.estimated_prompt_tokens"]).toBeDefined();
-        expect(statusEvent?.attributes?.["context_management.managed_context_tokens"]).toBeDefined();
-        expect(String(statusEvent?.attributes?.["context_management.summary"])).toContain(
-            "Inserted context status"
-        );
-        expect(statusEvent?.attributes?.["context_management.budget_scope"]).toBe(
-            "managed-context"
+        expect(anthropicCachingEvent).toBeDefined();
+        expect(anthropicCachingEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
+        expect(anthropicCachingEvent?.attributes?.["context_management.reason"]).toBe(
+            "non-anthropic-provider"
         );
 
         const decayEvent = events.find(
@@ -296,7 +298,6 @@ describe("TENEX context management telemetry", () => {
         );
         expect(toolEvent?.attributes?.["context_management.entry_char_count"]).toBeGreaterThan(0);
         expect(toolEvent?.attributes?.["context_management.entry_update_count"]).toBe(1);
-        expect(toolEvent?.attributes?.["context_management.omit_tool_call_id_count"]).toBe(1);
 
         const runtimeCompleteEvent = events.find(
             (event) => event.eventName === "context_management.runtime_complete"

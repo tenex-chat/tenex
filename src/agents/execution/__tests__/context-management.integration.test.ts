@@ -583,6 +583,85 @@ describe("TENEX context management integration", () => {
         expect(prepared?.providerOptions).toBeUndefined();
     });
 
+    test("anthropic stack restores shared-prefix cache breakpoints without request-level edits", async () => {
+        setContextManagementConfig({
+            tokenBudget: 12000,
+            forceScratchpadThresholdPercent: 100,
+        });
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "anthropic",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Repository context: parser.ts and tokenizer.ts." }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: "I reviewed the shared setup already." }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Review parser.ts." }],
+                },
+            ],
+            {
+                provider: "anthropic",
+                modelId: "claude-sonnet-4-6",
+            }
+        );
+
+        const prepared = await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Repository context: parser.ts and tokenizer.ts." }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: "I reviewed the shared setup already." }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Review tokenizer.ts." }],
+                },
+            ],
+            {
+                provider: "anthropic",
+                modelId: "claude-sonnet-4-6",
+            }
+        );
+
+        expect(prepared?.providerOptions).toBeUndefined();
+        expect(prepared?.messages[2]).toMatchObject({
+            role: "assistant",
+            providerOptions: {
+                anthropic: {
+                    cacheControl: {
+                        type: "ephemeral",
+                        ttl: "1h",
+                    },
+                },
+            },
+        });
+        expect(prepared?.messages.at(-1)?.providerOptions).toBeUndefined();
+    });
+
     test("anthropic provider exposes scratchpad when the strategy is enabled", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
@@ -622,7 +701,7 @@ describe("TENEX context management integration", () => {
             type: "tool",
             toolName: "scratchpad",
         });
-        expect(JSON.stringify(prepared?.messages)).toContain("Your scratchpad (executor):");
+        expect(JSON.stringify(prepared?.messages)).toContain("<scratchpad>");
     });
 
     test("utilization warning only appears once the working budget threshold is crossed", async () => {
