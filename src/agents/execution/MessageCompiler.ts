@@ -118,7 +118,10 @@ export class MessageCompiler {
 
         const enrichedContext = { ...context, teamContext };
 
-        const systemPromptMessages = await buildSystemPromptMessages(enrichedContext);
+        const systemPromptMessages = await buildSystemPromptMessages({
+            ...enrichedContext,
+            agentCategory: context.agent.category,
+        });
         activeSpan?.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
 
         t0 = performance.now();

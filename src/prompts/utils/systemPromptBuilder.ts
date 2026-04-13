@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
+import type { AgentCategory } from "@/agents/role-categories";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
@@ -52,6 +53,8 @@ export interface BuildSystemPromptOptions {
     availableAgents?: AgentInstance[];
     /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
     scratchpadAvailable?: boolean;
+    /** Agent category. Used to auto-derive scratchpadAvailable (orchestrators don't get scratchpad-practice). */
+    agentCategory?: AgentCategory;
     teamContext?: TeamContext;
 }
 
@@ -167,9 +170,14 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         currentBranch,
         availableAgents = [],
         conversation,
-        scratchpadAvailable = true,
+        scratchpadAvailable: scratchpadAvailableOption,
+        agentCategory,
         teamContext,
     } = options;
+
+    // Auto-derive scratchpadAvailable based on agent category (orchestrators don't get scratchpad-practice)
+    const isOrchestrator = agentCategory === "orchestrator";
+    const scratchpadAvailable = scratchpadAvailableOption ?? !isOrchestrator;
 
     const baseAgentInstructions = agent.instructions || "";
     const context = getProjectContext();
