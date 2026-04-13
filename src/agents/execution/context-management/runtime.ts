@@ -267,13 +267,6 @@ function createConversationContextManagementRuntime(options: {
                     { toolTokens: 50_000, depthFactor: 0.2 },
                     { toolTokens: 200_000, depthFactor: 1 },
                 ],
-                // Preserve TENEX's historical behavior for oversized single results
-                // regardless of upstream library default changes.
-                singleToolPressureAnchors: [
-                    { toolTokens: 500, depthFactor: 0.01 },
-                    { toolTokens: 5_000, depthFactor: 1 },
-                    { toolTokens: 50_000, depthFactor: 10 },
-                ],
             })
         );
     }
