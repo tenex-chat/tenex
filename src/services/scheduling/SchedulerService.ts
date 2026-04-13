@@ -128,21 +128,12 @@ export class SchedulerService {
 
         await ensureDirectory(config.getConfigPath("projects"));
 
-        // Load existing tasks
+        // Load existing tasks and start their crons/timers via reconciliation
         await this.loadTasks();
 
         // Check for missed tasks BEFORE starting regular scheduling
         // This ensures catch-ups happen first and update lastRun
         await this.checkMissedTasks();
-
-        // Start all loaded tasks (cron or one-off based on type)
-        for (const task of this.taskMetadata.values()) {
-            if (task.type === "oneoff") {
-                this.startOneoffTask(task);
-            } else {
-                this.startTask(task);
-            }
-        }
 
         trace.getActiveSpan()?.addEvent("scheduler.initialized", {
             "tasks.count": this.taskMetadata.size,
@@ -155,7 +146,7 @@ export class SchedulerService {
         fromPubkey: string,
         targetAgentSlug: string,
         projectId?: string,
-        title?: string,
+        options?: { title?: string; targetChannel?: string; projectRef?: string } | string,
         targetChannel?: string
     ): Promise<string> {
         // Validate cron expression
@@ -179,26 +170,36 @@ export class SchedulerService {
         const normalizedProjectId = normalizeProjectIdForRuntime(resolvedProjectId);
         const taskId = this.generateTaskId();
 
+        // Resolve options: 6th param can be a string (legacy title) or an options object
+        const resolvedTitle =
+            typeof options === "string" ? options : options?.title;
+        const resolvedTargetChannel =
+            typeof options === "object" ? options?.targetChannel : targetChannel;
+        const resolvedProjectRef =
+            typeof options === "object" && options?.projectRef
+                ? options.projectRef
+                : resolvedProjectId;
+
         // Store locally for cron management
         const task: ScheduledTask = {
             id: taskId,
-            title,
+            title: resolvedTitle,
             schedule,
             prompt,
             fromPubkey,
             targetAgentSlug,
             projectId: normalizedProjectId,
-            projectRef: resolvedProjectId,
+            projectRef: resolvedProjectRef,
             createdAt: new Date().toISOString(),
-            ...(targetChannel && { targetChannel }),
+            ...(resolvedTargetChannel && { targetChannel: resolvedTargetChannel }),
         };
 
         this.taskMetadata.set(taskId, task);
 
-        // Start the cron task
-        this.startTask(task);
-
+        // Write-through: persist → reload → reconcile
         await this.saveProjectTasks(task.projectId);
+        const reloadedTasks = await this.reloadTasksFromJson(task.projectId);
+        await this.reconcileTasksInMemory(task.projectId, reloadedTasks);
 
         logger.info(`Created scheduled task ${taskId} with cron schedule: ${schedule}`, {
             projectId: task.projectId,
@@ -262,10 +263,10 @@ export class SchedulerService {
 
         this.taskMetadata.set(taskId, task);
 
-        // Start the timer for this one-off task
-        this.startOneoffTask(task);
-
+        // Write-through: persist → reload → reconcile
         await this.saveProjectTasks(task.projectId);
+        const reloadedTasks = await this.reloadTasksFromJson(task.projectId);
+        await this.reconcileTasksInMemory(task.projectId, reloadedTasks);
 
         logger.info(
             `Created one-off scheduled task ${taskId} to execute at: ${executeAt.toISOString()}`,
@@ -283,6 +284,10 @@ export class SchedulerService {
     public async removeTask(taskId: string): Promise<boolean> {
         const task = this.taskMetadata.get(taskId);
 
+        if (!task) {
+            return false;
+        }
+
         // Stop cron task if exists
         const cronTask = this.tasks.get(taskId);
         if (cronTask) {
@@ -299,9 +304,11 @@ export class SchedulerService {
 
         // Remove from local storage
         this.taskMetadata.delete(taskId);
-        if (task) {
-            await this.saveProjectTasks(task.projectId);
-        }
+
+        // Write-through: persist → reload → reconcile
+        await this.saveProjectTasks(task.projectId);
+        const reloadedTasks = await this.reloadTasksFromJson(task.projectId);
+        await this.reconcileTasksInMemory(task.projectId, reloadedTasks);
 
         logger.info(`Removed scheduled task ${taskId}`);
         return true;
@@ -1065,6 +1072,135 @@ export class SchedulerService {
         });
     }
 
+    /**
+     * Read and validate tasks from the JSON file for a specific project.
+     * Returns only valid tasks; invalid ones are skipped with a warning.
+     */
+    async reloadTasksFromJson(projectId: string): Promise<ScheduledTask[]> {
+        const normalizedProjectId = normalizeProjectIdForRuntime(projectId);
+        const filePath = getProjectSchedulesPath(normalizedProjectId);
+
+        if (!(await fileExists(filePath))) {
+            return [];
+        }
+
+        const raw = await readJsonFile<ScheduledTask[]>(filePath);
+        if (!Array.isArray(raw)) {
+            logger.warn("Skipping invalid schedules file", { filePath, projectId: normalizedProjectId });
+            return [];
+        }
+
+        const validTasks: ScheduledTask[] = [];
+        for (const task of raw) {
+            if (!task.id || !task.prompt || !task.fromPubkey || !task.targetAgentSlug || !task.projectId) {
+                logger.warn("Skipping schedule with missing required fields", { taskId: task.id });
+                continue;
+            }
+
+            if (task.type !== "oneoff" && !cron.validate(task.schedule)) {
+                logger.warn("Skipping schedule with invalid cron expression", {
+                    taskId: task.id,
+                    schedule: task.schedule,
+                });
+                continue;
+            }
+
+            validTasks.push({
+                ...task,
+                projectId: normalizeProjectIdForRuntime(task.projectId),
+                projectRef: task.projectRef ?? task.projectId,
+            });
+        }
+
+        return validTasks;
+    }
+
+    /**
+     * Reconcile in-memory cron/timer state so it exactly matches reloadedTasks for this project.
+     * - Tasks in reloadedTasks but not in memory: start them
+     * - Tasks in memory with changed schedule: stop old, start new
+     * - Tasks in memory but not in reloadedTasks: stop and remove
+     */
+    async reconcileTasksInMemory(projectId: string, reloadedTasks: ScheduledTask[]): Promise<void> {
+        const normalizedProjectId = normalizeProjectIdForRuntime(projectId);
+
+        // Build a map of reloaded tasks for quick lookup
+        const reloadedMap = new Map<string, ScheduledTask>();
+        for (const task of reloadedTasks) {
+            reloadedMap.set(task.id, task);
+        }
+
+        // Find tasks currently in memory for this project
+        const inMemoryIds = new Set<string>();
+        for (const [id, task] of this.taskMetadata.entries()) {
+            if (normalizeProjectIdForRuntime(task.projectId) === normalizedProjectId) {
+                inMemoryIds.add(id);
+            }
+        }
+
+        // Stop and remove tasks that are no longer in the reloaded set
+        for (const id of inMemoryIds) {
+            if (!reloadedMap.has(id)) {
+                const cronTask = this.tasks.get(id);
+                if (cronTask) {
+                    cronTask.stop();
+                    this.tasks.delete(id);
+                }
+                const timer = this.oneoffTimers.get(id);
+                if (timer) {
+                    clearTimeout(timer);
+                    this.oneoffTimers.delete(id);
+                }
+                this.taskMetadata.delete(id);
+            }
+        }
+
+        // Add or update tasks from the reloaded set
+        for (const task of reloadedTasks) {
+            const existing = this.taskMetadata.get(task.id);
+            if (!existing) {
+                // New task — start it
+                this.taskMetadata.set(task.id, task);
+                if (task.type === "oneoff") {
+                    this.startOneoffTask(task);
+                } else {
+                    this.startTask(task);
+                }
+            } else if (existing.schedule !== task.schedule) {
+                // Schedule changed — stop old, start new
+                const cronTask = this.tasks.get(task.id);
+                if (cronTask) {
+                    cronTask.stop();
+                    this.tasks.delete(task.id);
+                }
+                const timer = this.oneoffTimers.get(task.id);
+                if (timer) {
+                    clearTimeout(timer);
+                    this.oneoffTimers.delete(task.id);
+                }
+                this.taskMetadata.set(task.id, task);
+                if (task.type === "oneoff") {
+                    this.startOneoffTask(task);
+                } else {
+                    this.startTask(task);
+                }
+            } else {
+                // Same schedule — update metadata but keep running timer/cron
+                this.taskMetadata.set(task.id, task);
+                // If the cron/timer is not actually running yet, start it now
+                const isRunning =
+                    this.tasks.has(task.id) || this.oneoffTimers.has(task.id);
+                if (!isRunning) {
+                    if (task.type === "oneoff") {
+                        this.startOneoffTask(task);
+                    } else {
+                        this.startTask(task);
+                    }
+                }
+            }
+        }
+    }
+
     private async loadTasks(): Promise<void> {
         try {
             const projectsBase = config.getConfigPath("projects");
@@ -1108,6 +1244,12 @@ export class SchedulerService {
                     });
                     loadedCount++;
                 }
+
+                // Start crons/timers for this project's loaded tasks
+                const projectTasks = Array.from(this.taskMetadata.values()).filter(
+                    (t) => normalizeProjectIdForRuntime(t.projectId) === normalizeProjectIdForRuntime(projectId)
+                );
+                await this.reconcileTasksInMemory(projectId, projectTasks);
             }
 
             trace.getActiveSpan()?.addEvent("scheduler.tasks_loaded", {
@@ -1166,27 +1308,54 @@ export class SchedulerService {
         trace.getActiveSpan()?.addEvent("scheduler.shutdown_complete");
     }
 
-    public async clearAllTasks(): Promise<void> {
+    public async clearAllTasks(projectId?: string): Promise<void> {
         const affectedProjects = new Set<string>();
 
-        for (const task of this.taskMetadata.values()) {
-            affectedProjects.add(task.projectId);
+        if (projectId) {
+            // Clear only tasks for the specified project
+            const normalizedProjectId = normalizeProjectIdForRuntime(projectId);
+            for (const [id, task] of this.taskMetadata.entries()) {
+                if (normalizeProjectIdForRuntime(task.projectId) === normalizedProjectId) {
+                    const cronTask = this.tasks.get(id);
+                    if (cronTask) {
+                        cronTask.stop();
+                        this.tasks.delete(id);
+                    }
+                    const timer = this.oneoffTimers.get(id);
+                    if (timer) {
+                        clearTimeout(timer);
+                        this.oneoffTimers.delete(id);
+                    }
+                    this.taskMetadata.delete(id);
+                    affectedProjects.add(task.projectId);
+                }
+            }
+        } else {
+            // Clear all tasks across all projects
+            for (const task of this.taskMetadata.values()) {
+                affectedProjects.add(task.projectId);
+            }
+
+            for (const cronTask of this.tasks.values()) {
+                cronTask.stop();
+            }
+
+            for (const timer of this.oneoffTimers.values()) {
+                clearTimeout(timer);
+            }
+
+            this.tasks.clear();
+            this.oneoffTimers.clear();
+            this.taskMetadata.clear();
         }
 
-        for (const cronTask of this.tasks.values()) {
-            cronTask.stop();
-        }
-
-        for (const timer of this.oneoffTimers.values()) {
-            clearTimeout(timer);
-        }
-
-        this.tasks.clear();
-        this.oneoffTimers.clear();
-        this.taskMetadata.clear();
-
+        // Write-through: persist → reload → reconcile for each affected project
         await Promise.all(
-            Array.from(affectedProjects).map((projectId) => this.saveProjectTasks(projectId))
+            Array.from(affectedProjects).map(async (pid) => {
+                await this.saveProjectTasks(pid);
+                const reloadedTasks = await this.reloadTasksFromJson(pid);
+                await this.reconcileTasksInMemory(pid, reloadedTasks);
+            })
         );
     }
 }
