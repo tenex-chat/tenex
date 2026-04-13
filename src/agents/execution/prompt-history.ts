@@ -27,6 +27,17 @@ export interface PromptHistoryAssemblyResult {
     reminderStateChanged: boolean;
 }
 
+function isSystemReminderOverlay(
+    message: FrozenPromptMessage | RuntimePromptOverlay
+): boolean {
+    if ("source" in message) {
+        return message.source.kind === "runtime-overlay"
+            && message.source.overlayType === "system-reminders";
+    }
+
+    return message.overlayType === "system-reminders";
+}
+
 function cloneMessageContent(message: ModelMessage): ModelMessage["content"] {
     return structuredClone(message.content);
 }
@@ -158,6 +169,16 @@ export function buildPromptHistoryMessages(params: {
     let didMutateHistory = false;
     let appendedCanonicalCount = 0;
 
+    if (!history.cacheAnchored) {
+        const retainedMessages = history.messages.filter(
+            (message) => !isSystemReminderOverlay(message)
+        );
+        if (retainedMessages.length !== history.messages.length) {
+            history.messages = retainedMessages;
+            didMutateHistory = true;
+        }
+    }
+
     for (let index = 0; index < canonicalMessages.length; index++) {
         const message = canonicalMessages[index];
         const sourceMessageId = getSourceMessageId(message, index);
@@ -175,6 +196,9 @@ export function buildPromptHistoryMessages(params: {
 
     for (const overlay of overlaysToAppend) {
         if (overlay.persistInHistory === false) {
+            continue;
+        }
+        if (overlay.overlayType === "system-reminders" && !history.cacheAnchored) {
             continue;
         }
         appendFrozenPromptMessage(history, freezeRuntimeOverlay(history, overlay));

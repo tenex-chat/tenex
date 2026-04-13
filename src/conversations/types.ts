@@ -215,6 +215,7 @@ export interface AgentPromptHistoryState {
     seenMessageIds: string[];
     reminderDeltaState: Record<string, PerAgentReminderDeltaState>;
     nextSequence: number;
+    cacheAnchored: boolean;
 }
 
 export interface ConversationState {

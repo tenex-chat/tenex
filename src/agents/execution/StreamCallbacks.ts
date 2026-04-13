@@ -33,6 +33,7 @@ import type { AISdkTool } from "@/tools/types";
 import type { ExecutionContextManagement } from "./context-management";
 import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
+import { didEstablishPromptCache } from "./prompt-cache";
 import { prepareLLMRequest } from "./request-preparation";
 import { createProjectDTag } from "@/types/project-ids";
 import type { FullRuntimeContext, LLMModelRequest, RALExecutionContext } from "./types";
@@ -193,6 +194,13 @@ export function createPrepareStep(
                 );
                 execContext.pendingContextManagementUsageReporter = undefined;
             }
+
+            const cacheAnchorEstablished = didEstablishPromptCache({
+                usage: lastCompletedStep?.usage,
+                providerMetadata: lastCompletedStep?.providerMetadata,
+            })
+                ? conversation.markAgentPromptHistoryCacheAnchored(context.agent.pubkey)
+                : false;
 
             // Pass steps to LLM service for usage tracking
             llmService.updateUsageFromSteps(step.steps);
@@ -508,6 +516,7 @@ export function createPrepareStep(
                 promptHistoryResult.didMutateHistory
                 || overlayHistoryResult?.didMutateHistory
                 || reminderStateChanged
+                || cacheAnchorEstablished
             ) {
                 await conversation.save();
             }

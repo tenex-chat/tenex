@@ -418,11 +418,21 @@ export function createTenexReminderStateStore(options: {
     conversationStore: ConversationStore;
 }): ReminderStateStore {
     return {
-        get: ({ agentId }) =>
-            cloneReminderState(
+        get: ({ agentId }) => {
+            if (!options.conversationStore.isAgentPromptHistoryCacheAnchored(agentId)) {
+                return undefined;
+            }
+
+            return cloneReminderState(
                 options.conversationStore.getContextManagementReminderState(agentId)
-            ),
+            );
+        },
         set: ({ agentId }, state) => {
+            if (!options.conversationStore.isAgentPromptHistoryCacheAnchored(agentId)) {
+                options.conversationStore.clearContextManagementReminderState(agentId);
+                return;
+            }
+
             options.conversationStore.setContextManagementReminderState(
                 agentId,
                 structuredClone(state)

@@ -109,6 +109,7 @@ describe("delta-based system reminders", () => {
     });
 
     it("skips unchanged providers on subsequent turns", async () => {
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         await collectReminderXml(makeData());
 
         const xml = await collectReminderXml(makeData());
@@ -118,6 +119,7 @@ describe("delta-based system reminders", () => {
     });
 
     it("re-sends when delegation state changes", async () => {
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         await collectReminderXml(makeData());
 
         const xml = await collectReminderXml(
@@ -140,6 +142,7 @@ describe("delta-based system reminders", () => {
     });
 
     it("sends todo deltas when items change status", async () => {
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         conversationStore.setTodos(agentPubkey, [
             {
                 id: "todo-1",
@@ -169,6 +172,7 @@ describe("delta-based system reminders", () => {
     });
 
     it("persists reminder delta state across conversation reloads", async () => {
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         await collectReminderXml(makeData());
         await conversationStore.save();
 
@@ -183,6 +187,15 @@ describe("delta-based system reminders", () => {
         expect(
             reloadedStore.getContextManagementReminderState(agentPubkey)?.providers["datetime"]
         ).toBeDefined();
+    });
+
+    it("re-sends full state on subsequent turns while history is not cache-anchored", async () => {
+        await collectReminderXml(makeData());
+
+        const xml = await collectReminderXml(makeData());
+
+        expect(xml).toContain("<datetime>");
+        expect(xml).toContain("<response-routing>");
     });
 
 });

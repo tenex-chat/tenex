@@ -294,6 +294,7 @@ function createEmptyAgentPromptHistoryState(): AgentPromptHistoryState {
         seenMessageIds: [],
         reminderDeltaState: {},
         nextSequence: 0,
+        cacheAnchored: false,
     };
 }
 
@@ -502,12 +503,14 @@ function normalizeLoadedAgentPromptHistories(
                 && Number.isFinite(rawState.nextSequence)
                 ? Math.max(0, Math.floor(rawState.nextSequence))
                 : messages.length;
+            const cacheAnchored = rawState.cacheAnchored === true;
 
             return [agentId, {
                 messages,
                 seenMessageIds,
                 reminderDeltaState,
                 nextSequence,
+                cacheAnchored,
             }] as const;
         })
     );
@@ -1310,6 +1313,20 @@ export class ConversationStore {
         }
 
         this.state.agentPromptHistories[agentPubkey] = history;
+    }
+
+    isAgentPromptHistoryCacheAnchored(agentPubkey: string): boolean {
+        return this.getAgentPromptHistory(agentPubkey).cacheAnchored;
+    }
+
+    markAgentPromptHistoryCacheAnchored(agentPubkey: string): boolean {
+        const history = this.getAgentPromptHistory(agentPubkey);
+        if (history.cacheAnchored) {
+            return false;
+        }
+
+        history.cacheAnchored = true;
+        return true;
     }
 
     clearAgentPromptHistory(agentPubkey: string): void {

@@ -45,6 +45,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type { ModelMessage } from "ai";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
+import { didEstablishPromptCacheFromUsage } from "./prompt-cache";
 import { setupStreamExecution } from "./StreamSetup";
 import { StreamExecutionHandler } from "./StreamExecutionHandler";
 import type {
@@ -568,6 +569,13 @@ export class AgentExecutor {
                 ralNumber,
                 messageLength: completionEvent.message.length,
             });
+        }
+
+        const cacheAnchorEstablished = didEstablishPromptCacheFromUsage(completionEvent.usage)
+            ? context.conversationStore.markAgentPromptHistoryCacheAnchored(context.agent.pubkey)
+            : false;
+        if (cacheAnchorEstablished) {
+            await context.conversationStore.save();
         }
 
         // Post-completion supervision check

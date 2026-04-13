@@ -199,7 +199,7 @@ TENEX conversation storage has two intentional layers:
 `ConversationStore` also carries per-agent prompt-view state that is intentionally separate from the canonical transcript:
 
 - Canonical `ConversationRecord`s remain the source of truth for transcript history.
-- Per-agent frozen prompt histories record the exact pre-context-management prompt view previously sent to that agent, including runtime-only overlay entries such as system reminders.
+- Per-agent frozen prompt histories record the exact pre-context-management prompt view previously sent to that agent. Runtime-only system reminder overlays remain ephemeral until a request has actually established prompt caching; after that anchor exists they can be persisted as replayable prompt-history entries.
 - Runtime overlays must never be replayed by mutating historical transcript messages. Append them as prompt-history entries instead.
 
 When adding a new conversation-facing feature, decide explicitly which layer it belongs to:
