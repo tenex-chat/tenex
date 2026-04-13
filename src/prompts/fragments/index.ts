@@ -16,6 +16,7 @@ import { delegationChainFragment } from "./05-delegation-chain";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 import { environmentVariablesFragment } from "./07-environment-variables";
 import { projectContextFragment } from "./08-project-context";
+import { domainExpertGuidanceFragment } from "./15-domain-expert-guidance";
 import { delegationTipsFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
 import { noResponseGuidanceFragment } from "./18-no-response-guidance";
@@ -46,6 +47,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(projectContextFragment);
 
     // Agent collaboration
+    fragmentRegistry.register(domainExpertGuidanceFragment);
     fragmentRegistry.register(delegationTipsFragment);
     fragmentRegistry.register(TodoUsageFragment);
     fragmentRegistry.register(noResponseGuidanceFragment);

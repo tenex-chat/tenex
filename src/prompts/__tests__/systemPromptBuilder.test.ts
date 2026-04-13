@@ -190,4 +190,46 @@ describe("systemPromptBuilder", () => {
 
         expect(addedFragments.some((fragment) => fragment.id === "no-response-guidance")).toBe(true);
     });
+
+    it("includes domain-expert-guidance fragment for domain-expert agents", async () => {
+        currentProjectContext = {};
+
+        await buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+            agentCategory: "domain-expert",
+        });
+
+        expect(addedFragments.some((fragment) => fragment.id === "domain-expert-guidance")).toBe(true);
+    });
+
+    it("does not include domain-expert-guidance fragment for non-domain-expert categories", async () => {
+        currentProjectContext = {};
+
+        for (const category of ["orchestrator", "worker"] as const) {
+            addedFragments.length = 0;
+
+            await buildSystemPromptMessages({
+                agent,
+                project,
+                conversation,
+                agentCategory: category,
+            });
+
+            expect(addedFragments.some((fragment) => fragment.id === "domain-expert-guidance")).toBe(false);
+        }
+    });
+
+    it("does not include domain-expert-guidance fragment when agentCategory is undefined", async () => {
+        currentProjectContext = {};
+
+        await buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+        });
+
+        expect(addedFragments.some((fragment) => fragment.id === "domain-expert-guidance")).toBe(false);
+    });
 });

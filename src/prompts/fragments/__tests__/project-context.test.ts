@@ -30,10 +30,6 @@ mock.module("@/utils/git/worktree", () => ({
     loadWorktreeMetadata: async () => ({}),
 }));
 
-mock.module("@/lib/agent-home", () => ({
-    getAgentProjectInjectedFiles: () => [],
-}));
-
 mock.module("@/utils/logger", () => ({
     logger: {
         warn: () => {},

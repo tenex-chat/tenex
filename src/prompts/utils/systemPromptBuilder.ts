@@ -272,6 +272,11 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // NOTE: agent-todos is NOT included here - it's injected as a late system message
     // in AgentExecutor.executeStreaming() to ensure it appears at the end of messages
 
+    // Add domain expert guidance for domain-expert agents
+    if (agentCategory === "domain-expert") {
+        systemPromptBuilder.add("domain-expert-guidance", {});
+    }
+
     // Add tool description guidance (universal — all agents benefit)
     systemPromptBuilder.add("tool-description-guidance", {});
 
