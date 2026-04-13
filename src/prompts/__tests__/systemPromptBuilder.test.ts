@@ -232,4 +232,36 @@ describe("systemPromptBuilder", () => {
 
         expect(addedFragments.some((fragment) => fragment.id === "domain-expert-guidance")).toBe(false);
     });
+
+    it("does not include delegation-tips or todo-before-delegation for domain-expert agents", async () => {
+        currentProjectContext = {};
+
+        await buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+            agentCategory: "domain-expert",
+        });
+
+        expect(addedFragments.some((f) => f.id === "delegation-tips")).toBe(false);
+        expect(addedFragments.some((f) => f.id === "todo-before-delegation")).toBe(false);
+    });
+
+    it("includes delegation-tips and todo-before-delegation for non-domain-expert agents", async () => {
+        currentProjectContext = {};
+
+        for (const category of ["worker", "orchestrator", "reviewer", undefined] as const) {
+            addedFragments.length = 0;
+
+            await buildSystemPromptMessages({
+                agent,
+                project,
+                conversation,
+                agentCategory: category,
+            });
+
+            expect(addedFragments.some((f) => f.id === "delegation-tips")).toBe(true);
+            expect(addedFragments.some((f) => f.id === "todo-before-delegation")).toBe(true);
+        }
+    });
 });

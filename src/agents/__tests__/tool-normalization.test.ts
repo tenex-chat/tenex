@@ -52,3 +52,32 @@ describe("processAgentTools", () => {
         }
     });
 });
+
+describe("domain-expert tool restrictions", () => {
+    it("should exclude delegate, delegate_crossproject, delegate_followup for domain-expert agents", () => {
+        const result = normalizeAgentTools(["shell"], "domain-expert");
+        expect(result).not.toContain("delegate");
+        expect(result).not.toContain("delegate_crossproject");
+        expect(result).not.toContain("delegate_followup");
+    });
+
+    it("should keep ask for domain-expert agents", () => {
+        const result = normalizeAgentTools(["shell"], "domain-expert");
+        expect(result).toContain("ask");
+    });
+
+    it("should still include all core tools for domain-expert agents", () => {
+        const result = normalizeAgentTools(["shell"], "domain-expert");
+        for (const coreTool of CORE_AGENT_TOOLS) {
+            expect(result).toContain(coreTool);
+        }
+    });
+
+    it("should include full delegate tools for non-domain-expert agents", () => {
+        const result = normalizeAgentTools(["shell"], "worker");
+        expect(result).toContain("delegate");
+        expect(result).toContain("delegate_crossproject");
+        expect(result).toContain("delegate_followup");
+        expect(result).toContain("ask");
+    });
+});

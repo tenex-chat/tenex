@@ -26,9 +26,9 @@ export interface AgentInstance {
     signer: NDKPrivateKeySigner;
     role: string;
     /**
-     * Agent category for semantic classification and organizational purposes.
-     * Resolved from the agent definition's category tag.
-     * No restrictions are applied based on category — all agents have access to all tools.
+     * Agent category for semantic classification and capability policy.
+     * Resolved from the agent definition's category or inferredCategory field.
+     * Drives tool assignment: domain-experts receive only `ask`, no delegation tools.
      */
     category?: AgentCategory;
     description?: string;

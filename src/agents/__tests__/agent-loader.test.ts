@@ -69,15 +69,15 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
         } as any;
     }
 
-    it("returns before categorization completes", async () => {
-        // categorizeAgent hangs indefinitely
-        categorizeAgentMock.mockReturnValue(new Promise(() => {}));
+    it("awaits categorization and applies the result to tool assignment", async () => {
+        // categorizeAgent resolves synchronously to domain-expert
+        categorizeAgentMock.mockResolvedValue("domain-expert");
 
         const signer = NDKPrivateKeySigner.generate();
         const storedAgent = createStoredAgent({
             nsec: signer.nsec,
-            slug: "lazy-nonblock",
-            name: "Nonblocking Test",
+            slug: "sync-categorized",
+            name: "Sync Categorized",
             role: "assistant",
         });
 
@@ -86,9 +86,53 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
             listAvailableSkills: mock(async () => []),
         } as never);
 
-        const start = Date.now();
-        await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
-        expect(Date.now() - start).toBeLessThan(1000);
+        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+
+        // Category must be resolved and reflected in the instance
+        expect(instance.category).toBe("domain-expert");
+
+        // Domain-experts must not receive delegation tools
+        expect(instance.tools).not.toContain("delegate");
+        expect(instance.tools).not.toContain("delegate_crossproject");
+        expect(instance.tools).not.toContain("delegate_followup");
+
+        // But they do retain ask
+        expect(instance.tools).toContain("ask");
+
+        loadAgentSpy.mockRestore();
+        skillServiceSpy.mockRestore();
+        categorizeAgentMock.mockReset();
+    });
+
+    it("applies domain-expert tool restrictions when category is stored (no LLM call needed)", async () => {
+        // No categorization needed — category already present in storage
+        const signer = NDKPrivateKeySigner.generate();
+        const storedAgent = createStoredAgent({
+            nsec: signer.nsec,
+            slug: "stored-expert",
+            name: "Stored Expert",
+            role: "assistant",
+            category: "domain-expert",
+        } as any); // createStoredAgent may not expose category directly; cast
+
+        const loadAgentSpy = spyOn(agentStorage, "loadAgent").mockResolvedValue({
+            ...storedAgent,
+            category: "domain-expert",
+        } as any);
+        const skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: mock(async () => []),
+        } as never);
+
+        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+
+        expect(instance.category).toBe("domain-expert");
+        expect(instance.tools).not.toContain("delegate");
+        expect(instance.tools).not.toContain("delegate_crossproject");
+        expect(instance.tools).not.toContain("delegate_followup");
+        expect(instance.tools).toContain("ask");
+
+        // categorizeAgent must NOT have been called — category was already set
+        expect(categorizeAgentMock).not.toHaveBeenCalled();
 
         loadAgentSpy.mockRestore();
         skillServiceSpy.mockRestore();

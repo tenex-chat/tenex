@@ -1,3 +1,4 @@
+import type { AgentCategory } from "@/agents/role-categories";
 import type { ToolName } from "@/tools/types";
 
 /**
@@ -51,21 +52,20 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
 ];
 
 /**
- * Get the delegate tools for an agent
- * This is the SINGLE source of truth for delegate tool assignment
+ * Get the delegate tools for an agent.
+ * This is the SINGLE source of truth for delegate tool assignment.
+ *
+ * Domain-expert agents only receive `ask` — they apply expertise directly
+ * and must never delegate work to other agents.
  */
-export function getDelegateToolsForAgent(): ToolName[] {
-    const tools: ToolName[] = [];
+export function getDelegateToolsForAgent(category?: AgentCategory): ToolName[] {
+    const tools: ToolName[] = ["ask"];
 
-    // All agents get ask tool
-    tools.push("ask");
-
-    // All agents get the unified delegate tool
-    tools.push("delegate");
-
-    // All agents get delegate_crossproject and delegate_followup
-    tools.push("delegate_crossproject");
-    tools.push("delegate_followup");
+    if (category !== "domain-expert") {
+        tools.push("delegate");
+        tools.push("delegate_crossproject");
+        tools.push("delegate_followup");
+    }
 
     return tools;
 }

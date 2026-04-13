@@ -143,7 +143,7 @@ async function executeAgentsWrite(
 export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "Write or update agent configuration and tools. Creates or updates backend-local agent identities. Core tools are automatically injected (lessons, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Telegram-triggered turns also get the context-sensitive `no_response` tool automatically. Newly created agents are installed in the backend, but they are not assigned to the current project until the user publishes a 31933 event that p-tags the agent pubkey.",
+            "Write or update agent configuration and tools. Creates or updates backend-local agent identities. Core tools are automatically injected (lessons, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are assigned based on agent category — domain-expert agents do not receive them. Do not include delegation tools explicitly. Assign additional tools based on responsibilities. Telegram-triggered turns also get the context-sensitive `no_response` tool automatically. Newly created agents are installed in the backend, but they are not assigned to the current project until the user publishes a 31933 event that p-tags the agent pubkey.",
         inputSchema: agentsWriteSchema,
         execute: async (input: AgentsWriteInput) => {
             try {

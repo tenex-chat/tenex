@@ -2,6 +2,7 @@ import { isValidToolName } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { CORE_AGENT_TOOLS, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./constants";
+import type { AgentCategory } from "./role-categories";
 
 /**
  * tool-normalization - Pure functions for processing agent tool lists
@@ -15,11 +16,15 @@ import { CORE_AGENT_TOOLS, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./co
  * ## What it does
  * Takes a raw tool list + agent context → returns final validated tool list:
  * 1. Filter out delegate tools (managed separately)
- * 2. Add appropriate delegate tools
+ * 2. Add appropriate delegate tools via getDelegateToolsForAgent (category-aware)
  * 3. Add core tools (all agents get these)
  * 4. Validate tool names
- * 5. Resolve MCP tools (check availability)
- * 6. Return final deduplicated list
+ * 5. Return final deduplicated list
+ *
+ * ## Capability policy
+ * getDelegateToolsForAgent() in constants.ts is the single source of truth
+ * for which delegation tools each category receives. Domain-experts receive
+ * only `ask` — no delegate/delegate_crossproject/delegate_followup.
  *
  * ## Pure Functions
  * All functions here are stateless and side-effect free:
@@ -28,30 +33,25 @@ import { CORE_AGENT_TOOLS, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./co
  * - No mutations
  * - Easy to test
  *
- * ## Usage
- * Called during AgentInstance creation in agent-loader.ts:
- * ```typescript
- * const finalTools = processAgentTools(storedAgent.tools, storedAgent.slug);
- * ```
- *
+ * @see constants.ts#getDelegateToolsForAgent for capability policy
  * @see agent-loader for usage in instance creation
  */
 
 /**
  * Normalize agent tools by applying business rules:
  * 1. Filter out delegate tools (they're managed separately)
- * 2. Add appropriate delegate tools
+ * 2. Add appropriate delegate tools via getDelegateToolsForAgent (category-aware)
  * 3. Ensure all core tools are included
  */
-export function normalizeAgentTools(requestedTools: string[]): string[] {
+export function normalizeAgentTools(requestedTools: string[], category?: AgentCategory): string[] {
     // Filter out delegation tools
     const toolNames = requestedTools.filter((tool) => {
         const typedTool = tool as ToolName;
         return !DELEGATE_TOOLS.includes(typedTool);
     });
 
-    // Add delegation tools
-    const delegateTools = getDelegateToolsForAgent();
+    // Add delegation tools — policy lives in getDelegateToolsForAgent (domain-experts get ask only)
+    const delegateTools = getDelegateToolsForAgent(category);
     toolNames.push(...delegateTools);
 
     // Ensure core tools are included
@@ -110,9 +110,9 @@ export function validateTools(toolNames: string[]): string[] {
  * MCP tools are no longer resolved here — agents declare server-level access
  * via mcpAccess and tools are injected at execution time.
  */
-export function processAgentTools(requestedTools: string[]): string[] {
+export function processAgentTools(requestedTools: string[], category?: AgentCategory): string[] {
     // Step 1: Normalize
-    const normalized = normalizeAgentTools(requestedTools);
+    const normalized = normalizeAgentTools(requestedTools, category);
 
     // Step 2: Validate (drops mcp__ entries with warning)
     return validateTools(normalized);

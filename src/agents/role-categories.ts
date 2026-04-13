@@ -1,15 +1,14 @@
 /**
  * role-categories - Semantic classification for agents
  *
- * Agents have an optional `category` field for semantic classification and organizational purposes.
- * Categories do NOT restrict tool access — all agents have access to all tools.
+ * Agents have an optional `category` field for semantic classification and capability policy.
  *
  * Categories represent operational roles:
  * - `principal`      — The human (e.g., human-replica)
  * - `orchestrator`   — Routes work, coordinates (e.g., PMs, coordinators)
  * - `worker`         — Does the work (e.g., developers, implementers)
  * - `reviewer`       — Evaluates quality, validates plans (e.g., clean-code-nazi)
- * - `domain-expert`  — Deep domain knowledge (e.g., ndk-core-expert)
+ * - `domain-expert`  — Deep domain knowledge; receives `ask` only — no delegation tools
  * - `generalist`     — General-purpose helpers
  *
  * Unknown/missing category remains undefined. Only set a category when explicitly known.
@@ -44,8 +43,8 @@ export function isValidCategory(value: string): value is AgentCategory {
  * Resolve an agent's effective category.
  * Returns the category if valid, otherwise undefined.
  *
- * Categories are for semantic classification and organizational purposes only.
- * They do not restrict tool access — all agents have access to all tools.
+ * The resolved category drives capability policy — e.g., domain-experts
+ * receive only `ask` and no delegation tools.
  */
 export function resolveCategory(category: string | undefined): AgentCategory | undefined {
     if (!category) return undefined;

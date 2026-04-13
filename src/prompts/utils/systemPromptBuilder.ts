@@ -107,17 +107,19 @@ async function addCoreAgentFragments(
 }
 
 /**
- * Add agent-specific fragments
+ * Add agent-specific fragments.
+ * Domain-expert agents receive domain-expert-guidance (no delegation) instead of
+ * delegation-tips and todo-before-delegation — including both would be contradictory.
  */
 function addAgentFragments(
     builder: PromptBuilder,
+    agentCategory: AgentCategory | undefined,
     triggeringEnvelope?: BuildSystemPromptOptions["triggeringEnvelope"],
 ): void {
-    // Add delegation tips (priority 16)
-    builder.add("delegation-tips", {});
-
-    // Add todo-before-delegation requirement (priority 17)
-    builder.add("todo-before-delegation", {});
+    if (agentCategory !== "domain-expert") {
+        builder.add("delegation-tips", {});
+        builder.add("todo-before-delegation", {});
+    }
 
     // Add explicit guidance for turns where the user wants no reply.
     if (triggeringEnvelope?.transport === "telegram") {
@@ -178,8 +180,13 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         teamContext,
     } = options;
 
+    // Fall back to the agent object's own category when the caller omits agentCategory.
+    // This ensures callers like PostCompletionChecker and ToolSupervisionWrapper
+    // that rebuild the prompt without an explicit category still apply correct policy.
+    const effectiveAgentCategory = agentCategory ?? agent.category;
+
     // Auto-derive availability based on agent category (orchestrators don't get scratchpad-practice or environment-variables)
-    const isOrchestrator = agentCategory === "orchestrator";
+    const isOrchestrator = effectiveAgentCategory === "orchestrator";
     const scratchpadAvailable = scratchpadAvailableOption ?? !isOrchestrator;
     const environmentVariablesAvailable = environmentVariablesAvailableOption ?? !isOrchestrator;
 
@@ -273,7 +280,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // in AgentExecutor.executeStreaming() to ensure it appears at the end of messages
 
     // Add domain expert guidance for domain-expert agents
-    if (agentCategory === "domain-expert") {
+    if (effectiveAgentCategory === "domain-expert") {
         systemPromptBuilder.add("domain-expert-guidance", {});
     }
 
@@ -292,6 +299,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // Add agent-specific fragments
     addAgentFragments(
         systemPromptBuilder,
+        effectiveAgentCategory,
         triggeringEnvelope,
     );
 

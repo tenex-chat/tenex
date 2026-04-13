@@ -3,7 +3,7 @@ import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
 import { installAgentFromNostr } from "@/agents/agent-installer";
 import { AgentSlugConflictError } from "@/agents/errors";
 import { categorizeAgent } from "@/agents/categorizeAgent";
-import { resolveCategory } from "@/agents/role-categories";
+import { resolveCategory, type AgentCategory } from "@/agents/role-categories";
 import { processAgentTools } from "@/agents/tool-normalization";
 import type { AgentInstance } from "@/agents/types";
 import { AgentMetadataStore } from "@/services/agents";
@@ -77,11 +77,11 @@ export async function createAgentInstance(
         });
     }
 
-    // Process tools using pure functions
-    const normalizedTools = processAgentTools(effectiveTools || []);
-
-    // Resolve category for organizational purposes (no tool restrictions)
+    // Resolve category — domain-experts have restricted tool access (no delegation)
     const resolvedCategory = resolveCategory(storedAgent.category) ?? resolveCategory(storedAgent.inferredCategory);
+
+    // Process tools using pure functions
+    const normalizedTools = processAgentTools(effectiveTools || [], resolvedCategory);
 
     // Build agent-specific MCP config from stored mcpServers
     const agentMcpConfig: MCPConfig | undefined = storedAgent.mcpServers
@@ -183,45 +183,56 @@ export async function loadStoredAgentIntoRegistry(
         throw new Error(`Agent ${pubkey} not found in storage`);
     }
 
+    // Resolve category synchronously so the correct capability policy (tool restrictions)
+    // is applied on the very first load. For uncategorized agents, we await the LLM
+    // classification before constructing the AgentInstance — this guarantees that
+    // domain-expert agents never receive delegation tools, even on first boot.
+    let freshlyInferredCategory: AgentCategory | undefined;
     if (!storedAgent.category && !storedAgent.inferredCategory && !categorizationInFlight.has(pubkey)) {
         categorizationInFlight.add(pubkey);
-        void (async () => {
-            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        try {
             const timeoutPromise = new Promise<never>((_, reject) => {
                 timeoutId = setTimeout(() => reject(new Error("categorization timed out after 30s")), 30_000);
             });
-            try {
-                const inferredCategory = await Promise.race([
-                    categorizeAgent({
-                        name: storedAgent.name,
-                        role: storedAgent.role,
-                        description: storedAgent.description,
-                        instructions: storedAgent.instructions,
-                        useCriteria: storedAgent.useCriteria,
-                    }),
-                    timeoutPromise,
-                ]).finally(() => clearTimeout(timeoutId));
-                if (!inferredCategory) return;
-                // CAS-style guard: re-read the agent immediately before writing so we
-                // don't clobber a concurrent saveAgent call with a stale copy of the file.
-                const current = await agentStorage.loadAgent(pubkey);
-                if (!current || current.inferredCategory || current.category) return;
-                const updated = await agentStorage.updateInferredCategory(pubkey, inferredCategory);
-                if (updated) {
-                    logger.info(`[AgentLoader] Lazily categorized agent "${storedAgent.name}" as "${inferredCategory}"`);
-                } else {
-                    logger.warn(`[AgentLoader] Failed to persist lazy categorization for "${storedAgent.name}"`);
-                }
-            } finally {
-                categorizationInFlight.delete(pubkey);
+            const inferredCategory = await Promise.race([
+                categorizeAgent({
+                    name: storedAgent.name,
+                    role: storedAgent.role,
+                    description: storedAgent.description,
+                    instructions: storedAgent.instructions,
+                    useCriteria: storedAgent.useCriteria,
+                }),
+                timeoutPromise,
+            ]).finally(() => clearTimeout(timeoutId));
+
+            if (inferredCategory) {
+                freshlyInferredCategory = inferredCategory;
+                logger.info(`[AgentLoader] Categorized agent "${storedAgent.name}" as "${inferredCategory}"`);
+                // CAS-style persist: re-read before writing to avoid clobbering concurrent saves.
+                void (async () => {
+                    const current = await agentStorage.loadAgent(pubkey);
+                    if (!current || current.inferredCategory || current.category) return;
+                    const updated = await agentStorage.updateInferredCategory(pubkey, inferredCategory);
+                    if (!updated) {
+                        logger.warn(`[AgentLoader] Failed to persist inferred category for "${storedAgent.name}"`);
+                    }
+                })();
             }
-        })().catch((error) => {
-            logger.warn(`[AgentLoader] Lazy categorization failed for "${storedAgent.name}"`, { error });
-        });
+        } catch (error) {
+            logger.warn(`[AgentLoader] Categorization failed for "${storedAgent.name}"`, { error });
+        } finally {
+            categorizationInFlight.delete(pubkey);
+        }
     }
 
     const projectDTag = registry.getProjectDTag();
-    const instance = await createAgentInstance(storedAgent, registry, projectDTag);
+    // Merge freshly inferred category into stored agent data so createAgentInstance
+    // sees it even before the CAS persist completes.
+    const agentForInstance = freshlyInferredCategory
+        ? { ...storedAgent, inferredCategory: freshlyInferredCategory }
+        : storedAgent;
+    const instance = await createAgentInstance(agentForInstance, registry, projectDTag);
     registry.addAgent(instance);
 
     const ndkProject = registry.getNDKProject();
