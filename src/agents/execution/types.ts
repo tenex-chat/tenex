@@ -1,7 +1,7 @@
 import type { Tool as CoreTool, ModelMessage, ToolChoice } from "ai";
-import type { ReminderRuntimeOverlay } from "ai-sdk-context-management";
 import type { AgentInstance } from "@/agents/types";
 import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
+import type { RuntimePromptOverlay } from "@/agents/execution/prompt-history";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
@@ -136,7 +136,7 @@ export interface LLMModelRequest {
     providerOptions?: ProviderOptions;
     experimentalContext?: unknown;
     toolChoice?: ToolChoice<Record<string, CoreTool>>;
-    runtimeOverlays?: ReminderRuntimeOverlay[];
+    runtimeOverlays?: RuntimePromptOverlay[];
     analysisRequestSeed?: LLMRequestAnalysisSeed;
     reportContextManagementUsage?: (
         actualInputTokens: number | null | undefined

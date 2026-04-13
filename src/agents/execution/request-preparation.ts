@@ -27,6 +27,7 @@ import type { ExecutionContextManagement } from "./context-management";
 import { normalizeMessagesForContextManagement } from "./context-management/normalize-messages";
 import { withContextManagementAnalysisScope } from "./context-management/telemetry";
 import type { LLMModelRequest } from "./types";
+import type { RuntimePromptOverlay } from "./prompt-history";
 
 const messageSanitizer = createMessageSanitizerMiddleware();
 const promptEstimator = createDefaultPromptTokenEstimator();
@@ -87,6 +88,126 @@ function mapQueuedRemindersToContextManagement(
     }));
 }
 
+function escapeReminderAttribute(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+}
+
+function renderReminderXml(reminder: CollectedSystemReminder): string {
+    const attrs = reminder.attributes
+        ? Object.entries(reminder.attributes)
+            .filter(([key, value]) => key.trim().length > 0 && value.trim().length > 0)
+            .map(([key, value]) => `${key}="${escapeReminderAttribute(value)}"`)
+            .join(" ")
+        : "";
+    return `<${reminder.type}${attrs.length > 0 ? ` ${attrs}` : ""}>${reminder.content.trim()}</${reminder.type}>`;
+}
+
+function normalizeReminderOverlayContent(content: string): string {
+    const startTag = "<system-reminders>";
+    const endTag = "</system-reminders>";
+
+    if (!content.includes(startTag) || !content.includes(endTag)) {
+        return content.trim();
+    }
+
+    const inner = content
+        .slice(content.indexOf(startTag) + startTag.length, content.lastIndexOf(endTag))
+        .trim();
+    if (inner.length === 0) {
+        return "";
+    }
+
+    return `${startTag}\n${inner}\n${endTag}`;
+}
+
+function replaceOverlayMessageContent(
+    message: ModelMessage,
+    content: string
+): ModelMessage {
+    switch (message.role) {
+        case "system":
+        case "user":
+        case "assistant":
+            return {
+                ...message,
+                content,
+            };
+        case "tool":
+            return message;
+    }
+}
+
+function stripTransientReminderXml(
+    content: string,
+    reminders: CollectedSystemReminder[]
+): string {
+    let nextContent = content;
+
+    for (const reminder of reminders) {
+        const xml = renderReminderXml(reminder);
+        nextContent = nextContent.replace(`\n${xml}`, "");
+        nextContent = nextContent.replace(`${xml}\n`, "");
+        nextContent = nextContent.replace(xml, "");
+    }
+
+    return normalizeReminderOverlayContent(nextContent);
+}
+
+function filterRuntimeOverlaysForPersistence(params: {
+    overlays: RuntimePromptOverlay[] | undefined;
+    queuedReminders: CollectedSystemReminder[];
+}): RuntimePromptOverlay[] | undefined {
+    const transientQueuedReminders = params.queuedReminders.filter(
+        (reminder) => reminder.persistInHistory !== true
+    );
+
+    if (transientQueuedReminders.length === 0 || !params.overlays?.length) {
+        return params.overlays;
+    }
+
+    const filtered: RuntimePromptOverlay[] = [];
+
+    for (const overlay of params.overlays) {
+        if (overlay.overlayType !== "system-reminders") {
+            filtered.push(overlay);
+            continue;
+        }
+
+        const content = overlay.message.content;
+        const stringContent = typeof content === "string"
+            ? content
+            : Array.isArray(content)
+                && content.length === 1
+                && content[0]?.type === "text"
+                ? content[0].text
+                : undefined;
+
+        if (typeof stringContent !== "string") {
+            filtered.push(overlay);
+            continue;
+        }
+
+        const strippedContent = stripTransientReminderXml(
+            stringContent,
+            transientQueuedReminders
+        );
+        if (strippedContent.length === 0) {
+            continue;
+        }
+
+        filtered.push({
+            ...overlay,
+            message: replaceOverlayMessageContent(overlay.message, strippedContent),
+        });
+    }
+
+    return filtered;
+}
+
 export async function prepareLLMRequest(options: {
     messages: ModelMessage[];
     tools: Record<string, AISdkTool>;
@@ -125,9 +246,11 @@ export async function prepareLLMRequest(options: {
             preContextEstimatedInputTokens,
         },
     });
+    let queuedReminders: CollectedSystemReminder[] = [];
 
     if (options.contextManagement) {
         const contextManagement = options.contextManagement;
+        queuedReminders = await getSystemReminderContext().collect();
         const contextManagedRequest = await withContextManagementAnalysisScope(
             analysisRequestSeed
                 ? {
@@ -158,9 +281,7 @@ export async function prepareLLMRequest(options: {
                     providerOptions: preparedProviderOptions,
                     model: options.model,
                     reminderData: options.reminderData,
-                    queuedReminders: mapQueuedRemindersToContextManagement(
-                        await getSystemReminderContext().collect()
-                    ),
+                    queuedReminders: mapQueuedRemindersToContextManagement(queuedReminders),
                 })
         );
 
@@ -169,7 +290,10 @@ export async function prepareLLMRequest(options: {
         preparedToolChoice =
             contextManagedRequest.toolChoice as ToolChoice<Record<string, CoreTool>> | undefined;
         reportContextManagementUsage = contextManagedRequest.reportActualUsage;
-        runtimeOverlays = contextManagedRequest.runtimeOverlays;
+        runtimeOverlays = filterRuntimeOverlaysForPersistence({
+            overlays: contextManagedRequest.runtimeOverlays as RuntimePromptOverlay[] | undefined,
+            queuedReminders,
+        });
     }
 
     ({

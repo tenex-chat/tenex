@@ -33,7 +33,7 @@ function descriptorToCollected(reminder: TenexSystemReminderDescriptor): Collect
         content: reminder.content,
         placement: reminder.placement ?? "overlay-user",
         ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
-        ...(reminder.persistInHistory !== undefined ? { persistInHistory: reminder.persistInHistory } : {}),
+        persistInHistory: reminder.persistInHistory ?? false,
     };
 }
 

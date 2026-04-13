@@ -1,33 +1,16 @@
 import {
     RemindersStrategy,
     createContextManagementRuntime,
-    type ContextManagementReminder,
 } from "ai-sdk-context-management";
+import type { ModelMessage } from "ai";
 import type { RuntimePromptOverlay } from "../prompt-history";
+import type { ExecutionContextManagement } from "../context-management";
+import { prepareLLMRequest } from "../request-preparation";
 import {
     createTenexReminderProviders,
     createTenexReminderStateStore,
     type TenexReminderData,
 } from "../system-reminders";
-import {
-    getSystemReminderContext,
-    type CollectedSystemReminder,
-} from "@/llm/system-reminder-context";
-
-function mapQueuedReminders(
-    reminders: CollectedSystemReminder[]
-): ContextManagementReminder[] {
-    return reminders.map((reminder) => ({
-        kind: reminder.type,
-        content: reminder.content,
-        ...(reminder.attributes ? { attributes: reminder.attributes } : {}),
-        ...(reminder.placement ? { placement: reminder.placement } : {}),
-        ...(reminder.disposition ? { disposition: reminder.disposition } : {}),
-        ...(reminder.persistInHistory !== undefined
-            ? { persistInHistory: reminder.persistInHistory }
-            : {}),
-    }));
-}
 
 function normalizeOverlay(
     overlay: RuntimePromptOverlay | undefined
@@ -58,15 +41,34 @@ function normalizeOverlays(
         .filter((overlay): overlay is RuntimePromptOverlay => overlay !== undefined);
 }
 
-export async function collectTenexReminderOverlays(
+function normalizeMessage(message: ModelMessage): ModelMessage {
+    if (
+        !Array.isArray(message.content)
+        || message.content.length !== 1
+        || message.content[0]?.type !== "text"
+    ) {
+        return message;
+    }
+
+    return {
+        ...message,
+        content: message.content[0].text,
+    } as ModelMessage;
+}
+
+export async function prepareTenexReminderRequest(params: {
+    messages: ModelMessage[];
     data: Pick<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">
-        & Partial<Omit<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">>
-): Promise<RuntimePromptOverlay[]> {
+        & Partial<Omit<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">>;
+}): Promise<{
+    messages: ModelMessage[];
+    runtimeOverlays: RuntimePromptOverlay[];
+}> {
     const reminderData: TenexReminderData = {
         pendingDelegations: [],
         completedDelegations: [],
         loadedSkills: [],
-        ...data,
+        ...params.data,
     };
     const runtime = createContextManagementRuntime({
         strategies: [
@@ -79,20 +81,53 @@ export async function collectTenexReminderOverlays(
             }),
         ],
     });
-    const prepared = await runtime.prepareRequest({
+    const contextManagement: ExecutionContextManagement = {
+        optionalTools: {},
+        scratchpadAvailable: true,
         requestContext: {
             conversationId: reminderData.conversation.getId(),
             agentId: reminderData.agent.pubkey,
             agentLabel: reminderData.agent.name || reminderData.agent.slug,
         },
-        messages: [],
+        prepareRequest: async (options) =>
+            await runtime.prepareRequest({
+                ...options,
+                requestContext: {
+                    conversationId: reminderData.conversation.getId(),
+                    agentId: reminderData.agent.pubkey,
+                    agentLabel: reminderData.agent.name || reminderData.agent.slug,
+                },
+            }),
+    };
+    const prepared = await prepareLLMRequest({
+        messages: params.messages,
+        tools: {},
+        providerId: "test-provider",
+        model: {
+            provider: "test-provider",
+            modelId: "test-model",
+        },
+        contextManagement,
         reminderData,
-        queuedReminders: mapQueuedReminders(
-            await getSystemReminderContext().collect()
-        ),
     });
 
-    return normalizeOverlays(prepared.runtimeOverlays as RuntimePromptOverlay[] | undefined);
+    return {
+        messages: prepared.messages.map((message) => normalizeMessage(message as ModelMessage)),
+        runtimeOverlays: normalizeOverlays(
+            prepared.runtimeOverlays
+        ),
+    };
+}
+
+export async function collectTenexReminderOverlays(
+    data: Pick<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">
+        & Partial<Omit<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">>
+): Promise<RuntimePromptOverlay[]> {
+    const prepared = await prepareTenexReminderRequest({
+        messages: [],
+        data,
+    });
+    return prepared.runtimeOverlays;
 }
 
 export async function collectTenexReminderOverlay(

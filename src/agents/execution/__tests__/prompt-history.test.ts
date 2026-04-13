@@ -9,7 +9,7 @@ import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { collectTenexReminderOverlay } from "./reminder-test-utils";
+import { prepareTenexReminderRequest } from "./reminder-test-utils";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
@@ -229,7 +229,7 @@ describe("per-agent prompt history", () => {
         expect(historyB[1]?.content).toBe("I already checked that file.");
     });
 
-    it("appends runtime overlays instead of rewriting the same historical user message", async () => {
+    it("leaves prompt history canonical when reminders append to the latest user message", async () => {
         conversationStore.addMessage({
             pubkey: "user-pubkey",
             content: "Track the todos",
@@ -242,19 +242,21 @@ describe("per-agent prompt history", () => {
         ]);
 
         const firstCompiled = await compile(agentA, ralNumber, [agentA]);
-        const firstOverlay = await collectTenexReminderOverlay({
-            agent: agentA,
-            conversation: conversationStore,
-            respondingToPrincipal,
-            pendingDelegations: [],
-            completedDelegations: [],
-            loadedSkills: [],
-        });
-        buildPromptHistoryMessages({
+        const firstBase = buildPromptHistoryMessages({
             compiled: firstCompiled,
             conversationStore,
             agentPubkey: agentA.pubkey,
-            runtimeOverlay: firstOverlay,
+        });
+        const firstPrepared = await prepareTenexReminderRequest({
+            messages: firstBase.messages,
+            data: {
+                agent: agentA,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                pendingDelegations: [],
+                completedDelegations: [],
+                loadedSkills: [],
+            },
         });
 
         conversationStore.setTodos(agentA.pubkey, [
@@ -262,29 +264,30 @@ describe("per-agent prompt history", () => {
         ]);
 
         const secondCompiled = await compile(agentA, ralNumber, [agentA]);
-        const secondOverlay = await collectTenexReminderOverlay({
-            agent: agentA,
-            conversation: conversationStore,
-            respondingToPrincipal,
-            pendingDelegations: [],
-            completedDelegations: [],
-            loadedSkills: [],
-        });
-        buildPromptHistoryMessages({
+        const secondBase = buildPromptHistoryMessages({
             compiled: secondCompiled,
             conversationStore,
             agentPubkey: agentA.pubkey,
-            runtimeOverlay: secondOverlay,
+        });
+        const secondPrepared = await prepareTenexReminderRequest({
+            messages: secondBase.messages,
+            data: {
+                agent: agentA,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                pendingDelegations: [],
+                completedDelegations: [],
+                loadedSkills: [],
+            },
         });
 
         const history = conversationStore.getAgentPromptHistory(agentA.pubkey).messages;
-        const overlayMessages = history.filter((message) => message.source.kind === "runtime-overlay");
 
         expect(history[0]?.content).toBe("Track the todos");
-        expect(overlayMessages).toHaveLength(2);
-        expect(String(overlayMessages[0]?.content)).toContain("<agent-todos>");
-        expect(String(overlayMessages[1]?.content)).toContain("pending → in_progress");
+        expect(history).toHaveLength(1);
         expect(String(history[0]?.content)).not.toContain("<system-reminders>");
+        expect(String(firstPrepared.messages[1]?.content)).toContain("<agent-todos>");
+        expect(String(secondPrepared.messages[1]?.content)).toContain("<agent-todos>");
     });
 
     it("appends explicit delegation completion marker records", async () => {
