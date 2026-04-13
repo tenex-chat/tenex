@@ -53,7 +53,9 @@ export interface BuildSystemPromptOptions {
     availableAgents?: AgentInstance[];
     /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
     scratchpadAvailable?: boolean;
-    /** Agent category. Used to auto-derive scratchpadAvailable (orchestrators don't get scratchpad-practice). */
+    /** Whether to include environment-variables fragment. Defaults to true. */
+    environmentVariablesAvailable?: boolean;
+    /** Agent category. Used to auto-derive scratchpadAvailable and environmentVariablesAvailable (orchestrators don't get either). */
     agentCategory?: AgentCategory;
     teamContext?: TeamContext;
 }
@@ -171,13 +173,15 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         availableAgents = [],
         conversation,
         scratchpadAvailable: scratchpadAvailableOption,
+        environmentVariablesAvailable: environmentVariablesAvailableOption,
         agentCategory,
         teamContext,
     } = options;
 
-    // Auto-derive scratchpadAvailable based on agent category (orchestrators don't get scratchpad-practice)
+    // Auto-derive availability based on agent category (orchestrators don't get scratchpad-practice or environment-variables)
     const isOrchestrator = agentCategory === "orchestrator";
     const scratchpadAvailable = scratchpadAvailableOption ?? !isOrchestrator;
+    const environmentVariablesAvailable = environmentVariablesAvailableOption ?? !isOrchestrator;
 
     const baseAgentInstructions = agent.instructions || "";
     const context = getProjectContext();
@@ -233,10 +237,12 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     });
 
     // Add environment path variables (shell + file tool usage)
-    systemPromptBuilder.add("environment-variables", {
-        agent: agentForFragments,
-        projectBasePath,
-    });
+    if (environmentVariablesAvailable) {
+        systemPromptBuilder.add("environment-variables", {
+            agent: agentForFragments,
+            projectBasePath,
+        });
+    }
 
     // Add consolidated project context (workspace, team, channels, agents.md, other-projects)
     systemPromptBuilder.add("project-context", {
