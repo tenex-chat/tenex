@@ -229,6 +229,59 @@ describe("per-agent prompt history", () => {
         expect(historyB[1]?.content).toBe("I already checked that file.");
     });
 
+    it("sanitizes non-cloneable tool payloads before freezing prompt history", () => {
+        const nonCloneable = {
+            ok: true,
+            nested: {
+                retained: "value",
+            },
+            dropMe: () => "not serializable",
+        };
+
+        const result = buildPromptHistoryMessages({
+            compiled: {
+                messages: [
+                    { role: "system", content: "SYSTEM_PROMPT" },
+                    {
+                        role: "tool",
+                        content: [{
+                            type: "tool-result" as const,
+                            toolCallId: "tool-call-1",
+                            toolName: "shell",
+                            output: {
+                                type: "json" as const,
+                                value: nonCloneable,
+                            },
+                        }],
+                        id: "tool-message-1",
+                    },
+                ],
+                systemPrompt: "SYSTEM_PROMPT",
+                counts: {
+                    systemPrompt: 1,
+                    conversation: 1,
+                    dynamicContext: 0,
+                    total: 2,
+                },
+            },
+            conversationStore,
+            agentPubkey: agentA.pubkey,
+        });
+
+        const history = conversationStore.getAgentPromptHistory(agentA.pubkey).messages;
+        const content = history[0]?.content;
+
+        expect(result.messages).toHaveLength(2);
+        expect(history).toHaveLength(1);
+        expect(Array.isArray(content)).toBe(true);
+        expect((content as Array<{ output?: { value?: unknown } }>)[0]?.output?.value).toEqual({
+            ok: true,
+            nested: {
+                retained: "value",
+            },
+        });
+    });
+
     it("leaves prompt history canonical when reminders append to the latest user message", async () => {
         conversationStore.addMessage({
             pubkey: "user-pubkey",

@@ -38,8 +38,99 @@ function isSystemReminderOverlay(
     return message.overlayType === "system-reminders";
 }
 
+function toPromptHistorySafeValue(
+    value: unknown,
+    seen: WeakSet<object> = new WeakSet()
+): unknown {
+    if (
+        value === null
+        || typeof value === "string"
+        || typeof value === "number"
+        || typeof value === "boolean"
+    ) {
+        return value;
+    }
+
+    if (typeof value === "bigint") {
+        return value.toString();
+    }
+
+    if (
+        value === undefined
+        || typeof value === "function"
+        || typeof value === "symbol"
+    ) {
+        return undefined;
+    }
+
+    if (value instanceof Date) {
+        return value.toISOString();
+    }
+
+    if (value instanceof URL) {
+        return value.toString();
+    }
+
+    if (value instanceof Error) {
+        const normalizedCause = toPromptHistorySafeValue(value.cause, seen);
+        const enumerableEntries = Object.entries(value).flatMap(([key, entryValue]) => {
+            const normalizedEntry = toPromptHistorySafeValue(entryValue, seen);
+            return normalizedEntry === undefined ? [] : [[key, normalizedEntry] as const];
+        });
+
+        return {
+            name: value.name,
+            message: value.message,
+            ...(value.stack ? { stack: value.stack } : {}),
+            ...(normalizedCause !== undefined ? { cause: normalizedCause } : {}),
+            ...Object.fromEntries(enumerableEntries),
+        };
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((entry) => {
+            const normalizedEntry = toPromptHistorySafeValue(entry, seen);
+            return normalizedEntry === undefined ? null : normalizedEntry;
+        });
+    }
+
+    if (ArrayBuffer.isView(value)) {
+        return Array.from(
+            new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+        );
+    }
+
+    if (value instanceof ArrayBuffer) {
+        return Array.from(new Uint8Array(value));
+    }
+
+    if (typeof value === "object") {
+        if (seen.has(value)) {
+            return "[Circular]";
+        }
+        seen.add(value);
+
+        return Object.fromEntries(
+            Object.entries(value).flatMap(([key, entryValue]) => {
+                const normalizedEntry = toPromptHistorySafeValue(entryValue, seen);
+                return normalizedEntry === undefined ? [] : [[key, normalizedEntry] as const];
+            })
+        );
+    }
+
+    return String(value);
+}
+
+function clonePromptHistoryValue<T>(value: T): T {
+    try {
+        return structuredClone(value);
+    } catch {
+        return toPromptHistorySafeValue(value) as T;
+    }
+}
+
 function cloneMessageContent(message: ModelMessage): ModelMessage["content"] {
-    return structuredClone(message.content);
+    return clonePromptHistoryValue(message.content);
 }
 
 function nextPromptHistoryId(history: AgentPromptHistoryState): string {
@@ -113,7 +204,7 @@ function freezeRuntimeOverlay(
 function thawFrozenPromptMessage(message: FrozenPromptMessage): ModelMessage {
     return {
         role: message.role,
-        content: structuredClone(message.content),
+        content: clonePromptHistoryValue(message.content),
         id: message.id,
         ...(message.source.sourceRecordId
             ? { sourceRecordId: message.source.sourceRecordId }
