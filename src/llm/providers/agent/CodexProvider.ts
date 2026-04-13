@@ -197,15 +197,26 @@ function hasDefinedMetadata(metadata: LLMMetadata): boolean {
     return Object.values(metadata).some((value) => value !== undefined);
 }
 
-function buildCodexDeveloperInstructions(
-    developerInstructions: string | undefined
-): string | undefined {
-    if (developerInstructions?.includes(CODEX_TENEX_TOOL_ROUTING_GUIDANCE)) {
-        return developerInstructions;
+/**
+ * Build the Codex baseInstructions, which always includes the TENEX tool routing
+ * guidance. baseInstructions has lower priority than developerInstructions, so
+ * this allows the Codex provider library to fall back to using the system prompt
+ * (extracted from role:"system" messages) as developerInstructions.
+ *
+ * When developerInstructions is left unset, the library's fallback logic
+ * (`effectiveDeveloperInstructions = developerInstructionsOverride ?? prompt.systemInstruction`)
+ * kicks in and uses the TENEX system prompt (agent identity, project context,
+ * skills, etc.) as developerInstructions — which is exactly what we want.
+ */
+function buildCodexBaseInstructions(
+    baseInstructions: string | undefined
+): string {
+    if (baseInstructions?.includes(CODEX_TENEX_TOOL_ROUTING_GUIDANCE)) {
+        return baseInstructions;
     }
 
-    return developerInstructions
-        ? `${CODEX_TENEX_TOOL_ROUTING_GUIDANCE}\n\n${developerInstructions}`
+    return baseInstructions
+        ? `${CODEX_TENEX_TOOL_ROUTING_GUIDANCE}\n\n${baseInstructions}`
         : CODEX_TENEX_TOOL_ROUTING_GUIDANCE;
 }
 
@@ -452,8 +463,16 @@ export class CodexProvider extends AgentProvider {
             effort: providerConfig.effort,
             summary: providerConfig.summary,
             personality: providerConfig.personality,
-            developerInstructions: buildCodexDeveloperInstructions(providerConfig.developerInstructions),
-            baseInstructions: providerConfig.baseInstructions,
+            // Do NOT set developerInstructions here unless the user explicitly configured it.
+            // The ai-sdk-provider-codex-cli library falls back to using the system prompt
+            // (extracted from role:"system" messages) as developerInstructions when this
+            // field is unset. This allows the TENEX system prompt (agent identity, project
+            // context, skills, etc.) to reach Codex as developerInstructions.
+            // See: effectiveDeveloperInstructions = developerInstructionsOverride ?? prompt.systemInstruction
+            developerInstructions: providerConfig.developerInstructions,
+            // TENEX tool routing guidance goes into baseInstructions so Codex always
+            // receives it regardless of whether developerInstructions is set or not.
+            baseInstructions: buildCodexBaseInstructions(providerConfig.baseInstructions),
             mcpServers: Object.keys(mcpServersConfig).length > 0 ? mcpServersConfig : undefined,
             rmcpClient: providerConfig.rmcpClient,
             configOverrides: normalizedConfigOverrides,

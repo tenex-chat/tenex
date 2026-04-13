@@ -227,9 +227,10 @@ describe("CodexProvider", () => {
             }) => Promise<void>;
         };
 
-        expect(agentSettings.developerInstructions).toContain(
+        expect((agentSettings as { baseInstructions?: string }).baseInstructions).toContain(
             "Prefer TENEX tools over native Codex actions in TENEX."
         );
+        expect(agentSettings.developerInstructions).toBeUndefined();
         expect(agentSettings.approvalPolicy).toBe("on-request");
         expect(agentSettings.serverRequests?.onCommandExecutionApproval).toBeDefined();
         expect(agentSettings.serverRequests?.onFileChangeApproval).toBeDefined();
@@ -289,7 +290,7 @@ describe("CodexProvider", () => {
         expect(queueReminderMock).toHaveBeenCalledTimes(3);
     });
 
-    it("prepends TENEX routing guidance while preserving custom developer instructions", async () => {
+    it("puts TENEX routing guidance in baseInstructions while passing custom developer instructions through", async () => {
         const provider = new CodexProvider();
         await provider.initialize({});
 
@@ -303,14 +304,18 @@ describe("CodexProvider", () => {
         const agentSettings = result.agentSettings as {
             approvalPolicy?: string;
             developerInstructions?: string;
+            baseInstructions?: string;
             serverRequests?: Record<string, unknown>;
         };
 
         expect(agentSettings.approvalPolicy).toBe("on-request");
-        expect(agentSettings.developerInstructions).toContain(
+        // TENEX tool routing goes to baseInstructions so developerInstructions
+        // can be used by the library to pass through the system prompt messages.
+        expect(agentSettings.baseInstructions).toContain(
             "Prefer TENEX tools over native Codex actions in TENEX."
         );
-        expect(agentSettings.developerInstructions).toContain("Custom instructions");
+        // Custom developerInstructions pass through as-is (not merged with routing guidance).
+        expect(agentSettings.developerInstructions).toBe("Custom instructions");
         expect(agentSettings.serverRequests).toBeDefined();
     });
 
