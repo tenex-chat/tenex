@@ -4,7 +4,6 @@ import {
     ensureAgentHomeDirectory,
     getAgentHomeDirectory,
     getAgentHomeInjectedFiles,
-    getAgentProjectMemoryDirectory,
 } from "@/lib/agent-home";
 
 // Re-export for convenience (used by tests)
@@ -22,7 +21,6 @@ export function clearAgentHomePromptCache(): void {
  */
 interface AgentHomeDirectoryArgs {
     agent: AgentInstance;
-    projectId?: string;
 }
 
 /**
@@ -64,13 +62,10 @@ function countHomeFiles(homeDir: string, agentPubkey: string): string {
 export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> = {
     id: "agent-home-directory",
     priority: 2, // Right after agent-identity (priority 1)
-    template: async ({ agent, projectId }) => {
+    template: async ({ agent }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const homeCount = countHomeFiles(homeDir, agent.pubkey);
         const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
-        const projectMemoryDir = projectId
-            ? getAgentProjectMemoryDirectory(agent.pubkey, projectId)
-            : undefined;
 
         const parts: string[] = [];
 
@@ -100,13 +95,6 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
                 "Instead, write that content in a regular (non-`+`) file and add a brief reference to it from your `+` file so you can read it when relevant. " +
                 "Keep each `+` file under **100 lines** — if it exceeds that, extract the detail into a non-`+` file and replace it with a pointer."
         );
-        if (projectMemoryDir) {
-            parts.push("");
-            parts.push(
-                `**Project-specific memory:** For private persistent notes for this project, use \`${projectMemoryDir}/+<slug>.md\`. ` +
-                "Those `+` files are injected in the project-context section. Apply the same rule: keep them lean, and link out to non-`+` files for detailed or situational content."
-            );
-        }
         // Inject +prefixed file contents
         if (injectedFiles.length > 0) {
             parts.push("");

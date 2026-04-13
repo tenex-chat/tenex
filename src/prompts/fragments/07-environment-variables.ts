@@ -18,16 +18,16 @@ export const environmentVariablesFragment: PromptFragment<EnvironmentVariablesAr
         const parts: string[] = [];
         parts.push("<environment-variables>");
         parts.push("These variables are available in shell commands and file tool path arguments.");
-        parts.push("- $USER_HOME — the user's home directory");
-        parts.push("- $AGENT_HOME — your private home directory");
-        parts.push("- $PUBKEY — your hex pubkey");
-        parts.push("- $NPUB — your npub-encoded pubkey");
+        parts.push("- $USER_HOME, $AGENT_HOME, $PUBKEY, $NPUB");
         if (projectBasePath) {
-            parts.push("- $PROJECT_BASE — the current project's root directory");
+            parts.push("- $PROJECT_BASE, $PROJECT_ID");
+        } else {
+            parts.push("- $PROJECT_ID");
         }
         parts.push("- $TENEX_BASE_DIR — TENEX data directory (agents, projects, teams)");
         parts.push("- $TENEX_SRC — TENEX source/installation directory (for running built-in skill scripts)");
-        parts.push("- $PROJECT_ID — current project identifier (when executing in a project context)");
+        parts.push("");
+        parts.push("Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessions).");
         parts.push("</environment-variables>");
         return parts.join("\n");
     },

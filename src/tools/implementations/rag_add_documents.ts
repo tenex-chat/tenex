@@ -6,6 +6,10 @@ import { type RAGDocument, RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
 import type { DocumentMetadata } from "@/services/rag/rag-utils";
 import { type ToolResponse, executeToolWithErrorHandling, resolveAndValidatePath } from "@/tools/utils";
+import {
+    expandPathFromContext,
+    formatUnresolvedPathVariablesError,
+} from "@/tools/utils/path-expansion";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { tool } from "ai";
 import { z } from "zod";
@@ -25,7 +29,7 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const HTTP_USER_AGENT = "TENEX-RAG-Ingester/1.0";
 
 // Type definitions for protocol handlers
-type ProtocolHandler = (uri: string, context: { workingDirectory: string }) => Promise<string>;
+type ProtocolHandler = (uri: string, context: ToolExecutionContext) => Promise<string>;
 
 /**
  * Schema for RAG document input
@@ -207,13 +211,17 @@ function parseFilePathFromURI(uri: string): string {
  */
 async function handleFileProtocolURI(
     uri: string,
-    context: { workingDirectory: string }
+    context: ToolExecutionContext
 ): Promise<string> {
     try {
         const filePath = parseFilePathFromURI(uri);
+        const { expandedPath, unresolvedVars } = await expandPathFromContext(filePath, context);
+        if (unresolvedVars.length > 0) {
+            throw new Error(formatUnresolvedPathVariablesError(filePath, unresolvedVars));
+        }
 
         // Resolve the path (handles both absolute and relative paths)
-        const resolvedPath = path.resolve(context.workingDirectory, filePath);
+        const resolvedPath = path.resolve(context.workingDirectory, expandedPath);
 
         // Check file size before reading
         const stats = await stat(resolvedPath);
@@ -233,7 +241,7 @@ async function handleFileProtocolURI(
  */
 async function handleHttpProtocolURI(
     uri: string,
-    _context: { workingDirectory: string }
+    _context: ToolExecutionContext
 ): Promise<string> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
@@ -307,7 +315,7 @@ export function registerProtocolHandler(protocol: string, handler: ProtocolHandl
 /**
  * Fetch content from a URI using the appropriate protocol handler
  */
-async function fetchFromURI(uri: string, workingDirectory: string): Promise<string> {
+async function fetchFromURI(uri: string, context: ToolExecutionContext): Promise<string> {
     // Validate URI first
     const parsedUrl = validateURI(uri);
 
@@ -321,7 +329,7 @@ async function fetchFromURI(uri: string, workingDirectory: string): Promise<stri
     }
 
     // Execute handler
-    return await handler(uri, { workingDirectory });
+    return await handler(uri, context);
 }
 
 /**
@@ -332,21 +340,31 @@ async function fetchFromURI(uri: string, workingDirectory: string): Promise<stri
  */
 async function extractDocumentContentFromSource(
     doc: DocumentInput,
-    workingDirectory: string
+    context: ToolExecutionContext
 ): Promise<{ content: string; source: string | undefined }> {
     let content: string;
     let resolvedPath: string | undefined;
 
     if ("uri" in doc && doc.uri) {
         // URI-based document
-        content = await fetchFromURI(doc.uri, workingDirectory);
+        content = await fetchFromURI(doc.uri, context);
     } else {
         // Content/file_path based document
         content = doc.content || "";
 
         // Read from file if file_path is provided
         if (doc.file_path) {
-            resolvedPath = resolveAndValidatePath(doc.file_path, workingDirectory);
+            const { expandedPath, unresolvedVars } = await expandPathFromContext(
+                doc.file_path,
+                context
+            );
+            if (unresolvedVars.length > 0) {
+                throw new Error(
+                    formatUnresolvedPathVariablesError(doc.file_path, unresolvedVars)
+                );
+            }
+
+            resolvedPath = resolveAndValidatePath(expandedPath, context.workingDirectory);
 
             // Check file size
             const stats = await stat(resolvedPath);
@@ -433,6 +451,7 @@ function coerceToDocumentMetadata(record: Record<string, unknown>): DocumentMeta
                 // JSON round-trip validates serializability and clones deeply
                 result[key] = JSON.parse(JSON.stringify(value));
             } catch {
+                continue;
             }
         }
     }
@@ -465,7 +484,7 @@ function mergeWithProvenance(
  */
 async function processDocuments(
     documents: z.infer<typeof ragAddDocumentsSchema>["documents"],
-    workingDirectory: string,
+    context: ToolExecutionContext,
     baseProvenance: DocumentMetadata
 ): Promise<RAGDocument[]> {
     const processedDocs: RAGDocument[] = [];
@@ -474,7 +493,7 @@ async function processDocuments(
         try {
             const { content, source } = await extractDocumentContentFromSource(
                 doc as DocumentInput,
-                workingDirectory
+                context
             );
 
             // Validate content
@@ -517,7 +536,7 @@ async function executeAddDocuments(
     const baseProvenance = computeBaseProvenance(context);
 
     // Process documents with provenance injection
-    const processedDocs = await processDocuments(documents, context.workingDirectory, baseProvenance);
+    const processedDocs = await processDocuments(documents, context, baseProvenance);
 
     // Add to collection
     const ragService = RAGService.getInstance();

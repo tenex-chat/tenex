@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import * as childProcess from "node:child_process";
 import { rmSync } from "node:fs";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { createShellTool } from "../shell";
@@ -113,6 +114,42 @@ describe("shellTool - simple test", () => {
         expect(result).toHaveProperty("type", "background-task");
         expect(result).toHaveProperty("taskId");
         expect(result).toHaveProperty("message");
+    });
+
+    it("should return a shell error when spawn fails before the command starts", async () => {
+        const spawnSpy = spyOn(childProcess, "spawn").mockImplementation((() => {
+            const child = {
+                stdout: { on: () => child },
+                stderr: { on: () => child },
+                kill: () => false,
+                on: (event: string, callback: (error: Error) => void) => {
+                    if (event === "error") {
+                        callback(new Error("ENOENT: no such file or directory, posix_spawn '/bin/sh'"));
+                    }
+                    return child;
+                },
+            } as any;
+
+            return child;
+        }) as typeof childProcess.spawn);
+
+        try {
+            const result = await shellTool.execute({
+                command: "echo should-not-run",
+                description: "Simulate spawn failure",
+                cwd: null,
+                timeout: null,
+            });
+
+            expect(result).toMatchObject({
+                type: "shell-error",
+                exitCode: null,
+            });
+            expect((result as { error: string }).error).toContain("Failed to start shell command");
+            expect((result as { error: string }).error).toContain("/bin/sh");
+        } finally {
+            spawnSpy.mockRestore();
+        }
     });
 });
 

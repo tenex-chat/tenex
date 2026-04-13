@@ -3,8 +3,12 @@ import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { agentEnvironmentService } from "@/services/AgentEnvironmentService";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
+import {
+    expandPathWithEnvironment,
+    formatUnresolvedPathVariablesError,
+    resolveToolEnvironment,
+} from "@/tools/utils/path-expansion";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { tool } from "ai";
@@ -187,23 +191,12 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         ? conversation.getProjectId()
         : null;
 
-    // Resolve cwd: if provided and relative, resolve against context.workingDirectory
-    // If not provided, use context.workingDirectory directly
-    let workingDir: string;
-    if (cwd) {
-        // If cwd is relative (like "."), resolve it against the project working directory
-        workingDir = isAbsolute(cwd) ? cwd : resolve(context.workingDirectory, cwd);
-    } else {
-        workingDir = context.workingDirectory;
-    }
-
     // Add trace span with all context for debugging
     const span = trace.getActiveSpan();
     span?.setAttributes({
         "shell.command": command.substring(0, 200),
         "shell.description": description || "(not provided)",
         "shell.cwd_param_raw": cwd || "(not provided)",
-        "shell.cwd_resolved": workingDir || "(empty)",
         "shell.context.working_directory": context.workingDirectory || "(empty)",
         "shell.context.project_base_path": context.projectBasePath || "(empty)",
         "shell.context.current_branch": context.currentBranch || "(empty)",
@@ -214,37 +207,13 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
     span?.addEvent("shell.execute_start", {
         command: command.substring(0, 200),
         description: description || "(not provided)",
-        cwd: workingDir || "(empty)",
+        cwd: cwd || "(not provided)",
         run_in_background: run_in_background ?? false,
-    });
-
-    // Validate working directory - fail fast if it's empty
-    if (!workingDir) {
-        const errorMsg = `Shell command cannot run: workingDirectory is empty. Context projectBasePath: "${context.projectBasePath}", Context workingDirectory: "${context.workingDirectory}"`;
-        span?.addEvent("shell.error", { error: errorMsg });
-        throw new Error(errorMsg);
-    }
-
-    logger.info("Executing shell command", {
-        command,
-        description: description || undefined,
-        cwd: workingDir,
-        contextWorkingDir: context.workingDirectory,
-        contextProjectBasePath: context.projectBasePath,
-        agent: context.agent.name,
-        timeout,
-        runInBackground: run_in_background ?? false,
     });
 
     let resolvedEnv: NodeJS.ProcessEnv;
     try {
-        resolvedEnv = await agentEnvironmentService.resolveShellEnvironment({
-            agentPubkey: context.agent.pubkey,
-            agentNsec: context.agent.signer.nsec,
-            projectDTag: projectId,
-            projectPath: context.projectBasePath || undefined,
-            baseEnv: process.env,
-        });
+        resolvedEnv = await resolveToolEnvironment(context);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
@@ -261,20 +230,74 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         return buildShellErrorResult(command, message);
     }
 
+    const rawWorkingDir = cwd || context.workingDirectory;
+    if (!rawWorkingDir) {
+        const errorMsg = `Shell command cannot run: workingDirectory is empty. Context projectBasePath: "${context.projectBasePath}", Context workingDirectory: "${context.workingDirectory}"`;
+        span?.addEvent("shell.error", { error: errorMsg });
+        return buildShellErrorResult(command, errorMsg);
+    }
+
+    const { expandedPath: expandedCwd, unresolvedVars } = expandPathWithEnvironment(
+        rawWorkingDir,
+        resolvedEnv
+    );
+    if (unresolvedVars.length > 0) {
+        const errorMsg = `Shell command cannot run: ${
+            formatUnresolvedPathVariablesError(rawWorkingDir, unresolvedVars, "cwd")
+        }`;
+        span?.addEvent("shell.error", { error: errorMsg });
+        logger.error("Invalid shell cwd", {
+            command,
+            agent: context.agent.name,
+            rawCwd: rawWorkingDir,
+            unresolvedVars,
+        });
+        return buildShellErrorResult(command, errorMsg);
+    }
+
+    const workingDir = isAbsolute(expandedCwd)
+        ? expandedCwd
+        : resolve(context.workingDirectory, expandedCwd);
+
+    span?.setAttributes({
+        "shell.cwd_resolved": workingDir || "(empty)",
+        "shell.cwd_expanded": expandedCwd || "(empty)",
+    });
+
+    logger.info("Executing shell command", {
+        command,
+        description: description || undefined,
+        cwd: workingDir,
+        cwdRaw: rawWorkingDir,
+        cwdExpanded: expandedCwd,
+        contextWorkingDir: context.workingDirectory,
+        contextProjectBasePath: context.projectBasePath,
+        agent: context.agent.name,
+        timeout,
+        runInBackground: run_in_background ?? false,
+    });
+
     // Handle background execution
     if (run_in_background) {
         const taskId = generateTaskId();
         const outputDir = join(tmpdir(), "tenex-shell-tasks");
         await mkdir(outputDir, { recursive: true });
         const outputFile = join(outputDir, `${taskId}.output`);
-
-        const child = spawn(command, [], {
-            cwd: workingDir,
-            shell: true,
-            detached: true,
-            stdio: ["ignore", "pipe", "pipe"],
-            env: resolvedEnv,
-        });
+        let child: ReturnType<typeof spawn>;
+        try {
+            child = spawn(command, [], {
+                cwd: workingDir,
+                shell: true,
+                detached: true,
+                stdio: ["ignore", "pipe", "pipe"],
+                env: resolvedEnv,
+            });
+        } catch (error) {
+            return buildShellErrorResult(
+                command,
+                `Failed to start shell command: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
 
         // Write output to file
         const outputStream = createWriteStream(outputFile);
@@ -341,22 +364,65 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
     // Without this, commands like `cat`, `grep` (no file args), `wc -l`, `read`, etc.
     // block indefinitely waiting for input, get killed by timeout, and crash with
     // "Missing exit code" because signal-killed processes have no exit code.
-    const result = await new Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: string | null }>((resolve) => {
-        const child = spawn(command, [], {
-            cwd: workingDir,
-            shell: true,
-            stdio: ["ignore", "pipe", "pipe"],
-            env: resolvedEnv,
-        });
-
+    const result = await new Promise<{
+        stdout: string;
+        stderr: string;
+        exitCode: number | null;
+        signal: string | null;
+        spawnError: string | null;
+    }>((resolve) => {
+        let child: ReturnType<typeof spawn>;
         let stdout = "";
         let stderr = "";
         let killed = false;
-
-        child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
-        child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
-
         let timer: ReturnType<typeof setTimeout> | undefined;
+
+        try {
+            child = spawn(command, [], {
+                cwd: workingDir,
+                shell: true,
+                stdio: ["ignore", "pipe", "pipe"],
+                env: resolvedEnv,
+            });
+        } catch (error) {
+            resolve({
+                stdout: "",
+                stderr: "",
+                exitCode: null,
+                signal: null,
+                spawnError: error instanceof Error ? error.message : String(error),
+            });
+            return;
+        }
+
+        const stdoutStream = child.stdout;
+        const stderrStream = child.stderr;
+
+        if (!stdoutStream || !stderrStream) {
+            resolve({
+                stdout: "",
+                stderr: "",
+                exitCode: null,
+                signal: null,
+                spawnError: "Shell process started without stdout/stderr pipes",
+            });
+            return;
+        }
+
+        child.on("error", (error: NodeJS.ErrnoException) => {
+            if (timer) clearTimeout(timer);
+            resolve({
+                stdout,
+                stderr,
+                exitCode: null,
+                signal: null,
+                spawnError: error.message,
+            });
+        });
+
+        stdoutStream.on("data", (data: Buffer) => { stdout += data.toString(); });
+        stderrStream.on("data", (data: Buffer) => { stderr += data.toString(); });
+
         if (timeoutMs) {
             timer = setTimeout(() => {
                 killed = true;
@@ -371,11 +437,40 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
                 stderr,
                 exitCode: code,
                 signal: killed ? "SIGTERM" : (signal || null),
+                spawnError: null,
             });
         });
     });
 
-    const { stdout, stderr, exitCode, signal } = result;
+    const { stdout, stderr, exitCode, signal, spawnError } = result;
+
+    if (spawnError) {
+        const errorResult: ShellErrorResult = {
+            type: "shell-error",
+            command: command.substring(0, 200),
+            exitCode: null,
+            error: `Failed to start shell command: ${spawnError}`,
+            stdout,
+            stderr,
+            signal,
+        };
+
+        span?.addEvent("shell.execute_error", {
+            exit_code: -1,
+            signal: "none",
+            error_message: errorResult.error.substring(0, 200),
+            has_stdout: !!stdout,
+            has_stderr: !!stderr,
+        });
+
+        logger.error("Shell command failed to start", {
+            command,
+            workingDir,
+            error: errorResult.error,
+        });
+
+        return errorResult;
+    }
 
     if (exitCode === 0) {
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : "");

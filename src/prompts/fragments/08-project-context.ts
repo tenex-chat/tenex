@@ -7,7 +7,6 @@ import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatCon
 import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { config } from "@/services/ConfigService";
 import { listWorktrees, loadWorktreeMetadata, type WorktreeMetadata } from "@/utils/git/worktree";
-import { getAgentProjectInjectedFiles } from "@/lib/agent-home";
 import { shortenPubkey, shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
@@ -339,7 +338,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
             if (activeTeam) {
                 parts.push("    <active-team>");
                 parts.push(`      You are working in team "${activeTeam.name}" — ${activeTeam.description}`);
-                parts.push(`      Delegate within your team first. Only reach outside when a specific expert is a clearly better fit.`);
+                parts.push("      Delegate within your team first. Only reach outside when a specific expert is a clearly better fit.");
                 parts.push("");
                 parts.push("      Teammates:");
                 for (const t of teammates) {
@@ -427,20 +426,6 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
                 }
             } catch (error) {
                 logger.debug("Could not read root AGENTS.md:", error);
-            }
-        }
-
-        // <memorized-project-files> section
-        if (projectId && agent.pubkey) {
-            const projectInjectedFiles = getAgentProjectInjectedFiles(agent.pubkey, projectId);
-            if (projectInjectedFiles.length > 0) {
-                parts.push("");
-                parts.push("  <memorized-project-files>");
-                for (const file of projectInjectedFiles) {
-                    const truncatedAttr = file.truncated ? " truncated=\"true\"" : "";
-                    parts.push(`    <file name="${file.filename}"${truncatedAttr}>${file.content}</file>`);
-                }
-                parts.push("  </memorized-project-files>");
             }
         }
 

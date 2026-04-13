@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as projectsModule from "@/services/projects";
 import { RAGService } from "@/services/rag/RAGService";
+import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import type { ToolExecutionContext } from "@/tools/types";
 import { createRAGAddDocumentsTool } from "../rag_add_documents";
 
@@ -36,12 +41,16 @@ const createMockContext = (): ToolExecutionContext => ({
 });
 
 describe("rag_add_documents metadata handling", () => {
+    const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
     let isProjectContextInitializedSpy: ReturnType<typeof spyOn>;
     let getProjectContextSpy: ReturnType<typeof spyOn>;
     let getInstanceSpy: ReturnType<typeof spyOn>;
+    let tempDir: string;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         captureAddDocuments = async () => {};
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-rag-add-docs-"));
+        process.env.TENEX_BASE_DIR = tempDir;
         isProjectContextInitializedSpy = spyOn(
             projectsModule,
             "isProjectContextInitialized"
@@ -57,7 +66,14 @@ describe("rag_add_documents metadata handling", () => {
         } as never);
     });
 
-    afterEach(() => {
+    afterEach(async () => {
+        if (originalTenexBaseDir === undefined) {
+            process.env.TENEX_BASE_DIR = undefined;
+        } else {
+            process.env.TENEX_BASE_DIR = originalTenexBaseDir;
+        }
+
+        await fs.rm(tempDir, { recursive: true, force: true });
         isProjectContextInitializedSpy?.mockRestore();
         getProjectContextSpy?.mockRestore();
         getInstanceSpy?.mockRestore();
@@ -241,6 +257,52 @@ describe("rag_add_documents metadata handling", () => {
             const doc = capturedDocs[0];
             // User-provided value should override
             expect(doc.metadata.agent_pubkey).toBe("custom-pubkey");
+        });
+
+        it("expands arbitrary env vars in file_path inputs", async () => {
+            const capturedDocs: any[] = [];
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
+
+            const projectDir = path.join(tempDir, "project");
+            const docsDir = path.join(projectDir, "docs");
+            await fs.mkdir(docsDir, { recursive: true });
+            await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
+            await fs.writeFile(
+                path.join(tempDir, "projects", "proj-1", ".env"),
+                "DOC_PATH=docs/input.txt\n",
+                "utf-8"
+            );
+            await fs.writeFile(path.join(docsDir, "input.txt"), "expanded rag document", "utf-8");
+
+            const signer = NDKPrivateKeySigner.generate();
+            const tool = createRAGAddDocumentsTool(
+                createMockExecutionEnvironment({
+                    agent: createMockAgent({
+                        pubkey: signer.pubkey,
+                        signer,
+                    }),
+                    workingDirectory: projectDir,
+                    projectBasePath: projectDir,
+                    getConversation: () => ({ getProjectId: () => "proj-1" } as any),
+                }) as unknown as ToolExecutionContext
+            );
+
+            await tool.execute({
+                description: "Add a document from env-expanded file_path",
+                collection: "test",
+                documents: [{
+                    content: null,
+                    file_path: "$DOC_PATH",
+                    metadata: null,
+                    source: null,
+                    id: null,
+                }],
+            });
+
+            expect(capturedDocs.length).toBeGreaterThan(0);
+            expect(capturedDocs[0].content).toBe("expanded rag document");
         });
     });
 });

@@ -1,30 +1,56 @@
 import { createFsTools } from "ai-sdk-fs-tools";
-import { homedir } from "node:os";
 import { getAgentHomeDirectory, ensureAgentHomeDirectory } from "@/lib/agent-home";
+import { createExpectedError } from "@/tools/utils";
+import {
+    expandPathFromContext,
+    formatUnresolvedPathVariablesError,
+} from "@/tools/utils/path-expansion";
 import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
 import { synthesizeContent, executeReadToolResult } from "./fs-hooks";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 
-function buildPathVars(context: ToolExecutionContext): Record<string, string> {
-    const vars: Record<string, string> = {
-        "$USER_HOME": homedir(),
-        "$AGENT_HOME": getAgentHomeDirectory(context.agent.pubkey),
-    };
-    if (context.projectBasePath) {
-        vars["$PROJECT_BASE"] = context.projectBasePath;
-    }
-    return vars;
-}
-
-function expandPathVars(input: Record<string, unknown>, pathVars: Record<string, string>): void {
-    if (typeof input.path === "string") {
-        for (const [varName, varValue] of Object.entries(pathVars)) {
-            input.path = (input.path as string).replaceAll(varName, varValue);
-        }
-    }
-}
-
 const tenexFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof createFsTools>>();
+
+function wrapToolsWithPathExpansion(
+    tools: ReturnType<typeof createFsTools>,
+    context: ToolExecutionContext
+): ReturnType<typeof createFsTools> {
+    const wrappedTools = {} as ReturnType<typeof createFsTools>;
+
+    for (const [toolName, tool] of Object.entries(tools)) {
+        wrappedTools[toolName] = {
+            ...tool,
+            execute: async (input: unknown) => {
+                if (
+                    typeof input === "object" &&
+                    input !== null &&
+                    typeof (input as Record<string, unknown>).path === "string"
+                ) {
+                    const rawPath = (input as Record<string, unknown>).path as string;
+                    const { expandedPath, unresolvedVars } = await expandPathFromContext(
+                        rawPath,
+                        context
+                    );
+
+                    if (unresolvedVars.length > 0) {
+                        return createExpectedError(
+                            formatUnresolvedPathVariablesError(rawPath, unresolvedVars)
+                        );
+                    }
+
+                    return await tool.execute({
+                        ...(input as Record<string, unknown>),
+                        path: expandedPath,
+                    });
+                }
+
+                return await tool.execute(input as never);
+            },
+        };
+    }
+
+    return wrappedTools;
+}
 
 export function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
     let tools = tenexFsToolsCache.get(context);
@@ -32,12 +58,9 @@ export function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnTy
         const allowedRoots = [context.projectBasePath, getAgentHomeDirectory(context.agent.pubkey)]
             .filter((p): p is string => typeof p === "string" && p.trim() !== "");
 
-        const pathVars = buildPathVars(context);
-
         tools = createFsTools({
             workingDirectory: context.workingDirectory,
             allowedRoots,
-            beforeExecute: (_toolName, input) => expandPathVars(input, pathVars),
             agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory, skipRoot: true },
             formatOutsideRootsError: (path, wd) =>
                 `Path "${path}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
@@ -45,6 +68,7 @@ export function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnTy
             loadToolResult: (toolCallId) =>
                 executeReadToolResult(context.conversationId, toolCallId),
         });
+        tools = wrapToolsWithPathExpansion(tools, context);
 
         attachTranscriptArgs(tools.fs_read as AISdkTool, [{ key: "path", attribute: "file_path" }]);
         attachTranscriptArgs(tools.fs_write as AISdkTool, [{ key: "path", attribute: "file_path" }]);
@@ -76,6 +100,7 @@ export function getOrCreateHomeFsTools(context: ToolExecutionContext): ReturnTyp
             formatOutsideRootsError: (path) =>
                 `Path "${path}" is outside your home directory. You can only access files within your home directory.`,
         });
+        tools = wrapToolsWithPathExpansion(tools, context);
         homeFsToolsCache.set(context, tools);
     }
     return tools;

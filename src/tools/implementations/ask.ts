@@ -156,6 +156,25 @@ async function getEscalationTarget(): Promise<string | null> {
   return result?.slug ?? null;
 }
 
+/**
+ * Determines whether the current execution was triggered directly by a human user.
+ *
+ * Two detection strategies (either is sufficient):
+ * 1. `principal.kind === "human"` — explicitly set by adapters that populate it (e.g. Telegram)
+ * 2. `principal.linkedPubkey === ownerPubkey` — fallback for Nostr adapter, which sets
+ *    `linkedPubkey` but does NOT set `kind`. When the triggering pubkey matches the project
+ *    owner's pubkey, the request came directly from the human user.
+ *
+ * Returns `false` when there is no triggering envelope (e.g. system-initiated calls).
+ */
+function isDirectHumanTrigger(context: ToolExecutionContext, ownerPubkey: string): boolean {
+  const principal = context.triggeringEnvelope?.principal;
+  if (!principal) return false;
+  if (principal.kind === "human") return true;
+  if (principal.kind === undefined && principal.linkedPubkey === ownerPubkey) return true;
+  return false;
+}
+
 async function executeAsk(input: AskInput, context: ToolExecutionContext): Promise<AskOutput> {
   const { title, context: askContext, questions } = input;
 
@@ -169,108 +188,112 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   const conversationStore = context.getConversation?.();
   const parentDelegationConversationId = conversationStore?.getRootEventId();
 
-  // Check for escalation agent configuration using helper
-  // This will auto-add the agent to the project if it exists in storage but not in project
-  const escalationAgentSlug = await getEscalationTarget();
+  // Short-circuit: if triggered directly by a human, skip escalation resolution entirely
+  // (avoids unnecessary side effects in EscalationService)
+  if (!isDirectHumanTrigger(context, ownerPubkey)) {
+    // Check for escalation agent configuration using helper
+    // This will auto-add the agent to the project if it exists in storage but not in project
+    const escalationAgentSlug = await getEscalationTarget();
 
-  // If escalation agent is configured AND current agent is not the escalation agent,
-  // route through escalation agent instead of directly to user
-  if (escalationAgentSlug && context.agent.slug !== escalationAgentSlug) {
-    const escalationAgentPubkey = resolveRecipientToPubkey(escalationAgentSlug);
+    // If escalation agent is configured AND current agent is not the escalation agent,
+    // route through escalation agent instead of directly to user
+    if (escalationAgentSlug && context.agent.slug !== escalationAgentSlug) {
+      const escalationAgentPubkey = resolveRecipientToPubkey(escalationAgentSlug);
 
-    if (!escalationAgentPubkey) {
-      // This shouldn't happen since getEscalationTarget() validates it,
-      // but handle gracefully just in case
-      logger.warn("[ask] Escalation agent not found, falling back to direct ask", {
-        escalationAgentSlug,
-        fromAgent: context.agent.slug,
-      });
-      // Fall through to normal ask flow
-    } else {
-      // Get delegation chain for circular delegation check
-      const conversationStore = ConversationStore.get(context.conversationId);
-      const delegationChain = conversationStore?.metadata?.delegationChain;
-
-      // Check for circular delegation using stored chain
-      if (delegationChain && wouldCreateCircularDelegation(delegationChain, escalationAgentPubkey)) {
-        const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
-
-        logger.warn("[ask] Circular delegation detected, falling back to direct ask", {
-          escalationAgent: escalationAgentSlug,
-          targetPubkey: escalationAgentPubkey.substring(0, 8),
-          chain: chainDisplay,
-        });
-
-        // Fall through to normal ask flow instead of throwing
-        // This allows the question to still be asked directly to the user
-      } else {
-        // Route through escalation agent
-        logger.info("[ask] Routing ask through escalation agent", {
+      if (!escalationAgentPubkey) {
+        // This shouldn't happen since getEscalationTarget() validates it,
+        // but handle gracefully just in case
+        logger.warn("[ask] Escalation agent not found, falling back to direct ask", {
+          escalationAgentSlug,
           fromAgent: context.agent.slug,
-          escalationAgent: escalationAgentSlug,
-          toUser: ownerPubkey.substring(0, 8),
-          questionCount: questions.length,
         });
+        // Fall through to normal ask flow
+      } else {
+        // Get delegation chain for circular delegation check
+        const conversationStore = ConversationStore.get(context.conversationId);
+        const delegationChain = conversationStore?.metadata?.delegationChain;
 
-        // Build escalation prompt using helper
-        const escalationPrompt = buildEscalationPrompt(input, context, delegationChain);
+        // Check for circular delegation using stored chain
+        if (delegationChain && wouldCreateCircularDelegation(delegationChain, escalationAgentPubkey)) {
+          const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
 
-        // Delegate to escalation agent
-        const eventContext = createEventContext(context);
-        const eventId = await context.agentPublisher.delegate({
-          recipient: escalationAgentPubkey,
-          content: escalationPrompt,
-        }, eventContext);
+          logger.warn("[ask] Circular delegation detected, falling back to direct ask", {
+            escalationAgent: escalationAgentSlug,
+            targetPubkey: escalationAgentPubkey.substring(0, 8),
+            chain: chainDisplay,
+          });
 
-        // Build prompt summary for delegation tracking using helper
-        const promptSummary = buildPromptSummary(input);
+          // Fall through to normal ask flow instead of throwing
+          // This allows the question to still be asked directly to the user
+        } else {
+          // Route through escalation agent
+          logger.info("[ask] Routing ask through escalation agent", {
+            fromAgent: context.agent.slug,
+            escalationAgent: escalationAgentSlug,
+            toUser: ownerPubkey.substring(0, 8),
+            questionCount: questions.length,
+          });
 
-        // Register delegation immediately (like delegate() does)
-        const pendingDelegations: PendingDelegation[] = [
-          {
-            type: "ask" as const,
-            delegationConversationId: eventId,
-            recipientPubkey: escalationAgentPubkey,
-            senderPubkey: context.agent.pubkey,
-            prompt: promptSummary,
-            ralNumber: context.ralNumber,
-            parentDelegationConversationId,
-          },
-        ];
+          // Build escalation prompt using helper
+          const escalationPrompt = buildEscalationPrompt(input, context, delegationChain);
 
-        const ralRegistry = RALRegistry.getInstance();
-        ralRegistry.mergePendingDelegations(
-          context.agent.pubkey,
-          context.conversationId,
-          context.ralNumber,
-          pendingDelegations
-        );
+          // Delegate to escalation agent
+          const eventContext = createEventContext(context);
+          const eventId = await context.agentPublisher.delegate({
+            recipient: escalationAgentPubkey,
+            content: escalationPrompt,
+          }, eventContext);
 
-        if (parentDelegationConversationId) {
-          const registered = ralRegistry.registerPendingSubDelegation(
-            parentDelegationConversationId,
-            pendingDelegations[0]
+          // Build prompt summary for delegation tracking using helper
+          const promptSummary = buildPromptSummary(input);
+
+          // Register delegation immediately (like delegate() does)
+          const pendingDelegations: PendingDelegation[] = [
+            {
+              type: "ask" as const,
+              delegationConversationId: eventId,
+              recipientPubkey: escalationAgentPubkey,
+              senderPubkey: context.agent.pubkey,
+              prompt: promptSummary,
+              ralNumber: context.ralNumber,
+              parentDelegationConversationId,
+            },
+          ];
+
+          const ralRegistry = RALRegistry.getInstance();
+          ralRegistry.mergePendingDelegations(
+            context.agent.pubkey,
+            context.conversationId,
+            context.ralNumber,
+            pendingDelegations
           );
-          if (!registered) {
-            logger.debug("[ask] Could not register escalation ask as parent sub-delegation", {
-              parentDelegationConversationId: shortenEventId(parentDelegationConversationId),
-              eventId: shortenEventId(eventId),
-            });
+
+          if (parentDelegationConversationId) {
+            const registered = ralRegistry.registerPendingSubDelegation(
+              parentDelegationConversationId,
+              pendingDelegations[0]
+            );
+            if (!registered) {
+              logger.debug("[ask] Could not register escalation ask as parent sub-delegation", {
+                parentDelegationConversationId: shortenEventId(parentDelegationConversationId),
+                eventId: shortenEventId(eventId),
+              });
+            }
           }
-        }
 
-        const conversationRecord = ConversationStore.get(context.conversationId);
-        if (conversationRecord) {
-          conversationRecord.save();
-        }
+          const conversationRecord = ConversationStore.get(context.conversationId);
+          if (conversationRecord) {
+            conversationRecord.save();
+          }
 
-        return {
-          success: true,
-          delegationConversationId: eventId,
-        };
+          return {
+            success: true,
+            delegationConversationId: eventId,
+          };
+        }
       }
     }
-  }
+  } // end if (!isDirectHumanTrigger)
 
   // Get human-readable name for the recipient
   const pubkeyService = getPubkeyService();

@@ -100,6 +100,59 @@ describe("shellTool env resolution", () => {
         expect(result).toBe("agent");
     });
 
+    it("expands project path variables in cwd before spawning the shell", async () => {
+        const signer = NDKPrivateKeySigner.generate();
+        const agent = createMockAgent({
+            pubkey: signer.pubkey,
+            signer,
+        });
+        const projectWorkingDir = path.join(tempDir, "project-workdir");
+        const projectBasePath = path.join(tempDir, "project-base");
+        await fs.mkdir(projectWorkingDir, { recursive: true });
+        await fs.mkdir(projectBasePath, { recursive: true });
+
+        const shellTool = createShellTool(
+            createMockExecutionEnvironment({
+                agent,
+                workingDirectory: projectWorkingDir,
+                projectBasePath,
+                getConversation: () => ({ getProjectId: () => "proj-1" } as any),
+            })
+        );
+
+        const result = await shellTool.execute({
+            command: "pwd",
+            description: "Verify cwd expansion",
+            cwd: "$PROJECT_BASE",
+        });
+
+        expect(typeof result).toBe("string");
+        expect((result as string).trim()).toBe(await fs.realpath(projectBasePath));
+    });
+
+    it("expands arbitrary env vars from project env files in cwd", async () => {
+        const { context } = createShellContext("proj-1");
+        const shellTool = createShellTool(context);
+        const envDir = path.join(projectDir, "env-dir");
+
+        await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
+        await fs.mkdir(envDir, { recursive: true });
+        await fs.writeFile(
+            path.join(tempDir, "projects", "proj-1", ".env"),
+            "CUSTOM_CWD=env-dir\n",
+            "utf-8"
+        );
+
+        const result = await shellTool.execute({
+            command: "pwd",
+            description: "Verify arbitrary cwd env expansion",
+            cwd: "$CUSTOM_CWD",
+        });
+
+        expect(typeof result).toBe("string");
+        expect((result as string).trim()).toBe(await fs.realpath(envDir));
+    });
+
     it("returns a shell error before execution when an env file has invalid syntax", async () => {
         const { context } = createShellContext("proj-1");
         const shellTool = createShellTool(context);

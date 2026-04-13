@@ -1,7 +1,6 @@
 import { mkdirSync, readdirSync, realpathSync, existsSync, lstatSync, openSync, readSync, closeSync, constants as fsConstants } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, dirname } from "node:path";
 import { getTenexBasePath } from "@/constants";
-import { logger } from "@/utils/logger";
 
 /**
  * Error thrown when a path escapes the agent's home directory scope.
@@ -49,13 +48,6 @@ export function getAgentHomeDirectory(agentPubkey: string): string {
     return join(getTenexBasePath(), "home", shortPubkey);
 }
 
-/**
- * Get the project-specific memory directory for an agent.
- * Project memory lives inside the agent home so home_fs_* tools can write to it directly.
- */
-export function getAgentProjectMemoryDirectory(agentPubkey: string, projectDTag: string): string {
-    return join(getAgentHomeDirectory(agentPubkey), "projects", projectDTag, "docs");
-}
 
 /**
  * Normalize and resolve a path to prevent path traversal attacks.
@@ -214,7 +206,7 @@ function safeReadBoundedFile(
 
         // Skip symlinks entirely (security: prevents symlink race attacks)
         if (lstats.isSymbolicLink()) {
-            logger.warn(`Skipping symlink in agent home: ${filePath}`);
+            console.warn(`Skipping symlink in agent home: ${filePath}`);
             return null;
         }
 
@@ -229,7 +221,7 @@ function safeReadBoundedFile(
         const realHomeDir = realpathSync(homeDir);
         const relativePath = relative(realHomeDir, realPath);
         if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
-            logger.warn(`Skipping file that resolves outside home: ${filePath} -> ${realPath}`);
+            console.warn(`Skipping file that resolves outside home: ${filePath} -> ${realPath}`);
             return null;
         }
 
@@ -252,7 +244,7 @@ function safeReadBoundedFile(
         }
     } catch (error) {
         // File may have been deleted/changed between lstat and read - that's OK
-        logger.warn(`Failed to safely read file ${filePath}:`, error);
+        console.warn(`Failed to safely read file ${filePath}:`, error);
         return null;
     }
 }
@@ -310,7 +302,7 @@ function getInjectedFilesFromDirectory(directory: string): InjectedFile[] {
 
         return injectedFiles;
     } catch (error) {
-        logger.warn("Failed to scan agent home for injected files:", error);
+        console.warn("Failed to scan agent home for injected files:", error);
         return [];
     }
 }
@@ -324,14 +316,6 @@ export function getAgentHomeInjectedFiles(agentPubkey: string): InjectedFile[] {
     return getInjectedFilesFromDirectory(homeDir);
 }
 
-export function getAgentProjectInjectedFiles(agentPubkey: string, projectDTag: string): InjectedFile[] {
-    const projectMemoryDir = getAgentProjectMemoryDirectory(agentPubkey, projectDTag);
-    if (!ensureAgentHomeDirectory(agentPubkey)) {
-        return [];
-    }
-
-    return getInjectedFilesFromDirectory(projectMemoryDir);
-}
 
 /**
  * Resolve a path that must be within the agent's home directory.
