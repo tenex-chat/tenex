@@ -297,7 +297,7 @@ export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
 
 Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` to bypass this check.
 
-Skill support: Pass skill IDs from the available-skills list in the \`skills\` array to activate skills on delegated agents. Slugged IDs and short event IDs are resolved automatically before publishing. Skills can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context. Skill inheritance: any skills active on the current agent are automatically forwarded to all delegated agents.`;
+Skill support: Pass skill IDs returned by \`skill_list\` in the \`skills\` array to activate skills on delegated agents. Skill inheritance: any skills active on the current agent are automatically forwarded to all delegated agents.`;
 
   const aiTool = tool({
     description,

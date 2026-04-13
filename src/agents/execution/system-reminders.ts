@@ -17,16 +17,10 @@ import type {
     TodoItem,
 } from "@/services/ral/types";
 import type { SkillData, SkillToolPermissions } from "@/services/skill";
-import {
-    buildExpandedBlockedSet,
-    buildSkillAliasMap,
-    filterBlockedSkills,
-} from "@/services/skill/skill-blocking";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { homedir } from "node:os";
 import type { ProjectDTag } from "@/types/project-ids";
-import { renderLoadedSkillsBlock, renderAvailableSkillsBlock } from "./skill-reminder-renderers";
-import { logger } from "@/utils/logger";
+import { renderLoadedSkillsBlock } from "./skill-reminder-renderers";
 import {
     buildConversationsReminderSnapshot,
     renderConversationsReminderDelta,
@@ -409,63 +403,6 @@ function createLoadedSkillsProvider(): ReminderProvider<TenexReminderData, strin
     };
 }
 
-export function buildAvailableSkillsSnapshotIds(
-    installedIds: string[],
-    whitelistIds: string[]
-): string[] {
-    return [...new Set([...installedIds, ...whitelistIds])].sort();
-}
-
-function createAvailableSkillsProvider(): ReminderProvider<TenexReminderData, string> {
-    return createDeltaProvider<string>({
-        type: "available-skills",
-        fullInterval: 15,
-        placement: "overlay-user",
-        emptySnapshot: "",
-        snapshot: async (data) => {
-            const { SkillService } = await import("@/services/skill/SkillService");
-            const { SkillWhitelistService } = await import("@/services/skill");
-            const installed = await SkillService.getInstance().listAvailableSkills({
-                agentPubkey: data.agent.pubkey,
-                projectPath: data.projectPath,
-            });
-            const installedSkillMap = buildSkillAliasMap(installed);
-            const whitelist = SkillWhitelistService.getInstance().getWhitelistedSkills();
-            const blockedSet = buildExpandedBlockedSet(data.agent.blockedSkills, installedSkillMap);
-            const { allowed: installedIds, blocked: blockedInstalledIds } = filterBlockedSkills(
-                installed.map((skill) => skill.identifier),
-                blockedSet,
-                installedSkillMap
-            );
-            const { allowed: whitelistIds, blocked: blockedWhitelistIds } = filterBlockedSkills(
-                whitelist
-                    .map((entry) => entry.identifier ?? entry.shortId ?? entry.eventId)
-                    .filter((id): id is string => Boolean(id)),
-                blockedSet,
-                installedSkillMap
-            );
-            const blockedSkills = [...new Set([...blockedInstalledIds, ...blockedWhitelistIds])].sort();
-            const ids = buildAvailableSkillsSnapshotIds(installedIds, whitelistIds);
-            if (blockedSkills.length > 0) {
-                logger.warn("[SystemReminders] Blocked skills removed from available skills", {
-                    agent: data.agent.slug,
-                    blockedSkills,
-                });
-            }
-            return ids.join(",");
-        },
-        renderFull: async (_snapshot, data) => ({
-            type: "available-skills",
-            content: await renderAvailableSkillsBlock(
-                data.agent.pubkey,
-                data.projectPath,
-                data.agent.blockedSkills
-            ),
-        }),
-        renderDelta: (previous, current) => (previous === current ? null : "full"),
-    });
-}
-
 export function createTenexReminderProviders(): ReminderProvider<TenexReminderData, unknown>[] {
     return [
         createDatetimeProvider(),
@@ -474,7 +411,6 @@ export function createTenexReminderProviders(): ReminderProvider<TenexReminderDa
         createDelegationsProvider(),
         createConversationsProvider(),
         createLoadedSkillsProvider(),
-        createAvailableSkillsProvider(),
     ];
 }
 

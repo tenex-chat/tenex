@@ -49,7 +49,8 @@ TENEX supplies provider-specific reminder facts and reminder renderers for:
 - `delegations`
 - `conversations`
 - `loaded-skills`
-- `available-skills`
+
+Non-loaded skills are not exposed through a system reminder. Agents must use `skill_list` to discover available skills on demand.
 
 TENEX also enables the library-owned built-in reminder sources for:
 

@@ -18,7 +18,7 @@ const skillsSetSchema = z.object({
         .array(z.string())
         .optional()
         .describe(
-            "Skill IDs to activate (merged into current set). Use IDs from the available-skills list."
+            "Skill IDs to activate (merged into current set). Use IDs returned by `skill_list`."
         ),
     remove: z
         .array(z.string())
@@ -42,7 +42,7 @@ type SkillsSetInput = z.infer<typeof skillsSetSchema>;
  * Semantics:
  * - Reads the current active skill set from the conversation store.
  * - Applies `remove` first (subtract listed IDs, or clear all with `["*"]`).
- * - Validates `add` IDs against the available skill list. Partial resolution is rejected.
+ * - Validates `add` IDs against `skill_list` results. Partial resolution is rejected.
  * - Merges `add` into the remaining set (deduped).
  * - Fetches only newly-added skills for rendering (the agent already has content for previously-active ones).
  * - Persists via `setSelfAppliedSkills` and optionally `updateDefaultConfig`.
@@ -148,7 +148,7 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
             if (unresolvedIdentifiers.length > 0) {
                 return {
                     success: false,
-                    message: `Partial resolution rejected: ${unresolvedIdentifiers.length} skill(s) are not in the available skill list: ${unresolvedIdentifiers.join(", ")}. All IDs must be valid skill IDs. No changes were made.`,
+                    message: `Partial resolution rejected: ${unresolvedIdentifiers.length} skill(s) are not available from \`skill_list\`: ${unresolvedIdentifiers.join(", ")}. All IDs must be valid skill IDs. No changes were made.`,
                     activeSkills: [] as string[],
                     skillContent: "",
                 };

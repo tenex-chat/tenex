@@ -444,7 +444,7 @@ describe("skills_set tool", () => {
         );
 
         expect(result.success).toBe(false);
-        expect(result.message).toContain("available skill list");
+        expect(result.message).toContain("available from `skill_list`");
         expect(result.message).toContain(SKILL_ID_1);
         expect(result.message).toContain("not-a-real-skill");
         expect(mockFetchSkills).not.toHaveBeenCalled();

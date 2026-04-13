@@ -79,7 +79,7 @@ describe("renderLoadedSkillsBlock", () => {
     it("should render header and skills", () => {
         const result = renderLoadedSkillsBlock([createSkill({ content: "Skill content" })]);
 
-        expect(result).toContain("## Loaded Skills");
+        expect(result).toContain("The following skills have been loaded for this conversation.");
         expect(result).toContain("Skill content");
     });
 
