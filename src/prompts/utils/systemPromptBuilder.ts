@@ -110,12 +110,17 @@ async function addCoreAgentFragments(
  * Add agent-specific fragments.
  * Domain-expert agents receive domain-expert-guidance (no delegation) instead of
  * delegation-tips and todo-before-delegation — including both would be contradictory.
+ * Orchestrators additionally receive explicit routing guidance.
  */
 function addAgentFragments(
     builder: PromptBuilder,
     agentCategory: AgentCategory | undefined,
     triggeringEnvelope?: BuildSystemPromptOptions["triggeringEnvelope"],
 ): void {
+    if (agentCategory === "orchestrator") {
+        builder.add("orchestrator-delegation-guidance", {});
+    }
+
     if (agentCategory !== "domain-expert") {
         builder.add("delegation-tips", {});
         builder.add("todo-before-delegation", {});

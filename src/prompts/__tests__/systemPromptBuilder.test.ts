@@ -233,6 +233,36 @@ describe("systemPromptBuilder", () => {
         expect(addedFragments.some((fragment) => fragment.id === "domain-expert-guidance")).toBe(false);
     });
 
+    it("includes orchestrator-delegation-guidance fragment for orchestrator agents", async () => {
+        currentProjectContext = {};
+
+        await buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+            agentCategory: "orchestrator",
+        });
+
+        expect(addedFragments.some((fragment) => fragment.id === "orchestrator-delegation-guidance")).toBe(true);
+    });
+
+    it("does not include orchestrator-delegation-guidance fragment for non-orchestrator categories", async () => {
+        currentProjectContext = {};
+
+        for (const category of ["worker", "reviewer", "domain-expert", undefined] as const) {
+            addedFragments.length = 0;
+
+            await buildSystemPromptMessages({
+                agent,
+                project,
+                conversation,
+                agentCategory: category,
+            });
+
+            expect(addedFragments.some((fragment) => fragment.id === "orchestrator-delegation-guidance")).toBe(false);
+        }
+    });
+
     it("does not include delegation-tips or todo-before-delegation for domain-expert agents", async () => {
         currentProjectContext = {};
 

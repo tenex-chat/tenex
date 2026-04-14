@@ -20,6 +20,7 @@ import { domainExpertGuidanceFragment } from "./15-domain-expert-guidance";
 import { delegationTipsFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
 import { noResponseGuidanceFragment } from "./18-no-response-guidance";
+import { orchestratorDelegationGuidanceFragment } from "./19-orchestrator-delegation-guidance";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
 import { toolDescriptionGuidanceFragment } from "./14-tool-description-guidance";
@@ -48,6 +49,7 @@ export function registerAllFragments(): void {
 
     // Agent collaboration
     fragmentRegistry.register(domainExpertGuidanceFragment);
+    fragmentRegistry.register(orchestratorDelegationGuidanceFragment);
     fragmentRegistry.register(delegationTipsFragment);
     fragmentRegistry.register(TodoUsageFragment);
     fragmentRegistry.register(noResponseGuidanceFragment);
