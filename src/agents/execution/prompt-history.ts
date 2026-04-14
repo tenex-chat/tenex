@@ -133,6 +133,10 @@ function cloneMessageContent(message: ModelMessage): ModelMessage["content"] {
     return clonePromptHistoryValue(message.content);
 }
 
+function serializeMessageContent(content: ModelMessage["content"]): string {
+    return JSON.stringify(toPromptHistorySafeValue(content));
+}
+
 function nextPromptHistoryId(history: AgentPromptHistoryState): string {
     history.nextSequence += 1;
     return `prompt:${history.nextSequence}`;
@@ -313,4 +317,53 @@ export function buildPromptHistoryMessages(params: {
         didMutateHistory,
         reminderStateChanged,
     };
+}
+
+export function syncPreparedPromptHistoryMessages(params: {
+    conversationStore: ConversationStore;
+    agentPubkey: string;
+    preparedMessages: ModelMessage[];
+    span?: Span;
+}): boolean {
+    const { conversationStore, agentPubkey, preparedMessages, span } = params;
+    const history = conversationStore.getAgentPromptHistory(agentPubkey);
+    const preparedMessagesById = new Map<string, AddressablePromptMessage>();
+
+    for (const message of preparedMessages as AddressablePromptMessage[]) {
+        if (typeof message.id === "string" && message.id.length > 0) {
+            preparedMessagesById.set(message.id, message);
+        }
+    }
+
+    for (let index = history.messages.length - 1; index >= 0; index--) {
+        const frozenMessage = history.messages[index];
+        if (frozenMessage.role !== "user") {
+            continue;
+        }
+
+        const preparedMessage = preparedMessagesById.get(frozenMessage.id);
+        if (!preparedMessage) {
+            continue;
+        }
+
+        const nextContent = cloneMessageContent(preparedMessage);
+        if (serializeMessageContent(nextContent) === serializeMessageContent(frozenMessage.content)) {
+            break;
+        }
+
+        history.messages[index] = {
+            ...frozenMessage,
+            content: nextContent,
+        };
+
+        span?.addEvent("prompt-history.mutable-sync", {
+            "prompt_history.updated_message_id": frozenMessage.id,
+            "prompt_history.updated_message_role": frozenMessage.role,
+            "prompt_history.updated_message_source": frozenMessage.source.kind,
+        });
+
+        return true;
+    }
+
+    return false;
 }

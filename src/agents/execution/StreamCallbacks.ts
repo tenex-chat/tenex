@@ -37,7 +37,10 @@ import { didEstablishPromptCache } from "./prompt-cache";
 import { prepareLLMRequest } from "./request-preparation";
 import { createProjectDTag } from "@/types/project-ids";
 import type { FullRuntimeContext, LLMModelRequest, RALExecutionContext } from "./types";
-import { buildPromptHistoryMessages } from "./prompt-history";
+import {
+    buildPromptHistoryMessages,
+    syncPreparedPromptHistoryMessages,
+} from "./prompt-history";
 
 /**
  * Step data passed to prepareStep callback
@@ -497,6 +500,12 @@ export function createPrepareStep(
                     agentId: context.agent.pubkey,
                 },
             });
+            const preparedHistoryMutated = syncPreparedPromptHistoryMessages({
+                conversationStore: conversation,
+                agentPubkey: context.agent.pubkey,
+                preparedMessages: preparedRequest.messages,
+                span: executionSpan,
+            });
             const reminderStateAfter = JSON.stringify(
                 conversation.getContextManagementReminderState(context.agent.pubkey) ?? null
             );
@@ -514,6 +523,7 @@ export function createPrepareStep(
 
             if (
                 promptHistoryResult.didMutateHistory
+                || preparedHistoryMutated
                 || overlayHistoryResult?.didMutateHistory
                 || reminderStateChanged
                 || cacheAnchorEstablished

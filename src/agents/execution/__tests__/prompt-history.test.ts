@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { MessageCompiler } from "@/agents/execution/MessageCompiler";
-import { buildPromptHistoryMessages } from "@/agents/execution/prompt-history";
+import {
+    buildPromptHistoryMessages,
+    syncPreparedPromptHistoryMessages,
+} from "@/agents/execution/prompt-history";
 import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentMetadataStore } from "@/services/agents";
@@ -282,7 +285,7 @@ describe("per-agent prompt history", () => {
         });
     });
 
-    it("leaves prompt history canonical when reminders append to the latest user message", async () => {
+    it("freezes the first latest-user-append mutation into prompt history", async () => {
         conversationStore.addMessage({
             pubkey: "user-pubkey",
             content: "Track the todos",
@@ -311,10 +314,22 @@ describe("per-agent prompt history", () => {
                 loadedSkills: [],
             },
         });
+        const firstSynced = syncPreparedPromptHistoryMessages({
+            conversationStore,
+            agentPubkey: agentA.pubkey,
+            preparedMessages: firstPrepared.messages,
+        });
 
         conversationStore.setTodos(agentA.pubkey, [
             { id: "todo-1", title: "Track work", description: "", status: "in_progress" },
         ]);
+
+        conversationStore.addMessage({
+            pubkey: agentA.pubkey,
+            ral: ralNumber,
+            content: "Acknowledged",
+            messageType: "text",
+        });
 
         const secondCompiled = await compile(agentA, ralNumber, [agentA]);
         const secondBase = buildPromptHistoryMessages({
@@ -333,14 +348,16 @@ describe("per-agent prompt history", () => {
                 loadedSkills: [],
             },
         });
-
         const history = conversationStore.getAgentPromptHistory(agentA.pubkey).messages;
 
-        expect(history[0]?.content).toBe("Track the todos");
-        expect(history).toHaveLength(1);
-        expect(String(history[0]?.content)).not.toContain("<system-reminders>");
+        expect(firstSynced).toBe(true);
+        expect(history).toHaveLength(2);
+        expect(String(history[0]?.content)).toContain("Track the todos");
+        expect(String(history[0]?.content)).toContain("<system-reminders>");
         expect(String(firstPrepared.messages[1]?.content)).toContain("<agent-todos>");
-        expect(String(secondPrepared.messages[1]?.content)).toContain("<agent-todos>");
+        expect(String(secondBase.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(secondPrepared.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(secondPrepared.messages[1]?.content)).not.toContain("agent-todos-update");
     });
 
     it("appends explicit delegation completion marker records", async () => {

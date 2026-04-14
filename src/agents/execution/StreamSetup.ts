@@ -29,7 +29,10 @@ import {
     createExecutionContextManagement,
     type ExecutionContextManagement,
 } from "./context-management";
-import { buildPromptHistoryMessages } from "./prompt-history";
+import {
+    buildPromptHistoryMessages,
+    syncPreparedPromptHistoryMessages,
+} from "./prompt-history";
 import { prepareLLMRequest } from "./request-preparation";
 import type { FullRuntimeContext, LLMModelRequest } from "./types";
 import type { AISdkTool } from "@/tools/types";
@@ -397,6 +400,12 @@ export async function setupStreamExecution(
             agentId: context.agent.pubkey,
         },
     });
+    const preparedHistoryMutated = syncPreparedPromptHistoryMessages({
+        conversationStore: conversation,
+        agentPubkey: context.agent.pubkey,
+        preparedMessages: request.messages,
+        span: trace.getActiveSpan(),
+    });
     const reminderStateAfter = JSON.stringify(
         conversation.getContextManagementReminderState(context.agent.pubkey) ?? null
     );
@@ -414,6 +423,7 @@ export async function setupStreamExecution(
 
     if (
         promptHistoryResult.didMutateHistory
+        || preparedHistoryMutated
         || overlayHistoryResult?.didMutateHistory
         || reminderStateChanged
     ) {

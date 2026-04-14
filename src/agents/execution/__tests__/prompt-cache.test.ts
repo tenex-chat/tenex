@@ -5,7 +5,7 @@ import {
 } from "@/agents/execution/prompt-cache";
 
 describe("prompt-cache", () => {
-    it("detects prompt cache usage from AI SDK usage fields", () => {
+    it("detects prompt cache reuse from AI SDK usage fields", () => {
         expect(didEstablishPromptCacheFromUsage({
             cachedInputTokens: 24,
         })).toBe(true);
@@ -14,11 +14,14 @@ describe("prompt-cache", () => {
                 cacheReadTokens: 12,
             },
         })).toBe(true);
+    });
+
+    it("does not treat cache writes as cache reuse", () => {
         expect(didEstablishPromptCacheFromUsage({
             inputTokenDetails: {
                 cacheWriteTokens: 8,
             },
-        })).toBe(true);
+        })).toBe(false);
     });
 
     it("detects prompt cache usage from provider metadata when usage omits cache fields", () => {

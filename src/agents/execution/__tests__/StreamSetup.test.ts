@@ -108,6 +108,7 @@ mock.module("../prompt-history", () => ({
         messages: compiled.messages,
         didMutateHistory: false,
     }),
+    syncPreparedPromptHistoryMessages: mock(() => false),
 }));
 
 mock.module("../request-preparation", () => ({

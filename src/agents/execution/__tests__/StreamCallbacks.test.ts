@@ -91,6 +91,7 @@ mock.module(messageSyncerModulePath, () => ({
 
 mock.module(promptHistoryModulePath, () => ({
     buildPromptHistoryMessages: buildPromptHistoryMessagesMock,
+    syncPreparedPromptHistoryMessages: mock(() => false),
 }));
 
 mock.module(requestPreparationModulePath, () => ({

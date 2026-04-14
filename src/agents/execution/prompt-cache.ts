@@ -40,8 +40,7 @@ export function didEstablishPromptCacheFromUsage(
     const cacheAwareUsage = usage as CacheAwareUsage | LanguageModelUsageWithCostUsd;
 
     return getPositiveNumber(cacheAwareUsage.cachedInputTokens) > 0
-        || getPositiveNumber(cacheAwareUsage.inputTokenDetails?.cacheReadTokens) > 0
-        || getPositiveNumber(cacheAwareUsage.inputTokenDetails?.cacheWriteTokens) > 0;
+        || getPositiveNumber(cacheAwareUsage.inputTokenDetails?.cacheReadTokens) > 0;
 }
 
 export function didEstablishPromptCache(params: {

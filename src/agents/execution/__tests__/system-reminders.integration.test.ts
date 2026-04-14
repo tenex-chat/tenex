@@ -153,8 +153,7 @@ describe("system reminder prompt integration", () => {
             },
         });
 
-        expect(prepared.runtimeOverlays).toHaveLength(1);
-        expect(String(prepared.runtimeOverlays[0]?.message.content)).toContain("<delegations>");
+        expect(prepared.runtimeOverlays).toHaveLength(0);
 
         const sourceUserMsg = compiled.messages.find((m) => m.role === "user");
         expect(typeof sourceUserMsg?.content === "string" ? sourceUserMsg.content : "").toBe(
@@ -202,7 +201,7 @@ describe("system reminder prompt integration", () => {
         reloaded.load(projectId, conversationId);
         const history = reloaded.getAgentPromptHistory(agentPubkey);
 
-        expect(prepared.runtimeOverlays).toHaveLength(1);
+        expect(prepared.runtimeOverlays).toHaveLength(0);
         expect(prepared.messages).toHaveLength(2);
         expect(history.messages).toHaveLength(1);
         expect(history.messages[0]?.source.kind).toBe("canonical");
@@ -372,22 +371,20 @@ describe("system reminder prompt integration", () => {
             agentPubkey,
             runtimeOverlays: prepared.runtimeOverlays,
         });
+        const renderedPrompt = prepared.messages
+            .map((message) => String(message.content))
+            .join("\n\n");
 
-        expect(prepared.runtimeOverlays).toHaveLength(1);
-        expect(String(prepared.runtimeOverlays[0]?.message.content)).not.toContain("Fix the previous tool call");
-        expect(String(prepared.messages[1]?.content)).toContain("<system-reminders>");
-        expect(String(prepared.messages[1]?.content)).toContain("Fix the previous tool call");
-        expect(assembled.messages).toHaveLength(3);
-        expect(String(assembled.messages[2]?.content)).toContain("<system-reminders>");
-        expect(String(assembled.messages[2]?.content)).not.toContain("Fix the previous tool call");
+        expect(prepared.runtimeOverlays).toHaveLength(0);
+        expect(renderedPrompt).toContain("<system-reminders>");
+        expect(renderedPrompt).toContain("Fix the previous tool call");
+        expect(assembled.messages).toHaveLength(2);
+        expect(String(assembled.messages[1]?.content)).toBe("Continue the task");
 
         const history = conversationStore.getAgentPromptHistory(agentPubkey);
-        expect(history.messages).toHaveLength(2);
+        expect(history.messages).toHaveLength(1);
         expect(history.messages[0]?.source.kind).toBe("canonical");
-        expect(history.messages[1]?.source.kind).toBe("runtime-overlay");
         expect(history.messages[0]?.content).toBe("Continue the task");
-        expect(String(history.messages[1]?.content)).toContain("<system-reminders>");
-        expect(String(history.messages[1]?.content)).not.toContain("Fix the previous tool call");
     });
 
     it("does not persist durable reminder overlays before cache is anchored", async () => {
@@ -422,7 +419,7 @@ describe("system reminder prompt integration", () => {
             runtimeOverlays: prepared.runtimeOverlays,
         });
 
-        expect(prepared.runtimeOverlays).toHaveLength(1);
+        expect(prepared.runtimeOverlays).toHaveLength(0);
         expect(assembled.messages).toHaveLength(2);
 
         const history = conversationStore.getAgentPromptHistory(agentPubkey);
