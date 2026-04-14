@@ -146,10 +146,9 @@ At this point TENEX passes two reminder inputs into the library:
 
 In `src/agents/execution/context-management/runtime.ts`, TENEX currently wires a stack shaped like:
 
-1. `ScratchpadStrategy` when available
-2. `CompactionToolStrategy` when enabled
-3. `ToolResultDecayStrategy` when enabled
-4. `RemindersStrategy` when enabled
+1. `CompactionToolStrategy` when enabled
+2. `ToolResultDecayStrategy` when enabled
+3. `RemindersStrategy` when enabled
 
 The exact toggles come from `src/agents/execution/context-management/settings.ts`.
 
@@ -273,7 +272,6 @@ These reminders are passed to `RemindersStrategy` as `queuedReminders`, so the p
 `src/agents/execution/context-management/settings.ts` currently exposes these strategy toggles:
 
 - `reminders`
-- `scratchpad`
 - `toolResultDecay`
 - `compaction`
 - `contextUtilizationReminder`
@@ -282,7 +280,6 @@ These reminders are passed to `RemindersStrategy` as `queuedReminders`, so the p
 Other relevant controls:
 
 - `tokenBudget`
-- `forceScratchpadThresholdPercent`
 - `utilizationWarningThresholdPercent`
 - `compactionThresholdPercent`
 

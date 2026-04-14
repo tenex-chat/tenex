@@ -82,6 +82,8 @@ describe("explicit request preparation order", () => {
                 {
                     kind: "heuristic",
                     content: "Service-level reminder.",
+                    placement: "overlay-user",
+                    persistInHistory: false,
                 },
             ],
             reminderData: undefined,
@@ -121,7 +123,7 @@ describe("explicit request preparation order", () => {
                 messages,
                 toolChoice: {
                     type: "tool",
-                    toolName: "scratchpad",
+                    toolName: "compact_context",
                 },
                 providerOptions: undefined,
                 reportActualUsage: async () => {},
@@ -142,7 +144,7 @@ describe("explicit request preparation order", () => {
 
         expect(request.toolChoice).toEqual({
             type: "tool",
-            toolName: "scratchpad",
+            toolName: "compact_context",
         });
     });
 

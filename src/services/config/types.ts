@@ -36,7 +36,6 @@ export interface TenexConfig {
     contextManagement?: {
         enabled?: boolean; // Enable ai-sdk-context-management strategies (default: true)
         tokenBudget?: number; // Managed working-context token budget (default: 40000)
-        forceScratchpadThresholdPercent?: number; // Managed-context utilization percent that forces scratchpad (default: 70)
         utilizationWarningThresholdPercent?: number; // Managed-context utilization percent for warnings (default: 70)
         compactionThresholdPercent?: number; // Managed-context utilization percent for automatic compaction (default: 90)
         toolResultDecay?: {
@@ -46,7 +45,6 @@ export interface TenexConfig {
         };
         strategies?: {
             reminders?: boolean; // Enable RemindersStrategy (default: true)
-            scratchpad?: boolean; // Enable ScratchpadStrategy (default: true)
             toolResultDecay?: boolean; // Enable ToolResultDecayStrategy (default: true)
             compaction?: boolean; // Enable CompactionToolStrategy (default: true)
             contextUtilizationReminder?: boolean; // Enable RemindersStrategy context utilization source (default: true)
@@ -142,7 +140,6 @@ export const TenexConfigSchema = z.object({
         .object({
             enabled: z.boolean().optional(),
             tokenBudget: z.number().positive().optional(),
-            forceScratchpadThresholdPercent: z.number().min(0).max(100).optional(),
             utilizationWarningThresholdPercent: z.number().min(0).max(100).optional(),
             compactionThresholdPercent: z.number().min(0).max(100).optional(),
             toolResultDecay: z
@@ -155,7 +152,6 @@ export const TenexConfigSchema = z.object({
             strategies: z
                 .object({
                     reminders: z.boolean().optional(),
-                    scratchpad: z.boolean().optional(),
                     toolResultDecay: z.boolean().optional(),
                     compaction: z.boolean().optional(),
                     contextUtilizationReminder: z.boolean().optional(),

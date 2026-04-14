@@ -177,7 +177,6 @@ async function withForcedContextSettings<T>(callback: () => Promise<T>): Promise
 
     configService.getContextManagementConfig = () => ({
         tokenBudget: 2500,
-        forceScratchpadThresholdPercent: 100,
         utilizationWarningThresholdPercent: 60,
         compactionThresholdPercent: 95,
     });

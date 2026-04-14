@@ -36,8 +36,6 @@ export interface MessageCompilerContext {
     metaModelSystemPrompt?: string;
     /** Variant-specific system prompt to inject when a meta model variant is active */
     variantSystemPrompt?: string;
-    /** Whether the scratchpad strategy is active. When false, scratchpad-practice prompt is omitted. Defaults to true. */
-    scratchpadAvailable?: boolean;
     teamContext?: TeamContext;
 }
 

@@ -193,7 +193,7 @@ services/
 
 TENEX conversation storage has two intentional layers:
 
-- `ConversationStore` is the canonical ledger. It owns full transcript JSON, scratchpads, and save/load semantics.
+- `ConversationStore` is the canonical ledger. It owns full transcript JSON, context-management compactions, and save/load semantics.
 - `ConversationCatalogService` is the per-project derived read model backed by `conversation-catalog.db`. It exists for prompt/tool metadata queries such as recent conversations, conversation previews, participant/delegation lookups, and durable embedding indexing state.
 
 `ConversationStore` also carries per-agent prompt-view state that is intentionally separate from the canonical transcript:

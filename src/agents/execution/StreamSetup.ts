@@ -302,7 +302,6 @@ export async function setupStreamExecution(
         conversationId: context.conversationId,
         agent: context.agent,
         conversationStore,
-        skillToolPermissions: skillResult.toolPermissions,
     });
 
     if (contextManagement) {
@@ -344,7 +343,6 @@ export async function setupStreamExecution(
         ralNumber,
         metaModelSystemPrompt,
         variantSystemPrompt,
-        scratchpadAvailable: contextManagement?.scratchpadAvailable ?? true,
     });
 
     // Cache the compiled system prompt for reuse by supervision checks

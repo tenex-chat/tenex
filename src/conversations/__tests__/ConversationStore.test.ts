@@ -181,65 +181,6 @@ describe("ConversationStore", () => {
             expect(saved.metadata.last_user_message).toBeUndefined();
         });
 
-        it("persists context-management scratchpads per agent", async () => {
-            store.load(PROJECT_ID, CONVERSATION_ID);
-
-            store.setContextManagementScratchpad(AGENT1_PUBKEY, {
-                entries: {
-                    objective: "Focus on parser cleanup",
-                    notes: "Focus on the failing tests",
-                },
-                preserveTurns: 6,
-                updatedAt: 123,
-                agentLabel: "agent1",
-            });
-            await store.save();
-
-            const store2 = new ConversationStore(testDir);
-            store2.load(PROJECT_ID, CONVERSATION_ID);
-
-            expect(store2.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
-                entries: {
-                    notes: "Focus on the failing tests",
-                    objective: "Focus on parser cleanup",
-                },
-                preserveTurns: 6,
-                updatedAt: 123,
-                agentLabel: "agent1",
-            });
-            expect(store2.listContextManagementScratchpads()).toEqual([{
-                agentId: AGENT1_PUBKEY,
-                agentLabel: "agent1",
-                state: {
-                    entries: {
-                        notes: "Focus on the failing tests",
-                        objective: "Focus on parser cleanup",
-                    },
-                    preserveTurns: 6,
-                    updatedAt: 123,
-                    agentLabel: "agent1",
-                },
-            }]);
-        });
-
-        it("keeps scratchpads that only contain structured entries", async () => {
-            store.load(PROJECT_ID, CONVERSATION_ID);
-
-            store.setContextManagementScratchpad(AGENT1_PUBKEY, {
-                entries: {
-                    thesis: "The parser regression is in middleware ordering",
-                },
-                agentLabel: "agent1",
-            });
-
-            expect(store.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
-                entries: {
-                    thesis: "The parser regression is in middleware ordering",
-                },
-                agentLabel: "agent1",
-            });
-        });
-
         it("persists context-management compactions per agent", async () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
 
@@ -323,7 +264,7 @@ describe("ConversationStore", () => {
             }]);
         });
 
-        it("migrates legacy scratchpad notes into structured entries on load", async () => {
+        it("drops legacy scratchpad state on the next save", async () => {
             const conversationDir = join(testDir, PROJECT_ID, "conversations");
             await mkdir(conversationDir, { recursive: true });
             await writeFile(
@@ -354,15 +295,16 @@ describe("ConversationStore", () => {
             );
 
             store.load(PROJECT_ID, CONVERSATION_ID);
+            await store.save();
 
-            expect(store.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
-                entries: {
-                    notes: "Focus on the failing tests",
-                },
-                preserveTurns: 6,
-                updatedAt: 123,
-                agentLabel: "agent1",
-            });
+            const saved = JSON.parse(
+                await readFile(
+                    join(conversationDir, `${CONVERSATION_ID}.json`),
+                    "utf-8"
+                )
+            );
+
+            expect(saved.contextManagementScratchpads).toBeUndefined();
         });
 
         it("should return empty state for new conversation", () => {

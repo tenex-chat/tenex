@@ -41,7 +41,6 @@ describe("Debug Mock Store", () => {
                 todoNudgedAgents: [],
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
-                contextManagementScratchpads: {},
                 contextManagementCompactions: {},
                 selfAppliedSkills: {},
                 agentPromptHistories: {},

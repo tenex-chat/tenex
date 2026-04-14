@@ -24,7 +24,6 @@ import { buildPromptMessagesFromRecords } from "./PromptBuilder";
 import { getConversationRecordAuthorPubkey } from "./record-author";
 import { ensureConversationRecord } from "./record-id";
 import { conversationRegistry } from "./ConversationRegistry";
-import { normalizeScratchpadEntries } from "./utils/normalize-scratchpad-entries";
 import type {
     AgentPromptHistoryState,
     ContextManagementCompactionAnchor,
@@ -35,8 +34,6 @@ import type {
     ConversationRecord,
     ConversationMetadata,
     ConversationState,
-    ContextManagementScratchpadEntry,
-    ContextManagementScratchpadState,
     DelegationMarker,
     ExecutionTime,
     FrozenPromptMessage,
@@ -95,74 +92,6 @@ function normalizeLoadedMetadata(
         ...(rest as ConversationMetadata),
         ...(lastUserMessage !== undefined ? { lastUserMessage } : {}),
     };
-}
-
-function normalizeContextManagementScratchpadState(
-    state: ContextManagementScratchpadState | Record<string, unknown> | undefined
-): ContextManagementScratchpadState | undefined {
-    if (!state) {
-        return undefined;
-    }
-
-    const rawState = state as Record<string, unknown>;
-    const rawEntries = typeof rawState.entries === "object" && rawState.entries !== null
-        ? rawState.entries as Record<string, unknown>
-        : undefined;
-    const legacyNotes = typeof rawState.notes === "string" ? rawState.notes : undefined;
-    const entries = normalizeScratchpadEntries(rawEntries)
-        ?? normalizeScratchpadEntries(legacyNotes ? { notes: legacyNotes } : undefined);
-    const rawPreserveTurns = typeof rawState.preserveTurns === "number"
-        ? rawState.preserveTurns
-        : rawState.keepLastMessages;
-    const preserveTurns = typeof rawPreserveTurns === "number"
-        && Number.isFinite(rawPreserveTurns)
-        ? Math.max(0, Math.floor(rawPreserveTurns))
-        : undefined;
-    const rawActiveNotice = typeof rawState.activeNotice === "object" && rawState.activeNotice !== null
-        ? rawState.activeNotice as Record<string, unknown>
-        : undefined;
-    const activeNotice = rawActiveNotice
-        && typeof rawActiveNotice.description === "string"
-        && rawActiveNotice.description.trim().length > 0
-        && typeof rawActiveNotice.toolCallId === "string"
-        && rawActiveNotice.toolCallId.trim().length > 0
-        && typeof rawActiveNotice.rawTurnCountAtCall === "number"
-        && Number.isFinite(rawActiveNotice.rawTurnCountAtCall)
-        && typeof rawActiveNotice.projectedTurnCountAtCall === "number"
-        && Number.isFinite(rawActiveNotice.projectedTurnCountAtCall)
-        ? {
-            description: rawActiveNotice.description.trim(),
-            toolCallId: rawActiveNotice.toolCallId.trim(),
-            rawTurnCountAtCall: Math.max(0, Math.floor(rawActiveNotice.rawTurnCountAtCall)),
-            projectedTurnCountAtCall: Math.max(
-                0,
-                Math.floor(rawActiveNotice.projectedTurnCountAtCall)
-            ),
-        }
-        : undefined;
-    const agentLabel = typeof rawState.agentLabel === "string" && rawState.agentLabel.trim().length > 0
-        ? rawState.agentLabel
-        : undefined;
-    const updatedAt = typeof rawState.updatedAt === "number" ? rawState.updatedAt : undefined;
-
-    return {
-        ...(entries ? { entries } : {}),
-        ...(preserveTurns !== undefined ? { preserveTurns } : {}),
-        ...(activeNotice ? { activeNotice } : {}),
-        ...(updatedAt !== undefined ? { updatedAt } : {}),
-        ...(agentLabel ? { agentLabel } : {}),
-    };
-}
-
-function normalizeLoadedContextManagementScratchpads(
-    scratchpads: Record<string, ContextManagementScratchpadState> | undefined
-): Record<string, ContextManagementScratchpadState> {
-    return Object.fromEntries(
-        Object.entries(scratchpads ?? {}).flatMap(([agentId, state]) => {
-            const normalizedState = normalizeContextManagementScratchpadState(state);
-            return normalizedState ? [[agentId, normalizedState] as const] : [];
-        })
-    );
 }
 
 function normalizeContextManagementCompactionAnchor(
@@ -678,7 +607,6 @@ export class ConversationStore {
         todoNudgedAgents: [],
         blockedAgents: [],
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
-        contextManagementScratchpads: {},
         contextManagementCompactions: {},
         selfAppliedSkills: {},
         agentPromptHistories: {},
@@ -728,14 +656,10 @@ export class ConversationStore {
                 agentTodos: loaded.agentTodos ?? {},
                 todoNudgedAgents: loaded.todoNudgedAgents ?? [],
                 // Note: todoRemindedAgents removed in refactor - ignore if present in old files
+                // Note: contextManagementScratchpads removed - ignore if present in old files
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 metaModelVariantOverride: loaded.metaModelVariantOverride,
-                contextManagementScratchpads: normalizeLoadedContextManagementScratchpads(
-                    loaded.contextManagementScratchpads as
-                        | Record<string, ContextManagementScratchpadState>
-                        | undefined
-                ),
                 contextManagementCompactions: normalizeLoadedContextManagementCompactions(
                     loaded.contextManagementCompactions as
                         | Record<string, ContextManagementCompactionState>
@@ -768,7 +692,6 @@ export class ConversationStore {
                 todoNudgedAgents: [],
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
-                contextManagementScratchpads: {},
                 contextManagementCompactions: {},
                 selfAppliedSkills: {},
                 agentPromptHistories: {},
@@ -992,42 +915,6 @@ export class ConversationStore {
         if (this.state.metaModelVariantOverride) {
             delete this.state.metaModelVariantOverride[agentPubkey];
         }
-    }
-
-    getContextManagementScratchpad(agentId: string): ContextManagementScratchpadState | undefined {
-        return this.state.contextManagementScratchpads?.[agentId];
-    }
-
-    setContextManagementScratchpad(agentId: string, state: ContextManagementScratchpadState): void {
-        if (!this.state.contextManagementScratchpads) {
-            this.state.contextManagementScratchpads = {};
-        }
-
-        const normalizedState = normalizeContextManagementScratchpadState(state);
-        const hasEntries = Object.keys(normalizedState?.entries ?? {}).length > 0;
-        const hasPreserveTurns = typeof normalizedState?.preserveTurns === "number";
-        const hasActiveNotice = normalizedState?.activeNotice !== undefined;
-
-        if (!normalizedState || (!hasEntries && !hasPreserveTurns && !hasActiveNotice)) {
-            delete this.state.contextManagementScratchpads[agentId];
-            return;
-        }
-
-        this.state.contextManagementScratchpads[agentId] = normalizedState;
-    }
-
-    listContextManagementScratchpads(): ContextManagementScratchpadEntry[] {
-        const entries = Object.entries(this.state.contextManagementScratchpads ?? {}).map(
-            ([agentId, state]) => ({
-                agentId,
-                agentLabel: state.agentLabel,
-                state,
-            })
-        );
-
-        return entries.sort((a, b) =>
-            (a.agentLabel ?? a.agentId).localeCompare(b.agentLabel ?? b.agentId)
-        );
     }
 
     getContextManagementCompaction(agentId: string): ContextManagementCompactionState | undefined {

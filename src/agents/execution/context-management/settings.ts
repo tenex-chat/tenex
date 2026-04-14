@@ -3,11 +3,9 @@ import { config as configService } from "@/services/ConfigService";
 export const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
 export const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 export const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 90;
-export const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 
 export interface ContextManagementStrategyToggles {
     reminders: boolean;
-    scratchpad: boolean;
     toolResultDecay: boolean;
     compaction: boolean;
     contextUtilizationReminder: boolean;
@@ -17,7 +15,6 @@ export interface ContextManagementStrategyToggles {
 export interface ContextManagementSettings {
     enabled: boolean;
     tokenBudget: number;
-    forceScratchpadThresholdPercent: number;
     utilizationWarningThresholdPercent: number;
     compactionThresholdPercent: number;
     strategies: ContextManagementStrategyToggles;
@@ -45,10 +42,6 @@ export function getContextManagementSettings(): ContextManagementSettings {
         tokenBudget: Math.floor(
             normalizePositiveNumber(raw?.tokenBudget, DEFAULT_WORKING_TOKEN_BUDGET)
         ),
-        forceScratchpadThresholdPercent: normalizePercent(
-            raw?.forceScratchpadThresholdPercent,
-            DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT
-        ),
         utilizationWarningThresholdPercent: normalizePercent(
             raw?.utilizationWarningThresholdPercent,
             DEFAULT_WARNING_THRESHOLD_PERCENT
@@ -59,7 +52,6 @@ export function getContextManagementSettings(): ContextManagementSettings {
         ),
         strategies: {
             reminders: rawStrategies?.reminders !== false,
-            scratchpad: rawStrategies?.scratchpad !== false,
             toolResultDecay: rawStrategies?.toolResultDecay !== false,
             compaction: rawStrategies?.compaction !== false,
             contextUtilizationReminder: rawStrategies?.contextUtilizationReminder !== false,

@@ -51,11 +51,9 @@ export interface BuildSystemPromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
-    /** Whether the scratchpad strategy is active. When false, omits the scratchpad-practice prompt fragment. Defaults to true. */
-    scratchpadAvailable?: boolean;
     /** Whether to include environment-variables fragment. Defaults to true. */
     environmentVariablesAvailable?: boolean;
-    /** Agent category. Used to auto-derive scratchpadAvailable and environmentVariablesAvailable (orchestrators don't get either). */
+    /** Agent category. Used to auto-derive environmentVariablesAvailable (orchestrators don't get it). */
     agentCategory?: AgentCategory;
     teamContext?: TeamContext;
 }
@@ -179,7 +177,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         currentBranch,
         availableAgents = [],
         conversation,
-        scratchpadAvailable: scratchpadAvailableOption,
         environmentVariablesAvailable: environmentVariablesAvailableOption,
         agentCategory,
         teamContext,
@@ -190,9 +187,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     // that rebuild the prompt without an explicit category still apply correct policy.
     const effectiveAgentCategory = agentCategory ?? agent.category;
 
-    // Auto-derive availability based on agent category (orchestrators don't get scratchpad-practice or environment-variables)
+    // Auto-derive availability based on agent category (orchestrators don't get environment-variables)
     const isOrchestrator = effectiveAgentCategory === "orchestrator";
-    const scratchpadAvailable = scratchpadAvailableOption ?? !isOrchestrator;
     const environmentVariablesAvailable = environmentVariablesAvailableOption ?? !isOrchestrator;
 
     const baseAgentInstructions = agent.instructions || "";
@@ -233,10 +229,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
 
     // Explain <system-reminder> tags before agents encounter them
     systemPromptBuilder.add("system-reminders-explanation", {});
-
-    if (scratchpadAvailable) {
-        systemPromptBuilder.add("scratchpad-practice", {});
-    }
 
     // Add global system prompt if configured (ordered by fragment priority)
     systemPromptBuilder.add("global-system-prompt", {});

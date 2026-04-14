@@ -51,99 +51,6 @@ function getString(value: unknown, key: string): string | undefined {
     return typeof nested === "string" && nested.length > 0 ? nested : undefined;
 }
 
-function getStringArray(value: unknown, key: string): string[] | undefined {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-
-    const nested = value[key];
-    if (!Array.isArray(nested)) {
-        return undefined;
-    }
-
-    return nested.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-}
-
-function getRecordKeyCount(value: unknown, key: string): number | undefined {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-
-    const nested = value[key];
-    if (!isRecord(nested)) {
-        return undefined;
-    }
-
-    return Object.keys(nested).length;
-}
-
-function getRecordStringCharCount(value: unknown, key: string): number | undefined {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-
-    const nested = value[key];
-    if (!isRecord(nested)) {
-        return undefined;
-    }
-
-    let total = 0;
-    for (const [entryKey, entryValue] of Object.entries(nested)) {
-        if (typeof entryValue === "string") {
-            total += entryKey.length + entryValue.length;
-        }
-    }
-
-    return total;
-}
-
-function getScratchpadNotes(value: unknown): string | undefined {
-    const directNotes = getString(value, "notes");
-    if (directNotes !== undefined) {
-        return directNotes;
-    }
-
-    const entries = isRecord(value) && isRecord(value.entries)
-        ? value.entries
-        : undefined;
-    if (typeof entries?.notes === "string" && entries.notes.trim().length > 0) {
-        return entries.notes;
-    }
-
-    const setEntries = isRecord(value) && isRecord(value.setEntries)
-        ? value.setEntries
-        : undefined;
-    const replaceEntries = isRecord(value) && isRecord(value.replaceEntries)
-        ? value.replaceEntries
-        : undefined;
-    const notes = typeof replaceEntries?.notes === "string"
-        ? replaceEntries.notes
-        : typeof setEntries?.notes === "string"
-            ? setEntries.notes
-            : undefined;
-
-    return notes?.trim().length ? notes : undefined;
-}
-
-function getScratchpadEntryUpdateCount(value: unknown): number {
-    if (getString(value, "notes") !== undefined) {
-        return 1;
-    }
-
-    return (getRecordKeyCount(value, "setEntries") ?? 0)
-        + (getRecordKeyCount(value, "replaceEntries") ?? 0);
-}
-
-function getScratchpadEntryCharCount(value: unknown): number {
-    const notes = getScratchpadNotes(value);
-    if (notes !== undefined) {
-        return notes.length;
-    }
-
-    return (getRecordStringCharCount(value, "setEntries") ?? 0)
-        + (getRecordStringCharCount(value, "replaceEntries") ?? 0);
-}
-
 function formatTelemetryNumber(value: number): string {
     return Math.round(value).toLocaleString("en-US");
 }
@@ -177,25 +84,6 @@ function buildToolResultDecaySummary(
     return clipTelemetrySummary(
         `Evaluated tool-result decay across ${formatTelemetryNumber(payload.totalToolExchanges ?? 0)} exchanges; ${formatTelemetryNumber(payload.placeholderCount ?? 0)} outputs and ${formatTelemetryNumber(payload.inputPlaceholderCount ?? 0)} inputs placeholdered.`
     );
-}
-
-function buildScratchpadSummary(
-    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
-    payload: Extract<ContextManagementStrategyPayload, { kind: "scratchpad" }> | undefined
-): string {
-    if (event.reason === "scratchpad-idle") {
-        return "Skipped scratchpad reminder because no scratchpad state exists yet.";
-    }
-
-    if (!payload) {
-        return "Rendered scratchpad context.";
-    }
-
-    if (payload.forcedToolChoice) {
-        return "Rendered scratchpad context and forced scratchpad tool choice.";
-    }
-
-    return "Rendered scratchpad context.";
 }
 
 function buildRemindersSummary(
@@ -249,8 +137,6 @@ function buildStrategyCompleteSummary(
     switch (payload.kind) {
         case "tool-result-decay":
             return buildToolResultDecaySummary(event, payload);
-        case "scratchpad":
-            return buildScratchpadSummary(event, payload);
         case "reminders":
             return buildRemindersSummary(payload);
         case "compaction-tool":
@@ -272,10 +158,6 @@ function buildToolExecuteSummary(
         type: "tool-execute-start" | "tool-execute-complete" | "tool-execute-error";
     }>
 ): string {
-    if (event.toolName === "scratchpad" && event.type === "tool-execute-complete") {
-        return "Updated scratchpad.";
-    }
-
     if (event.toolName === "compact_context" && event.type === "tool-execute-complete") {
         const result = isRecord(event.payloads.result) ? event.payloads.result : undefined;
         return result?.ok === true
@@ -329,14 +211,6 @@ function buildDerivedTelemetryAttributes(
                     addAttribute(attributes, "context_management.total_tool_exchanges", payload.totalToolExchanges);
                     addAttribute(attributes, "context_management.warning_count", payload.warningCount);
                     break;
-                case "scratchpad":
-                    attributes["context_management.entry_count"] = payload.entryCount;
-                    attributes["context_management.entry_char_count"] = payload.entryCharCount;
-                    addAttribute(attributes, "context_management.preserve_turns", payload.preserveTurns ?? undefined);
-                    attributes["context_management.forced_tool_choice"] = payload.forcedToolChoice;
-                    addAttribute(attributes, "context_management.force_threshold_tokens", payload.forceThresholdTokens);
-                    attributes["context_management.estimated_prompt_tokens"] = payload.estimatedTokens;
-                    break;
                 case "reminders":
                     attributes["context_management.reminder_count"] = payload.emittedCount;
                     attributes["context_management.reminder_provider_count"] = payload.providerCount;
@@ -385,21 +259,7 @@ function buildDerivedTelemetryAttributes(
         case "tool-execute-complete":
         case "tool-execute-error":
             attributes["context_management.summary"] = buildToolExecuteSummary(event);
-            if (event.toolName === "scratchpad") {
-                attributes["context_management.entry_char_count"] = getScratchpadEntryCharCount(
-                    event.payloads.input
-                );
-                attributes["context_management.entry_update_count"] = getScratchpadEntryUpdateCount(
-                    event.payloads.input
-                );
-                attributes["context_management.entry_removal_count"] =
-                    getStringArray(event.payloads.input, "removeEntryKeys")?.length ?? 0;
-                addAttribute(
-                    attributes,
-                    "context_management.preserve_turns",
-                    getNumber(event.payloads.input, "preserveTurns")
-                );
-            } else if (event.toolName === "compact_context") {
+            if (event.toolName === "compact_context") {
                 addAttribute(
                     attributes,
                     "context_management.summary_char_count",

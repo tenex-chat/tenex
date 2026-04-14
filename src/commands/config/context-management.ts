@@ -1,6 +1,5 @@
 import {
     DEFAULT_COMPACTION_THRESHOLD_PERCENT,
-    DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT,
     DEFAULT_WARNING_THRESHOLD_PERCENT,
     DEFAULT_WORKING_TOKEN_BUDGET,
 } from "@/agents/execution/context-management/settings";
@@ -54,22 +53,6 @@ export const contextManagementCommand = new Command("context-management")
                     const num = Number.parseInt(value, 10);
                     if (Number.isNaN(num) || num <= 0) {
                         return "Please enter a positive number";
-                    }
-                    return true;
-                },
-            },
-            {
-                type: "input",
-                name: "forceScratchpadThresholdPercent",
-                message: "Force scratchpad threshold (%):",
-                default: (
-                    contextManagement.forceScratchpadThresholdPercent
-                    ?? DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT
-                ),
-                validate: (value) => {
-                    const num = Number.parseInt(value, 10);
-                    if (Number.isNaN(num) || num < 0 || num > 100) {
-                        return "Please enter a number between 0 and 100";
                     }
                     return true;
                 },
@@ -153,12 +136,6 @@ export const contextManagementCommand = new Command("context-management")
             },
             {
                 type: "confirm",
-                name: "scratchpad",
-                message: "Enable ScratchpadStrategy:",
-                default: contextManagement.strategies?.scratchpad !== false,
-            },
-            {
-                type: "confirm",
                 name: "toolResultDecay",
                 message: "Enable ToolResultDecayStrategy:",
                 default: contextManagement.strategies?.toolResultDecay !== false,
@@ -186,7 +163,6 @@ export const contextManagementCommand = new Command("context-management")
         tenexConfig.contextManagement = {
             enabled: answers.enabled,
             tokenBudget: Number.parseInt(answers.tokenBudget, 10),
-            forceScratchpadThresholdPercent: Number.parseInt(answers.forceScratchpadThresholdPercent, 10),
             utilizationWarningThresholdPercent: Number.parseInt(answers.utilizationWarningThresholdPercent, 10),
             compactionThresholdPercent: Number.parseInt(answers.compactionThresholdPercent, 10),
             toolResultDecay: {
@@ -199,7 +175,6 @@ export const contextManagementCommand = new Command("context-management")
             },
             strategies: {
                 reminders: strategyAnswers.reminders,
-                scratchpad: strategyAnswers.scratchpad,
                 toolResultDecay: strategyAnswers.toolResultDecay,
                 compaction: strategyAnswers.compaction,
                 contextUtilizationReminder: strategyAnswers.contextUtilizationReminder,

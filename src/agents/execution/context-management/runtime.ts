@@ -9,7 +9,6 @@ import {
     type CompactionStore,
     type CompactionToolStrategyOptions,
     type ContextManagementPreparedRequest,
-    ScratchpadStrategy,
     RemindersStrategy,
     ToolResultDecayStrategy,
     createContextManagementRuntime,
@@ -25,7 +24,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
-import { isOnlyToolMode, type SkillToolPermissions } from "@/services/skill";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { shortenConversationId } from "@/utils/conversation-id";
@@ -43,17 +41,11 @@ import {
     createTenexReminderStateStore,
     type TenexReminderData,
 } from "../system-reminders";
-import {
-    fromRuntimeScratchpadState,
-    toRuntimeScratchpadConversationEntries,
-    toRuntimeScratchpadState,
-} from "./scratchpad-store";
 import { createTelemetryCallback } from "./telemetry";
 
 export interface ExecutionContextManagement {
     optionalTools: Record<string, AISdkTool>;
     requestContext: ContextManagementRequestContext;
-    scratchpadAvailable: boolean;
     prepareRequest(
         options: Omit<PrepareContextManagementRequestOptions, "requestContext">
     ): Promise<ContextManagementPreparedRequest>;
@@ -177,7 +169,6 @@ function createConversationContextManagementRuntime(options: {
     conversationStore: ConversationStore;
     conversationId: string;
     agent: AgentInstance;
-    scratchpadAvailable: boolean;
 }): {
     runtime: ContextManagementRuntime;
 } {
@@ -187,40 +178,8 @@ function createConversationContextManagementRuntime(options: {
         settings.tokenBudget,
         requestEstimator
     );
-    const scratchpadEnabled = options.scratchpadAvailable;
 
     const strategies: ContextManagementStrategy[] = [];
-
-    if (scratchpadEnabled && settings.strategies.scratchpad) {
-        strategies.push(
-            new ScratchpadStrategy({
-                scratchpadStore: {
-                    get: ({ agentId }) =>
-                        toRuntimeScratchpadState(
-                            options.conversationStore.getContextManagementScratchpad(agentId)
-                        ),
-                    set: async ({ agentId }, state) => {
-                        options.conversationStore.setContextManagementScratchpad(
-                            agentId,
-                            fromRuntimeScratchpadState(
-                                state,
-                                options.conversationStore.getContextManagementScratchpad(agentId)
-                            )
-                        );
-                        await options.conversationStore.save();
-                    },
-                    listConversation: (conversationId) =>
-                        conversationId === options.conversationStore.getId()
-                            ? toRuntimeScratchpadConversationEntries(
-                                options.conversationStore.listContextManagementScratchpads()
-                            )
-                            : [],
-                },
-                budgetProfile: managedBudgetProfile,
-                forceToolThresholdRatio: settings.forceScratchpadThresholdPercent / 100,
-            })
-        );
-    }
 
     const summarizationModel = createSummarizationModel({
         conversationId: options.conversationId,
@@ -283,7 +242,7 @@ function createConversationContextManagementRuntime(options: {
             ? {
                 budgetProfile: managedBudgetProfile,
                 warningThresholdRatio: settings.utilizationWarningThresholdPercent / 100,
-                mode: scratchpadEnabled ? "scratchpad" : "generic",
+                mode: "generic",
             }
             : false;
 
@@ -323,7 +282,6 @@ export function createExecutionContextManagement(options: {
     conversationId: string;
     agent: AgentInstance;
     conversationStore: ConversationStore;
-    skillToolPermissions?: SkillToolPermissions;
 }): ExecutionContextManagement | undefined {
     const settings = getContextManagementSettings();
 
@@ -337,7 +295,6 @@ export function createExecutionContextManagement(options: {
         return {
             optionalTools: {},
             requestContext,
-            scratchpadAvailable: true,
             async prepareRequest(requestOptions) {
                 return {
                     messages: normalizeMessagesForContextManagement(requestOptions.messages),
@@ -349,22 +306,17 @@ export function createExecutionContextManagement(options: {
         };
     }
 
-    const scratchpadAvailable =
-        !options.skillToolPermissions || !isOnlyToolMode(options.skillToolPermissions);
-
     const { runtime } = createConversationContextManagementRuntime({
         providerId: options.providerId,
         conversationStore: options.conversationStore,
         conversationId: options.conversationId,
         agent: options.agent,
-        scratchpadAvailable,
     });
     const optionalTools = runtime.optionalTools as unknown as Record<string, AISdkTool>;
 
     return {
         optionalTools,
         requestContext,
-        scratchpadAvailable,
         async prepareRequest(requestOptions) {
             return await runtime.prepareRequest({
                 ...requestOptions,

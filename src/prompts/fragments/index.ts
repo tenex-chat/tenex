@@ -11,7 +11,6 @@ import { globalSystemPromptFragment } from "./00-global-system-prompt";
 import { agentIdentityFragment } from "./01-agent-identity";
 import { agentHomeDirectoryFragment } from "./02-agent-home-directory";
 import { systemRemindersExplanationFragment } from "./03-system-reminders-explanation";
-import { scratchpadPracticeFragment } from "./04-scratchpad-practice";
 import { delegationChainFragment } from "./05-delegation-chain";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 import { environmentVariablesFragment } from "./07-environment-variables";
@@ -41,7 +40,6 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(agentIdentityFragment);
     fragmentRegistry.register(agentHomeDirectoryFragment);
     fragmentRegistry.register(systemRemindersExplanationFragment);
-    fragmentRegistry.register(scratchpadPracticeFragment);
     fragmentRegistry.register(delegationChainFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
     fragmentRegistry.register(environmentVariablesFragment);

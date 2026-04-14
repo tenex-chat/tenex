@@ -12,6 +12,22 @@ const promptMock = mock(async () => {
 const getGlobalPathMock = mock(() => "/tmp/tenex-config-test");
 const loadTenexConfigMock = mock(async () => ({}));
 const saveTenexConfigMock = mock(async () => undefined);
+const getAnalysisTelemetryConfigMock = mock(() => ({
+    enabled: false,
+    dbPath: "/tmp/tenex-analysis-test.db",
+    retentionDays: 14,
+    largeMessageThresholdTokens: 50,
+    storeMessagePreviews: true,
+    maxPreviewChars: 64,
+    storeFullMessageText: false,
+}));
+const getContextManagementConfigMock = mock(() => undefined);
+const getSummarizationModelNameMock = mock(() => undefined);
+const createLLMServiceMock = mock(() => ({
+    createLanguageModel: () => {
+        throw new Error("Unexpected createLanguageModel() call in context management config test");
+    },
+}));
 
 mock.module("inquirer", () => ({
     default: {
@@ -24,6 +40,10 @@ mock.module("@/services/ConfigService", () => ({
         getGlobalPath: getGlobalPathMock,
         loadTenexConfig: loadTenexConfigMock,
         saveTenexConfig: saveTenexConfigMock,
+        getAnalysisTelemetryConfig: getAnalysisTelemetryConfigMock,
+        getContextManagementConfig: getContextManagementConfigMock,
+        getSummarizationModelName: getSummarizationModelNameMock,
+        createLLMService: createLLMServiceMock,
     },
 }));
 
@@ -34,6 +54,10 @@ describe("contextManagementCommand", () => {
         getGlobalPathMock.mockClear();
         loadTenexConfigMock.mockClear();
         saveTenexConfigMock.mockClear();
+        getAnalysisTelemetryConfigMock.mockClear();
+        getContextManagementConfigMock.mockClear();
+        getSummarizationModelNameMock.mockClear();
+        createLLMServiceMock.mockClear();
         loadTenexConfigMock.mockResolvedValue({
             contextManagement: {},
         });
@@ -46,7 +70,6 @@ describe("contextManagementCommand", () => {
             {
                 enabled: true,
                 tokenBudget: "32000",
-                forceScratchpadThresholdPercent: "75",
                 utilizationWarningThresholdPercent: "65",
                 compactionThresholdPercent: "92",
             },
@@ -57,7 +80,6 @@ describe("contextManagementCommand", () => {
             },
             {
                 reminders: true,
-                scratchpad: true,
                 toolResultDecay: false,
                 compaction: true,
                 contextUtilizationReminder: true,
@@ -74,12 +96,10 @@ describe("contextManagementCommand", () => {
                 contextManagement: expect.objectContaining({
                     enabled: true,
                     tokenBudget: 32000,
-                    forceScratchpadThresholdPercent: 75,
                     utilizationWarningThresholdPercent: 65,
                     compactionThresholdPercent: 92,
                     strategies: expect.objectContaining({
                         reminders: true,
-                        scratchpad: true,
                         toolResultDecay: false,
                         compaction: true,
                         contextUtilizationReminder: true,

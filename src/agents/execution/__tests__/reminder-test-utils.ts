@@ -83,7 +83,6 @@ export async function prepareTenexReminderRequest(params: {
     });
     const contextManagement: ExecutionContextManagement = {
         optionalTools: {},
-        scratchpadAvailable: true,
         requestContext: {
             conversationId: reminderData.conversation.getId(),
             agentId: reminderData.agent.pubkey,

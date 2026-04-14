@@ -84,8 +84,8 @@ describe("TENEX context management telemetry", () => {
     function buildContextManagementConfig(overrides: Record<string, unknown>) {
         return {
             tokenBudget: 40000,
-            forceScratchpadThresholdPercent: 70,
             utilizationWarningThresholdPercent: 70,
+            compactionThresholdPercent: 90,
             ...overrides,
         };
     }
@@ -97,7 +97,7 @@ describe("TENEX context management telemetry", () => {
     ) {
         expect(contextManagement).toBeDefined();
         return await contextManagement?.prepareRequest({
-            messages: messages as any,
+            messages: messages as never,
             model,
         });
     }
@@ -110,7 +110,7 @@ describe("TENEX context management telemetry", () => {
         getContextManagementConfigSpy = spyOn(
             configService,
             "getContextManagementConfig"
-        ).mockReturnValue(buildContextManagementConfig({}) as any);
+        ).mockReturnValue(buildContextManagementConfig({}) as never);
         getSummarizationModelNameSpy = spyOn(
             configService,
             "getSummarizationModelName"
@@ -138,22 +138,38 @@ describe("TENEX context management telemetry", () => {
             conversationStore: store,
         });
 
-        const scratchpadTool = contextManagement?.optionalTools.scratchpad as {
+        const compactContextTool = contextManagement?.optionalTools.compact_context as {
             execute: (
                 input: unknown,
-                options: { toolCallId?: string; experimental_context: Record<string, unknown> }
+                options: {
+                    toolCallId?: string;
+                    messages?: Array<Record<string, unknown>>;
+                    experimental_context: Record<string, unknown>;
+                }
             ) => Promise<unknown>;
         };
 
-        await scratchpadTool.execute(
+        await compactContextTool.execute(
             {
-                description: "Capture the current parser state in scratchpad",
-                setEntries: {
-                    notes: "Track the current parser state",
-                },
+                guidance: "Keep the parser findings concise.",
             },
             {
                 toolCallId: "tool-call-1",
+                messages: [
+                    { role: "system", content: "You are helpful.", id: "system-1" },
+                    {
+                        role: "user",
+                        id: "msg-user-1",
+                        eventId: "evt-user-1",
+                        content: [{ type: "text", text: "Inspect the parser flow." }],
+                    },
+                    {
+                        role: "assistant",
+                        id: "msg-assistant-1",
+                        eventId: "evt-assistant-1",
+                        content: [{ type: "text", text: "I traced the middleware ordering." }],
+                    },
+                ],
                 experimental_context: {
                     [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
@@ -187,14 +203,15 @@ describe("TENEX context management telemetry", () => {
         ).toBe(true);
         expect(
             events.some((event) =>
-                event.eventName === "context_management.tool_execute_start.scratchpad"
+                event.eventName === "context_management.tool_execute_start.compact_context"
             )
         ).toBe(true);
         expect(
             events.some((event) =>
-                event.eventName === "context_management.tool_execute_complete.scratchpad"
+                event.eventName === "context_management.tool_execute_complete.compact_context"
             )
         ).toBe(true);
+        expect(events.some((event) => event.eventName.includes("scratchpad"))).toBe(false);
 
         const runtimeStartEvent = events.find(
             (event) => event.eventName === "context_management.runtime_start"
@@ -203,28 +220,17 @@ describe("TENEX context management telemetry", () => {
         expect(String(runtimeStartEvent?.attributes?.["context_management.summary"])).toContain(
             "Running"
         );
-        expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(5);
+        expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(4);
 
         const strategyOrder = events
             .filter((event) => event.eventName.startsWith("context_management.strategy_complete."))
             .map((event) => String(event.attributes?.["context_management.strategy_name"]));
-        expect(strategyOrder.indexOf("scratchpad")).toBeGreaterThanOrEqual(0);
-        expect(strategyOrder.indexOf("compaction-tool")).toBeGreaterThanOrEqual(0);
-        expect(strategyOrder.indexOf("tool-result-decay")).toBeGreaterThanOrEqual(0);
-        expect(strategyOrder.indexOf("reminders")).toBeGreaterThanOrEqual(0);
-        expect(strategyOrder.indexOf("anthropic-prompt-caching")).toBeGreaterThanOrEqual(0);
-        expect(strategyOrder.indexOf("scratchpad")).toBeLessThan(
-            strategyOrder.indexOf("compaction-tool")
-        );
-        expect(strategyOrder.indexOf("compaction-tool")).toBeLessThan(
-            strategyOrder.indexOf("tool-result-decay")
-        );
-        expect(strategyOrder.indexOf("tool-result-decay")).toBeLessThan(
-            strategyOrder.indexOf("reminders")
-        );
-        expect(strategyOrder.indexOf("reminders")).toBeLessThan(
-            strategyOrder.indexOf("anthropic-prompt-caching")
-        );
+        expect(strategyOrder).toEqual([
+            "compaction-tool",
+            "tool-result-decay",
+            "reminders",
+            "anthropic-prompt-caching",
+        ]);
 
         const remindersEvent = events.find(
             (event) =>
@@ -233,27 +239,10 @@ describe("TENEX context management telemetry", () => {
                 event.attributes?.["context_management.strategy_name"] === "reminders"
         );
         expect(remindersEvent).toBeDefined();
-        expect(remindersEvent?.attributes?.["context_management.outcome"]).toBe("applied");
-        expect(remindersEvent?.attributes?.["context_management.budget_scope"]).toBe(
-            "managed-context"
-        );
-        expect(remindersEvent?.attributes?.["context_management.reminder_count"]).toBe(1);
+        expect(remindersEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
+        expect(remindersEvent?.attributes?.["context_management.reminder_count"]).toBe(0);
         expect(String(remindersEvent?.attributes?.["context_management.summary"])).toContain(
-            "Applied 1 reminder"
-        );
-
-        const scratchpadEvent = events.find(
-            (event) =>
-                event.eventName === "context_management.strategy_complete.scratchpad" &&
-                event.attributes?.["context_management.strategy_name"] === "scratchpad"
-        );
-        expect(scratchpadEvent).toBeDefined();
-        expect(scratchpadEvent?.attributes?.["context_management.forced_tool_choice"]).toBe(false);
-        expect(scratchpadEvent?.attributes?.["context_management.force_threshold_tokens"]).toBe(
-            28000
-        );
-        expect(String(scratchpadEvent?.attributes?.["context_management.summary"])).toContain(
-            "Rendered scratchpad context"
+            "Evaluated reminders"
         );
 
         const anthropicCachingEvent = events.find(
@@ -290,14 +279,12 @@ describe("TENEX context management telemetry", () => {
         );
 
         const toolEvent = events.find(
-            (event) => event.eventName === "context_management.tool_execute_complete.scratchpad"
+            (event) => event.eventName === "context_management.tool_execute_complete.compact_context"
         );
         expect(toolEvent).toBeDefined();
         expect(String(toolEvent?.attributes?.["context_management.summary"])).toContain(
-            "Updated scratchpad"
+            "Rejected context compaction request"
         );
-        expect(toolEvent?.attributes?.["context_management.entry_char_count"]).toBeGreaterThan(0);
-        expect(toolEvent?.attributes?.["context_management.entry_update_count"]).toBe(1);
 
         const runtimeCompleteEvent = events.find(
             (event) => event.eventName === "context_management.runtime_complete"
@@ -311,11 +298,11 @@ describe("TENEX context management telemetry", () => {
         expect(runtimeCompleteEvent?.attributes?.["context_management.estimated_tokens_after"]).toBeDefined();
     });
 
-    test("records forced scratchpad choice on the scratchpad strategy event", async () => {
+    test("does not emit scratchpad strategy events or forced tool choice under pressure", async () => {
         getContextManagementConfigSpy.mockReturnValue(
             buildContextManagementConfig({
                 tokenBudget: 200,
-            }) as any
+            }) as never
         );
 
         const agent = {
@@ -330,7 +317,7 @@ describe("TENEX context management telemetry", () => {
             conversationStore: store,
         });
 
-        await prepareManagedRequest(contextManagement, [
+        const prepared = await prepareManagedRequest(contextManagement, [
             { role: "system", content: "You are helpful." },
             {
                 role: "user",
@@ -338,28 +325,20 @@ describe("TENEX context management telemetry", () => {
             },
         ]);
 
-        const scratchpadEvent = addEvent.mock.calls
-            .map(([eventName, attributes]) => ({ eventName, attributes }))
-            .find(
-                (event) =>
-                    event.eventName === "context_management.strategy_complete.scratchpad"
-            );
+        expect(prepared?.toolChoice).toBeUndefined();
+        expect(JSON.stringify(prepared?.messages)).not.toContain("scratchpad");
 
-        expect(scratchpadEvent).toBeDefined();
-        expect(scratchpadEvent?.attributes?.["context_management.forced_tool_choice"]).toBe(true);
-        expect(String(scratchpadEvent?.attributes?.["context_management.summary"])).toContain(
-            "forced scratchpad tool choice"
-        );
+        const events = addEvent.mock.calls.map(([eventName]) => String(eventName));
+        expect(events.some((eventName) => eventName.includes("scratchpad"))).toBe(false);
     });
 
     test("tool-result decay no longer uses a managed working budget gate", async () => {
         getContextManagementConfigSpy.mockReturnValue(
             buildContextManagementConfig({
                 tokenBudget: 100,
-                forceScratchpadThresholdPercent: 100,
                 utilizationWarningThresholdPercent: 100,
                 compactionThresholdPercent: 100,
-            }) as any
+            }) as never
         );
 
         const agent = {
@@ -402,5 +381,4 @@ describe("TENEX context management telemetry", () => {
         );
         expect(decayEvent?.attributes?.["context_management.working_token_budget"]).toBeUndefined();
     });
-
 });

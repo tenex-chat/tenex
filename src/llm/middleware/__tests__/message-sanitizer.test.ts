@@ -88,7 +88,7 @@ describe("message-sanitizer TENEX wrapper", () => {
                 content: [{
                     type: "tool-call",
                     toolCallId: "call-1",
-                    toolName: "scratchpad",
+                    toolName: "compact_context",
                     input: "{\"setEntries\": \n<parameter name=\"objective\">debug it</parameter>",
                 } as LanguageModelV3Message["content"][number]],
             },
@@ -97,7 +97,7 @@ describe("message-sanitizer TENEX wrapper", () => {
                 content: [{
                     type: "tool-result",
                     toolCallId: "call-1",
-                    toolName: "scratchpad",
+                    toolName: "compact_context",
                     output: { type: "text", value: "Tool execution failed" },
                 } as LanguageModelV3Message["content"][number]],
             },
@@ -121,7 +121,7 @@ describe("message-sanitizer TENEX wrapper", () => {
             model: "anthropic:claude-opus-4-6",
             callType: "stream",
             tool_call_id: "call-1",
-            tool_name: "scratchpad",
+            tool_name: "compact_context",
             input_type: "string",
         });
     });

@@ -26,7 +26,6 @@ describe("TENEX context management integration", () => {
     function buildContextManagementConfig(overrides: Record<string, unknown>) {
         return {
             tokenBudget: 40000,
-            forceScratchpadThresholdPercent: 70,
             utilizationWarningThresholdPercent: 70,
             compactionThresholdPercent: 90,
             ...overrides,
@@ -164,7 +163,7 @@ describe("TENEX context management integration", () => {
         expect(collectTextContent(prepared?.messages[3])).toContain("Continue working");
     });
 
-    test("does not inject an empty scratchpad before the agent has used it", async () => {
+    test("does not expose removed scratchpad guidance or optional tools", async () => {
         setContextManagementConfig({});
 
         const agent = {
@@ -180,6 +179,8 @@ describe("TENEX context management integration", () => {
             conversationStore: store,
         });
 
+        expect(contextManagement?.optionalTools.scratchpad).toBeUndefined();
+
         const prepared = await prepareManagedRequest(contextManagement, [
             { role: "system", content: "You are helpful." },
             {
@@ -190,7 +191,7 @@ describe("TENEX context management integration", () => {
 
         const preparedJson = JSON.stringify(prepared?.messages);
         expect(preparedJson).not.toContain("<scratchpad>");
-        expect(preparedJson).not.toContain("Your scratchpad");
+        expect(preparedJson).not.toContain("scratchpad");
     });
 
     test("compact_context persists anchored compactions across prompt rebuilds", async () => {
@@ -399,73 +400,9 @@ describe("TENEX context management integration", () => {
         });
     });
 
-    test("scratchpad tool persists state and affects the next prompt projection", async () => {
-        const agent = {
-            name: "executor",
-            slug: "executor",
-            pubkey: AGENT_PUBKEY,
-        } as AgentInstance;
-        const contextManagement = createExecutionContextManagement({
-            providerId: "openrouter",
-            conversationId: CONVERSATION_ID,
-            agent,
-            conversationStore: store,
-        });
-
-        expect(contextManagement?.optionalTools.scratchpad).toBeDefined();
-
-        const scratchpadTool = contextManagement?.optionalTools.scratchpad as {
-            execute: (input: unknown, options: { experimental_context: Record<string, unknown> }) => Promise<unknown>;
-        };
-        await scratchpadTool.execute(
-            {
-                description: "Capture the parser focus before continuing",
-                setEntries: {
-                    notes: "Focus on the parser errors",
-                },
-            },
-            {
-                experimental_context: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
-            }
-        );
-
-        expect(store.getContextManagementScratchpad(AGENT_PUBKEY)).toEqual(
-            expect.objectContaining({
-                entries: {
-                    notes: "Focus on the parser errors",
-                },
-            })
-        );
-
-        const prepared = await prepareManagedRequest(contextManagement, [
-            { role: "system", content: "You are helpful." },
-            {
-                role: "assistant",
-                content: [{ type: "tool-call", toolCallId: "call-old", toolName: "fs_read", input: { path: "old.ts" } }],
-            },
-            {
-                role: "tool",
-                content: [{ type: "tool-result", toolCallId: "call-old", toolName: "fs_read", output: { type: "text", value: "old contents" } }],
-            },
-            {
-                role: "user",
-                content: [{ type: "text", text: "Continue." }],
-            },
-        ]);
-
-        const preparedJson = JSON.stringify(prepared?.messages);
-        expect(preparedJson).toContain("Focus on the parser errors");
-        expect(preparedJson).toContain("<scratchpad>");
-        expect(preparedJson).toContain("[scratchpad used: Capture the parser focus before continuing]");
-        expect(preparedJson).not.toContain("\"toolCallId\":\"call-old\"");
-    });
-
     test("default stack decays stale tool results instead of dropping whole exchanges", async () => {
         setContextManagementConfig({
-            tokenBudget: 12000,
-            forceScratchpadThresholdPercent: 100,
+            tokenBudget: 1000,
         });
 
         const agent = {
@@ -481,7 +418,7 @@ describe("TENEX context management integration", () => {
         });
 
         const prompt: Array<Record<string, unknown>> = [{ role: "system", content: "You are helpful." }];
-        for (let index = 1; index <= 11; index++) {
+        for (let index = 1; index <= 20; index++) {
             prompt.push({
                 role: "assistant",
                 content: [
@@ -501,8 +438,8 @@ describe("TENEX context management integration", () => {
                         toolCallId: `call-${index}`,
                         toolName: "fs_read",
                         output: {
-                            type: "text",
-                            value: `result-${index} ${"x".repeat(index === 1 ? 12000 : 4000)}`,
+                        type: "text",
+                            value: `result-${index} ${"x".repeat(index === 1 ? 20000 : 8000)}`,
                         },
                     },
                 ],
@@ -517,13 +454,12 @@ describe("TENEX context management integration", () => {
         const transformedJson = JSON.stringify(prepared?.messages);
         expect(transformedJson).toContain("use fs_read(tool:");
         expect(transformedJson).toContain("[fs_read was used, id: call-1");
-        expect(transformedJson).toContain("\"toolCallId\":\"call-11\"");
+        expect(transformedJson).toContain("\"toolCallId\":\"call-20\"");
     });
 
     test("anthropic stack decays stale tool results locally and keeps prompt-stability tracking", async () => {
         setContextManagementConfig({
-            tokenBudget: 12000,
-            forceScratchpadThresholdPercent: 100,
+            tokenBudget: 1000,
         });
 
         const agent = {
@@ -539,7 +475,7 @@ describe("TENEX context management integration", () => {
         });
 
         const prompt: Array<Record<string, unknown>> = [{ role: "system", content: "You are helpful." }];
-        for (let index = 1; index <= 11; index++) {
+        for (let index = 1; index <= 20; index++) {
             prompt.push({
                 role: "assistant",
                 content: [
@@ -559,8 +495,8 @@ describe("TENEX context management integration", () => {
                         toolCallId: `call-${index}`,
                         toolName: "fs_read",
                         output: {
-                            type: "text",
-                            value: `result-${index} ${"x".repeat(index === 1 ? 12000 : 4000)}`,
+                        type: "text",
+                            value: `result-${index} ${"x".repeat(index === 1 ? 20000 : 8000)}`,
                         },
                     },
                 ],
@@ -579,14 +515,13 @@ describe("TENEX context management integration", () => {
         const transformedJson = JSON.stringify(prepared?.messages);
         expect(transformedJson).toContain("use fs_read(tool:");
         expect(transformedJson).toContain("[fs_read was used, id: call-1");
-        expect(transformedJson).toContain("\"toolCallId\":\"call-11\"");
+        expect(transformedJson).toContain("\"toolCallId\":\"call-20\"");
         expect(prepared?.providerOptions).toBeUndefined();
     });
 
     test("anthropic stack restores shared-prefix cache breakpoints without request-level edits", async () => {
         setContextManagementConfig({
             tokenBudget: 12000,
-            forceScratchpadThresholdPercent: 100,
         });
 
         const agent = {
@@ -662,10 +597,9 @@ describe("TENEX context management integration", () => {
         expect(prepared?.messages.at(-1)?.providerOptions).toBeUndefined();
     });
 
-    test("anthropic provider exposes scratchpad when the strategy is enabled", async () => {
+    test("anthropic provider no longer exposes scratchpad or forced tool choice", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
-            forceScratchpadThresholdPercent: 70,
         });
 
         const agent = {
@@ -680,7 +614,7 @@ describe("TENEX context management integration", () => {
             conversationStore: store,
         });
 
-        expect(contextManagement?.optionalTools.scratchpad).toBeDefined();
+        expect(contextManagement?.optionalTools.scratchpad).toBeUndefined();
 
         const prepared = await prepareManagedRequest(
             contextManagement,
@@ -697,17 +631,13 @@ describe("TENEX context management integration", () => {
             }
         );
 
-        expect(prepared?.toolChoice).toEqual({
-            type: "tool",
-            toolName: "scratchpad",
-        });
-        expect(JSON.stringify(prepared?.messages)).toContain("<scratchpad>");
+        expect(prepared?.toolChoice).toBeUndefined();
+        expect(JSON.stringify(prepared?.messages)).not.toContain("scratchpad");
     });
 
     test("utilization warning only appears once the working budget threshold is crossed", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
-            forceScratchpadThresholdPercent: 100,
             utilizationWarningThresholdPercent: 70,
         });
 
@@ -751,13 +681,15 @@ describe("TENEX context management integration", () => {
         const longPromptJson = JSON.stringify(longPrompt?.messages);
         expect(longPromptJson).toContain("[Context utilization:");
         expect(longPromptJson).toContain("managed working budget");
-        expect(longPromptJson).toContain("scratchpad(...)");
+        expect(longPromptJson).toContain(
+            "Trim or summarize stale context before continuing."
+        );
+        expect(longPromptJson).not.toContain("scratchpad");
     });
 
     test("managed working budget excludes base system prompts and tool definitions", async () => {
         setContextManagementConfig({
             tokenBudget: 100,
-            forceScratchpadThresholdPercent: 100,
             utilizationWarningThresholdPercent: 70,
         });
 
@@ -789,10 +721,9 @@ describe("TENEX context management integration", () => {
         expect(preparedJson).not.toContain("<context-window-status>");
     });
 
-    test("forced scratchpad tool choice appears once the configured threshold is crossed", async () => {
+    test("long prompts no longer force a context-management tool choice", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
-            forceScratchpadThresholdPercent: 70,
         });
 
         const agent = {
@@ -806,76 +737,6 @@ describe("TENEX context management integration", () => {
             agent,
             conversationStore: store,
         });
-
-        const prepared = await prepareManagedRequest(contextManagement, [
-            { role: "system", content: "You are helpful." },
-            {
-                role: "user",
-                content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
-            },
-        ]);
-
-        expect(prepared?.toolChoice).toEqual({
-            type: "tool",
-            toolName: "scratchpad",
-        });
-
-        const postScratchpadPrompt = await prepareManagedRequest(contextManagement, [
-            { role: "system", content: "You are helpful." },
-            {
-                role: "assistant",
-                content: [
-                    {
-                        type: "tool-call",
-                        toolCallId: "scratch-call-1",
-                        toolName: "scratchpad",
-                        input: { setEntries: { notes: "Keep parser context" } },
-                    },
-                ],
-            },
-            {
-                role: "tool",
-                content: [
-                    {
-                        type: "tool-result",
-                        toolCallId: "scratch-call-1",
-                        toolName: "scratchpad",
-                        output: { type: "json", value: { ok: true } },
-                    },
-                ],
-            },
-            {
-                role: "user",
-                content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
-            },
-        ]);
-
-        expect(postScratchpadPrompt?.toolChoice).toBeUndefined();
-    });
-
-    test("only-tool mode disables scratchpad-specific forcing and guidance", async () => {
-        setContextManagementConfig({
-            tokenBudget: 200,
-            forceScratchpadThresholdPercent: 70,
-            utilizationWarningThresholdPercent: 70,
-        });
-
-        const agent = {
-            name: "executor",
-            slug: "executor",
-            pubkey: AGENT_PUBKEY,
-        } as AgentInstance;
-        const contextManagement = createExecutionContextManagement({
-            providerId: "openrouter",
-            conversationId: CONVERSATION_ID,
-            agent,
-            conversationStore: store,
-            skillToolPermissions: {
-                onlyTools: ["shell"],
-            },
-        });
-
-        expect(contextManagement?.optionalTools.scratchpad).toBeUndefined();
 
         const prepared = await prepareManagedRequest(contextManagement, [
             { role: "system", content: "You are helpful." },
@@ -887,11 +748,10 @@ describe("TENEX context management integration", () => {
 
         expect(prepared?.toolChoice).toBeUndefined();
         const preparedJson = JSON.stringify(prepared?.messages);
-        expect(preparedJson).not.toContain("Use scratchpad(...) now");
         expect(preparedJson).toContain(
             "Your managed working budget is getting tight. Trim or summarize stale context before continuing."
         );
-        expect(preparedJson).not.toContain("<scratchpad>");
+        expect(preparedJson).not.toContain("scratchpad");
     });
 
     test("context status reminder waits for provider-reported usage before rendering raw model window details", async () => {
@@ -914,7 +774,7 @@ describe("TENEX context management integration", () => {
             agent,
             conversationStore: store,
         });
-        expect(contextManagement?.optionalTools.scratchpad).toBeDefined();
+        expect(contextManagement?.optionalTools.scratchpad).toBeUndefined();
 
         const prepared = await prepareManagedRequest(
             contextManagement,
@@ -932,15 +792,12 @@ describe("TENEX context management integration", () => {
         );
 
         const preparedJson = JSON.stringify(prepared?.messages);
-        expect(prepared?.toolChoice).toEqual({
-            type: "tool",
-            toolName: "scratchpad",
-        });
+        expect(prepared?.toolChoice).toBeUndefined();
         expect(preparedJson).not.toContain("[Context status]");
         expect(preparedJson).not.toContain("<context-window-status>");
         expect(preparedJson).toContain("managed working budget");
         expect(preparedJson).not.toContain("Model window:");
         expect(preparedJson).not.toContain("/200 tokens");
-        expect(preparedJson).toContain("<scratchpad>");
+        expect(preparedJson).not.toContain("scratchpad");
     });
 });

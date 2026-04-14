@@ -75,8 +75,25 @@ function recordStrategyComplete(params: {
     strategyName: string;
     before: number;
     after: number;
-    forcedToolChoice?: boolean;
 }): void {
+    const strategyPayload =
+        params.strategyName === "tool-result-decay"
+            ? {
+                kind: "tool-result-decay" as const,
+                totalToolExchanges: 0,
+                placeholderCount: 0,
+                inputPlaceholderCount: 0,
+            }
+            : {
+                kind: "compaction-tool" as const,
+                mode: "stored" as const,
+                editCount: 0,
+                compactedMessageCount: 0,
+                fromIndex: 0,
+                toIndex: 0,
+                summaryCharCount: 0,
+            };
+
     analysisTelemetryService.recordContextManagementEvent(
         {
             type: "strategy-complete",
@@ -91,11 +108,7 @@ function recordStrategyComplete(params: {
             pinnedToolCallIdsDelta: 0,
             messageCountBefore: 4,
             messageCountAfter: 3,
-            strategyPayload: {
-                kind: "scratchpad",
-                forcedToolChoice: params.forcedToolChoice ?? false,
-                currentTokens: params.after,
-            },
+            strategyPayload,
         } as never,
         {
             requestId: params.requestId,
@@ -341,10 +354,9 @@ describe("Analysis telemetry services", () => {
             requestId: "request-1",
             provider: "anthropic",
             model: "claude-opus",
-            strategyName: "scratchpad",
+            strategyName: "compaction-tool",
             before: 140,
             after: 100,
-            forcedToolChoice: true,
             ...baseContext,
         });
 
@@ -529,7 +541,7 @@ describe("Analysis telemetry services", () => {
             {
                 request_id: "request-1",
                 event_type: "strategy-complete",
-                strategy_name: "scratchpad",
+                strategy_name: "compaction-tool",
                 estimated_tokens_saved: 40,
             },
             {
@@ -684,7 +696,7 @@ describe("Analysis telemetry services", () => {
                 runtimeAfter: 100,
                 preparedBefore: 135,
                 preparedAfter: 100,
-                strategy: "scratchpad",
+                strategy: "compaction-tool",
             },
             {
                 requestId: "req-b",
@@ -714,7 +726,7 @@ describe("Analysis telemetry services", () => {
                 runtimeAfter: 30,
                 preparedBefore: 39,
                 preparedAfter: 30,
-                strategy: "scratchpad",
+                strategy: "compaction-tool",
             },
         ];
 
@@ -860,7 +872,7 @@ describe("Analysis telemetry services", () => {
         });
         expect(contextSavings).toEqual([
             expect.objectContaining({
-                strategyName: "scratchpad",
+                strategyName: "compaction-tool",
                 provider: "anthropic",
                 estimatedInputTokensSaved: 65,
             }),
