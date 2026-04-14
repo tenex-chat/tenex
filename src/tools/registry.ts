@@ -25,7 +25,7 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
     return tool as CoreTool<unknown, unknown>;
 }
 import { logger } from "@/utils/logger";
-import { CORE_AGENT_TOOLS } from "@/agents/constants";
+import { getCoreToolsForAgent } from "@/agents/constants";
 import { createAskTool } from "./implementations/ask";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
@@ -320,7 +320,8 @@ export function getToolsObject(
     // GATING: Only inject when conversation context is present to prevent leakage into non-agent contexts
     // Contexts without conversations (e.g., isolated tool execution) are excluded from core tool injection
     if (hasConversation) {
-        for (const coreToolName of CORE_AGENT_TOOLS) {
+        const coreToolNames = getCoreToolsForAgent(context.agent.category);
+        for (const coreToolName of coreToolNames) {
             if (!regularTools.includes(coreToolName)) {
                 regularTools.push(coreToolName);
             }

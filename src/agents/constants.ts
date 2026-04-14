@@ -3,7 +3,8 @@ import type { ToolName } from "@/tools/types";
 
 /**
  * Core tools that ALL agents must have access to regardless of configuration.
- * These are fundamental capabilities that every agent needs.
+ * These are the superset of fundamental capabilities auto-injected by policy.
+ * Category-specific policy is applied via getCoreToolsForAgent().
  * NOT announced in 24010 events - auto-injected to all agents.
  */
 export const CORE_AGENT_TOOLS: ToolName[] = [
@@ -13,11 +14,13 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     // Process control
     "kill", // All agents should be able to terminate processes
     // Skills management
-    "skill_list", // All agents can enumerate available skills on demand
-    "skills_set", // All agents can activate/deactivate skills mid-conversation
+    "skill_list", // Most agents can enumerate available skills on demand
+    "skills_set", // Most agents can activate/deactivate skills mid-conversation
     // Self-orchestration
     "self_delegate", // All agents can spin up a fresh instance of themselves
 ] as const;
+
+export const SKILL_MANAGEMENT_TOOLS: ToolName[] = ["skill_list", "skills_set"] as const;
 
 /**
  * Delegate tools that should be excluded from configuration and TenexProjectStatus events
@@ -50,6 +53,20 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "home_fs_glob",
     "home_fs_grep",
 ];
+
+/**
+ * Get the core auto-injected tools for an agent category.
+ *
+ * Orchestrators must not activate skills on their own, so skill-management
+ * tools are withheld from that category.
+ */
+export function getCoreToolsForAgent(category?: AgentCategory): ToolName[] {
+    if (category !== "orchestrator") {
+        return CORE_AGENT_TOOLS;
+    }
+
+    return CORE_AGENT_TOOLS.filter((toolName) => !SKILL_MANAGEMENT_TOOLS.includes(toolName));
+}
 
 /**
  * Get the delegate tools for an agent.

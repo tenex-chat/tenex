@@ -84,6 +84,7 @@ export type ToolAgentInfo = Pick<
     | "slug"
     | "signer"
     | "sign"
+    | "category"
     | "llmConfig"
     | "tools"
     | "telegram"

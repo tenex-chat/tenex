@@ -153,6 +153,18 @@ describe("Tool Registry", () => {
             expect(tools.self_delegate).toBeDefined();
         });
 
+        it("does not auto-inject skill-management tools for orchestrator agents", async () => {
+            const tools = await getToolsObject([], createMockExecutionEnvironment({
+                agent: createMockAgent({
+                    category: "orchestrator",
+                }),
+            }));
+
+            expect(tools.skill_list).toBeUndefined();
+            expect(tools.skills_set).toBeUndefined();
+            expect(tools.self_delegate).toBeDefined();
+        });
+
         it("keeps change_model auto-injected for meta-model agents", async () => {
             const getRawLLMConfigSpy = spyOn(configService, "getRawLLMConfig").mockReturnValue({
                 provider: "meta",

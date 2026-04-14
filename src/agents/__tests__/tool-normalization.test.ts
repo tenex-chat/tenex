@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { normalizeAgentTools, validateTools, processAgentTools } from "../tool-normalization";
-import { CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "../constants";
+import { CORE_AGENT_TOOLS, DELEGATE_TOOLS, SKILL_MANAGEMENT_TOOLS, getCoreToolsForAgent } from "../constants";
 
 describe("normalizeAgentTools", () => {
     it("should add core and delegate tools", () => {
         const result = normalizeAgentTools(["shell"]);
-        for (const coreTool of CORE_AGENT_TOOLS) {
+        for (const coreTool of getCoreToolsForAgent()) {
             expect(result).toContain(coreTool);
         }
         for (const delegateTool of DELEGATE_TOOLS) {
@@ -47,7 +47,7 @@ describe("processAgentTools", () => {
     it("should normalize and validate", () => {
         const result = processAgentTools(["shell"]);
         // Should have core + delegate tools, shell is skill-provided so dropped by validate
-        for (const coreTool of CORE_AGENT_TOOLS) {
+        for (const coreTool of getCoreToolsForAgent()) {
             expect(result).toContain(coreTool);
         }
     });
@@ -68,7 +68,7 @@ describe("domain-expert tool restrictions", () => {
 
     it("should still include all core tools for domain-expert agents", () => {
         const result = normalizeAgentTools(["shell"], "domain-expert");
-        for (const coreTool of CORE_AGENT_TOOLS) {
+        for (const coreTool of getCoreToolsForAgent("domain-expert")) {
             expect(result).toContain(coreTool);
         }
     });
@@ -79,5 +79,31 @@ describe("domain-expert tool restrictions", () => {
         expect(result).toContain("delegate_crossproject");
         expect(result).toContain("delegate_followup");
         expect(result).toContain("ask");
+    });
+
+    it("should exclude skill-management tools for orchestrator agents", () => {
+        const result = normalizeAgentTools(["shell", ...SKILL_MANAGEMENT_TOOLS], "orchestrator");
+
+        for (const toolName of SKILL_MANAGEMENT_TOOLS) {
+            expect(result).not.toContain(toolName);
+        }
+
+        expect(result).toContain("ask");
+        expect(result).toContain("delegate");
+        expect(result).toContain("self_delegate");
+    });
+
+    it("should keep non-skill core tools for orchestrator agents", () => {
+        const result = normalizeAgentTools(["shell"], "orchestrator");
+
+        for (const coreTool of getCoreToolsForAgent("orchestrator")) {
+            expect(result).toContain(coreTool);
+        }
+
+        for (const toolName of SKILL_MANAGEMENT_TOOLS) {
+            expect(result).not.toContain(toolName);
+        }
+
+        expect(getCoreToolsForAgent("orchestrator")).toHaveLength(CORE_AGENT_TOOLS.length - SKILL_MANAGEMENT_TOOLS.length);
     });
 });

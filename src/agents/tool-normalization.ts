@@ -1,7 +1,7 @@
 import { isValidToolName } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { CORE_AGENT_TOOLS, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./constants";
+import { DELEGATE_TOOLS, SKILL_MANAGEMENT_TOOLS, getCoreToolsForAgent, getDelegateToolsForAgent } from "./constants";
 import type { AgentCategory } from "./role-categories";
 
 /**
@@ -47,7 +47,15 @@ export function normalizeAgentTools(requestedTools: string[], category?: AgentCa
     // Filter out delegation tools
     const toolNames = requestedTools.filter((tool) => {
         const typedTool = tool as ToolName;
-        return !DELEGATE_TOOLS.includes(typedTool);
+        if (DELEGATE_TOOLS.includes(typedTool)) {
+            return false;
+        }
+
+        if (category === "orchestrator" && SKILL_MANAGEMENT_TOOLS.includes(typedTool)) {
+            return false;
+        }
+
+        return true;
     });
 
     // Add delegation tools — policy lives in getDelegateToolsForAgent (domain-experts get ask only)
@@ -55,7 +63,7 @@ export function normalizeAgentTools(requestedTools: string[], category?: AgentCa
     toolNames.push(...delegateTools);
 
     // Ensure core tools are included
-    for (const coreTool of CORE_AGENT_TOOLS) {
+    for (const coreTool of getCoreToolsForAgent(category)) {
         if (!toolNames.includes(coreTool)) {
             toolNames.push(coreTool);
         }

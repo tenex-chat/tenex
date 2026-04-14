@@ -139,6 +139,38 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
         categorizeAgentMock.mockReset();
     });
 
+    it("applies orchestrator skill restrictions when category is stored", async () => {
+        const signer = NDKPrivateKeySigner.generate();
+        const storedAgent = createStoredAgent({
+            nsec: signer.nsec,
+            slug: "stored-orchestrator",
+            name: "Stored Orchestrator",
+            role: "assistant",
+            category: "orchestrator",
+            defaultConfig: {
+                tools: ["skill_list", "skills_set", "fs_read"],
+            },
+        } as any);
+
+        const loadAgentSpy = spyOn(agentStorage, "loadAgent").mockResolvedValue({
+            ...storedAgent,
+            category: "orchestrator",
+        } as any);
+        const skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: mock(async () => []),
+        } as never);
+
+        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+
+        expect(instance.category).toBe("orchestrator");
+        expect(instance.tools).not.toContain("skill_list");
+        expect(instance.tools).not.toContain("skills_set");
+
+        loadAgentSpy.mockRestore();
+        skillServiceSpy.mockRestore();
+        categorizeAgentMock.mockReset();
+    });
+
     it("swallows errors from categorization and storage", async () => {
         categorizeAgentMock.mockRejectedValue(new Error("LLM unavailable"));
 
