@@ -15,17 +15,14 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
     priority: 1,
     template: ({ agent }) => {
         const parts: string[] = [];
+        const shortenedPubkey = shortenPubkey(agent.pubkey);
 
         // Identity
         parts.push("<agent-identity>");
-        parts.push(`Your name: ${agent.name} (${agent.slug})`);
-        if (agent.role) {
-            parts.push(`Your role: ${agent.role}`);
-        }
+        parts.push(`Your name: ${agent.slug} (${shortenedPubkey})`);
         if (agent.category) {
             parts.push(`Your category: ${agent.category}`);
         }
-        parts.push(`Your shortened pubkey: ${shortenPubkey(agent.pubkey)}`);
         parts.push("</agent-identity>");
         parts.push("");
 
