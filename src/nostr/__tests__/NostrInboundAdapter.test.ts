@@ -110,4 +110,37 @@ describe("NostrInboundAdapter", () => {
 
         expect(envelope.metadata.variantOverride).toBe("deep");
     });
+
+    it("treats intervention review e-tags as references instead of thread replies", () => {
+        const projectBinding = `31933:${"f".repeat(64)}:demo-project`;
+        const event = new NDKEvent();
+        event.id = "a".repeat(64);
+        event.kind = 1;
+        event.pubkey = "b".repeat(64);
+        event.content = "please review";
+        event.created_at = 1_773_400_000;
+        event.tags = [
+            ["p", "c".repeat(64)],
+            ["e", "d".repeat(64), "", "root"],
+            ["context", "intervention-review"],
+            ["a", projectBinding],
+        ];
+
+        const adapter = new NostrInboundAdapter();
+        const envelope = adapter.toEnvelope(event);
+
+        expect(envelope.channel).toEqual({
+            id: `nostr:project:${projectBinding}`,
+            transport: "nostr",
+            kind: "project",
+            projectBinding,
+        });
+        expect(envelope.message).toEqual({
+            id: `nostr:${event.id}`,
+            transport: "nostr",
+            nativeId: event.id,
+            replyToId: undefined,
+        });
+        expect(envelope.metadata.replyTargets).toEqual(["d".repeat(64)]);
+    });
 });

@@ -32,7 +32,10 @@ function getProjectBinding(event: NDKEvent): string | undefined {
 
 export class NostrInboundAdapter {
     toEnvelope(event: NDKEvent): InboundEnvelope {
-        const replyTarget = getReplyTarget(event) ?? getTagValue(event, "e");
+        const isInterventionReview = getTagValue(event, "context") === "intervention-review";
+        const replyTarget = isInterventionReview
+            ? undefined
+            : getReplyTarget(event) ?? getTagValue(event, "e");
         const mentionedPubkeys = getMentionedPubkeys(event);
         const recipients = mentionedPubkeys.length > 0 ? mentionedPubkeys : getTagValues(event, "p");
         const projectBinding = getProjectBinding(event);
