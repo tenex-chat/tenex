@@ -13,7 +13,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import NDK, { NDKEvent, NDKPrivateKeySigner, NDKRelayAuthPolicies } from "@nostr-dev-kit/ndk";
 
 const LONG_FORM_ARTICLE_KIND = 30023;
 const DEFAULT_RELAY = "wss://relay.tenex.chat";
@@ -123,6 +123,8 @@ async function main() {
         signer,
         enableOutboxModel: false,
     });
+
+    ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk });
 
     let relayReady = false;
     const readyPromise = new Promise((resolve) => {
