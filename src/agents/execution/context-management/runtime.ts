@@ -217,7 +217,7 @@ function createConversationContextManagementRuntime(options: {
         strategies.push(
             new ToolResultDecayStrategy({
                 estimator: managedBudgetProfile.estimator,
-                minPlaceholderBatchSize: 1,
+                minPlaceholderBatchSize: settings.toolResultDecay.minPlaceholderBatchSize,
                 placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
                     return buildDecayPlaceholder(toolName, toolCallId);
                 },

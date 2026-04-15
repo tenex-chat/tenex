@@ -76,6 +76,7 @@ describe("contextManagementCommand", () => {
             {
                 minTotalSavingsTokens: "20000",
                 minDepth: "20",
+                minPlaceholderBatchSize: "10",
                 excludeToolNames: "delegate, delegate_followup",
             },
             {
@@ -98,6 +99,9 @@ describe("contextManagementCommand", () => {
                     tokenBudget: 32000,
                     utilizationWarningThresholdPercent: 65,
                     compactionThresholdPercent: 92,
+                    toolResultDecay: expect.objectContaining({
+                        minPlaceholderBatchSize: 10,
+                    }),
                     strategies: expect.objectContaining({
                         reminders: true,
                         toolResultDecay: false,

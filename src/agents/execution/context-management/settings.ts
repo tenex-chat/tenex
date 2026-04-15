@@ -3,6 +3,11 @@ import { config as configService } from "@/services/ConfigService";
 export const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
 export const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 export const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 90;
+export const DEFAULT_TOOL_RESULT_DECAY_MIN_PLACEHOLDER_BATCH_SIZE = 10;
+
+export interface ToolResultDecaySettings {
+    minPlaceholderBatchSize: number;
+}
 
 export interface ContextManagementStrategyToggles {
     reminders: boolean;
@@ -17,6 +22,7 @@ export interface ContextManagementSettings {
     tokenBudget: number;
     utilizationWarningThresholdPercent: number;
     compactionThresholdPercent: number;
+    toolResultDecay: ToolResultDecaySettings;
     strategies: ContextManagementStrategyToggles;
 }
 
@@ -50,6 +56,14 @@ export function getContextManagementSettings(): ContextManagementSettings {
             raw?.compactionThresholdPercent,
             DEFAULT_COMPACTION_THRESHOLD_PERCENT
         ),
+        toolResultDecay: {
+            minPlaceholderBatchSize: Math.floor(
+                normalizePositiveNumber(
+                    raw?.toolResultDecay?.minPlaceholderBatchSize,
+                    DEFAULT_TOOL_RESULT_DECAY_MIN_PLACEHOLDER_BATCH_SIZE
+                )
+            ),
+        },
         strategies: {
             reminders: rawStrategies?.reminders !== false,
             toolResultDecay: rawStrategies?.toolResultDecay !== false,

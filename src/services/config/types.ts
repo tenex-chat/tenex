@@ -41,6 +41,7 @@ export interface TenexConfig {
         toolResultDecay?: {
             minTotalSavingsTokens?: number; // Minimum token savings required before decaying (default: 20000)
             minDepth?: number; // Minimum message age (turns ago) before considering decay (default: 20)
+            minPlaceholderBatchSize?: number; // Minimum eligible tool exchanges before placeholdering applies (default: 10, minimum: 5)
             excludeToolNames?: string[]; // Tool names to never decay (default: ["delegate", "delegate_followup"])
         };
         strategies?: {
@@ -146,6 +147,7 @@ export const TenexConfigSchema = z.object({
                 .object({
                     minTotalSavingsTokens: z.number().int().nonnegative().optional(),
                     minDepth: z.number().int().nonnegative().optional(),
+                    minPlaceholderBatchSize: z.number().int().min(5).optional(),
                     excludeToolNames: z.array(z.string()).optional(),
                 })
                 .optional(),

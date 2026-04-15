@@ -1,5 +1,6 @@
 import {
     DEFAULT_COMPACTION_THRESHOLD_PERCENT,
+    DEFAULT_TOOL_RESULT_DECAY_MIN_PLACEHOLDER_BATCH_SIZE,
     DEFAULT_WARNING_THRESHOLD_PERCENT,
     DEFAULT_WORKING_TOKEN_BUDGET,
 } from "@/agents/execution/context-management/settings";
@@ -121,6 +122,22 @@ export const contextManagementCommand = new Command("context-management")
             },
             {
                 type: "input",
+                name: "minPlaceholderBatchSize",
+                message: "Tool decay minimum placeholder batch size:",
+                default: (
+                    toolDecay.minPlaceholderBatchSize
+                    ?? DEFAULT_TOOL_RESULT_DECAY_MIN_PLACEHOLDER_BATCH_SIZE
+                ),
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num < 5) {
+                        return "Please enter an integer 5 or greater";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
                 name: "excludeToolNames",
                 message: "Tool decay excluded tool names (comma-separated):",
                 default: (toolDecay.excludeToolNames || ["delegate", "delegate_followup"]).join(", "),
@@ -168,6 +185,7 @@ export const contextManagementCommand = new Command("context-management")
             toolResultDecay: {
                 minTotalSavingsTokens: Number.parseInt(toolDecayAnswers.minTotalSavingsTokens, 10),
                 minDepth: Number.parseInt(toolDecayAnswers.minDepth, 10),
+                minPlaceholderBatchSize: Number.parseInt(toolDecayAnswers.minPlaceholderBatchSize, 10),
                 excludeToolNames: toolDecayAnswers.excludeToolNames
                     .split(",")
                     .map((name: string) => name.trim())
