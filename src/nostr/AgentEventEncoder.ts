@@ -675,8 +675,11 @@ export class AgentEventEncoder {
      * - tags:
      *   - ["p", targetPubkey] - The intervention agent to notify
      *   - ["context", "intervention-review"] - Context marker
-     *   - ["e", conversationId] - Reference to the conversation (short form already in content)
      *   - ["a", projectTag] - Project reference (added internally via aTagProject)
+     *
+     * The original conversation ID is included in the content only. Intervention
+     * reviews must publish as standalone events, not as replies anchored to the
+     * conversation being reviewed.
      *
      * Note: This method does NOT call addStandardTags() since intervention events
      * are not part of an agent execution context. However, the project tag is
@@ -698,9 +701,6 @@ export class AgentEventEncoder {
 
         // Context marker for intervention routing
         event.tag(["context", "intervention-review"]);
-
-        // Reference to the conversation (e-tag for event reference)
-        event.tag(["e", intent.conversationId, "", "root"]);
 
         // Add project tag (intervention events need project association)
         this.aTagProject(event);

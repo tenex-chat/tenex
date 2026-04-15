@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { config } from "@/services/ConfigService";
 import { projectContextStore } from "@/services/projects";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { AgentEventEncoder } from "../AgentEventEncoder";
 import { InterventionPublisher } from "../InterventionPublisher";
@@ -14,7 +15,8 @@ import * as traceContextModule from "../trace-context";
  *
  * Verifies:
  * - Event has correct kind (1)
- * - Event has correct tags (p, e, context, a)
+ * - Event has correct tags (p, context, a)
+ * - Event does not emit an e-tag for the reviewed conversation
  * - Event content is properly formatted with human-readable names
  * - Project a-tag is included (via AgentEventEncoder.aTagProject)
  * - Trace context is injected
@@ -107,7 +109,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         expect(pTag?.[1]).toBe("target-pubkey-123456789012345678901234567890123456");
     });
 
-    it("should include e-tag with conversation ID", () => {
+    it("should NOT include e-tag for the reviewed conversation", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
@@ -118,8 +120,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const eTag = event.tags.find((tag) => tag[0] === "e");
-        expect(eTag).toBeDefined();
-        expect(eTag?.[1]).toBe("conv-id-123456789012345678901234567890123456789012");
+        expect(eTag).toBeUndefined();
     });
 
     it("should include context tag with intervention-review value", () => {
@@ -206,7 +207,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         // Verify content uses the pre-resolved names from the intent
-        expect(event.content).toContain("conv-id-1234"); // First 12 chars of conversation ID
+        expect(event.content).toContain(shortenConversationId(intent.conversationId));
         expect(event.content).toContain("Pablo"); // Pre-resolved user name
         expect(event.content).toContain("Architect-Orchestrator"); // Pre-resolved agent name
         expect(event.content).toContain("Please review and decide if action is needed");
@@ -281,11 +282,11 @@ describe("InterventionPublisher", () => {
         // Verify all required tags are present
         const tags = event.tags;
         expect(tags.find((t) => t[0] === "p")).toBeDefined();
-        expect(tags.find((t) => t[0] === "e")).toBeDefined(); // Conversation reference
         expect(tags.find((t) => t[0] === "context")).toBeDefined();
         expect(tags.find((t) => t[0] === "a")).toBeDefined(); // Project tag - the critical fix
 
         // Verify removed tags are NOT present
+        expect(tags.find((t) => t[0] === "e")).toBeUndefined();
         expect(tags.find((t) => t[0] === "original-conversation")).toBeUndefined();
         expect(tags.find((t) => t[0] === "user-pubkey")).toBeUndefined();
         expect(tags.find((t) => t[0] === "agent-pubkey")).toBeUndefined();
@@ -358,7 +359,7 @@ describe("InterventionPublisher", () => {
         const event = capturedEvents[0];
         expect(event.content).toContain("Pablo"); // Pre-resolved user name
         expect(event.content).toContain("Architect-Orchestrator"); // Pre-resolved agent name
-        expect(event.content).toContain("conv-id-1234"); // Shortened conversation ID
+        expect(event.content).toContain(shortenConversationId("conv-id-123456789012345678901234567890123456789012"));
         expect(event.content).toContain("Please review and decide if action is needed");
     });
 });

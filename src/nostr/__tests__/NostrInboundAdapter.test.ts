@@ -111,7 +111,7 @@ describe("NostrInboundAdapter", () => {
         expect(envelope.metadata.variantOverride).toBe("deep");
     });
 
-    it("treats intervention review e-tags as references instead of thread replies", () => {
+    it("routes intervention reviews as standalone project messages", () => {
         const projectBinding = `31933:${"f".repeat(64)}:demo-project`;
         const event = new NDKEvent();
         event.id = "a".repeat(64);
@@ -121,7 +121,6 @@ describe("NostrInboundAdapter", () => {
         event.created_at = 1_773_400_000;
         event.tags = [
             ["p", "c".repeat(64)],
-            ["e", "d".repeat(64), "", "root"],
             ["context", "intervention-review"],
             ["a", projectBinding],
         ];
@@ -141,6 +140,6 @@ describe("NostrInboundAdapter", () => {
             nativeId: event.id,
             replyToId: undefined,
         });
-        expect(envelope.metadata.replyTargets).toEqual(["d".repeat(64)]);
+        expect(envelope.metadata.replyTargets).toBeUndefined();
     });
 });
