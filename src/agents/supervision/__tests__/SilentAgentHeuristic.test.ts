@@ -157,6 +157,12 @@ describe("SilentAgentHeuristic", () => {
         });
     });
 
+    describe("metadata", () => {
+        it("should repeat until the silence is resolved", () => {
+            expect(heuristic.enforcementMode).toBe("repeat-until-resolved");
+        });
+    });
+
     describe("buildCorrectionMessage", () => {
         it("should return LLM correction message if provided", () => {
             const context = createContext();

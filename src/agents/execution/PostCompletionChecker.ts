@@ -8,6 +8,7 @@
 import {
     supervisorOrchestrator,
     updateKnownAgentSlugs,
+    MAX_SUPERVISION_RETRIES,
     type PostCompletionContext,
 } from "@/agents/supervision";
 import type { AgentInstance } from "@/agents/types";
@@ -47,6 +48,36 @@ export interface PostCompletionCheckerConfig {
     completionEvent: CompleteEvent;
 }
 
+function isRepeatableReEngagingViolation(
+    enforcementMode: string | undefined,
+    action: { type: string; reEngage: boolean }
+): boolean {
+    return enforcementMode === "repeat-until-resolved"
+        && action.type === "suppress-publish"
+        && action.reEngage;
+}
+
+function buildFinalRepeatableCorrectionMessage(baseMessage?: string): string {
+    const sections: string[] = [];
+    const trimmedBaseMessage = baseMessage?.trim();
+
+    if (trimmedBaseMessage) {
+        sections.push(trimmedBaseMessage);
+    }
+
+    sections.push("This turn still cannot complete.");
+    sections.push(
+        "Do not try to finish again until you resolve the issue in structured state."
+    );
+    sections.push(`Choose one of these paths:
+- Continue the work and update your state as you go
+- Use \`ask()\` if you need user input or external confirmation
+- Use \`todo_write\` to update stale todo items and mark irrelevant items as \`skipped\` with \`skip_reason\`
+- If the issue is a missing response, provide the missing response instead of ending silently`);
+
+    return sections.join("\n\n");
+}
+
 /**
  * Run post-completion supervision check on agent response.
  *
@@ -63,15 +94,13 @@ export async function checkPostCompletion(
         agent: agent.slug,
         ralNumber,
     });
-
-    // Check if we've exceeded max retries for supervision
-    if (supervisorOrchestrator.hasExceededMaxRetries(executionId)) {
-        logger.warn("[PostCompletionChecker] Supervision max retries exceeded, publishing anyway", {
+    const supervisionState = supervisorOrchestrator.getSupervisionState(executionId);
+    if (supervisionState.retryCount >= MAX_SUPERVISION_RETRIES) {
+        logger.warn("[PostCompletionChecker] Supervision retries exhausted - repeatable gates remain active", {
             agent: agent.slug,
             ralNumber,
+            retryCount: supervisionState.retryCount,
         });
-        supervisorOrchestrator.clearState(executionId);
-        return { shouldReEngage: false, injectedMessage: false };
     }
 
     // Build supervision context
@@ -196,6 +225,7 @@ export async function checkPostCompletion(
             "ral.number": ralNumber,
             "heuristic.id": supervisionResult.heuristicId,
             "action.type": supervisionResult.correctionAction.type,
+            "heuristic.enforcement_mode": supervisionResult.enforcementMode || "once-per-execution",
         });
 
         logger.info("[PostCompletionChecker] Supervision detected violation", {
@@ -212,36 +242,76 @@ export async function checkPostCompletion(
 
         if (supervisionResult.correctionAction.type === "suppress-publish" &&
             supervisionResult.correctionAction.reEngage) {
+            const repeatableReEngagingViolation = isRepeatableReEngagingViolation(
+                supervisionResult.enforcementMode,
+                supervisionResult.correctionAction
+            );
+            const retryCountBeforeCorrection = supervisionState.retryCount;
+            const shouldUseFinalCorrection = repeatableReEngagingViolation
+                && retryCountBeforeCorrection + 1 >= MAX_SUPERVISION_RETRIES;
+            const finalCorrectionMessage = buildFinalRepeatableCorrectionMessage(
+                supervisionResult.correctionAction.message
+            );
+            const correctionMessage = shouldUseFinalCorrection
+                ? finalCorrectionMessage
+                : supervisionResult.correctionAction.message;
+
+            if (repeatableReEngagingViolation) {
+                trace.getActiveSpan()?.addEvent("executor.supervision_repeatable_gate_triggered", {
+                    "heuristic.id": supervisionResult.heuristicId,
+                    "ral.number": ralNumber,
+                    "retry.count_before": retryCountBeforeCorrection,
+                    "retry.limit": MAX_SUPERVISION_RETRIES,
+                    "retry.final_correction": shouldUseFinalCorrection,
+                });
+            }
+
+            if (shouldUseFinalCorrection) {
+                trace.getActiveSpan()?.addEvent("executor.supervision_final_correction", {
+                    "heuristic.id": supervisionResult.heuristicId,
+                    "ral.number": ralNumber,
+                    "retry.count_before": retryCountBeforeCorrection,
+                    "retry.limit": MAX_SUPERVISION_RETRIES,
+                    "message_length": finalCorrectionMessage.length,
+                });
+            }
+
             // Add telemetry for supervision correction diagnosis
             trace.getActiveSpan()?.addEvent("executor.supervision_correction", {
-                "has_message": !!supervisionResult.correctionAction.message,
-                "message_length": supervisionResult.correctionAction.message?.length || 0,
+                "has_message": !!correctionMessage,
+                "message_length": correctionMessage?.length || 0,
                 "heuristic.id": supervisionResult.heuristicId,
                 "action.type": supervisionResult.correctionAction.type,
                 "action.reEngage": supervisionResult.correctionAction.reEngage,
             });
 
-            // Increment retry count
-            supervisorOrchestrator.incrementRetryCount(executionId);
+            supervisionState.lastHeuristicTriggered = supervisionResult.heuristicId;
 
-            // Mark this heuristic as enforced so it won't fire again in this RAL
-            if (supervisionResult.heuristicId) {
+            // Increment retry count until the final correction threshold is reached
+            if (retryCountBeforeCorrection < MAX_SUPERVISION_RETRIES) {
+                supervisorOrchestrator.incrementRetryCount(executionId);
+            }
+
+            // Non-repeatable heuristics still enforce once per execution
+            if (supervisionResult.heuristicId && !repeatableReEngagingViolation) {
                 supervisorOrchestrator.markHeuristicEnforced(executionId, supervisionResult.heuristicId);
             }
 
-            if (supervisionResult.correctionAction.message) {
+            if (correctionMessage) {
                 getSystemReminderContext().queue({
                     type: "supervision-correction",
-                    content: supervisionResult.correctionAction.message,
+                    content: correctionMessage,
                 });
             }
 
             return {
                 shouldReEngage: true,
-                correctionMessage: supervisionResult.correctionAction.message,
+                correctionMessage,
                 injectedMessage: false,
             };
-        }if (supervisionResult.correctionAction.type === "inject-message" &&
+        }
+
+        if (supervisionResult.correctionAction.type === "inject-message" &&
             supervisionResult.correctionAction.message) {
             getSystemReminderContext().queue({
                 type: "supervision-message",

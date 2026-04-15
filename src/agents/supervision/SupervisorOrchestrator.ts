@@ -5,6 +5,7 @@ import { checkSupervisionHealth } from "./supervisionHealthCheck";
 import type {
     CorrectionAction,
     HeuristicDetection,
+    HeuristicEnforcementMode,
     PostCompletionContext,
     PreToolContext,
     SupervisionContext,
@@ -12,7 +13,7 @@ import type {
     VerificationResult,
 } from "./types";
 import { MAX_SUPERVISION_RETRIES } from "./types";
-import { trace, SpanStatusCode } from "@opentelemetry/api";
+import { trace, SpanStatusCode, type Span } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("tenex.supervision");
 
@@ -29,6 +30,24 @@ function shouldBuildCorrectionMessage(action: CorrectionAction): boolean {
     return action.type === "suppress-publish" && action.reEngage === true;
 }
 
+function recordHeuristicSkipTelemetry(
+    span: Span | undefined,
+    heuristicId: string,
+    executionId?: string
+): void {
+    span?.addEvent("supervision.heuristic_skipped", {
+        "heuristic.id": heuristicId,
+        ...(executionId ? { "execution.id": executionId } : {}),
+        "skip.reason": "already_enforced",
+    });
+}
+
+function getHeuristicEnforcementMode(
+    enforcementMode?: HeuristicEnforcementMode
+): HeuristicEnforcementMode {
+    return enforcementMode ?? "once-per-execution";
+}
+
 /**
  * Result of a supervision check
  */
@@ -43,6 +62,8 @@ export interface SupervisionCheckResult {
     detection?: HeuristicDetection;
     /** The verification result from the LLM */
     verification?: VerificationResult;
+    /** How this heuristic should behave on subsequent completion attempts in the same execution */
+    enforcementMode?: HeuristicEnforcementMode;
 }
 
 /**
@@ -143,6 +164,19 @@ export class SupervisorOrchestrator {
         };
     }
 
+    private shouldSkipEnforcedHeuristic(
+        executionId: string | undefined,
+        heuristicId: string,
+        enforcementMode?: HeuristicEnforcementMode
+    ): boolean {
+        if (!executionId) {
+            return false;
+        }
+
+        return getHeuristicEnforcementMode(enforcementMode) === "once-per-execution"
+            && this.isHeuristicEnforced(executionId, heuristicId);
+    }
+
     /**
      * Check all post-completion heuristics
      * @param context - The post-completion context
@@ -211,8 +245,9 @@ export class SupervisorOrchestrator {
 
             for (const heuristic of heuristics) {
                 // Skip heuristics already enforced in this execution
-                if (executionId && this.isHeuristicEnforced(executionId, heuristic.id)) {
+                if (this.shouldSkipEnforcedHeuristic(executionId, heuristic.id, heuristic.enforcementMode)) {
                     logger.debug(`[SupervisorOrchestrator] Skipping heuristic "${heuristic.id}" - already enforced`);
+                    recordHeuristicSkipTelemetry(span, heuristic.id, executionId);
                     continue;
                 }
 
@@ -268,6 +303,7 @@ export class SupervisorOrchestrator {
                             heuristicId: heuristic.id,
                             detection,
                             verification: syntheticVerification,
+                            enforcementMode: getHeuristicEnforcementMode(heuristic.enforcementMode),
                         };
                     }
 
@@ -316,6 +352,7 @@ export class SupervisorOrchestrator {
                             heuristicId: heuristic.id,
                             detection,
                             verification,
+                            enforcementMode: getHeuristicEnforcementMode(heuristic.enforcementMode),
                         };
                     }
 
@@ -390,8 +427,9 @@ export class SupervisorOrchestrator {
 
         for (const heuristic of heuristics) {
             // Skip heuristics already enforced in this execution
-            if (executionId && this.isHeuristicEnforced(executionId, heuristic.id)) {
+            if (this.shouldSkipEnforcedHeuristic(executionId, heuristic.id, heuristic.enforcementMode)) {
                 logger.debug(`[SupervisorOrchestrator] Skipping pre-tool heuristic "${heuristic.id}" - already enforced`);
+                recordHeuristicSkipTelemetry(trace.getActiveSpan() ?? undefined, heuristic.id, executionId);
                 continue;
             }
 
@@ -445,6 +483,7 @@ export class SupervisorOrchestrator {
                         heuristicId: heuristic.id,
                         detection,
                         verification,
+                        enforcementMode: getHeuristicEnforcementMode(heuristic.enforcementMode),
                     };
                 }
 

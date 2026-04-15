@@ -5,6 +5,7 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
   id = "silent-agent";
   name = "Silent Agent Detection";
   timing = "post-completion" as const;
+  enforcementMode = "repeat-until-resolved" as const;
 
   async detect(context: PostCompletionContext): Promise<HeuristicDetection> {
     if (context.silentCompletionRequested) {

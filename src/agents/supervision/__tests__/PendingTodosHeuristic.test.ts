@@ -178,7 +178,7 @@ describe("PendingTodosHeuristic", () => {
     });
 
     describe("buildCorrectionMessage", () => {
-        it("should contain softer tone with 'Would you like to address...'", () => {
+        it("should explicitly block completion until the todos are resolved", () => {
             const context = createContext({
                 todos: [
                     { id: "1", title: "Fix bug", status: "pending" },
@@ -190,7 +190,7 @@ describe("PendingTodosHeuristic", () => {
                 explanation: "Incomplete todos",
             });
 
-            expect(message).toContain("Would you like to address");
+            expect(message).toContain("This turn cannot complete yet");
             expect(message).toContain("Fix bug");
             expect(message).toContain("[pending]");
         });
@@ -214,7 +214,7 @@ describe("PendingTodosHeuristic", () => {
             expect(message).not.toContain("Task C");
         });
 
-        it("should mention todo_write tool", () => {
+        it("should mention ask() and todo_write as structured exits", () => {
             const context = createContext({
                 todos: [
                     { id: "1", title: "Fix bug", status: "pending" },
@@ -226,7 +226,9 @@ describe("PendingTodosHeuristic", () => {
                 explanation: "Incomplete todos",
             });
 
+            expect(message).toContain("ask()");
             expect(message).toContain("todo_write");
+            expect(message).toContain("skip_reason");
         });
     });
 
@@ -250,6 +252,10 @@ describe("PendingTodosHeuristic", () => {
 
         it("should skip verification since this is an objective check", () => {
             expect(heuristic.skipVerification).toBe(true);
+        });
+
+        it("should repeat until the todo state is resolved", () => {
+            expect(heuristic.enforcementMode).toBe("repeat-until-resolved");
         });
     });
 });

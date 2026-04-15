@@ -21,6 +21,7 @@ export class PendingTodosHeuristic implements Heuristic<PostCompletionContext> {
     name = "Agent Completing With Pending Todos";
     timing = "post-completion" as const;
     skipVerification = true; // Objective check - todos are data, not judgment
+    enforcementMode = "repeat-until-resolved" as const;
 
     async detect(context: PostCompletionContext): Promise<HeuristicDetection> {
         // Skip if agent has no todos at all
@@ -79,9 +80,12 @@ export class PendingTodosHeuristic implements Heuristic<PostCompletionContext> {
 
 ${todoList}
 
-Would you like to address these before finishing your turn? If you're intentionally leaving them incomplete (waiting on delegation, user request, or other valid reasons), please confirm your intent.
+This turn cannot complete yet.
 
-You can use \`todo_write\` to update item statuses if needed.`;
+Before you try to finish again, do one of the following:
+- Continue the work and update your todo list as you make progress
+- Use \`ask()\` if you need user input or external confirmation before continuing
+- Use \`todo_write\` to mark any no-longer-relevant items as \`skipped\` with \`skip_reason\``;
     }
 
     getCorrectionAction(_verification: VerificationResult): CorrectionAction {

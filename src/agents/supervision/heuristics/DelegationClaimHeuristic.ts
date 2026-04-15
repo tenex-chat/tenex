@@ -5,6 +5,7 @@ export class DelegationClaimHeuristic implements Heuristic<PostCompletionContext
   id = "delegation-claim";
   name = "Delegation Claim Without Tool Call";
   timing = "post-completion" as const;
+  enforcementMode = "repeat-until-resolved" as const;
 
   // List of known agent slugs should be passed in or fetched
   private knownAgentSlugs: string[] = [];

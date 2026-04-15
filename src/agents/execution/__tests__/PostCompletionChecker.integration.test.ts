@@ -80,8 +80,9 @@ describe("PostCompletionChecker - True Integration Test", () => {
 
     afterEach(async () => {
         registry.clear(AGENT_PUBKEY, CONVERSATION_ID);
-        supervisorOrchestrator.clearState(`${AGENT_PUBKEY}:${CONVERSATION_ID}:1`);
-        supervisorOrchestrator.clearState(`${AGENT_PUBKEY}:${CONVERSATION_ID}:2`);
+        for (let ralNumber = 1; ralNumber <= 6; ralNumber++) {
+            supervisorOrchestrator.clearState(`${AGENT_PUBKEY}:${CONVERSATION_ID}:${ralNumber}`);
+        }
         resetSystemReminders();
         await rm(TEST_DIR, { recursive: true, force: true });
         getProjectContextSpy?.mockRestore();
@@ -470,6 +471,130 @@ describe("PostCompletionChecker - True Integration Test", () => {
 
             // Should fire now - no pending delegations to suppress
             expect(result.shouldReEngage).toBe(true);
+        });
+    });
+
+    describe("repeatable re-engaging supervision gates", () => {
+        it("should re-trigger pending-todos within the same execution until the state changes", async () => {
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+            conversationStore.ensureRalActive(AGENT_PUBKEY, ralNumber);
+            conversationStore.setTodos(AGENT_PUBKEY, [
+                { id: "1", title: "Finish task", status: "pending", description: "" },
+            ]);
+            conversationStore.addMessage({
+                pubkey: AGENT_PUBKEY,
+                ral: ralNumber,
+                content: "Done!",
+                messageType: "text",
+            });
+
+            const config: PostCompletionCheckerConfig = {
+                agent: createMockAgent(),
+                context: createMockContext(ralNumber),
+                conversationStore,
+                ralNumber,
+                completionEvent: {
+                    type: "complete",
+                    message: "Done!",
+                    usage: {
+                        inputTokens: 100,
+                        outputTokens: 10,
+                    },
+                },
+            };
+            const executionId = `${AGENT_PUBKEY}:${CONVERSATION_ID}:${ralNumber}`;
+
+            const firstResult = await checkPostCompletion(config);
+            const secondResult = await checkPostCompletion(config);
+
+            expect(firstResult.shouldReEngage).toBe(true);
+            expect(firstResult.correctionMessage).toContain("This turn cannot complete yet");
+            expect(secondResult.shouldReEngage).toBe(true);
+            expect(secondResult.correctionMessage).toContain("This turn cannot complete yet");
+            expect(supervisorOrchestrator.getSupervisionState(executionId).retryCount).toBe(2);
+            expect(
+                supervisorOrchestrator.isHeuristicEnforced(executionId, "pending-todos")
+            ).toBe(false);
+        });
+
+        it("should use the final forced correction instead of publishing when retries are exhausted", async () => {
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+            conversationStore.ensureRalActive(AGENT_PUBKEY, ralNumber);
+            conversationStore.setTodos(AGENT_PUBKEY, [
+                { id: "1", title: "Finish task", status: "pending", description: "" },
+            ]);
+
+            const config: PostCompletionCheckerConfig = {
+                agent: createMockAgent(),
+                context: createMockContext(ralNumber),
+                conversationStore,
+                ralNumber,
+                completionEvent: {
+                    type: "complete",
+                    message: "Done!",
+                    usage: {
+                        inputTokens: 100,
+                        outputTokens: 10,
+                    },
+                },
+            };
+            const executionId = `${AGENT_PUBKEY}:${CONVERSATION_ID}:${ralNumber}`;
+
+            await checkPostCompletion(config);
+            await checkPostCompletion(config);
+            const finalRetryResult = await checkPostCompletion(config);
+            const afterLimitResult = await checkPostCompletion(config);
+
+            expect(finalRetryResult.shouldReEngage).toBe(true);
+            expect(finalRetryResult.correctionMessage).toContain("This turn still cannot complete");
+            expect(finalRetryResult.correctionMessage).toContain("ask()");
+            expect(finalRetryResult.correctionMessage).toContain("skip_reason");
+
+            expect(afterLimitResult.shouldReEngage).toBe(true);
+            expect(afterLimitResult.correctionMessage).toContain("This turn still cannot complete");
+            expect(supervisorOrchestrator.getSupervisionState(executionId).retryCount).toBe(3);
+        });
+
+        it("should stop re-triggering pending-todos after a pending delegation is registered", async () => {
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+            conversationStore.ensureRalActive(AGENT_PUBKEY, ralNumber);
+            conversationStore.setTodos(AGENT_PUBKEY, [
+                { id: "1", title: "Need user input", status: "pending", description: "" },
+            ]);
+
+            const config: PostCompletionCheckerConfig = {
+                agent: createMockAgent(),
+                context: createMockContext(ralNumber),
+                conversationStore,
+                ralNumber,
+                completionEvent: {
+                    type: "complete",
+                    message: "I can't continue yet.",
+                    usage: {
+                        inputTokens: 100,
+                        outputTokens: 10,
+                    },
+                },
+            };
+
+            const firstResult = await checkPostCompletion(config);
+            expect(firstResult.shouldReEngage).toBe(true);
+
+            registry.mergePendingDelegations(AGENT_PUBKEY, CONVERSATION_ID, ralNumber, [
+                {
+                    delegationConversationId: "ask-like-pending-delegation",
+                    senderPubkey: AGENT_PUBKEY,
+                    recipientPubkey: "user-pubkey",
+                    prompt: "Need confirmation",
+                    ralNumber,
+                    type: "ask",
+                },
+            ]);
+
+            const secondResult = await checkPostCompletion(config);
+
+            expect(secondResult.shouldReEngage).toBe(false);
+            expect(secondResult.injectedMessage).toBe(false);
         });
     });
 });

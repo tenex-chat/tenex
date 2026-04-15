@@ -1,3 +1,4 @@
+import { mock as bunMock } from "bun:test";
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { SupervisorOrchestrator } from "../SupervisorOrchestrator";
 import { HeuristicRegistry } from "../heuristics/HeuristicRegistry";
@@ -6,6 +7,54 @@ import { MAX_SUPERVISION_RETRIES } from "../types";
 import type { Heuristic, PostCompletionContext, PreToolContext } from "../types";
 import { supervisorLLMService } from "../SupervisorLLMService";
 import { resetRegistrationForTesting } from "../registerHeuristics";
+
+interface RecordedSpan {
+    name: string;
+    attributes: Record<string, unknown>;
+    events: Array<{ name: string; attributes: Record<string, unknown> }>;
+    status?: Record<string, unknown>;
+    exceptions: unknown[];
+    ended: boolean;
+}
+
+type SpanHandle = ReturnType<typeof createSpan>;
+
+const spans: RecordedSpan[] = [];
+let activeSpan: SpanHandle | undefined;
+
+function createSpan(name: string, attributes: Record<string, unknown> = {}) {
+    const span: RecordedSpan = {
+        name,
+        attributes: { ...attributes },
+        events: [],
+        exceptions: [],
+        ended: false,
+    };
+    spans.push(span);
+
+    return {
+        addEvent: (eventName: string, eventAttributes: Record<string, unknown> = {}) => {
+            span.events.push({ name: eventName, attributes: { ...eventAttributes } });
+        },
+        setAttributes: (nextAttributes: Record<string, unknown>) => {
+            Object.assign(span.attributes, nextAttributes);
+        },
+        setStatus: (status: Record<string, unknown>) => {
+            span.status = status;
+        },
+        recordException: (error: unknown) => {
+            span.exceptions.push(error);
+        },
+        end: () => {
+            span.ended = true;
+        },
+        spanContext: () => ({
+            traceId: "1".repeat(32),
+            spanId: "2".repeat(16),
+            traceFlags: 1,
+        }),
+    };
+}
 
 // Mock logger
 vi.mock("@/utils/logger", () => ({
@@ -34,6 +83,8 @@ describe("SupervisorOrchestrator", () => {
         // Reset registration state AND clear registry before each test
         // This allows tests to verify fail-closed behavior when registry is empty
         resetRegistrationForTesting();
+        spans.length = 0;
+        activeSpan = undefined;
         orchestrator = new SupervisorOrchestrator();
     });
 
@@ -440,6 +491,30 @@ describe("SupervisorOrchestrator", () => {
             expect(result.hasViolation).toBe(false);
         });
 
+        it("should keep checking repeat-until-resolved heuristics even after they were enforced", async () => {
+            const repeatableHeuristic: Heuristic<PostCompletionContext> = {
+                id: "repeatable-heuristic",
+                name: "Repeatable Heuristic",
+                timing: "post-completion",
+                enforcementMode: "repeat-until-resolved",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: false,
+                    reason: "Resolved",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(repeatableHeuristic);
+            orchestrator.markHeuristicEnforced("exec-1", "repeatable-heuristic");
+
+            const result = await orchestrator.checkPostCompletion(createContext(), "exec-1");
+
+            expect(repeatableHeuristic.detect).toHaveBeenCalled();
+            expect(result.hasViolation).toBe(false);
+        });
+
         it("should still run non-enforced heuristics when one is enforced", async () => {
             const enforcedHeuristic: Heuristic<PostCompletionContext> = {
                 id: "enforced-heuristic",
@@ -664,6 +739,9 @@ describe("SupervisorOrchestrator", () => {
             // Mark the heuristic as enforced
             orchestrator.markHeuristicEnforced("exec-1", "test-pretool-enforced");
 
+            const rootSpan = createSpan("root-span");
+            activeSpan = rootSpan;
+
             const context = createPreToolContext({
                 toolName: "test-tool",
             });
@@ -703,6 +781,118 @@ describe("SupervisorOrchestrator", () => {
             // Should have called detect because no executionId was provided
             expect(mockHeuristic.detect).toHaveBeenCalled();
             expect(result.hasViolation).toBe(false);
+        });
+    });
+
+    describe("telemetry", () => {
+        it("records a span event when a heuristic is skipped because it was already enforced", async () => {
+            bunMock.module("@opentelemetry/api", () => ({
+                SpanStatusCode: {
+                    UNSET: 0,
+                    OK: 1,
+                    ERROR: 2,
+                },
+                trace: {
+                    getActiveSpan: () => activeSpan,
+                    getTracer: () => ({
+                        startSpan: (
+                            name: string,
+                            options?: { attributes?: Record<string, unknown> }
+                        ) => {
+                            const span = createSpan(name, options?.attributes);
+                            activeSpan = span;
+                            return span;
+                        },
+                    }),
+                },
+            }));
+
+            const { SupervisorOrchestrator: TelemetryOrchestrator } = await import(
+                `../SupervisorOrchestrator.ts?telemetry-${Date.now()}`
+            );
+
+            const telemetryOrchestrator = new TelemetryOrchestrator();
+            const heuristicId = "telemetry-skip";
+            const executionId = "exec-telemetry";
+
+            const postCompletionHeuristic: Heuristic<PostCompletionContext> = {
+                id: heuristicId,
+                name: "Telemetry Skip Heuristic",
+                timing: "post-completion",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: false,
+                    reason: "already handled",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(postCompletionHeuristic);
+            telemetryOrchestrator.markHeuristicEnforced(executionId, heuristicId);
+
+            await telemetryOrchestrator.checkPostCompletion(createContext(), executionId);
+
+            const postCompletionSpan = spans.find(
+                (span) => span.name === "supervision.check_post_completion"
+            );
+
+            expect(
+                postCompletionSpan?.events.some((event) =>
+                    event.name === "supervision.heuristic_skipped" &&
+                    event.attributes["heuristic.id"] === heuristicId &&
+                    event.attributes["execution.id"] === executionId &&
+                    event.attributes["skip.reason"] === "already_enforced"
+                )
+            ).toBe(true);
+
+            spans.length = 0;
+            activeSpan = undefined;
+            telemetryOrchestrator.clearState(executionId);
+
+            const preToolHeuristic: Heuristic<PreToolContext> = {
+                id: "telemetry-pretool-skip",
+                name: "Telemetry PreTool Skip Heuristic",
+                timing: "pre-tool-execution",
+                toolFilter: ["test-tool"],
+                detect: vi.fn().mockResolvedValue({
+                    triggered: false,
+                    reason: "already handled",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(preToolHeuristic);
+            telemetryOrchestrator.markHeuristicEnforced(executionId, preToolHeuristic.id);
+
+            const rootSpan = createSpan("root-span");
+            activeSpan = rootSpan;
+
+            await telemetryOrchestrator.checkPreTool(
+                {
+                    agentSlug: "test-agent",
+                    agentPubkey: "abc123",
+                    toolName: "test-tool",
+                    toolArgs: {},
+                    systemPrompt: "You are a helpful assistant.",
+                    conversationHistory: [],
+                    availableTools: {},
+                },
+                executionId
+            );
+
+            const rootSpanRecord = spans[spans.length - 1];
+
+            expect(
+                rootSpanRecord.events.some((event) =>
+                    event.name === "supervision.heuristic_skipped" &&
+                    event.attributes["heuristic.id"] === preToolHeuristic.id &&
+                    event.attributes["execution.id"] === executionId &&
+                    event.attributes["skip.reason"] === "already_enforced"
+                )
+            ).toBe(true);
         });
     });
 });

@@ -5,6 +5,7 @@ import type { TodoStatus } from "../../services/ral/types";
  * When heuristic checks run relative to agent execution
  */
 export type HeuristicTiming = "pre-tool-execution" | "post-completion";
+export type HeuristicEnforcementMode = "once-per-execution" | "repeat-until-resolved";
 
 /**
  * Result of a heuristic detection check
@@ -143,6 +144,8 @@ export interface Heuristic<TContext> {
     toolFilter?: string[];
     /** Skip LLM verification and apply correction directly on detection (for low-stakes nudges) */
     skipVerification?: boolean;
+    /** Whether this heuristic should block once or keep blocking until the condition is resolved */
+    enforcementMode?: HeuristicEnforcementMode;
     /**
      * Detect if the heuristic condition is met
      * @param context - The context to check
@@ -172,6 +175,6 @@ export interface Heuristic<TContext> {
 }
 
 /**
- * Maximum number of supervision retries before giving up
+ * Maximum number of supervision retries before switching to the final forced correction path
  */
 export const MAX_SUPERVISION_RETRIES = 3;

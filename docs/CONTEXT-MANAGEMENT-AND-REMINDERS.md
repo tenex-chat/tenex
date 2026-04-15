@@ -71,6 +71,8 @@ This is an `AsyncLocalStorage` queue for current-cycle reminders such as supervi
 
 This queue is not the main reminder engine. It is an ingress path for transient reminders that should affect the current or next request without being written into the canonical transcript.
 
+For the supervision side of this flow, see `docs/SUPERVISION.md`. That document explains where `supervision-correction` and `supervision-message` reminders come from and why some supervision violations re-engage the agent immediately while others only queue a later reminder.
+
 ### Persistence
 
 - `src/conversations/ConversationStore.ts`

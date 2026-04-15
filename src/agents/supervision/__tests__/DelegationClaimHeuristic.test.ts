@@ -108,6 +108,12 @@ describe("DelegationClaimHeuristic", () => {
         });
     });
 
+    describe("metadata", () => {
+        it("should repeat until the delegation state is resolved", () => {
+            expect(heuristic.enforcementMode).toBe("repeat-until-resolved");
+        });
+    });
+
     describe("setKnownAgentSlugs", () => {
         it("should update the list of known agents", async () => {
             heuristic.setKnownAgentSlugs(["new-agent"]);
