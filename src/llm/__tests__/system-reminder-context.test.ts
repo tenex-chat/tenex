@@ -28,12 +28,22 @@ describe("TENEX system reminder context", () => {
                 });
 
                 expect(await getSystemReminderContext().collect()).toEqual([
-                    { type: "inner", content: "inner reminder" },
+                    {
+                        type: "inner",
+                        content: "inner reminder",
+                        placement: "overlay-user",
+                        persistInHistory: false,
+                    },
                 ]);
             }, innerContext);
 
             expect(await getSystemReminderContext().collect()).toEqual([
-                { type: "outer", content: "outer reminder" },
+                {
+                    type: "outer",
+                    content: "outer reminder",
+                    placement: "overlay-user",
+                    persistInHistory: false,
+                },
             ]);
         }, outerContext);
 

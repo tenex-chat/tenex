@@ -390,6 +390,9 @@ export async function setupStreamExecution(
             modelId: llmService.model,
         },
         contextManagement,
+        promptHistoryCacheAnchored: conversation.isAgentPromptHistoryCacheAnchored(
+            context.agent.pubkey
+        ),
         reminderData,
         analysisContext: {
             projectId: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,

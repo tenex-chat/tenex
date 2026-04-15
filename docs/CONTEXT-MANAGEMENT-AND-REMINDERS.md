@@ -8,6 +8,7 @@ The short version:
 - TENEX keeps a separate per-agent prompt-view history of what was actually sent.
 - Reminders are computed at request time by `RemindersStrategy`.
 - Runtime-only reminders are stored as append-only prompt overlays, not as edits to old user messages.
+- Cold prompt histories are restored from canonical transcript content before each request, so non-cached providers do not keep replaying stale reminder-appended user turns.
 
 ## Design Invariants
 
@@ -168,7 +169,7 @@ It returns reminder content in one of three placements:
 
 - `overlay-user`
 - `latest-user-append`
-- `fallback-system`
+- `system-append`
 
 ### 8. Runtime overlays are appended to prompt history
 
@@ -208,9 +209,13 @@ Used when reminder content should be appended to the latest user message in the 
 
 This affects the current request but does not rewrite the canonical transcript stored in `ConversationStore`.
 
-### `fallback-system`
+TENEX uses this placement only after the host has observed a cache anchor for that agent prompt history.
+
+### `system-append`
 
 Used when reminder content should be emitted as a secondary system message.
+
+TENEX uses this placement while prompt history is still cold, so non-cached providers get the current reminder snapshot in `system` without creating reminder-only `user` turns or replaying stale user-appended reminder history.
 
 ## Reminder State Persistence
 

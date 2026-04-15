@@ -7,6 +7,7 @@ import type { RuntimePromptOverlay } from "../prompt-history";
 import type { ExecutionContextManagement } from "../context-management";
 import { prepareLLMRequest } from "../request-preparation";
 import {
+    createTenexReminderPlacementPolicy,
     createTenexReminderProviders,
     createTenexReminderStateStore,
     type TenexReminderData,
@@ -77,6 +78,10 @@ export async function prepareTenexReminderRequest(params: {
                     conversationStore: reminderData.conversation,
                 }),
                 providers: createTenexReminderProviders(),
+                placementPolicy: createTenexReminderPlacementPolicy({
+                    conversationStore: reminderData.conversation,
+                    agentPubkey: reminderData.agent.pubkey,
+                }),
                 overlayType: "system-reminders",
             }),
         ],
@@ -107,6 +112,9 @@ export async function prepareTenexReminderRequest(params: {
             modelId: "test-model",
         },
         contextManagement,
+        promptHistoryCacheAnchored: reminderData.conversation.isAgentPromptHistoryCacheAnchored(
+            reminderData.agent.pubkey
+        ),
         reminderData,
     });
 
@@ -141,7 +149,26 @@ export async function collectTenexReminderXml(
     data: Pick<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">
         & Partial<Omit<TenexReminderData, "agent" | "conversation" | "respondingToPrincipal">>
 ): Promise<string> {
-    const overlay = await collectTenexReminderOverlay(data);
+    const prepared = await prepareTenexReminderRequest({
+        messages: [],
+        data,
+    });
+
+    const messageWithReminder = prepared.messages.find(
+        (message) =>
+            typeof message.content === "string"
+            && message.content.includes("<system-reminders>")
+    );
+    if (typeof messageWithReminder?.content === "string") {
+        return messageWithReminder.content;
+    }
+
+    const overlay = prepared.runtimeOverlays.find(
+        (candidate) =>
+            typeof candidate.message.content === "string"
+            && candidate.message.content.includes("<system-reminders>")
+    );
+
     return typeof overlay?.message.content === "string"
         ? overlay.message.content
         : "";

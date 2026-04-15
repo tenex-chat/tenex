@@ -130,6 +130,7 @@ describe("system reminder prompt integration", () => {
             content: "Hello, can you help me?",
             messageType: "text",
         });
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
 
@@ -175,6 +176,7 @@ describe("system reminder prompt integration", () => {
             content: "Follow up on the task",
             messageType: "text",
         });
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
         const ralNumber = conversationStore.createRal(agentPubkey);
         const compiled = await compile(ralNumber);
         const promptHistoryResult = buildPromptHistoryMessages({
@@ -208,6 +210,60 @@ describe("system reminder prompt integration", () => {
         expect(history.messages[0]?.content).toBe("Follow up on the task");
         expect(String(prepared.messages[1]?.content)).toContain("Follow up on the task");
         expect(String(prepared.messages[1]?.content)).toContain("<system-reminders>");
+    });
+
+    it("emits reminder blocks as a secondary system message while history is not cache-anchored", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "Open grok.com in a browser",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        conversationStore.addMessage({
+            pubkey: agentPubkey,
+            ral: ralNumber,
+            content: "I opened the page.",
+            messageType: "text",
+        });
+        const compiled = await compile(ralNumber);
+        const promptHistoryResult = buildPromptHistoryMessages({
+            compiled,
+            conversationStore,
+            agentPubkey,
+        });
+
+        const prepared = await prepareTenexReminderRequest({
+            messages: promptHistoryResult.messages,
+            data: {
+                agent,
+                conversation: conversationStore,
+                respondingToPrincipal,
+                loadedSkills: [],
+                pendingDelegations: [],
+                completedDelegations: [],
+            },
+        });
+
+        expect(prepared.runtimeOverlays).toHaveLength(0);
+        expect(prepared.messages[0]?.role).toBe("system");
+        expect(prepared.messages[1]?.role).toBe("system");
+        expect(String(prepared.messages[1]?.content)).toContain("<system-reminders>");
+        expect(String(prepared.messages[1]?.content)).toContain("<response-routing>");
+        expect(
+            prepared.messages.some(
+                (message) =>
+                    message.role === "user"
+                    && String(message.content).includes("Open grok.com in a browser")
+                    && String(message.content).includes("<system-reminders>")
+            )
+        ).toBe(false);
+        expect(
+            prepared.messages.some(
+                (message) =>
+                    message.role === "user"
+                    && String(message.content).includes("Open grok.com in a browser")
+            )
+        ).toBe(true);
     });
 
     it("does not repeat delegation reminders when the conversation already has a delegation marker", async () => {

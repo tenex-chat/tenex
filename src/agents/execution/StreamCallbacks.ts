@@ -489,6 +489,9 @@ export function createPrepareStep(
                 providerId: preparedModelRef.provider,
                 model: preparedModelRef,
                 contextManagement,
+                promptHistoryCacheAnchored: conversation.isAgentPromptHistoryCacheAnchored(
+                    context.agent.pubkey
+                ),
                 reminderData,
                 analysisContext: {
                     projectId:

@@ -208,12 +208,162 @@ function filterRuntimeOverlaysForPersistence(params: {
     return filtered;
 }
 
+function getReminderOverlayText(
+    message: ModelMessage | RuntimePromptOverlay["message"]
+): string | undefined {
+    const content = message.content;
+
+    if (typeof content === "string") {
+        return content;
+    }
+
+    if (!Array.isArray(content) || content.length === 0) {
+        return undefined;
+    }
+
+    const textParts = content.filter(
+        (part): part is { type: "text"; text: string } =>
+            part?.type === "text" && typeof part.text === "string"
+    );
+
+    return textParts.length === content.length
+        ? textParts.map((part) => part.text).join("")
+        : undefined;
+}
+
+function isContextManagementReminderOverlayMessage(message: ModelMessage): boolean {
+    return message.role === "user"
+        && typeof message.providerOptions === "object"
+        && message.providerOptions !== null
+        && typeof message.providerOptions[CONTEXT_MANAGEMENT_KEY] === "object"
+        && message.providerOptions[CONTEXT_MANAGEMENT_KEY] !== null
+        && (message.providerOptions[CONTEXT_MANAGEMENT_KEY] as { type?: unknown }).type === "reminder-overlay";
+}
+
+function appendReminderTextToLastUserMessage(
+    messages: ModelMessage[],
+    reminderText: string
+): ModelMessage[] | undefined {
+    const cloned = structuredClone(messages);
+
+    for (let index = cloned.length - 1; index >= 0; index--) {
+        const message = cloned[index];
+        if (message.role === "system") {
+            continue;
+        }
+        if (message.role !== "user" || isContextManagementReminderOverlayMessage(message)) {
+            continue;
+        }
+
+        if (typeof message.content === "string") {
+            cloned[index] = {
+                ...message,
+                content: message.content.length > 0
+                    ? `${message.content}\n\n${reminderText}`
+                    : reminderText,
+            };
+            return cloned;
+        }
+
+        if (!Array.isArray(message.content)) {
+            continue;
+        }
+
+        const content = [...message.content];
+        const lastPart = content.at(-1);
+        if (lastPart?.type === "text" && typeof lastPart.text === "string") {
+            content[content.length - 1] = {
+                ...lastPart,
+                text: `${lastPart.text}\n\n${reminderText}`,
+            };
+        } else {
+            content.push({ type: "text", text: reminderText });
+        }
+
+        cloned[index] = {
+            ...message,
+            content,
+        };
+        return cloned;
+    }
+
+    return undefined;
+}
+
+function collapseSystemReminderOverlaysIntoLastUserMessage(params: {
+    messages: ModelMessage[];
+    runtimeOverlays: RuntimePromptOverlay[] | undefined;
+}): {
+    messages: ModelMessage[];
+    runtimeOverlays: RuntimePromptOverlay[] | undefined;
+} {
+    const reminderOverlayTexts = (params.runtimeOverlays ?? [])
+        .filter((overlay) => overlay.overlayType === "system-reminders")
+        .map((overlay) => getReminderOverlayText(overlay.message))
+        .filter((text): text is string => typeof text === "string" && text.length > 0);
+
+    if (reminderOverlayTexts.length === 0) {
+        return {
+            messages: params.messages,
+            runtimeOverlays: params.runtimeOverlays,
+        };
+    }
+
+    const mergedMessages = appendReminderTextToLastUserMessage(
+        params.messages,
+        reminderOverlayTexts.join("\n\n")
+    );
+    if (!mergedMessages) {
+        return {
+            messages: params.messages,
+            runtimeOverlays: params.runtimeOverlays,
+        };
+    }
+
+    const remainingOverlayCounts = new Map<string, number>();
+    for (const text of reminderOverlayTexts) {
+        remainingOverlayCounts.set(text, (remainingOverlayCounts.get(text) ?? 0) + 1);
+    }
+
+    const filteredMessages = mergedMessages.filter((message) => {
+        if (!isContextManagementReminderOverlayMessage(message)) {
+            return true;
+        }
+
+        const text = getReminderOverlayText(message);
+        if (!text) {
+            return true;
+        }
+
+        const remaining = remainingOverlayCounts.get(text) ?? 0;
+        if (remaining <= 0) {
+            return true;
+        }
+
+        remainingOverlayCounts.set(text, remaining - 1);
+        return false;
+    });
+
+    const filteredRuntimeOverlays = params.runtimeOverlays?.filter(
+        (overlay) => overlay.overlayType !== "system-reminders"
+    );
+
+    return {
+        messages: filteredMessages,
+        runtimeOverlays:
+            filteredRuntimeOverlays && filteredRuntimeOverlays.length > 0
+                ? filteredRuntimeOverlays
+                : undefined,
+    };
+}
+
 export async function prepareLLMRequest(options: {
     messages: ModelMessage[];
     tools: Record<string, AISdkTool>;
     providerId: string;
     model?: ContextManagementModelRef;
     contextManagement?: ExecutionContextManagement;
+    promptHistoryCacheAnchored?: boolean;
     reminderData?: unknown;
     providerOptions?: ProviderOptions;
     toolChoice?: ToolChoice<Record<string, CoreTool>>;
@@ -294,6 +444,15 @@ export async function prepareLLMRequest(options: {
             overlays: contextManagedRequest.runtimeOverlays as RuntimePromptOverlay[] | undefined,
             queuedReminders,
         });
+
+        if (options.promptHistoryCacheAnchored !== true) {
+            const collapsedReminders = collapseSystemReminderOverlaysIntoLastUserMessage({
+                messages: preparedMessages,
+                runtimeOverlays: runtimeOverlays as RuntimePromptOverlay[] | undefined,
+            });
+            preparedMessages = collapsedReminders.messages;
+            runtimeOverlays = collapsedReminders.runtimeOverlays;
+        }
     }
 
     ({

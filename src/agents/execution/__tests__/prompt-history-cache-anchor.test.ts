@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPromptHistoryMessages, type RuntimePromptOverlay } from "@/agents/execution/prompt-history";
+import {
+    buildPromptHistoryMessages,
+    syncPreparedPromptHistoryMessages,
+    type RuntimePromptOverlay,
+} from "@/agents/execution/prompt-history";
 import type { CompiledMessages } from "@/agents/execution/MessageCompiler";
 import { ConversationStore } from "@/conversations/ConversationStore";
 
@@ -122,5 +126,74 @@ describe("prompt-history cache anchoring", () => {
         expect(result.messages).toHaveLength(2);
         expect(String(result.messages[1]?.content)).toBe("Continue the task");
         expect(conversationStore.getAgentPromptHistory(agentPubkey).messages).toHaveLength(1);
+    });
+
+    it("restores cold canonical prompt history from the compiled transcript", () => {
+        const history = conversationStore.getAgentPromptHistory(agentPubkey);
+        history.messages.push({
+            id: "prompt:1",
+            role: "user",
+            content: "Continue the task\n\n<system-reminders>stale</system-reminders>",
+            source: {
+                kind: "canonical",
+                sourceMessageId: "msg-1",
+            },
+        });
+        history.seenMessageIds.push("msg-1");
+        history.nextSequence = 1;
+
+        const result = buildPromptHistoryMessages({
+            compiled: buildCompiledMessages(),
+            conversationStore,
+            agentPubkey,
+        });
+
+        expect(result.messages).toHaveLength(2);
+        expect(String(result.messages[1]?.content)).toBe("Continue the task");
+        expect(conversationStore.getAgentPromptHistory(agentPubkey).messages[0]?.content).toBe(
+            "Continue the task"
+        );
+    });
+
+    it("only syncs prepared latest-user-appends once cache is anchored", () => {
+        const base = buildPromptHistoryMessages({
+            compiled: buildCompiledMessages(),
+            conversationStore,
+            agentPubkey,
+        });
+
+        expect(
+            syncPreparedPromptHistoryMessages({
+                conversationStore,
+                agentPubkey,
+                preparedMessages: [
+                    base.messages[0]!,
+                    {
+                        ...base.messages[1]!,
+                        content: "Continue the task\n\n<system-reminders>cold</system-reminders>",
+                    },
+                ],
+            })
+        ).toBe(false);
+
+        conversationStore.markAgentPromptHistoryCacheAnchored(agentPubkey);
+
+        expect(
+            syncPreparedPromptHistoryMessages({
+                conversationStore,
+                agentPubkey,
+                preparedMessages: [
+                    base.messages[0]!,
+                    {
+                        ...base.messages[1]!,
+                        content: "Continue the task\n\n<system-reminders>warm</system-reminders>",
+                    },
+                ],
+            })
+        ).toBe(true);
+
+        expect(conversationStore.getAgentPromptHistory(agentPubkey).messages[0]?.content).toBe(
+            "Continue the task\n\n<system-reminders>warm</system-reminders>"
+        );
     });
 });

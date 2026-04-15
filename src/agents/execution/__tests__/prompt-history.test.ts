@@ -285,7 +285,7 @@ describe("per-agent prompt history", () => {
         });
     });
 
-    it("freezes the first latest-user-append mutation into prompt history", async () => {
+    it("keeps cold prompt history canonical when system-appended reminders are applied", async () => {
         conversationStore.addMessage({
             pubkey: "user-pubkey",
             content: "Track the todos",
@@ -349,15 +349,24 @@ describe("per-agent prompt history", () => {
             },
         });
         const history = conversationStore.getAgentPromptHistory(agentA.pubkey).messages;
+        const firstReminderMessage = firstPrepared.messages.find(
+            (message) => message.role === "system" && String(message.content).includes("<system-reminders>")
+        );
+        const secondReminderMessage = secondPrepared.messages.find(
+            (message) => message.role === "system" && String(message.content).includes("<system-reminders>")
+        );
+        const secondUserMessage = secondPrepared.messages.find(
+            (message) => message.role === "user" && String(message.content).includes("Track the todos")
+        );
 
-        expect(firstSynced).toBe(true);
+        expect(firstSynced).toBe(false);
         expect(history).toHaveLength(2);
-        expect(String(history[0]?.content)).toContain("Track the todos");
-        expect(String(history[0]?.content)).toContain("<system-reminders>");
-        expect(String(firstPrepared.messages[1]?.content)).toContain("<agent-todos>");
-        expect(String(secondBase.messages[1]?.content)).toContain("<system-reminders>");
-        expect(String(secondPrepared.messages[1]?.content)).toContain("<system-reminders>");
-        expect(String(secondPrepared.messages[1]?.content)).not.toContain("agent-todos-update");
+        expect(String(history[0]?.content)).toBe("Track the todos");
+        expect(String(firstReminderMessage?.content)).toContain("<agent-todos>");
+        expect(String(secondBase.messages[1]?.content)).toBe("Track the todos");
+        expect(String(secondReminderMessage?.content)).toContain("<agent-todos>");
+        expect(String(secondReminderMessage?.content)).not.toContain("agent-todos-update");
+        expect(String(secondUserMessage?.content)).toBe("Track the todos");
     });
 
     it("appends explicit delegation completion marker records", async () => {

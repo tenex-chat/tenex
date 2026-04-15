@@ -37,6 +37,7 @@ import {
     getContextManagementSettings,
 } from "./settings";
 import {
+    createTenexReminderPlacementPolicy,
     createTenexReminderProviders,
     createTenexReminderStateStore,
     type TenexReminderData,
@@ -237,6 +238,10 @@ function createConversationContextManagementRuntime(options: {
             conversationStore: options.conversationStore,
         });
         reminderOptions.providers = createTenexReminderProviders();
+        reminderOptions.placementPolicy = createTenexReminderPlacementPolicy({
+            conversationStore: options.conversationStore,
+            agentPubkey: options.agent.pubkey,
+        });
         reminderOptions.overlayType = "system-reminders";
         reminderOptions.contextUtilization = settings.strategies.contextUtilizationReminder
             ? {

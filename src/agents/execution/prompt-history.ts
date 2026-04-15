@@ -137,6 +137,40 @@ function serializeMessageContent(content: ModelMessage["content"]): string {
     return JSON.stringify(toPromptHistorySafeValue(content));
 }
 
+function syncFrozenCanonicalMessage(params: {
+    history: AgentPromptHistoryState;
+    message: AddressablePromptMessage;
+    fallbackIndex: number;
+}): boolean {
+    const { history, message, fallbackIndex } = params;
+    const sourceMessageId = getSourceMessageId(message, fallbackIndex);
+    const frozenIndex = history.messages.findIndex(
+        (candidate) =>
+            candidate.source.kind === "canonical"
+            && candidate.source.sourceMessageId === sourceMessageId
+    );
+
+    if (frozenIndex < 0) {
+        return false;
+    }
+
+    const frozenMessage = history.messages[frozenIndex];
+    const nextContent = cloneMessageContent(message);
+    if (
+        frozenMessage.role === message.role
+        && serializeMessageContent(nextContent) === serializeMessageContent(frozenMessage.content)
+    ) {
+        return false;
+    }
+
+    history.messages[frozenIndex] = {
+        ...frozenMessage,
+        role: message.role,
+        content: nextContent,
+    };
+    return true;
+}
+
 function nextPromptHistoryId(history: AgentPromptHistoryState): string {
     history.nextSequence += 1;
     return `prompt:${history.nextSequence}`;
@@ -279,6 +313,15 @@ export function buildPromptHistoryMessages(params: {
         const sourceMessageId = getSourceMessageId(message, index);
 
         if (seenMessageIds.has(sourceMessageId)) {
+            if (!history.cacheAnchored) {
+                didMutateHistory =
+                    syncFrozenCanonicalMessage({
+                        history,
+                        message,
+                        fallbackIndex: index,
+                    })
+                    || didMutateHistory;
+            }
             continue;
         }
 
@@ -327,6 +370,11 @@ export function syncPreparedPromptHistoryMessages(params: {
 }): boolean {
     const { conversationStore, agentPubkey, preparedMessages, span } = params;
     const history = conversationStore.getAgentPromptHistory(agentPubkey);
+
+    if (!history.cacheAnchored) {
+        return false;
+    }
+
     const preparedMessagesById = new Map<string, AddressablePromptMessage>();
 
     for (const message of preparedMessages as AddressablePromptMessage[]) {

@@ -1,6 +1,7 @@
 import type {
     ReminderDescriptor,
     ReminderPlacement,
+    ReminderPlacementPolicy,
     ReminderProvider,
     ReminderProviderDeltaResult,
     ReminderState,
@@ -143,6 +144,21 @@ export interface TenexReminderData {
     loadedSkills: SkillData[];
     skillToolPermissions?: SkillToolPermissions;
     projectPath?: string;
+}
+
+export function createTenexReminderPlacementPolicy(options: {
+    conversationStore: ConversationStore;
+    agentPubkey: string;
+}): ReminderPlacementPolicy<TenexReminderData> {
+    return ({ defaultPlacement }) => {
+        if (defaultPlacement !== "latest-user-append") {
+            return defaultPlacement;
+        }
+
+        return options.conversationStore.isAgentPromptHistoryCacheAnchored(options.agentPubkey)
+            ? "latest-user-append"
+            : "system-append";
+    };
 }
 
 type DeltaProviderConfig<TSnapshot> = {
