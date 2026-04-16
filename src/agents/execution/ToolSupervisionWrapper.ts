@@ -96,11 +96,18 @@ export function wrapToolsWithSupervision(
                     const preToolContext: PreToolContext = {
                         agentSlug: context.agent.slug,
                         agentPubkey: context.agent.pubkey,
+                        agentCategory: context.agent.category,
                         toolName,
                         toolArgs: input,
                         systemPrompt,
                         conversationHistory: conversationMessages,
                         availableTools: toolsForContext,
+                        todos: conversationStore.getTodos(context.agent.pubkey).map((todo) => ({
+                            id: todo.id,
+                            title: todo.title,
+                            status: todo.status,
+                            description: todo.description,
+                        })),
                     };
 
                     // Run pre-tool supervision check

@@ -446,6 +446,35 @@ export class SupervisorOrchestrator {
                     { reason: detection.reason }
                 );
 
+                if (heuristic.skipVerification) {
+                    logger.debug(
+                        `[SupervisorOrchestrator] Pre-tool heuristic "${heuristic.id}" skips verification, applying correction directly`
+                    );
+
+                    const syntheticVerification: VerificationResult = {
+                        verdict: "violation",
+                        explanation: "Heuristic configured to skip LLM verification",
+                    };
+
+                    const correctionAction = heuristic.getCorrectionAction(syntheticVerification);
+
+                    if (shouldBuildCorrectionMessage(correctionAction)) {
+                        correctionAction.message = heuristic.buildCorrectionMessage(
+                            context,
+                            syntheticVerification
+                        );
+                    }
+
+                    return {
+                        hasViolation: true,
+                        correctionAction,
+                        heuristicId: heuristic.id,
+                        detection,
+                        verification: syntheticVerification,
+                        enforcementMode: getHeuristicEnforcementMode(heuristic.enforcementMode),
+                    };
+                }
+
                 // Build verification prompt and context
                 const verificationPrompt = heuristic.buildVerificationPrompt(context, detection);
                 const supervisionContext = this.buildSupervisionContext(

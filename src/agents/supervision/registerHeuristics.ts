@@ -9,6 +9,7 @@ import {
     DelegationClaimHeuristic,
     ConsecutiveToolsWithoutTodoHeuristic,
     PendingTodosHeuristic,
+    WorkerTodoBeforeFileOrShellHeuristic,
 } from "./heuristics";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 
@@ -47,6 +48,7 @@ export function registerDefaultHeuristics(): void {
         registry.register(new DelegationClaimHeuristic());
         registry.register(new ConsecutiveToolsWithoutTodoHeuristic());
         registry.register(new PendingTodosHeuristic());
+        registry.register(new WorkerTodoBeforeFileOrShellHeuristic());
 
         registered = true;
         const sizeAfter = registry.size;

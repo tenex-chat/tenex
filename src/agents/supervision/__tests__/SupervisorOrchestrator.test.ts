@@ -630,11 +630,13 @@ describe("SupervisorOrchestrator", () => {
         ): PreToolContext => ({
             agentSlug: "test-agent",
             agentPubkey: "abc123",
+            agentCategory: "worker",
             toolName: "test-tool",
             toolArgs: {},
-                systemPrompt: "You are a helpful assistant.",
+            systemPrompt: "You are a helpful assistant.",
             conversationHistory: [],
             availableTools: {},
+            todos: [],
             ...overrides,
         });
 
@@ -782,6 +784,42 @@ describe("SupervisorOrchestrator", () => {
             expect(mockHeuristic.detect).toHaveBeenCalled();
             expect(result.hasViolation).toBe(false);
         });
+
+        it("should apply skip-verification pre-tool corrections without calling the supervisor LLM", async () => {
+            const mockHeuristic: Heuristic<PreToolContext> = {
+                id: "test-pretool-skip-verification",
+                name: "Test PreTool Skip Verification",
+                timing: "pre-tool-execution",
+                toolFilter: ["test-tool"],
+                skipVerification: true,
+                enforcementMode: "repeat-until-resolved",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: true,
+                    reason: "Objective policy violation",
+                }),
+                buildVerificationPrompt: vi.fn().mockReturnValue("Should not be called"),
+                buildCorrectionMessage: vi.fn().mockReturnValue("Create a todo list first"),
+                getCorrectionAction: vi.fn().mockReturnValue({
+                    type: "block-tool",
+                    reEngage: true,
+                    message: undefined,
+                }),
+            };
+
+            HeuristicRegistry.getInstance().register(mockHeuristic);
+            (supervisorLLMService.verify as Mock).mockClear();
+
+            const result = await orchestrator.checkPreTool(createPreToolContext({
+                toolName: "test-tool",
+            }));
+
+            expect(result.hasViolation).toBe(true);
+            expect(result.correctionAction?.type).toBe("block-tool");
+            expect(result.correctionAction?.message).toBe("Create a todo list first");
+            expect(result.enforcementMode).toBe("repeat-until-resolved");
+            expect(mockHeuristic.buildVerificationPrompt).not.toHaveBeenCalled();
+            expect(supervisorLLMService.verify).not.toHaveBeenCalled();
+        });
     });
 
     describe("telemetry", () => {
@@ -879,6 +917,7 @@ describe("SupervisorOrchestrator", () => {
                     systemPrompt: "You are a helpful assistant.",
                     conversationHistory: [],
                     availableTools: {},
+                    todos: [],
                 },
                 executionId
             );

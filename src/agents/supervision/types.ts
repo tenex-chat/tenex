@@ -1,4 +1,5 @@
 import type { ModelMessage, ToolSet } from "ai";
+import type { AgentCategory } from "@/agents/role-categories";
 import type { TodoStatus } from "../../services/ral/types";
 
 /**
@@ -118,6 +119,8 @@ export interface PreToolContext {
     agentSlug: string;
     /** Agent's Nostr public key */
     agentPubkey: string;
+    /** Agent category for category-specific pre-tool policy */
+    agentCategory?: AgentCategory;
     /** Name of the tool about to be executed */
     toolName: string;
     /** Arguments passed to the tool */
@@ -128,6 +131,8 @@ export interface PreToolContext {
     conversationHistory: ModelMessage[];
     /** Tools available to the agent */
     availableTools: ToolSet;
+    /** The agent's todo items at the time the tool was requested */
+    todos: Array<{ id: string; title: string; status: TodoStatus; description?: string }>;
 }
 
 /**
