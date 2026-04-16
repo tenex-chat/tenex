@@ -99,4 +99,39 @@ describe("project-context fragment — $PROJECT_BASE path rendering", () => {
         expect(result).toContain("cwd: /parent/sibling");
         expect(result).not.toContain("cwd: $PROJECT_BASE");
     });
+
+    it("renders runtime status for remote and offline coworkers", async () => {
+        const result = await projectContextFragment.template({
+            ...baseArgs,
+            agentRuntimeInfo: [
+                {
+                    pubkey: mockAgent.pubkey,
+                    slug: mockAgent.slug,
+                    name: mockAgent.name,
+                    role: mockAgent.role,
+                    runtimeStatus: "local-online",
+                },
+                {
+                    pubkey: "remote-agent-pubkey",
+                    slug: "remote-agent",
+                    name: "Remote Agent",
+                    role: "developer",
+                    useCriteria: "Use remotely",
+                    runtimeStatus: "remote-online",
+                    backendPubkey: "feedface1234567890",
+                },
+                {
+                    pubkey: "offline-agent-pubkey",
+                    slug: "offline-agent",
+                    name: "Offline Agent",
+                    role: "developer",
+                    useCriteria: "Use later",
+                    runtimeStatus: "offline",
+                },
+            ],
+        });
+
+        expect(result).toContain("* remote-agent [remote backend feedfa] - Use remotely");
+        expect(result).toContain("* offline-agent [offline] - Use later");
+    });
 });

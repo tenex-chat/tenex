@@ -69,6 +69,7 @@ export function wrapToolsWithSupervision(
                             workingDirectory: context.workingDirectory,
                             currentBranch: context.currentBranch,
                             availableAgents: Array.from(projectContext.agents.values()),
+                            agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo(),
                         })).map(m => m.message.content).join("\n\n");
 
                     // Build conversation history from ConversationStore.

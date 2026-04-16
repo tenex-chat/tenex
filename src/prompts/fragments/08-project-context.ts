@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
+import type { ProjectAgentRuntimeInfo } from "@/services/projects/ProjectContext";
 import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { getIdentityBindingStore } from "@/services/identity";
 import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
@@ -233,6 +234,7 @@ export interface ProjectContextArgs {
     currentBranch?: string;
     projectDocsPath?: string;
     availableAgents?: AgentInstance[];
+    agentRuntimeInfo?: ProjectAgentRuntimeInfo[];
     teamContext?: TeamContext;
 }
 
@@ -250,6 +252,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         currentBranch,
         projectDocsPath,
         availableAgents,
+        agentRuntimeInfo,
         teamContext,
     }) => {
         const parts: string[] = [];
@@ -312,11 +315,34 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         }
 
         // <team> section
+        const runtimeInfoByPubkey = new Map(
+            (agentRuntimeInfo ?? []).map((info) => [info.pubkey, info])
+        );
+        const renderRuntimeLabel = (info?: ProjectAgentRuntimeInfo): string => {
+            if (!info || info.runtimeStatus === "local-online") {
+                return "local";
+            }
+            if (info.runtimeStatus === "remote-online") {
+                const backend = info.backendPubkey ? shortenPubkey(info.backendPubkey) : "unknown";
+                return `remote backend ${backend}`;
+            }
+            return "offline";
+        };
         const renderAgentBullet = (a: AgentInstance): string => {
             const detail = a.useCriteria ?? a.description ?? "";
+            const runtimeLabel = runtimeInfoByPubkey.has(a.pubkey)
+                ? ` [${renderRuntimeLabel(runtimeInfoByPubkey.get(a.pubkey))}]`
+                : "";
             return detail
-                ? `      * ${a.slug} — ${detail}`
-                : `      * ${a.slug}`;
+                ? `      * ${a.slug}${runtimeLabel} - ${detail}`
+                : `      * ${a.slug}${runtimeLabel}`;
+        };
+        const renderRuntimeAgentBullet = (info: ProjectAgentRuntimeInfo): string => {
+            const detail = info.useCriteria ?? info.description ?? "";
+            const runtimeLabel = renderRuntimeLabel(info);
+            return detail
+                ? `      * ${info.slug} [${runtimeLabel}] - ${detail}`
+                : `      * ${info.slug} [${runtimeLabel}]`;
         };
 
         const renderTeamBullet = (t: TeamInfo): string =>
@@ -383,16 +409,35 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
                 parts.push("    </also-available>");
             }
 
+            const nonLocalAgents = (agentRuntimeInfo ?? []).filter(
+                (info) =>
+                    info.pubkey !== agent.pubkey &&
+                    info.runtimeStatus !== "local-online"
+            );
+            if (nonLocalAgents.length > 0) {
+                parts.push("");
+                parts.push("    <agent-runtime>");
+                parts.push("      Assigned agents not running in this backend:");
+                for (const nonLocalAgent of nonLocalAgents) {
+                    parts.push(renderRuntimeAgentBullet(nonLocalAgent));
+                }
+                parts.push("    </agent-runtime>");
+            }
+
             parts.push("  </team>");
         } else {
             // No teams defined — flat coworker list
-            const coworkers = (availableAgents ?? []).filter((a) => a.pubkey !== agent.pubkey);
+            const coworkers = agentRuntimeInfo
+                ? agentRuntimeInfo.filter((a) => a.pubkey !== agent.pubkey)
+                : (availableAgents ?? []).filter((a) => a.pubkey !== agent.pubkey);
             if (coworkers.length > 0) {
                 parts.push("");
                 parts.push("  <team>");
                 parts.push("    You are part of a multi-agent team. Stay in your lane, trust your teammates, and defer to their expertise rather than overstepping your own role.");
                 for (const coworker of coworkers) {
-                    parts.push(renderAgentBullet(coworker));
+                    parts.push("runtimeStatus" in coworker
+                        ? renderRuntimeAgentBullet(coworker)
+                        : renderAgentBullet(coworker));
                 }
                 parts.push("  </team>");
             }

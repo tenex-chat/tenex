@@ -6,6 +6,7 @@ import type { MCPManager } from "@/services/mcp/MCPManager";
 import { SkillWhitelistService, type WhitelistItem } from "@/services/skill";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
+import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
 import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
@@ -147,6 +148,17 @@ export function resolveProjectManager(
         "No agents found in project or registry. Project will run without a project manager."
     );
     return undefined;
+}
+
+export interface ProjectAgentRuntimeInfo {
+    pubkey: string;
+    slug: string;
+    name: string;
+    role: string;
+    description?: string;
+    useCriteria?: string;
+    runtimeStatus: "local-online" | "remote-online" | "offline";
+    backendPubkey?: string;
 }
 
 /**
@@ -293,11 +305,104 @@ export class ProjectContext {
     }
 
     getAgentSlugs(): string[] {
-        return Array.from(this.agentRegistry.getAllAgentsMap().keys());
+        const slugs = new Set<string>();
+        for (const agent of this.agentRegistry.getAllProjectAgents()) {
+            slugs.add(agent.slug);
+        }
+        for (const agent of this.agentRegistry.getAllAgentsMap().keys()) {
+            slugs.add(agent);
+        }
+        return Array.from(slugs);
     }
 
     hasAgent(slug: string): boolean {
-        return this.agentRegistry.getAgent(slug) !== undefined;
+        return (
+            this.agentRegistry.getAgent(slug) !== undefined ||
+            this.agentRegistry.getProjectAgentBySlug(slug) !== undefined
+        );
+    }
+
+    getProjectAgentBySlug(slug: string): ProjectAgentRuntimeInfo | undefined {
+        return this.getProjectAgentRuntimeInfo().find(
+            (agent) => agent.slug.toLowerCase() === slug.trim().toLowerCase()
+        );
+    }
+
+    getProjectManagerRuntimeInfo(): ProjectAgentRuntimeInfo | undefined {
+        if (this.projectManager) {
+            return {
+                pubkey: this.projectManager.pubkey,
+                slug: this.projectManager.slug,
+                name: this.projectManager.name,
+                role: this.projectManager.role,
+                description: this.projectManager.description,
+                useCriteria: this.projectManager.useCriteria,
+                runtimeStatus: "local-online",
+            };
+        }
+
+        const runtimeInfoByPubkey = new Map(
+            this.getProjectAgentRuntimeInfo().map((agent) => [agent.pubkey, agent])
+        );
+        const explicitPmPubkey = this.project.tags.find(
+            (tag: string[]) => tag[0] === "p" && tag[1] && tag[2] === "pm"
+        )?.[1];
+        if (explicitPmPubkey) {
+            const pm = runtimeInfoByPubkey.get(explicitPmPubkey);
+            if (pm) {
+                return pm;
+            }
+        }
+
+        const firstAgentPubkey = this.project.tags.find(
+            (tag: string[]) => tag[0] === "p" && tag[1]
+        )?.[1];
+        return firstAgentPubkey ? runtimeInfoByPubkey.get(firstAgentPubkey) : undefined;
+    }
+
+    getProjectAgentRuntimeInfo(): ProjectAgentRuntimeInfo[] {
+        const projectCoordinate = this.project.tagId();
+        const remoteStatuses = RemoteBackendStatusService.getInstance();
+        const infos = new Map<string, ProjectAgentRuntimeInfo>();
+
+        for (const assignedAgent of this.agentRegistry.getAllProjectAgents()) {
+            const localAgent = this.agentRegistry.getAgentByPubkey(assignedAgent.pubkey);
+            if (localAgent) {
+                infos.set(assignedAgent.pubkey, {
+                    ...assignedAgent,
+                    runtimeStatus: "local-online",
+                });
+                continue;
+            }
+
+            const remote = remoteStatuses.getRemoteRuntimeForAgent(
+                projectCoordinate,
+                assignedAgent.pubkey
+            );
+
+            infos.set(assignedAgent.pubkey, {
+                ...assignedAgent,
+                runtimeStatus: remote?.status ?? "offline",
+                backendPubkey: remote?.backendPubkey,
+            });
+        }
+
+        for (const localAgent of this.agentRegistry.getAllAgents()) {
+            if (infos.has(localAgent.pubkey)) {
+                continue;
+            }
+            infos.set(localAgent.pubkey, {
+                pubkey: localAgent.pubkey,
+                slug: localAgent.slug,
+                name: localAgent.name,
+                role: localAgent.role,
+                description: localAgent.description,
+                useCriteria: localAgent.useCriteria,
+                runtimeStatus: "local-online",
+            });
+        }
+
+        return Array.from(infos.values());
     }
 
     /**

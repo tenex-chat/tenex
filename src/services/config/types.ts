@@ -21,6 +21,14 @@ export interface TenexConfig {
     identityRelays?: string[]; // Additional relays for publishing kind:0 identity events (default: wss://purplepag.es)
     blossomServerUrl?: string; // Blossom server URL for blob uploads (default: https://blossom.primal.net)
 
+    // Runtime sharding configuration for multi-backend project execution.
+    // all_except: run every project agent except the listed slugs.
+    // only: run only the listed slugs.
+    agentRuntime?: {
+        mode?: "all_except" | "only";
+        slugs?: string[];
+    };
+
     // Logging configuration
     logging?: {
         logFile?: string; // Path to log file (default: ~/.tenex/daemon.log)
@@ -126,6 +134,12 @@ export const TenexConfigSchema = z.object({
     relays: z.array(z.string()).optional(),
     identityRelays: z.array(z.string()).optional(),
     blossomServerUrl: z.string().optional(),
+    agentRuntime: z
+        .object({
+            mode: z.enum(["all_except", "only"]).optional(),
+            slugs: z.array(z.string()).optional(),
+        })
+        .optional(),
     logging: z
         .object({
             logFile: z.string().optional(),

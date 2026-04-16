@@ -2,10 +2,31 @@ import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
 import { publishAgentProfile, publishProjectAgentSnapshot } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
+import { agentRuntimePolicyService } from "@/services/AgentRuntimePolicyService";
 import { getConfiguredEscalationAgent } from "@/services/agents/EscalationService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
-import { agentStorage, deriveAgentPubkeyFromNsec } from "./AgentStorage";
+import { agentStorage, deriveAgentPubkeyFromNsec, type StoredAgent } from "./AgentStorage";
+
+export interface ProjectAgentInfo {
+    pubkey: string;
+    slug: string;
+    name: string;
+    role: string;
+    description?: string;
+    useCriteria?: string;
+}
+
+function toProjectAgentInfo(pubkey: string, storedAgent: StoredAgent): ProjectAgentInfo {
+    return {
+        pubkey,
+        slug: storedAgent.slug,
+        name: storedAgent.name,
+        role: storedAgent.role,
+        description: storedAgent.description,
+        useCriteria: storedAgent.useCriteria,
+    };
+}
 
 /**
  * AgentRegistry - In-memory runtime instances for a specific project
@@ -59,6 +80,7 @@ import { agentStorage, deriveAgentPubkeyFromNsec } from "./AgentStorage";
 export class AgentRegistry {
     private agents: Map<string, AgentInstance> = new Map();
     private agentsByPubkey: Map<string, AgentInstance> = new Map();
+    private projectAgentsByPubkey: Map<string, ProjectAgentInfo> = new Map();
     private projectDTag: string | undefined;
     private projectPath: string; // Git repo path
     private metadataPath: string; // TENEX metadata path
@@ -117,6 +139,7 @@ export class AgentRegistry {
         // Clear existing agents to ensure fresh load from project tags
         this.agents.clear();
         this.agentsByPubkey.clear();
+        this.projectAgentsByPubkey.clear();
 
         // Initialize storage
         await agentStorage.initialize();
@@ -132,14 +155,31 @@ export class AgentRegistry {
             assignedAgentPubkeys
         );
 
-        logger.info(`Loading ${assignedPubkeys.length} agents for project ${this.projectDTag}`, {
+        const localPubkeys: string[] = [];
+        const policy = agentRuntimePolicyService.getPolicy();
+
+        for (const pubkey of assignedPubkeys) {
+            const storedAgent = await agentStorage.loadAgent(pubkey);
+            if (!storedAgent) {
+                continue;
+            }
+
+            this.projectAgentsByPubkey.set(pubkey, toProjectAgentInfo(pubkey, storedAgent));
+            if (agentRuntimePolicyService.shouldRunAgentSlug(storedAgent.slug)) {
+                localPubkeys.push(pubkey);
+            }
+        }
+
+        logger.info(`Loading ${localPubkeys.length}/${assignedPubkeys.length} local agents for project ${this.projectDTag}`, {
             requestedCount: assignedAgentPubkeys.length,
             skippedCount: skippedPubkeys.length,
+            shardMode: policy.mode,
+            shardSlugs: policy.slugs,
         });
 
         const failedPubkeys: string[] = [];
 
-        for (const pubkey of assignedPubkeys) {
+        for (const pubkey of localPubkeys) {
             try {
                 await loadStoredAgentIntoRegistry(pubkey, this);
             } catch (error) {
@@ -170,9 +210,15 @@ export class AgentRegistry {
             try {
                 const storedAgent = await agentStorage.getAgentBySlug(escalationSlug);
                 if (storedAgent) {
-                    const escalationPubkey = deriveAgentPubkeyFromNsec(storedAgent.nsec);
-                    await loadStoredAgentIntoRegistry(escalationPubkey, this);
-                    logger.info(`Auto-loaded escalation agent ${escalationSlug} for project ${this.projectDTag}`);
+                    if (!agentRuntimePolicyService.shouldRunAgentSlug(storedAgent.slug)) {
+                        logger.info(`Escalation agent ${escalationSlug} skipped by local agent runtime policy`, {
+                            projectDTag: this.projectDTag,
+                        });
+                    } else {
+                        const escalationPubkey = deriveAgentPubkeyFromNsec(storedAgent.nsec);
+                        await loadStoredAgentIntoRegistry(escalationPubkey, this);
+                        logger.info(`Auto-loaded escalation agent ${escalationSlug} for project ${this.projectDTag}`);
+                    }
                 } else {
                     logger.warn(`Escalation agent ${escalationSlug} configured but not found in storage`, {
                         projectDTag: this.projectDTag,
@@ -278,6 +324,25 @@ export class AgentRegistry {
     }
 
     /**
+     * Get all assigned project agents, including agents intentionally not run
+     * by this backend's local shard.
+     */
+    getAllProjectAgents(): ProjectAgentInfo[] {
+        return Array.from(this.projectAgentsByPubkey.values());
+    }
+
+    getProjectAgentByPubkey(pubkey: string): ProjectAgentInfo | undefined {
+        return this.projectAgentsByPubkey.get(pubkey);
+    }
+
+    getProjectAgentBySlug(slug: string): ProjectAgentInfo | undefined {
+        const normalizedSlug = slug.trim().toLowerCase();
+        return Array.from(this.projectAgentsByPubkey.values()).find(
+            (agent) => agent.slug.toLowerCase() === normalizedSlug
+        );
+    }
+
+    /**
      * Get an agent by event ID
      */
     getAgentByEventId(eventId: string): AgentInstance | undefined {
@@ -310,6 +375,16 @@ export class AgentRegistry {
     addAgent(agent: AgentInstance): void {
         this.agents.set(agent.slug, agent);
         this.agentsByPubkey.set(agent.pubkey, agent);
+        if (!this.projectAgentsByPubkey.has(agent.pubkey)) {
+            this.projectAgentsByPubkey.set(agent.pubkey, {
+                pubkey: agent.pubkey,
+                slug: agent.slug,
+                name: agent.name,
+                role: agent.role,
+                description: agent.description,
+                useCriteria: agent.useCriteria,
+            });
+        }
     }
 
     /**

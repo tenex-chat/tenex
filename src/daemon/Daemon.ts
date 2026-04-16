@@ -29,6 +29,7 @@ import type { DaemonStatus } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
+import { NDKKind } from "@/nostr/kinds";
 import { RAGService } from "@/services/rag/RAGService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import {
@@ -38,6 +39,7 @@ import {
 } from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
 import { SkillWhitelistService } from "@/services/skill";
+import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { SkillService } from "@/services/skill";
@@ -547,6 +549,14 @@ export class Daemon {
      * Handle incoming events from the subscription (telemetry wrapper)
      */
     private async handleIncomingEvent(event: NDKEvent): Promise<void> {
+        if (event.kind === NDKKind.TenexProjectStatus) {
+            RemoteBackendStatusService.getInstance().handleStatusEvent(
+                event,
+                this.backendPubkey ?? undefined
+            );
+            return;
+        }
+
         const knownAgentPubkeys = new Set(this.agentPubkeyToProjects.keys());
         const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
         if (

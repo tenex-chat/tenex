@@ -272,6 +272,41 @@ describe("ProjectContext", () => {
         });
     });
 
+    describe("getProjectManagerRuntimeInfo", () => {
+        it("resolves an explicitly tagged remote PM from the assigned project roster", () => {
+            const remotePmPubkey = "remote-pm-pubkey";
+            const project = {
+                ...mockProject,
+                tags: [["p", remotePmPubkey, "pm"]],
+                tagId: () => "31933:test-pubkey:test-project",
+            } as unknown as NDKProject;
+            const registry = {
+                ...mockAgentRegistry,
+                getAllProjectAgents: () => [
+                    {
+                        pubkey: remotePmPubkey,
+                        slug: "remote-pm",
+                        name: "Remote PM",
+                        role: "assistant",
+                    },
+                    {
+                        pubkey: "other-agent-pubkey",
+                        slug: "other-agent",
+                        name: "Other Agent",
+                        role: "assistant",
+                    },
+                ],
+            } as unknown as AgentRegistry;
+
+            const context = new ProjectContext(project, registry);
+            const pm = context.getProjectManagerRuntimeInfo();
+
+            expect(pm?.pubkey).toBe(remotePmPubkey);
+            expect(pm?.slug).toBe("remote-pm");
+            expect(pm?.runtimeStatus).toBe("offline");
+        });
+    });
+
     describe("resolveProjectManager", () => {
         /**
          * Helper to create a minimal mock agent

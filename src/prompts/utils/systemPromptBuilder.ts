@@ -4,6 +4,7 @@ import type { AgentCategory } from "@/agents/role-categories";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
+import type { ProjectAgentRuntimeInfo } from "@/services/projects/ProjectContext";
 import { getProjectContext } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling";
 import { logger } from "@/utils/logger";
@@ -51,6 +52,7 @@ export interface BuildSystemPromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
+    agentRuntimeInfo?: ProjectAgentRuntimeInfo[];
     /** Whether to include environment-variables fragment. Defaults to true. */
     environmentVariablesAvailable?: boolean;
     /** Agent category. Used to auto-derive environmentVariablesAvailable (orchestrators don't get it). */
@@ -176,6 +178,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         workingDirectory,
         currentBranch,
         availableAgents = [],
+        agentRuntimeInfo,
         conversation,
         environmentVariablesAvailable: environmentVariablesAvailableOption,
         agentCategory,
@@ -193,6 +196,11 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
 
     const baseAgentInstructions = agent.instructions || "";
     const context = getProjectContext();
+    const effectiveAgentRuntimeInfo =
+        agentRuntimeInfo ??
+        (typeof context.getProjectAgentRuntimeInfo === "function"
+            ? context.getProjectAgentRuntimeInfo()
+            : undefined);
     const rawDTag = project.dTag;
     const dTag: ProjectDTag | undefined = rawDTag ? createProjectDTag(rawDTag) : undefined;
     const effectiveAgentInstructions = context.promptCompilerRegistry
@@ -260,6 +268,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         currentBranch,
         projectDocsPath: projectBasePath ? path.join(projectBasePath, "docs") : undefined,
         availableAgents,
+        agentRuntimeInfo: effectiveAgentRuntimeInfo,
         teamContext,
     });
 

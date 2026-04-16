@@ -974,7 +974,7 @@ export class SchedulerService {
                 return null;
             }
 
-            const targetAgent = projectContext.getAgent(task.targetAgentSlug);
+            const targetAgent = projectContext.getProjectAgentBySlug(task.targetAgentSlug);
             if (!targetAgent) {
                 return null;
             }

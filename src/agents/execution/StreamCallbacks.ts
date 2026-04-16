@@ -382,6 +382,7 @@ export function createPrepareStep(
                 workingDirectory: context.workingDirectory,
                 currentBranch: context.currentBranch,
                 availableAgents: Array.from(projectContext.agents.values()),
+                agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo(),
                 pendingDelegations,
                 completedDelegations,
                 ralNumber,

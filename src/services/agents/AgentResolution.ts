@@ -24,14 +24,21 @@ export function resolveAgentSlug(slug: string): AgentResolutionResult {
 
     try {
         const projectContext = getProjectContext();
-        const agents = projectContext.agentRegistry.getAllAgentsMap();
+        const agents = typeof projectContext.getProjectAgentRuntimeInfo === "function"
+            ? projectContext.getProjectAgentRuntimeInfo()
+            : Array.from(projectContext.agentRegistry.getAllAgentsMap().entries()).map(
+                ([agentSlug, agent]) => ({
+                    slug: agentSlug,
+                    pubkey: agent.pubkey,
+                })
+            );
 
         // First, collect all available slugs
-        const availableSlugs: string[] = Array.from(agents.keys());
+        const availableSlugs = agents.map((agent) => agent.slug);
 
         // Then look for a match
-        for (const [agentSlug, agent] of agents.entries()) {
-            if (agentSlug.toLowerCase() === slugLower) {
+        for (const agent of agents) {
+            if (agent.slug.toLowerCase() === slugLower) {
                 return { pubkey: agent.pubkey, availableSlugs };
             }
         }

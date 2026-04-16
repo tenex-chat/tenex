@@ -3,6 +3,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
+import type { ProjectAgentRuntimeInfo } from "@/services/projects/ProjectContext";
 import type { PromptMessage } from "@/conversations/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
@@ -29,6 +30,7 @@ export interface MessageCompilerContext {
     workingDirectory?: string;
     currentBranch?: string;
     availableAgents?: AgentInstance[];
+    agentRuntimeInfo?: ProjectAgentRuntimeInfo[];
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
     ralNumber: number;

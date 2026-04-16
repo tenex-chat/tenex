@@ -1,6 +1,11 @@
 import { getDaemon } from "@/daemon";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
+import {
+    agentRuntimePolicyService,
+    parseAgentRuntimeSlugList,
+    type AgentRuntimePolicy,
+} from "@/services/AgentRuntimePolicyService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SchedulerService } from "@/services/scheduling";
 import { eventLoopMonitor } from "@/telemetry/EventLoopMonitor";
@@ -29,6 +34,8 @@ daemonCommand
     .option("--supervised", "Run in supervised mode (enables graceful restart via SIGHUP)")
     .option("--foreground", "Run in the foreground instead of forking to the background")
     .option("--only", "Only start projects explicitly specified via -b or via Nostr; cron tasks will not auto-boot projects")
+    .option("--exclude-agents <slugs>", "Comma-separated agent slugs this backend must not run locally")
+    .option("--only-agents <slugs>", "Comma-separated agent slugs this backend is allowed to run locally")
     .action(async (options) => {
         // Enable verbose logging if requested
         if (options.verbose) {
@@ -37,6 +44,21 @@ daemonCommand
 
         // Load configuration (MCP config will be loaded later per-project with metadataPath)
         const { llms: globalLLMs } = await config.loadConfig();
+
+        const excludeAgents = parseAgentRuntimeSlugList(options.excludeAgents);
+        const onlyAgents = parseAgentRuntimeSlugList(options.onlyAgents);
+        if (excludeAgents.length > 0 && onlyAgents.length > 0) {
+            console.error(chalk.red("Use either --exclude-agents or --only-agents, not both."));
+            process.exit(1);
+        }
+
+        let cliAgentRuntimePolicy: AgentRuntimePolicy | undefined;
+        if (onlyAgents.length > 0) {
+            cliAgentRuntimePolicy = { mode: "only", slugs: onlyAgents };
+        } else if (excludeAgents.length > 0) {
+            cliAgentRuntimePolicy = { mode: "all_except", slugs: excludeAgents };
+        }
+        agentRuntimePolicyService.setCliOverride(cliAgentRuntimePolicy);
 
         // Initialize daemon logging
         await logger.initDaemonLogging();
@@ -141,6 +163,16 @@ daemonCommand
             console.log(chalk.yellow(`🚀 Auto-boot patterns: ${bootPatterns.join(", ")}`));
         }
 
+        const runtimePolicy = agentRuntimePolicyService.getPolicy();
+        if (runtimePolicy.slugs.length > 0) {
+            const modeLabel = runtimePolicy.mode === "only" ? "only" : "exclude";
+            console.log(
+                chalk.yellow(
+                    `🤖 Agent runtime shard: ${modeLabel} ${runtimePolicy.slugs.join(", ")}`
+                )
+            );
+        }
+
         // Register scheduler shutdown with daemon's shutdown handlers
         daemon.addShutdownHandler(async () => {
             schedulerService.shutdown();
@@ -193,7 +225,7 @@ daemonCommand
                         return null;
                     }
 
-                    const targetAgent = context.getAgent(targetAgentSlug);
+                    const targetAgent = context.getProjectAgentBySlug(targetAgentSlug);
                     if (targetAgent) {
                         return {
                             pubkey: targetAgent.pubkey,
@@ -203,7 +235,7 @@ daemonCommand
                     }
 
                     // Target agent is NOT in this project - route to PM instead
-                    const pm = context.projectManager;
+                    const pm = context.getProjectManagerRuntimeInfo();
                     if (!pm) {
                         return null;
                     }
