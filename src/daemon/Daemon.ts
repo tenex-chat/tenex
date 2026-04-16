@@ -49,6 +49,7 @@ import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 import { APNsService } from "@/services/apns";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
+import { BackendHeartbeatService } from "@/services/status/BackendHeartbeatService";
 import { ShutdownCoordinator } from "./ShutdownCoordinator";
 import { SubscriptionSyncCoordinator } from "./SubscriptionSyncCoordinator";
 import { EventHandlerRegistry } from "./EventHandlerRegistry";
@@ -115,6 +116,7 @@ export class Daemon {
     private statusFile: StatusFile | null = null;
     private statusInterval: NodeJS.Timeout | null = null;
     private installedAgentListPublisher: InstalledAgentListService | null = null;
+    private backendHeartbeat: BackendHeartbeatService | null = null;
 
     // Focused coordinators (initialized in start() before isRunning = true)
     private shutdownCoordinator: ShutdownCoordinator | undefined;
@@ -432,6 +434,11 @@ export class Daemon {
             this.installedAgentListPublisher = new InstalledAgentListService();
             await this.installedAgentListPublisher.startPublishing();
             logger.debug("Installed-agent inventory publisher started");
+
+            // 9b. Start backend heartbeat (publishes ephemeral 24012 until
+            //     the backend's pubkey appears in an owner's 14199 snapshot)
+            this.backendHeartbeat = new BackendHeartbeatService();
+            this.backendHeartbeat.start(this.backendPubkey, this.whitelistedPubkeys);
 
             // 10. Start automatic conversation indexing job
             getConversationIndexingJob().start();
@@ -1074,6 +1081,8 @@ export class Daemon {
         RAGService.closeInstance();
         InterventionService.getInstance().shutdown();
         OwnerAgentListService.getInstance().shutdown();
+        this.backendHeartbeat?.stop();
+        this.backendHeartbeat = null;
 
         this.removeWhitelistCacheListener?.();
         this.removeWhitelistCacheListener = null;

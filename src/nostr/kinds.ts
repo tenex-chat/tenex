@@ -29,6 +29,7 @@ export const NDKKind = {
     TenexAgentCreate: 24001 as BaseNDKKind, // Request backend-side agent creation/install
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexInstalledAgentList: 24011 as BaseNDKKind, // Backend inventory of installed agents
+    TenexBackendHeartbeat: 24012 as BaseNDKKind, // Backend whitelist request (ephemeral, p-tags owner)
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
     TenexAgentDelete: 24030 as BaseNDKKind, // Agent deletion from projects or globally
     TenexConfigUpdate: 25000 as BaseNDKKind, // Encrypted config updates (e.g., APNs device tokens)
