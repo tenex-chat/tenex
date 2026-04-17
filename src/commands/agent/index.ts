@@ -1,7 +1,8 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { initNDK } from "@/nostr/ndkClient";
+import { getNDK, initNDK } from "@/nostr/ndkClient";
+import { config } from "@/services/ConfigService";
 import {
     deleteStoredAgent,
     installAgentFromDefinitionEvent,
@@ -9,6 +10,17 @@ import {
 } from "@/services/agents/AgentProvisioningService";
 import { importCommand } from "./import/index";
 import { AgentManager } from "./AgentManager";
+
+// Initialize NDK and attach the backend signer so NIP-42 AUTH can complete
+// before any subscription fires. Without a signer the relay's AUTH challenge
+// goes unanswered and reads silently hang until EOSE timeout.
+async function initNDKWithBackendAuth(): Promise<void> {
+    await initNDK();
+    const ndk = getNDK();
+    if (!ndk.signer) {
+        ndk.signer = await config.getBackendSigner();
+    }
+}
 
 // ─── tenex agent add ─────────────────────────────────────────────────────────
 
@@ -28,7 +40,7 @@ async function addAgent(options: {
     eventId?: string;
     slug?: string;
 }): Promise<void> {
-    await initNDK();
+    await initNDKWithBackendAuth();
 
     if (!process.stdin.isTTY) {
         const raw = await readStdin();
@@ -55,11 +67,13 @@ async function addAgent(options: {
 }
 
 async function manageAgents(): Promise<void> {
+    await initNDKWithBackendAuth();
     const manager = new AgentManager();
     await manager.showMainMenu();
 }
 
 async function deleteAgent(pubkey: string): Promise<void> {
+    await initNDKWithBackendAuth();
     const deleted = await deleteStoredAgent(pubkey);
     if (!deleted) {
         console.error(chalk.red(`Error: agent ${pubkey} not found`));
