@@ -66,12 +66,12 @@ async function resolveTargetId(input: string): Promise<{
         return { id: trimmed, type: "conversation", wasResolved: false };
     }
 
-    // 12-char hex: resolve via prefix store or RALRegistry fallback (use typed guard)
+    // Short hex prefix: resolve via prefix store or RALRegistry fallback (use typed guard)
     if (isShortEventId(trimmed)) {
         // Try PrefixKVStore first (O(1) lookup)
         const resolved = resolvePrefixToId(trimmed);
         if (resolved) {
-            logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via PrefixKVStore", {
+            logger.debug("[kill.resolveTargetId] Resolved short prefix via PrefixKVStore", {
                 prefix: trimmed,
                 fullId: shortenEventId(resolved),
             });
@@ -82,7 +82,7 @@ async function resolveTargetId(input: string): Promise<{
         const ralRegistry = RALRegistry.getInstance();
         const ralResolved = ralRegistry.resolveDelegationPrefix(trimmed);
         if (ralResolved) {
-            logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via RALRegistry", {
+            logger.debug("[kill.resolveTargetId] Resolved short prefix via RALRegistry", {
                 prefix: trimmed,
                 fullId: shortenEventId(ralResolved),
             });
@@ -90,7 +90,7 @@ async function resolveTargetId(input: string): Promise<{
         }
 
         // Prefix not found - could still be valid but unknown
-        logger.debug("[kill.resolveTargetId] Could not resolve 12-char prefix", {
+        logger.debug("[kill.resolveTargetId] Could not resolve short prefix", {
             prefix: trimmed,
         });
         return null;
@@ -168,7 +168,8 @@ async function executeKill(input: KillInput, context: ToolExecutionContext, agen
     // Normalize target once for consistent matching throughout
     const normalizedTarget = target.trim().toLowerCase();
 
-    // Get caller's project ID for filtering (prevents cross-project metadata leakage)
+    // Caller project is only used to keep not-found suggestions scoped.
+    // A concrete target ID may refer to work in any active project.
     const callerConversation = context.getConversation?.();
     const callerProjectId = callerConversation?.getProjectId();
 
@@ -228,8 +229,9 @@ async function executeKill(input: KillInput, context: ToolExecutionContext, agen
         return await killAgent(matchingConv.id, reason, context, agentExecutor);
     }
 
-    // Not found - provide helpful error with project-filtered listings
-    // SECURITY: Only show tasks/conversations from caller's project to prevent metadata leakage
+    // Not found - provide helpful error with project-filtered listings.
+    // Keep discovery scoped to the caller's project even though explicit target
+    // IDs are allowed to cross project boundaries.
     let errorMessage = `Target '${target}' not found.`;
 
     if (callerProjectId) {
@@ -316,55 +318,23 @@ async function killAgent(
         };
     }
 
-    // === AUTHORIZATION: Project Isolation Check (BEFORE pre-emptive or active kill) ===
-    // This check MUST happen before any kill operation to prevent cross-project kills.
-    // Moving this check before the pre-emptive kill branch fixes the security bug where
-    // a caller with no matching project context could kill a pending delegation.
     const callerConversation = context.getConversation?.();
     const callerProjectId = callerConversation?.getProjectId();
 
-    if (!callerProjectId) {
-        logger.warn("[kill] Authorization check failed: caller has no project context", {
-            callerAgent: context.agent.slug,
-            targetConversationId: shortenConversationId(conversationId),
-            targetProjectId: projectId,
-        });
-
-        trace.getActiveSpan()?.addEvent("kill.authorization_failed", {
-            "kill.reason": "caller_no_project",
-            "kill.caller_agent": context.agent.slug,
-            "kill.target_conversation_id": shortenConversationId(conversationId),
-        });
-
-        return {
-            success: false,
-            message: "Authorization failed: cannot kill agents without project context",
-            target: conversationId,
-            targetType: "agent",
-        };
-    }
-
-    if (callerProjectId !== projectId) {
-        logger.warn("[kill] Authorization check failed: cross-project kill attempt blocked", {
-            callerAgent: context.agent.slug,
-            callerProjectId: callerProjectId,
-            targetConversationId: shortenConversationId(conversationId),
-            targetProjectId: projectId,
-        });
-
-        trace.getActiveSpan()?.addEvent("kill.authorization_failed", {
-            "kill.reason": "cross_project_kill_blocked",
+    if (callerProjectId && callerProjectId !== projectId) {
+        trace.getActiveSpan()?.addEvent("kill.cross_project_agent_target", {
             "kill.caller_agent": context.agent.slug,
             "kill.caller_project_id": callerProjectId,
             "kill.target_project_id": projectId,
+            "kill.target_conversation_id": shortenConversationId(conversationId),
         });
 
-        return {
-            success: false,
-            message: `Authorization failed: cannot kill agents in other projects (target: ${projectId}, caller: ${callerProjectId})`,
-            target: conversationId,
-            targetType: "agent",
-        };
+        logger.info("[kill] Cross-project agent kill requested", {
+            callerAgent: context.agent.slug,
+            callerProjectId,
+            targetConversationId: shortenConversationId(conversationId),
+            targetProjectId: projectId,
+        });
     }
 
     // If no active agents found, try PRE-EMPTIVE KILL:
@@ -419,9 +389,6 @@ async function killAgent(
         };
     }
 
-    // NOTE: Authorization check was already performed at the top of killAgent(),
-    // before the pre-emptive kill branch. No duplicate check needed here.
-
     // Get the first active agent (in multi-agent conversations, we abort all)
     // Use the combined set that includes both ConversationStore and RALRegistry
     const agentPubkey = Array.from(activeAgentPubkeys)[0];
@@ -436,6 +403,7 @@ async function killAgent(
 
     logger.info("[kill] Aborting agent with cascade", {
         projectId: projectId,
+        callerProjectId: callerProjectId ?? null,
         conversationId: shortenConversationId(conversationId),
         agentPubkey: shortenPubkey(agentPubkey),
         reason,
@@ -488,33 +456,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
     // Get task info before killing (for reporting)
     const taskInfo = getBackgroundTaskInfo(taskId);
 
-    // === AUTHORIZATION: Shell Task Project Isolation ===
-    // Shell tasks are bound to projectId at creation time.
-    // Verify caller's projectId matches task's projectId before allowing kill operation.
-    const callerConversation = context.getConversation?.();
-    const callerProjectId = callerConversation?.getProjectId();
-
-    if (!callerProjectId) {
-        logger.warn("[kill] Authorization check failed: caller has no project context for shell kill", {
-            callerAgent: callerAgentSlug,
-            targetTaskId: taskId,
-        });
-
-        trace.getActiveSpan()?.addEvent("kill.shell_authorization_failed", {
-            "kill.reason": "caller_no_project",
-            "kill.caller_agent": callerAgentSlug,
-            "kill.target_task_id": taskId,
-        });
-
-        return {
-            success: false,
-            message: "Authorization failed: cannot kill shell tasks without project context",
-            target: taskId,
-            targetType: "shell",
-        };
-    }
-
-    // Verify task exists and belongs to caller's project
+    // Verify task exists before attempting process termination.
     if (!taskInfo) {
         logger.warn("[kill] Task not found", {
             callerAgent: callerAgentSlug,
@@ -529,43 +471,32 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
         };
     }
 
-    // CRITICAL: Enforce project isolation - deny kill if projectId doesn't match
-    if (taskInfo.projectId !== callerProjectId) {
-        logger.warn("[kill] Authorization check failed: project isolation violation", {
+    const callerConversation = context.getConversation?.();
+    const callerProjectId = callerConversation?.getProjectId();
+
+    if (callerProjectId && callerProjectId !== taskInfo.projectId) {
+        logger.info("[kill] Cross-project shell task kill requested", {
             callerAgent: callerAgentSlug,
-            callerProjectId: callerProjectId,
+            callerProjectId,
             taskProjectId: taskInfo.projectId,
             targetTaskId: taskId,
         });
-
-        trace.getActiveSpan()?.addEvent("kill.shell_authorization_failed", {
-            "kill.reason": "project_mismatch",
-            "kill.caller_agent": callerAgentSlug,
-            "kill.caller_project_id": callerProjectId,
-            "kill.task_project_id": taskInfo.projectId,
-            "kill.target_task_id": taskId,
-        });
-
-        return {
-            success: false,
-            message: `Authorization failed: task ${taskId} belongs to a different project`,
-            target: taskId,
-            targetType: "shell",
-        };
     }
 
     // Log audit trail for shell kill
     logger.info("[kill] Shell task kill requested", {
         callerAgent: callerAgentSlug,
         callerConversationId: shortenConversationId(context.conversationId),
-        callerProjectId: callerProjectId,
+        callerProjectId: callerProjectId ?? null,
+        taskProjectId: taskInfo.projectId,
         targetTaskId: taskId,
         taskCommand: taskInfo?.command,
     });
 
     trace.getActiveSpan()?.addEvent("kill.shell_task_killing", {
         "kill.caller_agent": callerAgentSlug,
-        "kill.caller_project_id": callerProjectId.substring(0, 12),
+        "kill.caller_project_id": callerProjectId?.substring(0, 12) ?? "",
+        "kill.task_project_id": taskInfo.projectId.substring(0, 12),
         "kill.target_task_id": taskId,
     });
 
@@ -580,30 +511,12 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
         pid: result.pid,
     };
 
-    // Include task info if it was found
-    if (taskInfo) {
-        output.taskInfo = {
-            command: taskInfo.command,
-            description: taskInfo.description,
-            outputFile: taskInfo.outputFile,
-            startTime: taskInfo.startTime.toISOString(),
-        };
-    }
-
-    // If task not found, suggest listing tasks (filtered by project to prevent metadata leakage)
-    if (!result.success && !taskInfo && callerProjectId) {
-        // SECURITY: Only show tasks from caller's project to prevent cross-project information disclosure
-        const projectTasks = getAllBackgroundTasks().filter(
-            (t) => t.projectId === callerProjectId
-        );
-        if (projectTasks.length > 0) {
-            output.message += `\n\nAvailable background tasks in this project: ${projectTasks
-                .map((t) => t.taskId)
-                .join(", ")}`;
-        } else {
-            output.message += "\n\nNo background tasks are currently running in this project.";
-        }
-    }
+    output.taskInfo = {
+        command: taskInfo.command,
+        description: taskInfo.description,
+        outputFile: taskInfo.outputFile,
+        startTime: taskInfo.startTime.toISOString(),
+    };
 
     // Log audit trail for result
     if (result.success) {
@@ -611,7 +524,8 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
             taskId,
             pid: result.pid,
             callerAgent: callerAgentSlug,
-            projectId: callerProjectId,
+            callerProjectId: callerProjectId ?? null,
+            taskProjectId: taskInfo.projectId,
         });
     }
 
@@ -665,6 +579,7 @@ export function createKillTool(context: ToolRegistryContext): AISdkTool {
             "For agents: aborts the agent and all nested delegations with 15s cooldown. " +
             "For shells: terminates the background process. " +
             "For scheduled tasks: cancels a recurring or one-off task by ID. " +
+            "Targets may belong to any active project when you provide their ID. " +
             "IMPORTANT: This tool blocks until all cascade aborts complete.",
 
         inputSchema: killSchema,

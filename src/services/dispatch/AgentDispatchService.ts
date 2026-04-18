@@ -26,7 +26,11 @@ import type { RALRegistryEntry } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import { ROOT_CONTEXT, SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
-import { handleDelegationCompletion } from "@/services/dispatch/DelegationCompletionHandler";
+import {
+    handleDelegationCompletion,
+    type DelegationCompletionResult,
+} from "@/services/dispatch/DelegationCompletionHandler";
+import { projectRuntimeRegistry } from "@/services/runtime/ProjectRuntimeRegistryService";
 
 const tracer = trace.getTracer("tenex.dispatch");
 const DELEGATION_COMPLETION_DEBOUNCE_MS = 2500;
@@ -124,12 +128,15 @@ export class AgentDispatchService {
             },
         };
 
-        await this.handleKillWakeup(syntheticEnvelope, agentExecutor);
+        const result = await handleDelegationCompletion(syntheticEnvelope);
+        await this.handleKillWakeup(syntheticEnvelope, result, agentExecutor);
     }
 
-    private async handleKillWakeup(envelope: InboundEnvelope, agentExecutor: AgentExecutor): Promise<void> {
-        const result = await handleDelegationCompletion(envelope);
-
+    private async handleKillWakeup(
+        envelope: InboundEnvelope,
+        result: DelegationCompletionResult,
+        agentExecutor: AgentExecutor
+    ): Promise<void> {
         if (!result.recorded) {
             logger.debug("[AgentDispatchService] Kill wake-up: no parent agent to resume (consumed or not found)", {
                 delegationConversationId: shortenConversationId(
@@ -139,12 +146,34 @@ export class AgentDispatchService {
             return;
         }
 
+        const parentProjectId = result.conversationId
+            ? ConversationStore.get(result.conversationId)?.getProjectId()
+            : undefined;
+        const parentRuntime = projectRuntimeRegistry.get(parentProjectId);
+
+        if (parentRuntime) {
+            await projectRuntimeRegistry.runInProjectContext(parentRuntime, async () => {
+                await this.routeKillWakeup(envelope, result, parentRuntime.agentExecutor, parentRuntime.projectContext);
+            });
+            return;
+        }
+
         const projectCtx = getProjectContext();
+        await this.routeKillWakeup(envelope, result, agentExecutor, projectCtx);
+    }
+
+    private async routeKillWakeup(
+        envelope: InboundEnvelope,
+        result: DelegationCompletionResult,
+        agentExecutor: AgentExecutor,
+        projectCtx: ProjectContext
+    ): Promise<void> {
         const delegationTarget = AgentRouter.resolveDelegationTarget(result, projectCtx);
 
         if (!delegationTarget) {
             logger.warn("[AgentDispatchService] Kill wake-up: could not resolve delegation target (agent config missing?)", {
                 agentSlug: result.agentSlug,
+                agentPubkey: result.agentPubkey ? shortenPubkey(result.agentPubkey) : undefined,
                 conversationId: result.conversationId ? shortenConversationId(result.conversationId) : undefined,
             });
             return;
@@ -1147,7 +1176,7 @@ export class AgentDispatchService {
                 }
             }, LIVE_INJECTION_TIMEOUT_MS);
 
-            const finish = (result: boolean) => {
+            const finish = (result: boolean): void => {
                 if (settled) {
                     return;
                 }

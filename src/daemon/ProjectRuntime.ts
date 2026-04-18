@@ -22,6 +22,7 @@ import { OperationsStatusService } from "@/services/status/OperationsStatusServi
 import { prefixKVStore } from "@/services/storage";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
 import { createDefaultRuntimePublisherFactory } from "@/services/runtime/runtime-publisher-factory";
+import { projectRuntimeRegistry } from "@/services/runtime/ProjectRuntimeRegistryService";
 import { getTelegramGatewayService } from "@/services/telegram/TelegramGatewayService";
 import { RALRegistry } from "@/services/ral";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
@@ -233,9 +234,14 @@ export class ProjectRuntime {
                 agentExecutor: this.agentExecutor,
             });
             await this.eventHandler.initialize();
+            const context = this.context;
+            projectRuntimeRegistry.register({
+                projectId: this.projectId,
+                projectContext: context,
+                agentExecutor: this.agentExecutor,
+            });
             trace.getActiveSpan()?.addEvent("project_runtime.event_handler_initialized");
 
-            const context = this.context;
             const projectBinding = context.project.tagReference()[1];
             if (!projectBinding) {
                 throw new Error(`Project ${this.projectId} is missing a canonical tag reference`);
@@ -323,6 +329,7 @@ export class ProjectRuntime {
                 await getTelegramGatewayService().unregisterRuntime(this.projectId);
                 this.telegramGatewayRegistered = false;
             }
+            projectRuntimeRegistry.unregister(this.projectId);
             throw error;
         }
     }
@@ -413,6 +420,8 @@ export class ProjectRuntime {
         }
 
         // Stop status publisher
+        projectRuntimeRegistry.unregister(this.projectId);
+
         if (this.telegramGatewayRegistered) {
             logger.info(`[ProjectRuntime] Unregistering Telegram runtime: ${this.projectId}`);
             await getTelegramGatewayService().unregisterRuntime(this.projectId);

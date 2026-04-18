@@ -3,7 +3,12 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { createKillTool } from "../kill";
+import { createShellTool, getBackgroundTaskInfo, killBackgroundTask } from "../shell";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
@@ -138,9 +143,9 @@ describe("kill tool", () => {
             // the code falls back to scanning ConversationStore.getAll() for matches.
             //
             // Note: This test uses a non-hex prefix pattern (13+ chars) to avoid triggering
-            // the 12-char hex resolution path and ensure we hit the fallback getAll().find() path.
+            // the short hex resolution path and ensure we hit the fallback getAll().find() path.
             const fullConversationId = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
-            const prefixToMatch = "abcdef1234567"; // 13-char prefix (not 12-char hex, so goes to fallback)
+            const prefixToMatch = "abcdef1234567"; // 13-char prefix (not a short hex ID, so goes to fallback)
             const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -359,8 +364,8 @@ describe("kill tool", () => {
         });
     });
 
-    describe("Security: Project isolation enforcement", () => {
-        test("should reject agent kill when projectId does not match (cross-project protection)", async () => {
+    describe("Cross-project targets", () => {
+        test("should kill agent when target projectId does not match caller projectId", async () => {
             const callerProjectId = "caller-project-id-123456789012345678901234567890123456789012345678901234567";
             const targetProjectId = "target-project-id-999999999999999999999999999999999999999999999999999999999";
             const conversationId = "conv-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
@@ -390,17 +395,29 @@ describe("kill tool", () => {
             ConversationStore.has = mock(() => true);
             ConversationStore.get = mock(() => targetConversation as any);
 
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+            })) as any;
+
             const killTool = createKillTool(contextWithProjectId);
             const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
-            // SECURITY: Should reject cross-project kill
-            expect(result.success).toBe(false);
-            expect(result.message).toContain("Authorization failed");
-            expect(result.message).toContain("other projects");
+            expect(result.success).toBe(true);
+            expect(result.targetType).toBe("agent");
+            expect(ralRegistry.abortWithCascade).toHaveBeenCalledWith(
+                agentPubkey,
+                conversationId,
+                targetProjectId,
+                "test kill",
+                cooldownRegistry
+            );
 
             // Restore
             ConversationStore.has = originalHas;
             ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
         test("should attempt shell kill path for 7-char alphanumeric IDs", async () => {
@@ -445,7 +462,7 @@ describe("kill tool", () => {
             ConversationStore.getAll = originalGetAll;
         });
 
-        test("should reject agent kill when caller has no project context", async () => {
+        test("should kill agent when caller has no project context", async () => {
             const conversationId = "conv-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
             const targetProjectId = "target-project-id-123456789012345678901234567890123456789012345678901234567";
@@ -473,24 +490,109 @@ describe("kill tool", () => {
             ConversationStore.has = mock(() => true);
             ConversationStore.get = mock(() => targetConversation as any);
 
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+            })) as any;
+
             const killTool = createKillTool(contextWithoutProject);
             const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
-            // SECURITY: Should reject when no project context
-            expect(result.success).toBe(false);
-            expect(result.message).toContain("Authorization failed");
-            expect(result.message).toContain("cannot kill agents without project context");
+            expect(result.success).toBe(true);
+            expect(result.targetType).toBe("agent");
+            expect(ralRegistry.abortWithCascade).toHaveBeenCalledWith(
+                agentPubkey,
+                conversationId,
+                targetProjectId,
+                "test kill",
+                cooldownRegistry
+            );
 
             // Restore
             ConversationStore.has = originalHas;
             ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+        });
+
+        test("should kill background shell task from another project", async () => {
+            const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
+            const tenexBaseDir = join(
+                tmpdir(),
+                `tenex-kill-cross-project-${Math.random().toString(36).slice(2, 10)}`
+            );
+            const targetProjectId = "shell-target-project-123456789012345678901234567890";
+            const callerProjectId = "shell-caller-project-123456789012345678901234567890";
+            let taskId: string | undefined;
+
+            try {
+                process.env.TENEX_BASE_DIR = tenexBaseDir;
+                const signer = NDKPrivateKeySigner.generate();
+                const targetConversation = {
+                    id: "target-shell-conversation",
+                    getProjectId: () => targetProjectId,
+                };
+                const shellContext = {
+                    ...mockContext,
+                    agent: {
+                        ...mockContext.agent,
+                        pubkey: signer.pubkey,
+                        signer,
+                    },
+                    getConversation: () => targetConversation,
+                    projectBasePath: tmpdir(),
+                    workingDirectory: tmpdir(),
+                    currentBranch: "main",
+                } as any;
+
+                const shellTool = createShellTool(shellContext);
+                const backgroundResult = await shellTool.execute({
+                    command: "sleep 30",
+                    description: "Start long-running task for cross-project kill test",
+                    run_in_background: true,
+                });
+
+                expect(backgroundResult).toHaveProperty("type", "background-task");
+                taskId = (backgroundResult as { taskId: string }).taskId;
+                expect(getBackgroundTaskInfo(taskId)?.projectId).toBe(targetProjectId);
+
+                const callerConversation = {
+                    id: "caller-shell-conversation",
+                    getProjectId: () => callerProjectId,
+                };
+                const killContext = {
+                    ...mockContext,
+                    getConversation: () => callerConversation,
+                } as any;
+
+                const killTool = createKillTool(killContext);
+                const result = await killTool.execute({
+                    target: taskId,
+                    reason: "cross-project shell kill",
+                });
+
+                expect(result.success).toBe(true);
+                expect(result.targetType).toBe("shell");
+                expect(result.taskInfo?.command).toBe("sleep 30");
+                expect(getBackgroundTaskInfo(taskId)).toBeUndefined();
+            } finally {
+                if (taskId && getBackgroundTaskInfo(taskId)) {
+                    killBackgroundTask(taskId);
+                }
+                rmSync(tenexBaseDir, { recursive: true, force: true });
+                if (originalTenexBaseDir === undefined) {
+                    process.env.TENEX_BASE_DIR = undefined;
+                } else {
+                    process.env.TENEX_BASE_DIR = originalTenexBaseDir;
+                }
+            }
         });
     });
 
-    describe("18-char ID resolution", () => {
-        test("should resolve 18-char prefix to full conversation ID via PrefixKVStore", async () => {
+    describe("short ID resolution", () => {
+        test("should resolve short prefix to full conversation ID via PrefixKVStore", async () => {
             const fullConversationId = "a1b2c3d4e5f61234567890abcdef1234567890abcdef1234567890abcdef1234";
-            const shortId = "a1b2c3d4e5f6123456"; // First 18 chars
+            const shortId = "a1b2c3d4e5"; // First 10 chars
             const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -529,7 +631,7 @@ describe("kill tool", () => {
 
             const killTool = createKillTool(mockContext);
             const result = await killTool.execute({
-                target: shortId, // Use short 12-char ID
+                target: shortId,
                 reason: "test kill with short ID"
             });
 
@@ -545,9 +647,9 @@ describe("kill tool", () => {
             ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
-        test("should resolve 18-char prefix via RALRegistry when PrefixKVStore fails", async () => {
+        test("should resolve short prefix via RALRegistry when PrefixKVStore fails", async () => {
             const fullConversationId = "b2c3d4e5f6a71234567890abcdef1234567890abcdef1234567890abcdef1234";
-            const shortId = "b2c3d4e5f6a7123456"; // First 18 chars
+            const shortId = "b2c3d4e5f6"; // First 10 chars
             const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
             const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -607,8 +709,8 @@ describe("kill tool", () => {
             ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
-        test("should return error when 18-char prefix cannot be resolved", async () => {
-            const shortId = "c3d4e5f6a7b8c9d0e1"; // Unknown prefix (18 chars)
+        test("should return error when short prefix cannot be resolved", async () => {
+            const shortId = "c3d4e5f6a7"; // Unknown prefix
 
             // Mock PrefixKVStore to not find it
             const originalIsInitialized = prefixKVStore.isInitialized.bind(prefixKVStore);

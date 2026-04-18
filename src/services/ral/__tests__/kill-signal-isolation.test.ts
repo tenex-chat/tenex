@@ -6,7 +6,7 @@
  * 2. Kill-signal branch in handleDelegationCompletion runs before replyTargets/sender checks
  * 3. ConversationStore.addEnvelope is never called with a kill-signal envelope
  * 4. Kill-signal branch returns recorded:false for unknown/already-consumed delegation
- * 5. Kill-signal branch returns recorded:true when parent found and sets agentSlug/conversationId
+ * 5. Kill-signal branch returns recorded:true when parent found and sets agent identity/conversationId
  * 6. abortWithCascade on a paused child (no abort controllers) still wakes up the parent
  * 7. Kill tool passes the executor explicitly to dispatchKillWakeup (no singleton caching)
  */
@@ -187,6 +187,7 @@ describe("kill signal control-plane isolation", () => {
 
             expect(result.recorded).toBe(true);
             expect(result.agentSlug).toBe(agentB.slug);
+            expect(result.agentPubkey).toBe(agentB.pubkey);
             expect(result.conversationId).toBe(CONV_B);
         });
 

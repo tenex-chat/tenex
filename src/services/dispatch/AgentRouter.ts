@@ -127,25 +127,27 @@ export class AgentRouter {
             return null;
         }
 
-        const { agentSlug, conversationId } = delegationResult;
-        if (!agentSlug || !conversationId) {
+        const { agentSlug, agentPubkey, conversationId } = delegationResult;
+        if ((!agentSlug && !agentPubkey) || !conversationId) {
             logger.warn(
                 chalk.yellow(
-                    "[AgentRouter] Delegation recorded but missing agentSlug or conversationId"
+                    "[AgentRouter] Delegation recorded but missing agent identity or conversationId"
                 )
             );
             return null;
         }
 
-        const waitingAgent = projectContext.getAgent(agentSlug);
+        const waitingAgent = agentPubkey
+            ? projectContext.getAgentByPubkey(agentPubkey)
+            : projectContext.getAgent(agentSlug as string);
         if (!waitingAgent) {
-            logger.warn(chalk.yellow(`[AgentRouter] Waiting agent not found: ${agentSlug}`));
+            logger.warn(chalk.yellow(`[AgentRouter] Waiting agent not found: ${agentSlug ?? agentPubkey}`));
             return null;
         }
 
         logger.info(
             chalk.gray(
-                `Routing delegation completion to ${agentSlug} in conversation ${conversationId.substring(0, 8)}`
+                `Routing delegation completion to ${waitingAgent.slug} in conversation ${conversationId.substring(0, 8)}`
             )
         );
 

@@ -11,6 +11,7 @@ const tracer = trace.getTracer("tenex.delegation");
 export interface DelegationCompletionResult {
     recorded: boolean;
     agentSlug?: string;
+    agentPubkey?: string;
     conversationId?: string;
     pendingCount?: number;
     deferred?: boolean;
@@ -31,16 +32,23 @@ export async function handleDelegationCompletion(
         if (!wakeTarget) {
             return { recorded: false };
         }
-        const projectCtx = getProjectContext();
-        const targetAgent = projectCtx.getAgentByPubkey(wakeTarget.agentPubkey);
+        let agentSlug: string | undefined;
+        try {
+            const projectCtx = getProjectContext();
+            agentSlug = projectCtx.getAgentByPubkey(wakeTarget.agentPubkey)?.slug;
+        } catch {
+            agentSlug = undefined;
+        }
         logger.info("[handleDelegationCompletion] Kill signal wake-up: resolved parent agent", {
             delegationConversationId: shortenConversationId(delegationConversationId),
             parentConversationId: shortenConversationId(wakeTarget.conversationId),
-            agentSlug: targetAgent?.slug,
+            agentSlug,
+            agentPubkey: shortenPubkey(wakeTarget.agentPubkey),
         });
         return {
             recorded: true,
-            agentSlug: targetAgent?.slug,
+            agentSlug,
+            agentPubkey: wakeTarget.agentPubkey,
             conversationId: wakeTarget.conversationId,
         };
     }
@@ -227,6 +235,7 @@ export async function handleDelegationCompletion(
         return {
             recorded: true,
             agentSlug,
+            agentPubkey: location.agentPubkey,
             conversationId: location.conversationId,
             pendingCount: pendingDelegations.length,
             deferred: false,
