@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import * as agentStorageModule from "@/agents/AgentStorage";
 import * as projectServices from "@/services/projects";
 import type { ToolExecutionContext } from "@/tools/types";
+import { z } from "zod";
 import { createModifyProjectTool } from "../modify_project";
 
 const OWNER_PUBKEY = "a".repeat(64);
@@ -96,7 +97,10 @@ describe("modify_project tool", () => {
         const result = await toolDef.execute({
             add_agents: ["claude-code"],
             remove_agents: ["builder"],
-            set: [["title", "my project"], ["repo", "https://repo.example"]],
+            set: {
+                title: "my project",
+                repo: "https://repo.example",
+            },
         }, toolCallOpts("tc-modify-project-success"));
 
         expect(mockPublishMutation).toHaveBeenCalledWith({
@@ -157,5 +161,21 @@ describe("modify_project tool", () => {
         expect(result.error).toContain("Conflicting mutation");
         expect(result.error).toContain(CLAUDE_PUBKEY);
         expect(mockPublishMutation).not.toHaveBeenCalled();
+    });
+
+    it("uses an OpenAI-compatible object schema for project metadata updates", () => {
+        const toolDef = createModifyProjectTool(createMockContext());
+        const jsonSchema = z.toJSONSchema(toolDef.inputSchema as z.ZodType);
+
+        expect(jsonSchema.properties?.set).toMatchObject({
+            type: "object",
+            properties: {
+                image: { type: "string" },
+                repo: { type: "string" },
+                title: { type: "string" },
+                description: { type: "string" },
+            },
+        });
+        expect(JSON.stringify(jsonSchema)).not.toContain("prefixItems");
     });
 });

@@ -2,8 +2,9 @@
  * Utilities for converting text content with image URLs to AI SDK multimodal format.
  *
  * The AI SDK supports multimodal user messages with content arrays containing
- * TextPart and ImagePart objects. This module converts plain text messages
- * containing image URLs into the appropriate multimodal format.
+ * TextPart and ImagePart objects. This module marks image URLs as semantic
+ * image inputs; provider-specific request preparation decides whether to send
+ * the image as a URL, base64 payload, or text-only fallback.
  *
  * @see https://ai-sdk.dev/docs/foundations/prompts#multi-modal-messages
  */
@@ -34,7 +35,7 @@ export function hasImageUrls(content: string): boolean {
  * If the content contains image URLs:
  * - Returns an array with:
  *   1. A TextPart containing the full original text (preserves context)
- *   2. ImageParts for each unique image URL (using URL objects for AI SDK to fetch)
+ *   2. ImageParts for each unique image URL
  *
  * If no image URLs are found:
  * - Returns the original string unchanged
@@ -61,8 +62,8 @@ export function convertToMultimodalContent(content: string): MultimodalContent {
         text: content,
     } satisfies TextPart);
 
-    // Add each image as an ImagePart with URL reference
-    // The AI SDK will fetch the images automatically
+    // Add each image as an ImagePart with URL reference.
+    // Provider-specific request preparation handles the final encoding.
     // Skip URLs on non-routable domains (example.com, localhost, etc.) that would fail
     for (const imageUrl of imageUrls) {
         // Skip URLs that cannot be fetched (example domains, localhost, etc.)
@@ -72,8 +73,7 @@ export function convertToMultimodalContent(content: string): MultimodalContent {
         }
 
         // Note: new URL() here should never throw because extractImageUrls
-        // already validates and normalizes URLs. The ImagePart uses URL objects
-        // as per AI SDK spec, allowing the SDK to fetch the images.
+        // already validates and normalizes URLs.
         parts.push({
             type: "image",
             image: new URL(imageUrl),

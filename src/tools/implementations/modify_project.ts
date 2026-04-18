@@ -11,6 +11,13 @@ import { z } from "zod";
 
 const projectSetKeySchema = z.enum(["image", "repo", "title", "description"]);
 
+const projectSetSchema = z.object({
+    image: z.string().optional().describe("Project image URL."),
+    repo: z.string().optional().describe("Project repository URL."),
+    title: z.string().optional().describe("Project title."),
+    description: z.string().optional().describe("Project description."),
+});
+
 const modifyProjectSchema = z.object({
     add_agents: z
         .array(z.string())
@@ -20,10 +27,9 @@ const modifyProjectSchema = z.object({
         .array(z.string())
         .optional()
         .describe("Agent pubkeys or slugs to remove from the current project's lowercase p-tags."),
-    set: z
-        .array(z.tuple([projectSetKeySchema, z.string()]))
+    set: projectSetSchema
         .optional()
-        .describe("Project metadata updates: [key, value] where key is image, repo, title, or description."),
+        .describe("Project metadata updates keyed by image, repo, title, or description."),
 });
 
 type ModifyProjectInput = z.infer<typeof modifyProjectSchema>;
@@ -46,11 +52,14 @@ function uniqueOrdered(values: string[] | undefined): string[] {
 }
 
 function buildSetMap(
-    entries: Array<[ProjectMetadataKey, string]> | undefined,
+    entries: Partial<Record<ProjectMetadataKey, string>> | undefined,
 ): Partial<Record<ProjectMetadataKey, string>> {
     const mapped: Partial<Record<ProjectMetadataKey, string>> = {};
-    for (const [key, value] of entries ?? []) {
-        mapped[key] = value;
+    for (const key of projectSetKeySchema.options) {
+        const value = entries?.[key];
+        if (value !== undefined) {
+            mapped[key] = value;
+        }
     }
     return mapped;
 }
@@ -216,7 +225,7 @@ export function createModifyProjectTool(context: ToolExecutionContext): AISdkToo
         description:
             "Modify the current project's owner-signed 31933 event. " +
             "Use add_agents with agent slugs to add p-tags, remove_agents with pubkeys or slugs to remove p-tags, " +
-            "and set to update title, repo, image, or description before republishing via NIP-46.",
+            "and set fields such as title, repo, image, or description before republishing via NIP-46.",
         inputSchema: modifyProjectSchema,
         execute: async (input: ModifyProjectInput) => {
             try {

@@ -39,6 +39,7 @@ import { getInvalidToolCallsFromStep } from "./utils/tool-errors";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { extractLastStepUsage } from "./utils/usage";
 import { setApiKeyIdentity } from "@/telemetry/LLMSpanRegistry";
+import { prepareMultimodalMessagesForProvider } from "./multimodal-preparation";
 
 /**
  * Accessor for live provider state. Called per-request so LLMService
@@ -357,6 +358,17 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         });
     }
 
+    private async prepareMessagesForProvider(
+        messages: ModelMessage[],
+        abortSignal?: AbortSignal
+    ): Promise<ModelMessage[]> {
+        return prepareMultimodalMessagesForProvider(messages, {
+            provider: this.provider,
+            model: this.model,
+            abortSignal,
+        });
+    }
+
     async stream(
         messages: ModelMessage[],
         tools: Record<string, AISdkTool>,
@@ -485,6 +497,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         | { success: true }
         | { success: false; error: unknown; chunkCount: number; lastChunkType?: string }
     > {
+        const providerPreparedMessages = await this.prepareMessagesForProvider(
+            preparedMessages,
+            options?.abortSignal
+        );
+
         // ProgressMonitor is only used for providers without built-in tools
         let progressMonitor: ProgressMonitor | undefined;
         if (!this.capabilities.builtInTools) {
@@ -539,7 +556,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             setApiKeyIdentity(traceId, apiKeyIdentity);
         }
         activeSpan?.addEvent("llm.streamText_preparing", {
-            "stream.messages_count": preparedMessages.length,
+            "stream.messages_count": providerPreparedMessages.length,
             "stream.tools_count": this.capabilities.builtInTools ? 0 : Object.keys(tools).length,
             "stream.abort_signal_present": !!options?.abortSignal,
             "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
@@ -648,8 +665,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 }
 
                 const { analysisRequestSeed: _ignoredAnalysisSeed, ...sdkPrepared } = prepared;
+                const sdkMessages = sdkPrepared.messages
+                    ? await this.prepareMessagesForProvider(sdkPrepared.messages, options?.abortSignal)
+                    : undefined;
                 return {
                     ...sdkPrepared,
+                    ...(sdkMessages ? { messages: sdkMessages } : {}),
                     providerOptions: preparedProviderOptions,
                 };
             }
@@ -670,7 +691,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
         const { fullStream } = streamText({
             model,
-            messages: preparedMessages,
+            messages: providerPreparedMessages,
             ...(!this.capabilities.builtInTools && { tools }),
             ...(!this.capabilities.builtInTools &&
                 options?.toolChoice !== undefined && { toolChoice: options.toolChoice }),
@@ -1026,9 +1047,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         usage: LanguageModelUsage;
         providerMetadata?: Record<string, unknown>;
     }> {
+        const providerPreparedMessages = await this.prepareMessagesForProvider(messages);
         return await generateObject({
             model: languageModel,
-            messages,
+            messages: providerPreparedMessages,
             schema,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
@@ -1154,10 +1176,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     "messages.count": messages.length,
                 });
 
+                const providerPreparedMessages = await this.prepareMessagesForProvider(messages);
                 const result = await this.withKeyRotationRetry(
                     (languageModel) => generateText({
                         model: languageModel,
-                        messages,
+                        messages: providerPreparedMessages,
                         temperature: this.temperature,
                         maxOutputTokens: this.maxTokens,
 
