@@ -50,13 +50,11 @@ export async function createAgentInstance(
     const signer = new NDKPrivateKeySigner(storedAgent.nsec);
     const pubkey = signer.pubkey;
 
-    // Resolve effective configuration: projectOverrides[dTag] ?? default
-    const resolvedConfig = agentStorage.getEffectiveConfig(storedAgent, projectDTag);
-    const effectiveLLMConfig = resolvedConfig.model;
-    const effectiveTools = resolvedConfig.tools;
-    const effectiveAlwaysSkills = resolvedConfig.skills;
-    const effectiveBlockedSkills = resolvedConfig.blockedSkills;
-    const effectiveMcpAccess = resolvedConfig.mcpAccess;
+    const effectiveLLMConfig = storedAgent.default?.model;
+    const effectiveTools = storedAgent.default?.tools;
+    const effectiveAlwaysSkills = storedAgent.default?.skills;
+    const effectiveBlockedSkills = storedAgent.default?.blockedSkills;
+    const effectiveMcpAccess = storedAgent.default?.mcpAccess;
 
     const availableSkills = await SkillService.getInstance().listAvailableSkills({
         agentPubkey: pubkey,
@@ -105,9 +103,7 @@ export async function createAgentInstance(
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
         mcpServers: storedAgent.mcpServers,
-        pmOverrides: storedAgent.pmOverrides,
         isPM: storedAgent.isPM,
-        projectOverrides: storedAgent.projectOverrides,
         telegram: storedAgent.telegram,
         alwaysSkills: allowed.length > 0
             ? allowed

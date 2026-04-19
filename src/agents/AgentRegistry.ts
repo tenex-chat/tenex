@@ -441,7 +441,6 @@ export class AgentRegistry {
      * ## When to use
      * Call this after any AgentStorage update method:
      * - updateDefaultConfig()
-     * - updateProjectOverride()
      * - Or any direct modification to stored agent data
      *
      * ## What it does

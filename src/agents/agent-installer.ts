@@ -159,7 +159,7 @@ export async function installAgentFromNostrEvent(
     const ndkInstance = ndk || getNDK();
 
     // Check if an agent with this eventId already exists
-    // This preserves user configuration (llmConfig, pmOverrides, etc.)
+    // This preserves user configuration (llmConfig, etc.)
     if (event.id) {
         const existingAgent = await agentStorage.getAgentByEventId(event.id);
         if (existingAgent) {

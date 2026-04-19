@@ -1,14 +1,11 @@
-import { computeToolsDelta } from "@/agents/ConfigResolver";
 import { agentStorage } from "@/agents/AgentStorage";
-import type { AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
+import type { AgentDefaultConfig } from "@/agents/types";
 import { getToolTags } from "@/nostr/TagExtractor";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export interface ApplyAgentConfigUpdateResult {
     agentPubkey?: string;
-    scope: "global" | "project";
-    projectDTag?: string;
     configUpdated: boolean;
     pmUpdated: boolean;
     hasModel: boolean;
@@ -26,22 +23,14 @@ export interface ApplyAgentConfigUpdateResult {
  * This service owns the meaning of the event itself.
  */
 export class AgentConfigUpdateService {
-    async applyEvent(
-        event: NDKEvent,
-        options?: { projectDTag?: string }
-    ): Promise<ApplyAgentConfigUpdateResult> {
+    async applyEvent(event: NDKEvent): Promise<ApplyAgentConfigUpdateResult> {
         const agentPubkey = event.tagValue("p");
-        const projectDTag = options?.projectDTag;
-        const scope = projectDTag !== undefined ? "project" : "global";
 
         if (!agentPubkey) {
             logger.warn("AGENT_CONFIG_UPDATE event missing agent pubkey", {
                 eventId: event.id,
-                scope,
             });
             return {
-                scope,
-                projectDTag,
                 configUpdated: false,
                 pmUpdated: false,
                 hasModel: false,
@@ -70,29 +59,8 @@ export class AgentConfigUpdateService {
         const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
         const hasResetTag = event.tags.some((tag) => tag[0] === "reset");
 
-        if (projectDTag !== undefined) {
-            return {
-                agentPubkey,
-                scope,
-                projectDTag,
-                ...(await this.applyProjectScopedUpdate({
-                    agentPubkey,
-                    projectDTag,
-                    newModel,
-                    newToolNames,
-                    skillTagValues,
-                    blockedSkillValues,
-                    mcpServerSlugs,
-                    hasPMTag,
-                    hasResetTag,
-                    event,
-                })),
-            };
-        }
-
         return {
             agentPubkey,
-            scope,
             ...(await this.applyGlobalUpdate({
                 agentPubkey,
                 newModel,
@@ -107,100 +75,6 @@ export class AgentConfigUpdateService {
         };
     }
 
-    private async applyProjectScopedUpdate(params: {
-        agentPubkey: string;
-        projectDTag: string;
-        newModel: string | undefined;
-        newToolNames: string[];
-        skillTagValues: string[];
-        blockedSkillValues: string[];
-        mcpServerSlugs: string[];
-        hasPMTag: boolean;
-        hasResetTag: boolean;
-        event: NDKEvent;
-    }): Promise<Omit<ApplyAgentConfigUpdateResult, "agentPubkey" | "scope" | "projectDTag">> {
-        if (params.hasResetTag) {
-            const configUpdated = await agentStorage.updateProjectOverride(
-                params.agentPubkey,
-                params.projectDTag,
-                {},
-                true
-            );
-            const pmUpdated = await agentStorage.updateProjectScopedIsPM(
-                params.agentPubkey,
-                params.projectDTag,
-                undefined
-            );
-
-            return {
-                configUpdated,
-                pmUpdated,
-                hasModel: !!params.newModel,
-                toolCount: params.newToolNames.length,
-                skillCount: params.skillTagValues.length,
-                mcpCount: params.mcpServerSlugs.length,
-                hasPM: params.hasPMTag,
-                hasReset: params.hasResetTag,
-            };
-        } else {
-            const projectOverride: AgentProjectConfig = {};
-
-            if (params.newModel) {
-                projectOverride.model = params.newModel;
-            }
-
-            const hasRawToolTags = params.event.tags.some((tag) => tag[0] === "tool");
-            if (hasRawToolTags) {
-                const storedAgent = await agentStorage.loadAgent(params.agentPubkey);
-                const defaultTools = storedAgent?.default?.tools ?? [];
-                const toolsDelta = computeToolsDelta(defaultTools, params.newToolNames);
-                if (toolsDelta.length > 0) {
-                    projectOverride.tools = toolsDelta;
-                }
-            }
-
-            const hasSkillTags = params.event.tags.some((tag) => tag[0] === "skill");
-            if (hasSkillTags) {
-                projectOverride.skills = params.skillTagValues;
-            }
-
-            const hasBlockedSkillTags = params.event.tags.some((tag) => tag[0] === "blocked-skill");
-            if (hasBlockedSkillTags) {
-                projectOverride.blockedSkills = params.blockedSkillValues;
-            }
-
-            const hasMcpTags = params.event.tags.some((tag) => tag[0] === "mcp");
-            if (hasMcpTags) {
-                projectOverride.mcpAccess = params.mcpServerSlugs;
-            }
-
-            const configUpdated = await agentStorage.updateProjectOverride(
-                params.agentPubkey,
-                params.projectDTag,
-                projectOverride
-            );
-            let pmUpdated = false;
-            if (params.hasPMTag) {
-                pmUpdated = await agentStorage.updateProjectScopedIsPM(
-                    params.agentPubkey,
-                    params.projectDTag,
-                    true
-                );
-            }
-
-            return {
-                configUpdated,
-                pmUpdated,
-                hasModel: !!params.newModel,
-                toolCount: params.newToolNames.length,
-                skillCount: params.skillTagValues.length,
-                mcpCount: params.mcpServerSlugs.length,
-                hasPM: params.hasPMTag,
-                hasReset: params.hasResetTag,
-            };
-        }
-    }
-
     private async applyGlobalUpdate(params: {
         agentPubkey: string;
         newModel: string | undefined;
@@ -211,7 +85,21 @@ export class AgentConfigUpdateService {
         hasPMTag: boolean;
         hasResetTag: boolean;
         event: NDKEvent;
-    }): Promise<Omit<ApplyAgentConfigUpdateResult, "agentPubkey" | "scope" | "projectDTag">> {
+    }): Promise<Omit<ApplyAgentConfigUpdateResult, "agentPubkey">> {
+        if (params.hasResetTag) {
+            const configUpdated = await agentStorage.resetDefaultConfig(params.agentPubkey);
+            return {
+                configUpdated,
+                pmUpdated: configUpdated,
+                hasModel: !!params.newModel,
+                toolCount: params.newToolNames.length,
+                skillCount: params.skillTagValues.length,
+                mcpCount: params.mcpServerSlugs.length,
+                hasPM: params.hasPMTag,
+                hasReset: params.hasResetTag,
+            };
+        }
+
         const defaultUpdates: AgentDefaultConfig = {};
 
         const hasModelTag = params.event.tags.some((tag) => tag[0] === "model");
@@ -241,8 +129,7 @@ export class AgentConfigUpdateService {
 
         const configUpdated = await agentStorage.updateDefaultConfig(
             params.agentPubkey,
-            defaultUpdates,
-            { clearProjectOverrides: true }
+            defaultUpdates
         );
         const pmUpdated = await agentStorage.updateAgentIsPM(params.agentPubkey, params.hasPMTag);
 

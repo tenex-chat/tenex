@@ -101,28 +101,6 @@ describe("agent-installer", () => {
             expect(loaded?.default?.model).toBe(DEFAULT_AGENT_LLM_CONFIG);
         });
 
-        it("should preserve pmOverrides when agent already exists", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const eventId = "test-agent-with-pm-override";
-
-            // Create agent with PM override for project-1
-            const existingAgent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "pm-agent",
-                name: "PM Agent",
-                role: "assistant",
-                defaultConfig: { model: "custom-model" },
-                eventId: eventId,
-                pmOverrides: { "project-1": true },
-            });
-
-            await storage.saveAgent(existingAgent);
-
-            // Verify PM override is preserved
-            const loaded = await storage.getAgentByEventId(eventId);
-            expect(loaded?.pmOverrides).toEqual({ "project-1": true });
-        });
-
         it("should preserve nsec (identity) when agent already exists", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const eventId = "test-agent-identity";

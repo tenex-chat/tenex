@@ -63,8 +63,6 @@ describe("PM Designation via Kind 24020", () => {
 
         spyOn(TagExtractor, "getToolTags").mockReturnValue([]);
         spyOn(agentStorage, "updateDefaultConfig").mockResolvedValue(true);
-        spyOn(agentStorage, "updateProjectOverride").mockResolvedValue(true);
-        spyOn(agentStorage, "updateProjectScopedIsPM").mockResolvedValue(true);
         spyOn(agentStorage, "updateAgentIsPM").mockImplementation(
             async (pubkey: string, isPM: boolean | undefined) => {
                 updateIsPMCalls.push({ pubkey, isPM });

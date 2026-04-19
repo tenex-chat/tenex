@@ -6,7 +6,6 @@ import type { OnStreamStartCallback } from "@/llm/types";
 import type { AgentCategory } from "@/agents/role-categories";
 import type { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
-import type { AgentProjectConfig } from "./storage";
 
 /**
  * Simplified agent representation for UI display and selection.
@@ -44,23 +43,12 @@ export interface AgentInstance {
     /** Agent-specific MCP server configurations */
     mcpServers?: Record<string, MCPServerConfig>;
     /**
-     * Project-scoped PM override flags.
-     * Key is project dTag, value is true if this agent is PM for that project.
-     */
-    pmOverrides?: Record<string, boolean>;
-    /**
      * Global PM designation flag.
      * When true, this agent is designated as PM for ALL projects where it exists.
      * Set via kind 24020 TenexAgentConfigUpdate event with ["pm"] tag (without a-tag).
-     * Takes precedence over pmOverrides and project tag designations.
+     * Takes precedence over project tag designations.
      */
     isPM?: boolean;
-    /**
-     * Per-project configuration overrides.
-     * Key is project dTag, value contains project-specific settings including isPM.
-     * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
-     */
-    projectOverrides?: Record<string, AgentProjectConfig>;
     /** Telegram transport configuration for this agent */
     telegram?: TelegramAgentConfig;
     /** Skill IDs always active for this agent in the current project context (from resolved agent config, not conversation state). */

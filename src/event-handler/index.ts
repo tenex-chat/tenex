@@ -309,23 +309,18 @@ export class EventHandler {
                 return;
             }
 
-            const updateResult = await this.agentConfigUpdateService.applyEvent(event, { projectDTag });
+            const updateResult = await this.agentConfigUpdateService.applyEvent(event);
             const configUpdated = updateResult.configUpdated || updateResult.pmUpdated;
 
-            logger.info(
-                updateResult.scope === "project"
-                    ? "Processing project-scoped agent config update"
-                    : "Processing global agent config update",
-                {
-                    agentSlug: agent.slug,
-                    projectDTag,
-                    hasModel: updateResult.hasModel,
-                    toolCount: updateResult.toolCount,
-                    skillCount: updateResult.skillCount,
-                    hasPM: updateResult.hasPM,
-                    hasReset: updateResult.hasReset,
-                }
-            );
+            logger.info("Processing agent config update", {
+                agentSlug: agent.slug,
+                projectDTag,
+                hasModel: updateResult.hasModel,
+                toolCount: updateResult.toolCount,
+                skillCount: updateResult.skillCount,
+                hasPM: updateResult.hasPM,
+                hasReset: updateResult.hasReset,
+            });
 
             // Reload and status publish now handled by AgentConfigWatcher.
             // applyEvent() writes to disk → watcher detects change → reloadAgent() + publishImmediately().
@@ -333,7 +328,6 @@ export class EventHandler {
                 logger.info("Agent config updated on disk, watcher will reload", {
                     agentSlug: agent.slug,
                     agentPubkey: agentPubkey.substring(0, 8),
-                    projectScoped: projectDTag !== undefined,
                     projectDTag,
                 });
             }

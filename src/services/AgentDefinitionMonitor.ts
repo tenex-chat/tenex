@@ -55,7 +55,7 @@ interface AgentDefinitionStorage {
  * 3. When a new event arrives:
  *    - Verifies the author is authorized (original author or whitelisted)
  *    - Checks the event is actually newer (by `created_at` timestamp)
- *    - Updates the StoredAgent IN-PLACE (preserving nsec, slug, pmOverrides, etc.)
+ *    - Updates the StoredAgent IN-PLACE (preserving nsec, slug, etc.)
  *    - Reloads the agent in all active project registries
  * 4. Applies a 5000ms debounce to batch events during initial subscription catch-up
  *
@@ -63,9 +63,7 @@ interface AgentDefinitionStorage {
  * The following fields are NEVER overwritten during an upgrade:
  * - nsec (agent's private key / identity)
  * - slug (agent's identifier in projects)
- * - pmOverrides (PM designations)
  * - isPM (global PM flag)
- * - projectOverrides (per-project config)
  * - status (active/inactive)
  *
  * ## Backward Compatibility

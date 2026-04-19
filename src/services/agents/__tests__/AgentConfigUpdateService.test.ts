@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { agentStorage } from "@/agents/AgentStorage";
-import type { AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
+import type { AgentDefaultConfig } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentConfigUpdateService } from "../AgentConfigUpdateService";
 
@@ -9,27 +9,15 @@ describe("AgentConfigUpdateService", () => {
     let updateDefaultConfigCalls: Array<{
         pubkey: string;
         updates: AgentDefaultConfig;
-        options?: { clearProjectOverrides?: boolean };
-    }>;
-    let updateProjectOverrideCalls: Array<{
-        pubkey: string;
-        projectDTag: string;
-        override: AgentProjectConfig;
-        reset: boolean;
     }>;
     let updateAgentIsPMCalls: Array<{ pubkey: string; isPM: boolean | undefined }>;
-    let updateProjectScopedIsPMCalls: Array<{
-        pubkey: string;
-        projectDTag: string;
-        isPM: boolean | undefined;
-    }>;
+    let resetDefaultConfigCalls: Array<{ pubkey: string }>;
 
     beforeEach(() => {
         service = new AgentConfigUpdateService();
         updateDefaultConfigCalls = [];
-        updateProjectOverrideCalls = [];
         updateAgentIsPMCalls = [];
-        updateProjectScopedIsPMCalls = [];
+        resetDefaultConfigCalls = [];
 
         spyOn(agentStorage, "loadAgent").mockImplementation(async () => ({
             slug: "test-agent",
@@ -41,18 +29,8 @@ describe("AgentConfigUpdateService", () => {
         spyOn(agentStorage, "updateDefaultConfig").mockImplementation(async (
             pubkey: string,
             updates: AgentDefaultConfig,
-            options?: { clearProjectOverrides?: boolean }
         ) => {
-            updateDefaultConfigCalls.push({ pubkey, updates, options });
-            return true;
-        });
-        spyOn(agentStorage, "updateProjectOverride").mockImplementation(async (
-            pubkey: string,
-            projectDTag: string,
-            override: AgentProjectConfig,
-            reset = false
-        ) => {
-            updateProjectOverrideCalls.push({ pubkey, projectDTag, override, reset });
+            updateDefaultConfigCalls.push({ pubkey, updates });
             return true;
         });
         spyOn(agentStorage, "updateAgentIsPM").mockImplementation(async (
@@ -62,12 +40,8 @@ describe("AgentConfigUpdateService", () => {
             updateAgentIsPMCalls.push({ pubkey, isPM });
             return true;
         });
-        spyOn(agentStorage, "updateProjectScopedIsPM").mockImplementation(async (
-            pubkey: string,
-            projectDTag: string,
-            isPM: boolean | undefined
-        ) => {
-            updateProjectScopedIsPMCalls.push({ pubkey, projectDTag, isPM });
+        spyOn(agentStorage, "resetDefaultConfig").mockImplementation(async (pubkey: string) => {
+            resetDefaultConfigCalls.push({ pubkey });
             return true;
         });
     });
@@ -76,7 +50,7 @@ describe("AgentConfigUpdateService", () => {
         mock.restore();
     });
 
-    it("clears project overrides on global updates", async () => {
+    it("applies global config update", async () => {
         const event = createMockEvent([
             ["p", "agent-pubkey"],
             ["model", "ollama/qwen3.5:cloud"],
@@ -87,7 +61,7 @@ describe("AgentConfigUpdateService", () => {
 
         const result = await service.applyEvent(event);
 
-        expect(result.scope).toBe("global");
+        expect(result.configUpdated).toBe(true);
         expect(updateDefaultConfigCalls).toEqual([
             {
                 pubkey: "agent-pubkey",
@@ -96,65 +70,41 @@ describe("AgentConfigUpdateService", () => {
                     tools: ["fs_read"],
                     blockedSkills: ["shell"],
                 },
-                options: { clearProjectOverrides: true },
             },
         ]);
         expect(updateAgentIsPMCalls).toEqual([{ pubkey: "agent-pubkey", isPM: true }]);
     });
 
-    it("converts project-scoped tool snapshots into storage deltas", async () => {
+    it("treats a-tag event as global config update", async () => {
         const event = createMockEvent([
             ["p", "agent-pubkey"],
-            ["a", "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:TENEX-ff3ssq"],
+            ["a", "31933:09d48a:TENEX-ff3ssq"],
             ["model", "claude auto"],
-            ["tool", "conversation_search"],
-            ["tool", "shell"],
-            ["blocked-skill", "shell"],
+            ["tool", "fs_read"],
         ]);
 
-        const result = await service.applyEvent(event, { projectDTag: "TENEX-ff3ssq" });
+        const result = await service.applyEvent(event);
 
-        expect(result.scope).toBe("project");
-        expect(updateProjectOverrideCalls).toEqual([
-            {
-                pubkey: "agent-pubkey",
-                projectDTag: "TENEX-ff3ssq",
-                override: {
-                    model: "claude auto",
-                    tools: ["+shell"],
-                    blockedSkills: ["shell"],
-                },
-                reset: false,
-            },
-        ]);
-        expect(updateProjectScopedIsPMCalls).toEqual([]);
+        expect(result.configUpdated).toBe(true);
+        expect(updateDefaultConfigCalls).toHaveLength(1);
+        expect(updateDefaultConfigCalls[0].pubkey).toBe("agent-pubkey");
+        expect(resetDefaultConfigCalls).toHaveLength(0);
     });
 
-    it("clears project config and project-scoped PM on reset", async () => {
+    it("resets default config and isPM when reset tag is present", async () => {
         const event = createMockEvent([
             ["p", "agent-pubkey"],
-            ["a", "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:TENEX-ff3ssq"],
             ["reset"],
         ]);
 
-        const result = await service.applyEvent(event, { projectDTag: "TENEX-ff3ssq" });
+        const result = await service.applyEvent(event);
 
         expect(result.hasReset).toBe(true);
-        expect(updateProjectOverrideCalls).toEqual([
-            {
-                pubkey: "agent-pubkey",
-                projectDTag: "TENEX-ff3ssq",
-                override: {},
-                reset: true,
-            },
-        ]);
-        expect(updateProjectScopedIsPMCalls).toEqual([
-            {
-                pubkey: "agent-pubkey",
-                projectDTag: "TENEX-ff3ssq",
-                isPM: undefined,
-            },
-        ]);
+        expect(result.configUpdated).toBe(true);
+        expect(result.pmUpdated).toBe(true);
+        expect(resetDefaultConfigCalls).toEqual([{ pubkey: "agent-pubkey" }]);
+        expect(updateDefaultConfigCalls).toHaveLength(0);
+        expect(updateAgentIsPMCalls).toHaveLength(0);
     });
 });
 
