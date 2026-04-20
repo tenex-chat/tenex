@@ -383,6 +383,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
                 shell: true,
                 stdio: ["ignore", "pipe", "pipe"],
                 env: resolvedEnv,
+                detached: true,
             });
         } catch (error) {
             resolve({
@@ -426,7 +427,26 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         if (timeoutMs) {
             timer = setTimeout(() => {
                 killed = true;
-                child.kill("SIGTERM");
+                // Kill the entire process group (negative PID) so child processes
+                // spawned by the shell are also terminated, not just the shell itself.
+                const pid = child.pid;
+                if (pid !== undefined) {
+                    try {
+                        process.kill(-pid, "SIGTERM");
+                    } catch {
+                        child.kill("SIGTERM");
+                    }
+                    // Follow up with SIGKILL for processes that ignore SIGTERM.
+                    setTimeout(() => {
+                        try {
+                            process.kill(-pid, "SIGKILL");
+                        } catch {
+                            // Process group already gone — ignore.
+                        }
+                    }, 5000);
+                } else {
+                    child.kill("SIGTERM");
+                }
             }, timeoutMs);
         }
 
