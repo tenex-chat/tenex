@@ -38,16 +38,3 @@ Publish a directory with project association:
 report_publish(path="/path/to/reports/", project="31933:abc123:my-project")
 ```
 
-## Legacy Script (Backward Compatibility)
-
-The original shell script remains available for direct invocation:
-
-```
-node $TENEX_SRC/src/skills/built-in/report/scripts/publish.js <path> [--project 31933:pubkey:dtag]
-```
-
-**Environment (auto-set by shell):**
-- `NSEC` — agent private key (from agent `.env`)
-- `RELAYS` — comma-separated relay URLs (from agent `.env`); falls back to `$TENEX_BASE_DIR/config.json`, then `wss://relay.tenex.chat`
-
-Prefer the `report_publish` tool over the shell script.
