@@ -12,7 +12,7 @@ import {
     type Theme,
     type KeypressEvent,
 } from "@inquirer/core";
-import type { PartialDeep } from "@inquirer/type";
+import type { PartialDeep, Prompt } from "@inquirer/type";
 import { cursorHide } from "@inquirer/ansi";
 import chalk from "chalk";
 import { getApiKeyEntries, parseApiKeyEntry } from "@/llm/providers/key-manager";
@@ -78,11 +78,12 @@ const RULE_WIDTH = 30;
 
 // --- Prompt ---
 
-export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) => {
+const providerSelectPrompt: Prompt<PromptResult, ProviderSelectConfig> = createPrompt<PromptResult, ProviderSelectConfig>((config, done) => {
     const { providerIds, message, resumeState } = config;
     const theme = makeTheme(config.theme);
     const prefix = usePrefix({ status: "idle", theme });
     const doneIndex = providerIds.length;
+
 
     const [active, setActive] = useState(resumeState?.active ?? 0);
     const [providers, setProviders] = useState<Record<string, ProviderCredentials>>(
@@ -284,3 +285,4 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         out.push(chalk.dim(`  ${help.join(chalk.dim(" • "))}`));
     }
 });
+export default providerSelectPrompt;
