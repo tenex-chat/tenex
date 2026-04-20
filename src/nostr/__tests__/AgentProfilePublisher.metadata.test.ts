@@ -41,6 +41,13 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
         ensureBackendPrivateKeySpy = spyOn(config, "ensureBackendPrivateKey").mockResolvedValue("a".repeat(64));
         spyOn(ndkClientModule, "getNDK").mockReturnValue({
             fetchEvents: mock(() => Promise.resolve(new Set())),
+            pool: {
+                relays: new Map(),
+                useTemporaryRelay: mock(() => undefined),
+            },
+            debug: {
+                extend: mock((_msg: string) => ({ mock: true })),
+            },
         } as any);
         spyOn(systemPubkeyListModule, "getSystemPubkeyListService").mockReturnValue({
             syncWhitelistFile: mockSyncWhitelistFile,

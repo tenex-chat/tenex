@@ -34,7 +34,12 @@ describe("LLM Runtime Tracking", () => {
         await mkdir(TEST_DIR, { recursive: true });
         mockTime = 1000000;
         Date.now = () => mockTime;
-        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({
+            pool: {
+                relays: new Map(),
+                useTemporaryRelay: mock(() => undefined),
+            },
+        } as any);
         spyOn(projectsModule, "getProjectContext").mockReturnValue({
             project: {
                 tagReference: () => ["a", "31933:pubkey:d-tag"],
@@ -155,13 +160,10 @@ describe("LLM Runtime Tracking", () => {
         it("should include Codex thread and tool metadata tags when provided", () => {
             const encoder = new AgentEventEncoder();
 
-            const mockTriggeringEvent = new NDKEvent();
-            mockTriggeringEvent.pubkey = "user-pubkey-123";
-            mockTriggeringEvent.id = "event-id-123";
-            mockTriggeringEvent.tags = [];
+            const mockTriggeringEnvelope = createTriggeringEnvelope("user-pubkey-123", "event-id-123");
 
             const context: EventContext = {
-                triggeringEvent: mockTriggeringEvent,
+                triggeringEnvelope: mockTriggeringEnvelope,
                 rootEvent: { id: "root-event-id" },
                 conversationId: "conv-123",
                 model: "gpt-5-codex",
