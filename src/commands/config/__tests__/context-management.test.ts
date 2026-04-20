@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { config } from "@/services/ConfigService";
 
 const promptQueue: Array<Record<string, unknown>> = [];
 const promptMock = mock(async () => {
@@ -35,20 +36,21 @@ mock.module("inquirer", () => ({
     },
 }));
 
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getGlobalPath: getGlobalPathMock,
-        loadTenexConfig: loadTenexConfigMock,
-        saveTenexConfig: saveTenexConfigMock,
-        getAnalysisTelemetryConfig: getAnalysisTelemetryConfigMock,
-        getContextManagementConfig: getContextManagementConfigMock,
-        getSummarizationModelName: getSummarizationModelNameMock,
-        createLLMService: createLLMServiceMock,
-    },
-}));
-
 describe("contextManagementCommand", () => {
     beforeEach(() => {
+        spyOn(config, "getGlobalPath").mockImplementation(getGlobalPathMock);
+        spyOn(config, "loadTenexConfig").mockImplementation(loadTenexConfigMock as any);
+        spyOn(config, "saveTenexConfig").mockImplementation(saveTenexConfigMock as any);
+        spyOn(config, "getAnalysisTelemetryConfig").mockImplementation(
+            getAnalysisTelemetryConfigMock
+        );
+        spyOn(config, "getContextManagementConfig").mockImplementation(
+            getContextManagementConfigMock
+        );
+        spyOn(config, "getSummarizationModelName").mockImplementation(
+            getSummarizationModelNameMock
+        );
+        spyOn(config, "createLLMService").mockImplementation(createLLMServiceMock as any);
         promptQueue.length = 0;
         promptMock.mockClear();
         getGlobalPathMock.mockClear();

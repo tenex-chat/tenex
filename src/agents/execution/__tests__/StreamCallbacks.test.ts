@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { SkillWhitelistService } from "@/services/skill";
+import { config } from "@/services/ConfigService";
+import { SkillService, SkillWhitelistService } from "@/services/skill";
 import { logger } from "@/utils/logger";
+import { RALRegistry } from "@/services/ral";
 
 const fetchSkillsMock = mock(async (skillIds: string[]) => ({
     skills: skillIds.map((identifier) => ({
@@ -12,7 +14,6 @@ const fetchSkillsMock = mock(async (skillIds: string[]) => ({
     toolPermissions: {},
 }));
 const listAvailableSkillsMock = mock(async () => []);
-const loadAllSkillToolsMock = mock(() => ({}));
 const getProjectContextMock = mock(() => ({
     project: {
         dTag: "project-1",
@@ -35,40 +36,12 @@ const systemReminderContext = {
     clear: mock(() => undefined),
     queue: mock(() => undefined),
 };
-const configMock = {
-    isMetaModelConfig: mock(() => false),
-};
 const messageSyncerModulePath = new URL("../MessageSyncer.ts", import.meta.url).pathname;
 const promptHistoryModulePath = new URL("../prompt-history.ts", import.meta.url).pathname;
 const requestPreparationModulePath = new URL("../request-preparation.ts", import.meta.url).pathname;
 
-mock.module("@/services/skill", () => ({
-    SkillService: {
-        getInstance: () => ({
-            listAvailableSkills: listAvailableSkillsMock,
-            fetchSkills: fetchSkillsMock,
-        }),
-    },
-    loadAllSkillTools: loadAllSkillToolsMock,
-}));
-
 mock.module("@/services/projects", () => ({
     getProjectContext: getProjectContextMock,
-}));
-
-mock.module("@/services/ConfigService", () => ({
-    config: configMock,
-}));
-
-mock.module("@/services/ral", () => ({
-    RALRegistry: {
-        getInstance: () => ({
-            getAndConsumeInjections: () => [],
-            getAndConsumeHeuristicViolations: () => [],
-            getConversationPendingDelegations: () => [],
-            getConversationCompletedDelegations: () => [],
-        }),
-    },
 }));
 
 mock.module("@/llm/system-reminder-context", () => ({
@@ -110,10 +83,20 @@ describe("StreamCallbacks blocked skills", () => {
     });
 
     beforeEach(() => {
+        spyOn(RALRegistry, "getInstance").mockReturnValue({
+            getAndConsumeInjections: () => [],
+            getAndConsumeHeuristicViolations: () => [],
+            getConversationPendingDelegations: () => [],
+            getConversationCompletedDelegations: () => [],
+        } as any);
+        spyOn(config, "isMetaModelConfig").mockReturnValue(false);
+        spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: listAvailableSkillsMock,
+            fetchSkills: fetchSkillsMock,
+        } as any);
         conversationStore = createConversationStoreStub();
         listAvailableSkillsMock.mockClear();
         fetchSkillsMock.mockClear();
-        loadAllSkillToolsMock.mockClear();
         getProjectContextMock.mockClear();
         buildPromptHistoryMessagesMock.mockClear();
         prepareLLMRequestMock.mockClear();
@@ -121,7 +104,6 @@ describe("StreamCallbacks blocked skills", () => {
         systemReminderContext.advance.mockClear();
         systemReminderContext.clear.mockClear();
         systemReminderContext.queue.mockClear();
-        configMock.isMetaModelConfig.mockClear();
         warnSpy = spyOn(logger, "warn");
         spyOn(whitelistService, "getWhitelistedSkills").mockReturnValue([]);
     });

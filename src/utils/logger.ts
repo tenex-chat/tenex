@@ -44,6 +44,11 @@ let logFilePath: string | null = null;
 let warnLogFilePath: string | null = null;
 const WARN_LOG_MAX_SIZE = 100 * 1024 * 1024; // 100MB
 
+export function resetLogger(): void {
+    logFilePath = null;
+    warnLogFilePath = null;
+}
+
 // Helper to format timestamp for file output
 function formatTimestamp(): string {
     const now = new Date();

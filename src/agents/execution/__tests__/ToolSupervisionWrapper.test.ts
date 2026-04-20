@@ -1,5 +1,6 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { FullRuntimeContext } from "../types";
+import { RALRegistry } from "@/services/ral";
 
 const checkPreToolMock = mock(async () => ({ hasViolation: false }));
 const markHeuristicEnforcedMock = mock(() => undefined);
@@ -41,14 +42,6 @@ mock.module("@/llm/system-reminder-context", () => ({
     }),
 }));
 
-mock.module("@/services/ral", () => ({
-    RALRegistry: {
-        getInstance: () => ({
-            getRAL: getRalMock,
-        }),
-    },
-}));
-
 mock.module("@/utils/logger", () => ({
     logger: {
         debug: mock(() => undefined),
@@ -66,6 +59,9 @@ describe("ToolSupervisionWrapper", () => {
     });
 
     beforeEach(() => {
+        spyOn(RALRegistry, "getInstance").mockReturnValue({
+            getRAL: getRalMock,
+        } as any);
         checkPreToolMock.mockReset();
         checkPreToolMock.mockResolvedValue({ hasViolation: false });
         markHeuristicEnforcedMock.mockClear();

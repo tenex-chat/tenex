@@ -1,46 +1,15 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { PromptBuilder } from "@/prompts/core/PromptBuilder";
+import { SchedulerService } from "@/services/scheduling";
+import { RAGService } from "@/services/rag/RAGService";
 
 const addedFragments: Array<{ id: string; args: any }> = [];
 let currentProjectContext: any;
 
-class MockPromptBuilder {
-    add(id: string, args: any): void {
-        addedFragments.push({ id, args });
-    }
-
-    async build(): Promise<string> {
-        return "mock-built-prompt";
-    }
-
-    getFragmentCount(): number {
-        return addedFragments.length;
-    }
-}
-
-mock.module("@/prompts/core/PromptBuilder", () => ({
-    PromptBuilder: MockPromptBuilder,
-}));
-
 mock.module("@/services/projects", () => ({
     getProjectContext: () => currentProjectContext,
-}));
-
-mock.module("@/services/rag/RAGService", () => ({
-    RAGService: {
-        getInstance: () => ({
-            getCachedAllCollectionStats: async () => [],
-        }),
-    },
-}));
-
-mock.module("@/services/scheduling", () => ({
-    SchedulerService: {
-        getInstance: () => ({
-            getTasks: async () => [],
-        }),
-    },
 }));
 
 mock.module("@/services/ingress/TransportBindingStoreService", () => ({
@@ -78,6 +47,21 @@ describe("systemPromptBuilder", () => {
     let conversation: any;
 
     beforeEach(() => {
+        spyOn(SchedulerService, "getInstance").mockReturnValue({
+            getTasks: async () => [],
+        } as any);
+        spyOn(RAGService, "getInstance").mockReturnValue({
+            getCachedAllCollectionStats: async () => [],
+        } as any);
+        spyOn(PromptBuilder.prototype, "add").mockImplementation(function (
+            this: PromptBuilder,
+            id: string,
+            args: any
+        ) {
+            addedFragments.push({ id, args });
+            return this;
+        });
+        spyOn(PromptBuilder.prototype, "build").mockResolvedValue("mock-built-prompt");
         addedFragments.length = 0;
         currentProjectContext = {};
 

@@ -1,4 +1,6 @@
-import { describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { config } from "@/services/ConfigService";
+import { categorizeAgent, parseCategory } from "../categorizeAgent";
 
 let loadConfigCalls = 0;
 let createLLMServiceCalls = 0;
@@ -16,39 +18,30 @@ let loadConfigResult: {
         default: "default-model",
     },
 };
-let llmService = {
-    generateText: async () => ({ text: "worker" }),
+const mockState = {
+    llmService: {
+        generateText: async () => ({ text: "worker" }),
+    },
 };
 
-const loadConfigMock = mock(async () => {
-        loadConfigCalls++;
-        return loadConfigResult;
-    });
-
-    const createLLMServiceMock = mock((configName?: string) => {
-    createLLMServiceCalls++;
-        lastRequestedConfigName = configName;
-        return llmService;
-    });
-
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: () => "/tmp/tenex-test",
-        loadConfig: loadConfigMock,
-        createLLMService: createLLMServiceMock,
-    },
-}));
-
-const categorizeModulePromise = import("../categorizeAgent");
-
 describe("categorizeAgent", () => {
-    it("parses categories from verbose LLM output and uses the categorization slot first", async () => {
-        const { categorizeAgent, parseCategory } = await categorizeModulePromise;
+    beforeEach(() => {
+        spyOn(config, "loadConfig").mockImplementation(async () => {
+            loadConfigCalls++;
+            return loadConfigResult as any;
+        });
+        spyOn(config, "createLLMService").mockImplementation((configName?: string) => {
+            createLLMServiceCalls++;
+            lastRequestedConfigName = configName;
+            return mockState.llmService as any;
+        });
+    });
 
+    it("parses categories from verbose LLM output and uses the categorization slot first", async () => {
         expect(parseCategory("The agent is a domain-expert in NDK")).toBe("domain-expert");
         expect(parseCategory("  reviewer \n")).toBe("reviewer");
 
-        llmService = {
+        mockState.llmService = {
             generateText: async () => ({ text: "The agent is a worker" }),
         };
         loadConfigResult = {
@@ -77,9 +70,7 @@ describe("categorizeAgent", () => {
     });
 
     it("falls back to summarization when categorization is absent and handles parse failures", async () => {
-        const { categorizeAgent } = await categorizeModulePromise;
-
-        llmService = {
+        mockState.llmService = {
             generateText: async () => ({ text: "The agent is a reviewer" }),
         };
         loadConfigResult = {
@@ -101,7 +92,7 @@ describe("categorizeAgent", () => {
         expect(category).toBe("reviewer");
         expect(lastRequestedConfigName).toBe("summarization-model");
 
-        llmService = {
+        mockState.llmService = {
             generateText: async () => ({ text: "I cannot tell" }),
         };
         const undefinedCategory = await categorizeAgent({

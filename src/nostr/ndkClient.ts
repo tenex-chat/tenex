@@ -8,6 +8,10 @@ import NDK, { NDKRelayAuthPolicies } from "@nostr-dev-kit/ndk";
 
 let ndk: NDK | undefined;
 
+export function resetNDK(): void {
+    ndk = undefined;
+}
+
 /**
  * Initialize NDK with timeout for relay connections
  * Proceeds even if relay connection fails (daemon can still function locally)

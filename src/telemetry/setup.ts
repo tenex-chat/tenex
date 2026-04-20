@@ -56,6 +56,10 @@ class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
 
 let sdk: NodeSDK | null = null;
 
+export function resetTelemetry(): void {
+    sdk = null;
+}
+
 function createSDK(serviceName: string, wrappedExporter: SpanExporter): NodeSDK {
     const resource = resourceFromAttributes({
         [SEMRESATTRS_SERVICE_NAME]: serviceName,

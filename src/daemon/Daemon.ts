@@ -1119,6 +1119,10 @@ export class Daemon {
 // Singleton instance
 let daemonInstance: Daemon | null = null;
 
+export function resetDaemon(): void {
+    daemonInstance = null;
+}
+
 /**
  * Get or create the daemon instance
  */

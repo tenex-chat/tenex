@@ -1,11 +1,6 @@
-import { describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { config } from "@/services/ConfigService";
 import { projectContextFragment } from "../08-project-context";
-
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: () => "/tenex/projects",
-    },
-}));
 
 mock.module("@/services/ingress/TransportBindingStoreService", () => ({
     getTransportBindingStore: () => ({
@@ -40,6 +35,10 @@ mock.module("@/utils/logger", () => ({
 }));
 
 describe("project-context fragment — $PROJECT_BASE path rendering", () => {
+    beforeEach(() => {
+        spyOn(config, "getConfigPath").mockReturnValue("/tenex/projects");
+    });
+
     const mockAgent = {
         pubkey: "abcd1234567890ef",
         slug: "test-agent",

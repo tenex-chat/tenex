@@ -10,12 +10,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: () => "/tmp/tenex-test-config",
-    },
-}));
-
 import { QdrantProvider } from "../providers/QdrantProvider";
 import { SqliteVecProvider } from "../providers/SqliteVecProvider";
 

@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { config as configService } from "@/services/ConfigService";
-import { SkillWhitelistService } from "@/services/skill";
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { SkillService, SkillWhitelistService } from "@/services/skill";
+import { RALRegistry } from "@/services/ral";
 import {
     createMockAgent,
     createMockConversationStore,
@@ -26,20 +28,6 @@ const prepareLLMRequestMock = mock(async () => ({
     runtimeOverlays: [],
 }));
 
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        isMetaModelConfig: mock(() => false),
-        resolveMetaModel: mock(() => ({ isMetaModel: false })),
-    },
-}));
-
-mock.module("@/services/LLMOperationsRegistry", () => ({
-    llmOpsRegistry: {
-        registerOperation: mock(() => new AbortController().signal),
-        setMessageInjector: mock(() => undefined),
-    },
-}));
-
 mock.module("@/services/projects", () => ({
     getProjectContext: mock(() => ({
         project: {
@@ -50,26 +38,6 @@ mock.module("@/services/projects", () => ({
         mcpManager: undefined,
         agents: new Map(),
     })),
-}));
-
-mock.module("@/services/ral", () => ({
-    RALRegistry: {
-        getInstance: () => ({
-            getAndConsumeInjections: () => [],
-            getConversationPendingDelegations: () => [],
-            getConversationCompletedDelegations: () => [],
-        }),
-    },
-}));
-
-mock.module("@/services/skill", () => ({
-    SkillService: {
-        getInstance: () => ({
-            fetchSkills: fetchSkillsMock,
-            listAvailableSkills: listAvailableSkillsMock,
-        }),
-    },
-    loadAllSkillTools: mock(async () => ({})),
 }));
 
 mock.module("@/tools/registry", () => ({
@@ -221,16 +189,27 @@ describe("StreamSetup", () => {
     const mockedConfigService = configService as unknown as MockedConfigService;
 
     beforeEach(() => {
+        spyOn(RALRegistry, "getInstance").mockReturnValue({
+            getAndConsumeInjections: () => [],
+            getConversationPendingDelegations: () => [],
+            getConversationCompletedDelegations: () => [],
+        } as any);
+        spyOn(llmOpsRegistry, "registerOperation").mockReturnValue(
+            new AbortController().signal as any
+        );
+        spyOn(llmOpsRegistry, "setMessageInjector").mockReturnValue(false);
+        spyOn(configService, "isMetaModelConfig").mockReturnValue(false);
+        spyOn(configService, "resolveMetaModel").mockReturnValue({ isMetaModel: false } as any);
+        spyOn(SkillService, "getInstance").mockReturnValue({
+            fetchSkills: fetchSkillsMock,
+            listAvailableSkills: listAvailableSkillsMock,
+        } as any);
         whitelistService.setInstalledSkills([]);
         fetchSkillsMock.mockClear();
         listAvailableSkillsMock.mockClear();
         createLLMServiceMock.mockClear();
         compileMock.mockClear();
         prepareLLMRequestMock.mockClear();
-        mockedConfigService.isMetaModelConfig.mockReset();
-        mockedConfigService.isMetaModelConfig.mockReturnValue(false);
-        mockedConfigService.resolveMetaModel.mockReset();
-        mockedConfigService.resolveMetaModel.mockReturnValue({ isMetaModel: false });
     });
 
     afterEach(() => {
