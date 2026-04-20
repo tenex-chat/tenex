@@ -60,6 +60,7 @@ export type ToolName =
     | "kill"
     | "no_response"
     | "skill_list"
+    | "report_publish"
     | "skills_set"
     | "send_message";
 
