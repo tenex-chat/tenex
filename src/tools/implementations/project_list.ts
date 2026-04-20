@@ -2,19 +2,21 @@ import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { getDaemon } from "@/daemon";
 import { agentStorage } from "@/agents/AgentStorage";
 import { logger } from "@/utils/logger";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { shortenPubkey } from "@/utils/conversation-id";
 import { tool } from "ai";
 import { z } from "zod";
 
-const projectListSchema = z.object({});
+const projectListSchema = z.object({
+    search: z
+        .string()
+        .optional()
+        .describe(
+            "Optional fuzzy search string. When provided, only projects whose id, title, description, or repository contain this string (case-insensitive) are returned."
+        ),
+});
 
-type ProjectAgent = {
-    slug: string;
-    pubkey: string;
-    role: string;
-    isPM?: true;
-};
+type ProjectListInput = z.infer<typeof projectListSchema>;
+
+type AgentRoleMap = Record<string, string>;
 
 type ProjectInfo = {
     id: string; // The project's dTag (unique identifier)
@@ -22,7 +24,7 @@ type ProjectInfo = {
     description?: string;
     repository?: string;
     isRunning: boolean;
-    agents: ProjectAgent[];
+    agents: AgentRoleMap;
 };
 
 type ProjectListOutput = {
@@ -34,7 +36,24 @@ type ProjectListOutput = {
     };
 };
 
-async function executeProjectList(context: ToolExecutionContext): Promise<ProjectListOutput> {
+function formatAgentKey(slug: string, isPM = false): string {
+    return isPM ? `${slug} (PM)` : slug;
+}
+
+function addAgentRole(agents: AgentRoleMap, slug: string, role: string, isPM = false): void {
+    agents[formatAgentKey(slug, isPM)] = role;
+}
+
+function matchesProjectSearch(project: ProjectInfo, query: string): boolean {
+    return [project.id, project.title, project.description, project.repository].some((value) =>
+        (value ?? "").toLowerCase().includes(query)
+    );
+}
+
+async function executeProjectList(
+    context: ToolExecutionContext,
+    { search }: ProjectListInput
+): Promise<ProjectListOutput> {
     const daemon = getDaemon();
     const knownProjects = daemon.getKnownProjects();
     const activeRuntimes = daemon.getActiveRuntimes();
@@ -46,7 +65,6 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
     });
 
     const projects: ProjectInfo[] = [];
-    let totalAgents = 0;
 
     // Track which projects we've processed (by d-tag)
     const processedDTags = new Set<string>();
@@ -68,25 +86,22 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         const project = knownProjects.get(projectId);
         const runtimeContext = runtime.getContext();
 
-        const title = project?.tagValue("title") || project?.tagValue("name") || runtimeContext?.project?.tagValue("title") || id;
+        const title =
+            project?.tagValue("title") ||
+            project?.tagValue("name") ||
+            runtimeContext?.project?.tagValue("title") ||
+            id;
         const description = project?.content || project?.tagValue("description");
         const repository = project?.tagValue("repo") || project?.tagValue("repository");
 
         // Get agents from runtime context (authoritative for running projects)
-        const agents: ProjectAgent[] = [];
+        const agents = Object.create(null) as AgentRoleMap;
         const pmPubkey = runtimeContext?.projectManager?.pubkey;
         const agentMap = runtimeContext?.agentRegistry.getAllAgentsMap() || new Map();
         for (const agent of agentMap.values()) {
             const isPM = agent.pubkey === pmPubkey;
-            agents.push({
-                slug: agent.slug,
-                pubkey: shortenPubkey(agent.pubkey),
-                role: agent.role,
-                ...(isPM && { isPM: true }),
-            });
+            addAgentRole(agents, agent.slug, agent.role, isPM);
         }
-
-        totalAgents += agents.length;
 
         projects.push({
             id,
@@ -119,19 +134,11 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         const repository = project.tagValue("repo") || project.tagValue("repository");
 
         // Not running - get agents from storage
-        const agents: ProjectAgent[] = [];
+        const agents = Object.create(null) as AgentRoleMap;
         const storedAgents = await agentStorage.getProjectAgents(id);
         for (const storedAgent of storedAgents) {
-            const signer = new NDKPrivateKeySigner(storedAgent.nsec);
-            const pubkey = (await signer.user()).pubkey;
-            agents.push({
-                slug: storedAgent.slug,
-                pubkey: shortenPubkey(pubkey),
-                role: storedAgent.role,
-            });
+            addAgentRole(agents, storedAgent.slug, storedAgent.role);
         }
-
-        totalAgents += agents.length;
 
         projects.push({
             id,
@@ -155,19 +162,11 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         processedDTags.add(dTag);
 
         // Get agents from storage - this is the only metadata we have for offline projects
-        const agents: ProjectAgent[] = [];
+        const agents = Object.create(null) as AgentRoleMap;
         const storedAgents = await agentStorage.getProjectAgents(dTag);
         for (const storedAgent of storedAgents) {
-            const signer = new NDKPrivateKeySigner(storedAgent.nsec);
-            const pubkey = (await signer.user()).pubkey;
-            agents.push({
-                slug: storedAgent.slug,
-                pubkey: shortenPubkey(pubkey),
-                role: storedAgent.role,
-            });
+            addAgentRole(agents, storedAgent.slug, storedAgent.role);
         }
-
-        totalAgents += agents.length;
 
         projects.push({
             id: dTag,
@@ -177,19 +176,30 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         });
     }
 
-    const runningCount = projects.filter((p) => p.isRunning).length;
+    const normalizedSearch = search?.trim().toLowerCase();
+
+    const returnedProjects = normalizedSearch
+        ? projects.filter((project) => matchesProjectSearch(project, normalizedSearch))
+        : projects;
+
+    const totalAgents = returnedProjects.reduce(
+        (sum, project) => sum + Object.keys(project.agents).length,
+        0
+    );
+
+    const runningCount = returnedProjects.filter((p) => p.isRunning).length;
 
     logger.info("✅ Project list complete", {
-        totalProjects: projects.length,
-        runningProjects: runningCount,
-        totalAgents,
+        collectedProjects: projects.length,
+        returnedProjects: returnedProjects.length,
+        search: normalizedSearch,
         agent: context.agent.name,
     });
 
     return {
-        projects,
+        projects: returnedProjects,
         summary: {
-            totalProjects: projects.length,
+            totalProjects: returnedProjects.length,
             runningProjects: runningCount,
             totalAgents,
         },
@@ -198,10 +208,12 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
 
 export function createProjectListTool(context: ToolExecutionContext): AISdkTool {
     const coreTool = tool({
-        description: "List ALL known projects with their agents and running status.",
+        description:
+            "List known projects with their agents and running status. Optionally filter by search text. " +
+            'Agent keys ending with " (PM)" indicate the project manager; use the slug without the suffix when calling delegate_crossproject.',
         inputSchema: projectListSchema,
-        execute: async () => {
-            return await executeProjectList(context);
+        execute: async (input) => {
+            return await executeProjectList(context, input);
         },
     }) as AISdkTool;
 

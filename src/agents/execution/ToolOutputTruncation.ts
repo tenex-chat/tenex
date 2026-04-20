@@ -117,6 +117,8 @@ export function wrapToolsWithOutputTruncation(
         // Conversation retrieval
         "conversation_get",
         "conversation_list",
+        // Project listing (no pagination — truncated result is unrecoverable)
+        "project_list",
         // RAG tools
         "rag_search",
         "rag_collection_list",

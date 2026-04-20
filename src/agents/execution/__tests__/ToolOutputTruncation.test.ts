@@ -177,6 +177,28 @@ describe("wrapToolsWithOutputTruncation", () => {
         expect(stash.consume("call-null")).toBeUndefined();
     });
 
+    it("should not wrap project_list (truncation exempt)", async () => {
+        const stash = new FullResultStash();
+        const largeResult = "x".repeat(TOOL_OUTPUT_TRUNCATION_THRESHOLD + 1000);
+        const originalExecute = async () => largeResult;
+
+        const tools = wrapToolsWithOutputTruncation(
+            {
+                project_list: {
+                    execute: originalExecute,
+                    parameters: { type: "object", properties: {} },
+                } as any,
+            },
+            stash
+        );
+
+        const result = await tools.project_list.execute!({}, { toolCallId: "call-pl" } as any);
+
+        // Exempt tools pass through unchanged — no truncation, no stash entry
+        expect(result).toBe(largeResult);
+        expect(stash.consume("call-pl")).toBeUndefined();
+    });
+
     it("should handle results exactly at threshold without truncation", async () => {
         const stash = new FullResultStash();
         const exactResult = "z".repeat(TOOL_OUTPUT_TRUNCATION_THRESHOLD);
