@@ -987,6 +987,11 @@ Current status:
   maintenance report is serializable and pinned in the shared compatibility
   fixture as the operator output contract for future `doctor publish-outbox`
   inspect/status and repair/drain commands.
+- A thin internal Rust binary, `publish-outbox`, wraps the same library API for
+  JSON `inspect` and `maintain` output. It exists to give a future TypeScript
+  `doctor publish-outbox` adapter a process boundary; the operator contract
+  remains the `doctor` command surface plus the shared JSON fixtures, not the
+  binary path itself.
 - The TypeScript bridge has focused unit coverage for the framed dispatch path:
   spawn arguments, execute-frame construction, parent publish handling,
   `publish_result` replies, RAL cleanup on completion, and parent RAL
