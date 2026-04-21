@@ -25,7 +25,7 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
     return tool as CoreTool<unknown, unknown>;
 }
 import { logger } from "@/utils/logger";
-import { getCoreToolsForAgent } from "@/agents/constants";
+import { filterDelegateToolsForAgentCategory, getCoreToolsForAgent } from "@/agents/constants";
 import { createAskTool } from "./implementations/ask";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
@@ -204,14 +204,20 @@ export function getToolsObject(
     const hasConversation = context.getConversation?.() !== undefined;
 
     // === ONLY-TOOL MODE: STRICT EXCLUSIVITY ===
-    // When only-tool mode is active, return EXACTLY those tools - no auto-injection whatsoever.
-    // This is a security feature: the skill author has complete control over available tools.
+    // When only-tool mode is active, return EXACTLY those tools allowed by
+    // category policy - no auto-injection whatsoever.
+    // This is a security feature: the skill author has complete control over the
+    // category-allowed tool subset.
     //
     // IMPORTANT: Core agent tools (like 'kill') are NOT auto-injected in only-tool mode.
     // If the skill author wants core tools, they must explicitly include them in onlyTools.
-    // This ensures the skill author has complete, unambiguous control over the tool set.
+    // This ensures the skill author has complete, unambiguous control within
+    // the agent's category policy.
     if (skillPermissions && isOnlyToolMode(skillPermissions)) {
-        const onlyToolNames = skillPermissions.onlyTools ?? [];
+        const onlyToolNames = filterDelegateToolsForAgentCategory(
+            skillPermissions.onlyTools ?? [],
+            context.agent.category
+        );
         logger.debug("[ToolRegistry] Skill only-tool mode: strict exclusive tool set", {
             originalTools: names.length,
             onlyTools: onlyToolNames,
@@ -298,6 +304,8 @@ export function getToolsObject(
 
         effectiveNames = modifiedNames;
     }
+
+    effectiveNames = filterDelegateToolsForAgentCategory(effectiveNames, context.agent.category);
 
     // Separate regular tools (MCP tools are injected via mcpAccess, not via tool names)
     const regularTools: ToolName[] = [];

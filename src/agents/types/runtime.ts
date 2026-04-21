@@ -27,7 +27,8 @@ export interface AgentInstance {
     /**
      * Agent category for semantic classification and capability policy.
      * Resolved from the agent definition's category or inferredCategory field.
-     * Drives tool assignment: domain-experts receive only `ask`, no delegation tools.
+     * Drives tool assignment: workers receive `ask` and `delegate_followup`,
+     * while domain-experts receive only `ask`.
      */
     category?: AgentCategory;
     description?: string;

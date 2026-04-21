@@ -24,7 +24,7 @@ import type { AgentCategory } from "./role-categories";
  * ## Capability policy
  * getDelegateToolsForAgent() in constants.ts is the single source of truth
  * for which delegation tools each category receives. Domain-experts receive
- * only `ask` — no delegate/delegate_crossproject/delegate_followup.
+ * only `ask`; workers receive `ask` and `delegate_followup`.
  *
  * ## Pure Functions
  * All functions here are stateless and side-effect free:
@@ -58,7 +58,7 @@ export function normalizeAgentTools(requestedTools: string[], category?: AgentCa
         return true;
     });
 
-    // Add delegation tools — policy lives in getDelegateToolsForAgent (domain-experts get ask only)
+    // Add delegation tools — policy lives in getDelegateToolsForAgent.
     const delegateTools = getDelegateToolsForAgent(category);
     toolNames.push(...delegateTools);
 

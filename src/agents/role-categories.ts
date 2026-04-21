@@ -6,9 +6,9 @@
  * Categories represent operational roles:
  * - `principal`      — The human (e.g., human-replica)
  * - `orchestrator`   — Routes work, coordinates (e.g., PMs, coordinators)
- * - `worker`         — Does the work (e.g., developers, implementers)
+ * - `worker`         — Does the work directly (e.g., developers, implementers); no new agent delegation
  * - `reviewer`       — Evaluates quality, validates plans (e.g., clean-code-nazi)
- * - `domain-expert`  — Deep domain knowledge; receives `ask` only — no delegation tools
+ * - `domain-expert`  — Deep domain knowledge; receives `ask` only — no agent delegation
  * - `generalist`     — General-purpose helpers
  *
  * Unknown/missing category remains undefined. Only set a category when explicitly known.
@@ -44,7 +44,8 @@ export function isValidCategory(value: string): value is AgentCategory {
  * Returns the category if valid, otherwise undefined.
  *
  * The resolved category drives capability policy — e.g., domain-experts
- * receive only `ask` and no delegation tools.
+ * receive only `ask`, while workers receive follow-up delegation support
+ * without tools that initiate new delegations.
  */
 export function resolveCategory(category: string | undefined): AgentCategory | undefined {
     if (!category) return undefined;

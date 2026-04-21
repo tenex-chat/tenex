@@ -53,7 +53,7 @@ describe("processAgentTools", () => {
     });
 });
 
-describe("domain-expert tool restrictions", () => {
+describe("category tool restrictions", () => {
     it("should exclude delegate, delegate_crossproject, delegate_followup for domain-expert agents", () => {
         const result = normalizeAgentTools(["shell"], "domain-expert");
         expect(result).not.toContain("delegate");
@@ -66,6 +66,14 @@ describe("domain-expert tool restrictions", () => {
         expect(result).toContain("ask");
     });
 
+    it("should exclude new-delegation tools but keep delegate_followup for worker agents", () => {
+        const result = normalizeAgentTools(["shell"], "worker");
+        expect(result).not.toContain("delegate");
+        expect(result).not.toContain("delegate_crossproject");
+        expect(result).toContain("delegate_followup");
+        expect(result).toContain("ask");
+    });
+
     it("should still include all core tools for domain-expert agents", () => {
         const result = normalizeAgentTools(["shell"], "domain-expert");
         for (const coreTool of getCoreToolsForAgent("domain-expert")) {
@@ -73,13 +81,16 @@ describe("domain-expert tool restrictions", () => {
         }
     });
 
-    it("should include full delegate tools for non-domain-expert agents", () => {
-        const result = normalizeAgentTools(["shell"], "worker");
-        expect(result).toContain("delegate");
-        expect(result).toContain("delegate_crossproject");
-        expect(result).toContain("delegate_followup");
-        expect(result).toContain("ask");
-    });
+    it.each(["orchestrator", "reviewer", "generalist", undefined] as const)(
+        "should include full delegate tools for delegating category %s",
+        (category) => {
+            const result = normalizeAgentTools(["shell"], category);
+            expect(result).toContain("delegate");
+            expect(result).toContain("delegate_crossproject");
+            expect(result).toContain("delegate_followup");
+            expect(result).toContain("ask");
+        }
+    );
 
     it("should exclude skill-management tools for orchestrator agents", () => {
         const result = normalizeAgentTools(["shell", ...SKILL_MANAGEMENT_TOOLS], "orchestrator");

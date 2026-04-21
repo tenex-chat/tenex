@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createMockExecutionEnvironment } from "@/test-utils";
+import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import type { SkillToolPermissions } from "@/services/skill";
 import { getToolsObject } from "../registry";
 import { CORE_AGENT_TOOLS } from "@/agents/constants";
@@ -96,6 +96,24 @@ describe("Skill Tool Permissions", () => {
                 expect(toolNames).toContain("ask");
                 expect(toolNames).toContain("delegate_crossproject");
             });
+
+            it("should not override worker new-delegation restrictions", () => {
+                const workerContext = createMockExecutionEnvironment({
+                    agent: createMockAgent({ category: "worker" }),
+                });
+                const baseTools = ["ask"];
+                const skillPermissions: SkillToolPermissions = {
+                    onlyTools: ["ask", "delegate", "delegate_crossproject", "delegate_followup"],
+                };
+
+                const tools = getToolsObject(baseTools, workerContext, skillPermissions);
+                const toolNames = Object.keys(tools);
+
+                expect(toolNames).toContain("ask");
+                expect(toolNames).toContain("delegate_followup");
+                expect(toolNames).not.toContain("delegate");
+                expect(toolNames).not.toContain("delegate_crossproject");
+            });
         });
 
         describe("allow-tool mode", () => {
@@ -111,6 +129,24 @@ describe("Skill Tool Permissions", () => {
                 expect(toolNames).toContain("ask");
                 expect(toolNames).toContain("delegate_crossproject");
                 expect(toolNames).toContain("delegate");
+            });
+
+            it("should not add new-delegation tools disallowed for workers", () => {
+                const workerContext = createMockExecutionEnvironment({
+                    agent: createMockAgent({ category: "worker" }),
+                });
+                const baseTools = ["ask"];
+                const skillPermissions: SkillToolPermissions = {
+                    allowTools: ["delegate_crossproject", "delegate", "delegate_followup"],
+                };
+
+                const tools = getToolsObject(baseTools, workerContext, skillPermissions);
+                const toolNames = Object.keys(tools);
+
+                expect(toolNames).toContain("ask");
+                expect(toolNames).toContain("delegate_followup");
+                expect(toolNames).not.toContain("delegate_crossproject");
+                expect(toolNames).not.toContain("delegate");
             });
 
             it("should not duplicate tools already in base set", () => {

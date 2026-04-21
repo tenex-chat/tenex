@@ -246,24 +246,28 @@ describe("systemPromptBuilder", () => {
         }
     });
 
-    it("does not include delegation-tips or todo-before-delegation for domain-expert agents", async () => {
+    it("does not include delegation-tips or todo-before-delegation for non-delegation-initiating agents", async () => {
         currentProjectContext = {};
 
-        await build({
-            agent,
-            project,
-            conversation,
-            agentCategory: "domain-expert",
-        });
+        for (const category of ["worker", "domain-expert"] as const) {
+            addedFragments.length = 0;
 
-        expect(addedFragments.some((f) => f.id === "delegation-tips")).toBe(false);
-        expect(addedFragments.some((f) => f.id === "todo-before-delegation")).toBe(false);
+            await build({
+                agent,
+                project,
+                conversation,
+                agentCategory: category,
+            });
+
+            expect(addedFragments.some((f) => f.id === "delegation-tips")).toBe(false);
+            expect(addedFragments.some((f) => f.id === "todo-before-delegation")).toBe(false);
+        }
     });
 
-    it("includes delegation-tips and todo-before-delegation for non-domain-expert agents", async () => {
+    it("includes delegation-tips and todo-before-delegation for delegating agents", async () => {
         currentProjectContext = {};
 
-        for (const category of ["worker", "orchestrator", "reviewer", undefined] as const) {
+        for (const category of ["orchestrator", "reviewer", undefined] as const) {
             addedFragments.length = 0;
 
             await build({

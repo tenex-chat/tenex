@@ -108,8 +108,10 @@ async function addCoreAgentFragments(
 
 /**
  * Add agent-specific fragments.
- * Domain-expert agents receive domain-expert-guidance (no delegation) instead of
- * delegation-tips and todo-before-delegation — including both would be contradictory.
+ * Worker and domain-expert agents do not receive delegation-tips or
+ * todo-before-delegation because they do not receive tools that initiate new
+ * agent delegations.
+ * Domain-experts also receive domain-expert-guidance.
  * Orchestrators additionally receive explicit routing guidance.
  */
 function addAgentFragments(
@@ -121,7 +123,7 @@ function addAgentFragments(
         builder.add("orchestrator-delegation-guidance", {});
     }
 
-    if (agentCategory !== "domain-expert") {
+    if (agentCategory !== "domain-expert" && agentCategory !== "worker") {
         builder.add("delegation-tips", {});
         builder.add("todo-before-delegation", {});
     }

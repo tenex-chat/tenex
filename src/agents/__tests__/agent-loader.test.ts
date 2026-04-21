@@ -139,6 +139,38 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
         categorizeAgentMock.mockReset();
     });
 
+    it("gives stored worker agents delegate_followup but not new-delegation tools", async () => {
+        const signer = NDKPrivateKeySigner.generate();
+        const storedAgent = createStoredAgent({
+            nsec: signer.nsec,
+            slug: "stored-worker",
+            name: "Stored Worker",
+            role: "assistant",
+            category: "worker",
+        } as any);
+
+        const loadAgentSpy = spyOn(agentStorage, "loadAgent").mockResolvedValue({
+            ...storedAgent,
+            category: "worker",
+        } as any);
+        const skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
+            listAvailableSkills: mock(async () => []),
+        } as never);
+
+        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+
+        expect(instance.category).toBe("worker");
+        expect(instance.tools).not.toContain("delegate");
+        expect(instance.tools).not.toContain("delegate_crossproject");
+        expect(instance.tools).toContain("delegate_followup");
+        expect(instance.tools).toContain("ask");
+        expect(categorizeAgentMock).not.toHaveBeenCalled();
+
+        loadAgentSpy.mockRestore();
+        skillServiceSpy.mockRestore();
+        categorizeAgentMock.mockReset();
+    });
+
     it("applies orchestrator skill restrictions when category is stored", async () => {
         const signer = NDKPrivateKeySigner.generate();
         const storedAgent = createStoredAgent({

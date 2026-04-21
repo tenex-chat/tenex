@@ -75,7 +75,8 @@ export async function createAgentInstance(
         });
     }
 
-    // Resolve category — domain-experts have restricted tool access (no delegation)
+    // Resolve category before tool assignment so category-specific capability
+    // policy applies on the first hydrated instance.
     const resolvedCategory = resolveCategory(storedAgent.category) ?? resolveCategory(storedAgent.inferredCategory);
 
     // Process tools using pure functions
@@ -179,10 +180,9 @@ export async function loadStoredAgentIntoRegistry(
         throw new Error(`Agent ${pubkey} not found in storage`);
     }
 
-    // Resolve category synchronously so the correct capability policy (tool restrictions)
-    // is applied on the very first load. For uncategorized agents, we await the LLM
-    // classification before constructing the AgentInstance — this guarantees that
-    // domain-expert agents never receive delegation tools, even on first boot.
+    // Resolve category synchronously so the correct capability policy is applied
+    // on the very first load. For uncategorized agents, we await the LLM
+    // classification before constructing the AgentInstance.
     let freshlyInferredCategory: AgentCategory | undefined;
     if (!storedAgent.category && !storedAgent.inferredCategory && !categorizationInFlight.has(pubkey)) {
         categorizationInFlight.add(pubkey);

@@ -72,17 +72,39 @@ export function getCoreToolsForAgent(category?: AgentCategory): ToolName[] {
  * Get the delegate tools for an agent.
  * This is the SINGLE source of truth for delegate tool assignment.
  *
- * Domain-expert agents only receive `ask` — they apply expertise directly
- * and must never delegate work to other agents.
+ * Domain-expert agents only receive `ask`.
+ * Worker agents receive `ask` and `delegate_followup`, but not tools that
+ * initiate new delegations.
  */
 export function getDelegateToolsForAgent(category?: AgentCategory): ToolName[] {
     const tools: ToolName[] = ["ask"];
 
     if (category !== "domain-expert") {
-        tools.push("delegate");
-        tools.push("delegate_crossproject");
+        if (category !== "worker") {
+            tools.push("delegate");
+            tools.push("delegate_crossproject");
+        }
+
         tools.push("delegate_followup");
     }
 
     return tools;
+}
+
+/**
+ * Apply category-level delegation policy to a candidate tool list.
+ *
+ * This is used both during agent hydration and final runtime tool assembly so
+ * skills cannot reintroduce delegation tools a category is not allowed to use.
+ */
+export function filterDelegateToolsForAgentCategory<T extends string>(
+    toolNames: T[],
+    category?: AgentCategory
+): T[] {
+    const allowedDelegateTools = new Set(getDelegateToolsForAgent(category));
+
+    return toolNames.filter((toolName) => {
+        const typedToolName = toolName as ToolName;
+        return !DELEGATE_TOOLS.includes(typedToolName) || allowedDelegateTools.has(typedToolName);
+    });
 }
