@@ -180,6 +180,9 @@ Required protocol guarantees:
 - explicit heartbeat and abort timeout behavior
 - injection lease/ack semantics
 - publish request/result correlation
+- enough daemon-side context to derive native delivery records from accepted
+  signed runtime events without exposing transport-specific delivery commands
+  to the worker
 
 The protocol version is negotiated per worker connection. Warm worker reuse must
 be refused when the daemon and worker protocol versions differ. Protocol flags
@@ -351,6 +354,10 @@ Current implementation status:
   pending records are handed to a publisher interface as exact signed Nostr
   events and then moved into durable `published` or `failed` outbox directories
   with attempt metadata.
+- Retryable failed attempts now include durable `nextAttemptAt` metadata and a
+  Rust requeue scan can move due failed records back to `pending` without any
+  in-memory retry queue. The requeued record keeps the original signed event and
+  full attempt history.
 - `crates/tenex-daemon/src/relay_publisher.rs` provides the first Rust relay
   publisher implementation. It preserves the existing TypeScript default relay
   and `RELAYS` comma-list semantics, sends exact signed `["EVENT", event]`
@@ -421,6 +428,10 @@ Scope:
 - Define frame size limits and file-reference behavior for large payloads.
 - Define heartbeat, boot timeout, abort timeout, and force-kill behavior.
 - Define `publish_request` and `publish_result`.
+- Define the minimum transport-agnostic metadata, if any, that a
+  `publish_request` needs beyond the signed Nostr event. Rust must derive
+  Telegram or future native transport delivery from the accepted event,
+  triggering envelope, agent configuration, and daemon-owned runtime state.
 - Define publish request timeout behavior when the worker needs an event ID for
   threading.
 - Define claim-token validation and idempotent transition semantics.
@@ -619,7 +630,10 @@ Rollback:
 ### M7: Rust-Owned Relay Publishing
 
 Goal: move relay publishing, durable acceptance, retry, and diagnostics to Rust
-while preserving agent-side signing for agent-authored runtime events.
+while preserving agent-side signing for agent-authored runtime events. This
+milestone owns canonical Nostr relay publishing. Native transport delivery, such
+as Telegram Bot API sends, is derived by Rust from accepted signed events and
+drained by M8's Rust-native transport adapters.
 
 Scope:
 
@@ -629,6 +643,8 @@ Scope:
   durable boundary between worker execution and relay publishing.
 - Drain pending records through a publisher interface and move them to
   `publish-outbox/published/` or `publish-outbox/failed/` with attempt metadata.
+- Record retry schedules on retryable failures and requeue due failed records
+  from the filesystem on daemon startup or periodic maintenance.
 - Publish exact worker-signed Nostr events without reconstructing or re-signing
   them.
 - Add an initial Rust WebSocket relay publisher that can satisfy the outbox
@@ -661,6 +677,8 @@ Scope:
   config handling.
 - Add replaceable-event `created_at` policy for kind `31933`, `24010`, and any
   status event clients use as latest-state inputs.
+- Persist enough daemon-side publish context that enabling M8 does not require
+  rerunning completed worker executions to derive transport delivery records.
 
 Quality gates:
 
@@ -693,16 +711,37 @@ Rollback:
 ### M8: Long-Lived Services and Transport Adapters
 
 Goal: remove reliance on TypeScript `ProjectRuntime` for always-on behavior.
+Telegram's target implementation is Rust-native: Rust owns inbound gateway
+lifecycle, outbound Bot API delivery, retries, native message diagnostics, and
+transport delivery outbox state. TypeScript Telegram services remain useful as a
+compatibility oracle while the Rust adapter reaches parity, but they are not the
+target runtime path.
 
 Scope:
 
 - Move project status publishing to Rust or a dedicated adapter. If M7 is
-  enabled before this, M7 must provide a temporary Rust-compatible status
+  enabled before this, M7 must provide an interim Rust-compatible status
   publisher so clients do not lose status.
 - Move operations status to Rust or derive it from worker/RAL journal state. If
   only a compatibility subset is available, feature-gate it and document the
   exact missing fields.
-- Decide and implement Telegram strategy.
+- Implement the Rust-native Telegram gateway/adapter.
+- Add a Rust-owned Telegram transport outbox under
+  `$TENEX_BASE_DIR/daemon/transport-outbox/telegram/`, with pending, delivered,
+  failed, and tmp states.
+- Drain Telegram delivery records derived from accepted runtime events,
+  preserving Nostr as the canonical event identity while recording Telegram
+  native message IDs and delivery attempts.
+- Preserve Telegram routing inputs from the transport-neutral inbound envelope:
+  chat ID, message ID, thread/topic ID, sender identity, channel binding, and
+  project binding.
+- Port Telegram delivery semantics currently owned by TypeScript, including
+  final replies, allowed conversation/reasoning mirroring, ask/error delivery,
+  allowlisted tool publication mirroring, HTML/plain-text retry behavior, and
+  reserved `telegram_voice` handling.
+- Implement Telegram inbound update handling inside the Rust-native Telegram
+  adapter, normalizing updates into the same `InboundEnvelope` contract before
+  Rust dispatch.
 - Decide and implement MCP notification strategy.
 - Move scheduler wakeups to Rust.
 - Move agent definition monitoring or isolate it as an adapter.
@@ -713,8 +752,15 @@ Scope:
 Quality gates:
 
 - No always-on Bun daemon is required for Nostr project wakeups.
-- Telegram behavior is either supported and tested or explicitly unsupported in
-  Rust mode behind a guard.
+- Telegram behavior is supported by the Rust-native adapter for the enabled
+  matrix or explicitly blocked before dispatch for unsupported Telegram
+  scenarios.
+- Telegram outbound delivery is durable and idempotent across daemon restarts.
+- Telegram tests cover text replies, thread/topic replies, ask/error delivery,
+  allowlisted tool publication mirroring, HTML fallback, voice-note delivery,
+  delivery retry/failure states, and dedupe after replay.
+- Telegram inbound tests cover DM, group, topic, project binding selection,
+  allowlist rejection, backlog skipping, and normalized envelope construction.
 - Scheduled tasks can wake projects and agents through Rust.
 - Project status events remain client-compatible.
 - Operations status is accurate enough for existing clients or the compatibility

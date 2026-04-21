@@ -73,8 +73,9 @@ ownership first, then shrinking the TypeScript runtime surface over time.
 | LLM providers | Bun worker | Keep AI SDK provider integrations in TypeScript. |
 | Tools and skill tools | Bun worker | Keep existing tool factories and skill loading in TypeScript. |
 | MCP used by an agent execution | Bun worker | Start only MCP servers needed by the executing agent. Shut down on worker exit. |
-| Long-lived transport gateways | Rust or dedicated transport service | Telegram cannot live only in ephemeral workers if it must receive updates continuously. |
-| Runtime event publishing | Rust target, TS compatibility first | Initially TS may publish directly. Target is worker emits publish requests to Rust. |
+| Long-lived transport gateways | Rust | Telegram cannot live only in ephemeral workers if it must receive updates continuously. The target is a Rust-native Telegram gateway/adapter, with TypeScript retained only as the behavior oracle during migration. |
+| Transport-native outbound delivery | Rust transport outbox and Rust adapters | Telegram replies are projections of accepted runtime events. Workers must not own Bot API delivery, retries, dedupe, or native message diagnostics in the target architecture. |
+| Runtime event publishing | Rust target, TS compatibility first | Initially TS may publish directly. Target is worker emits signed Nostr runtime publish requests to Rust; Rust derives transport-native delivery from retained ingress context and configuration. |
 | Telemetry | Both | Rust owns daemon spans. Worker emits execution spans/events with correlation IDs. |
 
 ## Filesystem-First State Model
@@ -446,7 +447,9 @@ Use one authority split for publishing:
   Bun worker
 - Rust owns durable publish acceptance, relay publishing, retry, and diagnostics
 - backend-authored status, config, and control-plane events are signed by Rust
-  or a dedicated long-lived transport adapter
+  or a Rust-owned long-lived adapter
+- transport-native delivery, such as Telegram replies, is a Rust-owned
+  projection of accepted runtime events, not a worker-owned side effect
 
 ### Agent-Signed Runtime Events
 
@@ -480,6 +483,63 @@ returns correlated `publish_result` frames.
 This centralizes routing, relay selection, retry, and operator diagnostics in
 the control plane without moving the agent's signing authority out of the agent
 execution path.
+
+### Transport-Native Delivery
+
+Nostr is the canonical runtime publication surface, but it is not the only
+delivery surface. For Telegram-triggered or Telegram-bound executions, the
+worker signs the canonical Nostr runtime event and emits that event to Rust. The
+worker must not know whether that accepted event is later projected to Telegram,
+Slack, or any other native transport.
+
+The target ownership is:
+
+```text
+Bun worker
+  -> signs canonical Nostr event
+  -> emits publish_request with the signed event
+
+Rust daemon
+  -> validates and persists the signed event in the Nostr publish outbox
+  -> derives transport delivery records from retained ingress context,
+     agent configuration, runtime state, and the accepted Nostr event
+  -> persists derived delivery records in a Rust-owned transport outbox
+  -> acknowledges durable acceptance to the worker
+
+Rust relay publisher
+  -> drains signed Nostr events to relays
+
+Rust Telegram adapter
+  -> drains Telegram delivery records to the Bot API
+  -> records native message IDs, delivery failures, retries, and dedupe state
+```
+
+The Telegram adapter must derive destination chat, thread, reply target, and
+delivery policy from the original transport envelope and agent configuration.
+The Rust side already receives the triggering envelope in the `execute` request
+and owns the execution/RAL context. Any extra metadata attached to
+`publish_request` must remain transport-agnostic, such as correlation IDs or a
+runtime event classification that cannot be recovered from Nostr kind/tags.
+It must not contain Telegram-, Slack-, or transport-specific delivery commands.
+
+Recommended Rust-owned state layout:
+
+```text
+$TENEX_BASE_DIR/daemon/
+  transport-outbox/
+    telegram/
+      pending/
+      delivered/
+      failed/
+      tmp/
+```
+
+Each delivery record should include the accepted Nostr event ID, correlation ID,
+project ID, conversation ID, agent pubkey, delivery reason, rendered or
+renderable content, target transport metadata, attempt history, and a stable
+dedupe key. Telegram voice-note delivery remains part of the Telegram adapter's
+responsibility, using the existing reserved `telegram_voice` marker semantics
+until a more structured voice attachment contract replaces it.
 
 ## RAL Ownership
 
@@ -894,6 +954,11 @@ Current status:
   drain tests cover both deterministic mock publishing and a local WebSocket
   relay publisher that sends the exact signed `["EVENT", event]` frame and
   records relay `OK` results.
+- Retryable failed publish attempts now record a durable `nextAttemptAt`
+  timestamp. A Rust recovery scan can requeue due records from
+  `publish-outbox/failed/` back into `publish-outbox/pending/`, preserving the
+  original signed event and attempt history so restart recovery remains
+  filesystem-based.
 - The TypeScript bridge has focused unit coverage for the framed dispatch path:
   spawn arguments, execute-frame construction, parent publish handling,
   `publish_result` replies, RAL cleanup on completion, and parent RAL
@@ -1444,9 +1509,10 @@ Mitigations:
 Telegram and future non-Nostr transports need long-lived listeners. They cannot
 depend on ephemeral agent workers. Mitigations:
 
-- port transport gateway to Rust, or
-- run a dedicated transport adapter process that forwards normalized inbound
-  envelopes to Rust.
+- port the Telegram gateway to Rust as the target runtime path.
+- require future transport integrations to declare whether they are Rust-native
+  gateways or Rust-owned adapters that forward normalized inbound envelopes to
+  Rust.
 
 ### Publishing Divergence
 
