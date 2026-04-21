@@ -19,6 +19,8 @@ pub const PUBLISH_OUTBOX_PUBLISHED_DIR_NAME: &str = "published";
 pub const PUBLISH_OUTBOX_FAILED_DIR_NAME: &str = "failed";
 pub const PUBLISH_OUTBOX_TMP_DIR_NAME: &str = "tmp";
 pub const PUBLISH_OUTBOX_RECORD_SCHEMA_VERSION: u32 = 1;
+pub const DEFAULT_PUBLISH_OUTBOX_RETRY_INITIAL_DELAY_MS: u64 = 1_000;
+pub const DEFAULT_PUBLISH_OUTBOX_RETRY_MAX_DELAY_MS: u64 = 60_000;
 
 #[derive(Debug, Error)]
 pub enum PublishOutboxError {
@@ -43,6 +45,8 @@ pub enum PublishOutboxError {
     EventIdConflict { path: PathBuf },
     #[error("publish outbox record has invalid status {status:?} for drain")]
     InvalidDrainStatus { status: PublishOutboxStatus },
+    #[error("publish outbox record has invalid status {status:?} for requeue")]
+    InvalidRequeueStatus { status: PublishOutboxStatus },
 }
 
 pub type PublishOutboxResult<T> = Result<T, PublishOutboxError>;
@@ -106,6 +110,8 @@ pub struct PublishRelayAttempt {
     pub relay_results: Vec<PublishRelayResult>,
     pub error: Option<String>,
     pub retryable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_attempt_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +120,42 @@ pub struct PublishOutboxDrainOutcome {
     pub status: PublishOutboxStatus,
     pub source_path: PathBuf,
     pub target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishOutboxRequeueOutcome {
+    pub event_id: String,
+    pub status: PublishOutboxStatus,
+    pub source_path: PathBuf,
+    pub target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublishOutboxRetryPolicy {
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+}
+
+impl Default for PublishOutboxRetryPolicy {
+    fn default() -> Self {
+        Self {
+            initial_delay_ms: DEFAULT_PUBLISH_OUTBOX_RETRY_INITIAL_DELAY_MS,
+            max_delay_ms: DEFAULT_PUBLISH_OUTBOX_RETRY_MAX_DELAY_MS,
+        }
+    }
+}
+
+impl PublishOutboxRetryPolicy {
+    pub fn delay_for_failure_count(self, previous_failed_attempts: usize) -> u64 {
+        let mut delay = self.initial_delay_ms.max(1);
+        let max_delay = self.max_delay_ms.max(delay);
+
+        for _ in 0..previous_failed_attempts {
+            delay = delay.saturating_mul(2).min(max_delay);
+        }
+
+        delay
+    }
 }
 
 pub trait PublishOutboxRelayPublisher {
@@ -279,8 +321,150 @@ pub fn build_accepted_publish_result(
 pub fn list_pending_publish_outbox_record_paths(
     daemon_dir: impl AsRef<Path>,
 ) -> PublishOutboxResult<Vec<PathBuf>> {
-    let pending_dir = pending_publish_outbox_dir(daemon_dir);
-    let mut paths = match fs::read_dir(&pending_dir) {
+    list_record_paths(pending_publish_outbox_dir(daemon_dir))
+}
+
+pub fn list_failed_publish_outbox_record_paths(
+    daemon_dir: impl AsRef<Path>,
+) -> PublishOutboxResult<Vec<PathBuf>> {
+    list_record_paths(failed_publish_outbox_dir(daemon_dir))
+}
+
+pub fn drain_pending_publish_outbox<P: PublishOutboxRelayPublisher>(
+    daemon_dir: impl AsRef<Path>,
+    publisher: &mut P,
+    attempted_at: u64,
+) -> PublishOutboxResult<Vec<PublishOutboxDrainOutcome>> {
+    drain_pending_publish_outbox_with_retry_policy(
+        daemon_dir,
+        publisher,
+        attempted_at,
+        PublishOutboxRetryPolicy::default(),
+    )
+}
+
+pub fn drain_pending_publish_outbox_with_retry_policy<P: PublishOutboxRelayPublisher>(
+    daemon_dir: impl AsRef<Path>,
+    publisher: &mut P,
+    attempted_at: u64,
+    retry_policy: PublishOutboxRetryPolicy,
+) -> PublishOutboxResult<Vec<PublishOutboxDrainOutcome>> {
+    let daemon_dir = daemon_dir.as_ref();
+    let paths = list_pending_publish_outbox_record_paths(daemon_dir)?;
+    let mut outcomes = Vec::with_capacity(paths.len());
+
+    for source_path in paths {
+        let Some(mut record) = read_optional_record(&source_path)? else {
+            continue;
+        };
+        if record.status != PublishOutboxStatus::Accepted {
+            return Err(PublishOutboxError::InvalidDrainStatus {
+                status: record.status,
+            });
+        }
+        verify_signed_event(&record.event)?;
+
+        match publisher.publish_signed_event(&record.event) {
+            Ok(report) if relay_report_indicates_published(&report) => {
+                record.status = PublishOutboxStatus::Published;
+                record.attempts.push(PublishRelayAttempt {
+                    attempted_at,
+                    status: PublishRelayAttemptStatus::Published,
+                    relay_results: report.relay_results,
+                    error: None,
+                    retryable: false,
+                    next_attempt_at: None,
+                });
+                outcomes.push(transition_pending_record(
+                    daemon_dir,
+                    &source_path,
+                    published_publish_outbox_record_path(daemon_dir, &record.event.id),
+                    &record,
+                )?);
+            }
+            Ok(report) => {
+                let retryable = relay_report_failure_is_retryable(&report);
+                let next_attempt_at =
+                    retryable.then(|| next_attempt_at(&record, attempted_at, retry_policy));
+                record.status = PublishOutboxStatus::Failed;
+                record.attempts.push(PublishRelayAttempt {
+                    attempted_at,
+                    status: PublishRelayAttemptStatus::Failed,
+                    relay_results: report.relay_results,
+                    error: Some("event was accepted by 0 relays".to_string()),
+                    retryable,
+                    next_attempt_at,
+                });
+                outcomes.push(transition_pending_record(
+                    daemon_dir,
+                    &source_path,
+                    failed_publish_outbox_record_path(daemon_dir, &record.event.id),
+                    &record,
+                )?);
+            }
+            Err(error) => {
+                let next_attempt_at = error
+                    .retryable
+                    .then(|| next_attempt_at(&record, attempted_at, retry_policy));
+                record.status = PublishOutboxStatus::Failed;
+                record.attempts.push(PublishRelayAttempt {
+                    attempted_at,
+                    status: PublishRelayAttemptStatus::Failed,
+                    relay_results: Vec::new(),
+                    error: Some(error.message),
+                    retryable: error.retryable,
+                    next_attempt_at,
+                });
+                outcomes.push(transition_pending_record(
+                    daemon_dir,
+                    &source_path,
+                    failed_publish_outbox_record_path(daemon_dir, &record.event.id),
+                    &record,
+                )?);
+            }
+        }
+    }
+
+    Ok(outcomes)
+}
+
+pub fn requeue_due_failed_publish_outbox_records(
+    daemon_dir: impl AsRef<Path>,
+    now: u64,
+) -> PublishOutboxResult<Vec<PublishOutboxRequeueOutcome>> {
+    let daemon_dir = daemon_dir.as_ref();
+    let paths = list_failed_publish_outbox_record_paths(daemon_dir)?;
+    let mut outcomes = Vec::with_capacity(paths.len());
+
+    for source_path in paths {
+        let Some(mut record) = read_optional_record(&source_path)? else {
+            continue;
+        };
+        if record.status != PublishOutboxStatus::Failed {
+            return Err(PublishOutboxError::InvalidRequeueStatus {
+                status: record.status,
+            });
+        }
+        verify_signed_event(&record.event)?;
+
+        if !is_retry_due(&record, now) {
+            continue;
+        }
+
+        record.status = PublishOutboxStatus::Accepted;
+        outcomes.push(transition_failed_record_to_pending(
+            daemon_dir,
+            &source_path,
+            pending_publish_outbox_record_path(daemon_dir, &record.event.id),
+            &record,
+        )?);
+    }
+
+    Ok(outcomes)
+}
+
+fn list_record_paths(dir: PathBuf) -> PublishOutboxResult<Vec<PathBuf>> {
+    let mut paths = match fs::read_dir(&dir) {
         Ok(entries) => entries
             .map(|entry| entry.map(|entry| entry.path()))
             .collect::<Result<Vec<_>, _>>()?,
@@ -296,77 +480,75 @@ pub fn list_pending_publish_outbox_record_paths(
     Ok(paths)
 }
 
-pub fn drain_pending_publish_outbox<P: PublishOutboxRelayPublisher>(
-    daemon_dir: impl AsRef<Path>,
-    publisher: &mut P,
+fn next_attempt_at(
+    record: &PublishOutboxRecord,
     attempted_at: u64,
-) -> PublishOutboxResult<Vec<PublishOutboxDrainOutcome>> {
-    let daemon_dir = daemon_dir.as_ref();
-    let paths = list_pending_publish_outbox_record_paths(daemon_dir)?;
-    let mut outcomes = Vec::with_capacity(paths.len());
+    retry_policy: PublishOutboxRetryPolicy,
+) -> u64 {
+    let previous_failed_attempts = record
+        .attempts
+        .iter()
+        .filter(|attempt| attempt.status == PublishRelayAttemptStatus::Failed)
+        .count();
+    attempted_at.saturating_add(retry_policy.delay_for_failure_count(previous_failed_attempts))
+}
 
-    for source_path in paths {
-        let mut record = read_required_record(&source_path)?;
-        if record.status != PublishOutboxStatus::Accepted {
-            return Err(PublishOutboxError::InvalidDrainStatus {
-                status: record.status,
-            });
-        }
-        verify_signed_event(&record.event)?;
+fn is_retry_due(record: &PublishOutboxRecord, now: u64) -> bool {
+    let Some(latest_attempt) = record.attempts.last() else {
+        return false;
+    };
 
-        match publisher.publish_signed_event(&record.event) {
-            Ok(report) if report.relay_results.iter().any(|result| result.accepted) => {
-                record.status = PublishOutboxStatus::Published;
-                record.attempts.push(PublishRelayAttempt {
-                    attempted_at,
-                    status: PublishRelayAttemptStatus::Published,
-                    relay_results: report.relay_results,
-                    error: None,
-                    retryable: false,
-                });
-                outcomes.push(transition_pending_record(
-                    daemon_dir,
-                    &source_path,
-                    published_publish_outbox_record_path(daemon_dir, &record.event.id),
-                    &record,
-                )?);
-            }
-            Ok(report) => {
-                record.status = PublishOutboxStatus::Failed;
-                record.attempts.push(PublishRelayAttempt {
-                    attempted_at,
-                    status: PublishRelayAttemptStatus::Failed,
-                    relay_results: report.relay_results,
-                    error: Some("event was accepted by 0 relays".to_string()),
-                    retryable: true,
-                });
-                outcomes.push(transition_pending_record(
-                    daemon_dir,
-                    &source_path,
-                    failed_publish_outbox_record_path(daemon_dir, &record.event.id),
-                    &record,
-                )?);
-            }
-            Err(error) => {
-                record.status = PublishOutboxStatus::Failed;
-                record.attempts.push(PublishRelayAttempt {
-                    attempted_at,
-                    status: PublishRelayAttemptStatus::Failed,
-                    relay_results: Vec::new(),
-                    error: Some(error.message),
-                    retryable: error.retryable,
-                });
-                outcomes.push(transition_pending_record(
-                    daemon_dir,
-                    &source_path,
-                    failed_publish_outbox_record_path(daemon_dir, &record.event.id),
-                    &record,
-                )?);
-            }
-        }
+    latest_attempt.status == PublishRelayAttemptStatus::Failed
+        && latest_attempt.retryable
+        && latest_attempt
+            .next_attempt_at
+            .is_none_or(|next_attempt_at| next_attempt_at <= now)
+}
+
+fn relay_report_indicates_published(report: &PublishRelayReport) -> bool {
+    report
+        .relay_results
+        .iter()
+        .any(relay_result_indicates_published)
+}
+
+fn relay_result_indicates_published(result: &PublishRelayResult) -> bool {
+    result.accepted || relay_result_message_has_prefix(result, "duplicate:")
+}
+
+fn relay_report_failure_is_retryable(report: &PublishRelayReport) -> bool {
+    report
+        .relay_results
+        .iter()
+        .any(relay_result_failure_is_retryable)
+}
+
+fn relay_result_failure_is_retryable(result: &PublishRelayResult) -> bool {
+    if relay_result_indicates_published(result) {
+        return false;
     }
 
-    Ok(outcomes)
+    let Some(message) = result.message.as_deref() else {
+        return true;
+    };
+
+    !["blocked:", "invalid:", "pow:"]
+        .iter()
+        .any(|prefix| message_has_prefix(message, prefix))
+}
+
+fn relay_result_message_has_prefix(result: &PublishRelayResult, prefix: &str) -> bool {
+    result
+        .message
+        .as_deref()
+        .is_some_and(|message| message_has_prefix(message, prefix))
+}
+
+fn message_has_prefix(message: &str, prefix: &str) -> bool {
+    message
+        .trim_start()
+        .to_ascii_lowercase()
+        .starts_with(prefix)
 }
 
 fn persist_pending_record(
@@ -379,11 +561,10 @@ fn persist_pending_record(
     fs::create_dir_all(&tmp_dir)?;
 
     let record_path = pending_publish_outbox_record_path(daemon_dir, &record.event.id);
-    if let Some(existing) = read_optional_record(&record_path)? {
-        if existing.event == record.event {
-            return Ok(existing);
-        }
-        return Err(PublishOutboxError::EventIdConflict { path: record_path });
+    if let Some((existing_path, existing)) =
+        read_existing_publish_outbox_record(daemon_dir, &record.event.id)?
+    {
+        return existing_record_or_conflict(existing_path, existing, record);
     }
 
     let tmp_path = tmp_dir.join(format!(
@@ -393,17 +574,26 @@ fn persist_pending_record(
         now_nanos()
     ));
 
-    let write_result = write_record_file(&tmp_path, record)
-        .and_then(|()| {
-            fs::rename(&tmp_path, &record_path)?;
-            sync_parent_dir(&record_path)
-        })
-        .map(|()| record.clone());
+    let write_result = (|| {
+        write_record_file(&tmp_path, record)?;
+        if create_record_link_without_replacing(&tmp_path, &record_path)? {
+            remove_optional_file(&tmp_path)?;
+            sync_parent_dir(&record_path)?;
+            return Ok(record.clone());
+        }
+
+        remove_optional_file(&tmp_path)?;
+        if let Some((existing_path, existing)) =
+            read_existing_publish_outbox_record(daemon_dir, &record.event.id)?
+        {
+            return existing_record_or_conflict(existing_path, existing, record);
+        }
+        Err(PublishOutboxError::EventIdConflict { path: record_path })
+    })();
 
     if write_result.is_err() {
         let _ = fs::remove_file(&tmp_path);
     }
-
     write_result
 }
 
@@ -421,6 +611,7 @@ fn transition_pending_record(
 
     let existing = read_optional_record(&target_path)?;
     if let Some(existing) = existing {
+        ensure_same_event_or_conflict(&target_path, &existing, record)?;
         remove_optional_file(source_path)?;
         sync_parent_dir(source_path)?;
         return Ok(PublishOutboxDrainOutcome {
@@ -437,19 +628,37 @@ fn transition_pending_record(
         std::process::id(),
         now_nanos()
     ));
-    let write_result = write_record_file(&tmp_path, record)
-        .and_then(|()| {
-            fs::rename(&tmp_path, &target_path)?;
+    let write_result = (|| {
+        write_record_file(&tmp_path, record)?;
+        if create_record_link_without_replacing(&tmp_path, &target_path)? {
+            remove_optional_file(&tmp_path)?;
             sync_parent_dir(&target_path)?;
             remove_optional_file(source_path)?;
-            sync_parent_dir(source_path)
-        })
-        .map(|()| PublishOutboxDrainOutcome {
-            event_id: record.event.id.clone(),
-            status: record.status,
+            sync_parent_dir(source_path)?;
+            return Ok(PublishOutboxDrainOutcome {
+                event_id: record.event.id.clone(),
+                status: record.status,
+                source_path: source_path.to_path_buf(),
+                target_path: target_path.clone(),
+            });
+        }
+
+        remove_optional_file(&tmp_path)?;
+        let existing = read_optional_record(&target_path)?.ok_or_else(|| {
+            PublishOutboxError::EventIdConflict {
+                path: target_path.clone(),
+            }
+        })?;
+        ensure_same_event_or_conflict(&target_path, &existing, record)?;
+        remove_optional_file(source_path)?;
+        sync_parent_dir(source_path)?;
+        Ok(PublishOutboxDrainOutcome {
+            event_id: existing.event.id,
+            status: existing.status,
             source_path: source_path.to_path_buf(),
-            target_path,
-        });
+            target_path: target_path.clone(),
+        })
+    })();
 
     if write_result.is_err() {
         let _ = fs::remove_file(&tmp_path);
@@ -458,9 +667,151 @@ fn transition_pending_record(
     write_result
 }
 
-fn read_required_record(path: impl AsRef<Path>) -> PublishOutboxResult<PublishOutboxRecord> {
-    let path = path.as_ref();
-    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+fn transition_failed_record_to_pending(
+    daemon_dir: &Path,
+    source_path: &Path,
+    target_path: PathBuf,
+    record: &PublishOutboxRecord,
+) -> PublishOutboxResult<PublishOutboxRequeueOutcome> {
+    let target_dir = target_path
+        .parent()
+        .expect("publish outbox target record must have a parent");
+    fs::create_dir_all(target_dir)?;
+    fs::create_dir_all(tmp_publish_outbox_dir(daemon_dir))?;
+
+    let published_path = published_publish_outbox_record_path(daemon_dir, &record.event.id);
+    if let Some(existing) = read_optional_record(&published_path)? {
+        ensure_same_event_or_conflict(&published_path, &existing, record)?;
+        remove_optional_file(source_path)?;
+        sync_parent_dir(source_path)?;
+        return Ok(PublishOutboxRequeueOutcome {
+            event_id: existing.event.id,
+            status: existing.status,
+            source_path: source_path.to_path_buf(),
+            target_path: published_path,
+        });
+    }
+
+    let existing = read_optional_record(&target_path)?;
+    if let Some(existing) = existing {
+        ensure_same_event_or_conflict(&target_path, &existing, record)?;
+        remove_optional_file(source_path)?;
+        sync_parent_dir(source_path)?;
+        return Ok(PublishOutboxRequeueOutcome {
+            event_id: existing.event.id,
+            status: existing.status,
+            source_path: source_path.to_path_buf(),
+            target_path,
+        });
+    }
+
+    let tmp_path = tmp_publish_outbox_dir(daemon_dir).join(format!(
+        "{}.{}.{}.tmp",
+        record.event.id,
+        std::process::id(),
+        now_nanos()
+    ));
+    let write_result = (|| {
+        write_record_file(&tmp_path, record)?;
+        if create_record_link_without_replacing(&tmp_path, &target_path)? {
+            remove_optional_file(&tmp_path)?;
+            sync_parent_dir(&target_path)?;
+            if let Some(existing) = read_optional_record(&published_path)? {
+                ensure_same_event_or_conflict(&published_path, &existing, record)?;
+                remove_optional_file(&target_path)?;
+                sync_parent_dir(&target_path)?;
+                remove_optional_file(source_path)?;
+                sync_parent_dir(source_path)?;
+                return Ok(PublishOutboxRequeueOutcome {
+                    event_id: existing.event.id,
+                    status: existing.status,
+                    source_path: source_path.to_path_buf(),
+                    target_path: published_path,
+                });
+            }
+            remove_optional_file(source_path)?;
+            sync_parent_dir(source_path)?;
+            return Ok(PublishOutboxRequeueOutcome {
+                event_id: record.event.id.clone(),
+                status: record.status,
+                source_path: source_path.to_path_buf(),
+                target_path: target_path.clone(),
+            });
+        }
+
+        remove_optional_file(&tmp_path)?;
+        let existing = read_optional_record(&target_path)?.ok_or_else(|| {
+            PublishOutboxError::EventIdConflict {
+                path: target_path.clone(),
+            }
+        })?;
+        ensure_same_event_or_conflict(&target_path, &existing, record)?;
+        remove_optional_file(source_path)?;
+        sync_parent_dir(source_path)?;
+        Ok(PublishOutboxRequeueOutcome {
+            event_id: existing.event.id,
+            status: existing.status,
+            source_path: source_path.to_path_buf(),
+            target_path: target_path.clone(),
+        })
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
+    write_result
+}
+
+fn read_existing_publish_outbox_record(
+    daemon_dir: &Path,
+    event_id: &str,
+) -> PublishOutboxResult<Option<(PathBuf, PublishOutboxRecord)>> {
+    for path in [
+        pending_publish_outbox_record_path(daemon_dir, event_id),
+        published_publish_outbox_record_path(daemon_dir, event_id),
+        failed_publish_outbox_record_path(daemon_dir, event_id),
+    ] {
+        if let Some(record) = read_optional_record(&path)? {
+            return Ok(Some((path, record)));
+        }
+    }
+
+    Ok(None)
+}
+
+fn existing_record_or_conflict(
+    existing_path: PathBuf,
+    existing: PublishOutboxRecord,
+    requested: &PublishOutboxRecord,
+) -> PublishOutboxResult<PublishOutboxRecord> {
+    ensure_same_event_or_conflict(&existing_path, &existing, requested)?;
+    Ok(existing)
+}
+
+fn ensure_same_event_or_conflict(
+    existing_path: &Path,
+    existing: &PublishOutboxRecord,
+    requested: &PublishOutboxRecord,
+) -> PublishOutboxResult<()> {
+    if existing.event == requested.event {
+        return Ok(());
+    }
+
+    Err(PublishOutboxError::EventIdConflict {
+        path: existing_path.to_path_buf(),
+    })
+}
+
+fn create_record_link_without_replacing(
+    source_path: &Path,
+    target_path: &Path,
+) -> PublishOutboxResult<bool> {
+    match fs::hard_link(source_path, target_path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn remove_optional_file(path: impl AsRef<Path>) -> PublishOutboxResult<()> {
@@ -587,6 +938,7 @@ mod tests {
         );
         assert_eq!(failed.status, PublishOutboxStatus::Failed);
         assert_eq!(failed.attempts[0].status, PublishRelayAttemptStatus::Failed);
+        assert_eq!(failed.attempts[0].next_attempt_at, Some(1710001001300));
     }
 
     #[test]
@@ -636,6 +988,76 @@ mod tests {
         assert_eq!(second_record, first_record);
         assert_eq!(second_record.request.request_sequence, 41);
         assert_eq!(second_record.accepted_at, 1710001000100);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn accepts_duplicate_signed_event_from_failed_outbox_without_requeueing() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Err(PublishRelayError {
+            message: "relay connection failed".to_string(),
+            retryable: true,
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("pending outbox drain must fail into failed dir");
+
+        let duplicate = accept_worker_publish_request(&daemon_dir, &message, 1710001000300)
+            .expect("duplicate failed publish request must be idempotent");
+
+        assert_eq!(duplicate.status, PublishOutboxStatus::Failed);
+        assert_eq!(duplicate.event, fixture.signed);
+        assert_eq!(duplicate.attempts[0].next_attempt_at, Some(1710001001200));
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending record read must succeed")
+                .is_none()
+        );
+        assert!(
+            read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("failed record read must succeed")
+                .is_some()
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn accepts_duplicate_signed_event_from_published_outbox_without_republishing() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: true,
+                message: Some("ok".to_string()),
+            }],
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("pending outbox drain must publish");
+
+        let duplicate = accept_worker_publish_request(&daemon_dir, &message, 1710001000300)
+            .expect("duplicate published publish request must be idempotent");
+
+        assert_eq!(duplicate.status, PublishOutboxStatus::Published);
+        assert_eq!(duplicate.event, fixture.signed);
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending record read must succeed")
+                .is_none()
+        );
+        assert!(
+            read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("published record read must succeed")
+                .is_some()
+        );
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
@@ -771,6 +1193,171 @@ mod tests {
             Some("relay connection failed")
         );
         assert!(failed.attempts[0].retryable);
+        assert_eq!(failed.attempts[0].next_attempt_at, Some(1710001001200));
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn treats_duplicate_relay_rejection_as_published() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: false,
+                message: Some("duplicate: already have this event".to_string()),
+            }],
+        })]);
+
+        let outcomes = drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("duplicate relay response must be treated as published");
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].status, PublishOutboxStatus::Published);
+        let published = read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+            .expect("published record read must succeed")
+            .expect("published record must exist");
+        assert_eq!(
+            published.attempts[0].status,
+            PublishRelayAttemptStatus::Published
+        );
+        assert!(!published.attempts[0].relay_results[0].accepted);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn does_not_retry_permanent_relay_rejections() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: false,
+                message: Some("invalid: event policy rejected".to_string()),
+            }],
+        })]);
+
+        let outcomes = drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("permanent relay rejection must move to failed dir");
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].status, PublishOutboxStatus::Failed);
+        let failed = read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+            .expect("failed record read must succeed")
+            .expect("failed record must exist");
+        assert!(!failed.attempts[0].retryable);
+        assert_eq!(failed.attempts[0].next_attempt_at, None);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn requeues_due_retryable_failed_record_to_pending_and_publishes_on_next_drain() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut failing_publisher = MockRelayPublisher::new(vec![Err(PublishRelayError {
+            message: "relay connection failed".to_string(),
+            retryable: true,
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut failing_publisher, 1710001000200)
+            .expect("pending outbox drain must fail into failed dir");
+
+        let not_due = requeue_due_failed_publish_outbox_records(&daemon_dir, 1710001001199)
+            .expect("not-due requeue scan must succeed");
+
+        assert!(not_due.is_empty());
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending record read must succeed")
+                .is_none()
+        );
+        assert!(
+            read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("failed record read must succeed")
+                .is_some()
+        );
+
+        let requeued = requeue_due_failed_publish_outbox_records(&daemon_dir, 1710001001200)
+            .expect("due requeue scan must succeed");
+
+        assert_eq!(requeued.len(), 1);
+        assert_eq!(requeued[0].event_id, fixture.signed.id);
+        assert_eq!(requeued[0].status, PublishOutboxStatus::Accepted);
+        assert!(
+            read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("failed record read must succeed")
+                .is_none()
+        );
+
+        let pending = read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+            .expect("pending record read must succeed")
+            .expect("pending record must exist after requeue");
+        assert_eq!(pending.status, PublishOutboxStatus::Accepted);
+        assert_eq!(pending.attempts.len(), 1);
+        assert_eq!(pending.attempts[0].next_attempt_at, Some(1710001001200));
+
+        let mut succeeding_publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: true,
+                message: Some("ok".to_string()),
+            }],
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut succeeding_publisher, 1710001001300)
+            .expect("requeued outbox drain must publish");
+
+        let published = read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+            .expect("published record read must succeed")
+            .expect("published record must exist");
+        assert_eq!(published.status, PublishOutboxStatus::Published);
+        assert_eq!(published.attempts.len(), 2);
+        assert_eq!(
+            published.attempts[0].status,
+            PublishRelayAttemptStatus::Failed
+        );
+        assert_eq!(
+            published.attempts[1].status,
+            PublishRelayAttemptStatus::Published
+        );
+        assert_eq!(published.attempts[1].next_attempt_at, None);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn does_not_requeue_non_retryable_failed_record() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Err(PublishRelayError {
+            message: "relay rejected permanently".to_string(),
+            retryable: false,
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("pending outbox drain must fail into failed dir");
+
+        let requeued = requeue_due_failed_publish_outbox_records(&daemon_dir, 1710009999999)
+            .expect("requeue scan must succeed");
+
+        assert!(requeued.is_empty());
+        let failed = read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+            .expect("failed record read must succeed")
+            .expect("failed record must stay in failed dir");
+        assert!(!failed.attempts[0].retryable);
+        assert_eq!(failed.attempts[0].next_attempt_at, None);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

@@ -114,7 +114,8 @@
                     "status": "failed",
                     "relayResults": [],
                     "error": "relay publish failed",
-                    "retryable": true
+                    "retryable": true,
+                    "nextAttemptAt": 1710001001300
                 }
             ]
         }

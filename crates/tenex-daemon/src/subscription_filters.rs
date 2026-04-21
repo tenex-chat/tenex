@@ -26,7 +26,7 @@ pub struct DaemonSubscriptionFilters {
     pub empty_agent_mentions: Option<NostrFilter>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct NostrFilter {
     #[serde(default)]
     pub kinds: Vec<u64>,
@@ -108,21 +108,6 @@ pub fn build_lesson_filter(definition_id: &str) -> NostrFilter {
         kinds: vec![4129],
         event_ids: vec![definition_id.to_string()],
         ..NostrFilter::default()
-    }
-}
-
-impl Default for NostrFilter {
-    fn default() -> Self {
-        Self {
-            kinds: Vec::new(),
-            authors: Vec::new(),
-            project_addresses: Vec::new(),
-            pubkeys: Vec::new(),
-            event_ids: Vec::new(),
-            referenced_kinds: Vec::new(),
-            limit: None,
-            since: None,
-        }
     }
 }
 

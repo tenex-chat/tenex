@@ -959,6 +959,13 @@ Current status:
   `publish-outbox/failed/` back into `publish-outbox/pending/`, preserving the
   original signed event and attempt history so restart recovery remains
   filesystem-based.
+- Outbox event IDs are owned globally across `pending`, `published`, and
+  `failed`: duplicate worker publish requests for an already failed or
+  published event are idempotent and cannot bypass retry timing. Filesystem
+  transitions install new state files without replacing existing records.
+- Relay `OK false` results are classified before scheduling retry: duplicate
+  relay responses are treated as already published, while permanent rejection
+  prefixes such as `invalid:` and `blocked:` do not churn forever.
 - The TypeScript bridge has focused unit coverage for the framed dispatch path:
   spawn arguments, execute-frame construction, parent publish handling,
   `publish_result` replies, RAL cleanup on completion, and parent RAL

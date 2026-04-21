@@ -358,6 +358,10 @@ Current implementation status:
   Rust requeue scan can move due failed records back to `pending` without any
   in-memory retry queue. The requeued record keeps the original signed event and
   full attempt history.
+- Outbox event IDs are globally idempotent across `pending`, `published`, and
+  `failed`, and filesystem transitions create destination records without
+  replacing existing files. Relay duplicate responses count as published;
+  permanent relay rejection prefixes do not schedule retry.
 - `crates/tenex-daemon/src/relay_publisher.rs` provides the first Rust relay
   publisher implementation. It preserves the existing TypeScript default relay
   and `RELAYS` comma-list semantics, sends exact signed `["EVENT", event]`
@@ -645,6 +649,9 @@ Scope:
   `publish-outbox/published/` or `publish-outbox/failed/` with attempt metadata.
 - Record retry schedules on retryable failures and requeue due failed records
   from the filesystem on daemon startup or periodic maintenance.
+- Preserve one global owner for each outbox event ID across pending, published,
+  and failed states so duplicate worker publish requests cannot bypass retry
+  timing or cause duplicate relay side effects.
 - Publish exact worker-signed Nostr events without reconstructing or re-signing
   them.
 - Add an initial Rust WebSocket relay publisher that can satisfy the outbox

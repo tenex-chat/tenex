@@ -864,10 +864,7 @@ mod tests {
             let canonical_json = canonical_agent_worker_protocol_json(&frame_fixture.message)
                 .unwrap_or_else(|error| panic!("{}: {error}", frame_fixture.name));
             assert_eq!(canonical_json, frame_fixture.canonical_json);
-            assert_eq!(
-                canonical_json.as_bytes().len(),
-                frame_fixture.payload_byte_length
-            );
+            assert_eq!(canonical_json.len(), frame_fixture.payload_byte_length);
 
             let encoded = encode_agent_worker_protocol_frame(&frame_fixture.message)
                 .unwrap_or_else(|error| panic!("{}: {error}", frame_fixture.name));

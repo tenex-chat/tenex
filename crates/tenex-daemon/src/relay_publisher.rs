@@ -360,7 +360,7 @@ mod tests {
             .expect("published record read must succeed")
             .expect("published record must exist");
         assert_eq!(published.event, fixture.signed);
-        assert_eq!(published.attempts[0].relay_results[0].accepted, true);
+        assert!(published.attempts[0].relay_results[0].accepted);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
         mock_relay.join();

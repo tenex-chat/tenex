@@ -115,6 +115,7 @@ describe("PublishOutbox compatibility fixture", () => {
                 status: "failed",
                 error: "relay publish failed",
                 retryable: true,
+                nextAttemptAt: 1710001001300,
             })
         );
         expect(failed.attempts[0].relayResults).toEqual([]);
