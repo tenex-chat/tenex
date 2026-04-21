@@ -98,10 +98,9 @@ describe("PromptBuilder telemetry", () => {
         activeSpan = undefined;
     });
 
-    it("records fragment spans and a parent summary event", async () => {
+    it("builds fragments successfully without fragment spans", async () => {
         const { PromptBuilder } = await import(`../PromptBuilder.ts?telemetry-success-${Date.now()}`);
         const { fragmentRegistry } = await import("../FragmentRegistry");
-        const { trace } = await import("@opentelemetry/api");
 
         fragmentRegistry.clear();
         fragmentRegistry.register({
@@ -118,44 +117,18 @@ describe("PromptBuilder telemetry", () => {
             },
         });
 
-        const tracer = trace.getTracer("test");
-        const result = await tracer.startActiveSpan("tenex.message.compile", async () => {
-            return await new PromptBuilder()
-                .add("fast-fragment", {})
-                .add("slow-fragment", {})
-                .build();
-        });
+        const result = await new PromptBuilder()
+            .add("fast-fragment", {})
+            .add("slow-fragment", {})
+            .build();
 
         expect(result).toBe("fast\n\nslow");
-
-        const fastSpan = spans.find((span) => span.name === "tenex.prompt.fragment.fast-fragment");
-        const slowSpan = spans.find((span) => span.name === "tenex.prompt.fragment.slow-fragment");
-        const parentSpan = spans.find((span) => span.name === "tenex.message.compile");
-
-        expect(fastSpan?.attributes["fragment.id"]).toBe("fast-fragment");
-        expect(fastSpan?.attributes["fragment.priority"]).toBe(20);
-        expect(fastSpan?.attributes["fragment.content.length"]).toBe(4);
-        expect(fastSpan?.attributes["fragment.content.empty"]).toBe(false);
-        expect(fastSpan?.ended).toBe(true);
-
-        expect(slowSpan?.attributes["fragment.id"]).toBe("slow-fragment");
-        expect(slowSpan?.attributes["fragment.priority"]).toBe(30);
-        expect(slowSpan?.attributes["fragment.content.length"]).toBe(4);
-        expect(Number(slowSpan?.attributes["fragment.duration_ms"])).toBeGreaterThanOrEqual(1);
-        expect(slowSpan?.ended).toBe(true);
-
-        const summaryEvent = parentSpan?.events.find((event) => event.name === "prompt.fragments_profiled");
-        expect(summaryEvent?.attributes["fragment.count"]).toBe(2);
-        expect(summaryEvent?.attributes["slowest.fragment.id"]).toBe("slow-fragment");
-        expect(Number(summaryEvent?.attributes["slowest.duration_ms"])).toBeGreaterThanOrEqual(1);
-
         fragmentRegistry.clear();
     });
 
-    it("marks fragment spans as failed when a template throws", async () => {
+    it("throws error when a template throws", async () => {
         const { PromptBuilder } = await import(`../PromptBuilder.ts?telemetry-failure-${Date.now()}`);
         const { fragmentRegistry } = await import("../FragmentRegistry");
-        const { trace, SpanStatusCode } = await import("@opentelemetry/api");
 
         fragmentRegistry.clear();
         fragmentRegistry.register({
@@ -165,19 +138,9 @@ describe("PromptBuilder telemetry", () => {
             },
         });
 
-        const tracer = trace.getTracer("test");
         await expect(
-            tracer.startActiveSpan("tenex.message.compile", async () => {
-                return await new PromptBuilder().add("broken-fragment", {}).build();
-            })
+            new PromptBuilder().add("broken-fragment", {}).build()
         ).rejects.toThrow('Error executing fragment "broken-fragment"');
-
-        const brokenSpan = spans.find((span) => span.name === "tenex.prompt.fragment.broken-fragment");
-        expect(brokenSpan?.attributes["fragment.id"]).toBe("broken-fragment");
-        expect(brokenSpan?.attributes["error.message"]).toContain("fragment exploded");
-        expect(brokenSpan?.status).toEqual({ code: SpanStatusCode.ERROR });
-        expect(brokenSpan?.exceptions).toHaveLength(1);
-        expect(brokenSpan?.ended).toBe(true);
 
         fragmentRegistry.clear();
     });

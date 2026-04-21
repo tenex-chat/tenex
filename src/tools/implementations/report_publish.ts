@@ -1,9 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
-import NDK, { NDKEvent, NDKRelayAuthPolicies } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
-import { getRelayUrls } from "@/nostr/relays";
+import { getNDK } from "@/nostr/ndkClient";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -85,10 +85,6 @@ const reportPublishSchema = z.object({
             "Absolute or project-relative path to a single markdown file or directory. " +
                 "If a directory, all files inside are published recursively."
         ),
-    project: z
-        .string()
-        .optional()
-        .describe("Project association a-tag (e.g. 31933:pubkey:dtag)"),
 });
 
 export function createReportPublishTool(context: ToolExecutionContext): AISdkTool {
@@ -99,7 +95,13 @@ export function createReportPublishTool(context: ToolExecutionContext): AISdkToo
 
         inputSchema: reportPublishSchema,
 
-        execute: async ({ path: inputPath, project }) => {
+        execute: async ({ path: inputPath }) => {
+            const projectDTag =
+                context.projectContext.project.dTag ||
+                context.projectContext.project.tagValue("d");
+            const projectPubkey = context.projectContext.project.pubkey;
+            const projectATag = projectDTag ? `31933:${projectPubkey}:${projectDTag}` : undefined;
+
             let allowedRoot: string;
             try {
                 allowedRoot = fs.realpathSync(context.projectBasePath);
@@ -126,29 +128,8 @@ export function createReportPublishTool(context: ToolExecutionContext): AISdkToo
                 return { success: false, error: `No files found at ${resolvedPath}`, published: [] };
             }
 
-            const relayUrls = getRelayUrls();
+            const ndk = getNDK();
             const signer = context.agent.signer;
-
-            const ndk = new NDK({
-                explicitRelayUrls: relayUrls,
-                signer,
-                enableOutboxModel: false,
-            });
-
-            ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk });
-
-            let relayReady = false;
-            const readyPromise = new Promise<void>((resolve) => {
-                ndk.pool.on("relay:ready", () => {
-                    if (!relayReady) {
-                        relayReady = true;
-                        resolve();
-                    }
-                });
-            });
-
-            await ndk.connect();
-            await Promise.race([readyPromise, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
 
             const published: string[] = [];
 
@@ -164,8 +145,8 @@ export function createReportPublishTool(context: ToolExecutionContext): AISdkToo
                         ["document", file.documentTag],
                     ];
 
-                    if (project) {
-                        event.tags.push(["a", project]);
+                    if (projectATag) {
+                        event.tags.push(["a", projectATag]);
                     }
 
                     await event.sign(signer);
@@ -179,10 +160,6 @@ export function createReportPublishTool(context: ToolExecutionContext): AISdkToo
                     error: error instanceof Error ? error.message : String(error),
                     published,
                 };
-            } finally {
-                for (const relay of ndk.pool.relays.values()) {
-                    relay.disconnect();
-                }
             }
 
             const summary =
