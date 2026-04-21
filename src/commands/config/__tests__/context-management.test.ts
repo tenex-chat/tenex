@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { config } from "@/services/ConfigService";
 
 const promptQueue: Array<Record<string, unknown>> = [];
@@ -29,6 +29,8 @@ const createLLMServiceMock = mock(() => ({
         throw new Error("Unexpected createLanguageModel() call in context management config test");
     },
 }));
+let configSpies: Array<ReturnType<typeof spyOn>> = [];
+let logSpy: ReturnType<typeof spyOn> | undefined;
 
 mock.module("inquirer", () => ({
     default: {
@@ -38,19 +40,21 @@ mock.module("inquirer", () => ({
 
 describe("contextManagementCommand", () => {
     beforeEach(() => {
-        spyOn(config, "getGlobalPath").mockImplementation(getGlobalPathMock);
-        spyOn(config, "loadTenexConfig").mockImplementation(loadTenexConfigMock as any);
-        spyOn(config, "saveTenexConfig").mockImplementation(saveTenexConfigMock as any);
-        spyOn(config, "getAnalysisTelemetryConfig").mockImplementation(
-            getAnalysisTelemetryConfigMock
-        );
-        spyOn(config, "getContextManagementConfig").mockImplementation(
-            getContextManagementConfigMock
-        );
-        spyOn(config, "getSummarizationModelName").mockImplementation(
-            getSummarizationModelNameMock
-        );
-        spyOn(config, "createLLMService").mockImplementation(createLLMServiceMock as any);
+        configSpies = [
+            spyOn(config, "getGlobalPath").mockImplementation(getGlobalPathMock),
+            spyOn(config, "loadTenexConfig").mockImplementation(loadTenexConfigMock as any),
+            spyOn(config, "saveTenexConfig").mockImplementation(saveTenexConfigMock as any),
+            spyOn(config, "getAnalysisTelemetryConfig").mockImplementation(
+                getAnalysisTelemetryConfigMock
+            ),
+            spyOn(config, "getContextManagementConfig").mockImplementation(
+                getContextManagementConfigMock
+            ),
+            spyOn(config, "getSummarizationModelName").mockImplementation(
+                getSummarizationModelNameMock
+            ),
+            spyOn(config, "createLLMService").mockImplementation(createLLMServiceMock as any),
+        ];
         promptQueue.length = 0;
         promptMock.mockClear();
         getGlobalPathMock.mockClear();
@@ -65,8 +69,25 @@ describe("contextManagementCommand", () => {
         });
     });
 
+    afterEach(() => {
+        for (const spy of configSpies) {
+            spy.mockRestore();
+        }
+        configSpies = [];
+        logSpy?.mockRestore();
+        logSpy = undefined;
+        promptQueue.length = 0;
+    });
+
     it("saves context management settings from the config TUI", async () => {
-        const logSpy = spyOn(console, "log").mockImplementation(() => {});
+        logSpy = spyOn(console, "log").mockImplementation(() => {});
+        loadTenexConfigMock.mockResolvedValueOnce({
+            contextManagement: {},
+            contextDiscovery: {
+                injectWhenEmpty: true,
+                manifestTtlMs: 1234,
+            },
+        });
         promptQueue.push(
             { action: "configure" },
             {
@@ -87,6 +108,18 @@ describe("contextManagementCommand", () => {
                 compaction: true,
                 contextUtilizationReminder: true,
                 contextWindowStatus: false,
+            },
+            {
+                enabled: true,
+                trigger: "new-conversation",
+                timeoutMs: "1200",
+                maxQueries: "4",
+                maxHints: "5",
+                minScore: "0.45",
+                sources: "conversations, lessons, rag",
+                usePlannerModel: true,
+                useRerankerModel: false,
+                backgroundCompletionReminders: true,
             }
         );
 
@@ -112,9 +145,21 @@ describe("contextManagementCommand", () => {
                         contextWindowStatus: false,
                     }),
                 }),
+                contextDiscovery: expect.objectContaining({
+                    enabled: true,
+                    trigger: "new-conversation",
+                    timeoutMs: 1200,
+                    maxQueries: 4,
+                    maxHints: 5,
+                    minScore: 0.45,
+                    sources: ["conversations", "lessons", "rag"],
+                    usePlannerModel: true,
+                    useRerankerModel: false,
+                    backgroundCompletionReminders: true,
+                    injectWhenEmpty: true,
+                    manifestTtlMs: 1234,
+                }),
             })
         );
-
-        logSpy.mockRestore();
     });
 });

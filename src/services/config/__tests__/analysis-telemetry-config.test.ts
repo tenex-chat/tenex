@@ -52,6 +52,42 @@ describe("Analysis telemetry config schema", () => {
         expect(result.success).toBe(false);
     });
 
+    it("accepts proactive context discovery settings", () => {
+        const result = TenexConfigSchema.safeParse({
+            contextDiscovery: {
+                enabled: true,
+                trigger: "new-conversation",
+                timeoutMs: 1200,
+                maxQueries: 4,
+                maxHints: 5,
+                minScore: 0.45,
+                sources: ["conversations", "lessons", "rag"],
+                usePlannerModel: true,
+                useRerankerModel: true,
+                injectWhenEmpty: false,
+                backgroundCompletionReminders: true,
+                manifestTtlMs: 300000,
+            },
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it("rejects invalid proactive context discovery values", () => {
+        const result = TenexConfigSchema.safeParse({
+            contextDiscovery: {
+                trigger: "sometimes",
+                timeoutMs: 0,
+                maxQueries: 0,
+                maxHints: 13,
+                minScore: 2,
+                sources: ["unknown"],
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
+
     it("defaults to storing full prompt text when analysis telemetry is enabled", async () => {
         const testDir = path.join("/tmp", `tenex-analysis-defaults-${Date.now()}`);
         const config = new ConfigService();

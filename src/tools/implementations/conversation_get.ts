@@ -3,6 +3,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { llmServiceFactory } from "@/llm";
 import { config } from "@/services/ConfigService";
+import { ContextDiscoveryService } from "@/services/search/ContextDiscoveryService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
@@ -278,6 +279,13 @@ async function executeConversationGet(
         messageCount: conversation.getMessageCount(),
         untilId: targetUntilId,
         agent: context.agent.name,
+    });
+
+    ContextDiscoveryService.getInstance().recordRetrievalUsage({
+        agentPubkey: context.agent.pubkey,
+        conversationId: context.conversationId,
+        toolName: "conversation_get",
+        retrievalArg: conversation.id,
     });
 
     const serializedConversation = serializeConversation(conversation, {

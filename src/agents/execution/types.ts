@@ -65,6 +65,7 @@ export interface ExecutionContext {
     preferredRalClaimToken?: string;
 
     // Execution flags
+    isNewConversation?: boolean;
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
     debug?: boolean;
@@ -116,6 +117,7 @@ export interface RALExecutionContext {
  */
 export type FullRuntimeContext = Omit<ToolRegistryContext, "agent"> & {
     agent: AgentInstance;
+    isNewConversation?: boolean;
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
     cachedSystemPrompt?: string;

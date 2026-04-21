@@ -136,7 +136,13 @@ function decodeToPubkey(identifier: string): string {
  * Roles that can be assigned to specific LLM configurations.
  * Each role falls back to the "default" configuration when not explicitly set.
  */
-type LLMRoleKey = "default" | "summarization" | "supervision" | "promptCompilation" | "categorization";
+type LLMRoleKey =
+    | "default"
+    | "summarization"
+    | "supervision"
+    | "promptCompilation"
+    | "categorization"
+    | "contextDiscovery";
 
 const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: string }> = [
     { key: "default", label: "Default", recommendation: "The default model all agents get — pick your best all-rounder" },
@@ -144,6 +150,7 @@ const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: strin
     { key: "supervision", label: "Supervision", recommendation: "Evaluates agent work and decides next steps — choose a model with strong reasoning" },
     { key: "promptCompilation", label: "Prompt Compilation", recommendation: "Distills lessons into system prompts — choose a smart model with a large context window" },
     { key: "categorization", label: "Categorization", recommendation: "Classifies agent roles — choose a cheap, fast model" },
+    { key: "contextDiscovery", label: "Context Discovery", recommendation: "Plans proactive memory searches — choose a cheap, fast model with reliable JSON output" },
 ];
 
 /**
@@ -206,6 +213,9 @@ function autoSelectRoles(
     // Prompt Compilation: most expensive with large context (>= 100K)
     const promptCompilation = mostExpensive(100_000);
     if (promptCompilation) llmsConfig.promptCompilation = promptCompilation;
+
+    const contextDiscovery = cheapestWithContext(32_000) ?? cheapestWithContext(8_000);
+    if (contextDiscovery) llmsConfig.contextDiscovery = contextDiscovery;
 
 }
 

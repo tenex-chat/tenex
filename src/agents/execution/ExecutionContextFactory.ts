@@ -32,6 +32,7 @@ export async function createExecutionContext(params: {
     projectBasePath: string;
     triggeringEnvelope: InboundEnvelope;
     agentPublisher?: AgentRuntimePublisher;
+    isNewConversation?: boolean;
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
     debug?: boolean;
@@ -158,6 +159,7 @@ export async function createExecutionContext(params: {
                 currentBranch,
                 triggeringEnvelope: params.triggeringEnvelope,
                 agentPublisher: params.agentPublisher,
+                isNewConversation: params.isNewConversation,
                 isDelegationCompletion: params.isDelegationCompletion,
                 hasPendingDelegations: params.hasPendingDelegations,
                 debug: params.debug,

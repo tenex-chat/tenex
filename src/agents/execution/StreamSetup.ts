@@ -11,6 +11,7 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SkillService, type SkillToolPermissions, loadAllSkillTools } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
+import { ContextDiscoveryService } from "@/services/search/ContextDiscoveryService";
 import { getToolsObject, HOME_FS_FALLBACKS } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -364,6 +365,29 @@ export async function setupStreamExecution(
         skillToolPermissions: skillResult.toolPermissions,
         projectPath: context.projectBasePath || undefined,
     };
+    const contextDiscovery = ContextDiscoveryService.getInstance();
+    const contextDiscoveryResult = await contextDiscovery.discover({
+        agent: context.agent,
+        conversationId: context.conversationId,
+        projectId: dTag,
+        projectPath: context.projectBasePath || undefined,
+        userMessage: context.triggeringEnvelope.content,
+        trigger: context.isNewConversation ? "new-conversation" : "every-turn",
+    });
+    const contextDiscoveryReminder = contextDiscovery.renderReminder(contextDiscoveryResult);
+    if (contextDiscoveryReminder) {
+        getSystemReminderContext().queue({
+            type: "proactive-context",
+            content: contextDiscoveryReminder,
+            placement: "latest-user-append",
+            persistInHistory: false,
+            attributes: {
+                hints: String(contextDiscoveryResult.hints.length),
+                status: contextDiscoveryResult.status,
+            },
+        });
+        contextDiscovery.markInjected(contextDiscoveryResult);
+    }
     const promptHistoryResult = buildPromptHistoryMessages({
         compiled,
         conversationStore: conversation,

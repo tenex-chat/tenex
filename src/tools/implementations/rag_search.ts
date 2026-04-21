@@ -12,6 +12,7 @@
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { bootstrapSearchProviders, UnifiedSearchService } from "@/services/search";
+import { ContextDiscoveryService } from "@/services/search/ContextDiscoveryService";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -96,6 +97,14 @@ async function executeRAGSearch(
         prompt,
         collections,
         agentPubkey: context.agent.pubkey,
+    });
+
+    ContextDiscoveryService.getInstance().recordRetrievalUsage({
+        agentPubkey: context.agent.pubkey,
+        conversationId: context.conversationId,
+        toolName: "rag_search",
+        query,
+        collections,
     });
 
     // Format results for agent consumption

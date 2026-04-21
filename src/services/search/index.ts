@@ -6,8 +6,15 @@
  */
 
 export { buildProjectFilter } from "./projectFilter";
+export { ContextDiscoveryService } from "./ContextDiscoveryService";
 export { SearchProviderRegistry } from "./SearchProviderRegistry";
 export { UnifiedSearchService } from "./UnifiedSearchService";
+export type {
+    ContextDiscoveryHint,
+    ContextDiscoveryRequest,
+    ContextDiscoveryResult,
+    ContextDiscoveryUsageRecord,
+} from "./ContextDiscoveryService";
 export type {
     SearchOptions,
     SearchProvider,

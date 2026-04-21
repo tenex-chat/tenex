@@ -61,6 +61,22 @@ export interface TenexConfig {
         };
     };
 
+    // Proactive context discovery configuration
+    contextDiscovery?: {
+        enabled?: boolean; // Discover relevant context pointers before an agent starts a turn (default: true)
+        trigger?: "new-conversation" | "every-turn"; // When discovery runs automatically (default: "new-conversation")
+        timeoutMs?: number; // Hot-path discovery budget before continuing without hints (default: 1200)
+        maxQueries?: number; // Maximum search queries generated per discovery pass (default: 4)
+        maxHints?: number; // Maximum context pointers injected into the reminder (default: 5)
+        minScore?: number; // Minimum retrieval relevance score for hints (default: 0.45)
+        sources?: Array<"conversations" | "lessons" | "rag">; // Search domains to include
+        usePlannerModel?: boolean; // Use llms.contextDiscovery to plan searches (default: false)
+        useRerankerModel?: boolean; // Use llms.contextDiscovery to rerank candidate hints (default: false)
+        injectWhenEmpty?: boolean; // Inject an explicit empty-discovery reminder (default: false)
+        backgroundCompletionReminders?: boolean; // Surface late timeout results on a later turn (default: true)
+        manifestTtlMs?: number; // Cache available search collection inventory for this long (default: 300000)
+    };
+
     // Telemetry configuration
     telemetry?: {
         enabled?: boolean; // Enable OpenTelemetry tracing (default: true)
@@ -174,6 +190,22 @@ export const TenexConfigSchema = z.object({
                     contextWindowStatus: z.boolean().optional(),
                 })
                 .optional(),
+        })
+        .optional(),
+    contextDiscovery: z
+        .object({
+            enabled: z.boolean().optional(),
+            trigger: z.enum(["new-conversation", "every-turn"]).optional(),
+            timeoutMs: z.number().int().positive().optional(),
+            maxQueries: z.number().int().min(1).max(8).optional(),
+            maxHints: z.number().int().min(1).max(12).optional(),
+            minScore: z.number().min(0).max(1).optional(),
+            sources: z.array(z.enum(["conversations", "lessons", "rag"])).optional(),
+            usePlannerModel: z.boolean().optional(),
+            useRerankerModel: z.boolean().optional(),
+            injectWhenEmpty: z.boolean().optional(),
+            backgroundCompletionReminders: z.boolean().optional(),
+            manifestTtlMs: z.number().int().positive().optional(),
         })
         .optional(),
     telemetry: z
@@ -328,6 +360,7 @@ export interface TenexLLMs {
     supervision?: string; // Named config to use for agent supervision
     promptCompilation?: string; // Named config to use for prompt compilation (compiling lessons into system prompts)
     categorization?: string; // Named config to use for agent role categorization
+    contextDiscovery?: string; // Named config to use for proactive context discovery planning/reranking
 }
 
 /**
@@ -387,6 +420,7 @@ export const TenexLLMsSchema = z.object({
     supervision: z.string().optional(),
     promptCompilation: z.string().optional(),
     categorization: z.string().optional(),
+    contextDiscovery: z.string().optional(),
 });
 
 // =====================================================================================

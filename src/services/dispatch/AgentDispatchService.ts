@@ -487,6 +487,7 @@ export class AgentDispatchService {
             targetAgent: targetAgents[0],
             envelope,
             conversationId: conversation.id,
+            isNewConversation: isNew,
             principalContext,
             projectCtx,
             agentExecutor,
@@ -827,6 +828,7 @@ export class AgentDispatchService {
         targetAgent: AgentInstance;
         envelope: InboundEnvelope;
         conversationId: string;
+        isNewConversation?: boolean;
         principalContext?: MessagePrincipalContext;
         projectCtx: ProjectContext;
         agentExecutor: AgentExecutor;
@@ -836,6 +838,7 @@ export class AgentDispatchService {
             targetAgent,
             envelope,
             conversationId,
+            isNewConversation,
             principalContext,
             projectCtx,
             agentExecutor,
@@ -938,6 +941,7 @@ export class AgentDispatchService {
                 conversationId,
                 projectBasePath: projectCtx.agentRegistry.getBasePath(),
                 triggeringEnvelope: triggeringEnvelopeForContext,
+                isNewConversation,
                 mcpManager: projectCtx.mcpManager,
             });
 

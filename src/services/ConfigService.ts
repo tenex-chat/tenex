@@ -147,6 +147,10 @@ export class ConfigService {
         return this.loadedConfig?.config.contextManagement;
     }
 
+    getContextDiscoveryConfig(): TenexConfig["contextDiscovery"] | undefined {
+        return this.loadedConfig?.config.contextDiscovery;
+    }
+
     getAnalysisTelemetryConfig(): ResolvedAnalysisTelemetryConfig {
         const analysis = this.loadedConfig?.config.telemetry?.analysis;
 
@@ -618,6 +622,11 @@ export class ConfigService {
      */
     getSummarizationModelName(): string | undefined {
         return this.loadedConfig?.llms?.summarization;
+    }
+
+    getContextDiscoveryModelName(): string | undefined {
+        const llms = this.loadedConfig?.llms;
+        return llms?.contextDiscovery ?? llms?.categorization ?? llms?.summarization ?? llms?.default;
     }
 
     /**

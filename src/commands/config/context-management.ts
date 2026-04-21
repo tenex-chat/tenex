@@ -33,6 +33,7 @@ export const contextManagementCommand = new Command("context-management")
 
         if (action === "reset") {
             delete tenexConfig.contextManagement;
+            delete tenexConfig.contextDiscovery;
             await config.saveTenexConfig(globalPath, tenexConfig);
             console.log(chalk.green("\n✓ Context management settings reset to defaults"));
             return;
@@ -177,6 +178,114 @@ export const contextManagementCommand = new Command("context-management")
             },
         ]);
 
+        const contextDiscovery = tenexConfig.contextDiscovery || {};
+        const discoveryAnswers = await inquirer.prompt([
+            {
+                type: "confirm",
+                name: "enabled",
+                message: "Enable proactive context discovery:",
+                default: contextDiscovery.enabled !== false,
+            },
+            {
+                type: "select",
+                name: "trigger",
+                message: "Run context discovery:",
+                choices: [
+                    { name: "When a conversation starts", value: "new-conversation" },
+                    { name: "Before every turn", value: "every-turn" },
+                ],
+                default: contextDiscovery.trigger ?? "new-conversation",
+                theme: inquirerTheme,
+            },
+            {
+                type: "input",
+                name: "timeoutMs",
+                message: "Context discovery hot-path timeout (ms):",
+                default: contextDiscovery.timeoutMs ?? 1200,
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num <= 0) {
+                        return "Please enter a positive number";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "maxQueries",
+                message: "Maximum discovery search queries:",
+                default: contextDiscovery.maxQueries ?? 4,
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num < 1 || num > 8) {
+                        return "Please enter a number from 1 to 8";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "maxHints",
+                message: "Maximum context hints to inject:",
+                default: contextDiscovery.maxHints ?? 5,
+                validate: (value) => {
+                    const num = Number.parseInt(value, 10);
+                    if (Number.isNaN(num) || num < 1 || num > 12) {
+                        return "Please enter a number from 1 to 12";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "minScore",
+                message: "Minimum relevance score (0-1):",
+                default: contextDiscovery.minScore ?? 0.45,
+                validate: (value) => {
+                    const num = Number.parseFloat(value);
+                    if (Number.isNaN(num) || num < 0 || num > 1) {
+                        return "Please enter a number from 0 to 1";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "input",
+                name: "sources",
+                message: "Discovery sources (comma-separated: conversations, lessons, rag):",
+                default: (contextDiscovery.sources || ["conversations", "lessons", "rag"]).join(", "),
+                validate: (value) => {
+                    const allowed = new Set(["conversations", "lessons", "rag"]);
+                    const sources = String(value)
+                        .split(",")
+                        .map((source) => source.trim())
+                        .filter(Boolean);
+                    if (sources.length === 0 || sources.some((source) => !allowed.has(source))) {
+                        return "Use one or more of: conversations, lessons, rag";
+                    }
+                    return true;
+                },
+            },
+            {
+                type: "confirm",
+                name: "usePlannerModel",
+                message: "Use the contextDiscovery model to plan searches:",
+                default: contextDiscovery.usePlannerModel ?? false,
+            },
+            {
+                type: "confirm",
+                name: "useRerankerModel",
+                message: "Use the contextDiscovery model to rerank hints:",
+                default: contextDiscovery.useRerankerModel ?? false,
+            },
+            {
+                type: "confirm",
+                name: "backgroundCompletionReminders",
+                message: "Surface late context discovery results on a later turn:",
+                default: contextDiscovery.backgroundCompletionReminders !== false,
+            },
+        ]);
+
         tenexConfig.contextManagement = {
             enabled: answers.enabled,
             tokenBudget: Number.parseInt(answers.tokenBudget, 10),
@@ -198,6 +307,23 @@ export const contextManagementCommand = new Command("context-management")
                 contextUtilizationReminder: strategyAnswers.contextUtilizationReminder,
                 contextWindowStatus: strategyAnswers.contextWindowStatus,
             },
+        };
+
+        tenexConfig.contextDiscovery = {
+            ...contextDiscovery,
+            enabled: discoveryAnswers.enabled,
+            trigger: discoveryAnswers.trigger,
+            timeoutMs: Number.parseInt(discoveryAnswers.timeoutMs, 10),
+            maxQueries: Number.parseInt(discoveryAnswers.maxQueries, 10),
+            maxHints: Number.parseInt(discoveryAnswers.maxHints, 10),
+            minScore: Number.parseFloat(discoveryAnswers.minScore),
+            sources: discoveryAnswers.sources
+                .split(",")
+                .map((source: string) => source.trim())
+                .filter((source: string) => source.length > 0) as Array<"conversations" | "lessons" | "rag">,
+            usePlannerModel: discoveryAnswers.usePlannerModel,
+            useRerankerModel: discoveryAnswers.useRerankerModel,
+            backgroundCompletionReminders: discoveryAnswers.backgroundCompletionReminders,
         };
 
         await config.saveTenexConfig(globalPath, tenexConfig);
