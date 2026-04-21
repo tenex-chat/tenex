@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## v0.8.0 (2025-10-01)
 - Version bump to 0.8.0
-- Added comprehensive RAG (Retrieval-Augmented Generation) tools using LanceDB
+- Added comprehensive RAG (Retrieval-Augmented Generation) tools using vector storage
 - Enhanced agent capabilities with semantic memory and knowledge persistence
 - Improved embedding provider configuration with `tenex setup embed` command
 - Refactored service architecture following clean code principles

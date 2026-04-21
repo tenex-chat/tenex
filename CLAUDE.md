@@ -191,7 +191,7 @@ export const rag_search = tool({
 // WRONG: Tool implements business logic directly
 export const rag_search = tool({
   execute: async ({ query }) => {
-    const db = await lancedb.connect();
+    const db = await connectVectorStore();
     // ... 100 lines of implementation
   }
 });

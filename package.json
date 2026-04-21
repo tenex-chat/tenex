@@ -55,7 +55,6 @@
     "@huggingface/transformers": "^3.8.1",
     "@inquirer/ansi": "^2.0.5",
     "@inquirer/core": "^11.1.8",
-    "@lancedb/lancedb": "^0.27.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@nostr-dev-kit/ndk": "3.0.3",
     "@openrouter/ai-sdk-provider": "^2.8.0",

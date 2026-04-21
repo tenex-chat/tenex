@@ -13,7 +13,7 @@ import { DEFAULT_VECTOR_STORE_CONFIG } from "./types";
 /**
  * Create a VectorStore instance based on configuration.
  * Uses dynamic imports to only load the configured provider.
- * Defaults to LanceDB if no config is provided.
+ * Defaults to SQLite-vec if no config is provided.
  */
 export async function createVectorStore(storeConfig?: VectorStoreConfig): Promise<VectorStore> {
     const resolvedConfig = storeConfig ?? DEFAULT_VECTOR_STORE_CONFIG;
@@ -21,10 +21,6 @@ export async function createVectorStore(storeConfig?: VectorStoreConfig): Promis
     logger.debug(`Creating vector store: ${resolvedConfig.provider}`);
 
     switch (resolvedConfig.provider) {
-        case "lancedb": {
-            const { LanceDBProvider } = await import("./LanceDBProvider");
-            return new LanceDBProvider(resolvedConfig);
-        }
         case "sqlite-vec": {
             const { SqliteVecProvider } = await import("./SqliteVecProvider");
             return new SqliteVecProvider(resolvedConfig);

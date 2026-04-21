@@ -5,7 +5,7 @@ import { loadVectorStoreConfig } from "./EmbeddingProviderFactory";
 import { createVectorStore } from "./providers";
 import type { VectorStore } from "./providers/types";
 import { RAGOperations } from "./RAGOperations";
-import type { BulkUpsertResult, LanceDBSchema, RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
+import type { BulkUpsertResult, RAGCollection, RAGCollectionSchema, RAGDocument, RAGQueryResult } from "./RAGOperations";
 
 /** Default maintenance interval: 2 hours */
 const MAINTENANCE_INTERVAL_MS = 2 * 60 * 60 * 1000;
@@ -111,7 +111,7 @@ export class RAGService {
 
     public async createCollection(
         name: string,
-        schema?: Partial<LanceDBSchema>
+        schema?: Partial<RAGCollectionSchema>
     ): Promise<RAGCollection> {
         await this.ensureInitialized();
         const collection = await this.operations.createCollection(name, schema);

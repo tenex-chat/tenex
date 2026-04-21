@@ -75,7 +75,7 @@ export class ConversationIndexingJob {
             projectsBasePath: this.projectsBasePath,
         });
 
-        // Defer first batch to avoid loading LanceDB + embedding model during
+        // Defer first batch to avoid loading the vector store + embedding model during
         // the startup burst. Concurrent heavy allocations cause JSC to
         // pre-allocate massive memory pools that are never released.
         this.scheduleNextBatch(this.intervalMs);
@@ -125,9 +125,8 @@ export class ConversationIndexingJob {
      * Run a single indexing batch.
      *
      * Collects all conversations needing re-indexing across all projects,
-     * builds RAGDocuments for each, then flushes them via bulkUpsert
-     * (mergeInsert). This creates one LanceDB version per chunk of
-     * BATCH_SIZE instead of 2N versions (delete+insert per conversation).
+     * builds RAGDocuments for each, then flushes them via bulkUpsert.
+     * Batching limits write amplification and keeps failures isolated.
      *
      * Failures are isolated per chunk: documents in a successful chunk are
      * marked indexed even when other chunks fail. Only truly failed

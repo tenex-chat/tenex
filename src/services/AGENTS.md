@@ -16,7 +16,7 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 
 - `dispatch/` — Chat routing, delegation handling (`AgentDispatchService`, `AgentRouter`)
 - `ral/` — Request-Agent Lifecycle state (`RALRegistry`)
-- `rag/` — LanceDB document ingestion and querying
+- `rag/` — Vector-store document ingestion and querying
 - `mcp/` — MCP server lifecycle management (`MCPManager` is single source of truth)
 - `agents/` — NDK agent discovery
 - `projects/` — Project context management

@@ -9,8 +9,8 @@ import * as path from "node:path";
 export function getRAGDataDir(): string {
     return (
         process.env.RAG_DATA_DIR ||
-        process.env.LANCEDB_DATA_DIR ||
-        path.join(config.getConfigPath("data"), "lancedb")
+        process.env.SQLITE_VEC_DATA_DIR ||
+        path.join(config.getConfigPath("data"), "sqlite-vec")
     );
 }
 

@@ -6,7 +6,7 @@
  *
  * Key features:
  * - Embeds conversation summaries (not individual messages - too expensive)
- * - Uses existing RAG infrastructure (LanceDB, embedding providers)
+ * - Uses existing RAG infrastructure (vector store, embedding providers)
  * - Supports hybrid search (semantic + keyword fallback)
  * - Project isolation: filters are applied DURING vector search (prefilter)
  * - Upsert semantics: re-indexing updates existing documents via bulkUpsert
@@ -307,7 +307,7 @@ export class ConversationEmbeddingService {
             return false;
         }
 
-        // Atomic upsert via mergeInsert — one LanceDB version per chunk
+        // Atomic bulk upsert through the configured vector store
         await this.ragService.bulkUpsert(CONVERSATION_COLLECTION, [result.document]);
 
         logger.debug(`Indexed conversation ${conversationId.substring(0, 8)} for project ${projectId}`);

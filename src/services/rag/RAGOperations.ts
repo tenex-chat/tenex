@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DocumentMetadata } from "@/services/rag/rag-utils";
 import { parseDocumentMetadata } from "@/services/rag/rag-utils";
 import { AGENT_PUBKEY_KEYS } from "@/utils/metadataKeys";
@@ -20,9 +21,9 @@ export interface RAGDocument {
 }
 
 /**
- * Schema definition for LanceDB collection
+ * Optional schema metadata for RAG collections.
  */
-export interface LanceDBSchema {
+export interface RAGCollectionSchema {
     id: string;
     content: string;
     vector: string;
@@ -37,7 +38,7 @@ export interface LanceDBSchema {
  */
 export interface RAGCollection {
     name: string;
-    schema?: LanceDBSchema;
+    schema?: RAGCollectionSchema;
     created_at: number;
     updated_at: number;
 }
@@ -94,7 +95,7 @@ export class RAGOperations {
      */
     async createCollection(
         name: string,
-        _customSchema?: Partial<LanceDBSchema>
+        _customSchema?: Partial<RAGCollectionSchema>
     ): Promise<RAGCollection> {
         this.validateCollectionName(name);
 
@@ -130,7 +131,7 @@ export class RAGOperations {
         try {
             for (let i = 0; i < documents.length; i += RAGOperations.BATCH_SIZE) {
                 const batch = documents.slice(i, i + RAGOperations.BATCH_SIZE);
-                const processedDocs = await this.processBatch(batch);
+                const processedDocs = await this.processBatch(collectionName, batch, i);
                 await this.vectorStore.addDocuments(collectionName, processedDocs);
 
                 logger.debug(
@@ -152,13 +153,28 @@ export class RAGOperations {
     /**
      * Process a batch of documents for insertion
      */
-    private async processBatch(documents: RAGDocument[]): Promise<StoredDocument[]> {
+    private async processBatch(
+        collectionName: string,
+        documents: RAGDocument[],
+        startIndex: number
+    ): Promise<StoredDocument[]> {
         const results: StoredDocument[] = [];
 
-        for (const doc of documents) {
+        for (const [offset, doc] of documents.entries()) {
             this.validateDocument(doc);
 
-            const vector = doc.vector || (await this.embeddingProvider.embed(doc.content));
+            let vector: Float32Array;
+            try {
+                vector = doc.vector || (await this.embeddingProvider.embed(doc.content));
+            } catch (error) {
+                logger.error("Failed to embed RAG document", {
+                    collectionName,
+                    batchIndex: startIndex + offset,
+                    document: this.getDocumentEmbeddingDiagnostic(doc),
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                throw error;
+            }
 
             results.push({
                 id: doc.id || this.generateDocumentId(),
@@ -334,7 +350,7 @@ export class RAGOperations {
             const batch = documents.slice(i, chunkEnd);
 
             try {
-                const processedDocs = await this.processBatch(batch);
+                const processedDocs = await this.processBatch(collectionName, batch, i);
                 const result = await this.vectorStore.upsertDocuments(collectionName, processedDocs);
                 totalUpserted += result.upsertedCount;
 
@@ -364,6 +380,21 @@ export class RAGOperations {
 
     private generateDocumentId(): string {
         return `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    private getDocumentEmbeddingDiagnostic(doc: RAGDocument): Record<string, unknown> {
+        const content = doc.content;
+        return {
+            id: doc.id,
+            source: doc.source,
+            timestamp: doc.timestamp,
+            contentChars: content.length,
+            contentBytes: Buffer.byteLength(content, "utf8"),
+            contentLines: content.length === 0 ? 0 : content.split("\n").length,
+            contentSha256: createHash("sha256").update(content).digest("hex"),
+            metadata: doc.metadata,
+            hasPrecomputedVector: Boolean(doc.vector),
+        };
     }
 
     private validateCollectionName(name: string): void {

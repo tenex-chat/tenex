@@ -114,7 +114,7 @@ ConversationEmbeddingService (builds documents)
   ↓
 RAGService (stores in vector DB)
   ↓
-Vector Store (LanceDB/Qdrant/SQLite-vec)
+Vector Store (SQLite-vec/Qdrant)
 ```
 
 ### Key Files
@@ -185,6 +185,6 @@ Supported providers:
 - OpenRouter (various models)
 - Local providers (via MCP)
 
-Vector store configured via environment or config:
-- `TENEX_VECTOR_STORE`: `lancedb` (default), `qdrant`, or `sqlite-vec`
-- `TENEX_QDRANT_URL`: Qdrant server URL (if using Qdrant)
+Vector store configuration is read from the `vectorStore` field in `embed.json`:
+- `provider`: `sqlite-vec` (default) or `qdrant`
+- `url`: Qdrant server URL (if using Qdrant)
