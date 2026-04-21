@@ -100,6 +100,9 @@ Design rules:
 - Use append-only JSONL journals for high-churn state transitions, then compact
   to JSON snapshots when needed.
 - Use per-file or per-directory lockfiles for cross-process writers.
+- Keep status and diagnostics reads non-mutating. Repair or maintenance actions
+  should be explicit Rust library calls, then exposed through daemon lifecycle
+  hooks or operator commands such as `doctor`, not hidden inside status reads.
 - Prefer one logical writer per state namespace. If Rust owns RAL scheduling,
   workers should report transitions to Rust or use a Rust-defined file bridge,
   not independently invent scheduling decisions.
@@ -976,6 +979,11 @@ Current status:
   memory state. The diagnostic JSON carries a schema version, inspection
   timestamp, and compact request/event references, and is pinned in the shared
   publish-outbox compatibility fixture.
+- Rust now has a filesystem-only publish-outbox maintenance pass that snapshots
+  diagnostics, requeues due failed records, drains pending records through the
+  publisher interface, and snapshots diagnostics again. The API is library-first
+  so daemon startup, periodic maintenance, and a future `doctor` repair command
+  can all invoke the same behavior without making `daemon status` mutating.
 - The TypeScript bridge has focused unit coverage for the framed dispatch path:
   spawn arguments, execute-frame construction, parent publish handling,
   `publish_result` replies, RAL cleanup on completion, and parent RAL

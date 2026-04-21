@@ -131,6 +131,14 @@ pub struct PublishOutboxRequeueOutcome {
     pub target_path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishOutboxMaintenanceReport {
+    pub diagnostics_before: PublishOutboxDiagnostics,
+    pub requeued: Vec<PublishOutboxRequeueOutcome>,
+    pub drained: Vec<PublishOutboxDrainOutcome>,
+    pub diagnostics_after: PublishOutboxDiagnostics,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishOutboxFailureDiagnostic {
@@ -597,6 +605,40 @@ pub fn requeue_due_failed_publish_outbox_records(
     }
 
     Ok(outcomes)
+}
+
+pub fn run_publish_outbox_maintenance<P: PublishOutboxRelayPublisher>(
+    daemon_dir: impl AsRef<Path>,
+    publisher: &mut P,
+    now: u64,
+) -> PublishOutboxResult<PublishOutboxMaintenanceReport> {
+    run_publish_outbox_maintenance_with_retry_policy(
+        daemon_dir,
+        publisher,
+        now,
+        PublishOutboxRetryPolicy::default(),
+    )
+}
+
+pub fn run_publish_outbox_maintenance_with_retry_policy<P: PublishOutboxRelayPublisher>(
+    daemon_dir: impl AsRef<Path>,
+    publisher: &mut P,
+    now: u64,
+    retry_policy: PublishOutboxRetryPolicy,
+) -> PublishOutboxResult<PublishOutboxMaintenanceReport> {
+    let daemon_dir = daemon_dir.as_ref();
+    let diagnostics_before = inspect_publish_outbox(daemon_dir, now)?;
+    let requeued = requeue_due_failed_publish_outbox_records(daemon_dir, now)?;
+    let drained =
+        drain_pending_publish_outbox_with_retry_policy(daemon_dir, publisher, now, retry_policy)?;
+    let diagnostics_after = inspect_publish_outbox(daemon_dir, now)?;
+
+    Ok(PublishOutboxMaintenanceReport {
+        diagnostics_before,
+        requeued,
+        drained,
+        diagnostics_after,
+    })
 }
 
 fn list_record_paths(dir: PathBuf) -> PublishOutboxResult<Vec<PathBuf>> {
@@ -1617,6 +1659,162 @@ mod tests {
             PublishRelayAttemptStatus::Published
         );
         assert_eq!(published.attempts[1].next_attempt_at, None);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn maintenance_requeues_due_failed_records_and_drains_pending() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut failing_publisher = MockRelayPublisher::new(vec![Err(PublishRelayError {
+            message: "relay connection failed".to_string(),
+            retryable: true,
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut failing_publisher, 1710001000200)
+            .expect("pending outbox drain must fail into failed dir");
+
+        let mut succeeding_publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: true,
+                message: Some("ok".to_string()),
+            }],
+        })]);
+
+        let report =
+            run_publish_outbox_maintenance(&daemon_dir, &mut succeeding_publisher, 1710001001200)
+                .expect("maintenance pass must succeed");
+
+        assert_eq!(report.diagnostics_before.pending_count, 0);
+        assert_eq!(report.diagnostics_before.failed_count, 1);
+        assert_eq!(report.diagnostics_before.retry_due_count, 1);
+        assert_eq!(report.requeued.len(), 1);
+        assert_eq!(report.requeued[0].event_id, fixture.signed.id);
+        assert_eq!(report.requeued[0].status, PublishOutboxStatus::Accepted);
+        assert_eq!(report.drained.len(), 1);
+        assert_eq!(report.drained[0].event_id, fixture.signed.id);
+        assert_eq!(report.drained[0].status, PublishOutboxStatus::Published);
+        assert_eq!(report.diagnostics_after.pending_count, 0);
+        assert_eq!(report.diagnostics_after.failed_count, 0);
+        assert_eq!(report.diagnostics_after.published_count, 1);
+        assert_eq!(report.diagnostics_after.retry_due_count, 0);
+        assert_eq!(report.diagnostics_after.latest_failure, None);
+        assert_eq!(succeeding_publisher.published_events.len(), 1);
+        assert_eq!(succeeding_publisher.published_events[0], fixture.signed);
+
+        let published = read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+            .expect("published record read must succeed")
+            .expect("published record must exist");
+        assert_eq!(published.status, PublishOutboxStatus::Published);
+        assert_eq!(published.attempts.len(), 2);
+        assert_eq!(
+            published.attempts[0].status,
+            PublishRelayAttemptStatus::Failed
+        );
+        assert_eq!(
+            published.attempts[1].status,
+            PublishRelayAttemptStatus::Published
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn maintenance_leaves_future_retry_failed_records_in_place() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut failing_publisher = MockRelayPublisher::new(vec![Err(PublishRelayError {
+            message: "relay connection failed".to_string(),
+            retryable: true,
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut failing_publisher, 1710001000200)
+            .expect("pending outbox drain must fail into failed dir");
+
+        let mut unused_publisher = MockRelayPublisher::new(vec![]);
+        let report =
+            run_publish_outbox_maintenance(&daemon_dir, &mut unused_publisher, 1710001001199)
+                .expect("maintenance pass must succeed");
+
+        assert_eq!(report.diagnostics_before.failed_count, 1);
+        assert_eq!(report.diagnostics_before.retry_due_count, 0);
+        assert_eq!(report.diagnostics_before.next_retry_at, Some(1710001001200));
+        assert!(report.requeued.is_empty());
+        assert!(report.drained.is_empty());
+        assert_eq!(report.diagnostics_after.failed_count, 1);
+        assert_eq!(report.diagnostics_after.retry_due_count, 0);
+        assert_eq!(unused_publisher.published_events.len(), 0);
+        assert!(
+            read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("failed record read must succeed")
+                .is_some()
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn maintenance_removes_stale_failed_record_when_event_is_already_published() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let message = publish_request_message(&fixture, 41, 1710001000000);
+        accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: true,
+                message: Some("ok".to_string()),
+            }],
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("pending outbox drain must publish");
+
+        let mut stale_failed =
+            read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("published record read must succeed")
+                .expect("published record must exist");
+        stale_failed.status = PublishOutboxStatus::Failed;
+        stale_failed.attempts.push(PublishRelayAttempt {
+            attempted_at: 1710001000300,
+            status: PublishRelayAttemptStatus::Failed,
+            relay_results: Vec::new(),
+            error: Some("stale retry marker".to_string()),
+            retryable: true,
+            next_attempt_at: Some(1710001001200),
+        });
+        write_test_record(
+            failed_publish_outbox_record_path(&daemon_dir, &fixture.signed.id),
+            &stale_failed,
+        );
+
+        let mut unused_publisher = MockRelayPublisher::new(vec![]);
+        let report =
+            run_publish_outbox_maintenance(&daemon_dir, &mut unused_publisher, 1710001001200)
+                .expect("maintenance pass must clean stale failed source");
+
+        assert_eq!(report.diagnostics_before.published_count, 1);
+        assert_eq!(report.diagnostics_before.failed_count, 1);
+        assert_eq!(report.diagnostics_before.retry_due_count, 1);
+        assert_eq!(report.requeued.len(), 1);
+        assert_eq!(report.requeued[0].event_id, fixture.signed.id);
+        assert_eq!(report.requeued[0].status, PublishOutboxStatus::Published);
+        assert!(report.drained.is_empty());
+        assert_eq!(report.diagnostics_after.published_count, 1);
+        assert_eq!(report.diagnostics_after.failed_count, 0);
+        assert_eq!(report.diagnostics_after.retry_due_count, 0);
+        assert_eq!(unused_publisher.published_events.len(), 0);
+        assert!(
+            read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("failed record read must succeed")
+                .is_none()
+        );
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

@@ -367,6 +367,10 @@ Current implementation status:
   tmp-file, oldest pending, next retry, and latest failure fields. The
   diagnostic shape is versioned and pinned in the shared Bun/Rust
   publish-outbox compatibility fixture.
+- Rust exposes a library-first publish-outbox maintenance pass that inspects
+  before state, requeues due failed records, drains pending records through the
+  publisher interface, and inspects after state. This is the canonical behavior
+  for future startup hooks, periodic maintenance, and operator repair commands.
 - `crates/tenex-daemon/src/relay_publisher.rs` provides the first Rust relay
   publisher implementation. It preserves the existing TypeScript default relay
   and `RELAYS` comma-list semantics, sends exact signed `["EVENT", event]`
@@ -660,6 +664,9 @@ Scope:
   `publish-outbox/published/` or `publish-outbox/failed/` with attempt metadata.
 - Record retry schedules on retryable failures and requeue due failed records
   from the filesystem on daemon startup or periodic maintenance.
+- Use the same Rust maintenance API for daemon startup, periodic maintenance,
+  and any future `doctor` repair command. Keep status/diagnostic reads
+  read-only.
 - Preserve one global owner for each outbox event ID across pending, published,
   and failed states so duplicate worker publish requests cannot bypass retry
   timing or cause duplicate relay side effects.
@@ -713,6 +720,9 @@ Quality gates:
 - Publish diagnostics can be rebuilt from the filesystem after restart and
   distinguish retryable failures, due retries, permanent failures, and orphaned
   temp files while exposing only compact request/event references.
+- A maintenance pass can requeue due failed records and publish them in the same
+  run, leave future retries untouched without calling the publisher, and remove
+  stale duplicate failed records when the same event is already published.
 - No scenario publishes both a direct worker relay event and a Rust-relayed copy
   of the same event.
 - Relay round-trip tests pass for every Rust-published event kind in scope.
