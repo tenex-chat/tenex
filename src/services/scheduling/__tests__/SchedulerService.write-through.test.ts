@@ -34,21 +34,10 @@ vi.mock("@/lib/fs/filesystem", () => ({
     directoryExists: vi.fn().mockResolvedValue(false),
 }));
 
-// Control config paths
-vi.mock("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: vi.fn().mockImplementation((sub?: string) =>
-            sub ? `/fake-config/${sub}` : "/fake-config"
-        ),
-        getProjectMetadataPath: vi.fn().mockImplementation((projectId: string) =>
-            `/fake-config/projects/${projectId}`
-        ),
-    },
-}));
-
 // Import after mocking
 import { logger } from "@/utils/logger";
 import { fileExists, readJsonFile, writeJsonFile } from "@/lib/fs/filesystem";
+import { config } from "@/services/ConfigService";
 import { SchedulerService } from "../SchedulerService";
 
 const mockFileExists = fileExists as ReturnType<typeof vi.fn>;
@@ -86,6 +75,13 @@ describe("SchedulerService Write-Through", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+
+        vi.spyOn(config, "getConfigPath").mockImplementation((sub?: string) =>
+            sub ? `/fake-config/${sub}` : "/fake-config"
+        );
+        vi.spyOn(config, "getProjectMetadataPath").mockImplementation((projectId: string) =>
+            `/fake-config/projects/${projectId}`
+        );
 
         // Reset singleton state between tests
         const instance = SchedulerService.getInstance();

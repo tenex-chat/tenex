@@ -800,7 +800,7 @@ describe("SkillService", () => {
         const result = await SkillService.getInstance().fetchSkills(["d".repeat(64)]);
 
         expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].identifier).toBe("dddddddddddddddddd");
+        expect(result.skills[0].identifier).toBe("dddddddddd");
     });
 
     it("fetchSkill returns only kind:4202 skill events", async () => {

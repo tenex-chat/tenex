@@ -48,10 +48,21 @@ mock.module("@/utils/logger", () => ({
     logger: {
         info: () => {},
         warn: () => {},
+        warning: () => {},
         error: () => {},
         debug: () => {},
+        success: () => {},
+        isLevelEnabled: () => false,
+        initDaemonLogging: async () => undefined,
+        writeToWarnLog: () => undefined,
     },
 }));
+
+const noopContext = {
+    getValue: (_key: symbol) => undefined,
+    setValue: (_key: symbol, _value: unknown) => noopContext,
+    deleteValue: (_key: symbol) => noopContext,
+};
 
 mock.module("@opentelemetry/api", () => ({
     SpanStatusCode: {
@@ -82,8 +93,16 @@ mock.module("@opentelemetry/api", () => ({
                     activeSpan = previousSpan;
                 }
             },
+            startSpan: (name: string, options?: { attributes?: Record<string, unknown> }) =>
+                createSpan(name, options?.attributes),
         }),
     },
+    context: {
+        active: () => noopContext,
+        with: async (_context: unknown, fn: () => unknown) => await fn(),
+        bind: <T>(target: T) => target,
+    },
+    ROOT_CONTEXT: noopContext,
 }));
 
 describe("TelegramBotClient telemetry", () => {
@@ -151,7 +170,7 @@ describe("TelegramBotClient telemetry", () => {
                     result: {
                         message_id: 55,
                         date: 123,
-                        chat: { id: 1001, type: "private" },
+                        chat: { id: -1001, type: "supergroup" },
                         message_thread_id: 9,
                     },
                 }),
@@ -165,7 +184,7 @@ describe("TelegramBotClient telemetry", () => {
         });
 
         await client.sendMessage({
-            chatId: "1001",
+            chatId: "-1001",
             text: "hello",
             replyToMessageId: "7",
             messageThreadId: "9",
@@ -174,7 +193,7 @@ describe("TelegramBotClient telemetry", () => {
         const span = spans[0];
         expect(span?.name).toBe("tenex.telegram.api.sendMessage");
         expect(span?.attributes["telegram.sent_message.id"]).toBe("55");
-        expect(span?.attributes["telegram.chat.id"]).toBe("1001");
+        expect(span?.attributes["telegram.chat.id"]).toBe("-1001");
         expect(span?.attributes["telegram.chat.thread_id"]).toBe("9");
         expect(String(span?.events[0]?.attributes["telegram.api.request.body"])).toContain("\"reply_to_message_id\":7");
         expect(span?.ended).toBe(true);

@@ -7,6 +7,26 @@ mock.module("@opentelemetry/api", () => ({
     trace: {
         getActiveSpan: () => ({
             addEvent,
+            setAttribute: () => undefined,
+            setStatus: () => undefined,
+            end: () => undefined,
+            recordException: () => undefined,
+        }),
+        getTracer: () => ({
+            startSpan: () => ({
+                end: () => undefined,
+                setAttribute: () => undefined,
+                setStatus: () => undefined,
+                addEvent: () => undefined,
+                recordException: () => undefined,
+            }),
+            startActiveSpan: (_name: string, fn: (span: unknown) => unknown) => fn({
+                end: () => undefined,
+                setAttribute: () => undefined,
+                setStatus: () => undefined,
+                addEvent: () => undefined,
+                recordException: () => undefined,
+            }),
         }),
     },
 }));

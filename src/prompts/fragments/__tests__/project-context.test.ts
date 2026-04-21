@@ -1,29 +1,10 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { config } from "@/services/ConfigService";
 import { projectContextFragment } from "../08-project-context";
-
-mock.module("@/services/ingress/TransportBindingStoreService", () => ({
-    getTransportBindingStore: () => ({
-        listBindingsForAgentProject: () => [],
-    }),
-}));
-
-mock.module("@/services/identity", () => ({
-    getIdentityBindingStore: () => ({
-        getBinding: () => undefined,
-    }),
-}));
-
-mock.module("@/services/telegram/TelegramChatContextStoreService", () => ({
-    getTelegramChatContextStore: () => ({
-        getContext: () => undefined,
-    }),
-}));
-
-mock.module("@/utils/git/worktree", () => ({
-    listWorktrees: async () => [],
-    loadWorktreeMetadata: async () => ({}),
-}));
+import * as transportModule from "@/services/ingress/TransportBindingStoreService";
+import * as identityModule from "@/services/identity";
+import * as telegramChatContextModule from "@/services/telegram/TelegramChatContextStoreService";
+import * as worktreeModule from "@/utils/git/worktree";
 
 mock.module("@/utils/logger", () => ({
     logger: {
@@ -37,6 +18,17 @@ mock.module("@/utils/logger", () => ({
 describe("project-context fragment — $PROJECT_BASE path rendering", () => {
     beforeEach(() => {
         spyOn(config, "getConfigPath").mockReturnValue("/tenex/projects");
+        spyOn(transportModule, "getTransportBindingStore").mockReturnValue({
+            listBindingsForAgentProject: () => [],
+        } as any);
+        spyOn(identityModule, "getIdentityBindingStore").mockReturnValue({
+            getBinding: () => undefined,
+        } as any);
+        spyOn(telegramChatContextModule, "getTelegramChatContextStore").mockReturnValue({
+            getContext: () => undefined,
+        } as any);
+        spyOn(worktreeModule, "listWorktrees").mockResolvedValue([]);
+        spyOn(worktreeModule, "loadWorktreeMetadata").mockResolvedValue({} as any);
     });
 
     const mockAgent = {

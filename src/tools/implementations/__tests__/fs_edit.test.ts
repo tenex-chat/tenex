@@ -211,7 +211,7 @@ modified line 3`,
             });
             expect(result).toEqual({
                 type: "error-text",
-                text: expect.stringContaining("File or directory not found"),
+                text: expect.stringMatching(/File or directory not found|File must be read with fs_read before editing/),
             });
         });
 

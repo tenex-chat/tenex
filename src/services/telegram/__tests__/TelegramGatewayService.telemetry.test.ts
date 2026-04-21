@@ -53,10 +53,21 @@ mock.module("@/utils/logger", () => ({
     logger: {
         info: () => {},
         warn: () => {},
+        warning: () => {},
         error: () => {},
         debug: () => {},
+        success: () => {},
+        isLevelEnabled: () => false,
+        initDaemonLogging: async () => undefined,
+        writeToWarnLog: () => undefined,
     },
 }));
+
+const noopContext = {
+    getValue: (_key: symbol) => undefined,
+    setValue: (_key: symbol, _value: unknown) => noopContext,
+    deleteValue: (_key: symbol) => noopContext,
+};
 
 mock.module("@opentelemetry/api", () => ({
     SpanStatusCode: {
@@ -90,14 +101,14 @@ mock.module("@opentelemetry/api", () => ({
             startSpan: (name: string, options?: { attributes?: Record<string, unknown> }) =>
                 createSpan(name, options?.attributes),
         }),
-        setSpan: () => ({}),
+        setSpan: () => noopContext,
     },
     context: {
-        active: () => ({}),
+        active: () => noopContext,
         with: async (_context: unknown, fn: () => unknown) => await fn(),
         bind: <T>(target: T) => target,
     },
-    ROOT_CONTEXT: {},
+    ROOT_CONTEXT: noopContext,
 }));
 
 function createProjectContext(agent: any) {

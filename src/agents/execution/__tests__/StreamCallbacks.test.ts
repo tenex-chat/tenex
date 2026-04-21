@@ -3,6 +3,8 @@ import { config } from "@/services/ConfigService";
 import { SkillService, SkillWhitelistService } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { RALRegistry } from "@/services/ral";
+import { projectContextStore } from "@/services/projects/ProjectContextStore";
+import * as systemReminderContextModule from "@/llm/system-reminder-context";
 
 const fetchSkillsMock = mock(async (skillIds: string[]) => ({
     skills: skillIds.map((identifier) => ({
@@ -14,13 +16,15 @@ const fetchSkillsMock = mock(async (skillIds: string[]) => ({
     toolPermissions: {},
 }));
 const listAvailableSkillsMock = mock(async () => []);
-const getProjectContextMock = mock(() => ({
+
+const testProjectContext = {
     project: {
         dTag: "project-1",
         tagValue: (name: string) => (name === "d" ? "project-1" : undefined),
     },
     agents: new Map(),
-}));
+    getProjectAgentRuntimeInfo: () => [],
+} as any;
 const buildPromptHistoryMessagesMock = mock(() => ({
     messages: [],
     didMutateHistory: false,
@@ -39,18 +43,6 @@ const systemReminderContext = {
 const messageSyncerModulePath = new URL("../MessageSyncer.ts", import.meta.url).pathname;
 const promptHistoryModulePath = new URL("../prompt-history.ts", import.meta.url).pathname;
 const requestPreparationModulePath = new URL("../request-preparation.ts", import.meta.url).pathname;
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: getProjectContextMock,
-}));
-
-mock.module("@/llm/system-reminder-context", () => ({
-    getSystemReminderContext: () => systemReminderContext,
-}));
-
-mock.module("@/tools/registry", () => ({
-    HOME_FS_FALLBACKS: [],
-}));
 
 mock.module(messageSyncerModulePath, () => ({
     MessageSyncer: class {
@@ -83,6 +75,9 @@ describe("StreamCallbacks blocked skills", () => {
     });
 
     beforeEach(() => {
+        spyOn(systemReminderContextModule, "getSystemReminderContext").mockReturnValue(
+            systemReminderContext as ReturnType<typeof systemReminderContextModule.getSystemReminderContext>
+        );
         spyOn(RALRegistry, "getInstance").mockReturnValue({
             getAndConsumeInjections: () => [],
             getAndConsumeHeuristicViolations: () => [],
@@ -97,7 +92,6 @@ describe("StreamCallbacks blocked skills", () => {
         conversationStore = createConversationStoreStub();
         listAvailableSkillsMock.mockClear();
         fetchSkillsMock.mockClear();
-        getProjectContextMock.mockClear();
         buildPromptHistoryMessagesMock.mockClear();
         prepareLLMRequestMock.mockClear();
         messageSyncerSpy.mockClear();
@@ -129,11 +123,13 @@ describe("StreamCallbacks blocked skills", () => {
             modelState: createModelStateStub(),
         });
 
-        await callback({
-            messages: [],
-            stepNumber: 2,
-            steps: [],
-        });
+        await projectContextStore.run(testProjectContext, () =>
+            callback({
+                messages: [],
+                stepNumber: 2,
+                steps: [],
+            })
+        );
 
         expect(fetchSkillsMock).toHaveBeenCalledWith(["allowed-skill"], expect.any(Object));
         expect(warnSpy).toHaveBeenCalledWith(
@@ -161,11 +157,13 @@ describe("StreamCallbacks blocked skills", () => {
             modelState: createModelStateStub(),
         });
 
-        await callback({
-            messages: [],
-            stepNumber: 2,
-            steps: [],
-        });
+        await projectContextStore.run(testProjectContext, () =>
+            callback({
+                messages: [],
+                stepNumber: 2,
+                steps: [],
+            })
+        );
 
         expect(fetchSkillsMock).toHaveBeenCalledWith(["allowed-skill"], expect.any(Object));
         expect(warnSpy).not.toHaveBeenCalled();
@@ -196,11 +194,13 @@ describe("StreamCallbacks blocked skills", () => {
             modelState: createModelStateStub(),
         });
 
-        await callback({
-            messages: [],
-            stepNumber: 2,
-            steps: [],
-        });
+        await projectContextStore.run(testProjectContext, () =>
+            callback({
+                messages: [],
+                stepNumber: 2,
+                steps: [],
+            })
+        );
 
         expect(fetchSkillsMock).not.toHaveBeenCalled();
         expect(warnSpy).toHaveBeenCalledWith(
@@ -219,6 +219,7 @@ function createConversationStoreStub() {
         getSelfAppliedSkillIds: mock(() => [] as string[]),
         getMetaModelVariantOverride: mock(() => undefined as string | undefined),
         getContextManagementReminderState: mock(() => undefined),
+        isAgentPromptHistoryCacheAnchored: mock(() => false),
         save: mock(async () => undefined),
     };
 }

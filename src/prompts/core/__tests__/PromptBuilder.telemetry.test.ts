@@ -26,6 +26,9 @@ function createSpan(name: string) {
         addEvent: (eventName: string, eventAttributes: Record<string, unknown>) => {
             span.events.push({ name: eventName, attributes: { ...eventAttributes } });
         },
+        setAttribute: (key: string, value: unknown) => {
+            span.attributes[key] = value;
+        },
         setAttributes: (nextAttributes: Record<string, unknown>) => {
             Object.assign(span.attributes, nextAttributes);
         },
@@ -45,6 +48,12 @@ function createSpan(name: string) {
         }),
     };
 }
+
+const noopContext = {
+    getValue: (_key: symbol) => undefined,
+    setValue: (_key: symbol, _value: unknown) => noopContext,
+    deleteValue: (_key: symbol) => noopContext,
+};
 
 mock.module("@opentelemetry/api", () => ({
     SpanStatusCode: {
@@ -72,8 +81,15 @@ mock.module("@opentelemetry/api", () => ({
                     activeSpan = previousSpan;
                 }
             },
+            startSpan: (name: string) => createSpan(name),
         }),
     },
+    context: {
+        active: () => noopContext,
+        with: (_ctx: unknown, fn: () => unknown) => fn(),
+        bind: <T>(target: T) => target,
+    },
+    ROOT_CONTEXT: noopContext,
 }));
 
 describe("PromptBuilder telemetry", () => {

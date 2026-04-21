@@ -60,6 +60,7 @@ describe("PostCompletionChecker - True Integration Test", () => {
                 tagReference: () => ["a", "31933:testpubkey:test-project"],
             },
             agents: new Map(),
+            getProjectAgentRuntimeInfo: () => [],
         } as ReturnType<typeof projectServices.getProjectContext>);
         buildSystemPromptMessagesSpy = spyOn(
             systemPromptBuilderModule,

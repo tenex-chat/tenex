@@ -4,31 +4,11 @@ import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { SchedulerService } from "@/services/scheduling";
 import { RAGService } from "@/services/rag/RAGService";
-
-const addedFragments: Array<{ id: string; args: any }> = [];
-let currentProjectContext: any;
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => currentProjectContext,
-}));
-
-mock.module("@/services/ingress/TransportBindingStoreService", () => ({
-    getTransportBindingStore: () => ({
-        listBindingsForAgentProject: () => [],
-    }),
-}));
-
-mock.module("@/services/identity", () => ({
-    getIdentityBindingStore: () => ({
-        getBinding: () => undefined,
-    }),
-}));
-
-mock.module("@/services/telegram/TelegramChatContextStoreService", () => ({
-    getTelegramChatContextStore: () => ({
-        getContext: () => undefined,
-    }),
-}));
+import { projectContextStore } from "@/services/projects";
+import * as transportModule from "@/services/ingress/TransportBindingStoreService";
+import * as identityModule from "@/services/identity";
+import * as telegramChatContextModule from "@/services/telegram/TelegramChatContextStoreService";
+import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 
 mock.module("@/utils/logger", () => ({
     logger: {
@@ -39,7 +19,17 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
+const addedFragments: Array<{ id: string; args: any }> = [];
+let currentProjectContext: any;
+
+/** Run buildSystemPromptMessages inside the current test's project context */
+async function build(
+    opts: Parameters<typeof buildSystemPromptMessages>[0]
+): Promise<ReturnType<typeof buildSystemPromptMessages>> {
+    return projectContextStore.run(currentProjectContext, () =>
+        buildSystemPromptMessages(opts)
+    );
+}
 
 describe("systemPromptBuilder", () => {
     let agent: AgentInstance;
@@ -47,6 +37,15 @@ describe("systemPromptBuilder", () => {
     let conversation: any;
 
     beforeEach(() => {
+        spyOn(transportModule, "getTransportBindingStore").mockReturnValue({
+            listBindingsForAgentProject: () => [],
+        } as any);
+        spyOn(identityModule, "getIdentityBindingStore").mockReturnValue({
+            getBinding: () => undefined,
+        } as any);
+        spyOn(telegramChatContextModule, "getTelegramChatContextStore").mockReturnValue({
+            getContext: () => undefined,
+        } as any);
         spyOn(SchedulerService, "getInstance").mockReturnValue({
             getTasks: async () => [],
         } as any);
@@ -103,7 +102,7 @@ describe("systemPromptBuilder", () => {
             },
         };
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -125,7 +124,7 @@ describe("systemPromptBuilder", () => {
     it("falls back to base instructions when no runtime registry exists", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -141,7 +140,7 @@ describe("systemPromptBuilder", () => {
     it("does not add cross-project fragments to the main prompt", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -153,7 +152,7 @@ describe("systemPromptBuilder", () => {
     it("only adds no-response guidance for Telegram-triggered turns", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -163,7 +162,7 @@ describe("systemPromptBuilder", () => {
 
         addedFragments.length = 0;
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -178,7 +177,7 @@ describe("systemPromptBuilder", () => {
     it("includes domain-expert-guidance fragment for domain-expert agents", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -194,7 +193,7 @@ describe("systemPromptBuilder", () => {
         for (const category of ["orchestrator", "worker"] as const) {
             addedFragments.length = 0;
 
-            await buildSystemPromptMessages({
+            await build({
                 agent,
                 project,
                 conversation,
@@ -208,7 +207,7 @@ describe("systemPromptBuilder", () => {
     it("does not include domain-expert-guidance fragment when agentCategory is undefined", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -220,7 +219,7 @@ describe("systemPromptBuilder", () => {
     it("includes orchestrator-delegation-guidance fragment for orchestrator agents", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -236,7 +235,7 @@ describe("systemPromptBuilder", () => {
         for (const category of ["worker", "reviewer", "domain-expert", undefined] as const) {
             addedFragments.length = 0;
 
-            await buildSystemPromptMessages({
+            await build({
                 agent,
                 project,
                 conversation,
@@ -250,7 +249,7 @@ describe("systemPromptBuilder", () => {
     it("does not include delegation-tips or todo-before-delegation for domain-expert agents", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
+        await build({
             agent,
             project,
             conversation,
@@ -267,7 +266,7 @@ describe("systemPromptBuilder", () => {
         for (const category of ["worker", "orchestrator", "reviewer", undefined] as const) {
             addedFragments.length = 0;
 
-            await buildSystemPromptMessages({
+            await build({
                 agent,
                 project,
                 conversation,

@@ -1,6 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { FullRuntimeContext } from "../types";
 import { RALRegistry } from "@/services/ral";
+import { projectContextStore } from "@/services/projects/ProjectContextStore";
+import * as systemReminderContextModule from "@/llm/system-reminder-context";
+import * as toolsRegistryModule from "@/tools/registry";
 
 const checkPreToolMock = mock(async () => ({ hasViolation: false }));
 const markHeuristicEnforcedMock = mock(() => undefined);
@@ -23,31 +26,25 @@ mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages: buildSystemPromptMessagesMock,
 }));
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagValue: mock(() => "project-1"),
-        },
-        agents: new Map(),
-    })),
-}));
-
-mock.module("@/tools/registry", () => ({
-    getToolsObject: getToolsObjectMock,
-}));
-
-mock.module("@/llm/system-reminder-context", () => ({
-    getSystemReminderContext: () => ({
-        queue: queueSystemReminderMock,
-    }),
-}));
+const testProjectContext = {
+    project: {
+        tagValue: () => "project-1",
+    },
+    agents: new Map(),
+    getProjectAgentRuntimeInfo: () => [],
+} as any;
 
 mock.module("@/utils/logger", () => ({
     logger: {
-        debug: mock(() => undefined),
-        info: mock(() => undefined),
-        warn: mock(() => undefined),
-        error: mock(() => undefined),
+        debug: () => undefined,
+        info: () => undefined,
+        warn: () => undefined,
+        warning: () => undefined,
+        error: () => undefined,
+        success: () => undefined,
+        isLevelEnabled: () => false,
+        initDaemonLogging: async () => undefined,
+        writeToWarnLog: () => undefined,
     },
 }));
 
@@ -59,6 +56,13 @@ describe("ToolSupervisionWrapper", () => {
     });
 
     beforeEach(() => {
+        spyOn(toolsRegistryModule, "getToolsObject").mockReturnValue({} as any);
+        spyOn(systemReminderContextModule, "getSystemReminderContext").mockReturnValue({
+            advance: () => undefined,
+            queue: queueSystemReminderMock,
+            collect: async () => [],
+            clear: () => undefined,
+        } as ReturnType<typeof systemReminderContextModule.getSystemReminderContext>);
         spyOn(RALRegistry, "getInstance").mockReturnValue({
             getRAL: getRalMock,
         } as any);
@@ -87,9 +91,11 @@ describe("ToolSupervisionWrapper", () => {
             ],
         }));
 
-        await wrappedTools.fs_read.execute?.(
-            { path: "README.md" },
-            { toolCallId: "call-1" } as never
+        await projectContextStore.run(testProjectContext, () =>
+            wrappedTools.fs_read.execute?.(
+                { path: "README.md" },
+                { toolCallId: "call-1" } as never
+            )
         );
 
         expect(checkPreToolMock).toHaveBeenCalledTimes(1);
@@ -122,9 +128,11 @@ describe("ToolSupervisionWrapper", () => {
 
         const wrappedTools = wrapToolsWithSupervision(createTools(), createContext());
 
-        const result = await wrappedTools.fs_read.execute?.(
-            { path: "README.md" },
-            { toolCallId: "call-1" } as never
+        const result = await projectContextStore.run(testProjectContext, () =>
+            wrappedTools.fs_read.execute?.(
+                { path: "README.md" },
+                { toolCallId: "call-1" } as never
+            )
         );
 
         expect(result).toBe("Tool execution blocked: Create a todo list first");

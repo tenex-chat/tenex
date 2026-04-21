@@ -9,8 +9,13 @@ mock.module("@/utils/logger", () => ({
     logger: {
         info: mock(),
         warn: mock(),
+        warning: mock(),
         error: mock(),
         debug: mock(),
+        success: mock(),
+        isLevelEnabled: () => false,
+        initDaemonLogging: async () => undefined,
+        writeToWarnLog: () => undefined,
     },
 }));
 
@@ -122,19 +127,10 @@ function mockBuildConversationCatalogProjection(
     };
 }
 
-mock.module("@/conversations/ConversationCatalogService", () => ({
-    ConversationCatalogService: {
-        getInstance: (projectId: string) => ({
-            listConversations: () => mockListConversations(projectId),
-        }),
-        closeProject: mockCloseProject,
-        resetAll: () => {},
-    },
-    buildConversationCatalogProjection: mockBuildConversationCatalogProjection,
-}));
-
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { logger } from "@/utils/logger";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
+import * as catalogServiceModule from "@/conversations/ConversationCatalogService";
 import { createConversationListTool } from "../conversation_list";
 
 type StoreOverrides = {
@@ -405,6 +401,16 @@ describe("conversation_list Tool", () => {
     let parseNostrUserSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
+        spyOn(ConversationCatalogService, "getInstance").mockImplementation(
+            (projectId: string) => ({
+                listConversations: () => mockListConversations(projectId),
+            } as any)
+        );
+        spyOn(ConversationCatalogService, "closeProject").mockImplementation(mockCloseProject as any);
+        spyOn(catalogServiceModule, "buildConversationCatalogProjection").mockImplementation(
+            mockBuildConversationCatalogProjection as any
+        );
+
         resolveAgentSlugSpy = spyOn(agentResolutionModule, "resolveAgentSlug").mockImplementation(
             mockResolveAgentSlug
         );

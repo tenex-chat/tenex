@@ -1,42 +1,28 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { RALRegistry } from "@/services/ral";
 import type { McpSubscription } from "@/services/mcp/McpSubscriptionService";
-
-const executeMock = mock(async () => {});
-const createExecutionContextMock = mock(async (params: unknown) => params);
-const getAgentByPubkeyMock = mock();
-
-mock.module("@/agents/execution/AgentExecutor", () => ({
-    AgentExecutor: class {
-        execute = executeMock;
-    },
-}));
-
-mock.module("@/agents/execution/ExecutionContextFactory", () => ({
-    createExecutionContext: createExecutionContextMock,
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
-        getAgentByPubkey: getAgentByPubkeyMock,
-        agentRegistry: {
-            getBasePath: () => "/tmp/tenex-mcp-project",
-        },
-        mcpManager: undefined,
-    }),
-}));
+import { AgentExecutor } from "@/agents/execution/AgentExecutor";
+import * as executionContextFactoryModule from "@/agents/execution/ExecutionContextFactory";
+import * as projectsModule from "@/services/projects";
 
 mock.module("@/utils/logger", () => ({
     logger: {
         info: mock(),
         warn: mock(),
+        warning: mock(),
         error: mock(),
         debug: mock(),
+        success: mock(),
+        isLevelEnabled: () => false,
+        initDaemonLogging: async () => undefined,
+        writeToWarnLog: () => undefined,
     },
 }));
+
+import { deliverMcpNotification } from "../McpNotificationDelivery";
 
 describe("McpNotificationDelivery", () => {
     const TEST_DIR = "/tmp/tenex-mcp-notification-delivery-test";
@@ -61,9 +47,26 @@ describe("McpNotificationDelivery", () => {
         slug: "telegram-agent",
     };
 
+    const executeMock = mock(async () => {});
+    const createExecutionContextMock = mock(async (params: unknown) => params);
+    const getAgentByPubkeyMock = mock(() => agent);
+
     beforeEach(async () => {
         await mkdir(TEST_DIR, { recursive: true });
         ConversationStore.initialize(TEST_DIR);
+
+        spyOn(AgentExecutor.prototype, "execute").mockImplementation(executeMock);
+        spyOn(executionContextFactoryModule, "createExecutionContext").mockImplementation(
+            createExecutionContextMock
+        );
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            getAgentByPubkey: getAgentByPubkeyMock,
+            agentRegistry: {
+                getBasePath: () => "/tmp/tenex-mcp-project",
+            },
+            mcpManager: undefined,
+        } as any);
+
         getAgentByPubkeyMock.mockReset();
         getAgentByPubkeyMock.mockReturnValue(agent);
         createExecutionContextMock.mockReset();
@@ -79,7 +82,6 @@ describe("McpNotificationDelivery", () => {
     });
 
     it("queues active-stream notifications with sender metadata intact", async () => {
-        const { deliverMcpNotification } = await import("../McpNotificationDelivery");
         const registry = RALRegistry.getInstance();
         const ralNumber = registry.create(agentPubkey, subscription.conversationId, subscription.projectId);
         registry.setStreaming(agentPubkey, subscription.conversationId, ralNumber, true);
@@ -114,7 +116,6 @@ describe("McpNotificationDelivery", () => {
     });
 
     it("stores direct notifications as transport-only user messages and executes the agent", async () => {
-        const { deliverMcpNotification } = await import("../McpNotificationDelivery");
         const store = ConversationStore.getOrLoad(subscription.conversationId);
 
         await deliverMcpNotification(subscription, "A new resource version is available.");

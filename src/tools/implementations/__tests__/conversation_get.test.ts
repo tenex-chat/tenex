@@ -9,8 +9,13 @@ mock.module("@/utils/logger", () => ({
     logger: {
         info: mock(),
         warn: mock(),
+        warning: mock(),
         error: mock(),
         debug: mock(),
+        success: mock(),
+        isLevelEnabled: () => false,
+        initDaemonLogging: async () => undefined,
+        writeToWarnLog: () => undefined,
     },
 }));
 
@@ -40,6 +45,7 @@ mock.module("@/services/PubkeyService", () => ({
 const mockPrefixLookup = mock((prefix: string) => {
     // Return predefined mappings for test prefixes
     const mappings: Record<string, string> = {
+        "abc123def4": "abc123def456789012345678901234567890123456789012345678901234abcd",
         "abc123def456": "abc123def456789012345678901234567890123456789012345678901234abcd",
         "event1234567": "event123456789012345678901234567890123456789012345678901234cd",
     };
@@ -60,16 +66,6 @@ mock.module("@/services/rag/RAGService", () => ({
     RAGService: {
         getInstance: mock(() => ({
             initialize: mock(() => Promise.resolve()),
-        })),
-    },
-}));
-
-// Mock ConversationEmbeddingService to avoid RAGService initialization
-mock.module("@/conversations/search/embeddings/ConversationEmbeddingService", () => ({
-    ConversationEmbeddingService: {
-        getInstance: mock(() => ({
-            initialize: mock(() => Promise.resolve()),
-            indexConversation: mock(() => Promise.resolve()),
         })),
     },
 }));
@@ -100,7 +96,23 @@ let mockConversationData: {
     }>;
 } | null = null;
 
-const mockGetAllMessages = mock(() => mockConversationData?.messages ?? []);
+function normalizeMockMessages() {
+    return (mockConversationData?.messages ?? []).map((message) => {
+        if (message.messageType !== "tool-call" || !Array.isArray(message.toolData)) {
+            return message;
+        }
+
+        return {
+            ...message,
+            toolData: message.toolData.map((tool, index) => ({
+                toolCallId: `${message.eventId}-call-${index}`,
+                ...tool,
+            })),
+        };
+    });
+}
+
+const mockGetAllMessages = mock(() => normalizeMockMessages());
 const mockGetMessageCount = mock(() => mockConversationData?.messages.length ?? 0);
 const mockGetConversation = mock(() => mockConversationData ? {
     id: mockConversationData.id,

@@ -133,7 +133,7 @@ describe("wrapToolsWithOutputTruncation", () => {
 
         const tools = wrapToolsWithOutputTruncation(
             {
-                rag_search: {
+                shell: {
                     execute: async () => largeObject,
                     parameters: { type: "object", properties: {} },
                 } as any,
@@ -141,7 +141,7 @@ describe("wrapToolsWithOutputTruncation", () => {
             stash
         );
 
-        const result = await tools.rag_search.execute!({}, { toolCallId: "call-obj" } as any);
+        const result = await tools.shell.execute!({}, { toolCallId: "call-obj" } as any);
 
         expect(typeof result).toBe("string");
         expect(result as string).toContain("truncated");

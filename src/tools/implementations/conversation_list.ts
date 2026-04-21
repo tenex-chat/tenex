@@ -541,8 +541,8 @@ function summarizeIndexedConversation(
         id: shortenConversationId(conversation.entry.id),
         fullId: conversation.entry.id,
         projectId: conversation.projectId,
-        title: store?.metadata.title ?? store?.title ?? conversation.entry.title,
-        summary: store?.metadata.summary ?? conversation.entry.summary,
+        title: store?.metadata?.title ?? store?.title ?? conversation.entry.title,
+        summary: store?.metadata?.summary ?? conversation.entry.summary,
         sender: store ? extractSender(store) : extractSenderFromIndexedConversation(conversation),
         recipient: store ? extractRecipient(store) : extractRecipientFromIndexedConversation(conversation),
         lastActive: conversation.entry.lastActivity

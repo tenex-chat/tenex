@@ -31,10 +31,15 @@ mock.module("@/conversations/persistence/ToolMessageStorage", () => ({
 // Mock logger
 mock.module("@/utils/logger", () => ({
     logger: {
-        info: mock(() => {}),
-        debug: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
+        info: () => {},
+        debug: () => {},
+        warn: () => {},
+        warning: () => {},
+        error: () => {},
+        success: () => {},
+        isLevelEnabled: () => false,
+        initDaemonLogging: async () => {},
+        writeToWarnLog: () => {},
     },
 }));
 
@@ -383,7 +388,7 @@ describe("ToolExecutionTracker", () => {
             expect(pending[0]).toEqual({
                 toolCallId: "pending-1",
                 toolName: "pendingTool",
-                startedAt: "mock-eve", // First 8 chars of event ID
+                startedAt: "mock-event", // First 10 chars of event ID
             });
         });
     });
