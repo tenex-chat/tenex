@@ -970,6 +970,12 @@ Current status:
 - Relay `OK false` results are classified before scheduling retry: duplicate
   relay responses are treated as already published, while permanent rejection
   prefixes such as `invalid:` and `blocked:` do not churn forever.
+- Rust can inspect the publish outbox from the filesystem and report pending,
+  published, failed, retryable, due-retry, permanent-failure, tmp-file, oldest
+  pending, next-retry, and latest-failure diagnostics without keeping daemon
+  memory state. The diagnostic JSON carries a schema version, inspection
+  timestamp, and compact request/event references, and is pinned in the shared
+  publish-outbox compatibility fixture.
 - The TypeScript bridge has focused unit coverage for the framed dispatch path:
   spawn arguments, execute-frame construction, parent publish handling,
   `publish_result` replies, RAL cleanup on completion, and parent RAL

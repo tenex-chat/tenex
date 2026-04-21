@@ -14,6 +14,54 @@
         "published": "<event-id>.json",
         "failed": "<event-id>.json"
     },
+    "diagnostics": {
+        "empty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000000,
+            "pendingCount": 0,
+            "publishedCount": 0,
+            "failedCount": 0,
+            "retryableFailedCount": 0,
+            "retryDueCount": 0,
+            "permanentFailedCount": 0,
+            "tmpFileCount": 0,
+            "oldestPending": null,
+            "nextRetryAt": null,
+            "latestFailure": null
+        },
+        "fixtureRecordsBeforeRetry": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001001200,
+            "pendingCount": 1,
+            "publishedCount": 1,
+            "failedCount": 1,
+            "retryableFailedCount": 1,
+            "retryDueCount": 0,
+            "permanentFailedCount": 0,
+            "tmpFileCount": 0,
+            "oldestPending": {
+                "eventId": "event-accepted-01",
+                "acceptedAt": 1710001000100,
+                "requestId": "publish-fixture-01",
+                "projectId": "project-alpha",
+                "conversationId": "conversation-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "nextRetryAt": 1710001001300,
+            "latestFailure": {
+                "eventId": "event-failed-01",
+                "requestId": "publish-fixture-01",
+                "projectId": "project-alpha",
+                "conversationId": "conversation-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "attemptCount": 1,
+                "attemptedAt": 1710001000300,
+                "error": "relay publish failed",
+                "retryable": true,
+                "nextAttemptAt": 1710001001300
+            }
+        }
+    },
     "records": {
         "accepted": {
             "schemaVersion": 1,

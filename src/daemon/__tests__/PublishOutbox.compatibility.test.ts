@@ -120,4 +120,58 @@ describe("PublishOutbox compatibility fixture", () => {
         );
         expect(failed.attempts[0].relayResults).toEqual([]);
     });
+
+    it("describes filesystem-derived diagnostic shapes", () => {
+        const { empty, fixtureRecordsBeforeRetry } = publishOutboxFixture.diagnostics;
+
+        expect(empty).toEqual({
+            schemaVersion: 1,
+            inspectedAt: 1710001000000,
+            pendingCount: 0,
+            publishedCount: 0,
+            failedCount: 0,
+            retryableFailedCount: 0,
+            retryDueCount: 0,
+            permanentFailedCount: 0,
+            tmpFileCount: 0,
+            oldestPending: null,
+            nextRetryAt: null,
+            latestFailure: null,
+        });
+
+        expect(fixtureRecordsBeforeRetry).toEqual(
+            expect.objectContaining({
+                schemaVersion: 1,
+                inspectedAt: 1710001001200,
+                pendingCount: 1,
+                publishedCount: 1,
+                failedCount: 1,
+                retryableFailedCount: 1,
+                retryDueCount: 0,
+                permanentFailedCount: 0,
+                tmpFileCount: 0,
+                nextRetryAt: 1710001001300,
+            })
+        );
+        expect(fixtureRecordsBeforeRetry.oldestPending).toEqual({
+            eventId: "event-accepted-01",
+            acceptedAt: 1710001000100,
+            requestId: "publish-fixture-01",
+            projectId: "project-alpha",
+            conversationId: "conversation-alpha",
+            agentPubkey: "a".repeat(64),
+        });
+        expect(fixtureRecordsBeforeRetry.latestFailure).toEqual({
+            eventId: "event-failed-01",
+            requestId: "publish-fixture-01",
+            projectId: "project-alpha",
+            conversationId: "conversation-alpha",
+            agentPubkey: "a".repeat(64),
+            attemptCount: 1,
+            attemptedAt: 1710001000300,
+            error: "relay publish failed",
+            retryable: true,
+            nextAttemptAt: 1710001001300,
+        });
+    });
 });

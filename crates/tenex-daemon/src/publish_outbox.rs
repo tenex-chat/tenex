@@ -19,6 +19,7 @@ pub const PUBLISH_OUTBOX_PUBLISHED_DIR_NAME: &str = "published";
 pub const PUBLISH_OUTBOX_FAILED_DIR_NAME: &str = "failed";
 pub const PUBLISH_OUTBOX_TMP_DIR_NAME: &str = "tmp";
 pub const PUBLISH_OUTBOX_RECORD_SCHEMA_VERSION: u32 = 1;
+pub const PUBLISH_OUTBOX_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_PUBLISH_OUTBOX_RETRY_INITIAL_DELAY_MS: u64 = 1_000;
 pub const DEFAULT_PUBLISH_OUTBOX_RETRY_MAX_DELAY_MS: u64 = 60_000;
 
@@ -128,6 +129,49 @@ pub struct PublishOutboxRequeueOutcome {
     pub status: PublishOutboxStatus,
     pub source_path: PathBuf,
     pub target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishOutboxFailureDiagnostic {
+    pub event_id: String,
+    pub request_id: String,
+    pub project_id: String,
+    pub conversation_id: String,
+    pub agent_pubkey: String,
+    pub attempt_count: usize,
+    pub attempted_at: u64,
+    pub error: Option<String>,
+    pub retryable: bool,
+    pub next_attempt_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishOutboxPendingDiagnostic {
+    pub event_id: String,
+    pub accepted_at: u64,
+    pub request_id: String,
+    pub project_id: String,
+    pub conversation_id: String,
+    pub agent_pubkey: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishOutboxDiagnostics {
+    pub schema_version: u32,
+    pub inspected_at: u64,
+    pub pending_count: usize,
+    pub published_count: usize,
+    pub failed_count: usize,
+    pub retryable_failed_count: usize,
+    pub retry_due_count: usize,
+    pub permanent_failed_count: usize,
+    pub tmp_file_count: usize,
+    pub oldest_pending: Option<PublishOutboxPendingDiagnostic>,
+    pub next_retry_at: Option<u64>,
+    pub latest_failure: Option<PublishOutboxFailureDiagnostic>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,6 +374,98 @@ pub fn list_failed_publish_outbox_record_paths(
     list_record_paths(failed_publish_outbox_dir(daemon_dir))
 }
 
+pub fn inspect_publish_outbox(
+    daemon_dir: impl AsRef<Path>,
+    now: u64,
+) -> PublishOutboxResult<PublishOutboxDiagnostics> {
+    let daemon_dir = daemon_dir.as_ref();
+    let pending_records =
+        read_records_from_paths(list_pending_publish_outbox_record_paths(daemon_dir)?)?;
+    let published_records =
+        read_records_from_paths(list_record_paths(published_publish_outbox_dir(daemon_dir))?)?;
+    let failed_records =
+        read_records_from_paths(list_failed_publish_outbox_record_paths(daemon_dir)?)?;
+
+    let mut retryable_failed_count = 0;
+    let mut retry_due_count = 0;
+    let mut permanent_failed_count = 0;
+    let mut next_retry_at: Option<u64> = None;
+    let mut latest_failure: Option<PublishOutboxFailureDiagnostic> = None;
+
+    for record in &failed_records {
+        let Some(latest_attempt) = record.attempts.last() else {
+            permanent_failed_count += 1;
+            continue;
+        };
+
+        if latest_attempt.retryable {
+            retryable_failed_count += 1;
+            let retry_at = latest_attempt.next_attempt_at.unwrap_or(now);
+            next_retry_at = Some(next_retry_at.map_or(retry_at, |current| current.min(retry_at)));
+            if retry_at <= now {
+                retry_due_count += 1;
+            }
+        } else {
+            permanent_failed_count += 1;
+        }
+
+        let candidate = failure_diagnostic_from_record(record, latest_attempt);
+        if latest_failure
+            .as_ref()
+            .is_none_or(|current| candidate.attempted_at > current.attempted_at)
+        {
+            latest_failure = Some(candidate);
+        }
+    }
+
+    Ok(PublishOutboxDiagnostics {
+        schema_version: PUBLISH_OUTBOX_DIAGNOSTICS_SCHEMA_VERSION,
+        inspected_at: now,
+        pending_count: pending_records.len(),
+        published_count: published_records.len(),
+        failed_count: failed_records.len(),
+        retryable_failed_count,
+        retry_due_count,
+        permanent_failed_count,
+        tmp_file_count: list_tmp_publish_outbox_paths(daemon_dir)?.len(),
+        oldest_pending: pending_records
+            .iter()
+            .min_by_key(|record| record.accepted_at)
+            .map(pending_diagnostic_from_record),
+        next_retry_at,
+        latest_failure,
+    })
+}
+
+fn pending_diagnostic_from_record(record: &PublishOutboxRecord) -> PublishOutboxPendingDiagnostic {
+    PublishOutboxPendingDiagnostic {
+        event_id: record.event.id.clone(),
+        accepted_at: record.accepted_at,
+        request_id: record.request.request_id.clone(),
+        project_id: record.request.project_id.clone(),
+        conversation_id: record.request.conversation_id.clone(),
+        agent_pubkey: record.request.agent_pubkey.clone(),
+    }
+}
+
+fn failure_diagnostic_from_record(
+    record: &PublishOutboxRecord,
+    latest_attempt: &PublishRelayAttempt,
+) -> PublishOutboxFailureDiagnostic {
+    PublishOutboxFailureDiagnostic {
+        event_id: record.event.id.clone(),
+        request_id: record.request.request_id.clone(),
+        project_id: record.request.project_id.clone(),
+        conversation_id: record.request.conversation_id.clone(),
+        agent_pubkey: record.request.agent_pubkey.clone(),
+        attempt_count: record.attempts.len(),
+        attempted_at: latest_attempt.attempted_at,
+        error: latest_attempt.error.clone(),
+        retryable: latest_attempt.retryable,
+        next_attempt_at: latest_attempt.next_attempt_at,
+    }
+}
+
 pub fn drain_pending_publish_outbox<P: PublishOutboxRelayPublisher>(
     daemon_dir: impl AsRef<Path>,
     publisher: &mut P,
@@ -476,6 +612,37 @@ fn list_record_paths(dir: PathBuf) -> PublishOutboxResult<Vec<PathBuf>> {
         path.extension()
             .is_some_and(|extension| extension == "json")
     });
+    paths.sort();
+    Ok(paths)
+}
+
+fn read_records_from_paths(paths: Vec<PathBuf>) -> PublishOutboxResult<Vec<PublishOutboxRecord>> {
+    paths
+        .into_iter()
+        .filter_map(|path| match read_optional_record(&path) {
+            Ok(Some(record)) => Some(Ok(record)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
+
+fn list_tmp_publish_outbox_paths(daemon_dir: &Path) -> PublishOutboxResult<Vec<PathBuf>> {
+    let tmp_dir = tmp_publish_outbox_dir(daemon_dir);
+    let mut paths = match fs::read_dir(&tmp_dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| match entry {
+                Ok(entry) if entry.file_type().is_ok_and(|file_type| file_type.is_file()) => {
+                    Some(Ok(entry.path()))
+                }
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error.into()),
+    };
+
     paths.sort();
     Ok(paths)
 }
@@ -939,6 +1106,125 @@ mod tests {
         assert_eq!(failed.status, PublishOutboxStatus::Failed);
         assert_eq!(failed.attempts[0].status, PublishRelayAttemptStatus::Failed);
         assert_eq!(failed.attempts[0].next_attempt_at, Some(1710001001300));
+    }
+
+    #[test]
+    fn inspects_empty_publish_outbox_diagnostics() {
+        let fixture: Value =
+            serde_json::from_str(PUBLISH_OUTBOX_FIXTURE).expect("fixture must parse");
+        let expected: PublishOutboxDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["empty"].clone())
+                .expect("empty diagnostics fixture must deserialize");
+        let daemon_dir = unique_temp_daemon_dir();
+
+        let diagnostics =
+            inspect_publish_outbox(&daemon_dir, 1710001000000).expect("diagnostics must inspect");
+
+        assert_eq!(diagnostics, expected);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn inspects_publish_outbox_diagnostics_from_filesystem_records() {
+        let fixture: Value =
+            serde_json::from_str(PUBLISH_OUTBOX_FIXTURE).expect("fixture must parse");
+        let daemon_dir = unique_temp_daemon_dir();
+        let accepted: PublishOutboxRecord =
+            serde_json::from_value(fixture["records"]["accepted"].clone())
+                .expect("accepted record must deserialize");
+        let published: PublishOutboxRecord =
+            serde_json::from_value(fixture["records"]["published"].clone())
+                .expect("published record must deserialize");
+        let failed: PublishOutboxRecord =
+            serde_json::from_value(fixture["records"]["failed"].clone())
+                .expect("failed record must deserialize");
+        let mut permanent_failed = failed.clone();
+        permanent_failed.event.id = "event-permanent-failed-01".to_string();
+        permanent_failed.attempts[0].attempted_at = 1710001000400;
+        permanent_failed.attempts[0].error = Some("invalid: rejected permanently".to_string());
+        permanent_failed.attempts[0].retryable = false;
+        permanent_failed.attempts[0].next_attempt_at = None;
+
+        write_test_record(
+            pending_publish_outbox_record_path(&daemon_dir, &accepted.event.id),
+            &accepted,
+        );
+        write_test_record(
+            published_publish_outbox_record_path(&daemon_dir, &published.event.id),
+            &published,
+        );
+        write_test_record(
+            failed_publish_outbox_record_path(&daemon_dir, &failed.event.id),
+            &failed,
+        );
+        let fixture_diagnostics: PublishOutboxDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["fixtureRecordsBeforeRetry"].clone())
+                .expect("fixture records diagnostics must deserialize");
+        let actual_fixture_diagnostics =
+            inspect_publish_outbox(&daemon_dir, 1710001001200).expect("diagnostics must inspect");
+        assert_eq!(actual_fixture_diagnostics, fixture_diagnostics);
+
+        write_test_record(
+            failed_publish_outbox_record_path(&daemon_dir, &permanent_failed.event.id),
+            &permanent_failed,
+        );
+        fs::create_dir_all(tmp_publish_outbox_dir(&daemon_dir))
+            .expect("tmp outbox dir must be created");
+        fs::write(
+            tmp_publish_outbox_dir(&daemon_dir).join("orphan-write.tmp"),
+            b"partial",
+        )
+        .expect("tmp file must be written");
+
+        let diagnostics_before_retry =
+            inspect_publish_outbox(&daemon_dir, 1710001001200).expect("diagnostics must inspect");
+
+        assert_eq!(
+            diagnostics_before_retry.schema_version,
+            PUBLISH_OUTBOX_DIAGNOSTICS_SCHEMA_VERSION
+        );
+        assert_eq!(diagnostics_before_retry.inspected_at, 1710001001200);
+        assert_eq!(diagnostics_before_retry.pending_count, 1);
+        assert_eq!(diagnostics_before_retry.published_count, 1);
+        assert_eq!(diagnostics_before_retry.failed_count, 2);
+        assert_eq!(diagnostics_before_retry.retryable_failed_count, 1);
+        assert_eq!(diagnostics_before_retry.retry_due_count, 0);
+        assert_eq!(diagnostics_before_retry.permanent_failed_count, 1);
+        assert_eq!(diagnostics_before_retry.tmp_file_count, 1);
+        assert_eq!(
+            diagnostics_before_retry.oldest_pending,
+            Some(PublishOutboxPendingDiagnostic {
+                event_id: "event-accepted-01".to_string(),
+                accepted_at: 1710001000100,
+                request_id: "publish-fixture-01".to_string(),
+                project_id: "project-alpha".to_string(),
+                conversation_id: "conversation-alpha".to_string(),
+                agent_pubkey: "a".repeat(64),
+            })
+        );
+        assert_eq!(diagnostics_before_retry.next_retry_at, Some(1710001001300));
+        assert_eq!(
+            diagnostics_before_retry.latest_failure,
+            Some(PublishOutboxFailureDiagnostic {
+                event_id: "event-permanent-failed-01".to_string(),
+                request_id: "publish-fixture-01".to_string(),
+                project_id: "project-alpha".to_string(),
+                conversation_id: "conversation-alpha".to_string(),
+                agent_pubkey: "a".repeat(64),
+                attempt_count: 1,
+                attempted_at: 1710001000400,
+                error: Some("invalid: rejected permanently".to_string()),
+                retryable: false,
+                next_attempt_at: None,
+            })
+        );
+
+        let diagnostics_when_due =
+            inspect_publish_outbox(&daemon_dir, 1710001001300).expect("diagnostics must inspect");
+        assert_eq!(diagnostics_when_due.retry_due_count, 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
 
     #[test]
@@ -1412,6 +1698,15 @@ mod tests {
                 .pop_front()
                 .expect("mock publisher outcome must exist")
         }
+    }
+
+    fn write_test_record(path: PathBuf, record: &PublishOutboxRecord) {
+        fs::create_dir_all(
+            path.parent()
+                .expect("test publish outbox record path must have parent"),
+        )
+        .expect("test publish outbox record dir must be created");
+        write_record_file(&path, record).expect("test publish outbox record must be written");
     }
 
     fn unique_temp_daemon_dir() -> PathBuf {

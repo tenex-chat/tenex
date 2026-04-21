@@ -362,6 +362,11 @@ Current implementation status:
   `failed`, and filesystem transitions create destination records without
   replacing existing files. Relay duplicate responses count as published;
   permanent relay rejection prefixes do not schedule retry.
+- Rust publish-outbox diagnostics now summarize filesystem state without daemon
+  memory: pending, published, failed, retryable, due-retry, permanent-failure,
+  tmp-file, oldest pending, next retry, and latest failure fields. The
+  diagnostic shape is versioned and pinned in the shared Bun/Rust
+  publish-outbox compatibility fixture.
 - `crates/tenex-daemon/src/relay_publisher.rs` provides the first Rust relay
   publisher implementation. It preserves the existing TypeScript default relay
   and `RELAYS` comma-list semantics, sends exact signed `["EVENT", event]`
@@ -705,6 +710,9 @@ Quality gates:
   Rust can return durable `accepted` before relay publication finishes.
 - Stream text deltas preserve sequence behavior.
 - Publish retries are bounded and idempotent where possible.
+- Publish diagnostics can be rebuilt from the filesystem after restart and
+  distinguish retryable failures, due retries, permanent failures, and orphaned
+  temp files while exposing only compact request/event references.
 - No scenario publishes both a direct worker relay event and a Rust-relayed copy
   of the same event.
 - Relay round-trip tests pass for every Rust-published event kind in scope.
