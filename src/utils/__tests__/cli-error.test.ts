@@ -66,5 +66,22 @@ describe("CLI Error Handler", () => {
             mockExit.mockRestore();
             mockLogError.mockRestore();
         });
+
+        it("should prefer an error object's exitCode when present", () => {
+            const mockExit = spyOn(process, "exit").mockImplementation(() => {
+                throw new Error("process.exit called");
+            });
+            const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
+
+            const error = Object.assign(new Error("Rust usage error"), { exitCode: 2 });
+
+            expect(() => handleCliError(error)).toThrow("process.exit called");
+
+            expect(mockLogError).toHaveBeenCalledWith("Rust usage error");
+            expect(mockExit).toHaveBeenCalledWith(2);
+
+            mockExit.mockRestore();
+            mockLogError.mockRestore();
+        });
     });
 });

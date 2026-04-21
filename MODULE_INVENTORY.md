@@ -21,7 +21,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`agent/`**: User-facing subcommands for listing/removing/operating agents, including the interactive installed-agent manager for 4199 installs and permanent deletions. Orchestrates `agents/` runtimes, `services/ConfigService`, and `nostr` publishers; no business logic should remain inside command handlers.
 - **`config/`**: Interactive settings editors for backend and transport configuration. `config/telegram.ts` is the operator-facing UI for single-bot-per-agent Telegram transport config plus the global Telegram DM allowlist, while remembered chat/topic-to-project bindings remain derived runtime state backed by `AgentStorage`, `TransportBindingStore`, and global `whitelistedIdentities`.
 - **`daemon.ts` + `daemon/`**: Starts the long-running orchestrator and UI loop by delegating to `src/daemon`.
-- **`doctor.ts`**: Diagnostics and repair entrypoint — agent refetch, orphan detection/purge, agent auto-categorization backfill, and explicit state migrations via `doctor migrate`.
+- **`doctor.ts` + `doctor/`**: Diagnostics and repair entrypoint — agent refetch, orphan detection/purge, agent auto-categorization backfill, explicit state migrations via `doctor migrate`, and the `doctor publish-outbox` operator surface. The publish-outbox subcommands delegate to the Rust adapter/binary for JSON inspect/status and repair/drain behavior instead of duplicating Rust outbox state logic in TypeScript.
 - **`setup/`**: Guided onboarding flows for LLM and embed providers (ties into `ConfigService` and `llm/LLMServiceFactory`).
 
 ### Agents Runtime (`src/agents`)

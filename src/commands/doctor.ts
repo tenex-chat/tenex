@@ -12,6 +12,7 @@ import { RAGService } from "@/services/rag/RAGService";
 import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { listProjectIdsFromDisk, listConversationIdsFromDiskForProject } from "@/conversations/ConversationDiskReader";
 import { getTenexBasePath } from "@/constants";
+import { createPublishOutboxCommand } from "@/commands/doctor/publish-outbox";
 import { join } from "node:path";
 
 const refetchCommand = new Command("refetch")
@@ -75,7 +76,8 @@ export const doctorCommand = new Command("doctor")
     .description("Diagnose and repair TENEX state")
     .addCommand(agentsCommand)
     .addCommand(migrateCommand)
-    .addCommand(conversationsCommand);
+    .addCommand(conversationsCommand)
+    .addCommand(createPublishOutboxCommand());
 
 function agentChanged(before: StoredAgent, after: StoredAgent): boolean {
     if (before.name !== after.name) return true;

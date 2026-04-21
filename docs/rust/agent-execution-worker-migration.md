@@ -982,13 +982,13 @@ Current status:
 - Rust now has a filesystem-only publish-outbox maintenance pass that snapshots
   diagnostics, requeues due failed records, drains pending records through the
   publisher interface, and snapshots diagnostics again. The API is library-first
-  so daemon startup, periodic maintenance, and a future `doctor` repair command
+  so daemon startup, periodic maintenance, and the `doctor` repair command
   can all invoke the same behavior without making `daemon status` mutating. The
   maintenance report is serializable and pinned in the shared compatibility
-  fixture as the operator output contract for future `doctor publish-outbox`
+  fixture as the operator output contract for `doctor publish-outbox`
   inspect/status and repair/drain commands.
 - A thin internal Rust binary, `publish-outbox`, wraps the same library API for
-  JSON `inspect` and `maintain` output. It exists to give a future TypeScript
+  JSON `inspect` and `maintain` output. It exists to give the TypeScript
   `doctor publish-outbox` adapter a process boundary; the operator contract
   remains the `doctor` command surface plus the shared JSON fixtures, not the
   binary path itself.

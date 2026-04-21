@@ -10,6 +10,7 @@ import { logger } from "./logger";
 export function handleCliError(error: unknown, context?: string, exitCode = 1): never {
     const errorMessage = formatAnyError(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
+    const resolvedExitCode = getCliExitCode(error) ?? exitCode;
 
     // Log error with context
     if (context) {
@@ -24,6 +25,16 @@ export function handleCliError(error: unknown, context?: string, exitCode = 1): 
     }
 
     // Exit with specified code
-    process.exit(exitCode);
+    process.exit(resolvedExitCode);
 }
 
+function getCliExitCode(error: unknown): number | undefined {
+    if (!error || typeof error !== "object" || !("exitCode" in error)) {
+        return undefined;
+    }
+
+    const exitCode = (error as { exitCode: unknown }).exitCode;
+    return typeof exitCode === "number" && Number.isInteger(exitCode) && exitCode > 0
+        ? exitCode
+        : undefined;
+}

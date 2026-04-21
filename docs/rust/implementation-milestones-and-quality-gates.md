@@ -374,9 +374,8 @@ Current implementation status:
   its serializable report shape is pinned in the shared compatibility fixture.
 - A thin internal `publish-outbox` Rust binary now exposes inspect/maintain JSON
   output over the same library API, with parse errors exiting distinctly from
-  runtime errors. Future `doctor publish-outbox` commands should call this
-  through an adapter rather than duplicating publish-outbox logic in
-  TypeScript.
+  runtime errors. `doctor publish-outbox` calls this through an adapter rather
+  than duplicating publish-outbox logic in TypeScript.
 - `crates/tenex-daemon/src/relay_publisher.rs` provides the first Rust relay
   publisher implementation. It preserves the existing TypeScript default relay
   and `RELAYS` comma-list semantics, sends exact signed `["EVENT", event]`
@@ -672,10 +671,15 @@ Scope:
   from the filesystem on daemon startup or periodic maintenance.
 - Use the same Rust maintenance API for daemon startup, periodic maintenance,
   and any future `doctor` repair command. Keep status/diagnostic reads
-  read-only; future `doctor publish-outbox` inspect/status commands should be
-  separate from mutating repair/drain commands.
+  read-only; `doctor publish-outbox` inspect/status commands are separate from
+  mutating repair/drain commands.
 - Keep the internal Rust binary a thin process boundary over the same library
   calls and JSON structs; compatibility fixtures remain the output contract.
+- `doctor publish-outbox inspect/status` shells through the Rust adapter, emits
+  only parsed JSON on success, and does not mutate `publish-outbox/` files.
+- `doctor publish-outbox repair/drain` maps to Rust `maintain`, preserves Rust
+  usage/runtime exit codes, and does not implement independent TypeScript
+  publish-outbox state transitions.
 - Preserve one global owner for each outbox event ID across pending, published,
   and failed states so duplicate worker publish requests cannot bypass retry
   timing or cause duplicate relay side effects.
