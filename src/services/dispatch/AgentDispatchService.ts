@@ -1,5 +1,10 @@
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
+import {
+    executeDispatchViaAgentWorker,
+    getAgentWorkerDispatchIneligibility,
+    isAgentWorkerDispatchEnabled,
+} from "@/agents/execution/worker/dispatch-adapter";
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
@@ -947,6 +952,30 @@ export class AgentDispatchService {
             }
 
             await otelContext.with(trace.setSpan(otelContext.active(), agentSpan), async () => {
+                if (isAgentWorkerDispatchEnabled()) {
+                    const workerIneligibility = getAgentWorkerDispatchIneligibility({
+                        executionContext,
+                        projectCtx,
+                        targetAgent,
+                        activeRal,
+                        resumptionClaim,
+                    });
+
+                    if (!workerIneligibility) {
+                        agentSpan.addEvent("dispatch.agent_worker_selected");
+                        await executeDispatchViaAgentWorker({
+                            executionContext,
+                            projectCtx,
+                            targetAgent,
+                        });
+                        return;
+                    }
+
+                    agentSpan.addEvent("dispatch.agent_worker_skipped", {
+                        "worker.skip_reason": workerIneligibility,
+                    });
+                }
+
                 await agentExecutor.execute(executionContext);
             });
 

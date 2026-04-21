@@ -1,0 +1,122 @@
+{
+    "name": "publish-outbox-basic",
+    "description": "Canonical Rust publish outbox filesystem paths and record shapes for Bun compatibility tests.",
+    "daemonDirName": "daemon",
+    "relativePaths": {
+        "outbox": "publish-outbox",
+        "pending": "publish-outbox/pending",
+        "published": "publish-outbox/published",
+        "failed": "publish-outbox/failed",
+        "tmp": "publish-outbox/tmp"
+    },
+    "recordFileNames": {
+        "pending": "<event-id>.json",
+        "published": "<event-id>.json",
+        "failed": "<event-id>.json"
+    },
+    "records": {
+        "accepted": {
+            "schemaVersion": 1,
+            "status": "accepted",
+            "acceptedAt": 1710001000100,
+            "request": {
+                "requestId": "publish-fixture-01",
+                "requestSequence": 41,
+                "requestTimestamp": 1710001000000,
+                "correlationId": "rust_publish_outbox",
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 7,
+                "requiresEventId": true,
+                "timeoutMs": 30000
+            },
+            "event": {
+                "id": "event-accepted-01",
+                "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "created_at": 1710001000000,
+                "kind": 1,
+                "tags": [["p", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]],
+                "content": "accepted publish request",
+                "sig": "sig-accepted-01"
+            },
+            "attempts": []
+        },
+        "published": {
+            "schemaVersion": 1,
+            "status": "published",
+            "acceptedAt": 1710001000100,
+            "request": {
+                "requestId": "publish-fixture-01",
+                "requestSequence": 41,
+                "requestTimestamp": 1710001000000,
+                "correlationId": "rust_publish_outbox",
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 7,
+                "requiresEventId": true,
+                "timeoutMs": 30000
+            },
+            "event": {
+                "id": "event-published-01",
+                "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "created_at": 1710001000000,
+                "kind": 1,
+                "tags": [["p", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]],
+                "content": "published publish request",
+                "sig": "sig-published-01"
+            },
+            "attempts": [
+                {
+                    "attemptedAt": 1710001000200,
+                    "status": "published",
+                    "relayResults": [
+                        {
+                            "relayUrl": "wss://relay.example.invalid",
+                            "accepted": true,
+                            "message": null
+                        }
+                    ],
+                    "error": null,
+                    "retryable": false
+                }
+            ]
+        },
+        "failed": {
+            "schemaVersion": 1,
+            "status": "failed",
+            "acceptedAt": 1710001000100,
+            "request": {
+                "requestId": "publish-fixture-01",
+                "requestSequence": 41,
+                "requestTimestamp": 1710001000000,
+                "correlationId": "rust_publish_outbox",
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 7,
+                "requiresEventId": true,
+                "timeoutMs": 30000
+            },
+            "event": {
+                "id": "event-failed-01",
+                "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "created_at": 1710001000000,
+                "kind": 1,
+                "tags": [["p", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]],
+                "content": "failed publish request",
+                "sig": "sig-failed-01"
+            },
+            "attempts": [
+                {
+                    "attemptedAt": 1710001000300,
+                    "status": "failed",
+                    "relayResults": [],
+                    "error": "relay publish failed",
+                    "retryable": true
+                }
+            ]
+        }
+    }
+}

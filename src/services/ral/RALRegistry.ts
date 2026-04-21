@@ -97,6 +97,9 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   create(agentPubkey: string, conversationId: string, projectId: ProjectDTag, originalTriggeringEventId?: string, traceContext?: { traceId: string; spanId: string }): number {
     return this.stateRegistry.create(agentPubkey, conversationId, projectId, originalTriggeringEventId, traceContext);
   }
+  seed(params: { agentPubkey: string; conversationId: string; projectId: ProjectDTag; ralNumber: number; originalTriggeringEventId?: string; executionClaimToken?: string }): RALRegistryEntry {
+    return this.stateRegistry.seed(params);
+  }
   getActiveRALs(agentPubkey: string, conversationId: string): RALRegistryEntry[] { return this.stateRegistry.getActiveRALs(agentPubkey, conversationId); }
   getRAL(agentPubkey: string, conversationId: string, ralNumber: number): RALRegistryEntry | undefined { return this.stateRegistry.getRAL(agentPubkey, conversationId, ralNumber); }
   getStateByRalId(ralId: string): RALRegistryEntry | undefined { return this.stateRegistry.getStateByRalId(ralId); }

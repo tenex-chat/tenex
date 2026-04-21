@@ -1,0 +1,50 @@
+{
+    "name": "daemon-filesystem-state-basic",
+    "description": "Canonical daemon filesystem state files shared by the current TypeScript daemon and the Rust daemon migration.",
+    "daemonDirName": "daemon",
+    "relativePaths": {
+        "lockfile": "tenex.lock",
+        "status": "status.json",
+        "restartState": "restart-state.json"
+    },
+    "lockfile": {
+        "pid": 4242,
+        "hostname": "tenex-host",
+        "startedAt": 1710000000000
+    },
+    "staleLockfile": {
+        "pid": 999999,
+        "hostname": "tenex-stale-host",
+        "startedAt": 1709999900000
+    },
+    "status": {
+        "pid": 4242,
+        "startedAt": "2024-03-09T16:00:00.000Z",
+        "knownProjects": 3,
+        "runtimes": [
+            {
+                "projectId": "project-alpha",
+                "title": "Project Alpha",
+                "agentCount": 2,
+                "startTime": "2024-03-09T16:01:00.000Z",
+                "lastEventTime": "2024-03-09T16:03:00.000Z",
+                "eventCount": 7
+            },
+            {
+                "projectId": "project-beta",
+                "title": "Project Beta",
+                "agentCount": 1,
+                "startTime": null,
+                "lastEventTime": null,
+                "eventCount": 0
+            }
+        ],
+        "updatedAt": "2024-03-09T16:05:00.000Z"
+    },
+    "restartState": {
+        "requestedAt": 1710000300000,
+        "bootedProjects": ["project-alpha", "project-beta"],
+        "pid": 4242,
+        "hostname": "tenex-host"
+    }
+}

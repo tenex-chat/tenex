@@ -1,0 +1,64 @@
+{
+    "name": "agent-worker-frame-codec-v1",
+    "description": "Canonical length-prefixed JSON byte frames for Rust daemon and Bun worker protocol compatibility.",
+    "format": {
+        "lengthPrefixBytes": 4,
+        "lengthEndian": "big",
+        "payloadEncoding": "utf-8",
+        "jsonCanonicalization": "sorted-object-keys-no-whitespace",
+        "maxFrameBytes": 1048576
+    },
+    "frames": [
+        {
+            "name": "ping",
+            "message": {
+                "version": 1,
+                "type": "ping",
+                "correlationId": "exec_codec",
+                "sequence": 1,
+                "timestamp": 1710000500000,
+                "timeoutMs": 5000
+            },
+            "canonicalJson": "{\"correlationId\":\"exec_codec\",\"sequence\":1,\"timeoutMs\":5000,\"timestamp\":1710000500000,\"type\":\"ping\",\"version\":1}",
+            "payloadByteLength": 112,
+            "frameHex": "000000707b22636f7272656c6174696f6e4964223a22657865635f636f646563222c2273657175656e6365223a312c2274696d656f75744d73223a353030302c2274696d657374616d70223a313731303030303530303030302c2274797065223a2270696e67222c2276657273696f6e223a317d"
+        },
+        {
+            "name": "stream-delta",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_codec",
+                "sequence": 2,
+                "timestamp": 1710000500250,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1,
+                "delta": "hello frame codec"
+            },
+            "canonicalJson": "{\"agentPubkey\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"batchSequence\":1,\"conversationId\":\"conversation-alpha\",\"correlationId\":\"exec_codec\",\"delta\":\"hello frame codec\",\"projectId\":\"project-alpha\",\"ralNumber\":3,\"sequence\":2,\"timestamp\":1710000500250,\"type\":\"stream_delta\",\"version\":1}",
+            "payloadByteLength": 310,
+            "frameHex": "000001367b226167656e745075626b6579223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22626174636853657175656e6365223a312c22636f6e766572736174696f6e4964223a22636f6e766572736174696f6e2d616c706861222c22636f7272656c6174696f6e4964223a22657865635f636f646563222c2264656c7461223a2268656c6c6f206672616d6520636f646563222c2270726f6a6563744964223a2270726f6a6563742d616c706861222c2272616c4e756d626572223a332c2273657175656e6365223a322c2274696d657374616d70223a313731303030303530303235302c2274797065223a2273747265616d5f64656c7461222c2276657273696f6e223a317d"
+        }
+    ],
+    "invalidFrames": [
+        {
+            "name": "missing-length-prefix",
+            "frameHex": "7b7d"
+        },
+        {
+            "name": "declared-length-too-short",
+            "frameHex": "000000027b7d7d"
+        },
+        {
+            "name": "invalid-json-payload",
+            "frameHex": "000000037b7d7d"
+        },
+        {
+            "name": "invalid-message-payload",
+            "frameHex": "000000027b7d"
+        }
+    ]
+}

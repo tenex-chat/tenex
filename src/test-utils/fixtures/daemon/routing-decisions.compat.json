@@ -1,0 +1,156 @@
+{
+    "name": "daemon-routing-decisions-basic",
+    "description": "Canonical TENEX daemon routing decisions for A-tag/P-tag interoperability during the Rust migration.",
+    "projects": [
+        {
+            "dTag": "project-alpha",
+            "address": "31933:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:project-alpha",
+            "title": "Project Alpha",
+            "agents": [
+                {
+                    "pubkey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "slug": "shared-agent"
+                },
+                {
+                    "pubkey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "slug": "alpha-agent"
+                }
+            ]
+        },
+        {
+            "dTag": "project-beta",
+            "address": "31933:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:project-beta",
+            "title": "Project Beta",
+            "agents": [
+                {
+                    "pubkey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "slug": "shared-agent"
+                }
+            ]
+        }
+    ],
+    "cases": [
+        {
+            "name": "a-tag-priority-over-p-tag",
+            "activeProjectIds": ["project-alpha", "project-beta"],
+            "event": {
+                "id": "route-event-a-tag-priority",
+                "kind": 1,
+                "pubkey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "content": "delegate to shared agent",
+                "tags": [
+                    ["p", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],
+                    ["a", "31933:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:project-alpha"]
+                ]
+            },
+            "expected": {
+                "projectId": "project-alpha",
+                "method": "a_tag",
+                "matchedTags": [
+                    "31933:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:project-alpha"
+                ],
+                "reason": "Matched project a-tag: 31933:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:project-alpha"
+            }
+        },
+        {
+            "name": "p-tag-routes-when-only-one-project-is-active",
+            "activeProjectIds": ["project-alpha"],
+            "event": {
+                "id": "route-event-single-active",
+                "kind": 1,
+                "pubkey": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "content": "message shared agent",
+                "tags": [
+                    ["p", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]
+                ]
+            },
+            "expected": {
+                "projectId": "project-alpha",
+                "method": "p_tag_agent",
+                "matchedTags": [
+                    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                ],
+                "reason": "Matched agent P-tag: cccccccc"
+            }
+        },
+        {
+            "name": "p-tag-shared-agent-ambiguous-when-multiple-projects-active",
+            "activeProjectIds": ["project-alpha", "project-beta"],
+            "event": {
+                "id": "route-event-ambiguous-shared-agent",
+                "kind": 1,
+                "pubkey": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "content": "message shared agent without project",
+                "tags": [
+                    ["p", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]
+                ]
+            },
+            "expected": {
+                "projectId": null,
+                "method": "none",
+                "matchedTags": [],
+                "reason": "P-tags found but no matching agents: cccccccc"
+            }
+        },
+        {
+            "name": "unknown-a-tag-falls-back-to-p-tag",
+            "activeProjectIds": ["project-alpha"],
+            "event": {
+                "id": "route-event-unknown-a-tag",
+                "kind": 1,
+                "pubkey": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "content": "message with stale project tag",
+                "tags": [
+                    ["p", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],
+                    ["a", "31933:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff:unknown-project"]
+                ]
+            },
+            "expected": {
+                "projectId": "project-alpha",
+                "method": "p_tag_agent",
+                "matchedTags": [
+                    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                ],
+                "reason": "Matched agent P-tag: cccccccc"
+            }
+        },
+        {
+            "name": "uppercase-a-tag-is-ignored",
+            "activeProjectIds": ["project-alpha", "project-beta"],
+            "event": {
+                "id": "route-event-uppercase-a",
+                "kind": 1,
+                "pubkey": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "content": "uppercase A tag should not route",
+                "tags": [
+                    ["A", "31933:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:project-alpha"]
+                ]
+            },
+            "expected": {
+                "projectId": null,
+                "method": "none",
+                "matchedTags": [],
+                "reason": "No A-tags or P-tags found"
+            }
+        },
+        {
+            "name": "global-identity-kind-is-never-project-routed",
+            "activeProjectIds": ["project-alpha", "project-beta"],
+            "event": {
+                "id": "route-event-global-profile",
+                "kind": 0,
+                "pubkey": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "content": "{}",
+                "tags": [
+                    ["a", "31933:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:project-alpha"]
+                ]
+            },
+            "expected": {
+                "projectId": null,
+                "method": "none",
+                "matchedTags": [],
+                "reason": "Global identity kind (0) - not project-specific"
+            }
+        }
+    ]
+}

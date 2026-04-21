@@ -22,6 +22,8 @@ import type {
     ProviderModelResult,
 } from "../types";
 
+type MockProviderConfig = Parameters<typeof createMockProvider>[0];
+
 /**
  * Provider initialization result
  */
@@ -110,7 +112,7 @@ export class ProviderRegistry {
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {
-            await this.initializeMockProvider();
+            await this.initializeMockProvider(configs.mock);
         }
 
         // Register all key pools with KeyManager and initialize providers
@@ -254,9 +256,9 @@ export class ProviderRegistry {
     /**
      * Initialize the mock provider for testing
      */
-    private async initializeMockProvider(): Promise<void> {
+    private async initializeMockProvider(config?: ProviderPoolConfig): Promise<void> {
         try {
-            const mockProvider = createMockProvider();
+            const mockProvider = createMockProvider(config?.options as MockProviderConfig);
 
             // Create a wrapper that satisfies ILLMProvider
             const mockWrapper: ILLMProvider = {

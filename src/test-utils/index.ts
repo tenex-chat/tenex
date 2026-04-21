@@ -10,6 +10,7 @@
 export * from "./conversational-logger";
 export * from "./mock-factories";
 export * from "./mock-llm";
+export * from "./nostr-event-compatibility";
 
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";

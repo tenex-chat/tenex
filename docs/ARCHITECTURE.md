@@ -223,6 +223,17 @@ Teams are local JSON-defined memberships that never become standalone Nostr enti
 
 Standalone developer tooling or auxiliary CLIs should live under `tools/` at the repo root. Treat each tool as isolated (own `package.json`/`tsconfig.json`) and document additions in `MODULE_INVENTORY.md`.
 
+### Rust Workspace
+
+Rust migration code lives under `crates/` and is governed by the migration plans in `docs/rust/`. The first crate, `crates/tenex-daemon`, exists to make protocol compatibility executable before Rust owns daemon behavior.
+
+Rules for Rust code:
+
+- Consume shared fixtures from `src/test-utils/fixtures/` when proving compatibility with TypeScript behavior.
+- Keep Nostr wire, filesystem, status, lock, restart, and worker-protocol contracts aligned with `docs/rust/implementation-milestones-and-quality-gates.md`.
+- Do not duplicate or replace TypeScript agent execution paths until the relevant milestone gates are passing.
+- Keep production authority behind explicit migration flags once daemon code moves beyond fixture verification.
+
 ---
 
 ## Naming Conventions

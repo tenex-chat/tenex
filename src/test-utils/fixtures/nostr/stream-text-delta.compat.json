@@ -1,0 +1,39 @@
+{
+    "name": "stream-text-delta-basic",
+    "description": "Canonical TENEX stream text delta event fixture for Rust migration compatibility tests.",
+    "secretKeyHex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+    "created_at": 1710000000,
+    "normalized": {
+        "kind": 24135,
+        "content": "hello world",
+        "tags": [
+            ["e", "root-conv-id", "", "root"],
+            ["a", "31933:testpubkey:test-project"],
+            ["llm-model", "anthropic:claude-haiku-4-5"],
+            ["llm-ral", "7"],
+            ["stream-seq", "3"],
+            ["branch", "feature/alpha"]
+        ],
+        "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+        "created_at": 1710000000
+    },
+    "canonicalPayload": "[0,\"1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f\",1710000000,24135,[[\"e\",\"root-conv-id\",\"\",\"root\"],[\"a\",\"31933:testpubkey:test-project\"],[\"llm-model\",\"anthropic:claude-haiku-4-5\"],[\"llm-ral\",\"7\"],[\"stream-seq\",\"3\"],[\"branch\",\"feature/alpha\"]],\"hello world\"]",
+    "eventHash": "b5986cfb9c2b8aa667bf98af8d4b1577bb9caeb772a13604bc1412cf2e55f969",
+    "signed": {
+        "id": "b5986cfb9c2b8aa667bf98af8d4b1577bb9caeb772a13604bc1412cf2e55f969",
+        "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+        "created_at": 1710000000,
+        "kind": 24135,
+        "tags": [
+            ["e", "root-conv-id", "", "root"],
+            ["a", "31933:testpubkey:test-project"],
+            ["llm-model", "anthropic:claude-haiku-4-5"],
+            ["llm-ral", "7"],
+            ["stream-seq", "3"],
+            ["branch", "feature/alpha"]
+        ],
+        "content": "hello world",
+        "sig": "e4ba89fc45fba180380198da68837bf2092fa6531bb62bdb28a65d1dbbd6d8ee129ccad0fdf1efa20cc992f7933083a548e51c020dc8ad85d12a79ec765bea54"
+    }
+}

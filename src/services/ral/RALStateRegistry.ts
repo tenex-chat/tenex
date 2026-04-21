@@ -122,6 +122,78 @@ export class RALStateRegistry {
     return ralNumber;
   }
 
+  seed(
+    params: {
+      agentPubkey: string;
+      conversationId: string;
+      projectId: ProjectDTag;
+      ralNumber: number;
+      originalTriggeringEventId?: string;
+      executionClaimToken?: string;
+    }
+  ): RALRegistryEntry {
+    const now = Date.now();
+    const key = this.makeKey(params.agentPubkey, params.conversationId);
+    const existing = this.states.get(key)?.get(params.ralNumber);
+    if (existing) {
+      if (params.executionClaimToken && existing.executionClaimToken === undefined) {
+        existing.executionClaimToken = params.executionClaimToken;
+      }
+      existing.lastActivityAt = now;
+      return existing;
+    }
+
+    const id = crypto.randomUUID();
+    const state: RALRegistryEntry = {
+      id,
+      ralNumber: params.ralNumber,
+      agentPubkey: params.agentPubkey,
+      projectId: params.projectId,
+      conversationId: params.conversationId,
+      queuedInjections: [],
+      isStreaming: false,
+      activeTools: new Map(),
+      createdAt: now,
+      lastActivityAt: now,
+      originalTriggeringEventId: params.originalTriggeringEventId,
+      executionClaimToken: params.executionClaimToken,
+      accumulatedRuntime: 0,
+      lastReportedRuntime: 0,
+    };
+
+    let rals = this.states.get(key);
+    if (!rals) {
+      rals = new Map();
+      this.states.set(key, rals);
+    }
+    rals.set(params.ralNumber, state);
+    this.ralIdToLocation.set(id, { key, ralNumber: params.ralNumber });
+
+    const currentNext = this.nextRalNumber.get(key) || 0;
+    if (params.ralNumber > currentNext) {
+      this.nextRalNumber.set(key, params.ralNumber);
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.seeded", {
+      "ral.id": id,
+      "ral.number": params.ralNumber,
+      "agent.pubkey": params.agentPubkey,
+      "conversation.id": shortenConversationId(params.conversationId),
+      "claim.present": params.executionClaimToken !== undefined,
+    });
+
+    logger.info("[RALStateRegistry.seed] RAL seeded", {
+      ralNumber: params.ralNumber,
+      agentPubkey: params.agentPubkey.substring(0, 8),
+      conversationId: params.conversationId.substring(0, 8),
+      projectId: params.projectId.substring(0, 20),
+      key,
+    });
+
+    this.deps.emitUpdated(params.projectId, params.conversationId);
+    return state;
+  }
+
   getActiveRALs(agentPubkey: string, conversationId: string): RALRegistryEntry[] {
     const key = this.makeKey(agentPubkey, conversationId);
     return Array.from(this.states.get(key)?.values() ?? []);

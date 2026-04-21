@@ -157,7 +157,7 @@ export function createTenexReminderPlacementPolicy(options: {
 
         return options.conversationStore.isAgentPromptHistoryCacheAnchored(options.agentPubkey)
             ? "latest-user-append"
-            : "system-append";
+            : "fallback-system";
     };
 }
 

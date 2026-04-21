@@ -1,0 +1,687 @@
+{
+    "name": "agent-execution-worker-protocol-v1",
+    "description": "Canonical Rust daemon to Bun agent-worker protocol frames for migration compatibility tests.",
+    "protocol": {
+        "version": 1,
+        "encoding": "length-prefixed-json",
+        "maxFrameBytes": 1048576,
+        "streamBatchMs": 250,
+        "streamBatchMaxBytes": 8192,
+        "heartbeatIntervalMs": 5000,
+        "missedHeartbeatThreshold": 3,
+        "workerBootTimeoutMs": 30000,
+        "gracefulAbortTimeoutMs": 10000,
+        "forceKillTimeoutMs": 5000,
+        "idleTtlMs": 120000
+    },
+    "execution": {
+        "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+        "projectId": "project-alpha",
+        "projectBasePath": "/tmp/tenex/projects/project-alpha/work",
+        "metadataPath": "/tmp/tenex/projects/project-alpha/metadata",
+        "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "conversationId": "conversation-alpha",
+        "ralNumber": 3,
+        "ralClaimToken": "claim_01hzzzzzzzzzzzzzzzzzzzzzzz"
+    },
+    "triggeringEnvelope": {
+        "transport": "nostr",
+        "principal": {
+            "id": "nostr:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "transport": "nostr",
+            "linkedPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "displayName": "Project Owner",
+            "kind": "human"
+        },
+        "channel": {
+            "id": "conversation:conversation-alpha",
+            "transport": "nostr",
+            "kind": "conversation",
+            "projectBinding": "project-alpha"
+        },
+        "message": {
+            "id": "trigger-event-id",
+            "transport": "nostr",
+            "nativeId": "trigger-event-id"
+        },
+        "recipients": [
+            {
+                "id": "nostr:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "transport": "nostr",
+                "linkedPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "kind": "agent"
+            }
+        ],
+        "content": "please continue the migration",
+        "occurredAt": 1710000400000,
+        "capabilities": ["reply", "delegate"],
+        "metadata": {
+            "eventKind": 1,
+            "eventTagCount": 3,
+            "branchName": "feature/rust-daemon"
+        }
+    },
+    "validMessages": [
+        {
+            "name": "execute",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "execute",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000400001,
+                "projectId": "project-alpha",
+                "projectBasePath": "/tmp/tenex/projects/project-alpha/work",
+                "metadataPath": "/tmp/tenex/projects/project-alpha/metadata",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "ralClaimToken": "claim_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "triggeringEnvelope": {
+                    "transport": "nostr",
+                    "principal": {
+                        "id": "nostr:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "transport": "nostr",
+                        "linkedPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "displayName": "Project Owner",
+                        "kind": "human"
+                    },
+                    "channel": {
+                        "id": "conversation:conversation-alpha",
+                        "transport": "nostr",
+                        "kind": "conversation",
+                        "projectBinding": "project-alpha"
+                    },
+                    "message": {
+                        "id": "trigger-event-id",
+                        "transport": "nostr",
+                        "nativeId": "trigger-event-id"
+                    },
+                    "recipients": [
+                        {
+                            "id": "nostr:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "transport": "nostr",
+                            "linkedPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "kind": "agent"
+                        }
+                    ],
+                    "content": "please continue the migration",
+                    "occurredAt": 1710000400000,
+                    "capabilities": ["reply", "delegate"],
+                    "metadata": {
+                        "eventKind": 1,
+                        "eventTagCount": 3,
+                        "branchName": "feature/rust-daemon"
+                    }
+                },
+                "executionFlags": {
+                    "isDelegationCompletion": false,
+                    "hasPendingDelegations": false,
+                    "debug": true
+                }
+            }
+        },
+        {
+            "name": "ping",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "ping",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 2,
+                "timestamp": 1710000400100,
+                "timeoutMs": 5000
+            }
+        },
+        {
+            "name": "inject",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "inject",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 3,
+                "timestamp": 1710000400200,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "injectionId": "inj_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "leaseToken": "lease_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "role": "user",
+                "content": "new user message while the worker is active"
+            }
+        },
+        {
+            "name": "abort",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "abort",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 4,
+                "timestamp": 1710000400300,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "reason": "operator_requested",
+                "gracefulTimeoutMs": 10000
+            }
+        },
+        {
+            "name": "shutdown",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "shutdown",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 5,
+                "timestamp": 1710000400400,
+                "reason": "idle_ttl_elapsed",
+                "forceKillTimeoutMs": 5000
+            }
+        },
+        {
+            "name": "publish-result",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "publish_result",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 6,
+                "timestamp": 1710000400500,
+                "requestId": "pub_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "requestSequence": 18,
+                "status": "published",
+                "eventIds": ["published-event-id"]
+            }
+        },
+        {
+            "name": "ack",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "ack",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 7,
+                "timestamp": 1710000400600,
+                "acknowledgedSequence": 13,
+                "durable": true
+            }
+        },
+        {
+            "name": "ready",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "ready",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000401000,
+                "workerId": "worker_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "pid": 4242,
+                "protocol": {
+                    "version": 1,
+                    "encoding": "length-prefixed-json",
+                    "maxFrameBytes": 1048576,
+                    "streamBatchMs": 250,
+                    "streamBatchMaxBytes": 8192
+                }
+            }
+        },
+        {
+            "name": "boot-error",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "boot_error",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 2,
+                "timestamp": 1710000401100,
+                "error": {
+                    "code": "missing_agent",
+                    "message": "agent was not found in shared filesystem state",
+                    "retryable": false
+                }
+            }
+        },
+        {
+            "name": "pong",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "pong",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 3,
+                "timestamp": 1710000401200,
+                "replyingToSequence": 2
+            }
+        },
+        {
+            "name": "execution-started",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "execution_started",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 4,
+                "timestamp": 1710000401300,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3
+            }
+        },
+        {
+            "name": "stream-delta",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 5,
+                "timestamp": 1710000401400,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1,
+                "delta": "I will update the Rust migration plan."
+            }
+        },
+        {
+            "name": "stream-delta-file-reference",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 6,
+                "timestamp": 1710000401500,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 2,
+                "contentRef": {
+                    "path": "/tmp/tenex/worker/exec_01hzzzzzzzzzzzzzzzzzzzzzzz/delta-2.txt",
+                    "byteLength": 1048577,
+                    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            }
+        },
+        {
+            "name": "reasoning-delta",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "reasoning_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 7,
+                "timestamp": 1710000401600,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1,
+                "delta": "checking filesystem compatibility before dispatch",
+                "visibility": "debug"
+            }
+        },
+        {
+            "name": "tool-call-started",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "tool_call_started",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 8,
+                "timestamp": 1710000401700,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "toolCallId": "toolu_01",
+                "toolName": "fs_write"
+            }
+        },
+        {
+            "name": "tool-call-completed",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "tool_call_completed",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 9,
+                "timestamp": 1710000401800,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "toolCallId": "toolu_01",
+                "toolName": "fs_write",
+                "durationMs": 42,
+                "resultSummary": "updated docs/rust/implementation-milestones-and-quality-gates.md"
+            }
+        },
+        {
+            "name": "tool-call-failed",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "tool_call_failed",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 10,
+                "timestamp": 1710000401900,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "toolCallId": "toolu_02",
+                "toolName": "shell",
+                "error": {
+                    "code": "command_failed",
+                    "message": "command exited with status 1",
+                    "retryable": true
+                }
+            }
+        },
+        {
+            "name": "delegation-registered",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "delegation_registered",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 11,
+                "timestamp": 1710000402000,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "delegationConversationId": "delegation-conversation-1",
+                "recipientPubkey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "delegationType": "standard"
+            }
+        },
+        {
+            "name": "waiting-for-delegation",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "waiting_for_delegation",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 12,
+                "timestamp": 1710000402100,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "pendingDelegations": ["delegation-conversation-1"],
+                "finalRalState": "waiting_for_delegation",
+                "publishedUserVisibleEvent": false,
+                "pendingDelegationsRemain": true,
+                "accumulatedRuntimeMs": 1200,
+                "finalEventIds": [],
+                "keepWorkerWarm": true
+            }
+        },
+        {
+            "name": "publish-request",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "publish_request",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 13,
+                "timestamp": 1710000402200,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "requestId": "pub_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "requiresEventId": true,
+                "timeoutMs": 15000,
+                "event": {
+                    "id": "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",
+                    "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "kind": 1,
+                    "content": "Done.",
+                    "tags": [
+                        ["a", "31933:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:project-alpha"],
+                        ["p", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+                    ],
+                    "created_at": 1710000402,
+                    "sig": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+            }
+        },
+        {
+            "name": "published",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "published",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 14,
+                "timestamp": 1710000402300,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "mode": "direct_worker_publish",
+                "eventIds": ["published-event-id"]
+            }
+        },
+        {
+            "name": "complete",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "complete",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 15,
+                "timestamp": 1710000402400,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "finalRalState": "completed",
+                "publishedUserVisibleEvent": true,
+                "pendingDelegationsRemain": false,
+                "accumulatedRuntimeMs": 2250,
+                "finalEventIds": ["published-event-id"],
+                "keepWorkerWarm": false
+            }
+        },
+        {
+            "name": "silent-completion-requested",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "silent_completion_requested",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 16,
+                "timestamp": 1710000402500,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "reason": "agent_called_no_response"
+            }
+        },
+        {
+            "name": "no-response",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "no_response",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 17,
+                "timestamp": 1710000402600,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "finalRalState": "no_response",
+                "publishedUserVisibleEvent": false,
+                "pendingDelegationsRemain": false,
+                "accumulatedRuntimeMs": 900,
+                "finalEventIds": [],
+                "keepWorkerWarm": false
+            }
+        },
+        {
+            "name": "aborted",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "aborted",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 18,
+                "timestamp": 1710000402700,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "abortReason": "operator_requested",
+                "finalRalState": "aborted",
+                "publishedUserVisibleEvent": false,
+                "pendingDelegationsRemain": false,
+                "accumulatedRuntimeMs": 500,
+                "finalEventIds": [],
+                "keepWorkerWarm": false
+            }
+        },
+        {
+            "name": "error",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "error",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 19,
+                "timestamp": 1710000402800,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "terminal": true,
+                "error": {
+                    "code": "llm_provider_error",
+                    "message": "provider returned retryable error",
+                    "retryable": true
+                },
+                "finalRalState": "error",
+                "publishedUserVisibleEvent": true,
+                "pendingDelegationsRemain": false,
+                "accumulatedRuntimeMs": 650,
+                "finalEventIds": ["error-event-id"],
+                "keepWorkerWarm": false
+            }
+        },
+        {
+            "name": "heartbeat",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "heartbeat",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 20,
+                "timestamp": 1710000402900,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "state": "streaming",
+                "activeToolCount": 0,
+                "accumulatedRuntimeMs": 700
+            }
+        }
+    ],
+    "invalidMessages": [
+        {
+            "name": "unsupported-version",
+            "message": {
+                "version": 2,
+                "type": "ping",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410000,
+                "timeoutMs": 5000
+            }
+        },
+        {
+            "name": "missing-correlation-id",
+            "message": {
+                "version": 1,
+                "type": "ping",
+                "sequence": 1,
+                "timestamp": 1710000410000,
+                "timeoutMs": 5000
+            }
+        },
+        {
+            "name": "invalid-agent-pubkey",
+            "message": {
+                "version": 1,
+                "type": "execution_started",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410000,
+                "projectId": "project-alpha",
+                "agentPubkey": "not-a-hex-pubkey",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3
+            }
+        },
+        {
+            "name": "stream-delta-without-payload",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410000,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1
+            }
+        },
+        {
+            "name": "terminal-message-missing-final-state",
+            "message": {
+                "version": 1,
+                "type": "complete",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410000,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "publishedUserVisibleEvent": true,
+                "pendingDelegationsRemain": false,
+                "accumulatedRuntimeMs": 2250,
+                "finalEventIds": ["published-event-id"],
+                "keepWorkerWarm": false
+            }
+        },
+        {
+            "name": "publish-result-missing-request-sequence",
+            "message": {
+                "version": 1,
+                "type": "publish_result",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410000,
+                "status": "published",
+                "eventIds": ["published-event-id"]
+            }
+        }
+    ]
+}

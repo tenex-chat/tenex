@@ -127,7 +127,10 @@ export class AgentRegistry {
      * project membership. Storage mirrors those pubkeys for runtime boot and
      * non-running trust checks, but membership is never inferred from local state.
      */
-    async loadFromProject(ndkProject: NDKProject): Promise<void> {
+    async loadFromProject(
+        ndkProject: NDKProject,
+        options: { publishProfiles?: boolean } = {}
+    ): Promise<void> {
         this.ndkProject = ndkProject;
         this.projectDTag = ndkProject.dTag;
 
@@ -181,7 +184,9 @@ export class AgentRegistry {
 
         for (const pubkey of localPubkeys) {
             try {
-                await loadStoredAgentIntoRegistry(pubkey, this);
+                await loadStoredAgentIntoRegistry(pubkey, this, {
+                    publishProfile: options.publishProfiles !== false,
+                });
             } catch (error) {
                 logger.error(`Failed to load agent ${pubkey}`, { error });
                 failedPubkeys.push(pubkey);
@@ -216,7 +221,9 @@ export class AgentRegistry {
                         });
                     } else {
                         const escalationPubkey = deriveAgentPubkeyFromNsec(storedAgent.nsec);
-                        await loadStoredAgentIntoRegistry(escalationPubkey, this);
+                        await loadStoredAgentIntoRegistry(escalationPubkey, this, {
+                            publishProfile: options.publishProfiles !== false,
+                        });
                         logger.info(`Auto-loaded escalation agent ${escalationSlug} for project ${this.projectDTag}`);
                     }
                 } else {
@@ -236,7 +243,7 @@ export class AgentRegistry {
 
         // Republish kind:0 profiles for all agents now that the project has booted
         // Fire-and-forget: don't block boot waiting for profile publishes (especially NIP-46 signing)
-        if (ndkProject) {
+        if (options.publishProfiles !== false) {
             this.republishAgentProfiles(ndkProject).catch((error) => {
                 logger.warn("Background agent profile republishing failed", {
                     projectDTag: this.projectDTag,

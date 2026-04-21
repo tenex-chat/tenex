@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/tenex-daemon"]
+resolver = "3"

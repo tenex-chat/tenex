@@ -44,7 +44,7 @@ export class LLMServiceFactory {
      * @param options Additional options for initialization
      */
     async initializeProviders(
-        providerConfigs: Record<string, { apiKey: string | string[] }>
+        providerConfigs: Record<string, ProviderPoolConfig>
     ): Promise<void> {
         // Convert to ProviderPoolConfig format
         // apiKey can be a single string or an array — KeyManager handles the rest
@@ -57,6 +57,8 @@ export class LLMServiceFactory {
             if (hasKey) {
                 configs[name] = {
                     apiKey: config.apiKey,
+                    ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
+                    ...(config.options !== undefined ? { options: config.options } : {}),
                 };
             }
         }

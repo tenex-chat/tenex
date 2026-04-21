@@ -170,7 +170,8 @@ export async function createAgentInstance(
  */
 export async function loadStoredAgentIntoRegistry(
     pubkey: string,
-    registry: AgentRegistry
+    registry: AgentRegistry,
+    options: { publishProfile?: boolean } = {}
 ): Promise<AgentInstance> {
     const existingAgent = registry.getAgentByPubkey(pubkey);
     if (existingAgent) {
@@ -236,13 +237,13 @@ export async function loadStoredAgentIntoRegistry(
     registry.addAgent(instance);
 
     const ndkProject = registry.getNDKProject();
-    if (ndkProject) {
+    if (options.publishProfile !== false && ndkProject) {
         try {
             const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
             const whitelistedPubkeys = config.getWhitelistedPubkeys();
             const signer = new NDKPrivateKeySigner(storedAgent.nsec);
 
-            publishAgentProfile(
+            void publishAgentProfile(
                 signer,
                 storedAgent.name,
                 storedAgent.role,
@@ -255,7 +256,11 @@ export async function loadStoredAgentIntoRegistry(
                     useCriteria: storedAgent.useCriteria,
                 },
                 whitelistedPubkeys
-            );
+            ).catch((error) => {
+                logger.warn(`Failed to publish kind:0 profile for agent ${storedAgent.name}`, {
+                    error,
+                });
+            });
         } catch (error) {
             logger.warn(`Failed to publish kind:0 profile for agent ${storedAgent.name}`, { error });
         }
