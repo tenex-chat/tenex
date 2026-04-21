@@ -10,7 +10,7 @@ import type { SkillData } from "./types";
 import { logger } from "@/utils/logger";
 import { existsSync } from "fs";
 import { readdir } from "fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
 
 const TOOLS_DIR_NAME = "tools";
 
@@ -19,6 +19,13 @@ const TOOLS_DIR_NAME = "tools";
  * Returns null if the skill has no localDir or the tools/ subdirectory is missing.
  */
 export async function getSkillToolsDir(skillData: SkillData): Promise<string | null> {
+    if (skillData.scope === "built-in") {
+        const builtInToolsDir = getBundledBuiltInSkillToolsDir(skillData.identifier);
+        if (builtInToolsDir) {
+            return builtInToolsDir;
+        }
+    }
+
     if (!skillData.localDir) {
         return null;
     }
@@ -29,6 +36,20 @@ export async function getSkillToolsDir(skillData: SkillData): Promise<string | n
     }
 
     return toolsDir;
+}
+
+function getBundledBuiltInSkillToolsDir(identifier: string): string | null {
+    if (!/^[a-z0-9-]+$/.test(identifier)) {
+        return null;
+    }
+
+    const candidates = [
+        resolve(import.meta.dirname, "../../skills/built-in", identifier, TOOLS_DIR_NAME),
+        resolve(import.meta.dirname, "../src/skills/built-in", identifier, TOOLS_DIR_NAME),
+        resolve(import.meta.dirname, "../../../src/skills/built-in", identifier, TOOLS_DIR_NAME),
+    ];
+
+    return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 /**
