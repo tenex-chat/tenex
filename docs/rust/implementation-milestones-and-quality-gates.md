@@ -367,6 +367,12 @@ Current implementation status:
   and `RELAYS` comma-list semantics, sends exact signed `["EVENT", event]`
   frames, parses relay `OK` responses, and is covered by local mock WebSocket
   relay tests.
+- `worker_process.rs` now has an opt-in Rust-to-Bun publish interop gate that
+  spawns the real Bun worker, accepts worker-signed `publish_request` frames
+  into Rust's outbox, drains them through the Rust relay publisher, and verifies
+  a local mock relay receives the exact signed events. The gate then feeds those
+  same events to a TypeScript probe that verifies NIP-01 hash/signature,
+  daemon classification, and `NostrInboundAdapter` normalization.
 - The dispatch adapter mirrors `delegation_registered` frames into the parent
   `RALRegistry` and refreshes the parent in-memory `ConversationStore` from disk
   after the worker reaches a terminal frame.
@@ -708,6 +714,10 @@ Interoperability gate:
 - Existing clients accept Rust-published events without code changes.
 - A mixed environment with TypeScript and Rust backends does not duplicate
   events for the same execution.
+- Run `bun run test:rust:publish-interop` to execute the opt-in Rust-to-Bun
+  publish interop gate. This command runs the ignored Rust test serially and
+  requires Bun and installed TypeScript dependencies because it drives the real
+  worker process and the TypeScript Nostr consume probe.
 
 Rollback:
 

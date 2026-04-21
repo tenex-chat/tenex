@@ -30,6 +30,7 @@
     "test:coverage": "bun test --coverage",
     "test:unit": "bun test src/**/__tests__/*.test.ts",
     "test:integration": "bun test src/**/__tests__/*.integration.test.ts",
+    "test:rust:publish-interop": "cargo test -p tenex-daemon worker_process::tests::bun_agent_worker_publish_requests_relay_through_rust_outbox -- --ignored --exact --test-threads=1",
     "audit:identity-runtime": "bun run scripts/identity-runtime-audit.ts --strict",
     "audit:transport-runtime": "bun run scripts/transport-runtime-audit.ts --strict",
     "validate:events": "bun run src/scripts/validate-events.ts",

@@ -455,12 +455,16 @@ pub fn bun_agent_worker_command(
 mod tests {
     use super::*;
     use crate::publish_outbox::{
-        accept_worker_publish_request, build_accepted_publish_result,
-        read_pending_publish_outbox_record,
+        accept_worker_publish_request, build_accepted_publish_result, drain_pending_publish_outbox,
+        read_pending_publish_outbox_record, read_published_publish_outbox_record,
     };
+    use crate::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
     use crate::worker_protocol::{AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolFixture};
     use std::fs;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tungstenite::Message;
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
         "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
@@ -655,8 +659,8 @@ mod tests {
         let fixture = FilesystemBackedAgentFixture::create()
             .expect("filesystem-backed agent fixture must be created");
 
-        let bun = std::env::var("BUN_BIN").unwrap_or_else(|_| "bun".to_string());
-        let command = bun_agent_worker_command(&repo_root(), bun)
+        let bun = PathBuf::from(std::env::var("BUN_BIN").unwrap_or_else(|_| "bun".to_string()));
+        let command = bun_agent_worker_command(&repo_root(), bun.clone())
             .env("TENEX_AGENT_WORKER_ENGINE", "agent")
             .env("TENEX_BASE_DIR", fixture.tenex_base_path_string())
             .env("USE_MOCK_LLM", "true")
@@ -755,6 +759,125 @@ mod tests {
             first_todo.get("status").and_then(Value::as_str),
             Some("done")
         );
+    }
+
+    #[test]
+    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    fn bun_agent_worker_publish_requests_relay_through_rust_outbox() {
+        let fixture = FilesystemBackedAgentFixture::create()
+            .expect("filesystem-backed agent fixture must be created");
+
+        let bun = PathBuf::from(std::env::var("BUN_BIN").unwrap_or_else(|_| "bun".to_string()));
+        let command = bun_agent_worker_command(&repo_root(), bun.clone())
+            .env("TENEX_AGENT_WORKER_ENGINE", "agent")
+            .env("TENEX_BASE_DIR", fixture.tenex_base_path_string())
+            .env("USE_MOCK_LLM", "true")
+            .env("LOG_LEVEL", "silent");
+        let mut worker = AgentWorkerProcess::spawn(
+            &command,
+            &AgentWorkerProcessConfig {
+                boot_timeout: Duration::from_secs(5),
+            },
+        )
+        .expect("agent worker must boot");
+
+        worker
+            .process
+            .send_message(&fixture.execute_message)
+            .expect("execute must send");
+
+        let execution_started = worker
+            .process
+            .next_message(Duration::from_secs(10))
+            .expect("execution_started must arrive");
+        assert_eq!(
+            execution_started.get("type").and_then(Value::as_str),
+            Some("execution_started")
+        );
+
+        let observed =
+            collect_worker_messages_until_terminal(&mut worker.process, &fixture.daemon_dir());
+        let publish_requests = observed
+            .iter()
+            .filter(|message| {
+                message.get("type").and_then(Value::as_str) == Some("publish_request")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            publish_requests.len() >= 2,
+            "real worker must emit tool-progress and final publish requests"
+        );
+
+        let status = worker
+            .process
+            .wait_for_exit(Duration::from_secs(5))
+            .expect("worker must exit");
+        assert!(status.success(), "worker exited with {status}");
+
+        let mock_relay = MultiPublishMockRelay::start(publish_requests.len());
+        let config =
+            RelayPublisherConfig::new(vec![mock_relay.url.clone()], Duration::from_secs(2))
+                .expect("mock relay config must be valid");
+        let mut publisher = NostrRelayPublisher::new(config);
+
+        let outcomes =
+            drain_pending_publish_outbox(fixture.daemon_dir(), &mut publisher, 1710001000200)
+                .expect("pending outbox must drain through Rust relay publisher");
+
+        assert_eq!(outcomes.len(), publish_requests.len());
+        let expected_events = publish_requests
+            .iter()
+            .map(|message| {
+                let event = message
+                    .get("event")
+                    .cloned()
+                    .expect("publish request must include signed event");
+                let event_id = event
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .expect("publish request event must include id")
+                    .to_string();
+                (event_id, event)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut relayed_events = BTreeMap::new();
+        for _ in 0..publish_requests.len() {
+            let frame = mock_relay
+                .published_frames
+                .recv_timeout(Duration::from_secs(5))
+                .expect("mock relay must receive published event");
+            assert_eq!(frame.get(0).and_then(Value::as_str), Some("EVENT"));
+            let event = frame
+                .get(1)
+                .cloned()
+                .expect("EVENT frame must contain signed event");
+            let event_id = event
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("relayed event must include id")
+                .to_string();
+            relayed_events.insert(event_id, event);
+        }
+
+        assert_eq!(relayed_events, expected_events);
+        assert_typescript_consumes_relayed_events(
+            &repo_root(),
+            &bun,
+            &relayed_events.values().cloned().collect::<Vec<_>>(),
+        );
+        for event_id in expected_events.keys() {
+            assert!(
+                read_pending_publish_outbox_record(fixture.daemon_dir(), event_id)
+                    .expect("pending outbox read must succeed")
+                    .is_none()
+            );
+            let published = read_published_publish_outbox_record(fixture.daemon_dir(), event_id)
+                .expect("published outbox read must succeed")
+                .expect("published outbox record must exist");
+            assert_eq!(published.event.id, *event_id);
+        }
+
+        mock_relay.join();
     }
 
     #[test]
@@ -1289,6 +1412,136 @@ mod tests {
                 },
             }),
         )
+    }
+
+    fn assert_typescript_consumes_relayed_events(
+        repository_root: &Path,
+        bun_program: &Path,
+        events: &[Value],
+    ) {
+        let mut child = std::process::Command::new(bun_program)
+            .arg("run")
+            .arg("tools/rust-migration/nostr-consume-probe.ts")
+            .current_dir(repository_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("TypeScript Nostr consume probe must spawn");
+
+        {
+            let mut stdin = child
+                .stdin
+                .take()
+                .expect("TypeScript Nostr consume probe stdin must be piped");
+            serde_json::to_writer(&mut stdin, &json!({ "events": events }))
+                .expect("relayed events must serialize for TypeScript probe");
+            stdin
+                .write_all(b"\n")
+                .expect("TypeScript Nostr consume probe stdin must accept newline");
+        }
+
+        let output = child
+            .wait_with_output()
+            .expect("TypeScript Nostr consume probe must exit");
+        assert!(
+            output.status.success(),
+            "TypeScript Nostr consume probe failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let probe_result: Value = serde_json::from_slice(&output.stdout)
+            .expect("TypeScript Nostr consume probe stdout must be JSON");
+        assert_eq!(probe_result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            probe_result
+                .get("events")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(events.len())
+        );
+    }
+
+    struct MultiPublishMockRelay {
+        url: String,
+        published_frames: mpsc::Receiver<Value>,
+        handle: thread::JoinHandle<()>,
+    }
+
+    impl MultiPublishMockRelay {
+        fn start(expected_connections: usize) -> Self {
+            let listener =
+                TcpListener::bind("127.0.0.1:0").expect("mock relay must bind local port");
+            listener
+                .set_nonblocking(true)
+                .expect("mock relay listener must become nonblocking");
+            let url = format!(
+                "ws://{}",
+                listener
+                    .local_addr()
+                    .expect("mock relay must expose local addr")
+            );
+            let (sender, published_frames) = mpsc::channel();
+
+            let handle = thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let mut accepted = 0;
+                while accepted < expected_connections {
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            stream
+                                .set_nonblocking(false)
+                                .expect("mock relay stream must become blocking");
+                            let mut websocket = tungstenite::accept(stream)
+                                .expect("mock relay handshake must succeed");
+                            let message = websocket.read().expect("mock relay must read event");
+                            let value: Value = serde_json::from_str(
+                                message
+                                    .to_text()
+                                    .expect("mock relay event message must be text"),
+                            )
+                            .expect("mock relay event message must be json");
+                            let event_id = value
+                                .get(1)
+                                .and_then(|event| event.get("id"))
+                                .and_then(Value::as_str)
+                                .expect("EVENT frame must include event id")
+                                .to_string();
+                            sender
+                                .send(value)
+                                .expect("mock relay must send captured frame");
+                            websocket
+                                .send(Message::text(
+                                    serde_json::to_string(&json!(["OK", event_id, true, "stored"]))
+                                        .expect("mock relay OK frame must serialize"),
+                                ))
+                                .expect("mock relay must send OK frame");
+                            accepted += 1;
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            if Instant::now() > deadline {
+                                panic!(
+                                    "mock relay accepted {accepted} of {expected_connections} expected connections"
+                                );
+                            }
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("mock relay accept failed: {error}"),
+                    }
+                }
+            });
+
+            Self {
+                url,
+                published_frames,
+                handle,
+            }
+        }
+
+        fn join(self) {
+            self.handle.join().expect("mock relay thread must join");
+        }
     }
 
     struct FilesystemBackedAgentFixture {

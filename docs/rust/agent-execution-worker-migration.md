@@ -932,6 +932,10 @@ Current status:
   stdio, drive real-worker tool calls and non-initial continuations, observe
   terminal delegation wait state and no-response state, and verify shared
   filesystem transcript effects in ignored integration tests.
+- The opt-in `bun run test:rust:publish-interop` gate now drives the real Bun
+  worker through Rust publish acceptance and Rust relay publishing, then verifies
+  a local mock relay receives the exact worker-signed events and the TypeScript
+  Nostr client path can verify, classify, and normalize those same events.
 - Worker bootstrap coverage verifies MCP manager shutdown on executor failure.
 - The existing TypeScript daemon has an opt-in `TENEX_AGENT_WORKER=1` route
   through `AgentDispatchService`. It currently only selects the child worker for
