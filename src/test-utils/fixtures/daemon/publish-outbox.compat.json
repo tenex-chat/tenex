@@ -62,6 +62,65 @@
             }
         }
     },
+    "maintenanceReports": {
+        "dueRetryPublished": {
+            "diagnosticsBefore": {
+                "schemaVersion": 1,
+                "inspectedAt": 1710001001200,
+                "pendingCount": 0,
+                "publishedCount": 0,
+                "failedCount": 1,
+                "retryableFailedCount": 1,
+                "retryDueCount": 1,
+                "permanentFailedCount": 0,
+                "tmpFileCount": 0,
+                "oldestPending": null,
+                "nextRetryAt": 1710001001200,
+                "latestFailure": {
+                    "eventId": "event-failed-01",
+                    "requestId": "publish-fixture-01",
+                    "projectId": "project-alpha",
+                    "conversationId": "conversation-alpha",
+                    "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "attemptCount": 1,
+                    "attemptedAt": 1710001000300,
+                    "error": "relay publish failed",
+                    "retryable": true,
+                    "nextAttemptAt": 1710001001200
+                }
+            },
+            "requeued": [
+                {
+                    "eventId": "event-failed-01",
+                    "status": "accepted",
+                    "sourcePath": "/var/lib/tenex/daemon/publish-outbox/failed/event-failed-01.json",
+                    "targetPath": "/var/lib/tenex/daemon/publish-outbox/pending/event-failed-01.json"
+                }
+            ],
+            "drained": [
+                {
+                    "eventId": "event-failed-01",
+                    "status": "published",
+                    "sourcePath": "/var/lib/tenex/daemon/publish-outbox/pending/event-failed-01.json",
+                    "targetPath": "/var/lib/tenex/daemon/publish-outbox/published/event-failed-01.json"
+                }
+            ],
+            "diagnosticsAfter": {
+                "schemaVersion": 1,
+                "inspectedAt": 1710001001200,
+                "pendingCount": 0,
+                "publishedCount": 1,
+                "failedCount": 0,
+                "retryableFailedCount": 0,
+                "retryDueCount": 0,
+                "permanentFailedCount": 0,
+                "tmpFileCount": 0,
+                "oldestPending": null,
+                "nextRetryAt": null,
+                "latestFailure": null
+            }
+        }
+    },
     "records": {
         "accepted": {
             "schemaVersion": 1,

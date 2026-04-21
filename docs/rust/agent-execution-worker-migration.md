@@ -983,7 +983,10 @@ Current status:
   diagnostics, requeues due failed records, drains pending records through the
   publisher interface, and snapshots diagnostics again. The API is library-first
   so daemon startup, periodic maintenance, and a future `doctor` repair command
-  can all invoke the same behavior without making `daemon status` mutating.
+  can all invoke the same behavior without making `daemon status` mutating. The
+  maintenance report is serializable and pinned in the shared compatibility
+  fixture as the operator output contract for future `doctor publish-outbox`
+  inspect/status and repair/drain commands.
 - The TypeScript bridge has focused unit coverage for the framed dispatch path:
   spawn arguments, execute-frame construction, parent publish handling,
   `publish_result` replies, RAL cleanup on completion, and parent RAL

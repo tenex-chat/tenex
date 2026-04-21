@@ -4,8 +4,8 @@ User-facing CLI commands. Thin wrappers that parse input, delegate to services, 
 
 ## Contents
 
-- `daemon.ts` — Daemon start/stop
-- `doctor.ts` — System health diagnostics
+- `daemon.ts` — Daemon lifecycle plus read-only status probes. Do not hide mutating repair or maintenance actions under daemon status.
+- `doctor.ts` — System health diagnostics and explicit repair flows. Future Rust publish-outbox operator commands should live here, with read-only inspect/status separate from mutating repair/drain actions.
 - `agent/` — Agent management subcommands
 - `setup/` — Onboarding flows (interactive setup, LLM config, embedding config)
 

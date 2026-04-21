@@ -174,4 +174,49 @@ describe("PublishOutbox compatibility fixture", () => {
             nextAttemptAt: 1710001001300,
         });
     });
+
+    it("describes maintenance report output shapes", () => {
+        const { dueRetryPublished } = publishOutboxFixture.maintenanceReports;
+        const daemonDir = "/var/lib/tenex/daemon";
+
+        expect(dueRetryPublished.diagnosticsBefore).toEqual(
+            expect.objectContaining({
+                schemaVersion: 1,
+                inspectedAt: 1710001001200,
+                pendingCount: 0,
+                publishedCount: 0,
+                failedCount: 1,
+                retryDueCount: 1,
+                nextRetryAt: 1710001001200,
+            })
+        );
+        expect(dueRetryPublished.requeued).toEqual([
+            {
+                eventId: "event-failed-01",
+                status: "accepted",
+                sourcePath: path.join(daemonDir, "publish-outbox", "failed", "event-failed-01.json"),
+                targetPath: path.join(daemonDir, "publish-outbox", "pending", "event-failed-01.json"),
+            },
+        ]);
+        expect(dueRetryPublished.drained).toEqual([
+            {
+                eventId: "event-failed-01",
+                status: "published",
+                sourcePath: path.join(daemonDir, "publish-outbox", "pending", "event-failed-01.json"),
+                targetPath: path.join(daemonDir, "publish-outbox", "published", "event-failed-01.json"),
+            },
+        ]);
+        expect(dueRetryPublished.diagnosticsAfter).toEqual(
+            expect.objectContaining({
+                schemaVersion: 1,
+                inspectedAt: 1710001001200,
+                pendingCount: 0,
+                publishedCount: 1,
+                failedCount: 0,
+                retryDueCount: 0,
+                nextRetryAt: null,
+                latestFailure: null,
+            })
+        );
+    });
 });

@@ -115,7 +115,8 @@ pub struct PublishRelayAttempt {
     pub next_attempt_at: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublishOutboxDrainOutcome {
     pub event_id: String,
     pub status: PublishOutboxStatus,
@@ -123,7 +124,8 @@ pub struct PublishOutboxDrainOutcome {
     pub target_path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublishOutboxRequeueOutcome {
     pub event_id: String,
     pub status: PublishOutboxStatus,
@@ -131,7 +133,8 @@ pub struct PublishOutboxRequeueOutcome {
     pub target_path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublishOutboxMaintenanceReport {
     pub diagnostics_before: PublishOutboxDiagnostics,
     pub requeued: Vec<PublishOutboxRequeueOutcome>,
@@ -1148,6 +1151,27 @@ mod tests {
         assert_eq!(failed.status, PublishOutboxStatus::Failed);
         assert_eq!(failed.attempts[0].status, PublishRelayAttemptStatus::Failed);
         assert_eq!(failed.attempts[0].next_attempt_at, Some(1710001001300));
+
+        let maintenance_report: PublishOutboxMaintenanceReport =
+            serde_json::from_value(fixture["maintenanceReports"]["dueRetryPublished"].clone())
+                .expect("maintenance report fixture must deserialize");
+        assert_eq!(maintenance_report.diagnostics_before.failed_count, 1);
+        assert_eq!(maintenance_report.diagnostics_before.retry_due_count, 1);
+        assert_eq!(maintenance_report.requeued.len(), 1);
+        assert_eq!(
+            maintenance_report.requeued[0].target_path,
+            daemon_dir
+                .join("publish-outbox")
+                .join("pending")
+                .join("event-failed-01.json")
+        );
+        assert_eq!(maintenance_report.drained.len(), 1);
+        assert_eq!(
+            maintenance_report.drained[0].status,
+            PublishOutboxStatus::Published
+        );
+        assert_eq!(maintenance_report.diagnostics_after.published_count, 1);
+        assert_eq!(maintenance_report.diagnostics_after.failed_count, 0);
     }
 
     #[test]
