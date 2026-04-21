@@ -57,11 +57,11 @@ describe("ConversationEmbeddingService", () => {
 
             expect(result.kind).toBe("ok");
             if (result.kind === "ok") {
-                expect(result.transcriptXml).toBeString();
-                expect(result.transcriptXml.length).toBeGreaterThan(0);
+                expect(result.transcriptChunks[0]).toBeString();
+                expect(result.transcriptChunks[0].length).toBeGreaterThan(0);
                 // Should contain the message content
-                expect(result.transcriptXml).toContain("Hello");
-                expect(result.transcriptXml).toContain("Hi there!");
+                expect(result.transcriptChunks.join("\n")).toContain("Hello");
+                expect(result.transcriptChunks.join("\n")).toContain("Hi there!");
             }
         });
 
@@ -84,7 +84,7 @@ describe("ConversationEmbeddingService", () => {
             // With fallback, we get 'ok' with the raw message content
             expect(result.kind).toBe("ok");
             if (result.kind === "ok") {
-                expect(result.transcriptXml).toContain("Test message content");
+                expect(result.transcriptChunks.join("\n")).toContain("Test message content");
                 expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
             }
         });
@@ -114,7 +114,51 @@ describe("ConversationEmbeddingService", () => {
             expect(result.kind).toBe("ok");
             if (result.kind === "ok") {
                 // The XML should include the tool call name
-                expect(result.transcriptXml).toContain("search_files");
+                expect(result.transcriptChunks.join("\n")).toContain("search_files");
+            }
+        });
+
+        it("excludes tool results from embedding content", () => {
+            const service = ConversationEmbeddingService.getInstance();
+            const messages: ConversationRecordInput[] = [
+                makeMessage({ id: "msg-1", role: "user", content: "Please run the command", timestamp: 1000 }),
+                {
+                    pubkey: "agent-pubkey-1",
+                    messageType: "tool-result",
+                    content: "large command output that should not be embedded",
+                    eventId: "tool-result-event",
+                    timestamp: 1001,
+                    role: "tool",
+                },
+            ];
+
+            const result = buildEmbeddingContent(service, messages);
+
+            expect(result.kind).toBe("ok");
+            if (result.kind === "ok") {
+                const content = result.transcriptChunks.join("\n");
+                expect(content).toContain("Please run the command");
+                expect(content).not.toContain("large command output");
+            }
+        });
+
+        it("splits long transcripts into bounded chunks", () => {
+            const service = ConversationEmbeddingService.getInstance();
+            const messages = [
+                makeMessage({
+                    id: "msg-1",
+                    role: "user",
+                    content: "A".repeat(30_000),
+                    timestamp: 1000,
+                }),
+            ];
+
+            const result = buildEmbeddingContent(service, messages);
+
+            expect(result.kind).toBe("ok");
+            if (result.kind === "ok") {
+                expect(result.transcriptChunks.length).toBeGreaterThan(1);
+                expect(Math.max(...result.transcriptChunks.map((chunk) => chunk.length))).toBeLessThanOrEqual(12_000);
             }
         });
 
@@ -132,9 +176,12 @@ describe("ConversationEmbeddingService", () => {
                 expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
 
                 // Verify the fingerprint is actually the SHA-256 of the XML
-                const expectedFingerprint = createHash("sha256")
-                    .update(result.transcriptXml)
-                    .digest("hex");
+                const hash = createHash("sha256");
+                for (const chunk of result.transcriptChunks) {
+                    hash.update(chunk);
+                    hash.update("\n");
+                }
+                const expectedFingerprint = hash.digest("hex");
                 expect(result.fingerprint).toBe(expectedFingerprint);
             }
         });

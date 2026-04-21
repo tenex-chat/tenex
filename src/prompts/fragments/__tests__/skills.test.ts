@@ -63,6 +63,33 @@ describe("renderSkill", () => {
         expect(result).not.toContain("## Failed File Downloads");
     });
 
+    it("should self-close skills without content", () => {
+        const result = renderSkill(createSkill({ content: "" }));
+
+        expect(result).toBe('<skill id="poster-kit" />');
+    });
+
+    it("should show failed file downloads for skills without content", () => {
+        const result = renderSkill(
+            createSkill({
+                content: "",
+                installedFiles: [
+                    {
+                        eventId: "event2",
+                        relativePath: "data/missing.json",
+                        absolutePath: "/home/.tenex/skills/poster-kit/data/missing.json",
+                        success: false,
+                        error: "Download timed out",
+                    },
+                ],
+            })
+        );
+
+        expect(result).toContain("## Failed File Downloads");
+        expect(result).toContain("data/missing.json: Download timed out");
+        expect(result).toContain("</skill>");
+    });
+
     it("should escape special characters in attributes", () => {
         const result = renderSkill(createSkill({ content: "Test content", identifier: 'name-with-"quotes"' }));
 

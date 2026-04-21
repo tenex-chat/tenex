@@ -126,7 +126,6 @@ export class AgentEnvironmentService {
             mergedEnv.PROJECT_ID = params.projectDTag;
         }
         mergedEnv.TENEX_BASE_DIR = config.getConfigPath();
-        mergedEnv.TENEX_SRC = path.resolve(import.meta.dirname, "../..");
 
         return mergedEnv;
     }

@@ -43,6 +43,7 @@ const createMockVectorStore = (
     upsertDocuments: mock(() => Promise.resolve({ upsertedCount: 0, failedIndices: [] })),
     deleteDocument: mock(() => Promise.resolve()),
     getAllDocuments: mock(() => Promise.resolve([])),
+    getCollectionDimensions: mock(() => Promise.resolve(384)),
     search: mock(() => Promise.resolve([])),
     runMaintenance: mock(() => Promise.resolve()),
 });

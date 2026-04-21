@@ -157,7 +157,7 @@ describe("IndexingStateManager", () => {
     });
 
     it("EMBEDDING_CONTENT_VERSION constant has expected value", () => {
-        expect(EMBEDDING_CONTENT_VERSION).toBe("v2");
+        expect(EMBEDDING_CONTENT_VERSION).toBe("v3");
     });
 });
 

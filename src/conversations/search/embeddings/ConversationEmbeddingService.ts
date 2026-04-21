@@ -1,11 +1,11 @@
 /**
  * ConversationEmbeddingService - Semantic search for conversations
  *
- * This service manages embeddings for conversation summaries to enable
+ * This service manages embeddings for conversation transcripts to enable
  * natural language semantic search across conversations.
  *
  * Key features:
- * - Embeds conversation summaries (not individual messages - too expensive)
+ * - Embeds bounded transcript chunks, excluding tool results
  * - Uses existing RAG infrastructure (vector store, embedding providers)
  * - Supports hybrid search (semantic + keyword fallback)
  * - Project isolation: filters are applied DURING vector search (prefilter)
@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 
 /** Collection name for conversation embeddings */
 const CONVERSATION_COLLECTION = "conversation_embeddings";
+const MAX_EMBEDDING_CONTENT_CHARS = 12_000;
 
 /**
  * Document structure for conversation embeddings
@@ -61,7 +62,7 @@ export interface SemanticSearchResult {
  * or leave for retry.
  */
 export type BuildDocumentResult =
-    | { kind: "ok"; document: RAGDocument }
+    | { kind: "ok"; documents: RAGDocument[] }
     | { kind: "noContent" }
     | { kind: "error"; reason: string };
 
@@ -125,6 +126,23 @@ export class ConversationEmbeddingService {
                 // Create the collection
                 await this.ragService.createCollection(CONVERSATION_COLLECTION);
                 logger.info(`Created conversation embeddings collection: ${CONVERSATION_COLLECTION}`);
+            } else {
+                const [expectedDimensions, actualDimensions] = await Promise.all([
+                    this.ragService.getEmbeddingDimensions(),
+                    this.ragService.getCollectionDimensions(CONVERSATION_COLLECTION),
+                ]);
+
+                if (actualDimensions !== null && actualDimensions !== expectedDimensions) {
+                    logger.warn("Recreating conversation embeddings collection due to vector dimension mismatch", {
+                        collectionName: CONVERSATION_COLLECTION,
+                        expectedDimensions,
+                        actualDimensions,
+                        embeddingProvider: await this.ragService.getEmbeddingProviderInfo(),
+                    });
+                    await this.ragService.deleteCollection(CONVERSATION_COLLECTION);
+                    await this.ragService.createCollection(CONVERSATION_COLLECTION);
+                    logger.info(`Recreated conversation embeddings collection: ${CONVERSATION_COLLECTION}`);
+                }
             }
 
             this.initialized = true;
@@ -164,27 +182,26 @@ export class ConversationEmbeddingService {
      *   fallback root event ID when messages lack explicit eventId fields.
      * @param messages - The full list of messages in the conversation
      * @param fallbackTitle - Optional title for the plain-text fallback content
-     * @returns { kind: 'ok'; transcriptXml: string; fingerprint: string } on success,
+     * @returns { kind: 'ok'; transcriptChunks: string[]; fingerprint: string } on success,
      *          { kind: 'error' } only when there is truly no content to embed
      */
     private buildEmbeddingContent(
         conversationId: string,
         messages: import("@/conversations/types").ConversationRecordInput[],
         fallbackTitle?: string
-    ): { kind: "ok"; transcriptXml: string; fingerprint: string } | { kind: "error" } {
+    ): { kind: "ok"; transcriptChunks: string[]; fingerprint: string } | { kind: "error" } {
         // Try XML rendering first, passing conversationId so the renderer can
         // resolve the root event ID even when message eventId fields are absent.
         try {
-            const renderResult: ConversationXmlRenderResult = renderConversationXml(messages, {
-                conversationId,
-                includeToolCalls: true,
-            });
+            const transcriptChunks = this.renderTranscriptChunks(conversationId, messages);
 
-            const fingerprint = createHash("sha256")
-                .update(renderResult.xml)
-                .digest("hex");
+            const hash = createHash("sha256");
+            for (const chunk of transcriptChunks) {
+                hash.update(chunk);
+                hash.update("\n");
+            }
 
-            return { kind: "ok", transcriptXml: renderResult.xml, fingerprint };
+            return { kind: "ok", transcriptChunks, fingerprint: hash.digest("hex") };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger.debug(`XML transcript render failed for ${conversationId.substring(0, 8)}, using plain-text fallback: ${message}`);
@@ -197,6 +214,9 @@ export class ConversationEmbeddingService {
             parts.push(fallbackTitle);
         }
         for (const msg of messages) {
+            if (msg.messageType === "tool-result") {
+                continue;
+            }
             if (typeof msg.content === "string" && msg.content.trim()) {
                 parts.push(msg.content.trim());
             }
@@ -208,8 +228,111 @@ export class ConversationEmbeddingService {
         }
 
         const plainText = parts.join("\n\n");
-        const fingerprint = createHash("sha256").update(plainText).digest("hex");
-        return { kind: "ok", transcriptXml: plainText, fingerprint };
+        const transcriptChunks = this.splitTextForEmbedding(plainText);
+        const hash = createHash("sha256");
+        for (const chunk of transcriptChunks) {
+            hash.update(chunk);
+            hash.update("\n");
+        }
+        return { kind: "ok", transcriptChunks, fingerprint: hash.digest("hex") };
+    }
+
+    private renderTranscriptChunks(
+        conversationId: string,
+        messages: import("@/conversations/types").ConversationRecordInput[]
+    ): string[] {
+        const chunks: string[] = [];
+        let currentMessages: import("@/conversations/types").ConversationRecordInput[] = [];
+
+        const flushCurrent = (): void => {
+            const renderResult: ConversationXmlRenderResult = renderConversationXml(currentMessages, {
+                conversationId,
+                includeToolCalls: true,
+            });
+            chunks.push(renderResult.xml);
+            currentMessages = [];
+        };
+
+        const expandedMessages = messages.flatMap((message) => this.splitOversizedMessage(message));
+        if (expandedMessages.length === 0) {
+            const renderResult: ConversationXmlRenderResult = renderConversationXml([], {
+                conversationId,
+                includeToolCalls: true,
+            });
+            return [renderResult.xml];
+        }
+
+        for (const message of expandedMessages) {
+            const candidateMessages = [...currentMessages, message];
+            const candidate = renderConversationXml(candidateMessages, {
+                conversationId,
+                includeToolCalls: true,
+            }).xml;
+
+            if (candidate.length <= MAX_EMBEDDING_CONTENT_CHARS || currentMessages.length === 0) {
+                currentMessages = candidateMessages;
+                continue;
+            }
+
+            flushCurrent();
+            currentMessages = [message];
+
+            const singleMessageChunk = renderConversationXml(currentMessages, {
+                conversationId,
+                includeToolCalls: true,
+            }).xml;
+            if (singleMessageChunk.length > MAX_EMBEDDING_CONTENT_CHARS) {
+                logger.warn("Conversation transcript chunk exceeds embedding target size", {
+                    conversationId: conversationId.substring(0, 8),
+                    chunkChars: singleMessageChunk.length,
+                    targetChars: MAX_EMBEDDING_CONTENT_CHARS,
+                });
+            }
+        }
+
+        if (currentMessages.length > 0) {
+            flushCurrent();
+        }
+
+        return chunks;
+    }
+
+    private splitOversizedMessage(
+        message: import("@/conversations/types").ConversationRecordInput
+    ): import("@/conversations/types").ConversationRecordInput[] {
+        if (message.messageType !== "text" || message.content.length <= MAX_EMBEDDING_CONTENT_CHARS / 2) {
+            return [message];
+        }
+
+        return this.splitTextForEmbedding(message.content, Math.floor(MAX_EMBEDDING_CONTENT_CHARS / 2))
+            .map((content, index, parts) => ({
+                ...message,
+                content: parts.length === 1
+                    ? content
+                    : `${content}\n\n[message part ${index + 1}/${parts.length}]`,
+            }));
+    }
+
+    private splitTextForEmbedding(
+        text: string,
+        maxChars: number = MAX_EMBEDDING_CONTENT_CHARS
+    ): string[] {
+        if (text.length <= maxChars) {
+            return [text];
+        }
+
+        const chunks: string[] = [];
+        let remaining = text;
+        while (remaining.length > maxChars) {
+            const newlineIndex = remaining.lastIndexOf("\n", maxChars);
+            const splitAt = newlineIndex > maxChars * 0.5 ? newlineIndex : maxChars;
+            chunks.push(remaining.slice(0, splitAt).trim());
+            remaining = remaining.slice(splitAt).trim();
+        }
+        if (remaining.length > 0) {
+            chunks.push(remaining);
+        }
+        return chunks.filter((chunk) => chunk.length > 0);
     }
 
     /**
@@ -251,18 +374,18 @@ export class ConversationEmbeddingService {
                 return { kind: "noContent" };
             }
 
-            const { transcriptXml, fingerprint } = renderResult;
-
-            const documentId = `conv_${projectId}_${conversationId}`;
+            const { transcriptChunks, fingerprint } = renderResult;
 
             return {
                 kind: "ok",
-                document: {
-                    id: documentId,
-                    content: transcriptXml,
+                documents: transcriptChunks.map((transcriptChunk, chunkIndex) => ({
+                    id: this.getDocumentId(projectId, conversationId, chunkIndex),
+                    content: transcriptChunk,
                     metadata: {
                         conversationId,
                         projectId,
+                        chunkIndex,
+                        totalChunks: transcriptChunks.length,
                         title: title || "",
                         summary: preview?.summary ?? metadata?.summary ?? "",
                         messageCount: preview?.messageCount ?? messages.length,
@@ -273,7 +396,7 @@ export class ConversationEmbeddingService {
                     },
                     timestamp: preview?.lastActivity || messages[messages.length - 1]?.timestamp || Date.now(),
                     source: "conversation",
-                },
+                })),
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -308,7 +431,7 @@ export class ConversationEmbeddingService {
         }
 
         // Atomic bulk upsert through the configured vector store
-        await this.ragService.bulkUpsert(CONVERSATION_COLLECTION, [result.document]);
+        await this.ragService.bulkUpsert(CONVERSATION_COLLECTION, result.documents);
 
         logger.debug(`Indexed conversation ${conversationId.substring(0, 8)} for project ${projectId}`);
         return true;
@@ -320,6 +443,13 @@ export class ConversationEmbeddingService {
      */
     public getCollectionName(): string {
         return CONVERSATION_COLLECTION;
+    }
+
+    public getDocumentId(projectId: string, conversationId: string, chunkIndex: number): string {
+        if (chunkIndex === 0) {
+            return `conv_${projectId}_${conversationId}`;
+        }
+        return `conv_${projectId}_${conversationId}_chunk_${chunkIndex}`;
     }
 
     /**

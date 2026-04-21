@@ -2,7 +2,6 @@ import * as crypto from "node:crypto";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { getAgentHomeDirectory, getShortPubkey } from "@/lib/agent-home";
 import { ensureDirectory } from "@/lib/fs";
 import { slugifyIdentifier } from "@/lib/string";
@@ -27,6 +26,7 @@ import type {
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { shortenEventId } from "@/utils/conversation-id";
+import { getTenexBasePath } from "@/constants";
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const MAX_DOWNLOAD_SIZE_BYTES = 10 * 1024 * 1024;
@@ -243,11 +243,9 @@ export class SkillService {
     ): Promise<SkillStoreDirectory[]> {
         const directories: SkillStoreDirectory[] = [];
 
-        // Built-in skills bundled with source code take highest precedence
-        const thisDir = path.dirname(fileURLToPath(import.meta.url));
         directories.push({
             scope: "built-in",
-            dir: path.resolve(thisDir, "../../skills/built-in"),
+            dir: await this.getBuiltInSkillsBaseDir(),
         });
 
         if (lookupContext.agentPubkey) {
@@ -277,6 +275,38 @@ export class SkillService {
         });
 
         return directories;
+    }
+
+    private async getBuiltInSkillsBaseDir(): Promise<string> {
+        const bundledDir = path.join(getTenexBasePath(), "skills", "built-in");
+        if (await this.directoryExists(bundledDir)) {
+            return bundledDir;
+        }
+
+        const candidates = [
+            path.resolve(import.meta.dirname, "../../skills/built-in"),
+            path.resolve(import.meta.dirname, "../src/skills/built-in"),
+        ];
+
+        for (const candidate of candidates) {
+            if (await this.directoryExists(candidate)) {
+                return candidate;
+            }
+        }
+
+        return bundledDir;
+    }
+
+    private async directoryExists(dirPath: string): Promise<boolean> {
+        try {
+            const stats = await fs.stat(dirPath);
+            return stats.isDirectory();
+        } catch (error) {
+            if (this.isMissingDirectoryError(error)) {
+                return false;
+            }
+            throw error;
+        }
     }
 
     private isMissingDirectoryError(error: unknown): boolean {

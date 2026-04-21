@@ -24,8 +24,8 @@ export const environmentVariablesFragment: PromptFragment<EnvironmentVariablesAr
         } else {
             parts.push("- $PROJECT_ID");
         }
-        parts.push("- $TENEX_BASE_DIR — TENEX data directory (agents, projects, teams)");
-        parts.push("- $TENEX_SRC — TENEX source/installation directory (for running built-in skill scripts)");
+        parts.push("- $TENEX_BASE_DIR — TENEX data directory (agents, projects, teams, built-in skills)");
+
         parts.push("");
         parts.push("Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessions).");
         parts.push("</environment-variables>");

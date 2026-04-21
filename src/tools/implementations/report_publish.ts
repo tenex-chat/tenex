@@ -15,7 +15,7 @@ interface FileEntry {
 
 function assertContained(realFilePath: string, allowedRoot: string): void {
     if (realFilePath !== allowedRoot && !realFilePath.startsWith(allowedRoot + path.sep)) {
-        throw new Error(`Access denied: path is outside the project directory`);
+        throw new Error("Access denied: path is outside the project directory");
     }
 }
 
@@ -48,8 +48,8 @@ function collectFiles(inputPath: string, allowedRoot: string): FileEntry[] {
         let entries: fs.Dirent[];
         try {
             entries = fs.readdirSync(current, { withFileTypes: true });
-        } catch (err) {
-            throw new Error(`Cannot read directory: ${current}`);
+        } catch (error) {
+            throw new Error(`Cannot read directory: ${current}`, { cause: error });
         }
         for (const entry of entries) {
             const fullPath = path.join(current, entry.name);

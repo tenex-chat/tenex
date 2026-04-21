@@ -64,6 +64,7 @@ export interface VectorStore {
     deleteCollection(name: string): Promise<void>;
     listCollections(): Promise<string[]>;
     collectionExists(name: string): Promise<boolean>;
+    getCollectionDimensions(name: string): Promise<number | null>;
 
     // -- Document operations --
 

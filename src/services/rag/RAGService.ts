@@ -229,6 +229,16 @@ export class RAGService {
         return this.embeddingProvider.getModelId();
     }
 
+    public async getEmbeddingDimensions(): Promise<number> {
+        await this.ensureInitialized();
+        return this.embeddingProvider.getDimensions();
+    }
+
+    public async getCollectionDimensions(collectionName: string): Promise<number | null> {
+        await this.ensureInitialized();
+        return this.vectorStore.getCollectionDimensions(collectionName);
+    }
+
     public async close(): Promise<void> {
         await this.ensureInitialized();
         if (this.maintenanceTimer) {

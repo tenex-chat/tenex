@@ -24,9 +24,21 @@ interface EventLoopStats {
     blockedCount: number; // samples where lag > threshold
 }
 
+interface ProcessHealthSample {
+    timestamp: number;
+    cpuPercent: number;
+    activeOperations: number;
+    heapUsedMb: number;
+    rssMb: number;
+}
+
 const DEFAULT_SAMPLE_INTERVAL_MS = 100; // Sample every 100ms
 const DEFAULT_LAG_THRESHOLD_MS = 50; // Consider >50ms as "blocked"
 const MAX_SAMPLES = 1000; // Keep last 1000 samples
+const PROCESS_HEALTH_SAMPLE_INTERVAL_MS = 30_000;
+const HIGH_CPU_THRESHOLD_PERCENT = 80;
+const HIGH_CPU_WARNING_CONSECUTIVE_SAMPLES = 2;
+const PROCESS_HEALTH_LOG_INTERVAL_MS = 120_000;
 
 class EventLoopMonitor {
     private static instance: EventLoopMonitor;
@@ -39,6 +51,10 @@ class EventLoopMonitor {
     private intervalHandle: ReturnType<typeof setInterval> | null = null;
     private lastCheckTime = 0;
     private getActiveOperationsCount: () => number = () => 0;
+    private lastProcessHealthSampleAt = 0;
+    private lastProcessCpuUsage = process.cpuUsage();
+    private consecutiveHighCpuSamples = 0;
+    private lastProcessHealthLogAt = 0;
 
     private constructor() {}
 
@@ -118,6 +134,7 @@ class EventLoopMonitor {
                 }
             }
 
+            this.sampleProcessHealth(now, activeOps);
             this.lastCheckTime = now;
         }, sampleIntervalMs);
 
@@ -193,6 +210,10 @@ class EventLoopMonitor {
         this.totalLagMs = 0;
         this.sampleCount = 0;
         this.blockedCount = 0;
+        this.lastProcessHealthSampleAt = 0;
+        this.lastProcessCpuUsage = process.cpuUsage();
+        this.consecutiveHighCpuSamples = 0;
+        this.lastProcessHealthLogAt = 0;
     }
 
     /**
@@ -200,6 +221,81 @@ class EventLoopMonitor {
      */
     isActive(): boolean {
         return this.isRunning;
+    }
+
+    private sampleProcessHealth(now: number, activeOps: number): void {
+        if (this.lastProcessHealthSampleAt === 0) {
+            this.lastProcessHealthSampleAt = now;
+            this.lastProcessCpuUsage = process.cpuUsage();
+            return;
+        }
+
+        const elapsedMs = now - this.lastProcessHealthSampleAt;
+        if (elapsedMs < PROCESS_HEALTH_SAMPLE_INTERVAL_MS) {
+            return;
+        }
+
+        const currentCpuUsage = process.cpuUsage();
+        const userDelta = currentCpuUsage.user - this.lastProcessCpuUsage.user;
+        const systemDelta = currentCpuUsage.system - this.lastProcessCpuUsage.system;
+        const cpuPercent = ((userDelta + systemDelta) / 1000 / elapsedMs) * 100;
+
+        this.lastProcessHealthSampleAt = now;
+        this.lastProcessCpuUsage = currentCpuUsage;
+
+        if (cpuPercent >= HIGH_CPU_THRESHOLD_PERCENT) {
+            this.consecutiveHighCpuSamples++;
+        } else {
+            this.consecutiveHighCpuSamples = 0;
+        }
+
+        if (
+            this.consecutiveHighCpuSamples >= HIGH_CPU_WARNING_CONSECUTIVE_SAMPLES &&
+            now - this.lastProcessHealthLogAt >= PROCESS_HEALTH_LOG_INTERVAL_MS
+        ) {
+            this.lastProcessHealthLogAt = now;
+            const sample = this.buildProcessHealthSample(now, cpuPercent, activeOps);
+            logger.warn("[EventLoopMonitor] Sustained high process CPU detected", {
+                ...sample,
+                consecutiveHighCpuSamples: this.consecutiveHighCpuSamples,
+                resourceUsage: process.resourceUsage(),
+                activeHandles: this.getActiveHandleSummary(),
+                externalProbe: `timeout 10 strace -f -tt -T -e trace=madvise,futex,epoll_pwait2,read,write -p ${process.pid}`,
+            });
+        }
+    }
+
+    private buildProcessHealthSample(
+        timestamp: number,
+        cpuPercent: number,
+        activeOperations: number
+    ): ProcessHealthSample {
+        const memory = process.memoryUsage();
+        return {
+            timestamp,
+            cpuPercent: Math.round(cpuPercent * 100) / 100,
+            activeOperations,
+            heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+            rssMb: Math.round(memory.rss / 1024 / 1024),
+        };
+    }
+
+    private getActiveHandleSummary(): Record<string, number> {
+        const getActiveHandles = (process as unknown as {
+            _getActiveHandles?: () => unknown[];
+        })._getActiveHandles;
+        if (!getActiveHandles) {
+            return {};
+        }
+
+        const summary: Record<string, number> = {};
+        for (const handle of getActiveHandles()) {
+            const name = handle && typeof handle === "object" && "constructor" in handle
+                ? (handle as { constructor?: { name?: string } }).constructor?.name || "Unknown"
+                : "Unknown";
+            summary[name] = (summary[name] ?? 0) + 1;
+        }
+        return summary;
     }
 }
 

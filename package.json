@@ -12,6 +12,7 @@
     "!dist/**/__tests__",
     "!dist/**/*.test.js",
     "!dist/**/*.spec.js",
+    "src/skills/**/*",
     "!dist/test-utils",
     "src/**/*.ts",
     "!src/**/__tests__",

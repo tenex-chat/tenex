@@ -154,6 +154,10 @@ export class SqliteVecProvider implements VectorStore {
         return name in this.registry.collections;
     }
 
+    async getCollectionDimensions(name: string): Promise<number | null> {
+        return this.registry.collections[name]?.dimensions ?? null;
+    }
+
     // -- Document operations --
 
     async addDocuments(collection: string, documents: StoredDocument[]): Promise<void> {

@@ -68,21 +68,27 @@ function compressPath(absolutePath: string, pathVars?: Record<string, string>): 
 }
 
 export function renderSkill(skill: SkillData, pathVars?: Record<string, string>): string {
-    const parts: string[] = [];
-
     const attrs: string[] = [];
     attrs.push(`id="${escapeAttrValue(skill.identifier)}"`);
     if (skill.localDir && skill.scope !== "built-in") {
         attrs.push(`path="${escapeAttrValue(compressPath(skill.localDir, pathVars))}"`);
     }
 
-    const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
-
-    parts.push(`<skill${attrStr}>`);
-
-    parts.push(skill.content);
+    const attrStr = ` ${attrs.join(" ")}`;
 
     const failedFiles = skill.installedFiles.filter((f) => !f.success);
+
+    // Self-closing tag for skills with no content and no load diagnostics.
+    if ((!skill.content || skill.content.trim() === "") && failedFiles.length === 0) {
+        return `<skill${attrStr} />`;
+    }
+
+    const parts: string[] = [];
+    parts.push(`<skill${attrStr}>`);
+    if (skill.content && skill.content.trim() !== "") {
+        parts.push(skill.content);
+    }
+
     if (failedFiles.length > 0) {
         parts.push("");
         parts.push("## Failed File Downloads");

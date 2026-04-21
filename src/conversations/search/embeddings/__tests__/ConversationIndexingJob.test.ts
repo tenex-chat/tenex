@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 
 const mockInitialize = vi.fn().mockResolvedValue(undefined);
-const mockBuildDocument = vi.fn().mockReturnValue({ kind: "ok", document: { id: "doc-1", content: "test" } });
+const mockBuildDocument = vi.fn().mockReturnValue({ kind: "ok", documents: [{ id: "doc-1", content: "test" }] });
 const mockGetCollectionName = vi.fn().mockReturnValue("conversation_embeddings");
 const mockBulkUpsert = vi.fn().mockResolvedValue({ upsertedCount: 1, failedIndices: [] });
 import { ConversationIndexingJob } from "../ConversationIndexingJob";
@@ -41,7 +41,7 @@ describe("ConversationIndexingJob", () => {
 
         // Reset mocks
         mockInitialize.mockReset().mockResolvedValue(undefined);
-        mockBuildDocument.mockReset().mockReturnValue({ kind: "ok", document: { id: "doc-1", content: "test" } });
+        mockBuildDocument.mockReset().mockReturnValue({ kind: "ok", documents: [{ id: "doc-1", content: "test" }] });
         mockGetCollectionName.mockReset().mockReturnValue("conversation_embeddings");
         mockBulkUpsert.mockReset().mockResolvedValue({ upsertedCount: 1, failedIndices: [] });
 
@@ -109,7 +109,7 @@ describe("ConversationIndexingJob", () => {
             let docCounter = 0;
             mockBuildDocument.mockImplementation(() => {
                 docCounter++;
-                return { kind: "ok", document: { id: `doc-${docCounter}`, content: "test" } };
+                return { kind: "ok", documents: [{ id: `doc-${docCounter}`, content: "test" }] };
             });
 
             // Create job and run batch
@@ -169,6 +169,95 @@ describe("ConversationIndexingJob", () => {
 
             // Only one conversation should be built
             expect(mockBuildDocument).toHaveBeenCalledTimes(1);
+        });
+
+        it("should flush large backfills in bounded document batches", async () => {
+            const projectId = "large-project";
+            const projectPath = join(testBasePath, projectId);
+            const conversationIds = Array.from({ length: 205 }, (_, index) => `conv-${index}`);
+
+            mkdirSync(join(projectPath, "conversations"), { recursive: true });
+            for (const conversationId of conversationIds) {
+                writeConversationFile(projectPath, conversationId, `Conversation ${conversationId}`);
+            }
+
+            vi.spyOn(conversationDiskReader, "listProjectIdsFromDisk").mockReturnValue([projectId]);
+            vi.spyOn(
+                conversationDiskReader,
+                "listConversationIdsFromDiskForProject"
+            ).mockReturnValue(conversationIds);
+
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
+                metadata: {
+                    title: "Test",
+                    summary: "Test",
+                    lastActivity: Date.now(),
+                },
+            } as any);
+
+            mockBuildDocument.mockImplementation((conversationId: string) => ({
+                kind: "ok",
+                documents: [{ id: `doc-${conversationId}`, content: "test" }],
+            }));
+            mockBulkUpsert.mockImplementation((_collectionName, documents) => Promise.resolve({
+                upsertedCount: documents.length,
+                failedIndices: [],
+            }));
+
+            const job = ConversationIndexingJob.getInstance(100);
+            await job.forceFullReindex();
+
+            expect(mockBuildDocument).toHaveBeenCalledTimes(205);
+            expect(mockBulkUpsert).toHaveBeenCalledTimes(5);
+            for (const call of mockBulkUpsert.mock.calls) {
+                expect(call[1].length).toBeLessThanOrEqual(50);
+            }
+        });
+
+        it("should stop each run after the indexing document budget is reached", async () => {
+            const projectId = "budget-project";
+            const projectPath = join(testBasePath, projectId);
+            const conversationIds = Array.from({ length: 5 }, (_, index) => `conv-${index}`);
+
+            mkdirSync(join(projectPath, "conversations"), { recursive: true });
+            for (const conversationId of conversationIds) {
+                writeConversationFile(projectPath, conversationId, `Conversation ${conversationId}`);
+            }
+
+            vi.spyOn(conversationDiskReader, "listProjectIdsFromDisk").mockReturnValue([projectId]);
+            vi.spyOn(
+                conversationDiskReader,
+                "listConversationIdsFromDiskForProject"
+            ).mockReturnValue(conversationIds);
+
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
+                metadata: {
+                    title: "Test",
+                    summary: "Test",
+                    lastActivity: Date.now(),
+                },
+            } as any);
+
+            mockBuildDocument.mockImplementation((conversationId: string) => ({
+                kind: "ok",
+                documents: Array.from({ length: 100 }, (_, index) => ({
+                    id: `doc-${conversationId}-${index}`,
+                    content: "test",
+                })),
+            }));
+            mockBulkUpsert.mockImplementation((_collectionName, documents) => Promise.resolve({
+                upsertedCount: documents.length,
+                failedIndices: [],
+            }));
+
+            const job = ConversationIndexingJob.getInstance(100);
+            await job.forceFullReindex();
+
+            expect(mockBuildDocument).toHaveBeenCalledTimes(4);
+            expect(mockBulkUpsert).toHaveBeenCalledTimes(4);
+            for (const call of mockBulkUpsert.mock.calls) {
+                expect(call[1]).toHaveLength(100);
+            }
         });
     });
 

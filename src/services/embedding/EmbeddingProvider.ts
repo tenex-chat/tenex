@@ -1,6 +1,8 @@
-import { rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type FeatureExtractionPipeline, type Tensor, env, pipeline } from "@huggingface/transformers";
+import { getTenexBasePath } from "@/constants";
 import { logger } from "@/utils/logger";
 
 export interface EmbeddingProvider {
@@ -23,6 +25,83 @@ export interface EmbeddingProvider {
      * Get model identifier
      */
     getModelId(): string;
+}
+
+const EMBEDDING_DIAGNOSTIC_EXCERPT_CHARS = 240;
+
+function getTextDiagnostic(text: string, index: number): Record<string, unknown> {
+    return {
+        index,
+        chars: text.length,
+        bytes: Buffer.byteLength(text, "utf8"),
+        lines: text.length === 0 ? 0 : text.split("\n").length,
+        sha256: createHash("sha256").update(text).digest("hex"),
+        prefix: text.slice(0, EMBEDDING_DIAGNOSTIC_EXCERPT_CHARS),
+        suffix: text.length > EMBEDDING_DIAGNOSTIC_EXCERPT_CHARS
+            ? text.slice(-EMBEDDING_DIAGNOSTIC_EXCERPT_CHARS)
+            : undefined,
+    };
+}
+
+function getEmbeddingRequestDiagnostic(texts: string[]): Record<string, unknown> {
+    const lengths = texts.map((text) => text.length);
+    return {
+        inputCount: texts.length,
+        totalChars: lengths.reduce((sum, length) => sum + length, 0),
+        maxChars: lengths.length > 0 ? Math.max(...lengths) : 0,
+        minChars: lengths.length > 0 ? Math.min(...lengths) : 0,
+        inputs: texts.map(getTextDiagnostic),
+    };
+}
+
+function getEmbeddingFailureArtifactPath(): string {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const random = Math.random().toString(36).slice(2, 8);
+    const dir = join(getTenexBasePath(), "daemon", "embedding-failures");
+    mkdirSync(dir, { recursive: true });
+    return join(dir, `${timestamp}-${process.pid}-${random}.json`);
+}
+
+function writeEmbeddingFailureArtifact(params: {
+    endpoint: string;
+    model: string;
+    texts: string[];
+    responseStatus: number;
+    responseStatusText: string;
+    responseText: string;
+    failureKind: string;
+}): string | undefined {
+    try {
+        const artifactPath = getEmbeddingFailureArtifactPath();
+        const payload = {
+            timestamp: new Date().toISOString(),
+            failureKind: params.failureKind,
+            replay: {
+                method: "POST",
+                endpoint: params.endpoint,
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: "Bearer <redacted>",
+                },
+                body: {
+                    model: params.model,
+                    input: params.texts,
+                },
+            },
+            response: {
+                status: params.responseStatus,
+                statusText: params.responseStatusText,
+                body: params.responseText,
+            },
+        };
+        writeFileSync(artifactPath, `${JSON.stringify(payload, null, 2)}\n`);
+        return artifactPath;
+    } catch (error) {
+        logger.warn("Failed to write embedding failure artifact", {
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+    }
 }
 
 /**
@@ -216,7 +295,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     }
 
     public async embedBatch(texts: string[]): Promise<Float32Array[]> {
-        const response = await fetch(`${this.baseUrl}/embeddings`, {
+        const endpoint = `${this.baseUrl}/embeddings`;
+        const response = await fetch(endpoint, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -230,6 +310,24 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
         if (!response.ok) {
             const errorBody = await response.text();
+            const artifactPath = writeEmbeddingFailureArtifact({
+                endpoint,
+                model: this.modelId,
+                texts,
+                responseStatus: response.status,
+                responseStatusText: response.statusText,
+                responseText: errorBody,
+                failureKind: "http_error",
+            });
+            logger.error("Embedding request failed", {
+                endpoint,
+                model: this.modelId,
+                status: response.status,
+                statusText: response.statusText,
+                request: getEmbeddingRequestDiagnostic(texts),
+                artifactPath,
+                response: errorBody.substring(0, 1000),
+            });
             throw new Error(`OpenAI API error: ${response.statusText} - ${errorBody}`);
         }
 
@@ -243,17 +341,45 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         try {
             data = JSON.parse(responseText) as EmbeddingResponse;
         } catch (parseError) {
+            const artifactPath = writeEmbeddingFailureArtifact({
+                endpoint,
+                model: this.modelId,
+                texts,
+                responseStatus: response.status,
+                responseStatusText: response.statusText,
+                responseText,
+                failureKind: "invalid_json",
+            });
             logger.error("Failed to parse embedding response", {
                 responseText: responseText.substring(0, 500),
-                parseError
+                parseError,
+                endpoint,
+                model: this.modelId,
+                request: getEmbeddingRequestDiagnostic(texts),
+                artifactPath,
             });
-            throw new Error(`Invalid JSON response from embeddings API: ${parseError}`);
+            throw new Error(`Invalid JSON response from embeddings API: ${parseError}`, {
+                cause: parseError,
+            });
         }
 
         if (!data.data) {
+            const artifactPath = writeEmbeddingFailureArtifact({
+                endpoint,
+                model: this.modelId,
+                texts,
+                responseStatus: response.status,
+                responseStatusText: response.statusText,
+                responseText,
+                failureKind: "missing_data",
+            });
             logger.error("Embedding response missing 'data' field", {
                 response: responseText.substring(0, 500),
-                keys: Object.keys(data)
+                keys: Object.keys(data),
+                endpoint,
+                model: this.modelId,
+                request: getEmbeddingRequestDiagnostic(texts),
+                artifactPath,
             });
             throw new Error(`Embedding response missing 'data' field. Response keys: ${Object.keys(data).join(", ")}`);
         }

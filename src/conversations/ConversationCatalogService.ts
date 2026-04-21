@@ -120,6 +120,7 @@ interface EmbeddingStateRow {
     last_indexed_at: number;
     no_content: number;
     content_version: string | null;
+    document_ids: string | null;
 }
 
 interface ReconcileRow {
@@ -519,11 +520,12 @@ export class ConversationCatalogService {
         lastIndexedAt: number;
         noContent: boolean;
         contentVersion: string | null;
+        documentIds: string[];
     } | null {
         this.initialize();
 
         const row = this.ensureDb().prepare(
-            `SELECT metadata_hash, last_indexed_at, no_content, content_version
+            `SELECT metadata_hash, last_indexed_at, no_content, content_version, document_ids
              FROM conversation_embedding_state
              WHERE conversation_id = ?`
         ).get(conversationId) as EmbeddingStateRow | undefined;
@@ -537,6 +539,7 @@ export class ConversationCatalogService {
             lastIndexedAt: row.last_indexed_at,
             noContent: !!row.no_content,
             contentVersion: row.content_version ?? null,
+            documentIds: this.parseEmbeddingDocumentIds(row.document_ids),
         };
     }
 
@@ -547,25 +550,28 @@ export class ConversationCatalogService {
             lastIndexedAt: number;
             noContent: boolean;
             contentVersion?: string;
+            documentIds?: string[];
         }
     ): void {
         this.initialize();
 
         this.ensureDb().prepare(
             `INSERT INTO conversation_embedding_state (
-                conversation_id, metadata_hash, last_indexed_at, no_content, content_version
-             ) VALUES (?, ?, ?, ?, ?)
+                conversation_id, metadata_hash, last_indexed_at, no_content, content_version, document_ids
+             ) VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(conversation_id) DO UPDATE SET
                 metadata_hash = excluded.metadata_hash,
                 last_indexed_at = excluded.last_indexed_at,
                 no_content = excluded.no_content,
-                content_version = excluded.content_version`
+                content_version = excluded.content_version,
+                document_ids = excluded.document_ids`
         ).run(
             conversationId,
             state.metadataHash,
             state.lastIndexedAt,
             state.noContent ? 1 : 0,
-            state.contentVersion ?? null
+            state.contentVersion ?? null,
+            JSON.stringify(state.documentIds ?? [])
         );
     }
 
@@ -693,11 +699,36 @@ export class ConversationCatalogService {
                 last_indexed_at INTEGER NOT NULL,
                 no_content INTEGER NOT NULL DEFAULT 0,
                 content_version TEXT,
+                document_ids TEXT NOT NULL DEFAULT '[]',
                 FOREIGN KEY (conversation_id)
                     REFERENCES conversations(conversation_id)
                     ON DELETE CASCADE
             );
         `);
+        this.ensureEmbeddingStateColumns();
+    }
+
+    private ensureEmbeddingStateColumns(): void {
+        const db = this.ensureDb();
+        const columns = db.prepare("PRAGMA table_info(conversation_embedding_state)").all() as Array<{ name: string }>;
+        if (!columns.some((column) => column.name === "document_ids")) {
+            db.exec("ALTER TABLE conversation_embedding_state ADD COLUMN document_ids TEXT NOT NULL DEFAULT '[]'");
+        }
+    }
+
+    private parseEmbeddingDocumentIds(value: string | null): string[] {
+        if (!value) {
+            return [];
+        }
+        try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) {
+                return parsed.filter((entry): entry is string => typeof entry === "string");
+            }
+        } catch {
+            return [];
+        }
+        return [];
     }
 
     private initializeSchemaOnly(): void {

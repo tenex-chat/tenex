@@ -60,6 +60,7 @@ function createMockVectorStore(collections: MockCollectionState) {
         }),
         deleteDocument: mock(() => Promise.resolve()),
         getAllDocuments: mock(() => Promise.resolve([])),
+        getCollectionDimensions: mock(() => Promise.resolve(384)),
         initialize: mock(() => Promise.resolve()),
         listCollections: mock(() => Promise.resolve(Object.keys(collections))),
         runMaintenance: mock(() => Promise.resolve()),

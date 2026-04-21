@@ -12,7 +12,3 @@ tools:
   - rag_subscription_get
   - rag_subscription_delete
 ---
-
-# RAG Knowledge Management
-
-This skill provides tools for semantic search across project knowledge, creating and managing vector database collections, adding documents, and managing real-time data subscriptions.

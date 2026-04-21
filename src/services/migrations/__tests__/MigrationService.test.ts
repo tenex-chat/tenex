@@ -33,7 +33,7 @@ describe("MigrationService", () => {
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
-    it("migrates legacy schedules into per-project schedules.json files and writes version 1", async () => {
+    it("migrates legacy schedules into per-project schedules.json files and writes latest version", async () => {
         const projectAddress = `31933:${"a".repeat(64)}:project-1`;
 
         await fs.writeFile(path.join(tempDir, "config.json"), JSON.stringify({}, null, 2));
@@ -88,15 +88,17 @@ describe("MigrationService", () => {
         const summary = await migrationService.migrate();
 
         expect(summary.currentVersion).toBe("unknown");
-        expect(summary.finalVersion).toBe(2);
-        expect(summary.applied).toHaveLength(2);
+        expect(summary.finalVersion).toBe(3);
+        expect(summary.applied).toHaveLength(3);
         expect(summary.applied[0].result.migratedCount).toBe(1);
         expect(summary.applied[0].result.skippedCount).toBe(0);
+        expect(summary.applied[2].description).toContain("built-in skills");
+        expect(summary.applied[2].result.migratedCount).toBeGreaterThan(0);
 
         const savedConfig = JSON.parse(
             await fs.readFile(path.join(tempDir, "config.json"), "utf-8")
         );
-        expect(savedConfig.version).toBe(2);
+        expect(savedConfig.version).toBe(3);
 
         const migratedTasks = JSON.parse(
             await fs.readFile(getProjectSchedulesPath("project-1"), "utf-8")
@@ -107,6 +109,8 @@ describe("MigrationService", () => {
         expect(migratedTasks[0].projectRef).toBe(projectAddress);
 
         expect(await fileExists(getLegacySchedulesPath())).toBe(false);
+        expect(await fileExists(path.join(tempDir, "skills", "built-in", "schedule", "SKILL.md")))
+            .toBe(true);
     });
 
     it("retains the legacy file when a target pubkey cannot be resolved to a project agent slug", async () => {
@@ -148,8 +152,8 @@ describe("MigrationService", () => {
 
         const summary = await migrationService.migrate();
 
-        expect(summary.finalVersion).toBe(2);
-        expect(summary.applied).toHaveLength(2);
+        expect(summary.finalVersion).toBe(3);
+        expect(summary.applied).toHaveLength(3);
         expect(summary.applied[0].result.migratedCount).toBe(0);
         expect(summary.applied[0].result.skippedCount).toBe(1);
         expect(summary.applied[0].result.warnings.some((warning) =>
@@ -161,12 +165,12 @@ describe("MigrationService", () => {
     });
 
     it("no-ops when the config migration version is already current", async () => {
-        await fs.writeFile(path.join(tempDir, "config.json"), JSON.stringify({ version: 2 }, null, 2));
+        await fs.writeFile(path.join(tempDir, "config.json"), JSON.stringify({ version: 3 }, null, 2));
 
         const summary = await migrationService.migrate();
 
-        expect(summary.currentVersion).toBe(2);
-        expect(summary.finalVersion).toBe(2);
+        expect(summary.currentVersion).toBe(3);
+        expect(summary.finalVersion).toBe(3);
         expect(summary.applied).toHaveLength(0);
     });
 
@@ -190,15 +194,17 @@ describe("MigrationService", () => {
         const summary = await migrationService.migrate();
 
         expect(summary.currentVersion).toBe(1);
-        expect(summary.finalVersion).toBe(2);
-        expect(summary.applied).toHaveLength(1);
+        expect(summary.finalVersion).toBe(3);
+        expect(summary.applied).toHaveLength(2);
         expect(summary.applied[0].from).toBe(1);
         expect(summary.applied[0].to).toBe(2);
         expect(summary.applied[0].description).toContain("PrefixKVStore");
+        expect(summary.applied[1].from).toBe(2);
+        expect(summary.applied[1].to).toBe(3);
 
         const savedConfig = JSON.parse(
             await fs.readFile(path.join(tempDir, "config.json"), "utf-8")
         );
-        expect(savedConfig.version).toBe(2);
+        expect(savedConfig.version).toBe(3);
     });
 });

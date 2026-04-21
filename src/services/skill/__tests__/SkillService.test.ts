@@ -23,10 +23,8 @@ const AGENT_PUBKEY = "a".repeat(64);
 const AGENT_SHORT_PUBKEY = AGENT_PUBKEY.slice(0, 8);
 const PROJECT_PATH = "/path/to/my-project";
 const AVAILABLE_SKILLS_CACHE_TTL_MS = 5_000;
-const BUILT_IN_SKILLS_PATH = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../skills/built-in"
-);
+const TEST_TENEX_BASE = "/tmp/test-tenex";
+const BUILT_IN_SKILLS_PATH = path.join(TEST_TENEX_BASE, "skills", "built-in");
 const LOOKUP_CONTEXT = {
     agentPubkey: AGENT_PUBKEY,
     projectPath: PROJECT_PATH,
