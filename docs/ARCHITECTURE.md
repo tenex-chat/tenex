@@ -491,7 +491,7 @@ export const somethingService = new SomethingService(
 
 **Philosophy:** Make incremental improvements. Leave code better than you found it (Boy Scout Rule).
 
-Rust migration code under `crates/tenex-daemon/` now includes startup-recovery orchestration in `worker_startup_recovery.rs`, which replays the RAL journal, plans orphan reconciliation, and applies crashed recovery records through the existing recovery boundary.
+Rust migration code under `crates/tenex-daemon/` now includes startup-recovery orchestration in `worker_startup_recovery.rs`, which replays the RAL journal, plans orphan reconciliation, and applies crashed recovery records through the existing recovery boundary. `daemon_diagnostics.rs` composes the filesystem-only operator snapshot from status/control files, queue and journal replay summaries, outbox diagnostics, routing shadow logs, telegram outbox diagnostics, and optional in-memory worker runtime state.
 
 ---
 
