@@ -190,10 +190,10 @@ pub fn find_linked_pubkey<'a>(
 /// Convenience: look up the linked pubkey for a Telegram user by numeric id.
 /// Uses the `telegram:user:<id>` principal id scheme shared with the
 /// inbound normalizer.
-pub fn find_linked_pubkey_for_telegram_user<'a>(
-    bindings: &'a [IdentityBindingRecord],
+pub fn find_linked_pubkey_for_telegram_user(
+    bindings: &[IdentityBindingRecord],
     telegram_user_id: i64,
-) -> Option<&'a str> {
+) -> Option<&str> {
     let principal_id = format!("telegram:user:{telegram_user_id}");
     find_linked_pubkey(bindings, &principal_id)
 }

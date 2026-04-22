@@ -50,6 +50,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`crates/tenex-daemon/src/subscription_runtime.rs`**: Filesystem-backed Nostr subscription plan builder. It reads backend relay/whitelist config plus the inbound routing catalog to produce relay URLs and REQ filters for whitelisted authors, active project `a` tags, active agent `p` tags, and optional lesson-definition ids.
 - **`crates/tenex-daemon/src/telegram/inbound.rs`**: Pure Rust Telegram inbound normalizer. It converts raw Bot API update JSON plus caller-supplied identity, project binding, media, recipient, and chat-context inputs into the shared `InboundEnvelope` shape, dropping non-routable updates before they can enqueue worker dispatches.
 - **`crates/tenex-daemon/src/telegram/ingress_runtime.rs`**: Filesystem-backed Telegram inbound composition boundary. It reads shared transport and identity bindings, applies the private-DM authorization gate from global config, normalizes bound Bot API updates through `telegram::inbound`, and forwards the resulting envelope to `inbound_runtime` for route resolution and worker dispatch enqueueing without Bot API polling or media-download side effects.
+- **`crates/tenex-daemon/src/telegram/gateway.rs`**: Rust-native Telegram long-poll gateway supervisor. It owns per-bot polling threads, startup backlog skipping, transient Bot API backoff, chat-context refresh, seen-participant recording, optional media downloads, and hands each update to `telegram::ingress_runtime` while keeping project routing and worker dispatch filesystem-owned.
 - **`crates/tenex-daemon/src/telegram/bindings.rs`**: Read-only Rust view of shared Telegram transport and identity binding files. It reads `transport-bindings.json` for channel-to-project routing and `identity-bindings.json` for linked Nostr pubkeys without writing TypeScript-owned state.
 - **`crates/tenex-daemon/src/telegram/chat_context.rs`**: Durable Telegram chat-context cache under `$TENEX_BASE_DIR/daemon/telegram/chat-context`. It stores chat titles, usernames, member counts, administrators, seen participants, and forum topic titles with atomic writes and TTL-gated Bot API refresh helpers for future Rust Telegram inbound handling.
 - **`crates/tenex-daemon/src/worker_dispatch_input.rs`**: Generic filesystem sidecar contract for worker dispatch inputs under `$TENEX_BASE_DIR/daemon/workers/dispatch-inputs`. It records dispatch id, source type, execute-message or execute-compatible fields, writer metadata, source metadata, and schema-version validation so scheduled tasks and future Nostr/Telegram dispatches share one input artifact shape.
@@ -172,7 +173,7 @@ Use this section to understand each service’s scope and dependencies:
 
 1. **Strict layered architecture**: Dependencies flow downward only:
    ```
-   commands/daemon/event-handler
+   commands/event-handler
      ↓
    services/agents/conversations/tools
      ↓
