@@ -1189,7 +1189,10 @@ Work:
   scopes, and packages the validated execute message before any lock
   acquisition or process spawn occurs.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
-  scope.
+  scope. The first Rust helper builds the documented allocation/state lock
+  paths, writes daemon-compatible `{ pid, hostname, startedAt }` owner JSON,
+  acquires with atomic create-new semantics, fails closed on corrupt lock JSON,
+  and leaves stale replacement behind an explicit PID-liveness classification.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet

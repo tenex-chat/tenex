@@ -591,6 +591,11 @@ Scope:
   leased dispatch identity matches the expected RAL identity, derive allocation
   and state lock scopes, and package the validated execute message without
   acquiring locks or spawning a worker process.
+- Add the RAL lockfile helper before production wiring. It builds the documented
+  `ral/locks/alloc.*.lock` and `ral/locks/state.*.lock` paths, uses the same
+  `{ pid, hostname, startedAt }` JSON owner shape as `tenex.lock`, acquires via
+  atomic create-new writes, fails closed on corrupt lock JSON, and treats stale
+  replacement as an explicit PID-liveness decision rather than an age heuristic.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.
