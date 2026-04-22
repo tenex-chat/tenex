@@ -513,4 +513,56 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
     }
+
+    #[test]
+    fn backend_operations_status_fixture_matches_canonical_signature_and_tag_order() {
+        let fixture: crate::nostr_event::Nip01EventFixture = serde_json::from_str(include_str!(
+            "../../../../src/test-utils/fixtures/backend-events/operations-status.compat.json"
+        ))
+        .expect("fixture must parse");
+        let signer = test_signer();
+        let conversation_id = event_id_hex(0x09);
+        let project_owner = pubkey_hex(0x02);
+        let whitelisted = vec![pubkey_hex(0x03)];
+        let agents = vec![pubkey_hex(0x04), pubkey_hex(0x05)];
+        let project_tag = project_tag(&project_owner);
+        let inputs = OperationsStatusInputs {
+            created_at: fixture.created_at,
+            conversation_id: &conversation_id,
+            whitelisted_pubkeys: &whitelisted,
+            agent_pubkeys: &agents,
+            project_tag: &project_tag,
+        };
+
+        assert_eq!(fixture.name, "backend-operations-status-basic");
+        assert_eq!(
+            fixture.description,
+            "Canonical backend operations-status fixture for kind 24133."
+        );
+        assert_eq!(fixture.secret_key_hex, TEST_SECRET_KEY_HEX);
+        assert_eq!(fixture.pubkey, signer.xonly_pubkey_hex());
+        assert_eq!(fixture.normalized, fixture.signed.normalized());
+        assert_eq!(fixture.signed.tags, fixture.normalized.tags);
+        assert_eq!(
+            fixture.signed.tags,
+            vec![
+                vec!["e".to_string(), conversation_id.clone()],
+                vec!["P".to_string(), whitelisted[0].clone()],
+                vec!["p".to_string(), agents[0].clone()],
+                vec!["p".to_string(), agents[1].clone()],
+                project_tag.clone(),
+            ]
+        );
+
+        let event = encode_operations_status(&inputs, &signer).expect("encode operations status");
+        assert_eq!(event, fixture.signed);
+        assert_eq!(
+            canonical_payload(&fixture.normalized).expect("canonical payload"),
+            fixture.canonical_payload
+        );
+        assert_eq!(event.id, fixture.event_hash);
+        assert_eq!(event.id, fixture.signed.id);
+
+        verify_signed_event(&fixture.signed).expect("fixture signature must verify");
+    }
 }

@@ -325,4 +325,46 @@ mod tests {
         let event = encode_heartbeat(&inputs, &signer).expect("encode heartbeat");
         assert_eq!(event.pubkey, signer.xonly_pubkey_hex());
     }
+
+    #[test]
+    fn backend_heartbeat_fixture_matches_canonical_signature_and_tag_order() {
+        let fixture: crate::nostr_event::Nip01EventFixture = serde_json::from_str(include_str!(
+            "../../../../src/test-utils/fixtures/backend-events/heartbeat.compat.json"
+        ))
+        .expect("fixture must parse");
+        let signer = test_signer();
+        let owners = vec![owner_hex(0x02), owner_hex(0x03)];
+        let inputs = HeartbeatInputs {
+            created_at: fixture.created_at,
+            owner_pubkeys: &owners,
+        };
+
+        assert_eq!(fixture.name, "backend-heartbeat-basic");
+        assert_eq!(
+            fixture.description,
+            "Canonical backend heartbeat fixture for kind 24012."
+        );
+        assert_eq!(fixture.secret_key_hex, TEST_SECRET_KEY_HEX);
+        assert_eq!(fixture.pubkey, signer.xonly_pubkey_hex());
+        assert_eq!(fixture.normalized, fixture.signed.normalized());
+        assert_eq!(fixture.signed.tags, fixture.normalized.tags);
+        assert_eq!(
+            fixture.signed.tags,
+            vec![
+                vec!["p".to_string(), owners[0].clone()],
+                vec!["p".to_string(), owners[1].clone()],
+            ]
+        );
+
+        let event = encode_heartbeat(&inputs, &signer).expect("encode heartbeat");
+        assert_eq!(event, fixture.signed);
+        assert_eq!(
+            canonical_payload(&fixture.normalized).expect("canonical payload"),
+            fixture.canonical_payload
+        );
+        assert_eq!(event.id, fixture.event_hash);
+        assert_eq!(event.id, fixture.signed.id);
+
+        verify_signed_event(&fixture.signed).expect("fixture signature must verify");
+    }
 }

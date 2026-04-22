@@ -899,8 +899,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn dump_backend_project_status_fixture() {
+    fn backend_project_status_fixture_matches_canonical_signature_and_tag_order() {
+        let fixture: crate::nostr_event::Nip01EventFixture = serde_json::from_str(include_str!(
+            "../../../../src/test-utils/fixtures/backend-events/project-status.compat.json"
+        ))
+        .expect("fixture must parse");
         let signer = test_signer();
         let owner = pubkey_hex(0x02);
         let project_tag = project_tag(&owner);
@@ -953,22 +956,68 @@ mod tests {
             &scheduled_tasks,
         );
 
-        let event = encode_project_status(&inputs, &signer).expect("encode project status");
-        let fixture = serde_json::json!({
-            "name": "backend-project-status-basic",
-            "description": "Canonical backend project-status fixture for kind 24010.",
-            "secretKeyHex": TEST_SECRET_KEY_HEX,
-            "pubkey": signer.xonly_pubkey_hex(),
-            "created_at": event.created_at,
-            "normalized": event.normalized(),
-            "canonicalPayload": canonical_payload(&event.normalized()).expect("canonical payload"),
-            "eventHash": event.id.clone(),
-            "signed": event,
-        });
-
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&fixture).expect("serialize fixture")
+        assert_eq!(fixture.name, "backend-project-status-basic");
+        assert_eq!(
+            fixture.description,
+            "Canonical backend project-status fixture for kind 24010."
         );
+        assert_eq!(fixture.secret_key_hex, TEST_SECRET_KEY_HEX);
+        assert_eq!(fixture.pubkey, signer.xonly_pubkey_hex());
+        assert_eq!(fixture.normalized, fixture.signed.normalized());
+        assert_eq!(fixture.signed.tags, fixture.normalized.tags);
+        assert_eq!(
+            fixture.signed.tags,
+            vec![
+                project_tag.clone(),
+                vec!["p".to_string(), owner.clone()],
+                vec!["p".to_string(), whitelisted[0].clone()],
+                vec![
+                    "agent".to_string(),
+                    agents[0].pubkey.clone(),
+                    agents[0].slug.clone(),
+                ],
+                vec![
+                    "model".to_string(),
+                    models[0].slug.clone(),
+                    "worker".to_string()
+                ],
+                vec![
+                    "tool".to_string(),
+                    tools[0].name.clone(),
+                    "worker".to_string()
+                ],
+                vec![
+                    "skill".to_string(),
+                    skills[0].id.clone(),
+                    "worker".to_string()
+                ],
+                vec![
+                    "mcp".to_string(),
+                    mcp_servers[0].slug.clone(),
+                    "worker".to_string()
+                ],
+                vec!["branch".to_string(), worktrees[0].clone()],
+                vec![
+                    "scheduled-task".to_string(),
+                    scheduled_tasks[0].id.clone(),
+                    scheduled_tasks[0].title.clone(),
+                    scheduled_tasks[0].schedule.clone(),
+                    scheduled_tasks[0].target_agent.clone(),
+                    "cron".to_string(),
+                    "1699999999".to_string(),
+                ],
+            ]
+        );
+
+        let event = encode_project_status(&inputs, &signer).expect("encode project status");
+        assert_eq!(event, fixture.signed);
+        assert_eq!(
+            canonical_payload(&fixture.normalized).expect("canonical payload"),
+            fixture.canonical_payload
+        );
+        assert_eq!(event.id, fixture.event_hash);
+        assert_eq!(event.id, fixture.signed.id);
+
+        verify_signed_event(&fixture.signed).expect("fixture signature must verify");
     }
 }

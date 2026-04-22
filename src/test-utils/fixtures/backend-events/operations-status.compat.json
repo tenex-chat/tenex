@@ -1,0 +1,67 @@
+{
+    "name": "backend-operations-status-basic",
+    "description": "Canonical backend operations-status fixture for kind 24133.",
+    "secretKeyHex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+    "created_at": 1700010100,
+    "normalized": {
+        "kind": 24133,
+        "content": "",
+        "tags": [
+            [
+                "e",
+                "0909090909090909090909090909090909090909090909090909090909090909"
+            ],
+            [
+                "P",
+                "531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337"
+            ],
+            [
+                "p",
+                "462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
+            ],
+            [
+                "p",
+                "62c0a046dacce86ddd0343c6d3c7c79c2208ba0d9c9cf24a6d046d21d21f90f7"
+            ],
+            [
+                "a",
+                "31933:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766:demo-project"
+            ]
+        ],
+        "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+        "created_at": 1700010100
+    },
+    "canonicalPayload": "[0,\"1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f\",1700010100,24133,[[\"e\",\"0909090909090909090909090909090909090909090909090909090909090909\"],[\"P\",\"531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337\"],[\"p\",\"462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b\"],[\"p\",\"62c0a046dacce86ddd0343c6d3c7c79c2208ba0d9c9cf24a6d046d21d21f90f7\"],[\"a\",\"31933:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766:demo-project\"]],\"\"]",
+    "eventHash": "bc35900bc737f34cb4645bff6f1a5f74d7446d9fb295d856d0c31ab93cb3f8ec",
+    "signed": {
+        "id": "bc35900bc737f34cb4645bff6f1a5f74d7446d9fb295d856d0c31ab93cb3f8ec",
+        "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+        "created_at": 1700010100,
+        "kind": 24133,
+        "tags": [
+            [
+                "e",
+                "0909090909090909090909090909090909090909090909090909090909090909"
+            ],
+            [
+                "P",
+                "531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337"
+            ],
+            [
+                "p",
+                "462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
+            ],
+            [
+                "p",
+                "62c0a046dacce86ddd0343c6d3c7c79c2208ba0d9c9cf24a6d046d21d21f90f7"
+            ],
+            [
+                "a",
+                "31933:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766:demo-project"
+            ]
+        ],
+        "content": "",
+        "sig": "638c13979ef3153625e741994ec2eb849d5e9ccd926190df2f4c955f41217f03874cb881ca5ebfdc8ae457aa1a182ac83cc2111041a8252bf86fc07a70fbd5f3"
+    }
+}

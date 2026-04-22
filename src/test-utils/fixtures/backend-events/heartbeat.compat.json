@@ -1,0 +1,43 @@
+{
+    "name": "backend-heartbeat-basic",
+    "description": "Canonical backend heartbeat fixture for kind 24012.",
+    "secretKeyHex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+    "created_at": 1700010000,
+    "normalized": {
+        "kind": 24012,
+        "content": "",
+        "tags": [
+            [
+                "p",
+                "4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
+            ],
+            [
+                "p",
+                "531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337"
+            ]
+        ],
+        "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+        "created_at": 1700010000
+    },
+    "canonicalPayload": "[0,\"1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f\",1700010000,24012,[[\"p\",\"4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766\"],[\"p\",\"531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337\"]],\"\"]",
+    "eventHash": "9c779a94b34f03bcc0b3f8a510199bf1c0e2bc5e76e07ce1a9cca4b6463b94b9",
+    "signed": {
+        "id": "9c779a94b34f03bcc0b3f8a510199bf1c0e2bc5e76e07ce1a9cca4b6463b94b9",
+        "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+        "created_at": 1700010000,
+        "kind": 24012,
+        "tags": [
+            [
+                "p",
+                "4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
+            ],
+            [
+                "p",
+                "531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337"
+            ]
+        ],
+        "content": "",
+        "sig": "de731dd3ad9f0343ce5a4c62db853739af557c6e16d847a29c480a74dd529e380f7d0318146a55adb2a9c8edb38ac23cc409eeb850c1c9bd81940918e1de8053"
+    }
+}
