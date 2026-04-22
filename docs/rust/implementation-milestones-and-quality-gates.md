@@ -298,6 +298,10 @@ Scope:
 
 Current implementation status:
 
+- Branch `rust-agent-worker-publishing` currently carries the worker recovery,
+  diagnostics, admission-start, and message-flow slices that round out the
+  worker supervision stack below the publish-outbox work.
+
 - `src/agents/execution/worker/agent-worker.ts` exists and speaks the framed
   worker protocol.
 - The entrypoint reports protocol metadata in `ready`, handles `ping`,
@@ -334,6 +338,14 @@ Current implementation status:
 - Worker bootstrap has injectable coverage proving MCP manager shutdown runs
   after executor failure, preserving the same `finally` path used for successful
   worker exits.
+- `worker_recovery_apply.rs` reconciles durable worker state after partial
+  transitions or crashes.
+- `worker_diagnostics.rs` builds the worker diagnostics snapshot used for
+  operator reads.
+- `worker_dispatch_admission_start.rs` bridges worker admission to live spawn
+  and started-worker bookkeeping.
+- `worker_message_flow.rs` routes worker frames through message handling,
+  publish flow, and terminal cleanup.
 - `AgentDispatchService` now has a disabled-by-default `TENEX_AGENT_WORKER=1`
   route through `src/agents/execution/worker/dispatch-adapter.ts`. The gate is
   intentionally narrow: only fresh first-turn executions can run in a child

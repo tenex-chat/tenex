@@ -57,6 +57,11 @@ The current daemon is a single long-lived Bun process. Important current files:
 The migration should preserve behavior by moving orchestration and process
 ownership first, then shrinking the TypeScript runtime surface over time.
 
+Branch status: the `rust-agent-worker-publishing` branch currently carries the
+worker recovery, diagnostics, admission-start, and message-flow slices in the
+Rust daemon crate, extending the worker supervision stack that feeds publish
+outbox and launch planning.
+
 ## Target Ownership
 
 | Concern | Target owner | Notes |
