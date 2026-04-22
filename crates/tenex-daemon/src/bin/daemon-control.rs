@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
+use tenex_daemon::caches::prefix_lookup::{PrefixLookupDiagnostics, inspect_prefix_lookup};
+use tenex_daemon::caches::profile_names::{ProfileNamesDiagnostics, inspect_profile_names};
+use tenex_daemon::caches::trust_pubkeys::{TrustPubkeysDiagnostics, inspect_trust_pubkeys};
 use tenex_daemon::daemon_control::{
     inspect_daemon_control, plan_daemon_start, plan_daemon_stop,
     read_daemon_restart_state_compatibility,
@@ -11,11 +15,13 @@ use tenex_daemon::daemon_control::{
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
 use tenex_daemon::daemon_shell::DaemonShell;
 
+const CACHES_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DaemonControlCommand {
+    Caches,
     Diagnostics,
     Status,
     StartPlan,
@@ -28,6 +34,16 @@ struct DaemonControlCliOptions {
     command: DaemonControlCommand,
     daemon_dir: PathBuf,
     inspected_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CachesDiagnostics {
+    schema_version: u32,
+    inspected_at: u64,
+    trust_pubkeys: TrustPubkeysDiagnostics,
+    prefix_lookup: PrefixLookupDiagnostics,
+    profile_names: ProfileNamesDiagnostics,
 }
 
 #[derive(Debug)]
@@ -63,6 +79,11 @@ where
     let options = parse_daemon_control_args(&args)?;
 
     match options.command {
+        DaemonControlCommand::Caches => {
+            let diagnostics = inspect_caches(&options)?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
         DaemonControlCommand::Diagnostics => {
             let diagnostics = inspect_daemon_diagnostics(DaemonDiagnosticsInput {
                 daemon_dir: &options.daemon_dir,
@@ -102,8 +123,22 @@ where
     }
 }
 
+fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics, CliError> {
+    Ok(CachesDiagnostics {
+        schema_version: CACHES_DIAGNOSTICS_SCHEMA_VERSION,
+        inspected_at: options.inspected_at,
+        trust_pubkeys: inspect_trust_pubkeys(&options.daemon_dir, options.inspected_at)
+            .map_err(|error| runtime_error(error.to_string()))?,
+        prefix_lookup: inspect_prefix_lookup(&options.daemon_dir, options.inspected_at)
+            .map_err(|error| runtime_error(error.to_string()))?,
+        profile_names: inspect_profile_names(&options.daemon_dir, options.inspected_at)
+            .map_err(|error| runtime_error(error.to_string()))?,
+    })
+}
+
 fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions, CliError> {
     let command = match args.first().map(String::as_str) {
+        Some("caches") => DaemonControlCommand::Caches,
         Some("diagnostics") => DaemonControlCommand::Diagnostics,
         Some("status") => DaemonControlCommand::Status,
         Some("start-plan") => DaemonControlCommand::StartPlan,
@@ -175,6 +210,7 @@ fn current_unix_time_ms() -> u64 {
 fn usage() -> String {
     [
         "usage:",
+        "  daemon-control caches --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control diagnostics --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control status --daemon-dir <path>",
         "  daemon-control start-plan --daemon-dir <path>",
@@ -202,15 +238,38 @@ fn runtime_error(message: impl Into<String>) -> CliError {
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+    use std::collections::BTreeMap;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use tenex_daemon::caches::CACHES_WRITER;
+    use tenex_daemon::caches::prefix_lookup::{PrefixLookupSnapshot, write_prefix_lookup};
+    use tenex_daemon::caches::profile_names::{
+        ProfileNameEntry, ProfileNamesSnapshot, write_profile_names,
+    };
+    use tenex_daemon::caches::trust_pubkeys::{TrustPubkeysSnapshot, write_trust_pubkeys};
     use tenex_daemon::filesystem_state::{
         build_lock_info, build_restart_state, save_restart_state_file, write_lock_info_file,
     };
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn parses_caches_args() {
+        let options = parse_daemon_control_args(&[
+            "caches".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--inspected-at".to_string(),
+            "1710001000000".to_string(),
+        ])
+        .expect("caches args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::Caches);
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.inspected_at, 1710001000000);
+    }
 
     #[test]
     fn parses_diagnostics_args() {
@@ -275,6 +334,152 @@ mod tests {
         .expect("restart-state args must parse");
 
         assert_eq!(options.command, DaemonControlCommand::RestartState);
+    }
+
+    #[test]
+    fn caches_empty_daemon_outputs_cache_diagnostics_json() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let output = run_cli([
+            "caches",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("temp path must be utf-8"),
+            "--inspected-at",
+            "1710001000000",
+        ])
+        .expect("caches command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["inspectedAt"], json!(1_710_001_000_000u64));
+        assert_eq!(
+            value["trustPubkeys"]["inspectedAt"],
+            json!(1_710_001_000_000u64)
+        );
+        assert_eq!(value["trustPubkeys"]["present"], json!(false));
+        assert_eq!(value["trustPubkeys"]["pubkeyCount"], json!(0));
+        assert_eq!(value["prefixLookup"]["present"], json!(false));
+        assert_eq!(value["prefixLookup"]["prefixCount"], json!(0));
+        assert_eq!(value["profileNames"]["present"], json!(false));
+        assert_eq!(value["profileNames"]["entryCount"], json!(0));
+        assert_eq!(value["profileNames"]["displayNameCount"], json!(0));
+        assert_eq!(value["profileNames"]["nip05Count"], json!(0));
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn caches_populated_daemon_outputs_cache_diagnostics_json() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let pubkey_one =
+            "1111111111111111111111111111111111111111111111111111111111111111".to_string();
+        let pubkey_two =
+            "2222222222222222222222222222222222222222222222222222222222222222".to_string();
+        let pubkey_three =
+            "3333333333333333333333333333333333333333333333333333333333333333".to_string();
+
+        write_trust_pubkeys(
+            &daemon_dir,
+            &TrustPubkeysSnapshot {
+                schema_version: 0,
+                writer: CACHES_WRITER.to_string(),
+                writer_version: "test-version".to_string(),
+                updated_at: 1_710_001_000_100,
+                pubkeys: vec![pubkey_two.clone(), pubkey_one.clone(), pubkey_three.clone()],
+            },
+        )
+        .expect("trust pubkeys write must succeed");
+
+        let mut prefixes = BTreeMap::new();
+        prefixes.insert("111111".to_string(), pubkey_one.clone());
+        prefixes.insert("222222".to_string(), pubkey_two.clone());
+        write_prefix_lookup(
+            &daemon_dir,
+            &PrefixLookupSnapshot {
+                schema_version: 0,
+                writer: CACHES_WRITER.to_string(),
+                writer_version: "test-version".to_string(),
+                updated_at: 1_710_001_000_200,
+                prefixes,
+            },
+        )
+        .expect("prefix lookup write must succeed");
+
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            pubkey_one,
+            ProfileNameEntry {
+                display_name: Some("Alice".to_string()),
+                nip05: Some("alice@example.test".to_string()),
+                observed_at: 1_710_001_000_150,
+            },
+        );
+        entries.insert(
+            pubkey_two,
+            ProfileNameEntry {
+                display_name: Some("Bob".to_string()),
+                nip05: None,
+                observed_at: 1_710_001_000_180,
+            },
+        );
+        entries.insert(
+            pubkey_three,
+            ProfileNameEntry {
+                display_name: None,
+                nip05: Some("carol@example.test".to_string()),
+                observed_at: 1_710_001_000_200,
+            },
+        );
+        write_profile_names(
+            &daemon_dir,
+            &ProfileNamesSnapshot {
+                schema_version: 0,
+                writer: CACHES_WRITER.to_string(),
+                writer_version: "test-version".to_string(),
+                updated_at: 1_710_001_000_300,
+                entries,
+            },
+        )
+        .expect("profile names write must succeed");
+
+        let output = run_cli([
+            "caches",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("temp path must be utf-8"),
+            "--inspected-at",
+            "1710001000500",
+        ])
+        .expect("caches command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["inspectedAt"], json!(1_710_001_000_500u64));
+        assert_eq!(value["trustPubkeys"]["present"], json!(true));
+        assert_eq!(value["trustPubkeys"]["pubkeyCount"], json!(3));
+        assert_eq!(value["trustPubkeys"]["writer"], json!(CACHES_WRITER));
+        assert_eq!(
+            value["trustPubkeys"]["writerVersion"],
+            json!("test-version")
+        );
+        assert_eq!(
+            value["trustPubkeys"]["updatedAt"],
+            json!(1_710_001_000_100u64)
+        );
+        assert_eq!(value["prefixLookup"]["present"], json!(true));
+        assert_eq!(value["prefixLookup"]["prefixCount"], json!(2));
+        assert_eq!(
+            value["prefixLookup"]["updatedAt"],
+            json!(1_710_001_000_200u64)
+        );
+        assert_eq!(value["profileNames"]["present"], json!(true));
+        assert_eq!(value["profileNames"]["entryCount"], json!(3));
+        assert_eq!(value["profileNames"]["displayNameCount"], json!(2));
+        assert_eq!(value["profileNames"]["nip05Count"], json!(2));
+        assert_eq!(
+            value["profileNames"]["updatedAt"],
+            json!(1_710_001_000_300u64)
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
 
     #[test]
