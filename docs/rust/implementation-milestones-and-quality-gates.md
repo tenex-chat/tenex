@@ -626,6 +626,10 @@ Scope:
 - Bootstrap scheduler state from the on-disk journal and persist a versioned
   `ral/snapshot.json` compaction cache without letting a stale snapshot override
   journal replay.
+- Plan dispatch preparation bundles without side effects: a RAL allocation
+  journal record, a matching claim journal record with caller-supplied claim
+  token, and a queued dispatch record. RAL journal and dispatch queue sequence
+  spaces remain independent and are validated separately.
 - Implement orphan reconciliation planning and recovery classification. The
   current Rust library planner is transient: it proposes `crashed` journal
   records for claimed RALs whose worker ids are absent from the live worker set,

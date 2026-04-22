@@ -6,6 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::dispatch_queue::{
+    DispatchQueueRecord, DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
+    build_dispatch_queue_record,
+};
 use crate::ral_journal::{
     RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
     RalJournalReplay, RalJournalResult, RalJournalSnapshot, RalPendingDelegation, RalReplayEntry,
@@ -258,6 +262,85 @@ impl RalScheduler {
             identity,
             triggering_event_id,
             event,
+        })
+    }
+
+    pub fn plan_dispatch_preparation(
+        &self,
+        input: RalDispatchPreparationInput,
+    ) -> Result<RalDispatchPreparation, RalSchedulerError> {
+        if input.journal_sequence <= self.state.last_sequence {
+            return Err(RalSchedulerError::NonIncreasingJournalSequence {
+                sequence: input.journal_sequence,
+                last_sequence: self.state.last_sequence,
+            });
+        }
+        if input.dispatch_sequence <= input.last_dispatch_sequence {
+            return Err(RalSchedulerError::NonIncreasingDispatchSequence {
+                sequence: input.dispatch_sequence,
+                last_sequence: input.last_dispatch_sequence,
+            });
+        }
+
+        let claim_sequence = input
+            .journal_sequence
+            .checked_add(1)
+            .ok_or(RalSchedulerError::RalJournalSequenceExhausted)?;
+        let allocation = self.allocate(input.namespace, Some(input.triggering_event_id.clone()))?;
+        if input.claim_token.is_empty() {
+            return Err(RalSchedulerError::EmptyClaimToken {
+                identity: Box::new(allocation.identity),
+            });
+        }
+        let claim_token = input.claim_token;
+        let claim = RalClaim {
+            identity: allocation.identity.clone(),
+            worker_id: input.worker_id.clone(),
+            claim_token: claim_token.clone(),
+            event: RalJournalEvent::Claimed {
+                identity: allocation.identity.clone(),
+                worker_id: input.worker_id.clone(),
+                claim_token: claim_token.clone(),
+            },
+        };
+        let allocation_record = RalJournalRecord::new(
+            RAL_JOURNAL_WRITER_RUST_DAEMON,
+            input.writer_version.clone(),
+            input.journal_sequence,
+            input.timestamp,
+            input.correlation_id.clone(),
+            allocation.event.clone(),
+        );
+        let claim_record = RalJournalRecord::new(
+            RAL_JOURNAL_WRITER_RUST_DAEMON,
+            input.writer_version,
+            claim_sequence,
+            input.timestamp,
+            input.correlation_id.clone(),
+            claim.event.clone(),
+        );
+        let dispatch_record = build_dispatch_queue_record(DispatchQueueRecordParams {
+            sequence: input.dispatch_sequence,
+            timestamp: input.timestamp,
+            correlation_id: input.correlation_id,
+            dispatch_id: input.dispatch_id,
+            ral: DispatchRalIdentity {
+                project_id: allocation.identity.project_id.clone(),
+                agent_pubkey: allocation.identity.agent_pubkey.clone(),
+                conversation_id: allocation.identity.conversation_id.clone(),
+                ral_number: allocation.identity.ral_number,
+            },
+            triggering_event_id: input.triggering_event_id,
+            claim_token,
+            status: DispatchQueueStatus::Queued,
+        });
+
+        Ok(RalDispatchPreparation {
+            allocation,
+            claim,
+            allocation_record,
+            claim_record,
+            dispatch_record,
         })
     }
 
@@ -531,6 +614,30 @@ pub struct RalClaim {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalDispatchPreparationInput {
+    pub namespace: RalNamespace,
+    pub triggering_event_id: String,
+    pub worker_id: String,
+    pub claim_token: String,
+    pub journal_sequence: u64,
+    pub dispatch_sequence: u64,
+    pub last_dispatch_sequence: u64,
+    pub timestamp: u64,
+    pub correlation_id: String,
+    pub dispatch_id: String,
+    pub writer_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalDispatchPreparation {
+    pub allocation: RalAllocation,
+    pub claim: RalClaim,
+    pub allocation_record: RalJournalRecord,
+    pub claim_record: RalJournalRecord,
+    pub dispatch_record: DispatchQueueRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RalOrphanReconciliationInput {
     pub live_worker_ids: HashSet<String>,
     pub next_sequence: u64,
@@ -636,6 +743,8 @@ pub enum RalSchedulerError {
     RalJournalSequenceExhausted,
     #[error("RAL journal sequence {sequence} is not greater than replay sequence {last_sequence}")]
     NonIncreasingJournalSequence { sequence: u64, last_sequence: u64 },
+    #[error("dispatch sequence {sequence} is not greater than replay sequence {last_sequence}")]
+    NonIncreasingDispatchSequence { sequence: u64, last_sequence: u64 },
     #[error("worker {actual_worker_id} does not own the active RAL claim")]
     WorkerClaimMismatch {
         identity: Box<RalJournalIdentity>,
@@ -685,6 +794,7 @@ fn compare_identity(left: &RalJournalIdentity, right: &RalJournalIdentity) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dispatch_queue::{append_dispatch_queue_record, replay_dispatch_queue};
     use crate::ral_journal::{
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalRecord, RalPendingDelegation,
         RalTerminalSummary, append_ral_journal_record, read_ral_snapshot,
@@ -1537,6 +1647,235 @@ mod tests {
         }
     }
 
+    #[test]
+    fn dispatch_preparation_plans_ral_allocation_claim_and_queued_dispatch_records() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let scheduler = make_scheduler(Vec::new());
+        let preparation = scheduler
+            .plan_dispatch_preparation(dispatch_preparation_input(
+                namespace.clone(),
+                "trigger-a",
+                "worker-a",
+                "claim-dispatch",
+                1,
+                1,
+                0,
+            ))
+            .expect("dispatch preparation must plan");
+
+        assert_eq!(preparation.allocation.identity, namespace.identity(1));
+        assert_eq!(
+            preparation.allocation.triggering_event_id.as_deref(),
+            Some("trigger-a")
+        );
+        assert_eq!(preparation.claim.identity, namespace.identity(1));
+        assert_eq!(preparation.claim.worker_id, "worker-a");
+        assert_eq!(preparation.claim.claim_token, "claim-dispatch");
+        assert_eq!(preparation.allocation_record.sequence, 1);
+        assert_eq!(preparation.claim_record.sequence, 2);
+        assert_eq!(preparation.dispatch_record.sequence, 1);
+        assert_eq!(
+            preparation.dispatch_record.status,
+            DispatchQueueStatus::Queued
+        );
+        assert_eq!(
+            preparation.dispatch_record.claim_token,
+            preparation.claim.claim_token
+        );
+
+        append_ral_journal_record(&daemon_dir, &preparation.allocation_record)
+            .expect("allocation append must succeed");
+        append_ral_journal_record(&daemon_dir, &preparation.claim_record)
+            .expect("claim append must succeed");
+        append_dispatch_queue_record(&daemon_dir, &preparation.dispatch_record)
+            .expect("dispatch queue append must succeed");
+
+        let replay = crate::ral_journal::replay_ral_journal(&daemon_dir)
+            .expect("journal replay must succeed");
+        let entry = replay
+            .states
+            .get(&namespace.identity(1))
+            .expect("prepared RAL must replay");
+        assert_eq!(entry.status, RalReplayStatus::Claimed);
+        assert_eq!(entry.worker_id.as_deref(), Some("worker-a"));
+        assert_eq!(
+            entry.active_claim_token.as_deref(),
+            Some(preparation.claim.claim_token.as_str())
+        );
+
+        let dispatch_state = replay_dispatch_queue(&daemon_dir).expect("queue replay must succeed");
+        assert_eq!(dispatch_state.queued, vec![preparation.dispatch_record]);
+        assert!(dispatch_state.leased.is_empty());
+        assert!(dispatch_state.terminal.is_empty());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn dispatch_preparation_uses_journal_replay_for_next_ral_and_independent_queue_sequence() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let scheduler = make_scheduler(vec![
+            record(
+                4,
+                RalJournalEvent::Allocated {
+                    identity: namespace.identity(1),
+                    triggering_event_id: Some("old-trigger".to_string()),
+                },
+            ),
+            record(
+                5,
+                RalJournalEvent::Completed {
+                    identity: namespace.identity(1),
+                    worker_id: "worker-old".to_string(),
+                    claim_token: "claim-old".to_string(),
+                    terminal: terminal(),
+                },
+            ),
+        ]);
+        let preparation = scheduler
+            .plan_dispatch_preparation(dispatch_preparation_input(
+                namespace.clone(),
+                "trigger-a",
+                "worker-a",
+                "claim-explicit",
+                6,
+                1,
+                0,
+            ))
+            .expect("dispatch preparation must plan");
+
+        assert_eq!(preparation.allocation.identity, namespace.identity(2));
+        assert_eq!(preparation.allocation_record.sequence, 6);
+        assert_eq!(preparation.claim_record.sequence, 7);
+        assert_eq!(preparation.dispatch_record.sequence, 1);
+        assert_eq!(preparation.claim.claim_token, "claim-explicit");
+        assert_eq!(preparation.dispatch_record.claim_token, "claim-explicit");
+    }
+
+    #[test]
+    fn dispatch_preparation_rejects_duplicate_trigger_stale_sequence_and_empty_claim() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let scheduler = make_scheduler(vec![record(
+            2,
+            RalJournalEvent::Allocated {
+                identity: namespace.identity(1),
+                triggering_event_id: Some("trigger-a".to_string()),
+            },
+        )]);
+
+        match scheduler.plan_dispatch_preparation(dispatch_preparation_input(
+            namespace.clone(),
+            "fresh-trigger",
+            "worker-a",
+            "claim-fresh",
+            2,
+            1,
+            0,
+        )) {
+            Err(RalSchedulerError::NonIncreasingJournalSequence {
+                sequence,
+                last_sequence,
+            }) => {
+                assert_eq!(sequence, 2);
+                assert_eq!(last_sequence, 2);
+            }
+            other => panic!("expected stale journal sequence rejection, got {other:?}"),
+        }
+
+        match scheduler.plan_dispatch_preparation(dispatch_preparation_input(
+            namespace.clone(),
+            "trigger-a",
+            "worker-a",
+            "claim-duplicate",
+            3,
+            1,
+            0,
+        )) {
+            Err(RalSchedulerError::DuplicateActiveTriggeringEvent {
+                triggering_event_id,
+                ..
+            }) => {
+                assert_eq!(triggering_event_id, "trigger-a");
+            }
+            other => panic!("expected duplicate trigger rejection, got {other:?}"),
+        }
+
+        match scheduler.plan_dispatch_preparation(dispatch_preparation_input(
+            namespace.clone(),
+            "fresh-trigger",
+            "worker-a",
+            "claim-fresh",
+            3,
+            1,
+            1,
+        )) {
+            Err(RalSchedulerError::NonIncreasingDispatchSequence {
+                sequence,
+                last_sequence,
+            }) => {
+                assert_eq!(sequence, 1);
+                assert_eq!(last_sequence, 1);
+            }
+            other => panic!("expected stale dispatch sequence rejection, got {other:?}"),
+        }
+
+        match scheduler.plan_dispatch_preparation(dispatch_preparation_input(
+            namespace,
+            "fresh-trigger",
+            "worker-a",
+            "",
+            3,
+            1,
+            0,
+        )) {
+            Err(RalSchedulerError::EmptyClaimToken { identity }) => {
+                assert_eq!(identity.ral_number, 2);
+            }
+            other => panic!("expected empty claim token rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_preparation_allows_terminal_duplicate_triggering_event() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let scheduler = make_scheduler(vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: namespace.identity(1),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Completed {
+                    identity: namespace.identity(1),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                    terminal: terminal(),
+                },
+            ),
+        ]);
+        let preparation = scheduler
+            .plan_dispatch_preparation(dispatch_preparation_input(
+                namespace.clone(),
+                "trigger-a",
+                "worker-b",
+                "claim-b",
+                3,
+                1,
+                0,
+            ))
+            .expect("terminal duplicate trigger must not block dispatch preparation");
+
+        assert_eq!(preparation.allocation.identity, namespace.identity(2));
+        assert_eq!(
+            preparation.allocation.triggering_event_id.as_deref(),
+            Some("trigger-a")
+        );
+    }
+
     fn make_scheduler(records: Vec<RalJournalRecord>) -> RalScheduler {
         let replay = replay_ral_journal_records(records).expect("replay must succeed");
         RalScheduler::from_replay(&replay)
@@ -1622,6 +1961,30 @@ mod tests {
             correlation_id: "transition-test".to_string(),
             writer_version: "test-version".to_string(),
             transition,
+        }
+    }
+
+    fn dispatch_preparation_input(
+        namespace: RalNamespace,
+        triggering_event_id: &str,
+        worker_id: &str,
+        claim_token: &str,
+        journal_sequence: u64,
+        dispatch_sequence: u64,
+        last_dispatch_sequence: u64,
+    ) -> RalDispatchPreparationInput {
+        RalDispatchPreparationInput {
+            namespace,
+            triggering_event_id: triggering_event_id.to_string(),
+            worker_id: worker_id.to_string(),
+            claim_token: claim_token.to_string(),
+            journal_sequence,
+            dispatch_sequence,
+            last_dispatch_sequence,
+            timestamp: 1710003000000,
+            correlation_id: "dispatch-prep-test".to_string(),
+            dispatch_id: format!("dispatch-{dispatch_sequence}"),
+            writer_version: "test-version".to_string(),
         }
     }
 

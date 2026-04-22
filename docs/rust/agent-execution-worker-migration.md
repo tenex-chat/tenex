@@ -1170,6 +1170,10 @@ Work:
   the journal record for completed, waiting-for-delegation, no-response,
   aborted, or error outcomes. Worker crashes remain a reconciliation result, not
   a worker-emitted terminal transition.
+- Add a dispatch preparation planner that returns the RAL allocation record,
+  claim record, and queued dispatch record as a single side-effect-free bundle.
+  The caller supplies the claim token, and the planner validates RAL journal and
+  dispatch queue sequence spaces independently.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
   scope.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
