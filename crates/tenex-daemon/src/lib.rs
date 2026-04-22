@@ -13,6 +13,7 @@ pub mod worker_abort;
 pub mod worker_completion;
 pub mod worker_completion_apply;
 pub mod worker_concurrency;
+pub mod worker_diagnostics;
 pub mod worker_dispatch_admission;
 pub mod worker_dispatch_execution;
 pub mod worker_dispatch_spawn;
