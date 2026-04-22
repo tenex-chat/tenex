@@ -794,6 +794,15 @@ milestone owns canonical Nostr relay publishing. Native transport delivery, such
 as Telegram Bot API sends, is derived by Rust from accepted signed events and
 drained by M8's Rust-native transport adapters.
 
+Landed slices:
+
+- `crates/tenex-daemon/src/backend_events/heartbeat.rs` — Rust encoder and
+  schnorr signer for kind `24012` backend heartbeat, with NIP-01 self-conformance
+  tests (event id equals `sha256(canonical_payload)`, signature verifies against
+  the claimed xonly pubkey, ordered `p` tags, empty content, no self p-tag).
+  Library-only; no daemon wiring. First backend-signed encoder; templates the
+  remaining `24010`, `24011`, `24133` encoders.
+
 Scope:
 
 - Implement durable publish request/result handling in Rust.
@@ -916,6 +925,18 @@ lifecycle, outbound Bot API delivery, retries, native message diagnostics, and
 transport delivery outbox state. TypeScript Telegram services remain useful as a
 compatibility oracle while the Rust adapter reaches parity, but they are not the
 target runtime path.
+
+Landed slices:
+
+- `crates/tenex-daemon/src/telegram_outbox.rs` — Rust-owned Telegram transport
+  outbox with pending / delivered / failed / tmp states, deterministic record
+  IDs, retryable-vs-permanent failure classification, requeue scan, diagnostics,
+  and maintenance pass. Library-only; no Bot API HTTP client, no daemon wiring.
+- `crates/tenex-daemon/src/caches/` — filesystem-backed caches for trust
+  pubkeys, prefix lookups, and profile names under
+  `$TENEX_BASE_DIR/daemon/caches/`, with atomic writes, schema-version and
+  writer stamps, fail-closed reads on corruption or version mismatch, and
+  per-cache diagnostics. Library-only; no daemon wiring.
 
 Scope:
 
