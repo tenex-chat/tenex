@@ -897,4 +897,78 @@ mod tests {
             Err(ProjectStatusEncodeError::EmptyScheduledTaskSchedule { index: 0 })
         ));
     }
+
+    #[test]
+    #[ignore]
+    fn dump_backend_project_status_fixture() {
+        let signer = test_signer();
+        let owner = pubkey_hex(0x02);
+        let project_tag = project_tag(&owner);
+        let whitelisted = vec![pubkey_hex(0x03)];
+        let agent = ProjectStatusAgent {
+            pubkey: pubkey_hex(0x04),
+            slug: "worker".to_string(),
+        };
+        let agents = [agent];
+        let model = ProjectStatusModel {
+            slug: "anthropic".to_string(),
+            agents: vec!["worker".to_string()],
+        };
+        let models = [model];
+        let tool = ProjectStatusTool {
+            name: "shell".to_string(),
+            agents: vec!["worker".to_string()],
+        };
+        let tools = [tool];
+        let skill = ProjectStatusSkill {
+            id: "skill-build".to_string(),
+            agents: vec!["worker".to_string()],
+        };
+        let skills = [skill];
+        let mcp_server = ProjectStatusMcpServer {
+            slug: "github".to_string(),
+            agents: vec!["worker".to_string()],
+        };
+        let mcp_servers = [mcp_server];
+        let worktrees = vec!["main".to_string()];
+        let scheduled_tasks = vec![ProjectStatusScheduledTask {
+            id: "task-1".to_string(),
+            title: "Nightly build".to_string(),
+            schedule: "0 1 * * *".to_string(),
+            target_agent: "worker".to_string(),
+            kind: ProjectStatusScheduledTaskKind::Cron,
+            last_run: Some(1_699_999_999),
+        }];
+        let inputs = default_inputs(
+            &project_tag,
+            &owner,
+            &whitelisted,
+            None,
+            &agents,
+            &models,
+            &tools,
+            &skills,
+            &mcp_servers,
+            &worktrees,
+            &scheduled_tasks,
+        );
+
+        let event = encode_project_status(&inputs, &signer).expect("encode project status");
+        let fixture = serde_json::json!({
+            "name": "backend-project-status-basic",
+            "description": "Canonical backend project-status fixture for kind 24010.",
+            "secretKeyHex": TEST_SECRET_KEY_HEX,
+            "pubkey": signer.xonly_pubkey_hex(),
+            "created_at": event.created_at,
+            "normalized": event.normalized(),
+            "canonicalPayload": canonical_payload(&event.normalized()).expect("canonical payload"),
+            "eventHash": event.id.clone(),
+            "signed": event,
+        });
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&fixture).expect("serialize fixture")
+        );
+    }
 }

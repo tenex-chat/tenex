@@ -184,6 +184,7 @@ Use this section to understand each service’s scope and dependencies:
 ### Ongoing Improvements (Gradual Migration)
 - **Prompt-history cache anchoring (2026-04-13)**: `src/agents/execution/prompt-cache.ts` now gates durable reminder overlays on observed provider cache usage. Cold histories resend current-state reminders each turn instead of carrying historical reminder overlays until a real cache anchor exists.
 - **Rust startup recovery slice (2026-04-22)**: `crates/tenex-daemon/src/worker_startup_recovery.rs` composes `ral_scheduler.rs` orphan planning with `worker_recovery_apply.rs` during daemon startup, using explicit live worker ids or runtime snapshots and filesystem journal replay.
+- **Rust backend-event publish orchestration slice (2026-04-22)**: `crates/tenex-daemon/src/backend_event_publish.rs` provides library-first helpers that encode backend-authored heartbeat, project status, installed-agent-list, and operations-status events, derive the backend publisher pubkey from the signer, and enqueue through the existing publish runtime without direct relay publishing.
 - **Layer violations fixed (COMPLETED 2025-12-20)**: Fixed all `utils/` → `services/` layer violations:
   - Moved `relays.ts` to `nostr/` (Nostr-specific)
   - Refactored `lockfile.ts` to accept path parameter
