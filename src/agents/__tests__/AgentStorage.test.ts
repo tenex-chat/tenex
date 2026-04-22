@@ -1540,6 +1540,57 @@ describe("AgentStorage", () => {
             }
         });
 
+        it("should repair byProject-only index files written by Rust project ingress", async () => {
+            const ConfigService = await import("@/services/ConfigService");
+            const originalGetConfigPath = ConfigService.config.getConfigPath;
+            ConfigService.config.getConfigPath = () => tempDir;
+
+            try {
+                const signer = NDKPrivateKeySigner.generate();
+                const agent = createStoredAgent({
+                    nsec: signer.nsec,
+                    slug: "rust-discovered-agent",
+                    name: "Rust Discovered Agent",
+                    role: "assistant",
+                });
+
+                await fs.writeFile(
+                    path.join(tempDir, `${signer.pubkey}.json`),
+                    JSON.stringify(agent, null, 2)
+                );
+                await fs.writeFile(
+                    path.join(tempDir, "index.json"),
+                    JSON.stringify(
+                        {
+                            byProject: {
+                                "project-1": [signer.pubkey],
+                            },
+                        },
+                        null,
+                        2
+                    )
+                );
+
+                const newStorage = new AgentStorage();
+                await newStorage.initialize();
+                await newStorage.syncProjectAgents("project-1", [signer.pubkey]);
+
+                const loaded = await newStorage.getAgentBySlug("rust-discovered-agent");
+                expect(loaded?.name).toBe("Rust Discovered Agent");
+
+                const indexContent = await fs.readFile(path.join(tempDir, "index.json"), "utf-8");
+                const repairedIndex = JSON.parse(indexContent);
+                expect(repairedIndex.bySlug["rust-discovered-agent"].pubkey).toBe(signer.pubkey);
+                expect(repairedIndex.bySlug["rust-discovered-agent"].projectIds).toContain(
+                    "project-1"
+                );
+                expect(repairedIndex.byEventId).toEqual({});
+                expect(repairedIndex.byProject["project-1"]).toContain(signer.pubkey);
+            } finally {
+                ConfigService.config.getConfigPath = originalGetConfigPath;
+            }
+        });
+
         it("should keep slug entry for reactivation when agent has no projects left", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({

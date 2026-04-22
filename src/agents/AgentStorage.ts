@@ -99,6 +99,29 @@ function normalizeLoadedAgent(agent: StoredAgent): StoredAgent {
     };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeAgentIndex(rawIndex: unknown): AgentIndex {
+    const raw = isRecord(rawIndex) ? rawIndex : {};
+    const byProject = isRecord(raw.byProject)
+        ? Object.fromEntries(
+              Object.entries(raw.byProject)
+                  .filter((entry): entry is [string, string[]] =>
+                      Array.isArray(entry[1]) &&
+                      entry[1].every((pubkey) => typeof pubkey === "string")
+                  )
+          )
+        : {};
+
+    return {
+        bySlug: isRecord(raw.bySlug) ? (raw.bySlug as Record<string, SlugEntry>) : {},
+        byEventId: isRecord(raw.byEventId) ? (raw.byEventId as Record<string, string>) : {},
+        byProject,
+    };
+}
+
 function sanitizeStoredAgentForPersistence(agent: StoredAgent): StoredAgent {
     return {
         ...agent,
@@ -329,7 +352,7 @@ export class AgentStorage {
         if (await fileExists(this.indexPath)) {
             try {
                 const content = await fs.readFile(this.indexPath, "utf-8");
-                const rawIndex = JSON.parse(content);
+                const rawIndex = normalizeAgentIndex(JSON.parse(content));
 
                 // Detect old format: bySlug is Record<string, string> instead of Record<string, SlugEntry>
                 const needsMigration = rawIndex.bySlug &&
@@ -337,7 +360,9 @@ export class AgentStorage {
 
                 if (needsMigration) {
                     logger.info("Migrating agent index from old format to multi-project slug structure");
-                    this.index = this.migrateIndexFormat(rawIndex);
+                    this.index = this.migrateIndexFormat(
+                        rawIndex as unknown as Record<string, unknown>
+                    );
 
                     // Verify byProject is populated after migration
                     const hasValidByProject = this.index.byProject &&

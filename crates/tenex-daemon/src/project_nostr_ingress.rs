@@ -4,7 +4,7 @@ use std::io;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::nostr_event::SignedNostrEvent;
@@ -39,8 +39,32 @@ pub enum ProjectNostrIngressError {
 
 #[derive(Deserialize, Default)]
 struct RawAgentIndex {
+    #[serde(default, rename = "bySlug")]
+    by_slug: BTreeMap<String, Value>,
+    #[serde(default, rename = "byEventId")]
+    by_event_id: BTreeMap<String, Value>,
     #[serde(default, rename = "byProject")]
     by_project: BTreeMap<String, Vec<String>>,
+    #[serde(flatten)]
+    extra_fields: BTreeMap<String, Value>,
+}
+
+impl Serialize for RawAgentIndex {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut value = serde_json::Map::new();
+        for (key, field) in &self.extra_fields {
+            if key != "bySlug" && key != "byEventId" && key != "byProject" {
+                value.insert(key.clone(), field.clone());
+            }
+        }
+        value.insert("bySlug".to_string(), json!(self.by_slug));
+        value.insert("byEventId".to_string(), json!(self.by_event_id));
+        value.insert("byProject".to_string(), json!(self.by_project));
+        value.serialize(serializer)
+    }
 }
 
 pub fn handle_project_nostr_event(
@@ -92,8 +116,7 @@ pub fn handle_project_nostr_event(
 
     fs::write(
         &index_path,
-        serde_json::to_string_pretty(&json!({ "byProject": index.by_project }))
-            .expect("agent index serializes"),
+        serde_json::to_string_pretty(&index).expect("agent index serializes"),
     )
     .map_err(ProjectNostrIngressError::WriteAgentIndex)?;
 
@@ -185,6 +208,8 @@ mod tests {
         let index_path = base.join("agents").join("index.json");
         assert!(index_path.exists());
         let index: Value = serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
+        assert!(index["bySlug"].is_object());
+        assert!(index["byEventId"].is_object());
         let by_project = &index["byProject"]["my-project"];
         assert_eq!(by_project[0], agent1.as_str());
         assert_eq!(by_project[1], agent2.as_str());
@@ -198,6 +223,15 @@ mod tests {
         let agent = "c".repeat(64);
 
         let existing_index = json!({
+            "bySlug": {
+                "existing-agent": {
+                    "pubkey": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    "projectIds": ["other-project"]
+                }
+            },
+            "byEventId": {
+                "event-alpha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            },
             "byProject": {
                 "other-project": ["eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]
             }
@@ -228,6 +262,14 @@ mod tests {
         assert!(
             index["byProject"]["new-project"].is_array(),
             "new-project added"
+        );
+        assert!(
+            index["bySlug"]["existing-agent"].is_object(),
+            "slug index preserved"
+        );
+        assert_eq!(
+            index["byEventId"]["event-alpha"],
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         );
     }
 
