@@ -263,13 +263,19 @@ fn next_sequence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dispatch_queue::replay_dispatch_queue;
+    use crate::dispatch_queue::{read_dispatch_queue_records, replay_dispatch_queue};
     use crate::inbound_envelope::{
-        ChannelKind, ChannelRef, ExternalMessageRef, InboundMetadata, PrincipalRef,
+        ChannelKind, ChannelRef, ExternalMessageRef, InboundMetadata, PrincipalKind, PrincipalRef,
+        TelegramChatType, TelegramTransportMetadata, TransportMetadataBag,
     };
-    use crate::ral_journal::{RalReplayStatus, replay_ral_journal};
+    use crate::ral_journal::{
+        RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
+        RalReplayStatus, read_ral_journal_records, replay_ral_journal,
+    };
     use crate::worker_dispatch_input::read_optional as read_worker_dispatch_input;
+    use serde_json::{Value, json};
     use std::fs;
+    use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -300,35 +306,138 @@ mod tests {
         assert!(outcome.queued);
         assert!(!outcome.already_existed);
         assert_eq!(outcome.triggering_event_id, "event-alpha");
-
-        let dispatch = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
-        assert_eq!(dispatch.queued.len(), 1);
-        assert_eq!(dispatch.queued[0].dispatch_id, outcome.dispatch_id);
-        assert_eq!(dispatch.queued[0].status, DispatchQueueStatus::Queued);
-
-        let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
-        let entry = ral
-            .states
-            .values()
-            .next()
-            .expect("RAL entry must be present");
-        assert_eq!(entry.status, RalReplayStatus::Claimed);
-        assert_eq!(entry.triggering_event_id.as_deref(), Some("event-alpha"));
-        assert_eq!(entry.worker_id.as_deref(), Some(outcome.worker_id.as_str()));
-
-        let sidecar = read_worker_dispatch_input(&daemon_dir, &outcome.dispatch_id)
-            .expect("sidecar must read")
-            .expect("sidecar must exist");
-        assert_eq!(sidecar.source_type, WorkerDispatchInputSourceType::Nostr);
-        let fields = sidecar
-            .resolved_execute_fields()
-            .expect("sidecar fields must resolve");
-        assert_eq!(
-            fields.worker_id.as_deref(),
-            Some(outcome.worker_id.as_str())
+        assert_inbound_dispatch_artifacts(
+            &daemon_dir,
+            &envelope,
+            &outcome,
+            WorkerDispatchInputSourceType::Nostr,
+            json!({
+                "transport": "nostr",
+                "messageId": "nostr:event-alpha",
+                "nativeId": "event-alpha",
+                "channelId": "nostr:conversation:event-alpha",
+            }),
+            json!({
+                "transport": "nostr",
+                "principal": {
+                    "id": "nostr:sender",
+                    "transport": "nostr",
+                    "linkedPubkey": "sender"
+                },
+                "channel": {
+                    "id": "nostr:conversation:event-alpha",
+                    "transport": "nostr",
+                    "kind": "conversation"
+                },
+                "message": {
+                    "id": "nostr:event-alpha",
+                    "transport": "nostr",
+                    "nativeId": "event-alpha"
+                },
+                "recipients": [],
+                "content": "hello",
+                "occurredAt": 1_710_000_700,
+                "capabilities": [],
+                "metadata": {}
+            }),
+            "TENEX-demo",
+            "agent-pubkey",
+            "conversation-alpha",
+            1_710_000_700_000,
+            "inbound-dispatch-test@0",
         );
-        assert_eq!(fields.project_base_path, "/repo/demo");
-        assert_eq!(fields.triggering_envelope["content"], "hello");
+
+        if daemon_dir.exists() {
+            fs::remove_dir_all(daemon_dir).expect("temp dir cleanup must succeed");
+        }
+    }
+
+    #[test]
+    fn enqueue_inbound_telegram_dispatch_writes_worker_runtime_artifacts() {
+        let daemon_dir = unique_temp_dir("inbound-dispatch-telegram");
+        let envelope = telegram_envelope();
+
+        let outcome = enqueue_inbound_dispatch(InboundDispatchEnqueueInput {
+            daemon_dir: &daemon_dir,
+            project: InboundDispatchProject {
+                project_id: "TENEX-demo",
+                project_base_path: "/repo/demo",
+                metadata_path: "/repo/demo/.tenex/project.json",
+            },
+            route: InboundDispatchRoute {
+                agent_pubkey: "agent-pubkey",
+                conversation_id: "conversation-bravo",
+            },
+            envelope: &envelope,
+            timestamp: 1_710_000_800_000,
+            writer_version: "inbound-dispatch-test@0",
+        })
+        .expect("inbound dispatch must enqueue");
+
+        assert!(outcome.queued);
+        assert!(!outcome.already_existed);
+        assert_eq!(outcome.triggering_event_id, "tg-event-88");
+        assert_inbound_dispatch_artifacts(
+            &daemon_dir,
+            &envelope,
+            &outcome,
+            WorkerDispatchInputSourceType::Telegram,
+            json!({
+                "transport": "telegram",
+                "messageId": "telegram:msg-88",
+                "nativeId": "tg-event-88",
+                "channelId": "telegram:group:-100200300",
+            }),
+            json!({
+                "transport": "telegram",
+                "principal": {
+                    "id": "telegram:user-42",
+                    "transport": "telegram",
+                    "displayName": "Ada",
+                    "username": "ada",
+                    "kind": "human"
+                },
+                "channel": {
+                    "id": "telegram:group:-100200300",
+                    "transport": "telegram",
+                    "kind": "group",
+                    "projectBinding": "TENEX-demo"
+                },
+                "message": {
+                    "id": "telegram:msg-88",
+                    "transport": "telegram",
+                    "nativeId": "tg-event-88",
+                    "replyToId": "telegram:msg-87"
+                },
+                "recipients": [],
+                "content": "hello from telegram",
+                "occurredAt": 1_710_000_800,
+                "capabilities": ["reply"],
+                "metadata": {
+                    "transport": {
+                        "telegram": {
+                            "updateId": 88,
+                            "chatId": "telegram:group:-100200300",
+                            "messageId": "telegram:msg-88",
+                            "threadId": "telegram:thread-3",
+                            "chatType": "group",
+                            "isEditedMessage": false,
+                            "senderUserId": "telegram:user-42",
+                            "chatTitle": "TENEX group",
+                            "chatUsername": "tenex-group",
+                            "memberCount": 12,
+                            "botId": "telegram:bot-1",
+                            "botUsername": "tenex_bot"
+                        }
+                    }
+                }
+            }),
+            "TENEX-demo",
+            "agent-pubkey",
+            "conversation-bravo",
+            1_710_000_800_000,
+            "inbound-dispatch-test@0",
+        );
 
         if daemon_dir.exists() {
             fs::remove_dir_all(daemon_dir).expect("temp dir cleanup must succeed");
@@ -432,6 +541,161 @@ mod tests {
             capabilities: Vec::new(),
             metadata: InboundMetadata::default(),
         }
+    }
+
+    fn telegram_envelope() -> InboundEnvelope {
+        InboundEnvelope {
+            transport: RuntimeTransport::Telegram,
+            principal: PrincipalRef {
+                id: "telegram:user-42".to_string(),
+                transport: RuntimeTransport::Telegram,
+                linked_pubkey: None,
+                display_name: Some("Ada".to_string()),
+                username: Some("ada".to_string()),
+                kind: Some(PrincipalKind::Human),
+            },
+            channel: ChannelRef {
+                id: "telegram:group:-100200300".to_string(),
+                transport: RuntimeTransport::Telegram,
+                kind: ChannelKind::Group,
+                project_binding: Some("TENEX-demo".to_string()),
+            },
+            message: ExternalMessageRef {
+                id: "telegram:msg-88".to_string(),
+                transport: RuntimeTransport::Telegram,
+                native_id: "tg-event-88".to_string(),
+                reply_to_id: Some("telegram:msg-87".to_string()),
+            },
+            recipients: Vec::new(),
+            content: "hello from telegram".to_string(),
+            occurred_at: 1_710_000_800,
+            capabilities: vec!["reply".to_string()],
+            metadata: InboundMetadata {
+                transport: Some(TransportMetadataBag {
+                    telegram: Some(TelegramTransportMetadata {
+                        update_id: 88,
+                        chat_id: "telegram:group:-100200300".to_string(),
+                        message_id: "telegram:msg-88".to_string(),
+                        thread_id: Some("telegram:thread-3".to_string()),
+                        chat_type: TelegramChatType::Group,
+                        is_edited_message: false,
+                        sender_user_id: "telegram:user-42".to_string(),
+                        chat_title: Some("TENEX group".to_string()),
+                        topic_title: None,
+                        chat_username: Some("tenex-group".to_string()),
+                        member_count: Some(12),
+                        administrators: None,
+                        seen_participants: None,
+                        bot_id: Some("telegram:bot-1".to_string()),
+                        bot_username: Some("tenex_bot".to_string()),
+                    }),
+                }),
+                ..InboundMetadata::default()
+            },
+        }
+    }
+
+    fn assert_inbound_dispatch_artifacts(
+        daemon_dir: &Path,
+        envelope: &InboundEnvelope,
+        outcome: &InboundDispatchEnqueueOutcome,
+        expected_source_type: WorkerDispatchInputSourceType,
+        expected_source_metadata: Value,
+        expected_triggering_envelope: Value,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+        timestamp: u64,
+        writer_version: &str,
+    ) {
+        let sidecar = read_worker_dispatch_input(daemon_dir, &outcome.dispatch_id)
+            .expect("sidecar must read")
+            .expect("sidecar must exist");
+        assert_eq!(sidecar.source_type, expected_source_type);
+        assert_eq!(
+            sidecar.source_metadata,
+            Some(expected_source_metadata.clone())
+        );
+        let fields = sidecar
+            .resolved_execute_fields()
+            .expect("sidecar fields must resolve");
+        assert_eq!(
+            fields.worker_id.as_deref(),
+            Some(outcome.worker_id.as_str())
+        );
+        assert_eq!(fields.project_base_path, "/repo/demo");
+        assert_eq!(fields.metadata_path, "/repo/demo/.tenex/project.json");
+        assert_eq!(fields.triggering_envelope, expected_triggering_envelope);
+        assert_eq!(
+            serde_json::to_value(envelope).expect("triggering envelope must serialize"),
+            fields.triggering_envelope
+        );
+
+        let dispatch_records =
+            read_dispatch_queue_records(daemon_dir).expect("dispatch queue must read");
+        assert_eq!(dispatch_records, vec![outcome.dispatch_record.clone()]);
+        assert_eq!(dispatch_records[0].status, DispatchQueueStatus::Queued);
+
+        let digest = outcome
+            .dispatch_id
+            .strip_prefix("inbound-")
+            .expect("dispatch id must carry the inbound prefix");
+        let identity = RalJournalIdentity {
+            project_id: project_id.to_string(),
+            agent_pubkey: agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
+            ral_number: 1,
+        };
+        let expected_allocation_record = RalJournalRecord::new(
+            RAL_JOURNAL_WRITER_RUST_DAEMON,
+            writer_version,
+            1,
+            timestamp,
+            format!("inbound-dispatch-{digest}"),
+            RalJournalEvent::Allocated {
+                identity: identity.clone(),
+                triggering_event_id: Some(outcome.triggering_event_id.clone()),
+            },
+        );
+        let expected_claim_record = RalJournalRecord::new(
+            RAL_JOURNAL_WRITER_RUST_DAEMON,
+            writer_version,
+            2,
+            timestamp,
+            format!("inbound-dispatch-{digest}"),
+            RalJournalEvent::Claimed {
+                identity,
+                worker_id: outcome.worker_id.clone(),
+                claim_token: outcome.claim_token.clone(),
+            },
+        );
+        let journal_records = read_ral_journal_records(daemon_dir).expect("RAL journal must read");
+        assert_eq!(
+            journal_records,
+            vec![expected_allocation_record, expected_claim_record]
+        );
+
+        let dispatch = replay_dispatch_queue(daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(dispatch.queued.len(), 1);
+        assert_eq!(dispatch.queued[0].dispatch_id, outcome.dispatch_id);
+        assert_eq!(dispatch.queued[0].status, DispatchQueueStatus::Queued);
+
+        let ral = replay_ral_journal(daemon_dir).expect("RAL journal must replay");
+        let entry = ral
+            .states
+            .values()
+            .next()
+            .expect("RAL entry must be present");
+        assert_eq!(entry.status, RalReplayStatus::Claimed);
+        assert_eq!(
+            entry.triggering_event_id.as_deref(),
+            Some(outcome.triggering_event_id.as_str())
+        );
+        assert_eq!(entry.worker_id.as_deref(), Some(outcome.worker_id.as_str()));
+        assert_eq!(
+            entry.active_claim_token.as_deref(),
+            Some(outcome.claim_token.as_str())
+        );
     }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
