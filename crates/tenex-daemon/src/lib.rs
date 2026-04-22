@@ -15,6 +15,7 @@ pub mod dispatch_queue;
 pub mod filesystem_state;
 pub mod nostr_event;
 pub mod operations_status_runtime;
+pub mod periodic_tick;
 pub mod process_liveness;
 pub mod project_status_snapshot;
 pub mod publish_outbox;
