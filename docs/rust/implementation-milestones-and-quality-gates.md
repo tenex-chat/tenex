@@ -812,6 +812,18 @@ Landed slices:
 - `crates/tenex-daemon/src/backend_events/installed_agent_list.rs` — Rust
   encoder and signer for kind `24011` installed-agent-list, preserving owner
   `p` tags and deterministic agent tags. Library-only; no daemon wiring.
+- `crates/tenex-daemon/src/backend_events/operations_status.rs` — Rust encoder
+  and signer for kind `24133` operations status, preserving TypeScript tag
+  ordering (`e`, human `P`, active-agent `p`, project `a`) and cleanup events
+  with no active-agent tags. Library-only; no daemon wiring.
+- `crates/tenex-daemon/src/publish_outbox.rs` — filesystem-backed acceptance,
+  idempotency, retry, diagnostics, maintenance, and relay-drain primitives for
+  exact signed Nostr events, including worker-signed publish requests and
+  backend-signed events with expected-publisher validation.
+- `crates/tenex-daemon/src/publish_runtime.rs` — runtime-facing inspect,
+  maintain, and backend-event enqueue wrappers over the publish outbox so
+  backend-authored status/heartbeat encoders can enter the same durable publish
+  path as worker-authored events.
 
 Scope:
 

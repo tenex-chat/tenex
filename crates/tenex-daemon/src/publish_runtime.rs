@@ -1,8 +1,10 @@
 use std::path::Path;
 
+use crate::nostr_event::SignedNostrEvent;
 use crate::publish_outbox::{
-    PublishOutboxDiagnostics, PublishOutboxError, PublishOutboxMaintenanceReport,
-    PublishOutboxRelayPublisher, PublishOutboxRetryPolicy, inspect_publish_outbox,
+    BackendPublishOutboxInput, PublishOutboxDiagnostics, PublishOutboxError,
+    PublishOutboxMaintenanceReport, PublishOutboxRecord, PublishOutboxRelayPublisher,
+    PublishOutboxRetryPolicy, accept_backend_signed_publish_event, inspect_publish_outbox,
     run_publish_outbox_maintenance_with_retry_policy,
 };
 
@@ -29,6 +31,28 @@ pub struct PublishRuntimeMaintainOutcome {
     pub maintenance_report: PublishOutboxMaintenanceReport,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendPublishRuntimeInput<'a> {
+    pub daemon_dir: &'a Path,
+    pub event: SignedNostrEvent,
+    pub accepted_at: u64,
+    pub request_id: &'a str,
+    pub request_sequence: u64,
+    pub request_timestamp: u64,
+    pub correlation_id: &'a str,
+    pub project_id: &'a str,
+    pub conversation_id: &'a str,
+    pub expected_publisher_pubkey: &'a str,
+    pub ral_number: u64,
+    pub requires_event_id: bool,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendPublishRuntimeOutcome {
+    pub record: PublishOutboxRecord,
+}
+
 pub fn inspect_publish_runtime(
     input: PublishRuntimeInspectInput<'_>,
 ) -> Result<PublishRuntimeInspectOutcome, PublishOutboxError> {
@@ -48,6 +72,30 @@ pub fn maintain_publish_runtime<P: PublishOutboxRelayPublisher>(
     )?;
 
     Ok(PublishRuntimeMaintainOutcome { maintenance_report })
+}
+
+pub fn enqueue_backend_event_for_publish(
+    input: BackendPublishRuntimeInput<'_>,
+) -> Result<BackendPublishRuntimeOutcome, PublishOutboxError> {
+    let record = accept_backend_signed_publish_event(
+        input.daemon_dir,
+        BackendPublishOutboxInput {
+            request_id: input.request_id.to_string(),
+            request_sequence: input.request_sequence,
+            request_timestamp: input.request_timestamp,
+            correlation_id: input.correlation_id.to_string(),
+            project_id: input.project_id.to_string(),
+            conversation_id: input.conversation_id.to_string(),
+            publisher_pubkey: input.expected_publisher_pubkey.to_string(),
+            ral_number: input.ral_number,
+            requires_event_id: input.requires_event_id,
+            timeout_ms: input.timeout_ms,
+            event: input.event,
+        },
+        input.accepted_at,
+    )?;
+
+    Ok(BackendPublishRuntimeOutcome { record })
 }
 
 #[cfg(test)]
@@ -146,6 +194,126 @@ mod tests {
             succeeding_publisher.published_events,
             vec![fixture.signed.clone()]
         );
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn enqueue_backend_event_for_publish_persists_expected_publisher_context() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let fixture = signed_event_fixture();
+
+        let outcome = enqueue_backend_event_for_publish(BackendPublishRuntimeInput {
+            daemon_dir: &daemon_dir,
+            event: fixture.signed.clone(),
+            accepted_at: 1_710_001_100_100,
+            request_id: "backend-status-01",
+            request_sequence: 1,
+            request_timestamp: 1_710_001_100_000,
+            correlation_id: "backend-status-correlation",
+            project_id: "project-alpha",
+            conversation_id: "conversation-alpha",
+            expected_publisher_pubkey: &fixture.pubkey,
+            ral_number: 0,
+            requires_event_id: false,
+            timeout_ms: 0,
+        })
+        .expect("backend event must enqueue");
+
+        assert_eq!(outcome.record.event, fixture.signed);
+        assert_eq!(outcome.record.request.request_id, "backend-status-01");
+        assert_eq!(outcome.record.request.agent_pubkey, fixture.pubkey);
+        assert_eq!(outcome.record.request.ral_number, 0);
+        assert!(!outcome.record.request.requires_event_id);
+        assert_eq!(outcome.record.request.timeout_ms, 0);
+
+        let persisted = read_pending_publish_outbox_record(&daemon_dir, &outcome.record.event.id)
+            .expect("pending record read must succeed")
+            .expect("pending backend event must persist");
+        assert_eq!(persisted, outcome.record);
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn enqueue_backend_event_for_publish_rejects_unexpected_publisher() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let fixture = signed_event_fixture();
+        let unexpected_pubkey = "a".repeat(64);
+
+        let error = enqueue_backend_event_for_publish(BackendPublishRuntimeInput {
+            daemon_dir: &daemon_dir,
+            event: fixture.signed.clone(),
+            accepted_at: 1_710_001_100_100,
+            request_id: "backend-status-01",
+            request_sequence: 1,
+            request_timestamp: 1_710_001_100_000,
+            correlation_id: "backend-status-correlation",
+            project_id: "project-alpha",
+            conversation_id: "conversation-alpha",
+            expected_publisher_pubkey: &unexpected_pubkey,
+            ral_number: 0,
+            requires_event_id: false,
+            timeout_ms: 0,
+        })
+        .expect_err("unexpected backend publisher must be rejected");
+
+        assert!(matches!(
+            error,
+            PublishOutboxError::PublisherPubkeyMismatch { .. }
+        ));
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending record read must succeed")
+                .is_none()
+        );
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn maintain_publish_runtime_drains_enqueued_backend_event_exactly_once() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let fixture = signed_event_fixture();
+        enqueue_backend_event_for_publish(BackendPublishRuntimeInput {
+            daemon_dir: &daemon_dir,
+            event: fixture.signed.clone(),
+            accepted_at: 1_710_001_100_100,
+            request_id: "backend-status-01",
+            request_sequence: 1,
+            request_timestamp: 1_710_001_100_000,
+            correlation_id: "backend-status-correlation",
+            project_id: "project-alpha",
+            conversation_id: "conversation-alpha",
+            expected_publisher_pubkey: &fixture.pubkey,
+            ral_number: 0,
+            requires_event_id: false,
+            timeout_ms: 0,
+        })
+        .expect("backend event must enqueue");
+
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay.tenex.chat".to_string(),
+                accepted: true,
+                message: None,
+            }],
+        })]);
+
+        let outcome = maintain_publish_runtime(PublishRuntimeMaintainInput {
+            daemon_dir: &daemon_dir,
+            publisher: &mut publisher,
+            now: 1_710_001_100_200,
+            retry_policy: PublishOutboxRetryPolicy::default(),
+        })
+        .expect("runtime maintenance must publish backend event");
+
+        assert_eq!(outcome.maintenance_report.drained.len(), 1);
+        assert_eq!(
+            outcome.maintenance_report.drained[0].status,
+            crate::publish_outbox::PublishOutboxStatus::Published
+        );
+        assert_eq!(publisher.published_events, vec![fixture.signed]);
 
         cleanup_temp_dir(daemon_dir);
     }
