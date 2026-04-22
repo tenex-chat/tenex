@@ -242,7 +242,9 @@ pub struct PublishOutboxRequestRef {
     pub agent_pubkey: String,
     pub conversation_id: String,
     pub ral_number: u64,
+    #[serde(default)]
     pub wait_for_relay_ok: bool,
+    #[serde(default)]
     pub timeout_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_event_class: Option<RuntimeEventClass>,
@@ -1952,6 +1954,49 @@ mod tests {
             .expect("failed record must exist");
         assert!(!failed.attempts[0].retryable);
         assert_eq!(failed.attempts[0].next_attempt_at, None);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn reads_existing_record_without_relay_ack_fields() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = json!({
+            "schemaVersion": PUBLISH_OUTBOX_RECORD_SCHEMA_VERSION,
+            "status": "accepted",
+            "acceptedAt": 1710001000100u64,
+            "request": {
+                "requestId": "publish-fixture-01",
+                "requestSequence": 41,
+                "requestTimestamp": 1710001000000u64,
+                "correlationId": "rust_publish_outbox",
+                "projectId": "project-alpha",
+                "agentPubkey": fixture.pubkey,
+                "conversationId": "conversation-alpha",
+                "ralNumber": 7
+            },
+            "event": fixture.signed,
+            "attempts": []
+        });
+
+        fs::create_dir_all(pending_publish_outbox_dir(&daemon_dir))
+            .expect("pending outbox dir must create");
+        fs::write(
+            pending_publish_outbox_record_path(&daemon_dir, "event-legacy-01"),
+            serde_json::to_vec_pretty(&record).expect("legacy record must serialize"),
+        )
+        .expect("legacy record must write");
+
+        let diagnostics =
+            inspect_publish_outbox(&daemon_dir, 1710001001200).expect("diagnostics must inspect");
+        assert_eq!(diagnostics.pending_count, 1);
+        let record =
+            read_pending_publish_outbox_record(&daemon_dir, "event-legacy-01")
+                .expect("legacy record read must succeed")
+                .expect("legacy record must exist");
+        assert!(!record.request.wait_for_relay_ok);
+        assert_eq!(record.request.timeout_ms, 0);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
