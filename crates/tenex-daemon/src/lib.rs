@@ -9,6 +9,7 @@ pub mod ral_scheduler;
 pub mod relay_publisher;
 pub mod routing;
 pub mod subscription_filters;
+pub mod worker_completion;
 pub mod worker_dispatch_execution;
 pub mod worker_dispatch_spawn;
 pub mod worker_dispatch_start;
