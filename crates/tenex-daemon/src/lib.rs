@@ -12,6 +12,7 @@ pub mod backend_status_tick;
 pub mod caches;
 pub mod daemon_control;
 pub mod daemon_diagnostics;
+pub mod daemon_maintenance;
 pub mod daemon_readiness;
 pub mod daemon_shell;
 pub mod daemon_status;

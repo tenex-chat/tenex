@@ -888,6 +888,11 @@ Landed slices:
   advanced scheduler snapshot, and returns publish-outbox diagnostics. The
   `daemon-control backend-events-periodic-tick` command now delegates through
   this library path.
+- `crates/tenex-daemon/src/daemon_maintenance.rs` — daemon-level one-pass
+  maintenance boundary for the future Rust main loop. It discovers active
+  project descriptors from shared filesystem state, invokes backend-events
+  maintenance with those projects, and runs scheduler-wakeup maintenance from
+  the same caller-owned timestamp.
 - `crates/tenex-daemon/src/bin/daemon-control.rs` —
   `backend-events-enqueue-status`,
   `backend-events-enqueue-project-status`, `backend-events-periodic-tick`, and
@@ -943,10 +948,11 @@ Planned next runtime boundaries:
 
 - `crates/tenex-daemon/src/periodic_tick.rs` and
   `crates/tenex-daemon/src/backend_events_tick.rs` are present as the
-  timerless scheduler primitive and backend-events tick runner. The remaining
-  boundary is wiring them into the daemon main loop so backend-status,
-  project-status, heartbeat, and publish-outbox maintenance can run from one
-  tick source.
+  timerless scheduler primitive and backend-events tick runner, and
+  `crates/tenex-daemon/src/daemon_maintenance.rs` is now the one-pass daemon
+  maintenance caller. The remaining boundary is the actual foreground loop
+  around that caller so backend-status, project-status, heartbeat, scheduler
+  wakeups, and publish-outbox maintenance can run from one tick source.
 - `crates/tenex-daemon/src/backend_status_runtime.rs` remains backend-status
   only: heartbeat and installed-agent-list enqueueing through
   `daemon-control backend-events-enqueue-status`. Project-status uses the
