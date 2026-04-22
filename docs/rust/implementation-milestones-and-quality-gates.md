@@ -899,6 +899,11 @@ Landed slices:
   validates owner / project-manager pubkeys, skips stopped descriptors, reports
   malformed files, and lets `daemon-control backend-events-periodic-tick
   --discover-projects` feed project-status tick inputs from shared disk state.
+- `crates/tenex-daemon/src/project_worktrees.rs` — filesystem/git worktree
+  branch discovery for project-status snapshots. When a project descriptor
+  carries `projectBasePath` but no explicit `worktrees`, Rust runs the same
+  `git worktree list --porcelain` style discovery as TypeScript and orders the
+  default/current branch first.
 - `crates/tenex-daemon/src/project_status_sources.rs` — filesystem readers for
   global `llms.json` model config keys and per-project `schedules.json`
   records, with deterministic ordering and TS-aligned cron/one-off task
@@ -941,8 +946,8 @@ Planned next runtime boundaries:
   separate `project_status_runtime` boundary and
   `daemon-control backend-events-enqueue-project-status`.
 - The remaining project-status work is daemon wiring: deriving runtime
-  agent/tool/skill/MCP/worktree detail from filesystem state and invoking the
-  central backend-events tick from the long-running Rust daemon loop.
+  agent/tool/skill/MCP detail from filesystem state and invoking the central
+  backend-events tick from the long-running Rust daemon loop.
 
 Scope:
 

@@ -30,6 +30,7 @@ pub struct ProjectStatusDescriptor {
     pub project_owner_pubkey: String,
     pub project_d_tag: String,
     pub project_manager_pubkey: Option<String>,
+    pub project_base_path: Option<String>,
     pub worktrees: Vec<String>,
 }
 
@@ -60,6 +61,8 @@ struct RawProjectStatusDescriptor {
     project_manager_pubkey: Option<String>,
     #[serde(default)]
     worktrees: Vec<String>,
+    #[serde(default)]
+    project_base_path: Option<String>,
     #[serde(default)]
     status: Option<String>,
 }
@@ -205,6 +208,7 @@ fn parse_project_status_descriptor(
     let mut worktrees = retain_nonempty(raw.worktrees);
     worktrees.sort();
     worktrees.dedup();
+    let project_base_path = optional_nonempty(raw.project_base_path);
 
     if path.file_name().and_then(|name| name.to_str()) != Some(PROJECT_DESCRIPTOR_FILE_NAME) {
         return Err(format!(
@@ -216,6 +220,7 @@ fn parse_project_status_descriptor(
         project_owner_pubkey,
         project_d_tag,
         project_manager_pubkey,
+        project_base_path,
         worktrees,
     }))
 }
@@ -297,6 +302,7 @@ mod tests {
                     "projectOwnerPubkey": "{alpha_owner}",
                     "projectDTag": "alpha",
                     "projectManagerPubkey": "{alpha_pm}",
+                    "projectBasePath": "/repo/alpha",
                     "worktrees": ["feature/b", "main", "feature/b", ""]
                 }}"#
             ),
@@ -324,12 +330,14 @@ mod tests {
                     project_owner_pubkey: alpha_owner,
                     project_d_tag: "alpha".to_string(),
                     project_manager_pubkey: Some(alpha_pm),
+                    project_base_path: Some("/repo/alpha".to_string()),
                     worktrees: vec!["feature/b".to_string(), "main".to_string()],
                 },
                 ProjectStatusDescriptor {
                     project_owner_pubkey: beta_owner,
                     project_d_tag: "beta".to_string(),
                     project_manager_pubkey: None,
+                    project_base_path: None,
                     worktrees: Vec::new(),
                 },
             ]

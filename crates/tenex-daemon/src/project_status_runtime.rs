@@ -14,6 +14,7 @@ use crate::project_status_snapshot::ProjectStatusSnapshot;
 use crate::project_status_sources::{
     ProjectStatusSourceError, read_global_llm_model_keys, read_project_scheduled_tasks,
 };
+use crate::project_worktrees::read_project_worktrees;
 use crate::publish_runtime::BackendPublishRuntimeOutcome;
 
 pub const PROJECT_STATUS_TIMEOUT_MS: u64 = 30_000;
@@ -30,6 +31,7 @@ pub struct ProjectStatusRuntimeInput<'a> {
     pub project_owner_pubkey: &'a str,
     pub project_d_tag: &'a str,
     pub project_manager_pubkey: Option<&'a str>,
+    pub project_base_path: Option<&'a Path>,
     pub agents: Option<&'a [ProjectStatusAgent]>,
     pub worktrees: Option<&'a [String]>,
 }
@@ -79,9 +81,14 @@ pub fn publish_project_status_from_filesystem(
         },
         |agents| agents.to_vec(),
     );
-    let worktrees = input
-        .worktrees
-        .map_or_else(Vec::new, |worktrees| worktrees.to_vec());
+    let worktrees = input.worktrees.map_or_else(
+        || {
+            input
+                .project_base_path
+                .map_or_else(Vec::new, read_project_worktrees)
+        },
+        |worktrees| worktrees.to_vec(),
+    );
     let snapshot = ProjectStatusSnapshot::new(
         input.created_at,
         project_tag,
@@ -155,6 +162,7 @@ mod tests {
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
+    use std::process::{Command, Stdio};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -269,6 +277,7 @@ mod tests {
             project_owner_pubkey: &owner,
             project_d_tag: "demo-project",
             project_manager_pubkey: Some(&manager),
+            project_base_path: None,
             agents: None,
             worktrees: Some(&worktrees),
         })
@@ -369,5 +378,58 @@ mod tests {
 
         let _ = fs::remove_dir_all(tenex_base_dir);
         let _ = fs::remove_dir_all(daemon_dir);
+    }
+
+    #[test]
+    fn derives_worktrees_from_project_base_path_when_runtime_input_has_no_worktrees() {
+        let tenex_base_dir = unique_temp_dir("project-status-runtime-worktrees-base");
+        let daemon_dir = unique_temp_dir("project-status-runtime-worktrees-daemon");
+        let agents_dir = agents_dir(&tenex_base_dir);
+        let project_base_path = unique_temp_dir("project-status-runtime-worktrees-repo");
+
+        fs::create_dir_all(&agents_dir).expect("create agents dir");
+        fs::create_dir_all(&daemon_dir).expect("create daemon dir");
+        fs::create_dir_all(&project_base_path).expect("create project repo dir");
+        let status = Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&project_base_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git init must run");
+        assert!(status.success(), "git init must succeed");
+
+        let owner = pubkey_hex(0x07);
+        write_config(&tenex_base_dir, &[&owner]);
+
+        let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
+            tenex_base_dir: &tenex_base_dir,
+            daemon_dir: &daemon_dir,
+            created_at: 1_710_001_200,
+            accepted_at: 1_710_001_200_100,
+            request_timestamp: 1_710_001_200_050,
+            project_owner_pubkey: &owner,
+            project_d_tag: "demo-project",
+            project_manager_pubkey: None,
+            project_base_path: Some(&project_base_path),
+            agents: None,
+            worktrees: None,
+        })
+        .expect("project status publish must succeed");
+
+        assert_eq!(outcome.snapshot.worktrees, vec!["main".to_string()]);
+        assert!(
+            outcome
+                .project_status
+                .record
+                .event
+                .tags
+                .iter()
+                .any(|tag| tag == &vec!["branch".to_string(), "main".to_string()])
+        );
+
+        let _ = fs::remove_dir_all(tenex_base_dir);
+        let _ = fs::remove_dir_all(daemon_dir);
+        let _ = fs::remove_dir_all(project_base_path);
     }
 }

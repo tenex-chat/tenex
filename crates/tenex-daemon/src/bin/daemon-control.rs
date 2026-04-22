@@ -317,7 +317,12 @@ fn run_backend_events_periodic_tick(
                     project_owner_pubkey: &descriptor.project_owner_pubkey,
                     project_d_tag: &descriptor.project_d_tag,
                     project_manager_pubkey: descriptor.project_manager_pubkey.as_deref(),
-                    worktrees: Some(&descriptor.worktrees),
+                    project_base_path: descriptor.project_base_path.as_deref().map(Path::new),
+                    worktrees: if descriptor.worktrees.is_empty() {
+                        None
+                    } else {
+                        Some(&descriptor.worktrees)
+                    },
                 })
                 .collect::<Vec<_>>()
         })
@@ -333,6 +338,7 @@ fn run_backend_events_periodic_tick(
                 project_owner_pubkey,
                 project_d_tag,
                 project_manager_pubkey: options.project_manager_pubkey.as_deref(),
+                project_base_path: None,
                 worktrees: Some(&options.worktrees),
             }),
             (None, None)
@@ -397,6 +403,7 @@ fn enqueue_backend_events_project_status(
         project_owner_pubkey,
         project_d_tag,
         project_manager_pubkey: options.project_manager_pubkey.as_deref(),
+        project_base_path: None,
         agents: None,
         worktrees: Some(&options.worktrees),
     })

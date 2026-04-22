@@ -27,6 +27,7 @@ pub mod project_status_descriptors;
 pub mod project_status_runtime;
 pub mod project_status_snapshot;
 pub mod project_status_sources;
+pub mod project_worktrees;
 pub mod publish_outbox;
 pub mod publish_runtime;
 pub mod ral_journal;

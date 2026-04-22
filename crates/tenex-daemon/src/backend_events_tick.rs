@@ -23,6 +23,7 @@ pub struct BackendEventsTickProject<'a> {
     pub project_owner_pubkey: &'a str,
     pub project_d_tag: &'a str,
     pub project_manager_pubkey: Option<&'a str>,
+    pub project_base_path: Option<&'a Path>,
     pub worktrees: Option<&'a [String]>,
 }
 
@@ -175,6 +176,7 @@ pub fn tick_backend_events(
             project_owner_pubkey: project.project_owner_pubkey,
             project_d_tag: project.project_d_tag,
             project_manager_pubkey: project.project_manager_pubkey,
+            project_base_path: project.project_base_path,
             agents: None,
             worktrees: project.worktrees,
         })
@@ -229,6 +231,7 @@ mod tests {
             project_owner_pubkey: &owner,
             project_d_tag: "demo-project",
             project_manager_pubkey: None,
+            project_base_path: None,
             worktrees: None,
         };
         let mut scheduler = PeriodicScheduler::new();
@@ -261,6 +264,7 @@ mod tests {
             project_owner_pubkey: &owner,
             project_d_tag: "demo-project",
             project_manager_pubkey: None,
+            project_base_path: None,
             worktrees: None,
         };
         let mut scheduler = PeriodicScheduler::new();
@@ -326,6 +330,7 @@ mod tests {
             project_owner_pubkey: &owner,
             project_d_tag: "demo-project",
             project_manager_pubkey: Some(&manager),
+            project_base_path: None,
             worktrees: Some(&worktrees),
         };
         let mut scheduler = PeriodicScheduler::new();
