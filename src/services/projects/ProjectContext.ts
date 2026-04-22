@@ -3,7 +3,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { LessonComment } from "@/events/LessonComment";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import { SkillWhitelistService, type WhitelistItem } from "@/services/skill";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
@@ -219,13 +218,6 @@ export class ProjectContext {
     public promptCompilerRegistry?: PromptCompilerRegistryService;
 
     /**
-     * @deprecated Skill whitelist is now user-scoped, not project-scoped.
-     * Use SkillWhitelistService.getInstance() directly instead.
-     * Retained as a backward-compatible shim; callers should migrate to the singleton.
-     */
-    public skillWhitelist: SkillWhitelistService;
-
-    /**
      * Callback invoked when a new agent is added to this project's registry.
      * Used by Daemon to synchronize its routing map (agentPubkeyToProjects).
      *
@@ -264,25 +256,6 @@ export class ProjectContext {
 
         this.agentLessons = new Map();
         this.agentComments = new Map();
-
-        // Reference the daemon-scoped skill whitelist singleton
-        this.skillWhitelist = SkillWhitelistService.getInstance();
-    }
-
-    /**
-     * @deprecated Skill whitelist is now initialized at daemon level (user-scoped).
-     * This method is a no-op. See Daemon.ts step 6d.
-     */
-    initializeSkillWhitelist(_additionalPubkeys: string[] = []): void {
-        logger.debug("initializeSkillWhitelist is deprecated — skill whitelist is now initialized at daemon level");
-    }
-
-    /**
-     * @deprecated Use SkillWhitelistService.getInstance().getWhitelistedSkills() directly.
-     * Skills are user-scoped, not project-scoped.
-     */
-    getAvailableSkills(): WhitelistItem[] {
-        return this.skillWhitelist.getWhitelistedSkills();
     }
 
     // =====================================================================================
