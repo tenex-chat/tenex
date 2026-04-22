@@ -14,6 +14,7 @@ use tenex_daemon::daemon_control::{
 };
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
 use tenex_daemon::daemon_shell::DaemonShell;
+use tenex_daemon::scheduler_wakeups::{inspect_scheduler_wakeups, run_scheduler_maintenance};
 
 const CACHES_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const USAGE_EXIT_CODE: i32 = 2;
@@ -23,6 +24,8 @@ const RUNTIME_EXIT_CODE: i32 = 1;
 enum DaemonControlCommand {
     Caches,
     Diagnostics,
+    SchedulerWakeups,
+    SchedulerWakeupsMaintain,
     Status,
     StartPlan,
     StopPlan,
@@ -94,6 +97,16 @@ where
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
+        DaemonControlCommand::SchedulerWakeups => serde_json::to_string_pretty(
+            &inspect_scheduler_wakeups(&options.daemon_dir, options.inspected_at)
+                .map_err(|error| runtime_error(error.to_string()))?,
+        )
+        .map_err(|error| runtime_error(error.to_string())),
+        DaemonControlCommand::SchedulerWakeupsMaintain => serde_json::to_string_pretty(
+            &run_scheduler_maintenance(&options.daemon_dir, options.inspected_at)
+                .map_err(|error| runtime_error(error.to_string()))?,
+        )
+        .map_err(|error| runtime_error(error.to_string())),
         DaemonControlCommand::Status => serde_json::to_string_pretty(
             &inspect_daemon_control(&DaemonShell::new(&options.daemon_dir))
                 .map_err(|error| runtime_error(error.to_string()))?,
@@ -140,6 +153,8 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let command = match args.first().map(String::as_str) {
         Some("caches") => DaemonControlCommand::Caches,
         Some("diagnostics") => DaemonControlCommand::Diagnostics,
+        Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
+        Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
         Some("status") => DaemonControlCommand::Status,
         Some("start-plan") => DaemonControlCommand::StartPlan,
         Some("stop-plan") => DaemonControlCommand::StopPlan,
@@ -212,6 +227,8 @@ fn usage() -> String {
         "usage:",
         "  daemon-control caches --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control diagnostics --daemon-dir <path> [--inspected-at <ms>]",
+        "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
+        "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control status --daemon-dir <path>",
         "  daemon-control start-plan --daemon-dir <path>",
         "  daemon-control stop-plan --daemon-dir <path>",
@@ -252,6 +269,10 @@ mod tests {
     use tenex_daemon::filesystem_state::{
         build_lock_info, build_restart_state, save_restart_state_file, write_lock_info_file,
     };
+    use tenex_daemon::scheduler_wakeups::{
+        WakeupEnqueueRequest, WakeupFailureClassification, WakeupRetryPolicy, WakeupTarget,
+        enqueue_wakeup, mark_wakeup_failed,
+    };
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -283,6 +304,41 @@ mod tests {
         .expect("diagnostics args must parse");
 
         assert_eq!(options.command, DaemonControlCommand::Diagnostics);
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.inspected_at, 1710001000000);
+    }
+
+    #[test]
+    fn parses_scheduler_wakeups_args() {
+        let options = parse_daemon_control_args(&[
+            "scheduler-wakeups".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--inspected-at".to_string(),
+            "1710001000000".to_string(),
+        ])
+        .expect("scheduler wakeups args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::SchedulerWakeups);
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.inspected_at, 1710001000000);
+    }
+
+    #[test]
+    fn parses_scheduler_wakeups_maintenance_args() {
+        let options = parse_daemon_control_args(&[
+            "scheduler-wakeups-maintain".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--inspected-at".to_string(),
+            "1710001000000".to_string(),
+        ])
+        .expect("scheduler wakeups maintenance args must parse");
+
+        assert_eq!(
+            options.command,
+            DaemonControlCommand::SchedulerWakeupsMaintain
+        );
         assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
         assert_eq!(options.inspected_at, 1710001000000);
     }
@@ -478,6 +534,81 @@ mod tests {
             value["profileNames"]["updatedAt"],
             json!(1_710_001_000_300u64)
         );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn scheduler_wakeups_empty_daemon_outputs_diagnostics_json() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let output = run_cli([
+            "scheduler-wakeups",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("temp path must be utf-8"),
+            "--inspected-at",
+            "1710001000000",
+        ])
+        .expect("scheduler wakeups command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["inspectedAt"], json!(1_710_001_000_000u64));
+        assert_eq!(value["pendingCount"], json!(0));
+        assert_eq!(value["firedCount"], json!(0));
+        assert_eq!(value["failedCount"], json!(0));
+        assert_eq!(value["duePendingCount"], json!(0));
+        assert_eq!(value["dueRetryCount"], json!(0));
+        assert!(value["oldestPending"].is_null());
+        assert!(value["nextRetryAt"].is_null());
+        assert!(value["latestFailure"].is_null());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn scheduler_wakeups_maintenance_requeues_due_retry_json() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            WakeupEnqueueRequest {
+                scheduled_for: 1_710_001_000_100,
+                target: WakeupTarget::ProjectWakeup {
+                    project_d_tag: "project-alpha".to_string(),
+                },
+                requester_context: "daemon-control-test".to_string(),
+                writer_version: "test-version".to_string(),
+                allow_backdated: false,
+            },
+            1_710_001_000_000,
+        )
+        .expect("wakeup enqueue must succeed");
+        mark_wakeup_failed(
+            &daemon_dir,
+            &record.wakeup_id,
+            1_710_001_000_150,
+            WakeupFailureClassification::Retryable,
+            Some("worker unavailable".to_string()),
+            Some(50),
+            WakeupRetryPolicy::default(),
+        )
+        .expect("wakeup failure must persist");
+
+        let output = run_cli([
+            "scheduler-wakeups-maintain",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("temp path must be utf-8"),
+            "--inspected-at",
+            "1710001000200",
+        ])
+        .expect("scheduler wakeups maintenance command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["diagnosticsBefore"]["failedCount"], json!(1));
+        assert_eq!(value["diagnosticsBefore"]["dueRetryCount"], json!(1));
+        assert_eq!(value["requeued"][0]["wakeupId"], json!(record.wakeup_id));
+        assert_eq!(value["diagnosticsAfter"]["pendingCount"], json!(1));
+        assert_eq!(value["diagnosticsAfter"]["failedCount"], json!(0));
+        assert_eq!(value["diagnosticsAfter"]["duePendingCount"], json!(1));
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
