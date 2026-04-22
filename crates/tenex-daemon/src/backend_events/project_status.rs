@@ -448,6 +448,7 @@ mod tests {
         vec!["a".to_string(), format!("31933:{owner}:demo-project")]
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn default_inputs<'a>(
         project_tag: &'a [String],
         owner: &'a str,
