@@ -53,12 +53,71 @@ pub enum RalDelegationType {
     Ask,
 }
 
+fn default_delegation_type() -> RalDelegationType {
+    RalDelegationType::Standard
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalPendingSubDelegationRef {
+    pub delegation_conversation_id: String,
+    #[serde(rename = "type", default = "default_delegation_type")]
+    pub delegation_type: RalDelegationType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalDelegationMessage {
+    pub sender_pubkey: String,
+    pub recipient_pubkey: String,
+    pub content: String,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalDeferredCompletion {
+    pub recipient_pubkey: String,
+    pub response: String,
+    pub completed_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_transcript: Option<Vec<RalDelegationMessage>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RalPendingDelegation {
     pub delegation_conversation_id: String,
     pub recipient_pubkey: String,
+    pub sender_pubkey: String,
+    pub prompt: String,
+    #[serde(rename = "type", default = "default_delegation_type")]
     pub delegation_type: RalDelegationType,
+    pub ral_number: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_delegation_conversation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_sub_delegations: Option<Vec<RalPendingSubDelegationRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred_completion: Option<RalDeferredCompletion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followup_event_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggestions: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub killed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub killed_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalWorkerError {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -124,6 +183,18 @@ pub enum RalJournalEvent {
         #[serde(flatten)]
         terminal: RalTerminalSummary,
     },
+    #[serde(rename = "error")]
+    Error {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId")]
+        worker_id: String,
+        #[serde(rename = "claimToken")]
+        claim_token: String,
+        error: RalWorkerError,
+        #[serde(flatten)]
+        terminal: RalTerminalSummary,
+    },
     Aborted {
         #[serde(flatten)]
         identity: RalJournalIdentity,
@@ -170,6 +241,7 @@ impl RalJournalEvent {
             | Self::WaitingForDelegation { identity, .. }
             | Self::Completed { identity, .. }
             | Self::NoResponse { identity, .. }
+            | Self::Error { identity, .. }
             | Self::Aborted { identity, .. }
             | Self::Crashed { identity, .. } => identity,
         }
@@ -218,6 +290,7 @@ pub enum RalReplayStatus {
     WaitingForDelegation,
     Completed,
     NoResponse,
+    Error,
     Aborted,
     Crashed,
 }
@@ -235,6 +308,7 @@ pub struct RalReplayEntry {
     pub triggering_event_id: Option<String>,
     pub final_event_ids: Vec<String>,
     pub accumulated_runtime_ms: u64,
+    pub error: Option<RalWorkerError>,
     pub abort_reason: Option<String>,
     pub crash_reason: Option<String>,
 }
@@ -377,6 +451,7 @@ fn apply_record(
             entry.triggering_event_id = triggering_event_id.clone();
             entry.final_event_ids.clear();
             entry.accumulated_runtime_ms = 0;
+            entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = None;
         }
@@ -390,6 +465,7 @@ fn apply_record(
             entry.active_claim_token = Some(claim_token.clone());
             entry.pending_delegations.clear();
             entry.final_event_ids.clear();
+            entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = None;
         }
@@ -404,6 +480,7 @@ fn apply_record(
             entry.active_claim_token = None;
             entry.pending_delegations = pending_delegations.clone();
             apply_terminal_summary(entry, terminal);
+            entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = None;
         }
@@ -417,6 +494,7 @@ fn apply_record(
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
             apply_terminal_summary(entry, terminal);
+            entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = None;
         }
@@ -430,6 +508,22 @@ fn apply_record(
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
             apply_terminal_summary(entry, terminal);
+            entry.error = None;
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::Error {
+            worker_id,
+            error,
+            terminal,
+            ..
+        } => {
+            entry.status = RalReplayStatus::Error;
+            entry.worker_id = Some(worker_id.clone());
+            entry.active_claim_token = None;
+            entry.pending_delegations.clear();
+            apply_terminal_summary(entry, terminal);
+            entry.error = Some(error.clone());
             entry.abort_reason = None;
             entry.crash_reason = None;
         }
@@ -444,6 +538,7 @@ fn apply_record(
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
             apply_terminal_summary(entry, terminal);
+            entry.error = None;
             entry.abort_reason = Some(abort_reason.clone());
             entry.crash_reason = None;
         }
@@ -457,6 +552,7 @@ fn apply_record(
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
             entry.final_event_ids.clear();
+            entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = Some(crash_reason.clone());
         }
@@ -476,6 +572,7 @@ fn empty_replay_entry(identity: RalJournalIdentity, record: &RalJournalRecord) -
         triggering_event_id: None,
         final_event_ids: Vec::new(),
         accumulated_runtime_ms: 0,
+        error: None,
         abort_reason: None,
         crash_reason: None,
     }
@@ -499,6 +596,9 @@ mod tests {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const RAL_LIFECYCLE_FIXTURE: &str =
+        include_str!("../../../src/test-utils/fixtures/daemon/ral-lifecycle.compat.json");
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -538,11 +638,10 @@ mod tests {
                     identity: identity.clone(),
                     worker_id: "worker-1".to_string(),
                     claim_token: "claim-1".to_string(),
-                    pending_delegations: vec![RalPendingDelegation {
-                        delegation_conversation_id: "delegation-1".to_string(),
-                        recipient_pubkey: "b".repeat(64),
-                        delegation_type: RalDelegationType::Ask,
-                    }],
+                    pending_delegations: vec![test_pending_delegation(
+                        "delegation-1",
+                        RalDelegationType::Ask,
+                    )],
                     terminal: terminal(Vec::new(), 10),
                 },
             ),
@@ -562,6 +661,20 @@ mod tests {
                     worker_id: "worker-3".to_string(),
                     claim_token: "claim-3".to_string(),
                     terminal: terminal(Vec::new(), 30),
+                },
+            ),
+            (
+                "error",
+                RalJournalEvent::Error {
+                    identity: identity.clone(),
+                    worker_id: "worker-3".to_string(),
+                    claim_token: "claim-3".to_string(),
+                    error: RalWorkerError {
+                        code: "execution_failed".to_string(),
+                        message: "execution failed".to_string(),
+                        retryable: false,
+                    },
+                    terminal: terminal(Vec::new(), 35),
                 },
             ),
             (
@@ -630,11 +743,10 @@ mod tests {
                 identity: identity.clone(),
                 worker_id: "worker-1".to_string(),
                 claim_token: "claim-1".to_string(),
-                pending_delegations: vec![RalPendingDelegation {
-                    delegation_conversation_id: "delegation-1".to_string(),
-                    recipient_pubkey: "b".repeat(64),
-                    delegation_type: RalDelegationType::Standard,
-                }],
+                pending_delegations: vec![test_pending_delegation(
+                    "delegation-1",
+                    RalDelegationType::Standard,
+                )],
                 terminal: terminal(vec!["event-waiting".to_string()], 25),
             },
         );
@@ -720,6 +832,162 @@ mod tests {
         assert_eq!(replay_entry.last_correlation_id, "corr-5");
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn ral_lifecycle_fixture_replays_waiting_completed_and_no_response_states() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(RAL_LIFECYCLE_FIXTURE).expect("fixture must parse");
+        let identity = fixture_identity(&fixture);
+        let waiting_message = &fixture["workerTerminalMessages"]["waitingForDelegation"];
+        let completed_message = &fixture["workerTerminalMessages"]["complete"];
+        let no_response_message = &fixture["workerTerminalMessages"]["noResponse"];
+
+        let waiting_replay = replay_ral_journal_records(vec![
+            record(
+                1,
+                string_value(&waiting_message["correlationId"]),
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some(string_value(
+                        &fixture["identity"]["triggeringEventId"],
+                    )),
+                },
+            ),
+            record(
+                2,
+                string_value(&waiting_message["correlationId"]),
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-fixture-1".to_string(),
+                    claim_token: "claim-fixture-1".to_string(),
+                },
+            ),
+            record(
+                3,
+                string_value(&waiting_message["correlationId"]),
+                RalJournalEvent::WaitingForDelegation {
+                    identity: identity.clone(),
+                    worker_id: "worker-fixture-1".to_string(),
+                    claim_token: "claim-fixture-1".to_string(),
+                    pending_delegations: vec![fixture_pending_delegation(&fixture)],
+                    terminal: terminal_from_worker_message(waiting_message),
+                },
+            ),
+        ])
+        .expect("waiting fixture replay must succeed");
+        let waiting_entry = waiting_replay
+            .states
+            .get(&identity)
+            .expect("waiting state must exist");
+        assert_eq!(waiting_entry.status, RalReplayStatus::WaitingForDelegation);
+        assert_eq!(waiting_entry.active_claim_token, None);
+        assert_eq!(
+            waiting_entry.triggering_event_id,
+            Some(string_value(&fixture["identity"]["triggeringEventId"]))
+        );
+        assert_eq!(
+            waiting_entry.pending_delegations,
+            vec![fixture_pending_delegation(&fixture)]
+        );
+        assert_eq!(
+            waiting_entry.final_event_ids,
+            string_array(&waiting_message["finalEventIds"])
+        );
+        assert_eq!(
+            waiting_entry.accumulated_runtime_ms,
+            u64_value(&waiting_message["accumulatedRuntimeMs"])
+        );
+
+        let completed_replay = replay_ral_journal_records(vec![
+            record(
+                1,
+                string_value(&completed_message["correlationId"]),
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some(string_value(
+                        &fixture["identity"]["triggeringEventId"],
+                    )),
+                },
+            ),
+            record(
+                2,
+                string_value(&completed_message["correlationId"]),
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-fixture-2".to_string(),
+                    claim_token: "claim-fixture-2".to_string(),
+                },
+            ),
+            record(
+                3,
+                string_value(&completed_message["correlationId"]),
+                RalJournalEvent::Completed {
+                    identity: identity.clone(),
+                    worker_id: "worker-fixture-2".to_string(),
+                    claim_token: "claim-fixture-2".to_string(),
+                    terminal: terminal_from_worker_message(completed_message),
+                },
+            ),
+        ])
+        .expect("completed fixture replay must succeed");
+        let completed_entry = completed_replay
+            .states
+            .get(&identity)
+            .expect("completed state must exist");
+        assert_eq!(completed_entry.status, RalReplayStatus::Completed);
+        assert!(completed_entry.pending_delegations.is_empty());
+        assert_eq!(
+            completed_entry.final_event_ids,
+            string_array(&completed_message["finalEventIds"])
+        );
+        assert_eq!(
+            completed_entry.accumulated_runtime_ms,
+            u64_value(&completed_message["accumulatedRuntimeMs"])
+        );
+
+        let no_response_replay = replay_ral_journal_records(vec![
+            record(
+                1,
+                string_value(&no_response_message["correlationId"]),
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some(string_value(
+                        &fixture["identity"]["triggeringEventId"],
+                    )),
+                },
+            ),
+            record(
+                2,
+                string_value(&no_response_message["correlationId"]),
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-fixture-3".to_string(),
+                    claim_token: "claim-fixture-3".to_string(),
+                },
+            ),
+            record(
+                3,
+                string_value(&no_response_message["correlationId"]),
+                RalJournalEvent::NoResponse {
+                    identity: identity.clone(),
+                    worker_id: "worker-fixture-3".to_string(),
+                    claim_token: "claim-fixture-3".to_string(),
+                    terminal: terminal_from_worker_message(no_response_message),
+                },
+            ),
+        ])
+        .expect("no-response fixture replay must succeed");
+        let no_response_entry = no_response_replay
+            .states
+            .get(&identity)
+            .expect("no-response state must exist");
+        assert_eq!(no_response_entry.status, RalReplayStatus::NoResponse);
+        assert!(no_response_entry.final_event_ids.is_empty());
+        assert_eq!(
+            no_response_entry.accumulated_runtime_ms,
+            u64_value(&no_response_message["accumulatedRuntimeMs"])
+        );
     }
 
     #[test]
@@ -846,6 +1114,59 @@ mod tests {
         }
     }
 
+    fn test_pending_delegation(
+        delegation_conversation_id: &str,
+        delegation_type: RalDelegationType,
+    ) -> RalPendingDelegation {
+        RalPendingDelegation {
+            delegation_conversation_id: delegation_conversation_id.to_string(),
+            recipient_pubkey: "b".repeat(64),
+            sender_pubkey: "a".repeat(64),
+            prompt: "Delegated prompt".to_string(),
+            delegation_type,
+            ral_number: 3,
+            parent_delegation_conversation_id: None,
+            pending_sub_delegations: None,
+            deferred_completion: None,
+            followup_event_id: None,
+            project_id: None,
+            suggestions: None,
+            killed: None,
+            killed_at: None,
+        }
+    }
+
+    fn fixture_identity(fixture: &serde_json::Value) -> RalJournalIdentity {
+        RalJournalIdentity {
+            project_id: string_value(&fixture["identity"]["projectId"]),
+            agent_pubkey: string_value(&fixture["identity"]["agentPubkey"]),
+            conversation_id: string_value(&fixture["identity"]["conversationId"]),
+            ral_number: u64_value(&fixture["freshTurn"]["expected"]["ralNumber"]),
+        }
+    }
+
+    fn fixture_pending_delegation(fixture: &serde_json::Value) -> RalPendingDelegation {
+        let pending = &fixture["waitingForDelegation"]["pendingDelegation"];
+        RalPendingDelegation {
+            delegation_conversation_id: string_value(&pending["delegationConversationId"]),
+            recipient_pubkey: string_value(&pending["recipientPubkey"]),
+            sender_pubkey: string_value(&pending["senderPubkey"]),
+            prompt: string_value(&pending["prompt"]),
+            delegation_type: delegation_type_value(&pending["type"]),
+            ral_number: u64_value(&pending["ralNumber"]),
+            parent_delegation_conversation_id: optional_string_value(
+                &pending["parentDelegationConversationId"],
+            ),
+            pending_sub_delegations: None,
+            deferred_completion: None,
+            followup_event_id: optional_string_value(&pending["followupEventId"]),
+            project_id: optional_string_value(&pending["projectId"]),
+            suggestions: optional_string_array(&pending["suggestions"]),
+            killed: pending["killed"].as_bool(),
+            killed_at: pending["killedAt"].as_u64(),
+        }
+    }
+
     fn terminal(final_event_ids: Vec<String>, accumulated_runtime_ms: u64) -> RalTerminalSummary {
         RalTerminalSummary {
             published_user_visible_event: !final_event_ids.is_empty(),
@@ -856,7 +1177,21 @@ mod tests {
         }
     }
 
-    fn record(sequence: u64, correlation_id: &str, event: RalJournalEvent) -> RalJournalRecord {
+    fn terminal_from_worker_message(message: &serde_json::Value) -> RalTerminalSummary {
+        RalTerminalSummary {
+            published_user_visible_event: bool_value(&message["publishedUserVisibleEvent"]),
+            pending_delegations_remain: bool_value(&message["pendingDelegationsRemain"]),
+            accumulated_runtime_ms: u64_value(&message["accumulatedRuntimeMs"]),
+            final_event_ids: string_array(&message["finalEventIds"]),
+            keep_worker_warm: bool_value(&message["keepWorkerWarm"]),
+        }
+    }
+
+    fn record(
+        sequence: u64,
+        correlation_id: impl Into<String>,
+        event: RalJournalEvent,
+    ) -> RalJournalRecord {
         RalJournalRecord::new(
             RAL_JOURNAL_WRITER_RUST_DAEMON,
             "test-version",
@@ -865,6 +1200,50 @@ mod tests {
             correlation_id,
             event,
         )
+    }
+
+    fn string_value(value: &serde_json::Value) -> String {
+        value
+            .as_str()
+            .expect("fixture value must be a string")
+            .to_string()
+    }
+
+    fn string_array(value: &serde_json::Value) -> Vec<String> {
+        value
+            .as_array()
+            .expect("fixture value must be an array")
+            .iter()
+            .map(string_value)
+            .collect()
+    }
+
+    fn optional_string_value(value: &serde_json::Value) -> Option<String> {
+        value.as_str().map(ToString::to_string)
+    }
+
+    fn optional_string_array(value: &serde_json::Value) -> Option<Vec<String>> {
+        value
+            .as_array()
+            .map(|values| values.iter().map(string_value).collect())
+    }
+
+    fn delegation_type_value(value: &serde_json::Value) -> RalDelegationType {
+        match value.as_str().unwrap_or("standard") {
+            "standard" => RalDelegationType::Standard,
+            "followup" => RalDelegationType::Followup,
+            "external" => RalDelegationType::External,
+            "ask" => RalDelegationType::Ask,
+            other => panic!("unknown fixture delegation type {other}"),
+        }
+    }
+
+    fn bool_value(value: &serde_json::Value) -> bool {
+        value.as_bool().expect("fixture value must be a bool")
+    }
+
+    fn u64_value(value: &serde_json::Value) -> u64 {
+        value.as_u64().expect("fixture value must be a u64")
     }
 
     fn unique_temp_daemon_dir() -> PathBuf {

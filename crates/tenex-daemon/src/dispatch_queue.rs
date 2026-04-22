@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -17,6 +17,13 @@ pub enum DispatchQueueError {
     Json {
         line: usize,
         source: serde_json::Error,
+    },
+    #[error(
+        "dispatch queue sequence {sequence} is not greater than previous sequence {previous_sequence}"
+    )]
+    NonIncreasingSequence {
+        sequence: u64,
+        previous_sequence: u64,
     },
 }
 
@@ -104,13 +111,15 @@ pub fn append_dispatch_queue_record(
         fs::create_dir_all(parent)?;
     }
 
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
     writeln!(
         file,
         "{}",
         serde_json::to_string(record)
             .map_err(|source| { DispatchQueueError::Json { line: 0, source } })?
     )?;
+    file.sync_all()?;
+    sync_parent_dir(&path)?;
     Ok(())
 }
 
@@ -141,7 +150,11 @@ pub fn read_dispatch_queue_records_from_path(
 
         match serde_json::from_str::<DispatchQueueRecord>(line) {
             Ok(record) => records.push(record),
-            Err(source) if index + 1 == line_count && !content_has_complete_final_line => {
+            Err(source)
+                if index + 1 == line_count
+                    && !content_has_complete_final_line
+                    && source.is_eof() =>
+            {
                 break;
             }
             Err(source) => {
@@ -166,8 +179,19 @@ pub fn replay_dispatch_queue_records(
     records: Vec<DispatchQueueRecord>,
 ) -> DispatchQueueResult<DispatchQueueState> {
     let mut latest_by_dispatch_id: BTreeMap<String, DispatchQueueRecord> = BTreeMap::new();
+    let mut last_sequence: Option<u64> = None;
 
     for record in records {
+        if let Some(previous_sequence) = last_sequence
+            && record.sequence <= previous_sequence
+        {
+            return Err(DispatchQueueError::NonIncreasingSequence {
+                sequence: record.sequence,
+                previous_sequence,
+            });
+        }
+
+        last_sequence = Some(record.sequence);
         latest_by_dispatch_id.insert(record.dispatch_id.clone(), record);
     }
 
@@ -183,6 +207,13 @@ pub fn replay_dispatch_queue_records(
     }
 
     Ok(state)
+}
+
+fn sync_parent_dir(path: &Path) -> DispatchQueueResult<()> {
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -315,6 +346,43 @@ mod tests {
             read_dispatch_queue_records(&daemon_dir).expect_err("corrupt middle line must fail");
 
         assert!(matches!(error, DispatchQueueError::Json { line: 1, .. }));
+    }
+
+    #[test]
+    fn dispatch_queue_read_rejects_complete_malformed_final_record() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let path = dispatch_queue_path(&daemon_dir);
+        fs::create_dir_all(path.parent().expect("queue file must have parent"))
+            .expect("workers dir must be created");
+        fs::write(
+            &path,
+            "{\"schemaVersion\":1,\"sequence\":1,\"timestamp\":1,\"correlationId\":\"correlation-1\",\"dispatchId\":\"dispatch-1\",\"ral\":{\"projectId\":\"project-1\",\"agentPubkey\":\"agent-pubkey-1\",\"conversationId\":\"conversation-1\",\"ralNumber\":1},\"triggeringEventId\":\"event-1\",\"claimToken\":\"claim-1\",\"status\":\"not_a_status\"}"
+        )
+        .expect("queue file write must succeed");
+
+        let error = read_dispatch_queue_records(&daemon_dir)
+            .expect_err("malformed final record must fail closed");
+
+        assert!(matches!(error, DispatchQueueError::Json { line: 1, .. }));
+    }
+
+    #[test]
+    fn dispatch_queue_replay_rejects_non_increasing_sequences() {
+        let records = vec![
+            build_record(2, "dispatch-1", DispatchQueueStatus::Queued),
+            build_record(2, "dispatch-1", DispatchQueueStatus::Completed),
+        ];
+
+        match replay_dispatch_queue_records(records) {
+            Err(DispatchQueueError::NonIncreasingSequence {
+                sequence,
+                previous_sequence,
+            }) => {
+                assert_eq!(sequence, 2);
+                assert_eq!(previous_sequence, 2);
+            }
+            other => panic!("expected non-increasing sequence error, got {other:?}"),
+        }
     }
 
     fn build_record(

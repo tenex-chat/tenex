@@ -574,14 +574,15 @@ Scope:
 - Implement worker pool and warm reuse.
 - Implement dispatch queue with filesystem journal. The library contract stores
   typed records in `daemon/workers/dispatch-queue.jsonl` and replays the latest
-  queued/leased/terminal state per dispatch id.
+  queued/leased/terminal state per dispatch id after sequence validation.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.
 - Rust observes published event IDs and terminal state.
 - Add JSONL truncation/replay tests for the dispatch queue immediately. The
-  dispatch queue replay ignores a truncated final record and rejects corrupt
-  non-final records instead of silently continuing.
+  dispatch queue replay ignores only EOF-truncated final records and rejects
+  corrupt non-final records, malformed complete final records, and
+  non-increasing sequences instead of silently continuing.
 
 Quality gates:
 
@@ -614,6 +615,10 @@ Scope:
 - Implement RAL journal and snapshot.
 - Implement RAL number allocation.
 - Implement claim tokens.
+- Derive scheduler state from RAL journal replay before wiring production
+  dispatch. The library scheduler rejects duplicate active triggering events,
+  validates active claim tokens, and treats completed/no-response/error/aborted/
+  crashed RAL states as terminal.
 - Implement orphan reconciliation.
 - Implement injection lease/ack.
 - Implement kill/abort/stop ownership.

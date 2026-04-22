@@ -173,9 +173,15 @@ filesystem state, then acknowledges when the transition matters for correctness.
 `workers/dispatch-queue.jsonl` is a typed append-only Rust contract. Each record
 contains `schemaVersion`, `sequence`, `timestamp`, `correlationId`,
 `dispatchId`, RAL identity, `triggeringEventId`, `claimToken`, and a
-queued/leased/terminal status. Replay uses the latest record per `dispatchId`,
-ignores a truncated final JSONL record, and fails closed on corrupt non-final
-records.
+queued/leased/terminal status. Appends flush the file and parent directory.
+Replay checks monotonic sequence order, uses the latest record per `dispatchId`,
+ignores only EOF-truncated final JSONL records, and fails closed on corrupt or
+malformed complete records.
+
+`ral/journal.jsonl` is likewise append-only and synced before Rust can
+acknowledge scheduler-critical RAL transitions. It records the TS-compatible RAL
+identity, pending delegation shape, claim tokens, terminal worker outcomes
+including `error`, and replay state consumed by the library scheduler.
 
 ## Non-Goals
 
