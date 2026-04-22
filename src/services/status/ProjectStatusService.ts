@@ -1,6 +1,3 @@
-// Status publishing interval
-const STATUS_INTERVAL_MS = 30_000; // 30 seconds
-
 import type { ScheduledTaskInfo, StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
@@ -17,51 +14,16 @@ import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { join } from "node:path";
 
 /**
- * StatusPublisher handles periodic publishing of status events to Nostr.
+ * ProjectStatusService builds and publishes project status events to Nostr.
  *
- * This class manages the lifecycle of status event publishing, including:
- * - Starting and stopping the periodic publishing interval
- * - Creating and publishing status events with agent and model information
- * - Handling errors gracefully to ensure the main process continues
- *
- * Status events are published at regular intervals (STATUS_INTERVAL_MS) and include:
+ * Status events include:
  * - Project reference tags
  * - Agent pubkeys and slugs
  * - Model configurations
- *
- * @example
- * ```typescript
- * const service = new ProjectStatusService();
- * await service.startPublishing('/path/to/project', projectContext);
- * // ... later
- * service.stopPublishing();
- * ```
  */
 export class ProjectStatusService {
-    private statusInterval?: NodeJS.Timeout;
     private projectContext!: ProjectContext;
     private readonly configOptionsService = new ProjectConfigOptionsService();
-
-    async startPublishing(projectPath: string, projectContext: ProjectContext): Promise<void> {
-        // Store the project context (required for daemon mode)
-        this.projectContext = projectContext;
-
-        await this.publishStatusEvent(projectPath);
-
-        this.statusInterval = setInterval(async () => {
-            // Wrap the publish in AsyncLocalStorage to ensure context is available
-            await projectContextStore.run(this.projectContext, async () => {
-                await this.publishStatusEvent(projectPath);
-            });
-        }, STATUS_INTERVAL_MS);
-    }
-
-    stopPublishing(): void {
-        if (this.statusInterval) {
-            clearInterval(this.statusInterval);
-            this.statusInterval = undefined;
-        }
-    }
 
     /**
      * Publish a status event immediately.

@@ -327,10 +327,8 @@ export class EventHandler {
                 }
             );
 
-            // Reload and status publish now handled by AgentConfigWatcher.
-            // applyEvent() writes to disk → watcher detects change → reloadAgent() + publishImmediately().
             if (configUpdated) {
-                logger.info("Agent config updated on disk, watcher will reload", {
+                logger.info("Agent config updated on disk", {
                     agentSlug: agent.slug,
                     agentPubkey: agentPubkey.substring(0, 8),
                     projectScoped: projectDTag !== undefined,

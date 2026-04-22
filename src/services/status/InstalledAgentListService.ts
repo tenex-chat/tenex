@@ -1,34 +1,10 @@
-const STATUS_INTERVAL_MS = 30_000;
-
 import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export class InstalledAgentListService {
-    private interval?: NodeJS.Timeout;
-
-    async startPublishing(): Promise<void> {
-        await this.publishImmediately();
-
-        this.interval = setInterval(() => {
-            void this.publishImmediately().catch((error) => {
-                logger.warn("[InstalledAgentListService] Failed to publish installed agent inventory", {
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            });
-        }, STATUS_INTERVAL_MS);
-        this.interval.unref();
-    }
-
-    stopPublishing(): void {
-        if (!this.interval) return;
-        clearInterval(this.interval);
-        this.interval = undefined;
-    }
-
     async publishImmediately(): Promise<void> {
         await agentStorage.initialize();
 
