@@ -1,5 +1,4 @@
 import * as fs from "node:fs/promises";
-import { ProjectAlreadyRunningError } from "./errors";
 import { getProjectSchedulesPath, normalizeProjectIdForRuntime } from "./storage";
 import type { ScheduledTask } from "./types";
 import { getNDK } from "@/nostr/ndkClient";
@@ -14,43 +13,10 @@ import { trace } from "@opentelemetry/api";
 import { CronExpressionParser } from "cron-parser";
 import * as cron from "node-cron";
 
-/**
- * Boot handler callback type for auto-booting projects.
- * Called when a scheduled task needs to execute but the target project is not running.
- *
- * @param projectId - The project ID to boot
- * @returns Promise that resolves when the project is ready to receive events
- */
-export type ProjectBootHandler = (projectId: string) => Promise<void>;
-
-/**
- * Project state resolver callback type for checking project status.
- * Used to determine if a project is already running before attempting to boot.
- *
- * @param projectId - The project ID to check
- * @returns True if the project is currently running, false otherwise
- */
-export type ProjectStateResolver = (projectId: string) => boolean;
-
-/**
- * Target resolution callback type for resolving the target agent.
- * Used to determine the actual target pubkey for a task, potentially rerouting
- * to the project manager if the original target agent slug is not in the project.
- *
- * @param projectId - The project ID
- * @param targetAgentSlug - The stored target agent slug
- * @returns The resolved target pubkey and routing metadata, or null if resolution failed
- */
 export interface TargetResolution {
     pubkey: string;
     resolvedSlug?: string;
-    wasRerouted: boolean;
 }
-
-export type TargetPubkeyResolver = (
-    projectId: string,
-    targetAgentSlug: string
-) => TargetResolution | null;
 
 /** Truncate a pubkey for logging (first 8 characters) */
 function truncatePubkey(pubkey: string): string {
@@ -76,45 +42,7 @@ export class SchedulerService {
     private taskMetadata: Map<string, ScheduledTask> = new Map();
     private ndk: NDK | null = null;
 
-    // Callbacks injected by daemon layer for project management
-    // This maintains architectural separation (Layer 3 services don't import Layer 4 daemon)
-    private projectBootHandler: ProjectBootHandler | null = null;
-    private projectStateResolver: ProjectStateResolver | null = null;
-    private targetPubkeyResolver: TargetPubkeyResolver | null = null;
-
-    // When true, cron/missed-task execution will not auto-boot projects that aren't running
-    private cronAutoBootDisabled = false;
-
     private constructor() {}
-
-    /**
-     * Set callbacks for project management (injected by daemon layer).
-     * These callbacks enable the scheduler to boot projects and resolve targets
-     * without directly importing from the daemon layer.
-     *
-     * @param bootHandler - Called when a project needs to be booted for a scheduled task
-     * @param stateResolver - Called to check if a project is already running
-     * @param targetResolver - Called to resolve the target pubkey for a task
-     */
-    public setProjectCallbacks(
-        bootHandler: ProjectBootHandler,
-        stateResolver: ProjectStateResolver,
-        targetResolver: TargetPubkeyResolver
-    ): void {
-        this.projectBootHandler = bootHandler;
-        this.projectStateResolver = stateResolver;
-        this.targetPubkeyResolver = targetResolver;
-        logger.debug("Project callbacks registered with SchedulerService");
-    }
-
-    /**
-     * Disable auto-booting projects for cron/missed-task execution.
-     * When disabled, scheduled tasks will be skipped for projects that are not already running.
-     */
-    public disableCronAutoBooting(): void {
-        this.cronAutoBootDisabled = true;
-        logger.debug("Cron auto-booting disabled (--only mode)");
-    }
 
     public static getInstance(): SchedulerService {
         if (!SchedulerService.instance) {
@@ -731,155 +659,13 @@ export class SchedulerService {
     }
 
     /**
-     * Ensure the project for a scheduled task is running before execution.
-     * If the project is not active, boot it up via the injected callback.
-     *
-     * Uses dependency injection to avoid Layer 3 → Layer 4 architectural violation.
-     * The boot handler is provided by the daemon layer during initialization.
-     *
-     * ProjectRuntime.start() completion IS the readiness signal - no additional
-     * delay is needed. When start() returns, isRunning=true and event handlers
-     * are fully initialized.
-     *
-     * @param projectId - The project ID to ensure is running
-     * @returns true if the project is confirmed running, false if it could not be started
-     */
-    private async ensureProjectRunning(projectId: string): Promise<boolean> {
-        // If no callbacks registered, we're running outside daemon mode
-        // (e.g., in tests or standalone CLI) - skip auto-boot, assume ok
-        if (!this.projectStateResolver || !this.projectBootHandler) {
-            logger.debug("Project callbacks not registered, skipping auto-boot", {
-                projectId,
-            });
-            return true;
-        }
-
-        const runtimeProjectId = normalizeProjectIdForRuntime(projectId);
-
-        try {
-            // Check if project is already running
-            if (this.projectStateResolver(runtimeProjectId)) {
-                // Project already running, nothing to do
-                return true;
-            }
-
-            // In --only mode, don't auto-boot projects for cron tasks
-            if (this.cronAutoBootDisabled) {
-                logger.info("Skipping auto-boot for cron task (--only mode active)", {
-                    projectId,
-                });
-                return false;
-            }
-
-            logger.info("Project not running, booting for scheduled task", {
-                projectId,
-            });
-
-            trace.getActiveSpan()?.addEvent("scheduler.project_auto_boot_start", {
-                "project.id": projectId,
-            });
-
-            await this.projectBootHandler(runtimeProjectId);
-
-            // No delay needed - ProjectRuntime.start() completion IS the readiness signal.
-            // When start() returns, isRunning=true and event handlers are initialized.
-
-            logger.info("Project booted successfully for scheduled task", {
-                projectId,
-            });
-
-            trace.getActiveSpan()?.addEvent("scheduler.project_auto_boot_complete", {
-                "project.id": projectId,
-            });
-
-            return true;
-        } catch (error) {
-            // Check if this is a benign "already running" error (race condition)
-            // This can happen if the project started between our check and boot attempt
-            const isAlreadyRunning = error instanceof ProjectAlreadyRunningError;
-
-            if (isAlreadyRunning) {
-                // Re-check state - if running now, treat as success
-                if (this.projectStateResolver(runtimeProjectId)) {
-                    logger.debug("Project was already running (race condition, benign)", {
-                        projectId,
-                    });
-                    trace.getActiveSpan()?.addEvent("scheduler.project_auto_boot_race_resolved", {
-                        "project.id": projectId,
-                    });
-                    return true;
-                }
-            }
-
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.warn("Failed to auto-boot project for scheduled task", {
-                projectId,
-                error: errorMessage,
-            });
-
-            trace.getActiveSpan()?.addEvent("scheduler.project_auto_boot_failed", {
-                "project.id": projectId,
-                "error": errorMessage,
-            });
-
-            // Final check: is the project running despite the error?
-            if (this.projectStateResolver(runtimeProjectId)) {
-                return true;
-            }
-
-            return false;
-        }
-    }
-
-    /**
      * Execute a scheduled task. Throws on failure to allow callers to handle errors.
      * Updates lastRun only AFTER successful publish to ensure failed tasks can be retried.
-     *
-     * Skips execution if the task's project cannot be started, preventing events
-     * from being published into an ambiguous routing state where they might be
-     * routed to the wrong project via P-tag fallback.
      */
     private async executeTask(task: ScheduledTask): Promise<void> {
         trace.getActiveSpan()?.addEvent("scheduler.task_executing", {
             "task.id": task.id,
         });
-
-        // Ensure project is running before executing task (auto-boot if needed)
-        // If the project can't be started, skip execution to prevent wrong-project routing
-        let projectRunning = false;
-        try {
-            projectRunning = await this.ensureProjectRunning(task.projectId);
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.warn("Unexpected error from ensureProjectRunning", {
-                taskId: task.id,
-                projectId: task.projectId,
-                error: errorMessage,
-            });
-            trace.getActiveSpan()?.addEvent("scheduler.ensure_project_running_unexpected_error", {
-                "task.id": task.id,
-                "project.id": task.projectId,
-                "error": errorMessage,
-            });
-        }
-
-        if (!projectRunning) {
-            logger.warn(
-                "Skipping scheduled task execution — project not running and could not be started. " +
-                "Task will be retried on next scheduled run or daemon restart.",
-                {
-                    taskId: task.id,
-                    projectId: task.projectId,
-                    schedule: task.schedule,
-                    title: task.title,
-                }
-            );
-            trace.getActiveSpan()?.addEvent("scheduler.task_skipped_no_project", {
-                "task.id": task.id,
-                "project.id": task.projectId,
-            });
-            return;
-        }
 
         // Try to get NDK instance if not already set
         if (!this.ndk) {
@@ -905,11 +691,9 @@ export class SchedulerService {
 
     /**
      * Resolve the target pubkey for a scheduled task.
-     * If the original target agent is not in the task's project,
-     * route to the Project Manager (PM) of that project instead.
-     *
-     * Uses dependency injection to avoid Layer 3 → Layer 4 architectural violation.
-     * The resolver is provided by the daemon layer during initialization.
+     * TypeScript worker processes do not own project boot/routing state; they can
+     * only resolve targets from the active project context. Background schedule
+     * publishing is owned by the Rust daemon.
      *
      * @param task - The scheduled task to resolve target for
      * @returns The resolved target pubkey and routing metadata
@@ -921,41 +705,9 @@ export class SchedulerService {
                 return resolvedViaContext;
             }
 
-            if (!this.targetPubkeyResolver) {
-                throw new Error(
-                    `Target pubkey resolver not registered for agent slug "${task.targetAgentSlug}"`
-                );
-            }
-
-            const resolved = this.targetPubkeyResolver(
-                normalizeProjectIdForRuntime(task.projectId),
-                task.targetAgentSlug
+            throw new Error(
+                `Could not resolve scheduled task target slug "${task.targetAgentSlug}" in the current project context`
             );
-
-            if (!resolved) {
-                throw new Error(
-                    `Could not resolve scheduled task target slug "${task.targetAgentSlug}"`
-                );
-            }
-
-            if (resolved.wasRerouted) {
-                logger.info("Scheduled task target resolved by daemon", {
-                    taskId: task.id,
-                    projectId: task.projectId,
-                    originalTarget: task.targetAgentSlug,
-                    resolvedTarget: truncatePubkey(resolved.pubkey),
-                    resolvedSlug: resolved.resolvedSlug,
-                });
-
-                trace.getActiveSpan()?.addEvent("scheduler.task_rerouted", {
-                    "task.id": task.id,
-                    "task.original_target": task.targetAgentSlug,
-                    "task.resolved_target": truncatePubkey(resolved.pubkey),
-                    "project.id": task.projectId,
-                });
-            }
-
-            return resolved;
         } catch (error) {
             logger.warn("Failed to resolve target pubkey", {
                 taskId: task.id,
@@ -982,7 +734,6 @@ export class SchedulerService {
             return {
                 pubkey: targetAgent.pubkey,
                 resolvedSlug: targetAgent.slug,
-                wasRerouted: false,
             };
         } catch {
             return null;
@@ -999,8 +750,7 @@ export class SchedulerService {
             throw new Error(`Scheduled task ${task.id} is missing projectId - cannot route event`);
         }
 
-        // Resolve the target pubkey - if the target agent is not in the project,
-        // route to the PM of that project instead
+        // Resolve the target pubkey from the active project context.
         const targetResolution = this.resolveTargetPubkey(task);
         const targetPubkey = targetResolution.pubkey;
 
@@ -1012,7 +762,7 @@ export class SchedulerService {
         // The projectId is stored when the task is created (within project context)
         const tags: string[][] = [
             ["a", task.projectRef ?? task.projectId], // Project reference (stored at task creation time)
-            ["p", targetPubkey], // Target agent that should handle this task (may be PM if original target not in project)
+            ["p", targetPubkey], // Target agent that should handle this task
         ];
 
         // Add metadata about the scheduled task
@@ -1044,17 +794,13 @@ export class SchedulerService {
         await event.sign(signer);
         await event.publish();
 
-        const wasRerouted = targetResolution.wasRerouted;
-
         logger.info("Published scheduled task event", {
             taskId: task.id,
             projectId: task.projectId,
             eventId: shortenOptionalEventId(event.id),
             from: truncatePubkey(signer.pubkey),
             to: truncatePubkey(targetPubkey),
-            originalTarget: wasRerouted ? task.targetAgentSlug : undefined,
             resolvedSlug: targetResolution.resolvedSlug,
-            reroutedToPM: wasRerouted,
         });
 
         if (!event.id) {
@@ -1066,8 +812,6 @@ export class SchedulerService {
             "event.id": event.id,
             "event.from": truncatePubkey(signer.pubkey),
             "event.to": truncatePubkey(targetPubkey),
-            "event.original_target": wasRerouted ? task.targetAgentSlug : undefined,
-            "event.rerouted_to_pm": wasRerouted,
             "project.id": task.projectId,
         });
     }
