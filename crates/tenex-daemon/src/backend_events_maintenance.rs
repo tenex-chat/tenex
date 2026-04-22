@@ -4,9 +4,9 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::backend_events_tick::{
-    BackendEventsTaskRegistration, BackendEventsTickError, BackendEventsTickInput,
-    BackendEventsTickOutcome, BackendEventsTickProject, ensure_backend_events_tasks,
-    tick_backend_events,
+    BackendEventsDueTickInput, BackendEventsTaskRegistration, BackendEventsTickError,
+    BackendEventsTickInput, BackendEventsTickOutcome, BackendEventsTickProject,
+    ensure_backend_events_tasks, tick_backend_events, tick_backend_events_for_due_tasks,
 };
 use crate::periodic_tick::PeriodicSchedulerSnapshot;
 use crate::periodic_tick_state::{
@@ -24,6 +24,20 @@ pub struct BackendEventsMaintenanceInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub projects: &'a [BackendEventsTickProject<'a>],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendEventsMaintenanceSharedSchedulerInput<'a> {
+    pub tenex_base_dir: &'a Path,
+    pub daemon_dir: &'a Path,
+    pub now: u64,
+    pub first_due_at: u64,
+    pub accepted_at: u64,
+    pub request_timestamp: u64,
+    pub projects: &'a [BackendEventsTickProject<'a>],
+    pub registered: BackendEventsTaskRegistration,
+    pub due_task_names: Vec<String>,
+    pub scheduler_snapshot: PeriodicSchedulerSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -83,6 +97,36 @@ pub fn maintain_backend_events_from_filesystem(
         registered,
         tick,
         persisted_scheduler_snapshot,
+        publish_outbox_after,
+    })
+}
+
+pub fn maintain_backend_events_from_shared_scheduler(
+    input: BackendEventsMaintenanceSharedSchedulerInput<'_>,
+) -> Result<BackendEventsMaintenanceOutcome, BackendEventsMaintenanceError> {
+    let tick = tick_backend_events_for_due_tasks(BackendEventsDueTickInput {
+        now: input.now,
+        due_task_names: input.due_task_names,
+        scheduler_snapshot: input.scheduler_snapshot.clone(),
+        tenex_base_dir: input.tenex_base_dir,
+        daemon_dir: input.daemon_dir,
+        accepted_at: input.accepted_at,
+        request_timestamp: input.request_timestamp,
+        projects: input.projects,
+    })?;
+    let publish_outbox_after = inspect_publish_outbox(input.daemon_dir, input.accepted_at)?;
+
+    Ok(BackendEventsMaintenanceOutcome {
+        tenex_base_dir: input.tenex_base_dir.to_path_buf(),
+        daemon_dir: input.daemon_dir.to_path_buf(),
+        now: input.now,
+        first_due_at: input.first_due_at,
+        accepted_at: input.accepted_at,
+        request_timestamp: input.request_timestamp,
+        scheduler_state_path: periodic_scheduler_state_path(input.daemon_dir),
+        registered: input.registered,
+        tick,
+        persisted_scheduler_snapshot: input.scheduler_snapshot,
         publish_outbox_after,
     })
 }

@@ -40,6 +40,17 @@ pub struct ScheduledTaskDuePlannerTickInput<'a> {
     pub max_plans: usize,
 }
 
+#[derive(Debug)]
+pub struct ScheduledTaskDuePlannerDueInput<'a> {
+    pub due_task_names: Vec<String>,
+    pub scheduler_snapshot: PeriodicSchedulerSnapshot,
+    pub tenex_base_dir: &'a Path,
+    pub projects: &'a [ScheduledTaskDuePlannerProject<'a>],
+    pub now: u64,
+    pub grace_seconds: u64,
+    pub max_plans: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduledTaskTriggerPlan {
     pub project_d_tag: String,
@@ -168,17 +179,45 @@ pub fn tick_scheduled_task_due_planner(
     input: ScheduledTaskDuePlannerTickInput<'_>,
 ) -> Result<ScheduledTaskDuePlannerOutcome, ScheduledTaskDuePlannerError> {
     let due_task_names = input.scheduler.take_due(input.now);
+    let scheduler_snapshot = input.scheduler.inspect();
+    tick_scheduled_task_due_planner_for_due_tasks(ScheduledTaskDuePlannerDueInput {
+        due_task_names,
+        scheduler_snapshot,
+        tenex_base_dir: input.tenex_base_dir,
+        projects: input.projects,
+        now: input.now,
+        grace_seconds: input.grace_seconds,
+        max_plans: input.max_plans,
+    })
+}
+
+pub fn tick_scheduled_task_due_planner_for_due_tasks(
+    input: ScheduledTaskDuePlannerDueInput<'_>,
+) -> Result<ScheduledTaskDuePlannerOutcome, ScheduledTaskDuePlannerError> {
+    let ScheduledTaskDuePlannerDueInput {
+        due_task_names,
+        scheduler_snapshot,
+        tenex_base_dir,
+        projects,
+        now,
+        grace_seconds,
+        max_plans,
+    } = input;
     let tick_due = due_task_names
         .iter()
         .any(|task_name| task_name == SCHEDULED_TASK_DUE_PLANNER_TASK_NAME);
+    let scheduled_due_task_names = due_task_names
+        .into_iter()
+        .filter(|task_name| task_name == SCHEDULED_TASK_DUE_PLANNER_TASK_NAME)
+        .collect::<Vec<_>>();
 
     let mut outcome = if tick_due {
         plan_due_scheduled_tasks(ScheduledTaskDuePlannerInput {
-            tenex_base_dir: input.tenex_base_dir,
-            projects: input.projects,
-            now: input.now,
-            grace_seconds: input.grace_seconds,
-            max_plans: input.max_plans,
+            tenex_base_dir,
+            projects,
+            now,
+            grace_seconds,
+            max_plans,
         })?
     } else {
         ScheduledTaskDuePlannerOutcome {
@@ -191,8 +230,8 @@ pub fn tick_scheduled_task_due_planner(
     };
 
     outcome.tick_due = tick_due;
-    outcome.due_task_names = due_task_names;
-    outcome.scheduler_snapshot = Some(input.scheduler.inspect());
+    outcome.due_task_names = scheduled_due_task_names;
+    outcome.scheduler_snapshot = Some(scheduler_snapshot);
     Ok(outcome)
 }
 

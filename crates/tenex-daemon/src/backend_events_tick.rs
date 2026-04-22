@@ -38,6 +38,18 @@ pub struct BackendEventsTickInput<'a> {
     pub projects: &'a [BackendEventsTickProject<'a>],
 }
 
+#[derive(Debug)]
+pub struct BackendEventsDueTickInput<'a> {
+    pub now: u64,
+    pub due_task_names: Vec<String>,
+    pub scheduler_snapshot: PeriodicSchedulerSnapshot,
+    pub tenex_base_dir: &'a Path,
+    pub daemon_dir: &'a Path,
+    pub accepted_at: u64,
+    pub request_timestamp: u64,
+    pub projects: &'a [BackendEventsTickProject<'a>],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendEventsTaskRegistration {
@@ -136,16 +148,50 @@ pub fn tick_backend_events(
     input: BackendEventsTickInput<'_>,
 ) -> Result<BackendEventsTickOutcome, BackendEventsTickError> {
     let due_task_names = input.scheduler.take_due(input.now);
-    let backend_status = if due_task_names
+    let scheduler_snapshot = input.scheduler.inspect();
+    tick_backend_events_for_due_tasks(BackendEventsDueTickInput {
+        now: input.now,
+        due_task_names,
+        scheduler_snapshot,
+        tenex_base_dir: input.tenex_base_dir,
+        daemon_dir: input.daemon_dir,
+        accepted_at: input.accepted_at,
+        request_timestamp: input.request_timestamp,
+        projects: input.projects,
+    })
+}
+
+pub fn tick_backend_events_for_due_tasks(
+    input: BackendEventsDueTickInput<'_>,
+) -> Result<BackendEventsTickOutcome, BackendEventsTickError> {
+    let BackendEventsDueTickInput {
+        now,
+        due_task_names,
+        scheduler_snapshot,
+        tenex_base_dir,
+        daemon_dir,
+        accepted_at,
+        request_timestamp,
+        projects,
+    } = input;
+    let backend_due_task_names = due_task_names
+        .iter()
+        .filter(|task_name| {
+            task_name.as_str() == BACKEND_STATUS_TICK_TASK_NAME
+                || task_name.starts_with(PROJECT_STATUS_TICK_TASK_PREFIX)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let backend_status = if backend_due_task_names
         .iter()
         .any(|task_name| task_name == BACKEND_STATUS_TICK_TASK_NAME)
     {
         let outcome = publish_backend_status_from_filesystem(BackendStatusRuntimeInput::new(
-            input.tenex_base_dir,
-            input.daemon_dir,
-            input.now,
-            input.accepted_at,
-            input.request_timestamp,
+            tenex_base_dir,
+            daemon_dir,
+            now,
+            accepted_at,
+            request_timestamp,
         ))?;
         Some(BackendEventsTickBackendStatusOutcome {
             task_name: BACKEND_STATUS_TICK_TASK_NAME.to_string(),
@@ -158,21 +204,21 @@ pub fn tick_backend_events(
     };
 
     let mut project_statuses = Vec::new();
-    for project in input.projects {
+    for project in projects {
         let task_name = backend_events_project_status_task_name(
             project.project_owner_pubkey,
             project.project_d_tag,
         );
-        if !due_task_names.iter().any(|due| due == &task_name) {
+        if !backend_due_task_names.iter().any(|due| due == &task_name) {
             continue;
         }
 
         let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
-            tenex_base_dir: input.tenex_base_dir,
-            daemon_dir: input.daemon_dir,
-            created_at: input.now,
-            accepted_at: input.accepted_at,
-            request_timestamp: input.request_timestamp,
+            tenex_base_dir,
+            daemon_dir,
+            created_at: now,
+            accepted_at,
+            request_timestamp,
             project_owner_pubkey: project.project_owner_pubkey,
             project_d_tag: project.project_d_tag,
             project_manager_pubkey: project.project_manager_pubkey,
@@ -195,10 +241,8 @@ pub fn tick_backend_events(
         });
     }
 
-    let scheduler_snapshot = input.scheduler.inspect();
-
     Ok(BackendEventsTickOutcome {
-        due_task_names,
+        due_task_names: backend_due_task_names,
         backend_status,
         project_statuses,
         scheduler_snapshot,

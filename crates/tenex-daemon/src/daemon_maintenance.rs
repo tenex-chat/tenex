@@ -4,16 +4,19 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::backend_events_maintenance::{
-    BackendEventsMaintenanceError, BackendEventsMaintenanceInput, BackendEventsMaintenanceOutcome,
-    maintain_backend_events_from_filesystem,
+    BackendEventsMaintenanceError, BackendEventsMaintenanceOutcome,
+    BackendEventsMaintenanceSharedSchedulerInput, maintain_backend_events_from_shared_scheduler,
 };
-use crate::backend_events_tick::BackendEventsTickProject;
+use crate::backend_events_tick::{BackendEventsTickProject, ensure_backend_events_tasks};
+use crate::periodic_tick_state::{
+    PeriodicTickStateError, read_periodic_scheduler_state, write_periodic_scheduler_state,
+};
 use crate::project_status_descriptors::{
     ProjectStatusDescriptorError, ProjectStatusDescriptorReport, read_project_status_descriptors,
 };
 use crate::scheduled_task_maintenance::{
-    ScheduledTaskMaintenanceError, ScheduledTaskMaintenanceInput, ScheduledTaskMaintenanceOutcome,
-    maintain_scheduled_tasks_from_filesystem,
+    ScheduledTaskMaintenanceError, ScheduledTaskMaintenanceOutcome,
+    ScheduledTaskMaintenanceSharedSchedulerInput, maintain_scheduled_tasks_from_shared_scheduler,
 };
 use crate::scheduler_wakeups::{
     SchedulerWakeupError, SchedulerWakeupsMaintenanceReport, run_scheduler_maintenance,
@@ -55,6 +58,8 @@ pub enum DaemonMaintenanceError {
     BackendEvents(#[from] BackendEventsMaintenanceError),
     #[error("scheduled task maintenance failed: {0}")]
     ScheduledTasks(#[from] ScheduledTaskMaintenanceError),
+    #[error("periodic scheduler state failed: {0}")]
+    SchedulerState(#[from] PeriodicTickStateError),
     #[error("scheduler wakeups maintenance failed: {0}")]
     SchedulerWakeups(#[from] SchedulerWakeupError),
     #[error("telegram outbox maintenance failed: {0}")]
@@ -84,22 +89,55 @@ where
     let now_seconds = input.now_ms / 1_000;
     let project_descriptor_report = read_project_status_descriptors(input.tenex_base_dir)?;
     let projects = backend_events_projects_from_descriptors(&project_descriptor_report);
-    let backend_events = maintain_backend_events_from_filesystem(BackendEventsMaintenanceInput {
-        tenex_base_dir: input.tenex_base_dir,
-        daemon_dir: input.daemon_dir,
-        now: now_seconds,
-        first_due_at: now_seconds,
-        accepted_at: input.now_ms,
-        request_timestamp: input.now_ms,
-        projects: &projects,
-    })?;
-    let scheduled_tasks =
-        maintain_scheduled_tasks_from_filesystem(ScheduledTaskMaintenanceInput::from_millis(
-            input.tenex_base_dir,
-            input.daemon_dir,
-            input.now_ms,
-            DAEMON_MAINTENANCE_WRITER_VERSION,
-        ))?;
+    let mut scheduler = read_periodic_scheduler_state(input.daemon_dir)?;
+    let backend_events_registration =
+        ensure_backend_events_tasks(&mut scheduler, now_seconds, &projects)
+            .map_err(crate::backend_events_tick::BackendEventsTickError::from)
+            .map_err(BackendEventsMaintenanceError::from)?;
+    let scheduled_task_registration =
+        crate::scheduled_task_due_planner::ensure_scheduled_task_due_planner_task(
+            &mut scheduler,
+            now_seconds,
+        )
+        .map_err(crate::scheduled_task_due_planner::ScheduledTaskDuePlannerError::from)
+        .map_err(|source| ScheduledTaskMaintenanceError::Planner { source })?;
+    let due_task_names = scheduler.take_due(now_seconds);
+    let scheduler_snapshot = scheduler.inspect();
+
+    let backend_events = maintain_backend_events_from_shared_scheduler(
+        BackendEventsMaintenanceSharedSchedulerInput {
+            tenex_base_dir: input.tenex_base_dir,
+            daemon_dir: input.daemon_dir,
+            now: now_seconds,
+            first_due_at: now_seconds,
+            accepted_at: input.now_ms,
+            request_timestamp: input.now_ms,
+            projects: &projects,
+            registered: backend_events_registration,
+            due_task_names: due_task_names.clone(),
+            scheduler_snapshot: scheduler_snapshot.clone(),
+        },
+    )?;
+    let scheduled_tasks = maintain_scheduled_tasks_from_shared_scheduler(
+        ScheduledTaskMaintenanceSharedSchedulerInput {
+            tenex_base_dir: input.tenex_base_dir,
+            daemon_dir: input.daemon_dir,
+            now: now_seconds,
+            first_due_at: now_seconds,
+            accepted_at: input.now_ms,
+            request_timestamp: input.now_ms,
+            writer_version: DAEMON_MAINTENANCE_WRITER_VERSION,
+            grace_seconds:
+                crate::scheduled_task_due_planner::SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS,
+            max_plans:
+                crate::scheduled_task_maintenance::SCHEDULED_TASK_MAINTENANCE_DEFAULT_MAX_PLANS,
+            project_descriptor_report: project_descriptor_report.clone(),
+            registered_planner_task: scheduled_task_registration,
+            due_task_names,
+            scheduler_snapshot: scheduler_snapshot.clone(),
+        },
+    )?;
+    write_periodic_scheduler_state(input.daemon_dir, &scheduler)?;
     let scheduler_wakeups = run_scheduler_maintenance(input.daemon_dir, input.now_ms)?;
     let telegram_outbox = telegram_publisher.run_maintenance(input.daemon_dir, input.now_ms)?;
 
@@ -185,9 +223,20 @@ fn backend_events_projects_from_descriptors<'a>(
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
+    use crate::backend_events_tick::{
+        PROJECT_STATUS_TICK_INTERVAL_SECONDS, backend_events_project_status_task_name,
+    };
+    use crate::backend_status_tick::{
+        BACKEND_STATUS_TICK_INTERVAL_SECONDS, BACKEND_STATUS_TICK_TASK_NAME,
+    };
     use crate::dispatch_queue::replay_dispatch_queue;
+    use crate::periodic_tick::PeriodicScheduler;
+    use crate::periodic_tick_state::write_periodic_scheduler_state;
     use crate::publish_outbox::inspect_publish_outbox;
     use crate::scheduled_task_dispatch_input::read_optional as read_scheduled_task_dispatch_input;
+    use crate::scheduled_task_due_planner::{
+        SCHEDULED_TASK_DUE_PLANNER_INTERVAL_SECONDS, SCHEDULED_TASK_DUE_PLANNER_TASK_NAME,
+    };
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -257,7 +306,7 @@ mod tests {
                 .persisted_scheduler_snapshot
                 .tasks
                 .len(),
-            2
+            3
         );
         assert!(outcome.scheduled_tasks.triggers.is_empty());
         assert_eq!(
@@ -351,6 +400,30 @@ mod tests {
             ),
         )
         .expect("schedule must write");
+        let mut scheduler = PeriodicScheduler::new();
+        scheduler
+            .register_task(
+                BACKEND_STATUS_TICK_TASK_NAME,
+                BACKEND_STATUS_TICK_INTERVAL_SECONDS,
+                1_710_001_000,
+            )
+            .expect("backend-status task must register");
+        scheduler
+            .register_task(
+                backend_events_project_status_task_name(&owner, "demo-project"),
+                PROJECT_STATUS_TICK_INTERVAL_SECONDS,
+                1_710_001_000,
+            )
+            .expect("project-status task must register");
+        scheduler
+            .register_task(
+                SCHEDULED_TASK_DUE_PLANNER_TASK_NAME,
+                SCHEDULED_TASK_DUE_PLANNER_INTERVAL_SECONDS,
+                1_710_001_000,
+            )
+            .expect("scheduled task planner must register");
+        write_periodic_scheduler_state(&daemon_dir, &scheduler)
+            .expect("shared scheduler state must write");
 
         let outcome = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
             tenex_base_dir: &tenex_base_dir,

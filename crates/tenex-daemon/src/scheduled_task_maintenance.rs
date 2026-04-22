@@ -15,10 +15,11 @@ use crate::project_status_descriptors::{
     read_project_status_descriptors,
 };
 use crate::scheduled_task_due_planner::{
-    SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS, ScheduledTaskDuePlannerError,
-    ScheduledTaskDuePlannerProject, ScheduledTaskDuePlannerTickInput, ScheduledTaskTriggerPlan,
-    ensure_scheduled_task_due_planner_task, finalize_scheduled_task_trigger_plan,
-    tick_scheduled_task_due_planner,
+    SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS, ScheduledTaskDuePlannerDueInput,
+    ScheduledTaskDuePlannerError, ScheduledTaskDuePlannerProject, ScheduledTaskDuePlannerTickInput,
+    ScheduledTaskTriggerPlan, ensure_scheduled_task_due_planner_task,
+    finalize_scheduled_task_trigger_plan, tick_scheduled_task_due_planner,
+    tick_scheduled_task_due_planner_for_due_tasks,
 };
 use crate::scheduled_task_enqueue::{
     ScheduledTaskEnqueueError, ScheduledTaskEnqueueInput, ScheduledTaskEnqueueOutcome,
@@ -38,6 +39,23 @@ pub struct ScheduledTaskMaintenanceInput<'a> {
     pub writer_version: &'a str,
     pub grace_seconds: u64,
     pub max_plans: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledTaskMaintenanceSharedSchedulerInput<'a> {
+    pub tenex_base_dir: &'a Path,
+    pub daemon_dir: &'a Path,
+    pub now: u64,
+    pub first_due_at: u64,
+    pub accepted_at: u64,
+    pub request_timestamp: u64,
+    pub writer_version: &'a str,
+    pub grace_seconds: u64,
+    pub max_plans: usize,
+    pub project_descriptor_report: ProjectStatusDescriptorReport,
+    pub registered_planner_task: bool,
+    pub due_task_names: Vec<String>,
+    pub scheduler_snapshot: PeriodicSchedulerSnapshot,
 }
 
 impl<'a> ScheduledTaskMaintenanceInput<'a> {
@@ -255,6 +273,94 @@ pub fn maintain_scheduled_tasks_from_filesystem(
         planner,
         triggers,
         persisted_scheduler_snapshot,
+    })
+}
+
+pub fn maintain_scheduled_tasks_from_shared_scheduler(
+    input: ScheduledTaskMaintenanceSharedSchedulerInput<'_>,
+) -> Result<ScheduledTaskMaintenanceOutcome, ScheduledTaskMaintenanceError> {
+    let planner_projects = planner_projects_from_descriptors(&input.project_descriptor_report);
+    let descriptor_by_d_tag = descriptors_by_d_tag(&input.project_descriptor_report);
+    let planner_outcome =
+        tick_scheduled_task_due_planner_for_due_tasks(ScheduledTaskDuePlannerDueInput {
+            due_task_names: input.due_task_names,
+            scheduler_snapshot: input.scheduler_snapshot.clone(),
+            tenex_base_dir: input.tenex_base_dir,
+            projects: &planner_projects,
+            now: input.now,
+            grace_seconds: input.grace_seconds,
+            max_plans: input.max_plans,
+        })
+        .map_err(|source| ScheduledTaskMaintenanceError::Planner { source })?;
+    let scheduler_snapshot = planner_outcome
+        .scheduler_snapshot
+        .clone()
+        .unwrap_or_else(|| input.scheduler_snapshot.clone());
+    let planner = ScheduledTaskMaintenancePlannerReport {
+        tick_due: planner_outcome.tick_due,
+        due_task_names: planner_outcome.due_task_names.clone(),
+        plans: planner_outcome
+            .plans
+            .iter()
+            .map(ScheduledTaskPlanDiagnostic::from)
+            .collect(),
+        truncated: planner_outcome.truncated,
+        scheduler_snapshot,
+    };
+
+    let mut triggers = Vec::new();
+    for plan in &planner_outcome.plans {
+        let project = descriptor_by_d_tag
+            .get(plan.project_d_tag.as_str())
+            .ok_or_else(|| ScheduledTaskMaintenanceError::MissingProjectDescriptor {
+                project_d_tag: plan.project_d_tag.clone(),
+            })?;
+        let enqueue = enqueue_scheduled_task_dispatch(ScheduledTaskEnqueueInput {
+            daemon_dir: input.daemon_dir,
+            tenex_base_dir: input.tenex_base_dir,
+            project,
+            plan,
+            timestamp: input.accepted_at,
+            writer_version: input.writer_version.to_string(),
+        })
+        .map_err(|source| ScheduledTaskMaintenanceError::Enqueue {
+            project_d_tag: plan.project_d_tag.clone(),
+            task_id: plan.task_id.clone(),
+            source,
+        })?;
+        let finalization = finalize_scheduled_task_trigger_plan(input.tenex_base_dir, plan)
+            .map_err(|source| ScheduledTaskMaintenanceError::Finalize {
+                project_d_tag: plan.project_d_tag.clone(),
+                task_id: plan.task_id.clone(),
+                source,
+            })?;
+        triggers.push(ScheduledTaskMaintenanceTriggerOutcome {
+            plan: ScheduledTaskPlanDiagnostic::from(plan),
+            enqueue,
+            finalization: ScheduledTaskFinalizationReport {
+                path: finalization.path,
+                updated: finalization.updated,
+                removed: finalization.removed,
+            },
+        });
+    }
+
+    Ok(ScheduledTaskMaintenanceOutcome {
+        tenex_base_dir: input.tenex_base_dir.to_path_buf(),
+        daemon_dir: input.daemon_dir.to_path_buf(),
+        now: input.now,
+        first_due_at: input.first_due_at,
+        accepted_at: input.accepted_at,
+        request_timestamp: input.request_timestamp,
+        writer_version: input.writer_version.to_string(),
+        grace_seconds: input.grace_seconds,
+        max_plans: input.max_plans,
+        project_descriptor_report: input.project_descriptor_report,
+        scheduler_state_path: periodic_scheduler_state_path(input.daemon_dir),
+        registered_planner_task: input.registered_planner_task,
+        planner,
+        triggers,
+        persisted_scheduler_snapshot: input.scheduler_snapshot,
     })
 }
 
