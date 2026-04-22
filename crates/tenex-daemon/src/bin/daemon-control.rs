@@ -2,11 +2,13 @@ use std::env;
 use std::fmt;
 use std::path::PathBuf;
 use std::process;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tenex_daemon::daemon_control::{
     inspect_daemon_control, plan_daemon_start, plan_daemon_stop,
     read_daemon_restart_state_compatibility,
 };
+use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
 use tenex_daemon::daemon_shell::DaemonShell;
 
 const USAGE_EXIT_CODE: i32 = 2;
@@ -14,6 +16,7 @@ const RUNTIME_EXIT_CODE: i32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DaemonControlCommand {
+    Diagnostics,
     Status,
     StartPlan,
     StopPlan,
@@ -24,6 +27,7 @@ enum DaemonControlCommand {
 struct DaemonControlCliOptions {
     command: DaemonControlCommand,
     daemon_dir: PathBuf,
+    inspected_at: u64,
 }
 
 #[derive(Debug)]
@@ -57,21 +61,32 @@ where
 {
     let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
     let options = parse_daemon_control_args(&args)?;
-    let shell = DaemonShell::new(&options.daemon_dir);
 
     match options.command {
+        DaemonControlCommand::Diagnostics => {
+            let diagnostics = inspect_daemon_diagnostics(DaemonDiagnosticsInput {
+                daemon_dir: &options.daemon_dir,
+                inspected_at: options.inspected_at,
+                worker_runtime_state: None,
+            })
+            .map_err(|error| runtime_error(error.to_string()))?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
         DaemonControlCommand::Status => serde_json::to_string_pretty(
-            &inspect_daemon_control(&shell).map_err(|error| runtime_error(error.to_string()))?,
+            &inspect_daemon_control(&DaemonShell::new(&options.daemon_dir))
+                .map_err(|error| runtime_error(error.to_string()))?,
         )
         .map_err(|error| runtime_error(error.to_string())),
         DaemonControlCommand::StartPlan => {
-            let lock_state = shell
+            let lock_state = DaemonShell::new(&options.daemon_dir)
                 .inspect_lock()
                 .map_err(|error| runtime_error(error.to_string()))?;
             serde_json::to_string_pretty(&plan_daemon_start(&lock_state))
                 .map_err(|error| runtime_error(error.to_string()))
         }
         DaemonControlCommand::StopPlan => {
+            let shell = DaemonShell::new(&options.daemon_dir);
             let lock_state = shell
                 .inspect_lock()
                 .map_err(|error| runtime_error(error.to_string()))?;
@@ -80,7 +95,7 @@ where
                 .map_err(|error| runtime_error(error.to_string()))
         }
         DaemonControlCommand::RestartState => serde_json::to_string_pretty(
-            &read_daemon_restart_state_compatibility(&shell)
+            &read_daemon_restart_state_compatibility(&DaemonShell::new(&options.daemon_dir))
                 .map_err(|error| runtime_error(error.to_string()))?,
         )
         .map_err(|error| runtime_error(error.to_string())),
@@ -89,6 +104,7 @@ where
 
 fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions, CliError> {
     let command = match args.first().map(String::as_str) {
+        Some("diagnostics") => DaemonControlCommand::Diagnostics,
         Some("status") => DaemonControlCommand::Status,
         Some("start-plan") => DaemonControlCommand::StartPlan,
         Some("stop-plan") => DaemonControlCommand::StopPlan,
@@ -103,6 +119,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     };
 
     let mut daemon_dir = None;
+    let mut inspected_at = None;
     let mut index = 1;
 
     while index < args.len() {
@@ -113,6 +130,13 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .get(index)
                     .ok_or_else(|| usage_error("--daemon-dir requires a value"))?;
                 daemon_dir = Some(PathBuf::from(value));
+            }
+            "--inspected-at" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--inspected-at requires a value"))?;
+                inspected_at = Some(parse_u64_arg("--inspected-at", value)?);
             }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
@@ -130,12 +154,28 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     Ok(DaemonControlCliOptions {
         command,
         daemon_dir,
+        inspected_at: inspected_at.unwrap_or_else(current_unix_time_ms),
     })
+}
+
+fn parse_u64_arg(name: &str, value: &str) -> Result<u64, CliError> {
+    value
+        .parse::<u64>()
+        .map_err(|_| usage_error(format!("{name} must be an unsigned integer")))
+}
+
+fn current_unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time must be after UNIX_EPOCH")
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
 }
 
 fn usage() -> String {
     [
         "usage:",
+        "  daemon-control diagnostics --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control status --daemon-dir <path>",
         "  daemon-control start-plan --daemon-dir <path>",
         "  daemon-control stop-plan --daemon-dir <path>",
@@ -171,6 +211,22 @@ mod tests {
     };
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn parses_diagnostics_args() {
+        let options = parse_daemon_control_args(&[
+            "diagnostics".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--inspected-at".to_string(),
+            "1710001000000".to_string(),
+        ])
+        .expect("diagnostics args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::Diagnostics);
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.inspected_at, 1710001000000);
+    }
 
     #[test]
     fn parses_status_args() {
@@ -219,6 +275,36 @@ mod tests {
         .expect("restart-state args must parse");
 
         assert_eq!(options.command, DaemonControlCommand::RestartState);
+    }
+
+    #[test]
+    fn diagnostics_empty_daemon_outputs_inspection_json() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let output = run_cli([
+            "diagnostics",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("temp path must be utf-8"),
+            "--inspected-at",
+            "1710001000000",
+        ])
+        .expect("diagnostics command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["inspectedAt"], json!(1_710_001_000_000u64));
+        assert_eq!(value["daemon"]["lockfile"], Value::Null);
+        assert_eq!(value["dispatchQueue"]["lastSequence"], json!(0));
+        assert_eq!(
+            value["publishOutbox"]["inspectedAt"],
+            json!(1_710_001_000_000u64)
+        );
+        assert_eq!(
+            value["telegramOutbox"]["inspectedAt"],
+            json!(1_710_001_000_000u64)
+        );
+        assert!(value["workerRuntime"].is_null());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
 
     #[test]
