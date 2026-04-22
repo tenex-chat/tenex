@@ -16,6 +16,7 @@ pub mod client;
 pub mod delivery;
 pub mod delivery_plan;
 pub mod inbound;
+pub mod ingress_runtime;
 pub mod media;
 pub mod renderer;
 pub mod types;
