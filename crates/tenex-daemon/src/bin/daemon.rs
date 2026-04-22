@@ -20,6 +20,10 @@ use tenex_daemon::daemon_shell::DaemonShell;
 use tenex_daemon::publish_outbox::PublishOutboxMaintenanceReport;
 use tenex_daemon::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
+use tenex_daemon::telegram::agent_config::read_agent_gateway_bots;
+use tenex_daemon::telegram::gateway::{
+    GatewayConfig, NoopIngressObserver, TelegramGatewaySupervisor, start_telegram_gateway,
+};
 use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
 use tenex_daemon::worker_dispatch_execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{
@@ -112,14 +116,62 @@ where
     let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
     let mut stop_signal = ProcessSignalStopSignal;
     let mut publisher = actual_relay_publisher(&options)?;
-    let diagnostics = run_daemon_foreground(
+
+    // Start the Telegram gateway supervisor (if any agents have bot tokens
+    // configured). Dropping the supervisor at the end of the function sets
+    // the stop flag; we additionally request_stop explicitly and join so
+    // in-flight polls finish before the process exits.
+    let gateway_supervisor = start_gateway_supervisor_from_options(&options)?;
+
+    let diagnostics_result = run_daemon_foreground(
         &options,
         &mut clock,
         &mut sleeper,
         &mut stop_signal,
         &mut publisher,
-    )?;
+    );
+
+    if let Some(supervisor) = gateway_supervisor {
+        supervisor.request_stop();
+        supervisor.join();
+    }
+
+    let diagnostics = diagnostics_result?;
     serde_json::to_string_pretty(&diagnostics).map_err(|error| runtime_error(error.to_string()))
+}
+
+/// Build a [`TelegramGatewaySupervisor`] from the on-disk agent
+/// configurations. Returns `None` when no agent has a Telegram bot token
+/// configured; the gateway is simply not started in that case.
+fn start_gateway_supervisor_from_options(
+    options: &DaemonCliOptions,
+) -> Result<Option<TelegramGatewaySupervisor>, CliError> {
+    let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
+    let bots = read_agent_gateway_bots(&tenex_base_dir)
+        .map_err(|error| runtime_error(format!("telegram agent config scan failed: {error}")))?;
+    if bots.is_empty() {
+        return Ok(None);
+    }
+
+    let data_dir = telegram_data_dir(&tenex_base_dir);
+    let mut config = GatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), data_dir);
+    config.bots = bots;
+    config.writer_version = daemon_writer_version();
+
+    match start_telegram_gateway(config, NoopIngressObserver) {
+        Ok(supervisor) => Ok(Some(supervisor)),
+        Err(error) => Err(runtime_error(format!(
+            "failed to start telegram gateway: {error}"
+        ))),
+    }
+}
+
+/// Resolve the directory that contains `transport-bindings.json` and
+/// `identity-bindings.json`. The TS side computes this as
+/// `ConfigService.getConfigPath("data")`, which lands at
+/// `$TENEX_BASE_DIR/data`.
+fn telegram_data_dir(tenex_base_dir: &Path) -> PathBuf {
+    tenex_base_dir.join("data")
 }
 
 fn run_daemon_foreground<C, S, Stop, P>(

@@ -10,6 +10,7 @@
 //! outbox primitive; it stays at the crate root during the transition so the
 //! ongoing worker-publishing branch does not need to rewrite paths.
 
+pub mod agent_config;
 pub mod bindings;
 pub mod chat_context;
 pub mod client;
