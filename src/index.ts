@@ -91,6 +91,7 @@ async function main(): Promise<void> {
         { onboardCommand },
         { doctorCommand },
         { agentCommand },
+        { daemonCommand },
         { handleCliError },
     ] = await Promise.all([
         import("commander"),
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
         import("@/commands/onboard"),
         import("@/commands/doctor"),
         import("@/commands/agent"),
+        import("@/commands/daemon"),
         import("@/utils/cli-error"),
     ]);
 
@@ -124,6 +126,7 @@ async function main(): Promise<void> {
     program.addCommand(onboardCommand);
     program.addCommand(doctorCommand);
     program.addCommand(agentCommand);
+    program.addCommand(daemonCommand);
 
     // Issue #2: Enable exitOverride so errors are thrown instead of calling process.exit
     program.exitOverride();
