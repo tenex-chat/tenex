@@ -885,6 +885,12 @@ Landed slices:
   enqueues kind `24010` through the Rust publish outbox. The
   `daemon-control backend-events-enqueue-project-status` command exercises
   this boundary with explicit project owner/tag inputs.
+- `crates/tenex-daemon/src/backend_events_tick.rs` — central periodic backend
+  events tick runner over the in-memory `periodic_tick` scheduler. It
+  registers backend-status plus per-project status tasks on the same scheduler,
+  consumes due task names once, and enqueues heartbeat, installed-agent-list,
+  and project-status records through their filesystem-backed runtimes on the
+  existing 30-second TypeScript status cadence.
 - `daemon-control backend-events-plan` — read-only diagnostics over publish
   outbox state plus backend status publisher readiness, including config,
   signer, relay, and installed-agent inventory availability without mutating
@@ -896,10 +902,12 @@ Landed slices:
 
 Planned next runtime boundaries:
 
-- `crates/tenex-daemon/src/periodic_tick.rs` is already present as the
-  timerless scheduler primitive; the next boundary is wiring it into the
-  daemon main loop so backend-status, project-status, heartbeat, and
-  publish-outbox maintenance can run on a single tick source.
+- `crates/tenex-daemon/src/periodic_tick.rs` and
+  `crates/tenex-daemon/src/backend_events_tick.rs` are present as the
+  timerless scheduler primitive and backend-events tick runner. The remaining
+  boundary is wiring them into the daemon main loop so backend-status,
+  project-status, heartbeat, and publish-outbox maintenance can run from one
+  tick source.
 - `crates/tenex-daemon/src/backend_status_runtime.rs` remains backend-status
   only: heartbeat and installed-agent-list enqueueing through
   `daemon-control backend-events-enqueue-status`. Project-status uses the
@@ -907,8 +915,8 @@ Planned next runtime boundaries:
   `daemon-control backend-events-enqueue-project-status`.
 - The remaining project-status work is daemon wiring: deriving project
   owner/tag inputs from live daemon context or project metadata, feeding
-  runtime agent/worktree state into the snapshot, and scheduling periodic
-  backend publishes from the shared tick source.
+  runtime agent/worktree state into the snapshot, and passing those project
+  descriptors into the central backend-events tick.
 
 Scope:
 
@@ -1069,6 +1077,10 @@ Landed slices:
   timers: callers pass `now` in seconds and sleep themselves. Targets the
   heartbeat / project-status / installed-agent-list / publish-outbox-drain
   / scheduler-wakeups tick loops.
+- `crates/tenex-daemon/src/backend_events_tick.rs` — first consumer of the
+  periodic scheduler that takes due backend-authored status work once and
+  dispatches backend heartbeat, installed-agent-list, and project-status
+  enqueue runtimes without direct relay publishing.
 
 Scope:
 

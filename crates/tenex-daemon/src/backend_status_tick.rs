@@ -7,7 +7,7 @@ use crate::backend_status_runtime::{
 use crate::periodic_tick::{PeriodicScheduler, PeriodicSchedulerSnapshot, PeriodicTickError};
 
 pub const BACKEND_STATUS_TICK_TASK_NAME: &str = "backend-status";
-pub const BACKEND_STATUS_TICK_INTERVAL_SECONDS: u64 = 300;
+pub const BACKEND_STATUS_TICK_INTERVAL_SECONDS: u64 = 30;
 
 #[derive(Debug)]
 pub struct BackendStatusTickInput<'a> {
@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(backend_status.enqueued_event_count, 2);
         assert!(!backend_status.heartbeat_event_id.is_empty());
         assert!(!backend_status.installed_agent_list_event_id.is_empty());
-        assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 400);
+        assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 130);
 
         let heartbeat_record =
             read_pending_publish_outbox_record(&daemon_dir, &backend_status.heartbeat_event_id)
@@ -218,7 +218,7 @@ mod tests {
                 .enqueued_event_count,
             2
         );
-        assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 800);
+        assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 530);
 
         let second = tick_backend_status(BackendStatusTickInput {
             now: 500,
