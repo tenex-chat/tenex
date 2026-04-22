@@ -23,4 +23,5 @@ pub mod worker_message;
 pub mod worker_process;
 pub mod worker_protocol;
 pub mod worker_publish;
+pub mod worker_publish_flow;
 pub mod worker_result;
