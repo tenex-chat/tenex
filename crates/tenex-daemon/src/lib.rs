@@ -1,5 +1,6 @@
 pub mod backend_event_publish;
 pub mod backend_events;
+pub mod backend_signer;
 pub mod caches;
 pub mod daemon_control;
 pub mod daemon_diagnostics;

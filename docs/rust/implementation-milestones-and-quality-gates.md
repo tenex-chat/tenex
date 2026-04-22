@@ -829,6 +829,10 @@ Landed slices:
   status, installed-agent-list, and operations-status events, derive the
   backend publisher pubkey from the signer, and enqueue the signed events
   through the existing publish runtime without publishing to relays directly.
+- `crates/tenex-daemon/src/backend_signer.rs` — reusable Rust implementation
+  of the backend signer contract for the same raw 64-hex `tenexPrivateKey`
+  value that TypeScript stores in global config, with private-key redaction in
+  debug output.
 - `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
   projection from active worker heartbeat state into kind `24133`
   operations-status drafts, including transition-aware cleanup drafts with no
