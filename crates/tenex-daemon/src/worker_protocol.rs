@@ -568,13 +568,20 @@ fn validate_shutdown(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
 fn validate_publish_result(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     require_string(object, "requestId")?;
     require_u64(object, "requestSequence")?;
-    require_one_of(
-        object,
-        "status",
-        &["accepted", "published", "failed", "timeout"],
-    )?;
+    let status = require_string(object, "status")?;
+    if !["accepted", "published", "failed", "timeout"].contains(&status) {
+        return Err(WorkerProtocolError::InvalidField("status"));
+    }
     require_string_array(object, "eventIds")?;
-    if object.contains_key("error") {
+
+    let has_error = object.contains_key("error");
+    if matches!(status, "failed" | "timeout") && !has_error {
+        return Err(WorkerProtocolError::MissingField("error"));
+    }
+    if matches!(status, "accepted" | "published") && has_error {
+        return Err(WorkerProtocolError::InvalidField("error"));
+    }
+    if has_error {
         validate_error_object(object, "error")?;
     }
     Ok(())
@@ -1174,6 +1181,82 @@ mod tests {
     }
 
     #[test]
+    fn publish_result_status_error_semantics_are_validated() {
+        for status in ["failed", "timeout"] {
+            let mut message = publish_result_message(status);
+            assert_eq!(
+                validate_agent_worker_protocol_message(&message),
+                Err(WorkerProtocolError::MissingField("error")),
+                "{status} without error"
+            );
+
+            message["error"] = json!({
+                "code": "publish_failed",
+                "message": "relay publish failed",
+                "retryable": true,
+            });
+            assert_eq!(
+                validate_agent_worker_protocol_message(&message),
+                Ok(WorkerProtocolDirection::DaemonToWorker),
+                "{status} with error"
+            );
+        }
+
+        for status in ["accepted", "published"] {
+            let mut message = publish_result_message(status);
+            message["eventIds"] = json!(["published-event-id"]);
+            assert_eq!(
+                validate_agent_worker_protocol_message(&message),
+                Ok(WorkerProtocolDirection::DaemonToWorker),
+                "{status} without error"
+            );
+
+            message["error"] = json!({
+                "code": "publish_failed",
+                "message": "success statuses must not include an error",
+                "retryable": false,
+            });
+            assert_eq!(
+                validate_agent_worker_protocol_message(&message),
+                Err(WorkerProtocolError::InvalidField("error")),
+                "{status} with error"
+            );
+        }
+
+        assert_eq!(
+            build_agent_worker_publish_result_message(AgentWorkerPublishResultMessageInput {
+                correlation_id: "correlation".to_string(),
+                sequence: 3,
+                timestamp: 1710000400002,
+                request_id: "request-1".to_string(),
+                request_sequence: 2,
+                status: AgentWorkerPublishResultStatus::Timeout,
+                event_ids: Vec::new(),
+                error: None,
+            }),
+            Err(WorkerProtocolError::MissingField("error"))
+        );
+
+        assert_eq!(
+            build_agent_worker_publish_result_message(AgentWorkerPublishResultMessageInput {
+                correlation_id: "correlation".to_string(),
+                sequence: 4,
+                timestamp: 1710000400003,
+                request_id: "request-1".to_string(),
+                request_sequence: 2,
+                status: AgentWorkerPublishResultStatus::Accepted,
+                event_ids: vec!["published-event-id".to_string()],
+                error: Some(AgentWorkerErrorObject {
+                    code: "publish_failed".to_string(),
+                    message: "accepted status must not include an error".to_string(),
+                    retryable: false,
+                }),
+            }),
+            Err(WorkerProtocolError::InvalidField("error"))
+        );
+    }
+
+    #[test]
     fn worker_protocol_fixture_matches_rust_validator() {
         let fixture: WorkerProtocolFixture =
             serde_json::from_str(WORKER_PROTOCOL_FIXTURE).expect("fixture must parse");
@@ -1264,6 +1347,20 @@ mod tests {
         let encoded = encode_agent_worker_protocol_frame(&built).expect("frame must encode");
         let decoded = decode_agent_worker_protocol_frame(&encoded).expect("frame must decode");
         assert_eq!(decoded, expected);
+    }
+
+    fn publish_result_message(status: &'static str) -> Value {
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "publish_result",
+            "correlationId": "exec_publish_result_semantics",
+            "sequence": 9,
+            "timestamp": 1710000410400_u64,
+            "requestId": "pub_semantics",
+            "requestSequence": 8,
+            "status": status,
+            "eventIds": [],
+        })
     }
 
     fn fixture_dispatch_from_execute(

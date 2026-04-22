@@ -679,8 +679,56 @@
                 "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
                 "sequence": 1,
                 "timestamp": 1710000410000,
+                "requestId": "pub_missing_sequence",
                 "status": "published",
                 "eventIds": ["published-event-id"]
+            }
+        },
+        {
+            "name": "publish-result-failed-without-error",
+            "message": {
+                "version": 1,
+                "type": "publish_result",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410100,
+                "requestId": "pub_failed_without_error",
+                "requestSequence": 18,
+                "status": "failed",
+                "eventIds": []
+            }
+        },
+        {
+            "name": "publish-result-timeout-without-error",
+            "message": {
+                "version": 1,
+                "type": "publish_result",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410200,
+                "requestId": "pub_timeout_without_error",
+                "requestSequence": 18,
+                "status": "timeout",
+                "eventIds": []
+            }
+        },
+        {
+            "name": "publish-result-published-with-error",
+            "message": {
+                "version": 1,
+                "type": "publish_result",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410300,
+                "requestId": "pub_published_with_error",
+                "requestSequence": 18,
+                "status": "published",
+                "eventIds": ["published-event-id"],
+                "error": {
+                    "code": "publish_failed",
+                    "message": "success statuses must not include an error",
+                    "retryable": false
+                }
             }
         }
     ]

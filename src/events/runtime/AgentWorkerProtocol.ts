@@ -216,6 +216,22 @@ const publishResultMessageSchema = frameSchema("publish_result", {
     status: z.enum(["accepted", "published", "failed", "timeout"]),
     eventIds: z.array(z.string()),
     error: workerErrorSchema.optional(),
+}).superRefine((message, context) => {
+    const hasError = message.error !== undefined;
+    if ((message.status === "failed" || message.status === "timeout") && !hasError) {
+        context.addIssue({
+            code: "custom",
+            path: ["error"],
+            message: "publish_result failed or timeout status requires error",
+        });
+    }
+    if ((message.status === "accepted" || message.status === "published") && hasError) {
+        context.addIssue({
+            code: "custom",
+            path: ["error"],
+            message: "publish_result accepted or published status must not include error",
+        });
+    }
 });
 
 const ackMessageSchema = frameSchema("ack", {

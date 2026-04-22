@@ -40,4 +40,56 @@ describe("AgentWorkerProtocol compatibility fixture", () => {
             });
         }
     });
+
+    it("enforces publish_result status and error semantics", () => {
+        const baseMessage = {
+            version: AGENT_WORKER_PROTOCOL_VERSION,
+            type: "publish_result",
+            correlationId: "exec_publish_result_semantics",
+            sequence: 9,
+            timestamp: 1710000410400,
+            requestId: "pub_semantics",
+            requestSequence: 8,
+            eventIds: [],
+        };
+        const error = {
+            code: "publish_failed",
+            message: "relay publish failed",
+            retryable: true,
+        };
+
+        for (const status of ["failed", "timeout"] as const) {
+            expect(
+                AgentWorkerProtocolMessageSchema.safeParse({
+                    ...baseMessage,
+                    status,
+                }).success
+            ).toBe(false);
+            expect(
+                AgentWorkerProtocolMessageSchema.safeParse({
+                    ...baseMessage,
+                    status,
+                    error,
+                }).success
+            ).toBe(true);
+        }
+
+        for (const status of ["accepted", "published"] as const) {
+            expect(
+                AgentWorkerProtocolMessageSchema.safeParse({
+                    ...baseMessage,
+                    status,
+                    eventIds: ["published-event-id"],
+                }).success
+            ).toBe(true);
+            expect(
+                AgentWorkerProtocolMessageSchema.safeParse({
+                    ...baseMessage,
+                    status,
+                    eventIds: ["published-event-id"],
+                    error,
+                }).success
+            ).toBe(false);
+        }
+    });
 });
