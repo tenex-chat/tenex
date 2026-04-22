@@ -18,6 +18,7 @@ use crate::nostr_subscription_tick::{
     NostrSubscriptionTickIgnoredFrame, NostrSubscriptionTickInput,
     NostrSubscriptionTickProcessedEvent, run_nostr_subscription_intake_tick,
 };
+use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::relay_publisher::{
     RelayAuthSigner, RelayPublishError, build_auth_message, build_relay_auth_event,
 };
@@ -41,6 +42,7 @@ pub struct NostrSubscriptionGatewayConfig {
     pub relay_read_timeout: Duration,
     pub reconnect_backoff: Duration,
     pub auth_signer: Option<Arc<dyn RelayAuthSigner + Send + Sync>>,
+    pub whitelist_ingress: Option<Arc<WhitelistIngress>>,
 }
 
 impl NostrSubscriptionGatewayConfig {
@@ -54,6 +56,7 @@ impl NostrSubscriptionGatewayConfig {
             relay_read_timeout: DEFAULT_RELAY_READ_TIMEOUT,
             reconnect_backoff: DEFAULT_RECONNECT_BACKOFF,
             auth_signer: None,
+            whitelist_ingress: None,
         }
     }
 
@@ -62,6 +65,11 @@ impl NostrSubscriptionGatewayConfig {
         S: RelayAuthSigner + Send + Sync + 'static,
     {
         self.auth_signer = Some(Arc::new(auth_signer));
+        self
+    }
+
+    pub fn with_whitelist_ingress(mut self, whitelist_ingress: Arc<WhitelistIngress>) -> Self {
+        self.whitelist_ingress = Some(whitelist_ingress);
         self
     }
 }
@@ -78,6 +86,10 @@ impl fmt::Debug for NostrSubscriptionGatewayConfig {
             .field("relay_read_timeout", &self.relay_read_timeout)
             .field("reconnect_backoff", &self.reconnect_backoff)
             .field("auth_signer_configured", &self.auth_signer.is_some())
+            .field(
+                "whitelist_ingress_configured",
+                &self.whitelist_ingress.is_some(),
+            )
             .finish()
     }
 }
@@ -204,6 +216,7 @@ fn run_relay_loop(
                 .as_ref()
                 .map(|signer| signer.as_ref() as &dyn RelayAuthSigner),
             stop_flag: &stop_flag,
+            whitelist_ingress: config.whitelist_ingress.as_deref(),
         });
         drop(_span);
 
@@ -246,6 +259,7 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub max_messages: Option<usize>,
     pub auth_signer: Option<&'a dyn RelayAuthSigner>,
     pub stop_flag: &'a AtomicBool,
+    pub whitelist_ingress: Option<&'a WhitelistIngress>,
 }
 
 impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
@@ -262,6 +276,7 @@ impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
             .field("stop_after_eose", &self.stop_after_eose)
             .field("max_messages", &self.max_messages)
             .field("auth_signer_configured", &self.auth_signer.is_some())
+            .field("whitelist_ingress_configured", &self.whitelist_ingress.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -339,6 +354,7 @@ pub fn run_nostr_subscription_relay_once(
                     raw_messages: &raw_messages,
                     timestamp: current_unix_time_ms(),
                     writer_version: input.writer_version,
+                    whitelist_ingress: input.whitelist_ingress,
                 })?;
                 for event in &tick.processed_events {
                     tracing::debug!(
@@ -637,6 +653,7 @@ mod tests {
             max_messages: None,
             auth_signer: None,
             stop_flag: &stop_flag,
+            whitelist_ingress: None,
         })
         .expect("relay subscription must drain");
 
@@ -701,6 +718,7 @@ mod tests {
             max_messages: None,
             auth_signer: Some(&signer),
             stop_flag: &stop_flag,
+            whitelist_ingress: None,
         })
         .expect("relay subscription must authenticate and drain");
 

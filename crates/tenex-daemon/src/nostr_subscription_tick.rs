@@ -14,6 +14,7 @@ use crate::nostr_subscription_ingress::{
     NostrSubscriptionIngressError, NostrSubscriptionIngressInput, NostrSubscriptionIngressOutcome,
     process_relay_subscription_frame,
 };
+use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::subscription_filters::RelaySubscriptionFrame;
 
 #[derive(Debug, Clone, Copy)]
@@ -25,6 +26,7 @@ pub struct NostrSubscriptionTickInput<'a> {
     pub raw_messages: &'a [&'a str],
     pub timestamp: u64,
     pub writer_version: &'a str,
+    pub whitelist_ingress: Option<&'a WhitelistIngress>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -130,6 +132,7 @@ pub fn run_nostr_subscription_intake_tick(
             frame: &frame,
             timestamp: input.timestamp,
             writer_version: input.writer_version,
+            whitelist_ingress: input.whitelist_ingress,
         })
         .map_err(|source| NostrSubscriptionTickError::Ingress {
             frame_index,
@@ -333,6 +336,7 @@ mod tests {
             raw_messages: &raw_message_refs,
             timestamp: 1_710_001_100_000,
             writer_version: "nostr-subscription-tick-test@0",
+            whitelist_ingress: None,
         })
         .expect("subscription tick must process");
 
@@ -409,6 +413,7 @@ mod tests {
             raw_messages: &raw_messages,
             timestamp: 1_710_001_200_000,
             writer_version: "nostr-subscription-tick-test@0",
+            whitelist_ingress: None,
         })
         .expect("subscription tick must process");
 

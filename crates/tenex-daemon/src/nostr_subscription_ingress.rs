@@ -7,6 +7,7 @@ use crate::nostr_event::SignedNostrEvent;
 use crate::nostr_ingress::{
     NostrIngressError, NostrIngressInput, NostrIngressOutcome, process_verified_nostr_event,
 };
+use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::subscription_filters::{RelaySubscriptionFrame, SubscriptionMessageError};
 
 #[derive(Debug, Clone, Copy)]
@@ -16,6 +17,7 @@ pub struct NostrSubscriptionIngressInput<'a> {
     pub frame: &'a RelaySubscriptionFrame,
     pub timestamp: u64,
     pub writer_version: &'a str,
+    pub whitelist_ingress: Option<&'a WhitelistIngress>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -85,6 +87,10 @@ fn process_event_frame(
     subscription_id: &str,
     event: &SignedNostrEvent,
 ) -> Result<NostrSubscriptionIngressOutcome, NostrSubscriptionIngressError> {
+    if let Some(whitelist_ingress) = input.whitelist_ingress {
+        whitelist_ingress.handle_event(event);
+    }
+
     let ingress = process_verified_nostr_event(NostrIngressInput {
         daemon_dir: input.daemon_dir,
         tenex_base_dir: input.tenex_base_dir,
@@ -147,6 +153,7 @@ mod tests {
             frame: &frame,
             timestamp: 1_710_000_900_000,
             writer_version: "nostr-subscription-ingress-test@0",
+            whitelist_ingress: None,
         })
         .expect("subscription frame must process");
 
@@ -218,6 +225,7 @@ mod tests {
                 frame: &frame,
                 timestamp: 1_710_000_900_001,
                 writer_version: "nostr-subscription-ingress-test@0",
+                whitelist_ingress: None,
             })
             .expect("lifecycle frame must process");
 
