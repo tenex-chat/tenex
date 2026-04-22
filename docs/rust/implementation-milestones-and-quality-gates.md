@@ -596,6 +596,9 @@ Scope:
   `{ pid, hostname, startedAt }` JSON owner shape as `tenex.lock`, acquires via
   atomic create-new writes, fails closed on corrupt lock JSON, and treats stale
   replacement as an explicit PID-liveness decision rather than an age heuristic.
+- Add the PID-liveness adapter as a small boundary above lock policy. Unix uses
+  `kill(pid, 0)` semantics compatible with the TypeScript lockfile; unsupported
+  platforms return `Unknown` so stale replacement fails closed.
 - Compose launch plans with lock acquisition before worker-spawn wiring:
   acquire allocation then state locks for a planned launch, and release the
   allocation lock if the state lock is already held.

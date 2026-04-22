@@ -1193,6 +1193,9 @@ Work:
   paths, writes daemon-compatible `{ pid, hostname, startedAt }` owner JSON,
   acquires with atomic create-new semantics, fails closed on corrupt lock JSON,
   and leaves stale replacement behind an explicit PID-liveness classification.
+- Add PID liveness as a separate adapter above lock policy. Unix maps
+  `kill(pid, 0)` results like the TypeScript lockfile path, while unsupported
+  platforms return `Unknown` and therefore do not auto-reclaim locks.
 - Compose launch plans with lock acquisition by taking the allocation lock
   before the state lock and rolling back the allocation lock if state acquisition
   fails. This remains separate from worker spawn so lock behavior is testable on
