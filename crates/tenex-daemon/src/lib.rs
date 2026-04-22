@@ -34,6 +34,7 @@ pub mod worker_publish;
 pub mod worker_publish_flow;
 pub mod worker_recovery_apply;
 pub mod worker_result;
+pub mod worker_reuse;
 pub mod worker_runtime_state;
 pub mod worker_startup_recovery;
 pub mod worker_terminal_flow;
