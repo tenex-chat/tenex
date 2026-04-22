@@ -1,4 +1,5 @@
 pub mod daemon_control;
+pub mod daemon_diagnostics;
 pub mod daemon_shell;
 pub mod daemon_status;
 pub mod dispatch_queue;
@@ -14,6 +15,7 @@ pub mod relay_publisher;
 pub mod routing;
 pub mod routing_shadow;
 pub mod routing_shadow_log;
+pub mod routing_shadow_replay;
 pub mod subscription_filters;
 pub mod telegram_outbox;
 pub mod worker_abort;
