@@ -443,6 +443,7 @@
                 "ralNumber": 3,
                 "requestId": "pub_01hzzzzzzzzzzzzzzzzzzzzzzz",
                 "requiresEventId": true,
+                "waitForRelayOk": true,
                 "timeoutMs": 15000,
                 "runtimeEventClass": "complete",
                 "event": {
@@ -827,6 +828,7 @@
                 "ralNumber": 3,
                 "requestId": "pub_missing_class",
                 "requiresEventId": true,
+                "waitForRelayOk": true,
                 "timeoutMs": 15000,
                 "event": {
                     "id": "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",
@@ -853,6 +855,7 @@
                 "ralNumber": 3,
                 "requestId": "pub_conversation_missing_variant",
                 "requiresEventId": true,
+                "waitForRelayOk": true,
                 "timeoutMs": 15000,
                 "runtimeEventClass": "conversation",
                 "event": {
@@ -880,6 +883,7 @@
                 "ralNumber": 3,
                 "requestId": "pub_complete_with_variant",
                 "requiresEventId": true,
+                "waitForRelayOk": true,
                 "timeoutMs": 15000,
                 "runtimeEventClass": "complete",
                 "conversationVariant": "primary",

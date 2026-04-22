@@ -136,6 +136,7 @@
                 "conversationId": "conversation-alpha",
                 "ralNumber": 7,
                 "requiresEventId": true,
+                "waitForRelayOk": true,
                 "timeoutMs": 30000
             },
             "event": {
@@ -163,6 +164,7 @@
                 "conversationId": "conversation-alpha",
                 "ralNumber": 7,
                 "requiresEventId": true,
+                "waitForRelayOk": true,
                 "timeoutMs": 30000
             },
             "event": {
@@ -204,6 +206,7 @@
                 "conversationId": "conversation-alpha",
                 "ralNumber": 7,
                 "requiresEventId": true,
+                "waitForRelayOk": true,
                 "timeoutMs": 30000
             },
             "event": {
