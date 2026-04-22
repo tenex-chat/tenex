@@ -390,6 +390,7 @@ function publishRequestFrame(
         requestId: "publish-1",
         requiresEventId: true,
         timeoutMs: 5000,
+        runtimeEventClass: "complete",
         event: publishEventPayload(),
     };
 }

@@ -656,6 +656,28 @@ pub fn run_telegram_outbox_maintenance<P: TelegramDeliveryPublisher>(
     )
 }
 
+/// Maintenance variant used before the Bot API client lands: inspect the
+/// outbox and requeue any due failed records, but do not attempt drain.
+/// Pending records accumulate and surface through diagnostics. Callers must
+/// switch to [`run_telegram_outbox_maintenance`] with a real publisher
+/// once delivery is available.
+pub fn run_telegram_outbox_maintenance_without_drain(
+    daemon_dir: impl AsRef<Path>,
+    now: u64,
+) -> TelegramOutboxResult<TelegramOutboxMaintenanceReport> {
+    let daemon_dir = daemon_dir.as_ref();
+    let diagnostics_before = inspect_telegram_outbox(daemon_dir, now)?;
+    let requeued = requeue_due_failed_telegram_outbox_records(daemon_dir, now)?;
+    let diagnostics_after = inspect_telegram_outbox(daemon_dir, now)?;
+
+    Ok(TelegramOutboxMaintenanceReport {
+        diagnostics_before,
+        requeued,
+        drained: Vec::new(),
+        diagnostics_after,
+    })
+}
+
 pub fn run_telegram_outbox_maintenance_with_retry_policy<P: TelegramDeliveryPublisher>(
     daemon_dir: impl AsRef<Path>,
     publisher: &mut P,

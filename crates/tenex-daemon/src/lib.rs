@@ -42,6 +42,7 @@ pub mod routing;
 pub mod routing_shadow;
 pub mod routing_shadow_log;
 pub mod routing_shadow_replay;
+pub mod scheduled_task_due_planner;
 pub mod scheduler_wakeups;
 pub mod skill_whitelist;
 pub mod subscription_filters;

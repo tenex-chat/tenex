@@ -1404,6 +1404,7 @@ mod tests {
             "requestId": "publish-fixture-01",
             "requiresEventId": true,
             "timeoutMs": 30_000_u64,
+            "runtimeEventClass": "complete",
             "event": &fixture.signed,
         })
     }

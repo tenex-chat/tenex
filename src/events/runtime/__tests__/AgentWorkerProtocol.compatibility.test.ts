@@ -93,6 +93,73 @@ describe("AgentWorkerProtocol compatibility fixture", () => {
         }
     });
 
+    it("enforces publish_request runtimeEventClass and conversationVariant semantics", () => {
+        const baseMessage = {
+            version: AGENT_WORKER_PROTOCOL_VERSION,
+            type: "publish_request",
+            correlationId: "exec_publish_request_class",
+            sequence: 11,
+            timestamp: 1710000410600,
+            projectId: "project-alpha",
+            agentPubkey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            conversationId: "conversation-alpha",
+            ralNumber: 3,
+            requestId: "pub_class_semantics",
+            requiresEventId: true,
+            timeoutMs: 10000,
+            event: {
+                id: "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",
+                pubkey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                kind: 1,
+                content: "Done.",
+                tags: [] as string[][],
+                created_at: 1710000410,
+                sig: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            },
+        };
+
+        expect(AgentWorkerProtocolMessageSchema.safeParse(baseMessage).success).toBe(false);
+        expect(
+            AgentWorkerProtocolMessageSchema.safeParse({
+                ...baseMessage,
+                runtimeEventClass: "complete",
+            }).success
+        ).toBe(true);
+        expect(
+            AgentWorkerProtocolMessageSchema.safeParse({
+                ...baseMessage,
+                runtimeEventClass: "conversation",
+            }).success
+        ).toBe(false);
+        expect(
+            AgentWorkerProtocolMessageSchema.safeParse({
+                ...baseMessage,
+                runtimeEventClass: "conversation",
+                conversationVariant: "primary",
+            }).success
+        ).toBe(true);
+        expect(
+            AgentWorkerProtocolMessageSchema.safeParse({
+                ...baseMessage,
+                runtimeEventClass: "conversation",
+                conversationVariant: "reasoning",
+            }).success
+        ).toBe(true);
+        expect(
+            AgentWorkerProtocolMessageSchema.safeParse({
+                ...baseMessage,
+                runtimeEventClass: "complete",
+                conversationVariant: "primary",
+            }).success
+        ).toBe(false);
+        expect(
+            AgentWorkerProtocolMessageSchema.safeParse({
+                ...baseMessage,
+                runtimeEventClass: "something-else",
+            }).success
+        ).toBe(false);
+    });
+
     it("enforces stream_delta inline payload and contentRef semantics", () => {
         const baseMessage = {
             version: AGENT_WORKER_PROTOCOL_VERSION,

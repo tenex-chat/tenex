@@ -226,6 +226,7 @@ mod tests {
             "requestId": "publish-fixture-01",
             "requiresEventId": true,
             "timeoutMs": 30000,
+            "runtimeEventClass": "complete",
             "event": fixture.signed,
         })
     }

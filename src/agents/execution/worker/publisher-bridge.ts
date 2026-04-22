@@ -24,6 +24,7 @@ import { getEventHash } from "nostr-tools";
 
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_result" }>;
+type PublishRequestMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_request" }>;
 
 interface WorkerProtocolPublisherOptions {
     agent: RuntimePublishAgent;
@@ -81,6 +82,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
                 ...enhancedContext,
                 llmRuntimeTotal: totalRuntime > 0 ? totalRuntime : undefined,
             },
+            runtimeEventClass: "complete",
             status: "completed",
             usage: intent.usage,
             metadata: {
@@ -95,6 +97,8 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     ): Promise<PublishedMessageRef> {
         return this.publishTextEvent(intent.content, {
             context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "conversation",
+            conversationVariant: intent.isReasoning ? "reasoning" : "primary",
             usage: intent.usage,
             metadata: {},
         });
@@ -103,6 +107,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     async delegate(config: DelegateConfig, context: EventContext): Promise<string> {
         const ref = await this.publishTextEvent(config.content, {
             context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "delegation",
             recipientPubkey: config.recipient,
             metadata: {
                 delegationParentConversationId: context.conversationId,
@@ -140,6 +145,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
         return this.publishTextEvent(config.context, {
             context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "ask",
             recipientPubkey: config.recipient,
             metadata: {
                 delegationParentConversationId: context.conversationId,
@@ -179,6 +185,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     ): Promise<string> {
         const ref = await this.publishTextEvent(params.content, {
             context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "delegate_followup",
             recipientPubkey: params.recipient,
             tags: [
                 ["e", params.delegationEventId, "", "root"],
@@ -194,6 +201,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     async error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef> {
         return this.publishTextEvent(intent.message, {
             context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "error",
             status: intent.errorType ?? "execution_error",
             metadata: {
                 statusValue: intent.errorType ?? "execution_error",
@@ -204,6 +212,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     async lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef> {
         return this.publishTextEvent(intent.lesson, {
             context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "lesson",
             kind: NDKKind.AgentLesson,
             metadata: {},
             tags: [
@@ -217,6 +226,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef> {
         const ref = await this.publishTextEvent(intent.content, {
             context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "tool_use",
             metadata: {
                 toolName: intent.toolName,
             },
@@ -286,6 +296,8 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         content: string,
         options: {
             context: EventContext;
+            runtimeEventClass: PublishRequestMessage["runtimeEventClass"];
+            conversationVariant?: PublishRequestMessage["conversationVariant"];
             kind?: number;
             status?: string;
             recipientPubkey?: string;
@@ -324,6 +336,10 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             requestId,
             requiresEventId: true,
             timeoutMs: 30_000,
+            runtimeEventClass: options.runtimeEventClass,
+            ...(options.conversationVariant
+                ? { conversationVariant: options.conversationVariant }
+                : {}),
             event: signedEvent,
         });
         await this.waitForPublishAcceptance(

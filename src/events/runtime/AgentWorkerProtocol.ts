@@ -327,12 +327,49 @@ const waitingForDelegationMessageSchema = frameSchema("waiting_for_delegation", 
     finalRalState: z.literal("waiting_for_delegation"),
 });
 
+export const RUNTIME_EVENT_CLASSES = [
+    "complete",
+    "conversation",
+    "ask",
+    "error",
+    "tool_use",
+    "delegation",
+    "delegate_followup",
+    "lesson",
+    "stream_text_delta",
+] as const;
+export const CONVERSATION_VARIANTS = ["primary", "reasoning"] as const;
+export type RuntimeEventClass = (typeof RUNTIME_EVENT_CLASSES)[number];
+export type ConversationVariant = (typeof CONVERSATION_VARIANTS)[number];
+
+const runtimeEventClassSchema = z.enum(RUNTIME_EVENT_CLASSES);
+const conversationVariantSchema = z.enum(CONVERSATION_VARIANTS);
+
 const publishRequestMessageSchema = frameSchema("publish_request", {
     ...executionIdentityShape,
     requestId: z.string().min(1),
     requiresEventId: z.boolean(),
     timeoutMs: positiveIntegerSchema,
+    runtimeEventClass: runtimeEventClassSchema,
+    conversationVariant: conversationVariantSchema.optional(),
     event: publishEventSchema,
+}).superRefine((message, context) => {
+    const isConversation = message.runtimeEventClass === "conversation";
+    const hasVariant = message.conversationVariant !== undefined;
+    if (isConversation && !hasVariant) {
+        context.addIssue({
+            code: "custom",
+            path: ["conversationVariant"],
+            message: "publish_request with runtimeEventClass=conversation requires conversationVariant",
+        });
+    }
+    if (!isConversation && hasVariant) {
+        context.addIssue({
+            code: "custom",
+            path: ["conversationVariant"],
+            message: "publish_request only carries conversationVariant when runtimeEventClass=conversation",
+        });
+    }
 });
 
 const publishedMessageSchema = frameSchema("published", {

@@ -444,6 +444,7 @@
                 "requestId": "pub_01hzzzzzzzzzzzzzzzzzzzzzzz",
                 "requiresEventId": true,
                 "timeoutMs": 15000,
+                "runtimeEventClass": "complete",
                 "event": {
                     "id": "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",
                     "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -809,6 +810,87 @@
                     "code": "publish_failed",
                     "message": "success statuses must not include an error",
                     "retryable": false
+                }
+            }
+        },
+        {
+            "name": "publish-request-missing-runtime-event-class",
+            "message": {
+                "version": 1,
+                "type": "publish_request",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 13,
+                "timestamp": 1710000402200,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "requestId": "pub_missing_class",
+                "requiresEventId": true,
+                "timeoutMs": 15000,
+                "event": {
+                    "id": "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",
+                    "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "kind": 1,
+                    "content": "Done.",
+                    "tags": [],
+                    "created_at": 1710000402,
+                    "sig": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+            }
+        },
+        {
+            "name": "publish-request-conversation-without-variant",
+            "message": {
+                "version": 1,
+                "type": "publish_request",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 13,
+                "timestamp": 1710000402200,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "requestId": "pub_conversation_missing_variant",
+                "requiresEventId": true,
+                "timeoutMs": 15000,
+                "runtimeEventClass": "conversation",
+                "event": {
+                    "id": "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",
+                    "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "kind": 1,
+                    "content": "Thinking.",
+                    "tags": [],
+                    "created_at": 1710000402,
+                    "sig": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+            }
+        },
+        {
+            "name": "publish-request-non-conversation-with-variant",
+            "message": {
+                "version": 1,
+                "type": "publish_request",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 13,
+                "timestamp": 1710000402200,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "requestId": "pub_complete_with_variant",
+                "requiresEventId": true,
+                "timeoutMs": 15000,
+                "runtimeEventClass": "complete",
+                "conversationVariant": "primary",
+                "event": {
+                    "id": "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",
+                    "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "kind": 1,
+                    "content": "Done.",
+                    "tags": [],
+                    "created_at": 1710000402,
+                    "sig": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
                 }
             }
         }

@@ -705,6 +705,38 @@ fn validate_publish_request(object: &Map<String, Value>) -> WorkerProtocolResult
     require_bool(object, "requiresEventId")?;
     require_positive_u64(object, "timeoutMs")?;
     validate_publish_event(object, "event")?;
+    validate_runtime_event_class(object)?;
+    Ok(())
+}
+
+fn validate_runtime_event_class(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    use crate::telegram::types::{ConversationVariant, RuntimeEventClass};
+
+    require_one_of(object, "runtimeEventClass", RuntimeEventClass::ALL_WIRE)?;
+    let class_value = object
+        .get("runtimeEventClass")
+        .and_then(Value::as_str)
+        .ok_or(WorkerProtocolError::MissingField("runtimeEventClass"))?;
+    let class = RuntimeEventClass::from_wire(class_value)
+        .ok_or(WorkerProtocolError::InvalidField("runtimeEventClass"))?;
+
+    match object.get("conversationVariant") {
+        Some(Value::String(value)) => {
+            if !class.permits_conversation_variant() {
+                return Err(WorkerProtocolError::InvalidField("conversationVariant"));
+            }
+            if !ConversationVariant::ALL_WIRE.contains(&value.as_str()) {
+                return Err(WorkerProtocolError::InvalidField("conversationVariant"));
+            }
+        }
+        Some(_) => return Err(WorkerProtocolError::InvalidField("conversationVariant")),
+        None => {
+            if class.permits_conversation_variant() {
+                return Err(WorkerProtocolError::MissingField("conversationVariant"));
+            }
+        }
+    }
+
     Ok(())
 }
 

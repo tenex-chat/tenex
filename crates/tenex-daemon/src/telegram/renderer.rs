@@ -333,19 +333,19 @@ fn replace_links(input: &str) -> String {
     let mut cursor = 0;
 
     while cursor < bytes.len() {
-        if bytes[cursor] == b'[' {
-            if let Some(end) = try_parse_link(input, cursor) {
-                let (label, href, total_len) = end;
-                // TS renders the label verbatim (no additional escape) so we
-                // match that. Href goes through escape_html like escapeAttribute.
-                out.push_str(&format!(
-                    "<a href=\"{href}\">{label}</a>",
-                    href = escape_html(&href),
-                    label = label,
-                ));
-                cursor += total_len;
-                continue;
-            }
+        if bytes[cursor] == b'['
+            && let Some(end) = try_parse_link(input, cursor)
+        {
+            let (label, href, total_len) = end;
+            // TS renders the label verbatim (no additional escape) so we
+            // match that. Href goes through escape_html like escapeAttribute.
+            out.push_str(&format!(
+                "<a href=\"{href}\">{label}</a>",
+                href = escape_html(&href),
+                label = label,
+            ));
+            cursor += total_len;
+            continue;
         }
         let mut end = cursor + 1;
         while end < bytes.len() && (bytes[end] & 0xC0) == 0x80 {
@@ -504,31 +504,31 @@ fn replace_word_bounded_italic(input: &str, delim: char) -> String {
                 let after_open = chars[cursor + 1];
                 // TS: first captured char is `[^_\n]` / `[^*\n]`, plus non-newline.
                 let inner_head_ok = after_open != '\n' && after_open != delim;
-                if inner_head_ok {
-                    if let Some(close) = find_italic_close(&chars, cursor + 1, delim) {
-                        let content: String = chars[cursor + 1..close].iter().collect();
-                        let prefix: String = if cursor == 0 {
-                            String::new()
-                        } else {
-                            chars[cursor - 1].to_string()
-                        };
-                        // Match TS: replacement keeps the prefix before the
-                        // `<i>` so the boundary char is retained.
-                        // But we've already appended the prefix to `out`, so
-                        // we strip the trailing copy of it and re-append with
-                        // the italic tags.
-                        if cursor > 0 {
-                            // Pop the prefix char we already emitted.
-                            let popped_len = prefix.len();
-                            out.truncate(out.len() - popped_len);
-                            out.push_str(&prefix);
-                        }
-                        out.push_str("<i>");
-                        out.push_str(&content);
-                        out.push_str("</i>");
-                        cursor = close + 1;
-                        continue;
+                if inner_head_ok
+                    && let Some(close) = find_italic_close(&chars, cursor + 1, delim)
+                {
+                    let content: String = chars[cursor + 1..close].iter().collect();
+                    let prefix: String = if cursor == 0 {
+                        String::new()
+                    } else {
+                        chars[cursor - 1].to_string()
+                    };
+                    // Match TS: replacement keeps the prefix before the
+                    // `<i>` so the boundary char is retained.
+                    // But we've already appended the prefix to `out`, so
+                    // we strip the trailing copy of it and re-append with
+                    // the italic tags.
+                    if cursor > 0 {
+                        // Pop the prefix char we already emitted.
+                        let popped_len = prefix.len();
+                        out.truncate(out.len() - popped_len);
+                        out.push_str(&prefix);
                     }
+                    out.push_str("<i>");
+                    out.push_str(&content);
+                    out.push_str("</i>");
+                    cursor = close + 1;
+                    continue;
                 }
             }
             out.push(delim);

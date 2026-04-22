@@ -81,13 +81,12 @@ pub fn read_transport_bindings(
 
     let mut records = Vec::with_capacity(array.len());
     for entry in array {
-        if let Ok(record) = serde_json::from_value::<TransportBindingRecord>(entry) {
-            if !record.agent_pubkey.is_empty()
-                && !record.channel_id.is_empty()
-                && !record.project_id.is_empty()
-            {
-                records.push(record);
-            }
+        if let Ok(record) = serde_json::from_value::<TransportBindingRecord>(entry)
+            && !record.agent_pubkey.is_empty()
+            && !record.channel_id.is_empty()
+            && !record.project_id.is_empty()
+        {
+            records.push(record);
         }
     }
     Ok(records)

@@ -136,17 +136,17 @@ fn plan_complete(input: &TelegramDeliveryPlanInput<'_>) -> Vec<TelegramDeliveryR
                 marker: voice.marker.to_string(),
             },
         ));
-        if let Some(remaining) = voice.remaining_content.as_deref() {
-            if !remaining.is_empty() {
-                let rendered = render_telegram_message(remaining);
-                records.push(build_request(
-                    input,
-                    TelegramDeliveryReason::FinalReply,
-                    TelegramDeliveryPayload::HtmlText {
-                        html: rendered.text,
-                    },
-                ));
-            }
+        if let Some(remaining) = voice.remaining_content.as_deref()
+            && !remaining.is_empty()
+        {
+            let rendered = render_telegram_message(remaining);
+            records.push(build_request(
+                input,
+                TelegramDeliveryReason::FinalReply,
+                TelegramDeliveryPayload::HtmlText {
+                    html: rendered.text,
+                },
+            ));
         }
         records
     } else {

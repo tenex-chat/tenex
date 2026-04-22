@@ -14,6 +14,10 @@ use crate::project_status_descriptors::{
 use crate::scheduler_wakeups::{
     SchedulerWakeupError, SchedulerWakeupsMaintenanceReport, run_scheduler_maintenance,
 };
+use crate::telegram_outbox::{
+    TelegramOutboxError, TelegramOutboxMaintenanceReport,
+    run_telegram_outbox_maintenance_without_drain,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonMaintenanceInput<'a> {
@@ -32,6 +36,7 @@ pub struct DaemonMaintenanceOutcome {
     pub project_descriptor_report: ProjectStatusDescriptorReport,
     pub backend_events: BackendEventsMaintenanceOutcome,
     pub scheduler_wakeups: SchedulerWakeupsMaintenanceReport,
+    pub telegram_outbox: TelegramOutboxMaintenanceReport,
 }
 
 #[derive(Debug, Error)]
@@ -42,6 +47,8 @@ pub enum DaemonMaintenanceError {
     BackendEvents(#[from] BackendEventsMaintenanceError),
     #[error("scheduler wakeups maintenance failed: {0}")]
     SchedulerWakeups(#[from] SchedulerWakeupError),
+    #[error("telegram outbox maintenance failed: {0}")]
+    TelegramOutbox(#[from] TelegramOutboxError),
 }
 
 pub fn run_daemon_maintenance_once_from_filesystem(
@@ -60,6 +67,13 @@ pub fn run_daemon_maintenance_once_from_filesystem(
         projects: &projects,
     })?;
     let scheduler_wakeups = run_scheduler_maintenance(input.daemon_dir, input.now_ms)?;
+    // The Rust-native Telegram Bot API client is tracked for a follow-up
+    // slice. Until it lands, the daemon maintenance pass inspects the
+    // Telegram outbox and requeues due failed records but does not attempt
+    // drain. Pending records accumulate and surface through diagnostics
+    // rather than being lost.
+    let telegram_outbox =
+        run_telegram_outbox_maintenance_without_drain(input.daemon_dir, input.now_ms)?;
 
     Ok(DaemonMaintenanceOutcome {
         tenex_base_dir: input.tenex_base_dir.to_path_buf(),
@@ -69,6 +83,7 @@ pub fn run_daemon_maintenance_once_from_filesystem(
         project_descriptor_report,
         backend_events,
         scheduler_wakeups,
+        telegram_outbox,
     })
 }
 
@@ -169,6 +184,11 @@ mod tests {
             2
         );
         assert_eq!(outcome.scheduler_wakeups.diagnostics_after.pending_count, 0);
+        // Telegram outbox is empty on a fresh tenex dir; pass runs without
+        // needing a Bot API client because drain is deliberately skipped.
+        assert_eq!(outcome.telegram_outbox.diagnostics_after.pending_count, 0);
+        assert!(outcome.telegram_outbox.drained.is_empty());
+        assert!(outcome.telegram_outbox.requeued.is_empty());
 
         let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
