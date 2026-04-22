@@ -1,3 +1,4 @@
+pub mod daemon_status;
 pub mod dispatch_queue;
 pub mod filesystem_state;
 pub mod nostr_event;
@@ -19,6 +20,7 @@ pub mod worker_dispatch_admission_start;
 pub mod worker_dispatch_execution;
 pub mod worker_dispatch_spawn;
 pub mod worker_dispatch_start;
+pub mod worker_dispatch_tick;
 pub mod worker_heartbeat;
 pub mod worker_launch;
 pub mod worker_launch_lock;
@@ -31,4 +33,5 @@ pub mod worker_publish_flow;
 pub mod worker_recovery_apply;
 pub mod worker_result;
 pub mod worker_runtime_state;
+pub mod worker_startup_recovery;
 pub mod worker_terminal_flow;

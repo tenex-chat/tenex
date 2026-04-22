@@ -231,6 +231,7 @@ Rules for Rust code:
 
 - Consume shared fixtures from `src/test-utils/fixtures/` when proving compatibility with TypeScript behavior.
 - Keep Nostr wire, filesystem, status, lock, restart, and worker-protocol contracts aligned with `docs/rust/implementation-milestones-and-quality-gates.md`.
+- Keep orchestration slices explicit and single-pass. For example, `worker_dispatch_tick.rs` may replay filesystem state and invoke one admission/start pass, but it should not hide a daemon loop or own long-lived global state.
 - Do not duplicate or replace TypeScript agent execution paths until the relevant milestone gates are passing.
 - Keep production authority behind explicit migration flags once daemon code moves beyond fixture verification.
 
@@ -489,6 +490,8 @@ export const somethingService = new SomethingService(
 3. ⏳ **Removal of Barrel Exports**: Phase out all remaining barrel exports in favor of direct imports.
 
 **Philosophy:** Make incremental improvements. Leave code better than you found it (Boy Scout Rule).
+
+Rust migration code under `crates/tenex-daemon/` now includes startup-recovery orchestration in `worker_startup_recovery.rs`, which replays the RAL journal, plans orphan reconciliation, and applies crashed recovery records through the existing recovery boundary.
 
 ---
 
