@@ -60,7 +60,12 @@ pub fn inspect_daemon_readiness(
     let base_ok = check_base_directory(base_dir, &mut checks);
     let config = check_config_file(base_dir, base_ok, &mut checks);
     check_backend_signer(config.as_ref(), &mut checks);
-    check_relay_list(config.as_ref(), &mut checks, CHECK_RELAYS, relay_list_extractor);
+    check_relay_list(
+        config.as_ref(),
+        &mut checks,
+        CHECK_RELAYS,
+        relay_list_extractor,
+    );
     check_relay_list(
         config.as_ref(),
         &mut checks,
@@ -161,10 +166,7 @@ fn check_relay_list(
     extractor: fn(&BackendConfigSnapshot) -> Vec<String>,
 ) {
     let Some(config) = config else {
-        checks.push(missing_check(
-            name,
-            "depends on config-file".to_string(),
-        ));
+        checks.push(missing_check(name, "depends on config-file".to_string()));
         return;
     };
     let relays = extractor(config);
@@ -409,10 +411,7 @@ mod tests {
             );
         }
         assert!(report.ready);
-        assert_eq!(
-            report.schema_version,
-            DAEMON_READINESS_SCHEMA_VERSION
-        );
+        assert_eq!(report.schema_version, DAEMON_READINESS_SCHEMA_VERSION);
         cleanup(&dir);
     }
 
@@ -539,5 +538,4 @@ mod tests {
         assert!(names.contains(&CHECK_LOCKFILE));
         cleanup(&dir);
     }
-
 }

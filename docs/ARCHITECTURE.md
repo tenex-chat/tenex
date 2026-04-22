@@ -232,6 +232,7 @@ Rules for Rust code:
 - Consume shared fixtures from `src/test-utils/fixtures/` when proving compatibility with TypeScript behavior.
 - Keep Nostr wire, filesystem, status, lock, restart, and worker-protocol contracts aligned with `docs/rust/implementation-milestones-and-quality-gates.md`.
 - Keep orchestration slices explicit and single-pass. For example, `worker_dispatch_tick.rs` may replay filesystem state and invoke one admission/start pass, but it should not hide a daemon loop or own long-lived global state.
+- Treat publish-outbox orchestration slices the same way: `backend_status_runtime.rs` and `project_status_runtime.rs` may assemble filesystem inputs and enqueue signed backend events, but they must not publish to relays directly.
 - Do not duplicate or replace TypeScript agent execution paths until the relevant milestone gates are passing.
 - Keep production authority behind explicit migration flags once daemon code moves beyond fixture verification.
 
