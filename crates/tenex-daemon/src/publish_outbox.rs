@@ -43,6 +43,13 @@ pub enum PublishOutboxError {
         event_pubkey: String,
         agent_pubkey: String,
     },
+    #[error(
+        "publish outbox event pubkey {event_pubkey} does not match publisher {publisher_pubkey}"
+    )]
+    PublisherPubkeyMismatch {
+        event_pubkey: String,
+        publisher_pubkey: String,
+    },
     #[error("publish outbox event id conflict at {path}")]
     EventIdConflict { path: PathBuf },
     #[error("publish outbox record has invalid status {status:?} for drain")]
@@ -238,6 +245,22 @@ pub struct PublishOutboxRequestRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BackendPublishOutboxInput {
+    pub request_id: String,
+    pub request_sequence: u64,
+    pub request_timestamp: u64,
+    pub correlation_id: String,
+    pub project_id: String,
+    pub conversation_id: String,
+    pub publisher_pubkey: String,
+    pub ral_number: u64,
+    pub requires_event_id: bool,
+    pub timeout_ms: u64,
+    pub event: SignedNostrEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublishOutboxRecord {
     pub schema_version: u32,
     pub status: PublishOutboxStatus,
@@ -329,6 +352,42 @@ pub fn accept_worker_publish_request(
             timeout_ms: request.timeout_ms,
         },
         event: request.event,
+        attempts: Vec::new(),
+    };
+
+    persist_pending_record(daemon_dir.as_ref(), &record)
+}
+
+pub fn accept_backend_signed_publish_event(
+    daemon_dir: impl AsRef<Path>,
+    input: BackendPublishOutboxInput,
+    accepted_at: u64,
+) -> PublishOutboxResult<PublishOutboxRecord> {
+    if input.event.pubkey != input.publisher_pubkey {
+        return Err(PublishOutboxError::PublisherPubkeyMismatch {
+            event_pubkey: input.event.pubkey,
+            publisher_pubkey: input.publisher_pubkey,
+        });
+    }
+    verify_signed_event(&input.event)?;
+
+    let record = PublishOutboxRecord {
+        schema_version: PUBLISH_OUTBOX_RECORD_SCHEMA_VERSION,
+        status: PublishOutboxStatus::Accepted,
+        accepted_at,
+        request: PublishOutboxRequestRef {
+            request_id: input.request_id,
+            request_sequence: input.request_sequence,
+            request_timestamp: input.request_timestamp,
+            correlation_id: input.correlation_id,
+            project_id: input.project_id,
+            agent_pubkey: input.publisher_pubkey,
+            conversation_id: input.conversation_id,
+            ral_number: input.ral_number,
+            requires_event_id: input.requires_event_id,
+            timeout_ms: input.timeout_ms,
+        },
+        event: input.event,
         attempts: Vec::new(),
     };
 
@@ -1329,6 +1388,207 @@ mod tests {
     }
 
     #[test]
+    fn accepts_backend_signed_event_into_pending_outbox() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let input = backend_publish_input(&fixture, 41, 1710001000000);
+
+        let record = accept_backend_signed_publish_event(&daemon_dir, input, 1710001000100)
+            .expect("backend signed event must be accepted");
+
+        assert_eq!(record.schema_version, PUBLISH_OUTBOX_RECORD_SCHEMA_VERSION);
+        assert_eq!(record.status, PublishOutboxStatus::Accepted);
+        assert_eq!(record.accepted_at, 1710001000100);
+        assert_eq!(record.request.request_id, "backend-publish-fixture-01");
+        assert_eq!(record.request.request_sequence, 41);
+        assert_eq!(record.request.correlation_id, "rust_backend_publish_outbox");
+        assert_eq!(record.request.agent_pubkey, fixture.pubkey);
+        assert_eq!(record.event, fixture.signed);
+        verify_signed_event(&record.event).expect("accepted backend event must still verify");
+
+        let persisted =
+            read_pending_publish_outbox_record(&daemon_dir, &record.event.id).expect("record read");
+        assert_eq!(persisted, Some(record));
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn accepts_duplicate_backend_signed_event_idempotently() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let first = backend_publish_input(&fixture, 41, 1710001000000);
+        let second = backend_publish_input(&fixture, 42, 1710001000500);
+
+        let first_record = accept_backend_signed_publish_event(&daemon_dir, first, 1710001000100)
+            .expect("first backend event must be accepted");
+        let second_record = accept_backend_signed_publish_event(&daemon_dir, second, 1710001000600)
+            .expect("duplicate backend event must be idempotent");
+
+        assert_eq!(second_record, first_record);
+        assert_eq!(second_record.request.request_sequence, 41);
+        assert_eq!(second_record.accepted_at, 1710001000100);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn accepts_duplicate_backend_signed_event_from_published_outbox_without_republishing() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let input = backend_publish_input(&fixture, 41, 1710001000000);
+        accept_backend_signed_publish_event(&daemon_dir, input, 1710001000100)
+            .expect("backend event must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: true,
+                message: Some("ok".to_string()),
+            }],
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("pending outbox drain must publish");
+
+        let duplicate = accept_backend_signed_publish_event(
+            &daemon_dir,
+            backend_publish_input(&fixture, 42, 1710001000500),
+            1710001000600,
+        )
+        .expect("duplicate published backend event must be idempotent");
+
+        assert_eq!(duplicate.status, PublishOutboxStatus::Published);
+        assert_eq!(duplicate.event, fixture.signed);
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending record read must succeed")
+                .is_none()
+        );
+        assert!(
+            read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("published record read must succeed")
+                .is_some()
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn accepts_duplicate_backend_signed_event_from_failed_outbox_without_requeueing() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let input = backend_publish_input(&fixture, 41, 1710001000000);
+        accept_backend_signed_publish_event(&daemon_dir, input, 1710001000100)
+            .expect("backend event must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Err(PublishRelayError {
+            message: "relay connection failed".to_string(),
+            retryable: true,
+        })]);
+        drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("pending outbox drain must fail into failed dir");
+
+        let duplicate = accept_backend_signed_publish_event(
+            &daemon_dir,
+            backend_publish_input(&fixture, 42, 1710001000500),
+            1710001000600,
+        )
+        .expect("duplicate failed backend event must be idempotent");
+
+        assert_eq!(duplicate.status, PublishOutboxStatus::Failed);
+        assert_eq!(duplicate.event, fixture.signed);
+        assert_eq!(duplicate.attempts[0].next_attempt_at, Some(1710001001200));
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending record read must succeed")
+                .is_none()
+        );
+        assert!(
+            read_failed_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("failed record read must succeed")
+                .is_some()
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_backend_signed_event_when_publisher_pubkey_does_not_match() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut input = backend_publish_input(&fixture, 41, 1710001000000);
+        input.publisher_pubkey = "a".repeat(64);
+
+        let error = accept_backend_signed_publish_event(&daemon_dir, input, 1710001000100)
+            .expect_err("wrong publisher pubkey must be rejected");
+
+        assert!(matches!(
+            error,
+            PublishOutboxError::PublisherPubkeyMismatch { .. }
+        ));
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("outbox read must succeed")
+                .is_none()
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_mutated_backend_signed_event_before_persisting() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut input = backend_publish_input(&fixture, 41, 1710001000000);
+        input.event.content = "mutated after signing".to_string();
+
+        let error = accept_backend_signed_publish_event(&daemon_dir, input, 1710001000100)
+            .expect_err("mutated backend event must be rejected");
+
+        assert!(matches!(
+            error,
+            PublishOutboxError::Nostr(NostrEventError::EventIdMismatch { .. })
+        ));
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("outbox read must succeed")
+                .is_none()
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn drains_backend_signed_event_exactly_to_relay_publisher() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let input = backend_publish_input(&fixture, 41, 1710001000000);
+        accept_backend_signed_publish_event(&daemon_dir, input, 1710001000100)
+            .expect("backend event must be accepted");
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: true,
+                message: Some("ok".to_string()),
+            }],
+        })]);
+
+        let outcomes = drain_pending_publish_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("pending backend event must publish");
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].event_id, fixture.signed.id);
+        assert_eq!(outcomes[0].status, PublishOutboxStatus::Published);
+        assert_eq!(publisher.published_events, vec![fixture.signed.clone()]);
+
+        let published = read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+            .expect("published record read must succeed")
+            .expect("published record must exist");
+        assert_eq!(published.event, fixture.signed);
+        assert_eq!(published.request.agent_pubkey, fixture.pubkey);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
     fn accepts_duplicate_signed_event_idempotently() {
         let fixture = signed_event_fixture();
         let daemon_dir = unique_temp_daemon_dir();
@@ -1893,6 +2153,26 @@ mod tests {
             "timeoutMs": 30000,
             "event": fixture.signed,
         })
+    }
+
+    fn backend_publish_input(
+        fixture: &Nip01EventFixture,
+        request_sequence: u64,
+        request_timestamp: u64,
+    ) -> BackendPublishOutboxInput {
+        BackendPublishOutboxInput {
+            request_id: "backend-publish-fixture-01".to_string(),
+            request_sequence,
+            request_timestamp,
+            correlation_id: "rust_backend_publish_outbox".to_string(),
+            project_id: "project-alpha".to_string(),
+            conversation_id: "conversation-alpha".to_string(),
+            publisher_pubkey: fixture.pubkey.clone(),
+            ral_number: 0,
+            requires_event_id: true,
+            timeout_ms: 30000,
+            event: fixture.signed.clone(),
+        }
     }
 
     fn signed_event_fixture() -> Nip01EventFixture {
