@@ -40,6 +40,7 @@ pub mod operations_status_runtime;
 pub mod periodic_tick;
 pub mod periodic_tick_state;
 pub mod process_liveness;
+pub mod project_agent_whitelist;
 pub mod project_nostr_ingress;
 pub mod project_status_agent_sources;
 pub mod project_status_descriptors;
