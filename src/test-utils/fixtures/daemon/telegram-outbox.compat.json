@@ -1,0 +1,376 @@
+{
+    "name": "telegram-outbox-basic",
+    "description": "Canonical Rust Telegram transport outbox filesystem paths and record shapes for Bun compatibility tests.",
+    "daemonDirName": "daemon",
+    "relativePaths": {
+        "outbox": "transport-outbox/telegram",
+        "pending": "transport-outbox/telegram/pending",
+        "delivered": "transport-outbox/telegram/delivered",
+        "failed": "transport-outbox/telegram/failed",
+        "tmp": "transport-outbox/telegram/tmp"
+    },
+    "recordFileNames": {
+        "pending": "<record-id>.json",
+        "delivered": "<record-id>.json",
+        "failed": "<record-id>.json"
+    },
+    "recordIdDerivation": "recordId = sha256(\"telegram-outbox/v1\\n\" + nostrEventId + \"\\n\" + chatId + \"\\n\" + (replyToTelegramMessageId ?? \"none\"))",
+    "writer": "rust-daemon",
+    "records": {
+        "pendingHtml": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "recordId": "3ace5a343cec2c986b729fa7cfd435ddc38741358f6432ee570873c12cb58b71",
+            "status": "pending",
+            "createdAt": 1710001000100,
+            "updatedAt": 1710001000100,
+            "nostrEventId": "event-pending-html-01",
+            "correlationId": "telegram-fixture-01",
+            "projectBinding": {
+                "projectDTag": "project-alpha",
+                "backendPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "channelBinding": {
+                "chatId": 12345,
+                "messageThreadId": 67890,
+                "channelLabel": "alpha-channel"
+            },
+            "senderIdentity": {
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "Agent Alpha"
+            },
+            "deliveryReason": "final_reply",
+            "replyToTelegramMessageId": 777,
+            "payload": {
+                "kind": "html_text",
+                "html": "<b>Delivered reply</b>"
+            },
+            "attempts": []
+        },
+        "pendingPlain": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "recordId": "1d75e5865663d21e62ba9db1dc7e0b847639ecbaf044e5286ef89382bbc1f06b",
+            "status": "pending",
+            "createdAt": 1710001000100,
+            "updatedAt": 1710001000100,
+            "nostrEventId": "event-pending-plain-01",
+            "correlationId": "telegram-fixture-01",
+            "projectBinding": {
+                "projectDTag": "project-alpha",
+                "backendPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "channelBinding": {
+                "chatId": 12345,
+                "messageThreadId": 67890,
+                "channelLabel": "alpha-channel"
+            },
+            "senderIdentity": {
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "Agent Alpha"
+            },
+            "deliveryReason": "conversation_mirror",
+            "replyToTelegramMessageId": 778,
+            "payload": {
+                "kind": "plain_text",
+                "text": "plain-text reply"
+            },
+            "attempts": []
+        },
+        "pendingAskError": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "recordId": "241bcf1e588ba89cf5d523330b438df51848e00361b8335df30e2a926d8e3c63",
+            "status": "pending",
+            "createdAt": 1710001000100,
+            "updatedAt": 1710001000100,
+            "nostrEventId": "event-pending-ask-01",
+            "correlationId": "telegram-fixture-01",
+            "projectBinding": {
+                "projectDTag": "project-alpha",
+                "backendPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "channelBinding": {
+                "chatId": 12345,
+                "messageThreadId": 67890,
+                "channelLabel": "alpha-channel"
+            },
+            "senderIdentity": {
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "Agent Alpha"
+            },
+            "deliveryReason": "ask_error",
+            "replyToTelegramMessageId": 779,
+            "payload": {
+                "kind": "ask_error",
+                "html": "<i>ask error body</i>"
+            },
+            "attempts": []
+        },
+        "pendingVoice": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "recordId": "1a1639cfa64e610530063c5e26ec59ca08fb79aba13dade5db5111c2c22e9e97",
+            "status": "pending",
+            "createdAt": 1710001000100,
+            "updatedAt": 1710001000100,
+            "nostrEventId": "event-pending-voice-01",
+            "correlationId": "telegram-fixture-01",
+            "projectBinding": {
+                "projectDTag": "project-alpha",
+                "backendPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "channelBinding": {
+                "chatId": 12345,
+                "messageThreadId": 67890,
+                "channelLabel": "alpha-channel"
+            },
+            "senderIdentity": {
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "Agent Alpha"
+            },
+            "deliveryReason": "voice",
+            "replyToTelegramMessageId": 780,
+            "payload": {
+                "kind": "reserved_voice",
+                "marker": "telegram_voice"
+            },
+            "attempts": []
+        },
+        "delivered": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "recordId": "556fb604c0a4f44f14c1d4664e22a61e4b91f8c58e357f4de56a24ccdc656752",
+            "status": "delivered",
+            "createdAt": 1710001000100,
+            "updatedAt": 1710001000200,
+            "nostrEventId": "event-delivered-01",
+            "correlationId": "telegram-fixture-01",
+            "projectBinding": {
+                "projectDTag": "project-alpha",
+                "backendPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "channelBinding": {
+                "chatId": 12345,
+                "messageThreadId": 67890,
+                "channelLabel": "alpha-channel"
+            },
+            "senderIdentity": {
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "Agent Alpha"
+            },
+            "deliveryReason": "final_reply",
+            "replyToTelegramMessageId": 781,
+            "payload": {
+                "kind": "html_text",
+                "html": "<b>Delivered reply</b>"
+            },
+            "attempts": [
+                {
+                    "attemptedAt": 1710001000200,
+                    "status": "delivered",
+                    "telegramMessageId": 5001,
+                    "retryable": false
+                }
+            ]
+        },
+        "failedRetryable": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "recordId": "88871bf98105f2b10bfff1d4f5c135213c49b072b7f2795863170ba4e68e2952",
+            "status": "failed",
+            "createdAt": 1710001000100,
+            "updatedAt": 1710001000300,
+            "nostrEventId": "event-failed-retryable-01",
+            "correlationId": "telegram-fixture-01",
+            "projectBinding": {
+                "projectDTag": "project-alpha",
+                "backendPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "channelBinding": {
+                "chatId": 12345,
+                "messageThreadId": 67890,
+                "channelLabel": "alpha-channel"
+            },
+            "senderIdentity": {
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "Agent Alpha"
+            },
+            "deliveryReason": "final_reply",
+            "replyToTelegramMessageId": 782,
+            "payload": {
+                "kind": "html_text",
+                "html": "<b>Delivered reply</b>"
+            },
+            "attempts": [
+                {
+                    "attemptedAt": 1710001000300,
+                    "status": "failed",
+                    "errorClass": "rate_limited",
+                    "errorDetail": "429 Too Many Requests",
+                    "retryAfter": 1000,
+                    "retryable": true,
+                    "nextAttemptAt": 1710001001300
+                }
+            ]
+        },
+        "failedPermanent": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "recordId": "cd3da38062bbdc00144d79cd5f34b8d20f74e8db503a0d9ebd00180e968afcba",
+            "status": "failed",
+            "createdAt": 1710001000100,
+            "updatedAt": 1710001000400,
+            "nostrEventId": "event-failed-permanent-01",
+            "correlationId": "telegram-fixture-01",
+            "projectBinding": {
+                "projectDTag": "project-alpha",
+                "backendPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "channelBinding": {
+                "chatId": 12345,
+                "messageThreadId": 67890,
+                "channelLabel": "alpha-channel"
+            },
+            "senderIdentity": {
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "Agent Alpha"
+            },
+            "deliveryReason": "final_reply",
+            "replyToTelegramMessageId": 783,
+            "payload": {
+                "kind": "html_text",
+                "html": "<b>Delivered reply</b>"
+            },
+            "attempts": [
+                {
+                    "attemptedAt": 1710001000400,
+                    "status": "failed",
+                    "errorClass": "bot_blocked",
+                    "errorDetail": "Forbidden: bot was blocked by the user",
+                    "retryable": false
+                }
+            ]
+        }
+    },
+    "diagnostics": {
+        "empty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000000,
+            "pendingCount": 0,
+            "deliveredCount": 0,
+            "failedCount": 0,
+            "retryableFailedCount": 0,
+            "retryDueCount": 0,
+            "permanentFailedCount": 0,
+            "tmpFileCount": 0,
+            "oldestPending": null,
+            "nextRetryAt": null,
+            "latestFailure": null
+        },
+        "fixtureRecordsBeforeRetry": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001001200,
+            "pendingCount": 1,
+            "deliveredCount": 1,
+            "failedCount": 1,
+            "retryableFailedCount": 1,
+            "retryDueCount": 0,
+            "permanentFailedCount": 0,
+            "tmpFileCount": 0,
+            "oldestPending": {
+                "recordId": "3ace5a343cec2c986b729fa7cfd435ddc38741358f6432ee570873c12cb58b71",
+                "nostrEventId": "event-pending-html-01",
+                "createdAt": 1710001000100,
+                "correlationId": "telegram-fixture-01",
+                "projectDTag": "project-alpha",
+                "chatId": 12345,
+                "deliveryReason": "final_reply"
+            },
+            "nextRetryAt": 1710001001300,
+            "latestFailure": {
+                "recordId": "88871bf98105f2b10bfff1d4f5c135213c49b072b7f2795863170ba4e68e2952",
+                "nostrEventId": "event-failed-retryable-01",
+                "correlationId": "telegram-fixture-01",
+                "projectDTag": "project-alpha",
+                "chatId": 12345,
+                "attemptCount": 1,
+                "attemptedAt": 1710001000300,
+                "errorClass": "rate_limited",
+                "errorDetail": "429 Too Many Requests",
+                "retryable": true,
+                "nextAttemptAt": 1710001001300
+            }
+        }
+    },
+    "maintenanceReports": {
+        "dueRetryDelivered": {
+            "diagnosticsBefore": {
+                "schemaVersion": 1,
+                "inspectedAt": 1710001001200,
+                "pendingCount": 0,
+                "deliveredCount": 0,
+                "failedCount": 1,
+                "retryableFailedCount": 1,
+                "retryDueCount": 1,
+                "permanentFailedCount": 0,
+                "tmpFileCount": 0,
+                "oldestPending": null,
+                "nextRetryAt": 1710001001200,
+                "latestFailure": {
+                    "recordId": "31227c95e5adcbb49e7326a8d3f2393ba11222550249703cd0663303b642af67",
+                    "nostrEventId": "event-failed-fixture-01",
+                    "correlationId": "telegram-fixture-01",
+                    "projectDTag": "project-alpha",
+                    "chatId": 12345,
+                    "attemptCount": 1,
+                    "attemptedAt": 1710001000300,
+                    "errorClass": "network",
+                    "errorDetail": "timeout",
+                    "retryable": true,
+                    "nextAttemptAt": 1710001001200
+                }
+            },
+            "requeued": [
+                {
+                    "recordId": "31227c95e5adcbb49e7326a8d3f2393ba11222550249703cd0663303b642af67",
+                    "nostrEventId": "event-failed-fixture-01",
+                    "status": "pending",
+                    "sourcePath": "/var/lib/tenex/daemon/transport-outbox/telegram/failed/31227c95e5adcbb49e7326a8d3f2393ba11222550249703cd0663303b642af67.json",
+                    "targetPath": "/var/lib/tenex/daemon/transport-outbox/telegram/pending/31227c95e5adcbb49e7326a8d3f2393ba11222550249703cd0663303b642af67.json"
+                }
+            ],
+            "drained": [
+                {
+                    "recordId": "31227c95e5adcbb49e7326a8d3f2393ba11222550249703cd0663303b642af67",
+                    "nostrEventId": "event-failed-fixture-01",
+                    "status": "delivered",
+                    "sourcePath": "/var/lib/tenex/daemon/transport-outbox/telegram/pending/31227c95e5adcbb49e7326a8d3f2393ba11222550249703cd0663303b642af67.json",
+                    "targetPath": "/var/lib/tenex/daemon/transport-outbox/telegram/delivered/31227c95e5adcbb49e7326a8d3f2393ba11222550249703cd0663303b642af67.json",
+                    "telegramMessageId": 5001
+                }
+            ],
+            "diagnosticsAfter": {
+                "schemaVersion": 1,
+                "inspectedAt": 1710001001200,
+                "pendingCount": 0,
+                "deliveredCount": 1,
+                "failedCount": 0,
+                "retryableFailedCount": 0,
+                "retryDueCount": 0,
+                "permanentFailedCount": 0,
+                "tmpFileCount": 0,
+                "oldestPending": null,
+                "nextRetryAt": null,
+                "latestFailure": null
+            }
+        }
+    }
+}
