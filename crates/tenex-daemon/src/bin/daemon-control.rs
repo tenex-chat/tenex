@@ -7,10 +7,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tenex_daemon::agent_inventory::read_installed_agent_inventory;
 use tenex_daemon::backend_config::read_backend_config;
-use tenex_daemon::backend_events_tick::{
-    BackendEventsTaskRegistration, BackendEventsTickInput, BackendEventsTickOutcome,
-    BackendEventsTickProject, ensure_backend_events_tasks, tick_backend_events,
+use tenex_daemon::backend_events_maintenance::{
+    BackendEventsMaintenanceInput, BackendEventsMaintenanceOutcome,
+    maintain_backend_events_from_filesystem,
 };
+use tenex_daemon::backend_events_tick::BackendEventsTickProject;
 use tenex_daemon::backend_status_runtime::{
     BackendStatusRuntimeInput, agents_dir, publish_backend_status_from_filesystem,
 };
@@ -24,10 +25,6 @@ use tenex_daemon::daemon_control::{
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
-use tenex_daemon::periodic_tick::PeriodicSchedulerSnapshot;
-use tenex_daemon::periodic_tick_state::{
-    periodic_scheduler_state_path, read_periodic_scheduler_state, write_periodic_scheduler_state,
-};
 use tenex_daemon::project_status_descriptors::{
     ProjectStatusDescriptorReport, read_project_status_descriptors,
 };
@@ -152,19 +149,10 @@ struct BackendEventsEnqueueProjectStatusDiagnostics {
 #[serde(rename_all = "camelCase")]
 struct BackendEventsPeriodicTickDiagnostics {
     schema_version: u32,
-    tenex_base_dir: PathBuf,
-    daemon_dir: PathBuf,
-    now: u64,
-    first_due_at: u64,
-    accepted_at: u64,
-    request_timestamp: u64,
-    scheduler_state_path: PathBuf,
-    registered: BackendEventsTaskRegistration,
-    tick: BackendEventsTickOutcome,
-    persisted_scheduler_snapshot: PeriodicSchedulerSnapshot,
+    #[serde(flatten)]
+    maintenance: BackendEventsMaintenanceOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_descriptor_report: Option<ProjectStatusDescriptorReport>,
-    publish_outbox_after: PublishOutboxDiagnostics,
 }
 
 #[derive(Debug)]
@@ -367,40 +355,21 @@ fn run_backend_events_periodic_tick(
     } else {
         explicit_project.as_slice()
     };
-    let mut scheduler = read_periodic_scheduler_state(&options.daemon_dir)
-        .map_err(|error| runtime_error(error.to_string()))?;
-    let registered = ensure_backend_events_tasks(&mut scheduler, first_due_at, projects)
-        .map_err(|error| runtime_error(error.to_string()))?;
-    let tick = tick_backend_events(BackendEventsTickInput {
-        now,
-        scheduler: &mut scheduler,
+    let maintenance = maintain_backend_events_from_filesystem(BackendEventsMaintenanceInput {
         tenex_base_dir: &options.tenex_base_dir,
         daemon_dir: &options.daemon_dir,
+        now,
+        first_due_at,
         accepted_at,
         request_timestamp,
         projects,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
-    let persisted_scheduler_snapshot =
-        write_periodic_scheduler_state(&options.daemon_dir, &scheduler)
-            .map_err(|error| runtime_error(error.to_string()))?;
-    let publish_outbox_after = inspect_publish_outbox(&options.daemon_dir, accepted_at)
-        .map_err(|error| runtime_error(error.to_string()))?;
 
     Ok(BackendEventsPeriodicTickDiagnostics {
         schema_version: 1,
-        tenex_base_dir: options.tenex_base_dir.clone(),
-        daemon_dir: options.daemon_dir.clone(),
-        now,
-        first_due_at,
-        accepted_at,
-        request_timestamp,
-        scheduler_state_path: periodic_scheduler_state_path(&options.daemon_dir),
-        registered,
-        tick,
-        persisted_scheduler_snapshot,
+        maintenance,
         project_descriptor_report,
-        publish_outbox_after,
     })
 }
 

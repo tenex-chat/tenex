@@ -882,6 +882,12 @@ Landed slices:
 - `crates/tenex-daemon/src/periodic_tick_state.rs` — filesystem persistence for
   `periodic_tick` snapshots under `$TENEX_BASE_DIR/daemon/periodic-scheduler.json`.
   Repeated one-shot ticks now preserve next deadlines across Rust process exits.
+- `crates/tenex-daemon/src/backend_events_maintenance.rs` — reusable
+  filesystem maintenance boundary that loads scheduler state, registers
+  backend/project status tasks, runs one backend-events tick, persists the
+  advanced scheduler snapshot, and returns publish-outbox diagnostics. The
+  `daemon-control backend-events-periodic-tick` command now delegates through
+  this library path.
 - `crates/tenex-daemon/src/bin/daemon-control.rs` —
   `backend-events-enqueue-status`,
   `backend-events-enqueue-project-status`, `backend-events-periodic-tick`, and
@@ -1108,6 +1114,10 @@ Landed slices:
   supports `--discover-projects`, reading active
   `$TENEX_BASE_DIR/projects/<project-dTag>/project.json` descriptors instead
   of requiring project owner/tag CLI arguments.
+- `crates/tenex-daemon/src/backend_events_maintenance.rs` — caller-facing
+  maintenance boundary around the backend-events tick and scheduler-state
+  persistence. This is the unit the future Rust daemon loop should invoke for
+  backend-authored status work.
 
 Scope:
 

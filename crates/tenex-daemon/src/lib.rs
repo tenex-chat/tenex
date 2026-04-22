@@ -3,6 +3,7 @@ pub mod agent_inventory;
 pub mod backend_config;
 pub mod backend_event_publish;
 pub mod backend_events;
+pub mod backend_events_maintenance;
 pub mod backend_events_tick;
 pub mod backend_heartbeat_latch;
 pub mod backend_signer;
