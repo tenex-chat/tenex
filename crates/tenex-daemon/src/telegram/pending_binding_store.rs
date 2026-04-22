@@ -65,9 +65,7 @@ pub enum PendingBindingError {
     Io(#[from] io::Error),
     #[error("pending binding json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error(
-        "pending binding schema version {found} is not supported (expected {expected})"
-    )]
+    #[error("pending binding schema version {found} is not supported (expected {expected})")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
     #[error("pending binding writer must not be empty")]
     MissingWriter,
@@ -208,11 +206,11 @@ pub fn remember_pending(
     record: PendingBindingRecord,
 ) -> Result<PendingBindingRecord, PendingBindingError> {
     let daemon_dir = daemon_dir.as_ref();
-    let mut snapshot = load_snapshot(daemon_dir)?
-        .unwrap_or_else(|| new_snapshot(now_ms, writer_version));
-    snapshot.bindings.retain(|existing| {
-        existing.token != record.token && !is_expired(existing, now_ms, ttl_ms)
-    });
+    let mut snapshot =
+        load_snapshot(daemon_dir)?.unwrap_or_else(|| new_snapshot(now_ms, writer_version));
+    snapshot
+        .bindings
+        .retain(|existing| existing.token != record.token && !is_expired(existing, now_ms, ttl_ms));
     snapshot.bindings.push(record.clone());
     snapshot.writer = TELEGRAM_PENDING_BINDING_WRITER.to_string();
     snapshot.writer_version = writer_version.to_string();
@@ -288,8 +286,14 @@ mod tests {
             project_title: Some("Project Alpha".to_string()),
             requested_at: now_ms,
         };
-        remember_pending(dir, "test@0.1.0", DEFAULT_PENDING_BINDING_TTL_MS, now_ms, record.clone())
-            .expect("seed");
+        remember_pending(
+            dir,
+            "test@0.1.0",
+            DEFAULT_PENDING_BINDING_TTL_MS,
+            now_ms,
+            record.clone(),
+        )
+        .expect("seed");
         record
     }
 
@@ -300,7 +304,10 @@ mod tests {
         let record = seed(tmp.path(), now);
 
         let snapshot = load_snapshot(tmp.path()).expect("load").expect("present");
-        assert_eq!(snapshot.schema_version, TELEGRAM_PENDING_BINDING_SCHEMA_VERSION);
+        assert_eq!(
+            snapshot.schema_version,
+            TELEGRAM_PENDING_BINDING_SCHEMA_VERSION
+        );
         assert_eq!(snapshot.writer, TELEGRAM_PENDING_BINDING_WRITER);
         assert_eq!(snapshot.bindings.len(), 1);
         assert_eq!(snapshot.bindings[0], record);
@@ -416,9 +423,13 @@ mod tests {
         let now = 1_700_000_000_000;
         seed(tmp.path(), now);
         let expired_now = now + DEFAULT_PENDING_BINDING_TTL_MS + 1;
-        let out =
-            peek_pending(tmp.path(), DEFAULT_PENDING_BINDING_TTL_MS, expired_now, "abc")
-                .expect("peek");
+        let out = peek_pending(
+            tmp.path(),
+            DEFAULT_PENDING_BINDING_TTL_MS,
+            expired_now,
+            "abc",
+        )
+        .expect("peek");
         assert!(out.is_none());
     }
 

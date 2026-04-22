@@ -607,8 +607,14 @@ mod tests {
             .iter()
             .map(|record| (record.agent_pubkey.clone(), record.project_id.clone()))
             .collect();
-        assert_eq!(by_agent.get(&agent_a).map(String::as_str), Some("project-alpha"));
-        assert_eq!(by_agent.get(&agent_b).map(String::as_str), Some("project-beta"));
+        assert_eq!(
+            by_agent.get(&agent_a).map(String::as_str),
+            Some("project-alpha")
+        );
+        assert_eq!(
+            by_agent.get(&agent_b).map(String::as_str),
+            Some("project-beta")
+        );
         fs::remove_dir_all(dir).ok();
     }
 

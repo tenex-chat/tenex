@@ -88,9 +88,7 @@ pub enum ConfigSessionError {
     Io(#[from] io::Error),
     #[error("config session json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error(
-        "config session schema version {found} is not supported (expected {expected})"
-    )]
+    #[error("config session schema version {found} is not supported (expected {expected})")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
     #[error("config session writer must not be empty")]
     MissingWriter,
@@ -364,14 +362,9 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let session = sample_session("1001", "abc");
         save_session(tmp.path(), "test@0.1.0", 1_000, session.clone()).expect("save");
-        let loaded = load_session(
-            tmp.path(),
-            "1001",
-            DEFAULT_CONFIG_SESSION_TTL_MS,
-            1_000,
-        )
-        .expect("load")
-        .expect("present");
+        let loaded = load_session(tmp.path(), "1001", DEFAULT_CONFIG_SESSION_TTL_MS, 1_000)
+            .expect("load")
+            .expect("present");
         assert_eq!(loaded, session);
 
         let path = config_session_path(tmp.path(), "1001");
@@ -409,31 +402,23 @@ mod tests {
     #[test]
     fn find_session_by_id_iterates_directory() {
         let tmp = tempdir().expect("tempdir");
-        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "alpha"))
-            .expect("first");
-        save_session(tmp.path(), "t@0", 1_000, sample_session("-2002", "beta"))
-            .expect("second");
+        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "alpha")).expect("first");
+        save_session(tmp.path(), "t@0", 1_000, sample_session("-2002", "beta")).expect("second");
         let hit = find_session_by_id(tmp.path(), "beta", DEFAULT_CONFIG_SESSION_TTL_MS, 1_500)
             .expect("find")
             .expect("hit");
         assert_eq!(hit.id, "beta");
         assert_eq!(hit.chat_id, "-2002");
 
-        let miss = find_session_by_id(
-            tmp.path(),
-            "gamma",
-            DEFAULT_CONFIG_SESSION_TTL_MS,
-            1_500,
-        )
-        .expect("miss");
+        let miss = find_session_by_id(tmp.path(), "gamma", DEFAULT_CONFIG_SESSION_TTL_MS, 1_500)
+            .expect("miss");
         assert!(miss.is_none());
     }
 
     #[test]
     fn clear_session_removes_file() {
         let tmp = tempdir().expect("tempdir");
-        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "abc"))
-            .expect("save");
+        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "abc")).expect("save");
         clear_session(tmp.path(), "1001").expect("clear");
         let path = config_session_path(tmp.path(), "1001");
         assert!(!path.exists());
@@ -442,10 +427,8 @@ mod tests {
     #[test]
     fn save_preserves_created_at_and_refreshes_updated_at() {
         let tmp = tempdir().expect("tempdir");
-        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "abc"))
-            .expect("first");
-        save_session(tmp.path(), "t@0", 2_500, sample_session("1001", "abc"))
-            .expect("second");
+        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "abc")).expect("first");
+        save_session(tmp.path(), "t@0", 2_500, sample_session("1001", "abc")).expect("second");
         let raw = fs::read_to_string(config_session_path(tmp.path(), "1001")).unwrap();
         let snapshot: ConfigSessionSnapshot = serde_json::from_str(&raw).unwrap();
         assert_eq!(snapshot.created_at, 1_000);
@@ -480,16 +463,15 @@ mod tests {
     #[test]
     fn missing_file_returns_none() {
         let tmp = tempdir().expect("tempdir");
-        let loaded = load_session(tmp.path(), "1001", DEFAULT_CONFIG_SESSION_TTL_MS, 1_000)
-            .expect("load");
+        let loaded =
+            load_session(tmp.path(), "1001", DEFAULT_CONFIG_SESSION_TTL_MS, 1_000).expect("load");
         assert!(loaded.is_none());
     }
 
     #[test]
     fn save_leaves_no_stray_tmp_files() {
         let tmp = tempdir().expect("tempdir");
-        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "abc"))
-            .expect("save");
+        save_session(tmp.path(), "t@0", 1_000, sample_session("1001", "abc")).expect("save");
         let tmp_entries: Vec<_> = fs::read_dir(tmp_dir(tmp.path()))
             .expect("tmp dir")
             .filter_map(|entry| entry.ok())

@@ -740,10 +740,7 @@ where
         CommandDispatchResult::Handled => true,
         CommandDispatchResult::NotACommand => false,
         CommandDispatchResult::Error(error) => {
-            log_bot_warning(
-                &bot.label,
-                &format!("command dispatch failed: {error}"),
-            );
+            log_bot_warning(&bot.label, &format!("command dispatch failed: {error}"));
             // Treat the error as "meta-UI handled" so the normalizer
             // doesn't re-process a `/model` typed into an agent chat.
             true

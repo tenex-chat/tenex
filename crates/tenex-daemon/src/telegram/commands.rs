@@ -54,7 +54,7 @@ use crate::telegram::client::{
     InlineKeyboardMarkup, SendMessageParams, TelegramClientError,
 };
 use crate::telegram::config_session_store::{
-    ConfigSessionKind, ConfigSessionRecord, ConfigSessionError, DEFAULT_CONFIG_SESSION_TTL_MS,
+    ConfigSessionError, ConfigSessionKind, ConfigSessionRecord, DEFAULT_CONFIG_SESSION_TTL_MS,
     clear_session, find_session_by_id, save_session,
 };
 use crate::telegram::pending_binding_store::{
@@ -200,8 +200,12 @@ where
 
     let outcome = match command.name {
         CommandName::Start => handle_start(ctx, &facts, command.remainder),
-        CommandName::Model => handle_config_menu(ctx, &facts, ConfigSessionKind::Model, command.remainder),
-        CommandName::Config => handle_config_menu(ctx, &facts, ConfigSessionKind::Tools, command.remainder),
+        CommandName::Model => {
+            handle_config_menu(ctx, &facts, ConfigSessionKind::Model, command.remainder)
+        }
+        CommandName::Config => {
+            handle_config_menu(ctx, &facts, ConfigSessionKind::Tools, command.remainder)
+        }
         CommandName::New => handle_new(ctx, &facts, command.remainder),
     };
     match outcome {
@@ -225,7 +229,10 @@ where
     let Some(id) = callback.get("id").and_then(Value::as_str) else {
         return CommandDispatchResult::NotACommand;
     };
-    let data = callback.get("data").and_then(Value::as_str).unwrap_or_default();
+    let data = callback
+        .get("data")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let Some((session_id, action)) = parse_callback_data(data) else {
         return CommandDispatchResult::NotACommand;
     };
@@ -309,7 +316,10 @@ struct ParsedCommand<'a> {
     remainder: &'a str,
 }
 
-fn parse_command_token<'a>(content: &'a str, bot_username: Option<&str>) -> Option<ParsedCommand<'a>> {
+fn parse_command_token<'a>(
+    content: &'a str,
+    bot_username: Option<&str>,
+) -> Option<ParsedCommand<'a>> {
     if !content.starts_with('/') {
         return None;
     }
@@ -460,8 +470,7 @@ where
         return Ok(());
     }
 
-    let channel_id =
-        create_telegram_channel_id(&facts.chat_id_str, facts.message_thread_id);
+    let channel_id = create_telegram_channel_id(&facts.chat_id_str, facts.message_thread_id);
     write_transport_binding(
         ctx.data_dir,
         RuntimeTransport::Telegram,
@@ -590,33 +599,36 @@ where
         ctx.now_ms,
     )?
     else {
-        ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-            callback_query_id: callback_query_id.to_string(),
-            text: Some("This config menu expired. Run the command again.".to_string()),
-            show_alert: true,
-        })?;
+        ctx.client
+            .answer_callback_query(AnswerCallbackQueryParams {
+                callback_query_id: callback_query_id.to_string(),
+                text: Some("This config menu expired. Run the command again.".to_string()),
+                show_alert: true,
+            })?;
         return Ok(());
     };
 
     if let Some(sender) = sender_id
         && format!("telegram:user:{sender}") != session.principal_id
     {
-        ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-            callback_query_id: callback_query_id.to_string(),
-            text: Some("Only the user who opened this menu can use it.".to_string()),
-            show_alert: true,
-        })?;
+        ctx.client
+            .answer_callback_query(AnswerCallbackQueryParams {
+                callback_query_id: callback_query_id.to_string(),
+                text: Some("Only the user who opened this menu can use it.".to_string()),
+                show_alert: true,
+            })?;
         return Ok(());
     }
 
     match action {
         CallbackAction::Cancel => {
             clear_session(ctx.daemon_dir, &session.chat_id)?;
-            ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-                callback_query_id: callback_query_id.to_string(),
-                text: Some("Cancelled".to_string()),
-                show_alert: false,
-            })?;
+            ctx.client
+                .answer_callback_query(AnswerCallbackQueryParams {
+                    callback_query_id: callback_query_id.to_string(),
+                    text: Some("Cancelled".to_string()),
+                    show_alert: false,
+                })?;
             edit_terminal(ctx, &session, "Configuration menu cancelled.")?;
         }
         CallbackAction::Next | CallbackAction::Previous => {
@@ -632,21 +644,28 @@ where
             let max_page = list_len.div_ceil(PAGE_SIZE).saturating_sub(1) as i64;
             let next_page = (session.current_page as i64 + delta).clamp(0, max_page.max(0));
             session.current_page = next_page as u32;
-            save_session(ctx.daemon_dir, ctx.writer_version, ctx.now_ms, session.clone())?;
-            ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-                callback_query_id: callback_query_id.to_string(),
-                text: None,
-                show_alert: false,
-            })?;
+            save_session(
+                ctx.daemon_dir,
+                ctx.writer_version,
+                ctx.now_ms,
+                session.clone(),
+            )?;
+            ctx.client
+                .answer_callback_query(AnswerCallbackQueryParams {
+                    callback_query_id: callback_query_id.to_string(),
+                    text: None,
+                    show_alert: false,
+                })?;
             edit_session(ctx, &session)?;
         }
         CallbackAction::SelectModel { index } => {
             let Some(next_model) = session.available_models.get(*index).cloned() else {
-                ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-                    callback_query_id: callback_query_id.to_string(),
-                    text: Some("That model is no longer available.".to_string()),
-                    show_alert: true,
-                })?;
+                ctx.client
+                    .answer_callback_query(AnswerCallbackQueryParams {
+                        callback_query_id: callback_query_id.to_string(),
+                        text: Some("That model is no longer available.".to_string()),
+                        show_alert: true,
+                    })?;
                 return Ok(());
             };
             publish_agent_config_update(
@@ -657,11 +676,12 @@ where
                 &session.selected_tools,
             )?;
             clear_session(ctx.daemon_dir, &session.chat_id)?;
-            ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-                callback_query_id: callback_query_id.to_string(),
-                text: Some(format!("Applied model: {next_model}")),
-                show_alert: false,
-            })?;
+            ctx.client
+                .answer_callback_query(AnswerCallbackQueryParams {
+                    callback_query_id: callback_query_id.to_string(),
+                    text: Some(format!("Applied model: {next_model}")),
+                    show_alert: false,
+                })?;
             let text = format!(
                 "Updated {}.\nModel: {}\nTools: {}",
                 session.agent_name,
@@ -672,14 +692,15 @@ where
         }
         CallbackAction::ToggleTool { index } => {
             let Some(tool_name) = session.available_tools.get(*index).cloned() else {
-                ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-                    callback_query_id: callback_query_id.to_string(),
-                    text: Some("That tool is no longer available.".to_string()),
-                    show_alert: true,
-                })?;
+                ctx.client
+                    .answer_callback_query(AnswerCallbackQueryParams {
+                        callback_query_id: callback_query_id.to_string(),
+                        text: Some("That tool is no longer available.".to_string()),
+                        show_alert: true,
+                    })?;
                 return Ok(());
             };
-            let currently_selected = session.selected_tools.iter().any(|t| *t == tool_name);
+            let currently_selected = session.selected_tools.contains(&tool_name);
             let mut next_set: Vec<String> = session
                 .selected_tools
                 .iter()
@@ -696,18 +717,24 @@ where
                 .filter(|available| next_set.iter().any(|entry| entry == *available))
                 .cloned()
                 .collect();
-            save_session(ctx.daemon_dir, ctx.writer_version, ctx.now_ms, session.clone())?;
-            let is_enabled_now = session.selected_tools.iter().any(|t| *t == tool_name);
+            save_session(
+                ctx.daemon_dir,
+                ctx.writer_version,
+                ctx.now_ms,
+                session.clone(),
+            )?;
+            let is_enabled_now = session.selected_tools.contains(&tool_name);
             let toast = if is_enabled_now {
                 format!("Enabled {tool_name}")
             } else {
                 format!("Disabled {tool_name}")
             };
-            ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-                callback_query_id: callback_query_id.to_string(),
-                text: Some(toast),
-                show_alert: false,
-            })?;
+            ctx.client
+                .answer_callback_query(AnswerCallbackQueryParams {
+                    callback_query_id: callback_query_id.to_string(),
+                    text: Some(toast),
+                    show_alert: false,
+                })?;
             edit_session(ctx, &session)?;
         }
         CallbackAction::Save => {
@@ -719,11 +746,12 @@ where
                 &session.selected_tools,
             )?;
             clear_session(ctx.daemon_dir, &session.chat_id)?;
-            ctx.client.answer_callback_query(AnswerCallbackQueryParams {
-                callback_query_id: callback_query_id.to_string(),
-                text: Some("Saved".to_string()),
-                show_alert: false,
-            })?;
+            ctx.client
+                .answer_callback_query(AnswerCallbackQueryParams {
+                    callback_query_id: callback_query_id.to_string(),
+                    text: Some("Saved".to_string()),
+                    show_alert: false,
+                })?;
             let text = format!(
                 "Updated {}.\nModel: {}\nTools: {}",
                 session.agent_name,
@@ -1095,16 +1123,22 @@ fn load_current_agent_snapshot(
         .get("projectOverrides")
         .and_then(|v| v.get(project_d_tag));
     let model = project_override
-        .and_then(|config| config.get("model").and_then(Value::as_str).map(str::to_string))
+        .and_then(|config| {
+            config
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .or(default_model);
-    let tools = match project_override.and_then(|config| config.get("tools").and_then(Value::as_array)) {
-        Some(values) => values
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect(),
-        None => default_tools,
-    };
+    let tools =
+        match project_override.and_then(|config| config.get("tools").and_then(Value::as_array)) {
+            Some(values) => values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            None => default_tools,
+        };
     Ok(AgentSnapshot { model, tools })
 }
 
@@ -1221,9 +1255,7 @@ use std::str::FromStr;
 mod tests {
     use super::*;
     use crate::telegram::client::SentChat;
-    use crate::telegram::pending_binding_store::{
-        PendingBindingRecord, remember_pending,
-    };
+    use crate::telegram::pending_binding_store::{PendingBindingRecord, remember_pending};
     use secp256k1::{Keypair, Secp256k1, SecretKey, Signing};
     use serde_json::json;
     use std::cell::RefCell;
@@ -1448,7 +1480,12 @@ mod tests {
         })
     }
 
-    fn callback_update(session_id: &str, action: &str, index: Option<usize>, sender_id: i64) -> Value {
+    fn callback_update(
+        session_id: &str,
+        action: &str,
+        index: Option<usize>,
+        sender_id: i64,
+    ) -> Value {
         let data = match index {
             Some(i) => format!("{CALLBACK_PREFIX}:{session_id}:{action}:{i}"),
             None => format!("{CALLBACK_PREFIX}:{session_id}:{action}"),
@@ -1535,7 +1572,10 @@ mod tests {
         assert!(matches!(result, CommandDispatchResult::Handled));
         let sends = client.sends.borrow();
         assert_eq!(sends.len(), 1);
-        assert_eq!(sends[0].params.text, TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE);
+        assert_eq!(
+            sends[0].params.text,
+            TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE
+        );
     }
 
     #[test]
@@ -1561,7 +1601,10 @@ mod tests {
         let _ = dispatch_command(&ctx, &update);
         let sends = client.sends.borrow();
         assert_eq!(sends.len(), 1);
-        assert_eq!(sends[0].params.text, TELEGRAM_NEW_CONVERSATION_USAGE_MESSAGE);
+        assert_eq!(
+            sends[0].params.text,
+            TELEGRAM_NEW_CONVERSATION_USAGE_MESSAGE
+        );
     }
 
     #[test]
@@ -1772,7 +1815,10 @@ mod tests {
 
         let answers = client.answers.borrow();
         assert_eq!(answers.len(), 1);
-        assert_eq!(answers[0].params.text.as_deref(), Some("Applied model: model-b"));
+        assert_eq!(
+            answers[0].params.text.as_deref(),
+            Some("Applied model: model-b")
+        );
         let edits = client.edits.borrow();
         assert_eq!(edits.len(), 1);
         assert!(edits[0].params.text.contains("Updated Alpha"));
@@ -1826,7 +1872,14 @@ mod tests {
         let answers = client.answers.borrow();
         assert_eq!(answers.len(), 1);
         assert!(answers[0].params.show_alert);
-        assert!(answers[0].params.text.as_deref().unwrap().contains("Only the user"));
+        assert!(
+            answers[0]
+                .params
+                .text
+                .as_deref()
+                .unwrap()
+                .contains("Only the user")
+        );
     }
 
     #[test]
@@ -1857,7 +1910,12 @@ mod tests {
         let answers = client.answers.borrow();
         assert_eq!(answers.len(), 1);
         assert!(
-            answers[0].params.text.as_deref().unwrap().contains("expired"),
+            answers[0]
+                .params
+                .text
+                .as_deref()
+                .unwrap()
+                .contains("expired"),
             "expected expired alert, got {:?}",
             answers[0].params.text
         );
