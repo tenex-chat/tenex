@@ -71,6 +71,88 @@ describe("daemon command", () => {
         expect(logSpy).toHaveBeenCalledWith("Rust daemon started (PID: 12345)");
     });
 
+    it("uses Cargo Rust binaries by default instead of a TypeScript daemon runtime", async () => {
+        const originalDaemonBin = process.env.TENEX_DAEMON_BIN;
+        const originalDaemonControlBin = process.env.TENEX_DAEMON_CONTROL_BIN;
+        delete process.env.TENEX_DAEMON_BIN;
+        delete process.env.TENEX_DAEMON_CONTROL_BIN;
+
+        try {
+            const calls: Array<{ command: string; args: string[]; stdio?: string }> = [];
+            const detachedCalls: Array<{ command: string; args: string[] }> = [];
+            const runner: SpawnRunner = mock(async (command, args, options) => {
+                calls.push({ command, args, stdio: options.stdio });
+                return {
+                    stdout: JSON.stringify({ kind: "allowed", lock_state: { kind: "missing" } }),
+                    stderr: "",
+                    exitCode: 0,
+                };
+            });
+            const detachedRunner: DetachedRunner = mock(async (command, args) => {
+                detachedCalls.push({ command, args });
+                return { pid: 12345 };
+            });
+            const adapter = new DaemonRustAdapter({
+                cwd: "/repo",
+                env: {},
+                runner,
+                detachedRunner,
+            });
+            const command = createDaemonCommand(adapter);
+
+            await command.parseAsync(["--tenex-base-dir", "/tmp/tenex-base"], { from: "user" });
+
+            expect(calls).toEqual([{
+                command: "cargo",
+                args: [
+                    "run",
+                    "-q",
+                    "-p",
+                    "tenex-daemon",
+                    "--bin",
+                    "daemon-control",
+                    "--",
+                    "start-plan",
+                    "--daemon-dir",
+                    "/tmp/tenex-base/daemon",
+                ],
+                stdio: "pipe",
+            }]);
+            expect(detachedCalls).toEqual([{
+                command: "cargo",
+                args: [
+                    "run",
+                    "-q",
+                    "-p",
+                    "tenex-daemon",
+                    "--bin",
+                    "daemon",
+                    "--",
+                    "--tenex-base-dir",
+                    "/tmp/tenex-base",
+                ],
+            }]);
+
+            const launchedRuntime = JSON.stringify([...calls, ...detachedCalls]);
+            expect(launchedRuntime).not.toContain("bun");
+            expect(launchedRuntime).not.toContain(".ts");
+            expect(launchedRuntime).not.toContain("src/daemon");
+            expect(launchedRuntime).not.toContain("src/event-handler");
+        } finally {
+            if (originalDaemonBin === undefined) {
+                delete process.env.TENEX_DAEMON_BIN;
+            } else {
+                process.env.TENEX_DAEMON_BIN = originalDaemonBin;
+            }
+
+            if (originalDaemonControlBin === undefined) {
+                delete process.env.TENEX_DAEMON_CONTROL_BIN;
+            } else {
+                process.env.TENEX_DAEMON_CONTROL_BIN = originalDaemonControlBin;
+            }
+        }
+    });
+
     it("runs the Rust daemon binary directly for foreground mode", async () => {
         const calls: Array<{ command: string; args: string[]; stdio?: string }> = [];
         const detachedRunner: DetachedRunner = mock(async () => {
