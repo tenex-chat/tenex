@@ -1,6 +1,11 @@
-use std::io;
+use std::collections::HashSet;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use secp256k1::XOnlyPublicKey;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -106,4 +111,509 @@ pub struct AgentDefinitionWatcherDiagnostics {
 
 pub fn agent_definitions_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
     daemon_dir.as_ref().join(AGENT_DEFINITIONS_FILE_NAME)
+}
+
+pub fn write_agent_definitions(
+    daemon_dir: impl AsRef<Path>,
+    snapshot: &AgentDefinitionSnapshot,
+) -> AgentDefinitionWatcherResult<AgentDefinitionSnapshot> {
+    validate_writer_fields(snapshot)?;
+
+    let mut normalized = snapshot.clone();
+    normalized.schema_version = AGENT_DEFINITION_WATCHER_SCHEMA_VERSION;
+    normalize_entries(&mut normalized.definitions)?;
+
+    let daemon_dir = daemon_dir.as_ref();
+    fs::create_dir_all(daemon_dir)?;
+
+    let target_path = agent_definitions_path(daemon_dir);
+    let tmp_path = daemon_dir.join(format!(
+        "{}.tmp.{}.{}",
+        AGENT_DEFINITIONS_FILE_NAME,
+        std::process::id(),
+        now_nanos()
+    ));
+
+    let outcome = (|| {
+        write_snapshot_file(&tmp_path, &normalized)?;
+        fs::rename(&tmp_path, &target_path)?;
+        sync_parent_dir(&target_path)?;
+        Ok(normalized.clone())
+    })();
+
+    if outcome.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
+    outcome
+}
+
+fn validate_writer_fields(
+    snapshot: &AgentDefinitionSnapshot,
+) -> AgentDefinitionWatcherResult<()> {
+    if snapshot.writer.is_empty() {
+        return Err(AgentDefinitionWatcherError::MissingWriter);
+    }
+    if snapshot.writer_version.is_empty() {
+        return Err(AgentDefinitionWatcherError::MissingWriterVersion);
+    }
+    if snapshot.updated_at == 0 {
+        return Err(AgentDefinitionWatcherError::InvalidUpdatedAt);
+    }
+    Ok(())
+}
+
+fn normalize_entries(
+    entries: &mut [AgentDefinitionEntry],
+) -> AgentDefinitionWatcherResult<()> {
+    let mut seen_event_ids: HashSet<String> = HashSet::with_capacity(entries.len());
+    let mut seen_agent_slugs: HashSet<(String, String)> = HashSet::with_capacity(entries.len());
+
+    for entry in entries.iter_mut() {
+        validate_entry(entry)?;
+
+        if !seen_event_ids.insert(entry.event_id.clone()) {
+            return Err(AgentDefinitionWatcherError::DuplicateEventId {
+                event_id: entry.event_id.clone(),
+            });
+        }
+        let key = (entry.agent_pubkey.clone(), entry.slug.clone());
+        if !seen_agent_slugs.insert(key) {
+            return Err(AgentDefinitionWatcherError::DuplicateAgentSlug {
+                agent_pubkey: entry.agent_pubkey.clone(),
+                slug: entry.slug.clone(),
+            });
+        }
+
+        entry.tools.sort();
+        entry.tools.dedup();
+        entry.skills.sort();
+        entry.skills.dedup();
+        entry.mcp_servers.sort();
+        entry.mcp_servers.dedup();
+    }
+
+    entries.sort_by(|left, right| {
+        left.agent_pubkey
+            .cmp(&right.agent_pubkey)
+            .then_with(|| left.slug.cmp(&right.slug))
+    });
+
+    Ok(())
+}
+
+fn validate_entry(entry: &AgentDefinitionEntry) -> AgentDefinitionWatcherResult<()> {
+    if !is_valid_event_id_hex(&entry.event_id) {
+        return Err(AgentDefinitionWatcherError::InvalidEventId {
+            event_id: entry.event_id.clone(),
+        });
+    }
+    if XOnlyPublicKey::from_str(&entry.author_pubkey).is_err() {
+        return Err(AgentDefinitionWatcherError::InvalidAuthorPubkey {
+            event_id: entry.event_id.clone(),
+            pubkey: entry.author_pubkey.clone(),
+        });
+    }
+    if XOnlyPublicKey::from_str(&entry.agent_pubkey).is_err() {
+        return Err(AgentDefinitionWatcherError::InvalidAgentPubkey {
+            event_id: entry.event_id.clone(),
+            pubkey: entry.agent_pubkey.clone(),
+        });
+    }
+    if entry.slug.is_empty() {
+        return Err(AgentDefinitionWatcherError::EmptySlug {
+            event_id: entry.event_id.clone(),
+        });
+    }
+    if entry.created_at == 0 {
+        return Err(AgentDefinitionWatcherError::InvalidCreatedAt {
+            event_id: entry.event_id.clone(),
+        });
+    }
+    if entry.last_observed_at == 0 {
+        return Err(AgentDefinitionWatcherError::InvalidLastObservedAt {
+            event_id: entry.event_id.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn is_valid_event_id_hex(candidate: &str) -> bool {
+    candidate.len() == EVENT_ID_HEX_LENGTH
+        && candidate
+            .chars()
+            .all(|character| matches!(character, '0'..='9' | 'a'..='f'))
+}
+
+fn write_snapshot_file(
+    path: &Path,
+    snapshot: &AgentDefinitionSnapshot,
+) -> AgentDefinitionWatcherResult<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    serde_json::to_writer_pretty(&mut file, snapshot)?;
+    file.write_all(b"\n")?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> AgentDefinitionWatcherResult<()> {
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+fn now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secp256k1::{Keypair, Secp256k1, SecretKey};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_temp_daemon_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must be after UNIX_EPOCH")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let daemon_dir = std::env::temp_dir().join(format!(
+            "tenex-agent-definition-watcher-{}-{counter}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&daemon_dir).expect("temp daemon dir must be created");
+        daemon_dir
+    }
+
+    fn full_hex(byte: u8) -> String {
+        format!("{byte:02x}").repeat(32)
+    }
+
+    fn xonly_hex_from_seed(fill_byte: u8) -> String {
+        let secp = Secp256k1::new();
+        let secret = SecretKey::from_byte_array([fill_byte; 32]).expect("valid secret");
+        let keypair = Keypair::from_secret_key(&secp, &secret);
+        let (xonly, _) = keypair.x_only_public_key();
+        hex::encode(xonly.serialize())
+    }
+
+    fn sample_entry(agent_byte: u8, slug: &str, created_at: u64) -> AgentDefinitionEntry {
+        AgentDefinitionEntry {
+            event_id: full_hex(agent_byte ^ 0x01),
+            author_pubkey: xonly_hex_from_seed(agent_byte ^ 0x40),
+            agent_pubkey: xonly_hex_from_seed(agent_byte),
+            slug: slug.to_string(),
+            name: Some(format!("Agent {agent_byte:02x}")),
+            description: Some("An agent".to_string()),
+            instructions: Some("Be helpful".to_string()),
+            tools: Vec::new(),
+            skills: Vec::new(),
+            mcp_servers: Vec::new(),
+            created_at,
+            last_observed_at: created_at + 10,
+        }
+    }
+
+    fn sample_snapshot(
+        updated_at: u64,
+        definitions: Vec<AgentDefinitionEntry>,
+    ) -> AgentDefinitionSnapshot {
+        AgentDefinitionSnapshot {
+            schema_version: AGENT_DEFINITION_WATCHER_SCHEMA_VERSION,
+            writer: AGENT_DEFINITION_WATCHER_WRITER.to_string(),
+            writer_version: "test-version".to_string(),
+            updated_at,
+            definitions,
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_event_id_on_write() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        entry.event_id = "ZZ".to_string();
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry.clone()]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("invalid eventId must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::InvalidEventId { event_id } if event_id == entry.event_id
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_malformed_author_pubkey_on_write() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        entry.author_pubkey = "not-a-pubkey".to_string();
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("invalid authorPubkey must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::InvalidAuthorPubkey { .. }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_malformed_agent_pubkey_on_write() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        let base = xonly_hex_from_seed(0x11);
+        entry.agent_pubkey = format!("{}ZZ", &base[..62]);
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("invalid agentPubkey must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::InvalidAgentPubkey { .. }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_empty_slug_on_write() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        entry.slug = String::new();
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("empty slug must fail");
+
+        assert!(matches!(error, AgentDefinitionWatcherError::EmptySlug { .. }));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_zero_created_at_on_write() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        entry.created_at = 0;
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("zero createdAt must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::InvalidCreatedAt { .. }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_zero_last_observed_at_on_write() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        entry.last_observed_at = 0;
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("zero lastObservedAt must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::InvalidLastObservedAt { .. }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_zero_updated_at_on_write() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        let snapshot = sample_snapshot(0, vec![entry]);
+
+        let error =
+            write_agent_definitions(&daemon_dir, &snapshot).expect_err("zero updatedAt must fail");
+
+        assert!(matches!(error, AgentDefinitionWatcherError::InvalidUpdatedAt));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_missing_writer() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+        snapshot.writer.clear();
+
+        let error =
+            write_agent_definitions(&daemon_dir, &snapshot).expect_err("missing writer must fail");
+
+        assert!(matches!(error, AgentDefinitionWatcherError::MissingWriter));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_missing_writer_version() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+        snapshot.writer_version.clear();
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("missing writerVersion must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::MissingWriterVersion
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_duplicate_agent_slug_pair() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let first = sample_entry(0x11, "primary", 1_710_000_000_010);
+        let mut second = sample_entry(0x11, "primary", 1_710_000_000_020);
+        second.event_id = full_hex(0x99);
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![first, second]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("duplicate (agentPubkey, slug) must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::DuplicateAgentSlug { .. }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn rejects_duplicate_event_id() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let first = sample_entry(0x11, "primary", 1_710_000_000_010);
+        let mut second = sample_entry(0x22, "secondary", 1_710_000_000_020);
+        second.event_id = first.event_id.clone();
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![first, second]);
+
+        let error = write_agent_definitions(&daemon_dir, &snapshot)
+            .expect_err("duplicate eventId must fail");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::DuplicateEventId { .. }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn write_sorts_entry_sublists_and_dedupes() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
+        entry.tools = vec![
+            "zeta".to_string(),
+            "alpha".to_string(),
+            "alpha".to_string(),
+        ];
+        entry.skills = vec![full_hex(0xbb), full_hex(0xaa), full_hex(0xbb)];
+        entry.mcp_servers = vec!["mcp-b".to_string(), "mcp-a".to_string()];
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
+
+        let written =
+            write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+
+        assert_eq!(written.definitions[0].tools, vec!["alpha", "zeta"]);
+        assert_eq!(
+            written.definitions[0].skills,
+            vec![full_hex(0xaa), full_hex(0xbb)]
+        );
+        assert_eq!(
+            written.definitions[0].mcp_servers,
+            vec!["mcp-a".to_string(), "mcp-b".to_string()]
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn write_sorts_definitions_by_agent_pubkey_then_slug() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut left = sample_entry(0x33, "beta", 1_710_000_000_010);
+        let mut middle = sample_entry(0x33, "alpha", 1_710_000_000_020);
+        let right = sample_entry(0x22, "omega", 1_710_000_000_030);
+        left.event_id = full_hex(0xaa);
+        middle.event_id = full_hex(0xbb);
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![left, middle, right]);
+
+        let written =
+            write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+
+        let observed: Vec<(String, String)> = written
+            .definitions
+            .iter()
+            .map(|entry| (entry.agent_pubkey.clone(), entry.slug.clone()))
+            .collect();
+
+        let mut expected = observed.clone();
+        expected.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+
+        assert_eq!(observed, expected);
+        assert_eq!(observed.len(), 3);
+        assert!(
+            observed
+                .iter()
+                .any(|(pubkey, slug)| pubkey == &xonly_hex_from_seed(0x33) && slug == "alpha")
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn atomic_write_leaves_no_stray_tmp_file() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+
+        write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+
+        let remaining: Vec<_> = fs::read_dir(&daemon_dir)
+            .expect("daemon dir must exist after write")
+            .collect::<Result<_, _>>()
+            .expect("entries must iterate");
+        for entry in &remaining {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            assert!(
+                !name_str.starts_with(&format!("{AGENT_DEFINITIONS_FILE_NAME}.tmp.")),
+                "stray tmp file present: {name_str}"
+            );
+        }
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
 }
