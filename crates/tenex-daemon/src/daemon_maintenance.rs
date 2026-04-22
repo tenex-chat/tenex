@@ -231,7 +231,9 @@ mod tests {
     };
     use crate::dispatch_queue::replay_dispatch_queue;
     use crate::periodic_tick::PeriodicScheduler;
-    use crate::periodic_tick_state::write_periodic_scheduler_state;
+    use crate::periodic_tick_state::{
+        read_periodic_scheduler_state, write_periodic_scheduler_state,
+    };
     use crate::publish_outbox::inspect_publish_outbox;
     use crate::scheduled_task_dispatch_input::read_optional as read_scheduled_task_dispatch_input;
     use crate::scheduled_task_due_planner::{
@@ -320,6 +322,21 @@ mod tests {
                 .tasks
                 .len(),
             3
+        );
+        assert_eq!(
+            outcome.backend_events.tick.scheduler_snapshot,
+            outcome.scheduled_tasks.planner.scheduler_snapshot
+        );
+        assert_eq!(
+            outcome.backend_events.persisted_scheduler_snapshot,
+            outcome.scheduled_tasks.persisted_scheduler_snapshot
+        );
+        let persisted_scheduler_snapshot = read_periodic_scheduler_state(&daemon_dir)
+            .expect("shared scheduler state must read")
+            .inspect();
+        assert_eq!(
+            outcome.backend_events.persisted_scheduler_snapshot,
+            persisted_scheduler_snapshot
         );
         assert_eq!(outcome.scheduler_wakeups.diagnostics_after.pending_count, 0);
         // Telegram outbox is empty on a fresh tenex dir; pass runs without
