@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use crate::publish_outbox::{
-    inspect_publish_outbox, run_publish_outbox_maintenance_with_retry_policy,
     PublishOutboxDiagnostics, PublishOutboxError, PublishOutboxMaintenanceReport,
-    PublishOutboxRelayPublisher, PublishOutboxRetryPolicy,
+    PublishOutboxRelayPublisher, PublishOutboxRetryPolicy, inspect_publish_outbox,
+    run_publish_outbox_maintenance_with_retry_policy,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,7 +58,7 @@ mod tests {
         PublishRelayError, PublishRelayReport, PublishRelayResult, accept_worker_publish_request,
         drain_pending_publish_outbox, read_pending_publish_outbox_record,
     };
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::fs;
     use std::path::PathBuf;
