@@ -272,23 +272,38 @@ mod tests {
     use crate::nostr_event::Nip01EventFixture;
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::ral_journal::{
-        RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
-        RalReplayStatus, append_ral_journal_record, replay_ral_journal,
+        RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalError, RalJournalEvent, RalJournalIdentity,
+        RalJournalRecord, RalReplayStatus, append_ral_journal_record, replay_ral_journal,
     };
-    use crate::ral_lock::build_ral_lock_info;
+    use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
     use crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason;
-    use crate::worker_dispatch_execution::BootedWorkerDispatch;
-    use crate::worker_process::AgentWorkerReady;
+    use crate::worker_dispatch_admission_start::WorkerDispatchAdmissionStartError;
+    use crate::worker_dispatch_execution::{
+        AgentWorkerProcessDispatchSpawner, BootedWorkerDispatch, WorkerDispatchExecutionError,
+    };
+    use crate::worker_dispatch_start::WorkerDispatchStartError;
+    use crate::worker_launch_lock::release_worker_launch_locks;
+    use crate::worker_message_flow::WorkerMessageFlowError;
+    use crate::worker_process::{
+        AgentWorkerProcess, AgentWorkerReady, WorkerProcessError, bun_agent_worker_command,
+    };
+    use crate::worker_protocol::WorkerProtocolError;
     use crate::worker_protocol::{
         AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,
         AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
         AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolConfig, encode_agent_worker_protocol_frame,
     };
+    use crate::worker_publish::WorkerPublishError;
+    use crate::worker_publish_flow::WorkerPublishFlowError;
+    use crate::worker_result::WorkerResultError;
+    use crate::worker_session_loop::WorkerSessionLoopError;
     use crate::worker_session_loop::WorkerSessionLoopFinalReason;
+    use crate::worker_terminal_flow::{WorkerTerminalFlowError, WorkerTerminalFlowPlanningError};
     use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::fmt;
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -316,6 +331,64 @@ mod tests {
             })
         }
     }
+
+    #[derive(Debug)]
+    struct ClaimingAgentWorkerProcessDispatchSpawner {
+        daemon_dir: PathBuf,
+        inner: AgentWorkerProcessDispatchSpawner,
+    }
+
+    impl WorkerDispatchSpawner for ClaimingAgentWorkerProcessDispatchSpawner {
+        type Session = AgentWorkerProcess;
+        type Error = ClaimingSpawnerError;
+
+        fn spawn_worker(
+            &mut self,
+            command: &AgentWorkerCommand,
+            config: &AgentWorkerProcessConfig,
+        ) -> Result<BootedWorkerDispatch<Self::Session>, Self::Error> {
+            let booted = self
+                .inner
+                .spawn_worker(command, config)
+                .map_err(ClaimingSpawnerError::Spawn)?;
+
+            append_ral_journal_record(
+                &self.daemon_dir,
+                &RalJournalRecord::new(
+                    RAL_JOURNAL_WRITER_RUST_DAEMON,
+                    "test-version",
+                    2,
+                    1_710_000_700_002,
+                    "claim-alpha",
+                    RalJournalEvent::Claimed {
+                        identity: identity(),
+                        worker_id: booted.ready.worker_id.clone(),
+                        claim_token: "claim-alpha".to_string(),
+                    },
+                ),
+            )
+            .map_err(ClaimingSpawnerError::Claim)?;
+
+            Ok(booted)
+        }
+    }
+
+    #[derive(Debug)]
+    enum ClaimingSpawnerError {
+        Spawn(WorkerProcessError),
+        Claim(RalJournalError),
+    }
+
+    impl fmt::Display for ClaimingSpawnerError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Spawn(source) => write!(formatter, "worker spawn failed: {source}"),
+                Self::Claim(source) => write!(formatter, "RAL claim append failed: {source}"),
+            }
+        }
+    }
+
+    impl Error for ClaimingSpawnerError {}
 
     #[derive(Debug, Clone)]
     struct RecordingSession {
@@ -417,6 +490,269 @@ mod tests {
     }
 
     #[test]
+    fn rejects_malformed_worker_frame_after_dispatch_start() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::from([malformed_frame()]),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = worker_config();
+
+        let error = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+        )
+        .expect_err("malformed frame must fail");
+
+        match error {
+            DaemonWorkerRuntimeError::SessionLoop { source } => match *source {
+                WorkerSessionLoopError::Decode { source } => {
+                    assert!(matches!(source, WorkerProtocolError::JsonDecodeFailed(_)));
+                }
+                other => panic!("expected decode failure, got {other:?}"),
+            },
+            other => panic!("expected session loop error, got {other:?}"),
+        }
+        assert!(
+            sent_messages
+                .lock()
+                .expect("sent message lock must not be poisoned")
+                .iter()
+                .any(|message| message["type"] == "execute")
+        );
+        assert!(runtime_state.get_worker("worker-alpha").is_some());
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn rejects_worker_session_when_frame_limit_is_exceeded() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::from([
+                frame_for(&heartbeat_message()),
+                frame_for(&complete_message(vec!["published-event-id".to_string()])),
+            ]),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = worker_config();
+
+        let error = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 1),
+        )
+        .expect_err("max frame limit must fail");
+
+        match error {
+            DaemonWorkerRuntimeError::SessionLoop { source } => match *source {
+                WorkerSessionLoopError::MaxFrameLimitExceeded {
+                    frame_count,
+                    max_frames,
+                } => {
+                    assert_eq!(frame_count, 1);
+                    assert_eq!(max_frames, 1);
+                }
+                other => panic!("expected max frame limit error, got {other:?}"),
+            },
+            other => panic!("expected session loop error, got {other:?}"),
+        }
+        assert!(
+            sent_messages
+                .lock()
+                .expect("sent message lock must not be poisoned")
+                .iter()
+                .any(|message| message["type"] == "execute")
+        );
+        assert!(runtime_state.get_worker("worker-alpha").is_some());
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn rejects_publish_acceptance_failure_after_dispatch_start() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        let fixture = signed_event_fixture();
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::from([frame_for(&publish_request_message(&fixture))]),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = worker_config();
+
+        let error = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input(
+                &daemon_dir,
+                &mut runtime_state,
+                &worker_config,
+                Some(WorkerMessagePublishContext {
+                    accepted_at: 1_710_000_800_100,
+                    result_sequence: 20,
+                    result_timestamp: 1_710_000_800_200,
+                }),
+                4,
+            ),
+        )
+        .expect_err("publish acceptance failure must fail");
+
+        match error {
+            DaemonWorkerRuntimeError::SessionLoop { source } => match *source {
+                WorkerSessionLoopError::MessageFlow { source } => match source {
+                    WorkerMessageFlowError::Publish { source } => match *source {
+                        WorkerPublishFlowError::Publish { source } => {
+                            assert!(matches!(
+                                *source,
+                                WorkerPublishError::PublishResultSequenceNotAfterRequest { .. }
+                            ));
+                        }
+                        other => panic!("expected publish acceptance failure, got {other:?}"),
+                    },
+                    other => panic!("expected publish message flow failure, got {other:?}"),
+                },
+                other => panic!("expected message flow failure, got {other:?}"),
+            },
+            other => panic!("expected session loop error, got {other:?}"),
+        }
+        let messages = sent_messages
+            .lock()
+            .expect("sent message lock must not be poisoned");
+        assert!(messages.iter().any(|message| message["type"] == "execute"));
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message["type"] == "publish_result")
+        );
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending outbox must read")
+                .is_none()
+        );
+        assert!(runtime_state.get_worker("worker-alpha").is_some());
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn returns_locks_from_terminal_planning_failure() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::from([frame_for(&waiting_for_delegation_message())]),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = worker_config();
+
+        let error = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+        )
+        .expect_err("terminal planning failure must fail");
+
+        let locks = match error {
+            DaemonWorkerRuntimeError::SessionLoop { source } => match *source {
+                WorkerSessionLoopError::MessageFlow { source } => match source {
+                    WorkerMessageFlowError::Terminal { source } => match *source {
+                        WorkerTerminalFlowError::Planning { source, locks } => {
+                            match *source {
+                                WorkerTerminalFlowPlanningError::Result { source } => {
+                                    assert!(matches!(
+                                        source,
+                                        WorkerResultError::UnresolvedPendingDelegation { .. }
+                                    ));
+                                }
+                                other => {
+                                    panic!(
+                                        "expected terminal planning result failure, got {other:?}"
+                                    )
+                                }
+                            }
+                            *locks
+                        }
+                        other => panic!("expected terminal planning error, got {other:?}"),
+                    },
+                    other => panic!("expected terminal message flow failure, got {other:?}"),
+                },
+                other => panic!("expected message flow failure, got {other:?}"),
+            },
+            other => panic!("expected session loop error, got {other:?}"),
+        };
+        let owner = build_ral_lock_info(100, "host-alpha", 1_710_000_700_000);
+        assert_eq!(
+            read_ral_lock_info(&locks.allocation.path).expect("allocation lock must be readable"),
+            Some(owner.clone())
+        );
+        assert_eq!(
+            read_ral_lock_info(&locks.state.path).expect("state lock must be readable"),
+            Some(owner)
+        );
+        assert!(
+            sent_messages
+                .lock()
+                .expect("sent message lock must not be poisoned")
+                .iter()
+                .any(|message| message["type"] == "execute")
+        );
+        assert!(runtime_state.get_worker("worker-alpha").is_some());
+
+        release_worker_launch_locks(locks).expect("locks must release");
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn returns_receive_failure_before_terminal_after_dispatch_start() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::from([frame_for(&heartbeat_message())]),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = worker_config();
+
+        let error = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+        )
+        .expect_err("missing terminal frame must fail");
+
+        match error {
+            DaemonWorkerRuntimeError::SessionLoop { source } => match *source {
+                WorkerSessionLoopError::Receive { source } => {
+                    assert_eq!(source, FakeWorkerError("missing worker frame"));
+                }
+                other => panic!("expected receive failure, got {other:?}"),
+            },
+            other => panic!("expected session loop error, got {other:?}"),
+        }
+        assert!(
+            sent_messages
+                .lock()
+                .expect("sent message lock must not be poisoned")
+                .iter()
+                .any(|message| message["type"] == "execute")
+        );
+        assert!(runtime_state.get_worker("worker-alpha").is_some());
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     fn accepts_worker_publish_request_before_terminal_completion() {
         let daemon_dir = unique_temp_daemon_dir();
         seed_claimed_ral(&daemon_dir);
@@ -501,6 +837,78 @@ mod tests {
         cleanup_temp_dir(daemon_dir);
     }
 
+    #[test]
+    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    fn bun_agent_worker_real_bun_runtime_spine_round_trips_filesystem_state() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_allocated_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+
+        let bun = std::env::var("BUN_BIN").unwrap_or_else(|_| "bun".to_string());
+        let command = bun_agent_worker_command(&repo_root(), bun)
+            .env("TENEX_AGENT_WORKER_ENGINE", "mock")
+            .env("LOG_LEVEL", "silent");
+        let worker_config = AgentWorkerProcessConfig {
+            boot_timeout: Duration::from_secs(5),
+        };
+        let mut spawner = ClaimingAgentWorkerProcessDispatchSpawner {
+            daemon_dir: daemon_dir.clone(),
+            inner: AgentWorkerProcessDispatchSpawner,
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+
+        let outcome = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input_with_command(
+                &daemon_dir,
+                &mut runtime_state,
+                &worker_config,
+                command,
+                None,
+                8,
+            ),
+        )
+        .unwrap_or_else(|error| {
+            panic_with_runtime_error("real Bun runtime spine must complete", error)
+        });
+
+        match outcome {
+            DaemonWorkerRuntimeOutcome::SessionCompleted {
+                dispatch_id,
+                worker_id,
+                session,
+            } => {
+                assert_eq!(dispatch_id, "dispatch-alpha");
+                assert!(!worker_id.is_empty());
+                assert_eq!(
+                    session.final_reason,
+                    WorkerSessionLoopFinalReason::TerminalResultHandled
+                );
+                assert_eq!(session.frame_count, 3);
+            }
+            other => panic!("expected session completion, got {other:?}"),
+        }
+        assert!(runtime_state.is_empty());
+
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(queue.queued.len(), 0);
+        assert_eq!(queue.leased.len(), 0);
+        assert_eq!(queue.terminal.len(), 1);
+        assert_eq!(queue.terminal[0].status, DispatchQueueStatus::Completed);
+
+        let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
+        assert_eq!(
+            ral.states
+                .get(&identity())
+                .expect("RAL state must exist")
+                .status,
+            RalReplayStatus::Completed
+        );
+        assert_no_ral_locks_remaining(&daemon_dir);
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
     fn runtime_input<'a>(
         daemon_dir: &'a Path,
         runtime_state: &'a mut WorkerRuntimeState,
@@ -548,22 +956,138 @@ mod tests {
         }
     }
 
-    fn seed_claimed_ral(daemon_dir: &Path) {
-        append_ral_journal_record(
+    fn runtime_input_with_command<'a>(
+        daemon_dir: &'a Path,
+        runtime_state: &'a mut WorkerRuntimeState,
+        worker_config: &'a AgentWorkerProcessConfig,
+        command: AgentWorkerCommand,
+        publish: Option<WorkerMessagePublishContext>,
+        max_frames: u64,
+    ) -> DaemonWorkerRuntimeInput<'a> {
+        let mut input = runtime_input(
             daemon_dir,
-            &RalJournalRecord::new(
-                RAL_JOURNAL_WRITER_RUST_DAEMON,
-                "test-version",
-                1,
-                1_710_000_700_001,
-                "allocate-alpha",
-                RalJournalEvent::Allocated {
-                    identity: identity(),
-                    triggering_event_id: Some("event-alpha".to_string()),
-                },
+            runtime_state,
+            worker_config,
+            publish,
+            max_frames,
+        );
+        input.command = command;
+        input
+    }
+
+    fn assert_no_ral_locks_remaining(daemon_dir: &Path) {
+        let locks_dir = crate::ral_lock::ral_locks_dir(daemon_dir);
+        if !locks_dir.exists() {
+            return;
+        }
+
+        let remaining = fs::read_dir(&locks_dir)
+            .expect("RAL lock dir must read")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("RAL lock entries must read");
+        assert!(
+            remaining.is_empty(),
+            "expected no RAL locks after terminal completion, found {remaining:?}"
+        );
+    }
+
+    fn panic_with_runtime_error(
+        context: &str,
+        error: DaemonWorkerRuntimeError<AgentWorkerProcess, WorkerProcessError>,
+    ) -> ! {
+        panic!("{context}: {}", format_runtime_error(error));
+    }
+
+    fn format_runtime_error(
+        error: DaemonWorkerRuntimeError<AgentWorkerProcess, WorkerProcessError>,
+    ) -> String {
+        match error {
+            DaemonWorkerRuntimeError::DispatchTick { source } => {
+                format!("dispatch tick: {}", format_dispatch_tick_error(*source))
+            }
+            DaemonWorkerRuntimeError::RalScheduler { source } => {
+                format!("RAL scheduler replay: {source}")
+            }
+            DaemonWorkerRuntimeError::DispatchReplay { source } => {
+                format!("dispatch queue replay: {source}")
+            }
+            DaemonWorkerRuntimeError::SessionLoop { source } => {
+                format!("session loop: {source}")
+            }
+        }
+    }
+
+    fn format_dispatch_tick_error(error: WorkerDispatchTickError<AgentWorkerProcess>) -> String {
+        match error {
+            WorkerDispatchTickError::DispatchQueueReplay { source } => {
+                format!("dispatch queue replay: {source}")
+            }
+            WorkerDispatchTickError::AdmissionStart { source } => {
+                format!("admission/start: {}", format_admission_start_error(*source))
+            }
+        }
+    }
+
+    fn format_admission_start_error(
+        error: WorkerDispatchAdmissionStartError<AgentWorkerProcess>,
+    ) -> String {
+        match error {
+            WorkerDispatchAdmissionStartError::Admission { source } => {
+                format!("admission planning: {source}")
+            }
+            WorkerDispatchAdmissionStartError::LaunchPlan { source, .. } => {
+                format!("launch planning: {source}")
+            }
+            WorkerDispatchAdmissionStartError::LeaseAppend { source, .. } => {
+                format!("lease append: {source}")
+            }
+            WorkerDispatchAdmissionStartError::DispatchStart { source, .. } => {
+                format!("dispatch start: {}", format_dispatch_start_error(*source))
+            }
+            WorkerDispatchAdmissionStartError::RuntimeRegister { source, .. } => {
+                format!("runtime registration: {source}")
+            }
+        }
+    }
+
+    fn format_dispatch_start_error(error: WorkerDispatchStartError) -> String {
+        match error {
+            WorkerDispatchStartError::Lock(source) => {
+                format!("launch lock acquisition: {source}")
+            }
+            WorkerDispatchStartError::Dispatch(source) => {
+                format!(
+                    "dispatch execution: {}",
+                    format_dispatch_execution_error(*source)
+                )
+            }
+            WorkerDispatchStartError::LockRollbackFailed {
+                start_error,
+                release_error,
+            } => format!(
+                "dispatch execution failed and lock rollback failed: start={}; release={release_error}",
+                format_dispatch_execution_error(*start_error)
             ),
-        )
-        .expect("allocated RAL record must append");
+        }
+    }
+
+    fn format_dispatch_execution_error(error: WorkerDispatchExecutionError) -> String {
+        match error {
+            WorkerDispatchExecutionError::InvalidExecuteMessage(source) => {
+                format!("invalid execute message: {source}")
+            }
+            WorkerDispatchExecutionError::UnexpectedMessageType { actual } => {
+                format!("unexpected message type: {actual}")
+            }
+            WorkerDispatchExecutionError::Spawn(source) => format!("worker spawn: {source}"),
+            WorkerDispatchExecutionError::SendExecute(source) => {
+                format!("execute send: {source}")
+            }
+        }
+    }
+
+    fn seed_claimed_ral(daemon_dir: &Path) {
+        seed_allocated_ral(daemon_dir);
         append_ral_journal_record(
             daemon_dir,
             &RalJournalRecord::new(
@@ -580,6 +1104,24 @@ mod tests {
             ),
         )
         .expect("claimed RAL record must append");
+    }
+
+    fn seed_allocated_ral(daemon_dir: &Path) {
+        append_ral_journal_record(
+            daemon_dir,
+            &RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "test-version",
+                1,
+                1_710_000_700_001,
+                "allocate-alpha",
+                RalJournalEvent::Allocated {
+                    identity: identity(),
+                    triggering_event_id: Some("event-alpha".to_string()),
+                },
+            ),
+        )
+        .expect("allocated RAL record must append");
     }
 
     fn seed_queued_dispatch(daemon_dir: &Path) {
@@ -661,6 +1203,32 @@ mod tests {
             "timeoutMs": 30_000_u64,
             "event": fixture.signed,
         })
+    }
+
+    fn waiting_for_delegation_message() -> Value {
+        let identity = identity();
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "waiting_for_delegation",
+            "correlationId": "runtime-alpha-terminal",
+            "sequence": 22,
+            "timestamp": 1_710_000_700_300_u64,
+            "projectId": identity.project_id,
+            "agentPubkey": identity.agent_pubkey,
+            "conversationId": identity.conversation_id,
+            "ralNumber": identity.ral_number,
+            "pendingDelegations": ["delegation-conversation-1"],
+            "finalRalState": "waiting_for_delegation",
+            "publishedUserVisibleEvent": false,
+            "pendingDelegationsRemain": true,
+            "accumulatedRuntimeMs": 1_200_u64,
+            "finalEventIds": [],
+            "keepWorkerWarm": true,
+        })
+    }
+
+    fn malformed_frame() -> Vec<u8> {
+        vec![0, 0, 0, 1, b'{']
     }
 
     fn frame_for(message: &Value) -> Vec<u8> {
@@ -783,6 +1351,14 @@ mod tests {
             "../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json"
         ))
         .expect("fixture must parse")
+    }
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("crate must live under repo_root/crates/tenex-daemon")
+            .to_path_buf()
     }
 
     fn unique_temp_daemon_dir() -> std::path::PathBuf {
