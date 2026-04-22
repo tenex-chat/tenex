@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingFixture {
     pub name: String,
@@ -10,7 +10,7 @@ pub struct RoutingFixture {
     pub cases: Vec<RoutingCaseFixture>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectFixture {
     pub d_tag: String,
@@ -19,13 +19,13 @@ pub struct ProjectFixture {
     pub agents: Vec<AgentFixture>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AgentFixture {
     pub pubkey: String,
     pub slug: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingCaseFixture {
     pub name: String,
@@ -34,7 +34,7 @@ pub struct RoutingCaseFixture {
     pub expected: RoutingDecision,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RoutingEvent {
     pub id: String,
     pub kind: u64,
@@ -43,7 +43,7 @@ pub struct RoutingEvent {
     pub tags: Vec<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingDecision {
     pub project_id: Option<String>,
