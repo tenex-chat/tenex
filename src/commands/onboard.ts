@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ensureDirectory } from "@/lib/fs";
@@ -1153,32 +1153,6 @@ interface OnboardingOptions {
     json?: boolean;
 }
 
-async function startDaemonFromSetup(metaProjectCreated: boolean): Promise<never> {
-    const entrypoint = process.argv[1];
-    if (!entrypoint) {
-        throw new Error("Cannot determine TENEX CLI entrypoint for daemon startup");
-    }
-
-    const isWrapperEntrypoint =
-        entrypoint.endsWith("wrapper.ts") || entrypoint.endsWith("wrapper.js");
-
-    const daemonArgs = isWrapperEntrypoint
-        ? [...(metaProjectCreated ? ["--boot", "meta"] : [])]
-        : ["daemon", ...(metaProjectCreated ? ["--boot", "meta"] : [])];
-
-    const child = spawn(process.argv[0], [entrypoint, ...daemonArgs], {
-        stdio: "inherit",
-        env: process.env,
-    });
-
-    const exitCode = await new Promise<number>((resolve, reject) => {
-        child.on("error", reject);
-        child.on("close", (code) => resolve(code ?? 1));
-    });
-
-    process.exit(exitCode);
-}
-
 /**
  * Full onboarding flow — identity, relay, providers, models, project & agents.
  */
@@ -1493,11 +1467,9 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         display.summaryLine("Relays", relays.join(", "));
         display.blank();
         display.context(metaProjectCreated
-            ? "Starting daemon with auto-boot for the Meta project..."
-            : "Starting daemon...");
+            ? "Meta project is ready for the Rust daemon to boot."
+            : "Configuration is ready for the Rust daemon.");
         display.blank();
-
-        await startDaemonFromSetup(metaProjectCreated);
     }
 
     process.exit(0);

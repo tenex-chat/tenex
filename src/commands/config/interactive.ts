@@ -56,7 +56,7 @@ export async function runInteractiveSetup(): Promise<TenexConfig> {
 
     display.setupComplete();
     display.context(`Configuration saved to: ${config.getGlobalPath()}/`);
-    display.hint("You can now run 'tenex daemon' to start the daemon with your configuration.");
+    display.hint("You can now start the Rust daemon with your configuration.");
     display.blank();
 
     return tenexConfig;

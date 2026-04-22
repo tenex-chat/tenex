@@ -3,7 +3,7 @@
   "version": "0.9.14",
   "description": "TENEX Command Line Interface",
   "bin": {
-    "tenex-backend": "./dist/daemon-wrapper.cjs"
+    "tenex-backend": "./dist/index.js"
   },
   "files": [
     "dist/**/*.js",
@@ -22,7 +22,6 @@
   ],
   "scripts": {
     "start": "bun run ./src/index.ts",
-    "daemon": "bun --smol run ./src/index.ts daemon",
     "build": "bun scripts/build-bundled.js",
     "prepublishOnly": "bun run build",
     "test": "bun test",

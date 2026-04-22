@@ -87,7 +87,6 @@ async function main(): Promise<void> {
     const [
         { Command },
         { getHeuristicEngine, getDefaultHeuristics },
-        { daemonCommand },
         { configCommand },
         { onboardCommand },
         { doctorCommand },
@@ -96,7 +95,6 @@ async function main(): Promise<void> {
     ] = await Promise.all([
         import("commander"),
         import("@/services/heuristics"),
-        import("@/commands/daemon"),
         import("@/commands/config/index"),
         import("@/commands/onboard"),
         import("@/commands/doctor"),
@@ -122,7 +120,6 @@ async function main(): Promise<void> {
         .version(getCliVersion());
 
     // Register subcommands
-    program.addCommand(daemonCommand);
     program.addCommand(configCommand);
     program.addCommand(onboardCommand);
     program.addCommand(doctorCommand);
