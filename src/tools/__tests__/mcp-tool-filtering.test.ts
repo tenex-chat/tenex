@@ -1,11 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { createMockExecutionEnvironment } from "@/test-utils";
+import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import { getToolsObject } from "../registry";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { Tool as CoreTool } from "ai";
 
-describe("MCP Tool Filtering in getToolsObject", () => {
-    // Mock MCP tools
+describe("MCP access filtering in getToolsObject", () => {
     const mockMcpTools: Record<string, CoreTool<unknown, unknown>> = {
         "mcp__server1__tool_a": {
             description: "Tool A from server1",
@@ -24,77 +23,58 @@ describe("MCP Tool Filtering in getToolsObject", () => {
         } as CoreTool<unknown, unknown>,
     };
 
-    // Create a mock MCPManager
     const mockMcpManager = {
         getCachedTools: () => mockMcpTools,
     } as unknown as MCPManager;
 
-    // Create context with mock MCPManager
-    const mockContext = createMockExecutionEnvironment({
+    const contextWithServer1Access = createMockExecutionEnvironment({
+        agent: createMockAgent({ mcpAccess: ["server1"] }),
         mcpManager: mockMcpManager,
     });
 
-    it("should only include MCP tools that are explicitly requested in names array", () => {
-        // Request only one specific MCP tool
-        const requestedTools = ["fs_read", "mcp__server1__tool_a"];
+    it("includes external MCP tools from servers the agent can access", () => {
+        const tools = getToolsObject(["ask"], contextWithServer1Access);
 
-        const tools = getToolsObject(requestedTools, mockContext);
-
-        // Should include the requested static tool
-        expect(tools.fs_read).toBeDefined();
-
-        // Should include ONLY the requested MCP tool
+        expect(tools.ask).toBeDefined();
         expect(tools.mcp__server1__tool_a).toBeDefined();
-
-        // Should NOT include MCP tools that weren't requested
-        expect(tools.mcp__server1__tool_b).toBeUndefined();
+        expect(tools.mcp__server1__tool_b).toBeDefined();
         expect(tools.mcp__server2__tool_c).toBeUndefined();
     });
 
-    it("should include no MCP tools when none are requested", () => {
-        // Request only static tools, no MCP tools
-        const requestedTools = ["fs_read", "shell"];
+    it("does not include MCP tools when the agent has no server access", () => {
+        const contextWithoutAccess = createMockExecutionEnvironment({
+            agent: createMockAgent({ mcpAccess: [] }),
+            mcpManager: mockMcpManager,
+        });
 
-        const tools = getToolsObject(requestedTools, mockContext);
+        const tools = getToolsObject(["ask"], contextWithoutAccess);
 
-        // Should include the requested static tools
-        expect(tools.fs_read).toBeDefined();
-        expect(tools.shell).toBeDefined();
-
-        // Should NOT include any MCP tools
+        expect(tools.ask).toBeDefined();
         expect(tools.mcp__server1__tool_a).toBeUndefined();
         expect(tools.mcp__server1__tool_b).toBeUndefined();
         expect(tools.mcp__server2__tool_c).toBeUndefined();
     });
 
-    it("should include multiple requested MCP tools but exclude unrequested ones", () => {
-        // Request two MCP tools from the same server
-        const requestedTools = ["mcp__server1__tool_a", "mcp__server1__tool_b"];
+    it("ignores explicit mcp__ entries in configured tool names", () => {
+        const contextWithoutAccess = createMockExecutionEnvironment({
+            agent: createMockAgent({ mcpAccess: [] }),
+            mcpManager: mockMcpManager,
+        });
 
-        const tools = getToolsObject(requestedTools, mockContext);
+        const tools = getToolsObject(["ask", "mcp__server1__tool_a"], contextWithoutAccess);
 
-        // Should include the requested MCP tools
-        expect(tools.mcp__server1__tool_a).toBeDefined();
-        expect(tools.mcp__server1__tool_b).toBeDefined();
-
-        // Should NOT include unrequested MCP tools
-        expect(tools.mcp__server2__tool_c).toBeUndefined();
-
-        // Note: Core tools (fs_*, shell, etc.) will also be present due to auto-injection
-        // when conversation context is available, but unrequested MCP tools are still excluded
+        expect(tools.ask).toBeDefined();
+        expect(tools.mcp__server1__tool_a).toBeUndefined();
     });
 
-    it("should handle context without mcpManager gracefully", () => {
-        // Create context without mcpManager
-        const contextWithoutMcp = createMockExecutionEnvironment();
+    it("handles context without mcpManager gracefully", () => {
+        const contextWithoutMcp = createMockExecutionEnvironment({
+            agent: createMockAgent({ mcpAccess: ["server1"] }),
+        });
 
-        const requestedTools = ["fs_read", "mcp__server1__tool_a"];
-        const tools = getToolsObject(requestedTools, contextWithoutMcp);
+        const tools = getToolsObject(["ask"], contextWithoutMcp);
 
-        // Should include the static tool
-        expect(tools.fs_read).toBeDefined();
-
-        // Should NOT include MCP tools (no mcpManager available)
+        expect(tools.ask).toBeDefined();
         expect(tools.mcp__server1__tool_a).toBeUndefined();
     });
 });

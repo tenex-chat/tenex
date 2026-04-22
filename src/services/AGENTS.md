@@ -10,7 +10,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `LLMOperationsRegistry.ts` — Request throttling
 - `CooldownRegistry.ts` — Cooldown tracking
 - `OwnerAgentListService.ts` — Owner-agent list management
-- `AgentDefinitionMonitor.ts` — Agent definition monitoring
 
 ## Subdirectories
 
@@ -22,7 +21,7 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `projects/` — Project context management
 - `embedding/` — Embedding provider wrappers
 - `scheduling/` — Cron-like scheduling
-- `status/` — Progress event broadcasting
+- `status/` — Read-side project/backend status helpers
 - `skill/` — Skill management and resolution
 - `prompt-compiler/` — Lesson + comment synthesis
 - `search/` — Unified search

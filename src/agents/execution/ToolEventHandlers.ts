@@ -133,10 +133,14 @@ export interface ToolEventHandlersConfig {
     onNoResponseRequested?: () => void;
 }
 
+export interface ToolEventHandlerSideEffects {
+    waitForIdle(): Promise<void>;
+}
+
 /**
  * Setup tool-will-execute and tool-did-execute event handlers
  */
-export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
+export function setupToolEventHandlers(config: ToolEventHandlersConfig): ToolEventHandlerSideEffects {
     const {
         context,
         llmService,
@@ -149,8 +153,27 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
     const conversationStore = context.conversationStore;
     const agentPublisher = context.agentPublisher;
     const ralRegistry = RALRegistry.getInstance();
+    const pendingSideEffects = new Set<Promise<void>>();
 
-    llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
+    const trackSideEffect = <T>(
+        label: "tool-will-execute" | "tool-did-execute",
+        handler: (event: T) => Promise<void>
+    ): ((event: T) => void) => {
+        return (event: T): void => {
+            const tracked = handler(event).catch((error) => {
+                logger.error("[ToolEventHandlers] Tool side effect failed", {
+                    label,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
+            pendingSideEffects.add(tracked);
+            void tracked.finally(() => {
+                pendingSideEffects.delete(tracked);
+            });
+        };
+    };
+
+    llmService.on("tool-will-execute", trackSideEffect("tool-will-execute", async (event: ToolWillExecuteEvent) => {
         const argsStr = event.args !== undefined ? JSON.stringify(event.args) : "";
         const argsPreview = argsStr.substring(0, 50);
         console.log(
@@ -221,9 +244,9 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
         if (toolEvent) {
             await ConversationStore.addEnvelope(context.conversationId, toolEvent.envelope);
         }
-    });
+    }));
 
-    llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
+    llmService.on("tool-did-execute", trackSideEffect("tool-did-execute", async (event: ToolDidExecuteEvent) => {
         const toolResultMessageIndex = conversationStore.addMessage({
             pubkey: context.agent.pubkey,
             ral: ralNumber,
@@ -361,5 +384,13 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             conversationStore.setEventId(toolResultMessageIndex, toolEventId);
             setToolCallEventIdFromToolCallId(conversationStore, event.toolCallId, toolEventId);
         }
-    });
+    }));
+
+    return {
+        async waitForIdle(): Promise<void> {
+            while (pendingSideEffects.size > 0) {
+                await Promise.allSettled([...pendingSideEffects]);
+            }
+        },
+    };
 }

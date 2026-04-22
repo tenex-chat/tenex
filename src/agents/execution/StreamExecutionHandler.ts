@@ -32,6 +32,7 @@ import type { MessageCompiler } from "./MessageCompiler";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { createPrepareStep } from "./StreamCallbacks";
 import { setupToolEventHandlers } from "./ToolEventHandlers";
+import type { ToolEventHandlerSideEffects } from "./ToolEventHandlers";
 import type {
     FullRuntimeContext,
     LLMModelRequest,
@@ -92,6 +93,7 @@ export class StreamExecutionHandler {
     private readonly effectiveAbortSignal: AbortSignal;
     private readonly execContext: RALExecutionContext;
     private readonly executionSpan = trace.getActiveSpan();
+    private toolSideEffects: ToolEventHandlerSideEffects | undefined;
 
     constructor(private readonly config: StreamExecutionConfig) {
         this.lastUsedVariant = config.context.conversationStore.getMetaModelVariantOverride(
@@ -265,6 +267,7 @@ export class StreamExecutionHandler {
         } catch (streamError) {
             await this.handleStreamError(streamError, this.effectiveAbortSignal);
         } finally {
+            await this.toolSideEffects?.waitForIdle();
             await this.cleanup();
         }
 
@@ -459,7 +462,7 @@ export class StreamExecutionHandler {
         });
 
         // Setup tool event handlers via extracted module
-        setupToolEventHandlers({
+        this.toolSideEffects = setupToolEventHandlers({
             context,
             llmService,
             toolTracker,

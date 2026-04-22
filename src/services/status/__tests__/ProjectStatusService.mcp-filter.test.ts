@@ -389,8 +389,7 @@ describe("ProjectStatusService.gatherToolInfo integration", () => {
         const mcpTools = intent.tools.filter((t) => t.name.startsWith("mcp__"));
         expect(mcpTools).toHaveLength(0);
 
-        // All remaining registry tools are core/delegate/context-injected (not configurable)
-        // agents_write and project_list are now skill-provided, so they won't appear here
+        // All remaining registry tools are core/delegate/context-injected (not configurable).
         expect(intent.tools).toHaveLength(0);
     });
 

@@ -48,7 +48,7 @@ describe("todoBeforeDelegationHeuristic", () => {
 
     it("triggers for delegation without todo state", () => {
         const context = createBaseContext();
-        context.tool.name = "mcp__tenex__delegate_crossproject";
+        context.tool.name = "mcp__tenex__delegate";
 
         const result = todoBeforeDelegationHeuristic.evaluate(context);
         expect(result?.heuristicId).toBe("todo-before-delegation");

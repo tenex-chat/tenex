@@ -227,7 +227,7 @@ export class HeuristicViolationManager {
       summary.flags.hasTodoWrite = true;
     }
 
-    if (toolName === "mcp__tenex__delegate" || toolName === "mcp__tenex__delegate_crossproject") {
+    if (toolName === "mcp__tenex__delegate") {
       summary.flags.hasDelegation = true;
 
       // Check if delegation to git-agent

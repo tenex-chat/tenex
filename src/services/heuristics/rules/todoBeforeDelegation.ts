@@ -12,10 +12,7 @@ const HEURISTIC_ID = "todo-before-delegation";
 /**
  * Tools that trigger delegation
  */
-const DELEGATION_TOOLS = new Set([
-  "mcp__tenex__delegate",
-  "mcp__tenex__delegate_crossproject",
-]);
+const DELEGATION_TOOLS = new Set(["mcp__tenex__delegate"]);
 
 /**
  * Check if TodoWrite was called before delegation in this RAL

@@ -33,8 +33,8 @@ export type AgentResolutionResult =
  * Function type for resolving an agent slug to a pubkey for a given project.
  * Returns resolution result indicating success, transient failure, or permanent failure.
  *
- * This abstraction allows InterventionService (Layer 3) to resolve agents
- * without directly depending on @/daemon (Layer 4).
+ * This abstraction allows InterventionService to resolve agents without
+ * depending on a concrete project runtime implementation.
  */
 export type AgentResolverFn = (projectId: string, agentSlug: string) => AgentResolutionResult;
 

@@ -102,24 +102,21 @@ export interface StoredAgentData {
 
     /**
      * The d-tag of the source agent definition event (kind:4199).
-     * Used by AgentDefinitionMonitor to detect when a newer version
-     * of the same definition is published.
-     * Backward-compatible: agents without this field are silently ignored.
+     * Used to detect when a newer version of the same definition is published.
      */
     definitionDTag?: string;
 
     /**
      * The pubkey of the author of the source agent definition event.
-     * Used by AgentDefinitionMonitor to verify that incoming definition
-     * updates come from the original (or whitelisted) author.
+     * Used to verify that incoming definition updates come from the original
+     * or whitelisted author.
      */
     definitionAuthor?: string;
 
     /**
      * The `created_at` timestamp of the source agent definition event.
-     * Used by AgentDefinitionMonitor to ensure only strictly newer
-     * definition events trigger upgrades, preventing rollbacks from
-     * older events arriving out of order.
+     * Used to ensure only strictly newer definition events trigger upgrades,
+     * preventing rollbacks from older events arriving out of order.
      */
     definitionCreatedAt?: number;
 
