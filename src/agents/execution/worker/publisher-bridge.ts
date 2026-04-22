@@ -1,6 +1,7 @@
 import type {
     AgentRuntimePublisher,
     PublishedMessageRef,
+    TransportMessageIntent,
 } from "@/events/runtime/AgentRuntimePublisher";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
@@ -261,6 +262,22 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         return ref;
     }
 
+    async sendMessage(
+        intent: TransportMessageIntent,
+        context: EventContext
+    ): Promise<PublishedMessageRef> {
+        return this.publishTextEvent(intent.content, {
+            context: this.consumeAndEnhanceContext(context),
+            runtimeEventClass: "conversation",
+            conversationVariant: "primary",
+            tags: [
+                ["tenex:egress", "telegram"],
+                ["tenex:channel", intent.channelId],
+            ],
+            outputTransport: "telegram",
+        });
+    }
+
     async streamTextDelta(
         intent: StreamTextDeltaIntent,
         _context: EventContext
@@ -304,6 +321,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             tags?: string[][];
             usage?: unknown;
             metadata?: Partial<InboundEnvelope["metadata"]>;
+            outputTransport?: PublishedMessageRef["transport"];
         }
     ): Promise<PublishedMessageRef> {
         const kind = options.kind ?? NDKKind.Text;
@@ -327,6 +345,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             context: options.context,
             metadata: options.metadata ?? {},
             occurredAt: createdAt,
+            transport: options.outputTransport ?? "nostr",
         });
 
         await this.options.emit({
@@ -350,7 +369,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
 
         return {
             id: eventId,
-            transport: "nostr",
+            transport: options.outputTransport ?? "nostr",
             envelope,
         };
     }
@@ -435,10 +454,11 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         context: EventContext;
         metadata: Partial<InboundEnvelope["metadata"]>;
         occurredAt: number;
+        transport: PublishedMessageRef["transport"];
     }): InboundEnvelope {
         const agentPrincipal: PrincipalRef = {
-            id: `nostr:${this.options.agent.pubkey}`,
-            transport: "nostr",
+            id: `${params.transport}:${this.options.agent.pubkey}`,
+            transport: params.transport,
             linkedPubkey: this.options.agent.pubkey,
             displayName: this.options.agent.name,
             kind: "agent",
@@ -459,18 +479,18 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
                   }));
 
         return {
-            transport: "nostr",
+            transport: params.transport,
             principal: agentPrincipal,
             channel: {
                 ...params.context.triggeringEnvelope.channel,
-                transport: "nostr",
+                transport: params.transport,
             },
             message: {
-                id: `nostr:${params.id}`,
-                transport: "nostr",
+                id: `${params.transport}:${params.id}`,
+                transport: params.transport,
                 nativeId: params.id,
                 replyToId: params.context.rootEvent.id
-                    ? `nostr:${params.context.rootEvent.id}`
+                    ? `${params.transport}:${params.context.rootEvent.id}`
                     : undefined,
             },
             recipients,

@@ -131,11 +131,7 @@ mod tests {
         out
     }
 
-    fn poller(
-        base_dir: PathBuf,
-        owners: Vec<String>,
-        tx: Sender<String>,
-    ) -> AgentInventoryPoller {
+    fn poller(base_dir: PathBuf, owners: Vec<String>, tx: Sender<String>) -> AgentInventoryPoller {
         AgentInventoryPoller {
             tenex_base_dir: base_dir,
             owners,
@@ -242,11 +238,7 @@ mod tests {
         let owner_one = pubkey_hex(0x11);
         let owner_two = pubkey_hex(0x12);
         let (tx, rx) = mpsc::channel();
-        let poller = poller(
-            base_dir,
-            vec![owner_one.clone(), owner_two.clone()],
-            tx,
-        );
+        let poller = poller(base_dir, vec![owner_one.clone(), owner_two.clone()], tx);
 
         let mut last_seen = None;
         assert!(poller.run_once(&mut last_seen));

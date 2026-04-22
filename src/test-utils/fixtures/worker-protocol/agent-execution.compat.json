@@ -601,46 +601,6 @@
                 "activeToolCount": 0,
                 "accumulatedRuntimeMs": 700
             }
-        },
-        {
-            "name": "telegram-send-request",
-            "direction": "worker_to_daemon",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_request",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 21,
-                "timestamp": 1710000403000,
-                "senderAgentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "channelId": "telegram:group:-1001:topic:77",
-                "content": "proactive update from the agent"
-            }
-        },
-        {
-            "name": "telegram-send-result-accepted",
-            "direction": "daemon_to_worker",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_result",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 22,
-                "timestamp": 1710000403100,
-                "status": "accepted"
-            }
-        },
-        {
-            "name": "telegram-send-result-failed",
-            "direction": "daemon_to_worker",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_result",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 23,
-                "timestamp": 1710000403200,
-                "status": "failed",
-                "errorReason": "unbound_channel",
-                "errorDetail": "channel telegram:group:-1001:topic:77 not remembered for this agent"
-            }
         }
     ],
     "invalidMessages": [
@@ -936,80 +896,6 @@
                     "created_at": 1710000402,
                     "sig": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
                 }
-            }
-        },
-        {
-            "name": "telegram-send-request-missing-sender",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_request",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 21,
-                "timestamp": 1710000403000,
-                "channelId": "telegram:group:-1001:topic:77",
-                "content": "missing sender"
-            }
-        },
-        {
-            "name": "telegram-send-request-invalid-sender",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_request",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 21,
-                "timestamp": 1710000403000,
-                "senderAgentPubkey": "not-a-hex-pubkey",
-                "channelId": "telegram:group:-1001:topic:77",
-                "content": "invalid sender"
-            }
-        },
-        {
-            "name": "telegram-send-request-empty-channel",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_request",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 21,
-                "timestamp": 1710000403000,
-                "senderAgentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "channelId": "",
-                "content": "empty channel"
-            }
-        },
-        {
-            "name": "telegram-send-request-empty-content",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_request",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 21,
-                "timestamp": 1710000403000,
-                "senderAgentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "channelId": "telegram:group:-1001:topic:77",
-                "content": ""
-            }
-        },
-        {
-            "name": "telegram-send-result-accepted-with-error-reason",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_result",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 22,
-                "timestamp": 1710000403100,
-                "status": "accepted",
-                "errorReason": "unbound_channel"
-            }
-        },
-        {
-            "name": "telegram-send-result-failed-without-reason",
-            "message": {
-                "version": 1,
-                "type": "telegram_send_result",
-                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
-                "sequence": 23,
-                "timestamp": 1710000403200,
-                "status": "failed"
             }
         }
     ]

@@ -104,5 +104,5 @@ pub mod worker_reuse;
 pub mod worker_runtime_state;
 pub mod worker_session_loop;
 pub mod worker_startup_recovery;
-pub mod worker_telegram_send_flow;
+pub mod worker_telegram_egress;
 pub mod worker_terminal_flow;

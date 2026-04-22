@@ -74,7 +74,6 @@ where
         observed_at,
         publish,
         terminal,
-        telegram_send,
         message: _,
     } = message_flow;
 
@@ -88,7 +87,6 @@ where
             observed_at,
             publish,
             terminal,
-            telegram_send,
         },
     )
     .map_err(|source| WorkerFramePumpError::MessageFlow { source })?;
@@ -226,6 +224,7 @@ mod tests {
                         accepted_at: 1_710_001_000_100,
                         result_sequence: 900,
                         result_timestamp: 1_710_001_000_200,
+                        telegram_egress: None,
                     }),
                 ),
             },
@@ -358,7 +357,7 @@ mod tests {
     fn message_flow_input<'a>(
         message: &'a Value,
         worker_id: &'a str,
-        publish: Option<WorkerMessagePublishContext>,
+        publish: Option<WorkerMessagePublishContext<'a>>,
     ) -> WorkerMessageFlowInput<'a> {
         message_flow_input_at(
             Path::new("/tmp/tenex-worker-frame-pump"),
@@ -372,7 +371,7 @@ mod tests {
         daemon_dir: &'a Path,
         message: &'a Value,
         worker_id: &'a str,
-        publish: Option<WorkerMessagePublishContext>,
+        publish: Option<WorkerMessagePublishContext<'a>>,
     ) -> WorkerMessageFlowInput<'a> {
         WorkerMessageFlowInput {
             daemon_dir,
@@ -381,7 +380,6 @@ mod tests {
             observed_at: 1_710_000_403_000,
             publish,
             terminal: None,
-            telegram_send: None,
         }
     }
 

@@ -1021,6 +1021,7 @@ mod tests {
                     accepted_at: 1_710_001_000_090,
                     result_sequence: 900,
                     result_timestamp: 1_710_001_000_100,
+                    telegram_egress: None,
                 }),
                 4,
             ),
@@ -1297,7 +1298,7 @@ mod tests {
         daemon_dir: &'a Path,
         runtime_state: &'a mut WorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
-        publish: Option<WorkerMessagePublishContext>,
+        publish: Option<WorkerMessagePublishContext<'a>>,
         max_frames: u64,
     ) -> DaemonWorkerRuntimeInput<'a> {
         DaemonWorkerRuntimeInput {
@@ -1327,7 +1328,7 @@ mod tests {
             started_at: 1_710_001_000_030,
             frame_observed_at: 1_710_001_000_040,
             publish,
-            telegram_send: None,
+            telegram_egress: None,
             terminal: DaemonWorkerTerminalRuntimeInput {
                 journal_sequence: 3,
                 journal_timestamp: 1_710_001_000_050,

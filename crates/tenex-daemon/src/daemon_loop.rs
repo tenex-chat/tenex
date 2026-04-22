@@ -15,7 +15,7 @@ use crate::daemon_maintenance::{
 };
 use crate::daemon_worker_runtime::{
     DaemonWorkerRuntimeFilesystemInput, DaemonWorkerRuntimeOutcome,
-    DaemonWorkerTelegramSendRuntimeInput, run_daemon_worker_runtime_once_from_filesystem,
+    DaemonWorkerTelegramEgressRuntimeInput, run_daemon_worker_runtime_once_from_filesystem,
 };
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
@@ -99,7 +99,7 @@ pub struct DaemonWorkerTickInput<'a> {
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
-    pub publish: Option<WorkerMessagePublishContext>,
+    pub publish: Option<WorkerMessagePublishContext<'a>>,
     pub max_frames: u64,
 }
 
@@ -286,7 +286,8 @@ where
     let now_ms = input.now_ms;
     let maintenance =
         run_daemon_maintenance_once_from_filesystem_with_telegram(input, &mut *telegram_publisher)?;
-    let telegram_send = worker_telegram_send_runtime_input(tenex_base_dir, &worker.writer_version);
+    let telegram_egress =
+        worker_telegram_egress_runtime_input(tenex_base_dir, &worker.writer_version);
     let worker_runtime = run_daemon_worker_runtime_once_from_filesystem(
         spawner,
         DaemonWorkerRuntimeFilesystemInput {
@@ -301,7 +302,7 @@ where
             writer_version: worker.writer_version,
             resolved_pending_delegations: worker.resolved_pending_delegations,
             publish: worker.publish,
-            telegram_send,
+            telegram_egress,
             max_frames: worker.max_frames,
         },
     );
@@ -324,10 +325,10 @@ where
     })
 }
 
-fn worker_telegram_send_runtime_input(
+fn worker_telegram_egress_runtime_input(
     tenex_base_dir: &Path,
     writer_version: &str,
-) -> Option<DaemonWorkerTelegramSendRuntimeInput> {
+) -> Option<DaemonWorkerTelegramEgressRuntimeInput> {
     let backend_pubkey = match read_backend_config(tenex_base_dir)
         .and_then(|config| config.backend_signer())
         .map(|signer| signer.pubkey_hex().to_string())
@@ -336,13 +337,13 @@ fn worker_telegram_send_runtime_input(
         Err(error) => {
             tracing::warn!(
                 error = %error,
-                "worker telegram send context unavailable; proactive telegram sends will fail closed"
+                "worker telegram egress context unavailable; proactive telegram egress will fail closed"
             );
             return None;
         }
     };
 
-    Some(DaemonWorkerTelegramSendRuntimeInput {
+    Some(DaemonWorkerTelegramEgressRuntimeInput {
         data_dir: tenex_base_dir.join("data"),
         backend_pubkey,
         writer_version: writer_version.to_string(),
@@ -486,6 +487,7 @@ where
                     accepted_at: now_ms,
                     result_sequence,
                     result_timestamp: now_ms,
+                    telegram_egress: None,
                 });
             if let Some(result_sequence) = next_publish_result_sequence.as_mut() {
                 *result_sequence = result_sequence.saturating_add(1);

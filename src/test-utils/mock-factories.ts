@@ -241,6 +241,11 @@ export function createMockToolContext(
         thinking: async () => mockEvent,
         typing: async () => {},
         conversation: async () => mockEvent,
+        sendMessage: async () => ({
+            id: mockEvent.message.nativeId,
+            transport: "telegram",
+            envelope: mockEvent,
+        }),
         lesson: async () => mockEvent,
     };
 

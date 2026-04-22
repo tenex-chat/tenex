@@ -1,6 +1,7 @@
 import type {
     AgentRuntimePublisher,
     PublishedMessageRef,
+    TransportMessageIntent,
 } from "@/events/runtime/AgentRuntimePublisher";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
@@ -288,6 +289,45 @@ export class AgentPublisher implements AgentRuntimePublisher {
         await this.safePublish(event, "conversation");
 
         return this.toPublishedMessageRef(event);
+    }
+
+    async sendMessage(
+        intent: TransportMessageIntent,
+        context: EventContext
+    ): Promise<PublishedMessageRef> {
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = new NDKEvent(getNDK());
+        event.kind = NDKKind.Text;
+        event.content = intent.content;
+        if (enhancedContext.rootEvent.id) {
+            event.tag(["e", enhancedContext.rootEvent.id, "", "root"]);
+        }
+        event.tag(["tenex:egress", "telegram"]);
+        event.tag(["tenex:channel", intent.channelId]);
+        this.encoder.addStandardTags(event, enhancedContext);
+
+        injectTraceContext(event);
+        await this.agent.sign(event);
+        await this.safePublish(event, "send_message");
+
+        const ref = this.toPublishedMessageRef(event);
+        return {
+            ...ref,
+            transport: "telegram",
+            envelope: {
+                ...ref.envelope,
+                transport: "telegram",
+                channel: {
+                    ...ref.envelope.channel,
+                    id: intent.channelId,
+                    transport: "telegram",
+                },
+                message: {
+                    ...ref.envelope.message,
+                    transport: "telegram",
+                },
+            },
+        };
     }
 
     /**

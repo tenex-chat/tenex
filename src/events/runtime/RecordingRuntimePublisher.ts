@@ -1,6 +1,7 @@
 import type {
     AgentRuntimePublisher,
     PublishedMessageRef,
+    TransportMessageIntent,
 } from "@/events/runtime/AgentRuntimePublisher";
 import type { AgentRuntimePublisherFactory } from "@/events/runtime/AgentRuntimePublisherFactory";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
@@ -30,6 +31,7 @@ export interface PublishedRuntimeRecord {
         | "delegateFollowup"
         | "error"
         | "lesson"
+        | "sendMessage"
         | "streamTextDelta"
         | "toolUse";
     payload: Record<string, string | number | boolean | undefined>;
@@ -288,6 +290,47 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         });
 
         return event;
+    }
+
+    async sendMessage(
+        intent: TransportMessageIntent,
+        context: EventContext
+    ): Promise<PublishedMessageRef> {
+        const rootEventId = context.rootEvent.id ?? context.conversationId;
+        const event = this.createEvent(
+            NDKKind.Text,
+            intent.content,
+            [
+                ["e", rootEventId],
+                ["tenex:egress", "telegram"],
+                ["tenex:channel", intent.channelId],
+            ],
+            context.conversationId
+        );
+
+        this.record("sendMessage", context, {
+            channelId: intent.channelId,
+            content: intent.content,
+            contentLength: intent.content.length,
+        });
+
+        return {
+            ...event,
+            transport: "telegram",
+            envelope: {
+                ...event.envelope,
+                transport: "telegram",
+                channel: {
+                    ...event.envelope.channel,
+                    id: intent.channelId,
+                    transport: "telegram",
+                },
+                message: {
+                    ...event.envelope.message,
+                    transport: "telegram",
+                },
+            },
+        };
     }
 
     async streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void> {

@@ -9,8 +9,7 @@ use crate::worker_dispatch_execution::WorkerDispatchSession;
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_message_flow::{
     WorkerMessageFlowError, WorkerMessageFlowInput, WorkerMessageFlowOutcome,
-    WorkerMessagePublishContext, WorkerMessageTerminalContext, WorkerTelegramSendMessageContext,
-    handle_worker_message_flow,
+    WorkerMessagePublishContext, WorkerMessageTerminalContext, handle_worker_message_flow,
 };
 use crate::worker_protocol::{WorkerProtocolError, decode_agent_worker_protocol_frame};
 use crate::worker_runtime_state::WorkerRuntimeState;
@@ -21,9 +20,8 @@ pub struct WorkerSessionLoopInput<'a> {
     pub runtime_state: &'a mut WorkerRuntimeState,
     pub worker_id: &'a str,
     pub observed_at: u64,
-    pub publish: Option<WorkerMessagePublishContext>,
+    pub publish: Option<WorkerMessagePublishContext<'a>>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
-    pub telegram_send: Option<WorkerTelegramSendMessageContext<'a>>,
     pub max_frames: u64,
 }
 
@@ -103,7 +101,6 @@ where
                 observed_at: input.observed_at,
                 publish: input.publish,
                 terminal,
-                telegram_send: input.telegram_send,
             },
         )
         .map_err(|source| WorkerSessionLoopError::MessageFlow { source })?;
@@ -127,8 +124,7 @@ where
             | WorkerMessageFlowOutcome::PublishRequestHandled { .. }
             | WorkerMessageFlowOutcome::ControlTelemetry { .. }
             | WorkerMessageFlowOutcome::StreamTelemetry { .. }
-            | WorkerMessageFlowOutcome::PublishedNotification { .. }
-            | WorkerMessageFlowOutcome::TelegramSendRequestHandled { .. } => {}
+            | WorkerMessageFlowOutcome::PublishedNotification { .. } => {}
         }
     }
 }
@@ -267,7 +263,6 @@ mod tests {
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
-                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -311,9 +306,9 @@ mod tests {
                     accepted_at: 1_710_001_000_100,
                     result_sequence: 900,
                     result_timestamp: 1_710_001_000_200,
+                    telegram_egress: None,
                 }),
                 terminal: None,
-                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -350,7 +345,6 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: None,
                 terminal: None,
-                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -384,7 +378,6 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: None,
                 terminal: None,
-                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -413,7 +406,6 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: None,
                 terminal: None,
-                telegram_send: None,
                 max_frames: 1,
             },
         )
@@ -434,8 +426,6 @@ mod tests {
     #[ignore = "requires Bun and repo TypeScript dependencies"]
     fn bun_agent_worker_session_loop_handles_real_process_to_completion() {
         let daemon_dir = unique_temp_daemon_dir();
-        let scheduler = scheduler_from_records();
-        let dispatch_state = dispatch_state_from_records();
         let owner = build_ral_lock_info(100, "host-a", 1_000);
         let locks = acquire_worker_launch_locks(&daemon_dir, &launch_plan(), &owner)
             .expect("launch locks must acquire");
@@ -454,6 +444,8 @@ mod tests {
         )
         .expect("agent worker must boot");
         let worker_id = worker.ready.worker_id.clone();
+        let scheduler = scheduler_from_records_for(&worker_id);
+        let dispatch_state = dispatch_state_from_records();
         let mut runtime_state = runtime_state_for(&worker_id, identity);
 
         worker
@@ -472,11 +464,10 @@ mod tests {
                 terminal: Some(WorkerMessageTerminalContext {
                     scheduler: &scheduler,
                     dispatch_state: &dispatch_state,
-                    result_context: result_context(),
+                    result_context: result_context_for(&worker_id),
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
-                telegram_send: None,
                 max_frames: 8,
             },
         )
@@ -542,8 +533,13 @@ mod tests {
     }
 
     fn scheduler_from_records() -> RalScheduler {
+        scheduler_from_records_for("worker-alpha")
+    }
+
+    fn scheduler_from_records_for(worker_id: &str) -> RalScheduler {
         let replay =
-            replay_ral_journal_records(initial_ral_records()).expect("journal replay must succeed");
+            replay_ral_journal_records(initial_ral_records_for(worker_id))
+                .expect("journal replay must succeed");
         RalScheduler::new(&RalJournalReplay {
             last_sequence: replay.last_sequence,
             states: replay.states,
@@ -555,7 +551,7 @@ mod tests {
             .expect("dispatch replay must succeed")
     }
 
-    fn initial_ral_records() -> Vec<RalJournalRecord> {
+    fn initial_ral_records_for(worker_id: &str) -> Vec<RalJournalRecord> {
         vec![
             journal_record(
                 198,
@@ -568,7 +564,7 @@ mod tests {
                 199,
                 RalJournalEvent::Claimed {
                     identity: identity(),
-                    worker_id: "worker-alpha".to_string(),
+                    worker_id: worker_id.to_string(),
                     claim_token: "claim-alpha".to_string(),
                 },
             ),
@@ -583,8 +579,12 @@ mod tests {
     }
 
     fn result_context() -> crate::worker_result::WorkerResultTransitionContext {
+        result_context_for("worker-alpha")
+    }
+
+    fn result_context_for(worker_id: &str) -> crate::worker_result::WorkerResultTransitionContext {
         crate::worker_result::WorkerResultTransitionContext {
-            worker_id: "worker-alpha".to_string(),
+            worker_id: worker_id.to_string(),
             claim_token: "claim-alpha".to_string(),
             journal_sequence: 200,
             journal_timestamp: 1_710_000_500_000,

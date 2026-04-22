@@ -276,7 +276,10 @@ impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
             .field("stop_after_eose", &self.stop_after_eose)
             .field("max_messages", &self.max_messages)
             .field("auth_signer_configured", &self.auth_signer.is_some())
-            .field("whitelist_ingress_configured", &self.whitelist_ingress.is_some())
+            .field(
+                "whitelist_ingress_configured",
+                &self.whitelist_ingress.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }

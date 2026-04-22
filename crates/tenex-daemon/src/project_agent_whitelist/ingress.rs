@@ -6,9 +6,7 @@ use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::nip46::protocol::NIP46_KIND;
 use crate::nip46::registry::NIP46Registry;
 use crate::nostr_event::SignedNostrEvent;
-use crate::project_agent_whitelist::snapshot_state::{
-    PROJECT_AGENT_SNAPSHOT_KIND, SnapshotState,
-};
+use crate::project_agent_whitelist::snapshot_state::{PROJECT_AGENT_SNAPSHOT_KIND, SnapshotState};
 
 /// Routes verified incoming Nostr events to the project-agent-whitelist and
 /// NIP-46 subsystems.
@@ -44,10 +42,7 @@ impl WhitelistIngress {
                 }
             }
             NIP46_KIND => {
-                if let Some(client) = self
-                    .nip46_registry
-                    .client_for_cached_owner(&event.pubkey)
-                {
+                if let Some(client) = self.nip46_registry.client_for_cached_owner(&event.pubkey) {
                     let _ = client.dispatch_incoming(&event.content);
                 }
             }
@@ -71,9 +66,7 @@ mod tests {
     use crate::nip46::client::PublishOutboxHandle;
     use crate::nip46::pending::PendingNip46Requests;
     use crate::nip46::registry::NIP46Registry;
-    use crate::nostr_event::{
-        NormalizedNostrEvent, canonical_payload, event_hash_hex,
-    };
+    use crate::nostr_event::{NormalizedNostrEvent, canonical_payload, event_hash_hex};
 
     const BACKEND_SECRET_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";

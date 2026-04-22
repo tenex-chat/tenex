@@ -188,6 +188,38 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
             expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
         });
     }
+
+    it("emits signed Telegram egress publish_request metadata", async () => {
+        const harness = createHarness();
+
+        const ref = await harness.publisher.sendMessage(
+            {
+                channelId: "telegram-channel-123",
+                content: "Telegram update from worker.",
+            },
+            harness.context
+        );
+
+        expect(ref.transport).toBe("telegram");
+        expect(ref.envelope.transport).toBe("telegram");
+        expect(ref.envelope.channel.transport).toBe("telegram");
+
+        const publishRequests = harness.emitted.filter(isPublishRequest);
+        expect(publishRequests).toHaveLength(1);
+
+        const [publishRequest] = publishRequests;
+        expect(publishRequest.runtimeEventClass).toBe("conversation");
+        expect(publishRequest.conversationVariant).toBe("primary");
+        expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
+        expect(publishRequest.event.content).toBe("Telegram update from worker.");
+        expect(publishRequest.event.tags).toContainEqual(["tenex:egress", "telegram"]);
+        expect(publishRequest.event.tags).toContainEqual(["tenex:channel", "telegram-channel-123"]);
+        expect(publishRequest.event.tags).toContainEqual([
+            "a",
+            `31933:${OWNER_PUBKEY}:${PROJECT_ID}`,
+        ]);
+        expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
+    });
 });
 
 function createHarness(): {

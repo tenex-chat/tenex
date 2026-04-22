@@ -99,7 +99,7 @@ pub enum TelegramDeliveryReason {
     ToolPublicationMirror,
     Voice,
     /// Proactive `send_message` tool invocation from an agent. Introduced in
-    /// schema v2 alongside the worker protocol `telegram_send_request` frame.
+    /// schema v2 alongside worker-authored Telegram egress events.
     ProactiveSend,
 }
 

@@ -177,7 +177,9 @@ impl RawNip46Config {
     fn into_config(self) -> Nip46Config {
         let defaults = Nip46Config::default();
         Nip46Config {
-            signing_timeout_ms: self.signing_timeout_ms.unwrap_or(defaults.signing_timeout_ms),
+            signing_timeout_ms: self
+                .signing_timeout_ms
+                .unwrap_or(defaults.signing_timeout_ms),
             max_retries: self.max_retries.unwrap_or(defaults.max_retries),
             owners: self
                 .owners

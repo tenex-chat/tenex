@@ -34,9 +34,7 @@ use crate::worker_dispatch_tick::{
 };
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_launch::{WorkerLaunchPlanInput, plan_worker_launch};
-use crate::worker_message_flow::{
-    WorkerMessagePublishContext, WorkerMessageTerminalContext, WorkerTelegramSendMessageContext,
-};
+use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
 use crate::worker_result::WorkerResultTransitionContext;
@@ -45,7 +43,7 @@ use crate::worker_session_loop::{
     WorkerSessionLoopError, WorkerSessionLoopInput, WorkerSessionLoopOutcome,
     run_worker_session_loop,
 };
-use crate::worker_telegram_send_flow::WorkerTelegramSendContext;
+use crate::worker_telegram_egress::WorkerTelegramEgressContext;
 
 #[derive(Debug)]
 pub struct DaemonWorkerRuntimeInput<'a> {
@@ -66,8 +64,8 @@ pub struct DaemonWorkerRuntimeInput<'a> {
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub started_at: u64,
     pub frame_observed_at: u64,
-    pub publish: Option<WorkerMessagePublishContext>,
-    pub telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
+    pub publish: Option<WorkerMessagePublishContext<'a>>,
+    pub telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
     pub terminal: DaemonWorkerTerminalRuntimeInput,
     pub max_frames: u64,
 }
@@ -84,13 +82,13 @@ pub struct DaemonWorkerRuntimeFilesystemInput<'a> {
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
-    pub publish: Option<WorkerMessagePublishContext>,
-    pub telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
+    pub publish: Option<WorkerMessagePublishContext<'a>>,
+    pub telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
     pub max_frames: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DaemonWorkerTelegramSendRuntimeInput {
+pub struct DaemonWorkerTelegramEgressRuntimeInput {
     pub data_dir: PathBuf,
     pub backend_pubkey: String,
     pub writer_version: String,
@@ -206,7 +204,7 @@ where
         writer_version,
         resolved_pending_delegations,
         publish,
-        telegram_send,
+        telegram_egress,
         max_frames,
     } = input;
 
@@ -286,7 +284,7 @@ where
         runtime_state,
         now_ms,
         publish,
-        telegram_send,
+        telegram_egress,
         DaemonWorkerFilesystemTerminalInput {
             timestamp: now_ms,
             writer_version,
@@ -330,7 +328,7 @@ where
         started_at,
         frame_observed_at,
         publish,
-        telegram_send,
+        telegram_egress,
         terminal,
         max_frames,
     } = input;
@@ -378,7 +376,7 @@ where
             runtime_state,
             frame_observed_at,
             publish,
-            telegram_send,
+            telegram_egress,
             terminal,
             max_frames,
             *started,
@@ -564,8 +562,8 @@ fn run_started_worker_session<S>(
     daemon_dir: &Path,
     runtime_state: &mut WorkerRuntimeState,
     frame_observed_at: u64,
-    publish: Option<WorkerMessagePublishContext>,
-    telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
+    publish: Option<WorkerMessagePublishContext<'_>>,
+    telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
     terminal: DaemonWorkerTerminalRuntimeInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -594,7 +592,7 @@ where
         runtime_state,
         frame_observed_at,
         publish,
-        telegram_send,
+        telegram_egress,
         terminal,
         max_frames,
         started,
@@ -607,8 +605,8 @@ fn run_started_worker_session_from_filesystem<S>(
     daemon_dir: &Path,
     runtime_state: &mut WorkerRuntimeState,
     frame_observed_at: u64,
-    publish: Option<WorkerMessagePublishContext>,
-    telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
+    publish: Option<WorkerMessagePublishContext<'_>>,
+    telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
     terminal: DaemonWorkerFilesystemTerminalInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -647,7 +645,7 @@ where
         runtime_state,
         frame_observed_at,
         publish,
-        telegram_send,
+        telegram_egress,
         terminal,
         max_frames,
         started,
@@ -660,8 +658,8 @@ fn run_started_worker_session_with_state<S>(
     daemon_dir: &Path,
     runtime_state: &mut WorkerRuntimeState,
     frame_observed_at: u64,
-    publish: Option<WorkerMessagePublishContext>,
-    telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
+    publish: Option<WorkerMessagePublishContext<'_>>,
+    telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
     terminal: DaemonWorkerTerminalRuntimeInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -689,18 +687,17 @@ where
     .entered();
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
 
-    let telegram_send = telegram_send
-        .as_ref()
-        .map(|telegram| WorkerTelegramSendMessageContext {
-            accepted_at: frame_observed_at,
-            result_sequence: terminal.dispatch_sequence.saturating_add(1),
-            result_timestamp: frame_observed_at,
-            context: WorkerTelegramSendContext {
-                data_dir: telegram.data_dir.as_path(),
-                backend_pubkey: telegram.backend_pubkey.as_str(),
-                writer_version: telegram.writer_version.as_str(),
-            },
-        });
+    let publish = publish.map(|mut publish| {
+        publish.telegram_egress =
+            telegram_egress
+                .as_ref()
+                .map(|telegram| WorkerTelegramEgressContext {
+                    data_dir: telegram.data_dir.as_path(),
+                    backend_pubkey: telegram.backend_pubkey.as_str(),
+                    writer_version: telegram.writer_version.as_str(),
+                });
+        publish
+    });
 
     let session = run_worker_session_loop(
         &mut session,
@@ -729,7 +726,6 @@ where
                 }),
                 locks: started.started.locks,
             }),
-            telegram_send,
             max_frames,
         },
     )
@@ -1107,6 +1103,7 @@ mod tests {
                     accepted_at: 1_710_000_800_100,
                     result_sequence: 20,
                     result_timestamp: 1_710_000_800_200,
+                    telegram_egress: None,
                 }),
                 4,
             ),
@@ -1286,6 +1283,7 @@ mod tests {
                     accepted_at: 1_710_000_800_100,
                     result_sequence: 900,
                     result_timestamp: 1_710_000_800_200,
+                    telegram_egress: None,
                 }),
                 4,
             ),
@@ -1522,7 +1520,7 @@ mod tests {
         daemon_dir: &'a Path,
         runtime_state: &'a mut WorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
-        publish: Option<WorkerMessagePublishContext>,
+        publish: Option<WorkerMessagePublishContext<'a>>,
         max_frames: u64,
     ) -> DaemonWorkerRuntimeInput<'a> {
         DaemonWorkerRuntimeInput {
@@ -1552,7 +1550,7 @@ mod tests {
             started_at: 1_710_000_700_030,
             frame_observed_at: 1_710_000_700_040,
             publish,
-            telegram_send: None,
+            telegram_egress: None,
             terminal: DaemonWorkerTerminalRuntimeInput {
                 journal_sequence: 3,
                 journal_timestamp: 1_710_000_700_050,
@@ -1571,7 +1569,7 @@ mod tests {
         runtime_state: &'a mut WorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         command: AgentWorkerCommand,
-        publish: Option<WorkerMessagePublishContext>,
+        publish: Option<WorkerMessagePublishContext<'a>>,
         max_frames: u64,
     ) -> DaemonWorkerRuntimeInput<'a> {
         let mut input = runtime_input(
@@ -1589,7 +1587,7 @@ mod tests {
         daemon_dir: &'a Path,
         runtime_state: &'a mut WorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
-        publish: Option<WorkerMessagePublishContext>,
+        publish: Option<WorkerMessagePublishContext<'a>>,
         max_frames: u64,
     ) -> DaemonWorkerRuntimeFilesystemInput<'a> {
         DaemonWorkerRuntimeFilesystemInput {
@@ -1608,7 +1606,7 @@ mod tests {
             writer_version: "test-version".to_string(),
             resolved_pending_delegations: Vec::new(),
             publish,
-            telegram_send: None,
+            telegram_egress: None,
             max_frames,
         }
     }

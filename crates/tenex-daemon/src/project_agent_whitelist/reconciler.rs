@@ -12,9 +12,7 @@ use crate::backend_status_runtime::agents_dir;
 use crate::nip46::client::{PublishOutboxHandle, SignError};
 use crate::nip46::registry::{NIP46Registry, RegistryError};
 use crate::nostr_event::NormalizedNostrEvent;
-use crate::project_agent_whitelist::snapshot_state::{
-    PROJECT_AGENT_SNAPSHOT_KIND, SnapshotState,
-};
+use crate::project_agent_whitelist::snapshot_state::{PROJECT_AGENT_SNAPSHOT_KIND, SnapshotState};
 
 /// Diff the locally installed agent set against the cached 14199 snapshot
 /// for a given owner; when they differ, build an unsigned kind 14199 event,
@@ -104,7 +102,9 @@ pub fn run_reconciler_loop(deps: ReconcilerDeps, trigger_rx: Receiver<String>) {
         let next_deadline = deadlines.values().copied().min();
 
         let recv_result = match next_deadline {
-            None => trigger_rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            None => trigger_rx
+                .recv()
+                .map_err(|_| RecvTimeoutError::Disconnected),
             Some(deadline) => {
                 let wake_in = deadline
                     .saturating_duration_since(Instant::now())
@@ -127,8 +127,7 @@ pub fn run_reconciler_loop(deps: ReconcilerDeps, trigger_rx: Receiver<String>) {
 
                 for owner in due_owners {
                     match reconcile_owner(&deps, &owner) {
-                        Ok(ReconcileOutcome::NoChange)
-                        | Ok(ReconcileOutcome::Published { .. }) => {
+                        Ok(ReconcileOutcome::NoChange) | Ok(ReconcileOutcome::Published { .. }) => {
                             deadlines.remove(&owner);
                         }
                         Err(err) => {
@@ -415,14 +414,9 @@ mod tests {
                 .expect("client must build");
 
             // First captured event is always the connect envelope.
-            let connect_event = wait_for_nip46_request_at_index(
-                &outbox,
-                0,
-                Duration::from_secs(5),
-            )
-            .expect("connect request must be enqueued");
-            let connect_request =
-                decrypt_request(&owner_keys, &backend_pubkey, &connect_event);
+            let connect_event = wait_for_nip46_request_at_index(&outbox, 0, Duration::from_secs(5))
+                .expect("connect request must be enqueued");
+            let connect_request = decrypt_request(&owner_keys, &backend_pubkey, &connect_event);
             assert_eq!(connect_request.method, "connect");
             let connect_response = Nip46Response {
                 id: connect_request.id,
@@ -438,14 +432,10 @@ mod tests {
             for round in 0..sign_rounds {
                 // Index 1, 2, ... are the sign_event envelopes for each
                 // round.
-                let sign_event = wait_for_nip46_request_at_index(
-                    &outbox,
-                    1 + round,
-                    Duration::from_secs(5),
-                )
-                .expect("sign_event request must be enqueued");
-                let sign_request =
-                    decrypt_request(&owner_keys, &backend_pubkey, &sign_event);
+                let sign_event =
+                    wait_for_nip46_request_at_index(&outbox, 1 + round, Duration::from_secs(5))
+                        .expect("sign_event request must be enqueued");
+                let sign_request = decrypt_request(&owner_keys, &backend_pubkey, &sign_event);
                 assert_eq!(sign_request.method, "sign_event");
                 let unsigned: NormalizedNostrEvent =
                     serde_json::from_str(&sign_request.params[0]).unwrap();
@@ -455,8 +445,7 @@ mod tests {
                     result: Some(serde_json::to_string(&signed).unwrap()),
                     error: None,
                 };
-                let encrypted_sign =
-                    encrypt_response(&owner_keys, &backend_pubkey, &sign_response);
+                let encrypted_sign = encrypt_response(&owner_keys, &backend_pubkey, &sign_response);
                 client
                     .dispatch_incoming(&encrypted_sign)
                     .expect("sign dispatch");
@@ -829,69 +818,45 @@ mod tests {
                 .expect("client must build");
 
             // Connect.
-            let connect_event = wait_for_nip46_request_at_index(
-                &outbox_for_bunker,
-                0,
-                Duration::from_secs(5),
-            )
-            .expect("connect must enqueue");
-            let connect_request = decrypt_request(
-                &owner_keys,
-                &backend_pubkey_for_bunker,
-                &connect_event,
-            );
+            let connect_event =
+                wait_for_nip46_request_at_index(&outbox_for_bunker, 0, Duration::from_secs(5))
+                    .expect("connect must enqueue");
+            let connect_request =
+                decrypt_request(&owner_keys, &backend_pubkey_for_bunker, &connect_event);
             let connect_response = Nip46Response {
                 id: connect_request.id,
                 result: Some("ack".to_string()),
                 error: None,
             };
-            let encrypted_connect = encrypt_response(
-                &owner_keys,
-                &backend_pubkey_for_bunker,
-                &connect_response,
-            );
+            let encrypted_connect =
+                encrypt_response(&owner_keys, &backend_pubkey_for_bunker, &connect_response);
             client
                 .dispatch_incoming(&encrypted_connect)
                 .expect("connect dispatch");
 
             // First sign_event → deny.
-            let sign_event_one = wait_for_nip46_request_at_index(
-                &outbox_for_bunker,
-                1,
-                Duration::from_secs(5),
-            )
-            .expect("first sign must enqueue");
-            let sign_request_one = decrypt_request(
-                &owner_keys,
-                &backend_pubkey_for_bunker,
-                &sign_event_one,
-            );
+            let sign_event_one =
+                wait_for_nip46_request_at_index(&outbox_for_bunker, 1, Duration::from_secs(5))
+                    .expect("first sign must enqueue");
+            let sign_request_one =
+                decrypt_request(&owner_keys, &backend_pubkey_for_bunker, &sign_event_one);
             let deny_response = Nip46Response {
                 id: sign_request_one.id,
                 result: None,
                 error: Some("denied".to_string()),
             };
-            let encrypted_deny = encrypt_response(
-                &owner_keys,
-                &backend_pubkey_for_bunker,
-                &deny_response,
-            );
+            let encrypted_deny =
+                encrypt_response(&owner_keys, &backend_pubkey_for_bunker, &deny_response);
             client
                 .dispatch_incoming(&encrypted_deny)
                 .expect("deny dispatch");
 
             // Second sign_event → approve.
-            let sign_event_two = wait_for_nip46_request_at_index(
-                &outbox_for_bunker,
-                2,
-                Duration::from_secs(5),
-            )
-            .expect("second sign must enqueue");
-            let sign_request_two = decrypt_request(
-                &owner_keys,
-                &backend_pubkey_for_bunker,
-                &sign_event_two,
-            );
+            let sign_event_two =
+                wait_for_nip46_request_at_index(&outbox_for_bunker, 2, Duration::from_secs(5))
+                    .expect("second sign must enqueue");
+            let sign_request_two =
+                decrypt_request(&owner_keys, &backend_pubkey_for_bunker, &sign_event_two);
             let unsigned: NormalizedNostrEvent =
                 serde_json::from_str(&sign_request_two.params[0]).unwrap();
             let signed = owner_keys.sign_event(&unsigned);
@@ -900,11 +865,8 @@ mod tests {
                 result: Some(serde_json::to_string(&signed).unwrap()),
                 error: None,
             };
-            let encrypted_approve = encrypt_response(
-                &owner_keys,
-                &backend_pubkey_for_bunker,
-                &approve_response,
-            );
+            let encrypted_approve =
+                encrypt_response(&owner_keys, &backend_pubkey_for_bunker, &approve_response);
             client
                 .dispatch_incoming(&encrypted_approve)
                 .expect("approve dispatch");

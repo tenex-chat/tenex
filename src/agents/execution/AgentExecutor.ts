@@ -75,6 +75,7 @@ function createSchemaOnlyPublisher(): AgentRuntimePublisher {
         error: async () => failSchemaOnlyAccess("agentPublisher.error"),
         lesson: async () => failSchemaOnlyAccess("agentPublisher.lesson"),
         toolUse: async () => failSchemaOnlyAccess("agentPublisher.toolUse"),
+        sendMessage: async () => failSchemaOnlyAccess("agentPublisher.sendMessage"),
         streamTextDelta: async () => failSchemaOnlyAccess("agentPublisher.streamTextDelta"),
     };
 }

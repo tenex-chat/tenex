@@ -12,6 +12,7 @@ use crate::worker_publish::{
     WorkerPublishAcceptance, WorkerPublishAcceptanceInput, WorkerPublishError,
     accept_worker_publish_and_build_result,
 };
+use crate::worker_telegram_egress::WorkerTelegramEgressContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerPublishFlowInput<'a> {
@@ -20,6 +21,7 @@ pub struct WorkerPublishFlowInput<'a> {
     pub accepted_at: u64,
     pub result_sequence: u64,
     pub result_timestamp: u64,
+    pub telegram_egress: Option<WorkerTelegramEgressContext<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +78,7 @@ where
         accepted_at: input.accepted_at,
         result_sequence: input.result_sequence,
         result_timestamp: input.result_timestamp,
+        telegram_egress: input.telegram_egress,
     })
     .map_err(WorkerPublishFlowError::from)?;
 
@@ -177,6 +180,7 @@ mod tests {
                 accepted_at: 1_710_001_000_100,
                 result_sequence: 900,
                 result_timestamp: 1_710_001_000_200,
+                telegram_egress: None,
             },
         )
         .expect("publish request flow must succeed");
@@ -185,7 +189,16 @@ mod tests {
             outcome.message_plan.action,
             WorkerMessageAction::PublishRequestCandidate
         );
-        assert_eq!(outcome.acceptance.record.event.id, fixture.signed.id);
+        assert_eq!(
+            outcome
+                .acceptance
+                .egress
+                .as_nostr()
+                .expect("default worker publish must route to Nostr")
+                .event
+                .id,
+            fixture.signed.id
+        );
         assert_eq!(
             session.sent_messages,
             vec![outcome.acceptance.publish_result.clone()]
@@ -222,6 +235,7 @@ mod tests {
                 accepted_at: 1_710_001_000_100,
                 result_sequence: 900,
                 result_timestamp: 1_710_001_000_200,
+                telegram_egress: None,
             },
         )
         .expect_err("heartbeat must not run publish flow");
@@ -255,6 +269,7 @@ mod tests {
                 accepted_at: 1_710_001_000_100,
                 result_sequence: 41,
                 result_timestamp: 1_710_001_000_200,
+                telegram_egress: None,
             },
         )
         .expect_err("non-advancing result sequence must fail");
@@ -288,13 +303,22 @@ mod tests {
                 accepted_at: 1_710_001_000_100,
                 result_sequence: 900,
                 result_timestamp: 1_710_001_000_200,
+                telegram_egress: None,
             },
         )
         .expect_err("send failure must be reported");
 
         match error {
             WorkerPublishFlowError::SendPublishResult { acceptance, .. } => {
-                assert_eq!(acceptance.record.event.id, fixture.signed.id);
+                assert_eq!(
+                    acceptance
+                        .egress
+                        .as_nostr()
+                        .expect("default worker publish must route to Nostr")
+                        .event
+                        .id,
+                    fixture.signed.id
+                );
                 assert_eq!(acceptance.publish_result, session.sent_messages[0]);
             }
             other => panic!("expected send failure, got {other:?}"),

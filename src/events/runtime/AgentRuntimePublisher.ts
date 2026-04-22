@@ -18,6 +18,11 @@ export interface PublishedMessageRef {
     encodedId?: string;
 }
 
+export interface TransportMessageIntent {
+    channelId: string;
+    content: string;
+}
+
 /**
  * Transport-neutral publishing contract for the conversation/runtime plane.
  *
@@ -42,5 +47,6 @@ export interface AgentRuntimePublisher {
     error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef>;
     lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef>;
     toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef>;
+    sendMessage(intent: TransportMessageIntent, context: EventContext): Promise<PublishedMessageRef>;
     streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void>;
 }

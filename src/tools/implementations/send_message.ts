@@ -1,9 +1,5 @@
 import { z } from "zod";
 import { tool } from "ai";
-import {
-    getActiveTelegramSendBridge,
-    type TelegramSendBridge,
-} from "@/agents/execution/worker/telegram-send-bridge";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 
 const sendMessageSchema = z.object({
@@ -14,10 +10,7 @@ const sendMessageSchema = z.object({
 type SendMessageInput = z.infer<typeof sendMessageSchema>;
 
 export function createSendMessageTool(
-    context: ToolExecutionContext,
-    options: {
-        bridge?: TelegramSendBridge;
-    } = {}
+    context: ToolExecutionContext
 ): AISdkTool {
     const aiTool = tool({
         description:
@@ -25,13 +18,6 @@ export function createSendMessageTool(
             "Use the channel IDs from your channel bindings in the system prompt.",
         inputSchema: sendMessageSchema,
         execute: async (input: SendMessageInput) => {
-            const bridge = options.bridge ?? getActiveTelegramSendBridge();
-            if (!bridge) {
-                return {
-                    error: "Telegram send bridge is not available in this execution context",
-                };
-            }
-
             if (!input.channelId) {
                 return { error: "channelId is required" };
             }
@@ -39,19 +25,30 @@ export function createSendMessageTool(
                 return { error: "content is required" };
             }
 
-            const result = await bridge.sendProactive({
-                senderAgentPubkey: context.agent.pubkey,
-                channelId: input.channelId,
-                content: input.content,
-            });
-
-            if (result.status === "accepted") {
-                return { success: true, channelId: input.channelId };
+            try {
+                const result = await context.agentPublisher.sendMessage(
+                    {
+                        channelId: input.channelId,
+                        content: input.content,
+                    },
+                    {
+                        conversationId: context.conversationId,
+                        rootEvent: {
+                            id: context.triggeringEnvelope.message.nativeId,
+                        },
+                        triggeringEnvelope: context.triggeringEnvelope,
+                        ralNumber: context.ralNumber,
+                    }
+                );
+                return {
+                    success: true,
+                    channelId: input.channelId,
+                    eventId: result.id,
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return { error: `Message send failed: ${message}` };
             }
-
-            const reason = result.errorReason ?? "send_failed";
-            const detail = result.errorDetail ? `: ${result.errorDetail}` : "";
-            return { error: `Telegram send failed (${reason})${detail}` };
         },
     });
 

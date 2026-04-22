@@ -271,10 +271,7 @@ mod tests {
                 reason,
             }) => {
                 assert_eq!(reported_owner, owner);
-                assert!(
-                    !reason.is_empty(),
-                    "reason must describe the parse failure"
-                );
+                assert!(!reason.is_empty(), "reason must describe the parse failure");
             }
             Err(other) => panic!("expected InvalidBunker, got {other:?}"),
             Ok(_) => panic!("malformed bunker uri must fail"),

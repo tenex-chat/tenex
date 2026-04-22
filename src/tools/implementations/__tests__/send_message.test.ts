@@ -1,134 +1,64 @@
-import { describe, expect, it } from "bun:test";
-import type { AgentWorkerProtocolMessage } from "@/events/runtime/AgentWorkerProtocol";
-import type { TelegramSendBridge } from "@/agents/execution/worker/telegram-send-bridge";
+import { describe, expect, it, mock } from "bun:test";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+    TransportMessageIntent,
+} from "@/events/runtime/AgentRuntimePublisher";
+import type { EventContext } from "@/nostr/types";
 import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import { createSendMessageTool } from "../send_message";
 
-type TelegramSendResult = Extract<AgentWorkerProtocolMessage, { type: "telegram_send_result" }>;
-
-interface CapturedRequest {
-    senderAgentPubkey: string;
-    channelId: string;
-    content: string;
-}
-
-function makeBridge(result: TelegramSendResult): {
-    bridge: TelegramSendBridge;
-    captured: CapturedRequest[];
-} {
-    const captured: CapturedRequest[] = [];
-    const bridge: TelegramSendBridge = {
-        async sendProactive(params) {
-            captured.push(params);
-            return result;
-        },
-    };
-    return { bridge, captured };
-}
-
-function acceptedResult(correlationId: string): TelegramSendResult {
-    return {
-        version: 1,
-        type: "telegram_send_result",
-        correlationId,
-        sequence: 42,
-        timestamp: 1_710_000_000_000,
-        status: "accepted",
-    };
-}
-
-function failedResult(
-    correlationId: string,
-    errorReason: string,
-    errorDetail?: string
-): TelegramSendResult {
-    return {
-        version: 1,
-        type: "telegram_send_result",
-        correlationId,
-        sequence: 42,
-        timestamp: 1_710_000_000_000,
-        status: "failed",
-        errorReason,
-        errorDetail,
-    };
-}
-
 describe("send_message tool", () => {
-    it("surfaces an error when no bridge is active", async () => {
-        const tool = createSendMessageTool(
-            createMockExecutionEnvironment({
-                agent: createMockAgent({}),
-            })
-        );
-
-        const result = await tool.execute({
-            channelId: "telegram:group:-1001:topic:77",
-            content: "hello",
-        });
-
-        expect(result).toEqual({
-            error: "Telegram send bridge is not available in this execution context",
-        });
-    });
-
-    it("emits telegram_send_request and returns accepted on bridge success", async () => {
-        const { bridge, captured } = makeBridge(acceptedResult("exec:tg-send:1"));
-        const agent = createMockAgent({
-            pubkey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        });
-        const tool = createSendMessageTool(
-            createMockExecutionEnvironment({ agent }),
-            { bridge }
-        );
+    it("publishes a signed transport event through the runtime publisher", async () => {
+        const { context, sendMessage } = makeContext();
+        const tool = createSendMessageTool(context);
 
         const result = await tool.execute({
             channelId: "telegram:group:-1001:topic:77",
             content: "hello there",
         });
 
-        expect(captured).toEqual([
+        expect(sendMessage).toHaveBeenCalledWith(
             {
-                senderAgentPubkey:
-                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 channelId: "telegram:group:-1001:topic:77",
                 content: "hello there",
             },
-        ]);
+            {
+                conversationId: context.conversationId,
+                rootEvent: {
+                    id: context.triggeringEnvelope.message.nativeId,
+                },
+                triggeringEnvelope: context.triggeringEnvelope,
+                ralNumber: context.ralNumber,
+            }
+        );
         expect(result).toEqual({
             success: true,
             channelId: "telegram:group:-1001:topic:77",
+            eventId: "telegram-event-id",
         });
     });
 
-    it("surfaces invalid_channel_id failures with the error detail", async () => {
-        const { bridge, captured } = makeBridge(
-            failedResult("exec:tg-send:1", "invalid_channel_id", "channel id must start with 'telegram:'")
-        );
-        const tool = createSendMessageTool(
-            createMockExecutionEnvironment({ agent: createMockAgent({}) }),
-            { bridge }
-        );
+    it("surfaces validation errors before publishing", async () => {
+        const { context, sendMessage } = makeContext();
+        const tool = createSendMessageTool(context);
 
-        const result = await tool.execute({
-            channelId: "1001",
-            content: "hello",
+        expect(await tool.execute({ channelId: "", content: "hello" })).toEqual({
+            error: "channelId is required",
         });
-
-        expect(result).toEqual({
-            error: "Telegram send failed (invalid_channel_id): channel id must start with 'telegram:'",
+        expect(await tool.execute({ channelId: "telegram:chat:2002", content: "" })).toEqual({
+            error: "content is required",
         });
-        expect(captured).toHaveLength(1);
+        expect(sendMessage).not.toHaveBeenCalled();
     });
 
-    it("surfaces unbound_channel failures", async () => {
-        const { bridge } = makeBridge(
-            failedResult("exec:tg-send:1", "unbound_channel", "channel telegram:chat:2002 is not remembered")
-        );
-        const tool = createSendMessageTool(
-            createMockExecutionEnvironment({ agent: createMockAgent({}) }),
-            { bridge }
-        );
+    it("surfaces publisher failures", async () => {
+        const { context } = makeContext({
+            sendMessage: mock(async () => {
+                throw new Error("channel telegram:chat:2002 is not remembered");
+            }),
+        });
+        const tool = createSendMessageTool(context);
 
         const result = await tool.execute({
             channelId: "telegram:chat:2002",
@@ -136,22 +66,34 @@ describe("send_message tool", () => {
         });
 
         expect(result).toEqual({
-            error: "Telegram send failed (unbound_channel): channel telegram:chat:2002 is not remembered",
+            error: "Message send failed: channel telegram:chat:2002 is not remembered",
         });
-    });
-
-    it("surfaces outbox_error failures with no detail", async () => {
-        const { bridge } = makeBridge(failedResult("exec:tg-send:1", "outbox_error"));
-        const tool = createSendMessageTool(
-            createMockExecutionEnvironment({ agent: createMockAgent({}) }),
-            { bridge }
-        );
-
-        const result = await tool.execute({
-            channelId: "telegram:group:-1001:topic:77",
-            content: "hello",
-        });
-
-        expect(result).toEqual({ error: "Telegram send failed (outbox_error)" });
     });
 });
+
+function makeContext(overrides?: {
+    sendMessage?: (
+        intent: TransportMessageIntent,
+        context: EventContext
+    ) => Promise<PublishedMessageRef>;
+}) {
+    const context = createMockExecutionEnvironment({
+        agent: createMockAgent({
+            pubkey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }),
+    });
+    const sendMessage =
+        overrides?.sendMessage ??
+        mock(async (): Promise<PublishedMessageRef> => ({
+            id: "telegram-event-id",
+            transport: "telegram",
+            envelope: context.triggeringEnvelope,
+        }));
+
+    context.agentPublisher = {
+        ...context.agentPublisher,
+        sendMessage,
+    } as AgentRuntimePublisher;
+
+    return { context, sendMessage };
+}

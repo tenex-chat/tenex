@@ -16,7 +16,6 @@ export const DAEMON_TO_WORKER_MESSAGE_TYPES = [
     "ping",
     "publish_result",
     "ack",
-    "telegram_send_result",
 ] as const;
 
 export const WORKER_TO_DAEMON_MESSAGE_TYPES = [
@@ -39,7 +38,6 @@ export const WORKER_TO_DAEMON_MESSAGE_TYPES = [
     "aborted",
     "error",
     "heartbeat",
-    "telegram_send_request",
 ] as const;
 
 export type AgentWorkerProtocolDirection = "daemon_to_worker" | "worker_to_daemon";
@@ -48,7 +46,6 @@ const hexPubkeySchema = z.string().regex(/^[0-9a-f]{64}$/);
 const positiveIntegerSchema = z.number().int().positive();
 const nonNegativeIntegerSchema = z.number().int().nonnegative();
 const utf8Encoder = new TextEncoder();
-
 const runtimeTransportSchema = z.enum(["local", "mcp", "nostr", "telegram"]);
 
 const principalRefSchema = z
@@ -419,51 +416,6 @@ const heartbeatMessageSchema = frameSchema("heartbeat", {
     accumulatedRuntimeMs: nonNegativeIntegerSchema,
 });
 
-export const TELEGRAM_SEND_CONTENT_MAX_BYTES =
-    AGENT_WORKER_MAX_FRAME_BYTES - AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES;
-
-const telegramSendRequestMessageSchema = frameSchema("telegram_send_request", {
-    senderAgentPubkey: hexPubkeySchema,
-    channelId: z.string().min(1),
-    content: z.string().min(1),
-}).superRefine((message, context) => {
-    if (utf8Encoder.encode(message.content).byteLength > TELEGRAM_SEND_CONTENT_MAX_BYTES) {
-        context.addIssue({
-            code: "custom",
-            path: ["content"],
-            message: `telegram_send_request content exceeds ${TELEGRAM_SEND_CONTENT_MAX_BYTES} bytes`,
-        });
-    }
-});
-
-const telegramSendResultMessageSchema = frameSchema("telegram_send_result", {
-    status: z.enum(["accepted", "failed"]),
-    errorReason: z.string().min(1).optional(),
-    errorDetail: z.string().min(1).optional(),
-}).superRefine((message, context) => {
-    if (message.status === "failed" && message.errorReason === undefined) {
-        context.addIssue({
-            code: "custom",
-            path: ["errorReason"],
-            message: "telegram_send_result failed status requires errorReason",
-        });
-    }
-    if (message.status === "accepted" && message.errorReason !== undefined) {
-        context.addIssue({
-            code: "custom",
-            path: ["errorReason"],
-            message: "telegram_send_result accepted status must not include errorReason",
-        });
-    }
-    if (message.status === "accepted" && message.errorDetail !== undefined) {
-        context.addIssue({
-            code: "custom",
-            path: ["errorDetail"],
-            message: "telegram_send_result accepted status must not include errorDetail",
-        });
-    }
-});
-
 export const AgentWorkerProtocolMessageSchema = z.union([
     executeMessageSchema,
     pingMessageSchema,
@@ -491,8 +443,6 @@ export const AgentWorkerProtocolMessageSchema = z.union([
     abortedMessageSchema,
     errorMessageSchema,
     heartbeatMessageSchema,
-    telegramSendRequestMessageSchema,
-    telegramSendResultMessageSchema,
 ]);
 
 export const AgentWorkerProtocolFixtureSchema = z.object({

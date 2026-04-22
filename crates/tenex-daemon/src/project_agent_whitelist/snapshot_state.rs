@@ -60,17 +60,14 @@ impl SnapshotState {
 
     fn apply(&self, owner_pubkey: &str, created_at: u64, p_tags: BTreeSet<String>) -> bool {
         let mut guard = self.inner.write().expect("snapshot state lock poisoned");
-        if let Some(existing) = guard.get(owner_pubkey) {
-            if existing.created_at >= created_at {
-                return false;
-            }
+        if let Some(existing) = guard.get(owner_pubkey)
+            && existing.created_at >= created_at
+        {
+            return false;
         }
         guard.insert(
             owner_pubkey.to_string(),
-            CachedSnapshot {
-                created_at,
-                p_tags,
-            },
+            CachedSnapshot { created_at, p_tags },
         );
         true
     }
