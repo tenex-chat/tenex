@@ -126,6 +126,12 @@ Rust and TypeScript share filesystem state. The compatibility contract includes:
 - `$TENEX_BASE_DIR/daemon/status.json`
 - `$TENEX_BASE_DIR/daemon/restart-state.json`
 - `$TENEX_BASE_DIR/projects/<project-dTag>/`
+- `$TENEX_BASE_DIR/projects/<project-dTag>/project.json`, a shared project
+  descriptor written by the TypeScript `ProjectRuntime` on start/stop and read
+  by Rust project-status ticks. Schema version `1` carries `status`,
+  `projectOwnerPubkey`, `projectDTag`, optional `projectManagerPubkey`,
+  optional `projectAddress`, and `projectBasePath`; Rust only schedules
+  descriptors with no status or `active` / `running` status.
 - conversation transcript JSON
 - conversation catalog path
 - agent metadata and home directories
@@ -874,7 +880,13 @@ Landed slices:
   `backend-events-enqueue-status`,
   `backend-events-enqueue-project-status`, `backend-events-periodic-tick`, and
   `readiness` CLI wiring for enqueue diagnostics, one-shot periodic tick
-  diagnostics, and startup-readiness JSON without direct relay publishing.
+  diagnostics, filesystem project discovery diagnostics, and startup-readiness
+  JSON without direct relay publishing.
+- `crates/tenex-daemon/src/project_status_descriptors.rs` — filesystem reader
+  for `$TENEX_BASE_DIR/projects/<project-dTag>/project.json` descriptors. It
+  validates owner / project-manager pubkeys, skips stopped descriptors, reports
+  malformed files, and lets `daemon-control backend-events-periodic-tick
+  --discover-projects` feed project-status tick inputs from shared disk state.
 - `crates/tenex-daemon/src/project_status_sources.rs` — filesystem readers for
   global `llms.json` model config keys and per-project `schedules.json`
   records, with deterministic ordering and TS-aligned cron/one-off task
@@ -892,7 +904,8 @@ Landed slices:
   and project-status records through their filesystem-backed runtimes on the
   existing 30-second TypeScript status cadence. The
   `daemon-control backend-events-periodic-tick` command exercises this as a
-  one-shot operator diagnostic with explicit project owner/tag inputs.
+  one-shot operator diagnostic with explicit project owner/tag inputs or
+  filesystem-discovered project descriptors.
 - `daemon-control backend-events-plan` — read-only diagnostics over publish
   outbox state plus backend status publisher readiness, including config,
   signer, relay, and installed-agent inventory availability without mutating
@@ -915,10 +928,10 @@ Planned next runtime boundaries:
   `daemon-control backend-events-enqueue-status`. Project-status uses the
   separate `project_status_runtime` boundary and
   `daemon-control backend-events-enqueue-project-status`.
-- The remaining project-status work is daemon wiring: deriving project
-  owner/tag inputs from live daemon context or project metadata, feeding
-  runtime agent/worktree state into the snapshot, and passing those project
-  descriptors into the central backend-events tick.
+- The remaining project-status work is daemon wiring: persisting scheduler
+  state across ticks, deriving runtime agent/tool/skill/MCP/worktree detail
+  from filesystem state, and invoking the central backend-events tick from the
+  long-running Rust daemon loop.
 
 Scope:
 
@@ -1082,7 +1095,10 @@ Landed slices:
 - `crates/tenex-daemon/src/backend_events_tick.rs` — first consumer of the
   periodic scheduler that takes due backend-authored status work once and
   dispatches backend heartbeat, installed-agent-list, and project-status
-  enqueue runtimes without direct relay publishing.
+  enqueue runtimes without direct relay publishing. Its diagnostic command now
+  supports `--discover-projects`, reading active
+  `$TENEX_BASE_DIR/projects/<project-dTag>/project.json` descriptors instead
+  of requiring project owner/tag CLI arguments.
 
 Scope:
 

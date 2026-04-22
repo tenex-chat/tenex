@@ -25,6 +25,9 @@ use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_di
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
 use tenex_daemon::periodic_tick::PeriodicScheduler;
+use tenex_daemon::project_status_descriptors::{
+    ProjectStatusDescriptorReport, read_project_status_descriptors,
+};
 use tenex_daemon::project_status_runtime::{
     ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
@@ -66,6 +69,7 @@ struct DaemonControlCliOptions {
     project_d_tag: Option<String>,
     project_manager_pubkey: Option<String>,
     worktrees: Vec<String>,
+    discover_projects: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -153,6 +157,8 @@ struct BackendEventsPeriodicTickDiagnostics {
     request_timestamp: u64,
     registered: BackendEventsTaskRegistration,
     tick: BackendEventsTickOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_descriptor_report: Option<ProjectStatusDescriptorReport>,
     publish_outbox_after: PublishOutboxDiagnostics,
 }
 
@@ -288,31 +294,74 @@ fn run_backend_events_periodic_tick(
     let request_timestamp = options.request_timestamp.unwrap_or(accepted_at);
     let now = options.created_at.unwrap_or(accepted_at / 1_000);
     let first_due_at = options.first_due_at.unwrap_or(now);
-    let project = match (
-        options.project_owner_pubkey.as_deref(),
-        options.project_d_tag.as_deref(),
-    ) {
-        (Some(project_owner_pubkey), Some(project_d_tag)) => Some(BackendEventsTickProject {
-            project_owner_pubkey,
-            project_d_tag,
-            project_manager_pubkey: options.project_manager_pubkey.as_deref(),
-            worktrees: Some(&options.worktrees),
-        }),
-        (None, None)
-            if options.project_manager_pubkey.is_some() || !options.worktrees.is_empty() =>
-        {
-            return Err(usage_error(
-                "--project-owner-pubkey and --project-d-tag are required when project-specific options are set",
-            ));
-        }
-        (None, None) => None,
-        _ => {
-            return Err(usage_error(
-                "--project-owner-pubkey and --project-d-tag must be provided together",
-            ));
+
+    if options.discover_projects
+        && (options.project_owner_pubkey.is_some()
+            || options.project_d_tag.is_some()
+            || options.project_manager_pubkey.is_some()
+            || !options.worktrees.is_empty())
+    {
+        return Err(usage_error(
+            "--discover-projects cannot be combined with explicit project options",
+        ));
+    }
+
+    let project_descriptor_report = if options.discover_projects {
+        Some(
+            read_project_status_descriptors(&options.tenex_base_dir)
+                .map_err(|error| runtime_error(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let discovered_projects = project_descriptor_report
+        .as_ref()
+        .map(|report| {
+            report
+                .descriptors
+                .iter()
+                .map(|descriptor| BackendEventsTickProject {
+                    project_owner_pubkey: &descriptor.project_owner_pubkey,
+                    project_d_tag: &descriptor.project_d_tag,
+                    project_manager_pubkey: descriptor.project_manager_pubkey.as_deref(),
+                    worktrees: Some(&descriptor.worktrees),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let explicit_project = if options.discover_projects {
+        None
+    } else {
+        match (
+            options.project_owner_pubkey.as_deref(),
+            options.project_d_tag.as_deref(),
+        ) {
+            (Some(project_owner_pubkey), Some(project_d_tag)) => Some(BackendEventsTickProject {
+                project_owner_pubkey,
+                project_d_tag,
+                project_manager_pubkey: options.project_manager_pubkey.as_deref(),
+                worktrees: Some(&options.worktrees),
+            }),
+            (None, None)
+                if options.project_manager_pubkey.is_some() || !options.worktrees.is_empty() =>
+            {
+                return Err(usage_error(
+                    "--project-owner-pubkey and --project-d-tag are required when project-specific options are set",
+                ));
+            }
+            (None, None) => None,
+            _ => {
+                return Err(usage_error(
+                    "--project-owner-pubkey and --project-d-tag must be provided together",
+                ));
+            }
         }
     };
-    let projects = project.as_slice();
+    let projects = if options.discover_projects {
+        discovered_projects.as_slice()
+    } else {
+        explicit_project.as_slice()
+    };
     let mut scheduler = PeriodicScheduler::new();
     let registered = ensure_backend_events_tasks(&mut scheduler, first_due_at, projects)
         .map_err(|error| runtime_error(error.to_string()))?;
@@ -339,6 +388,7 @@ fn run_backend_events_periodic_tick(
         request_timestamp,
         registered,
         tick,
+        project_descriptor_report,
         publish_outbox_after,
     })
 }
@@ -576,6 +626,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let mut project_d_tag = None;
     let mut project_manager_pubkey = None;
     let mut worktrees = Vec::new();
+    let mut discover_projects = false;
     let mut index = 1;
 
     while index < args.len() {
@@ -657,6 +708,9 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .ok_or_else(|| usage_error("--worktree requires a value"))?;
                 worktrees.push(value.clone());
             }
+            "--discover-projects" => {
+                discover_projects = true;
+            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -691,6 +745,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         project_d_tag,
         project_manager_pubkey,
         worktrees,
+        discover_projects,
     })
 }
 
@@ -727,7 +782,7 @@ fn usage() -> String {
         "  daemon-control backend-events-plan --daemon-dir <path> [--tenex-base-dir <path>] [--inspected-at <ms>]",
         "  daemon-control backend-events-enqueue-status --daemon-dir <path> [--tenex-base-dir <path>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control backend-events-enqueue-project-status --daemon-dir <path> [--tenex-base-dir <path>] --project-owner-pubkey <hex> --project-d-tag <d> [--project-manager-pubkey <hex>] [--worktree <branch>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
-        "  daemon-control backend-events-periodic-tick --daemon-dir <path> [--tenex-base-dir <path>] [--project-owner-pubkey <hex> --project-d-tag <d>] [--project-manager-pubkey <hex>] [--worktree <branch>] [--first-due-at <s>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
+        "  daemon-control backend-events-periodic-tick --daemon-dir <path> [--tenex-base-dir <path>] [--discover-projects | --project-owner-pubkey <hex> --project-d-tag <d>] [--project-manager-pubkey <hex>] [--worktree <branch>] [--first-due-at <s>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
@@ -936,6 +991,30 @@ mod tests {
         assert_eq!(options.created_at, Some(1_710_001_000));
         assert_eq!(options.accepted_at, Some(1_710_001_000_100));
         assert_eq!(options.request_timestamp, Some(1_710_001_000_050));
+    }
+
+    #[test]
+    fn parses_backend_events_periodic_tick_discovery_args() {
+        let options = parse_daemon_control_args(&[
+            "backend-events-periodic-tick".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--discover-projects".to_string(),
+            "--first-due-at".to_string(),
+            "1710000990".to_string(),
+        ])
+        .expect("backend-events-periodic-tick discovery args must parse");
+
+        assert_eq!(
+            options.command,
+            DaemonControlCommand::BackendEventsPeriodicTick
+        );
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert!(options.discover_projects);
+        assert_eq!(options.first_due_at, Some(1_710_000_990));
     }
 
     #[test]
@@ -1642,6 +1721,126 @@ mod tests {
         assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(3));
         assert_eq!(value["publishOutboxAfter"]["publishedCount"], json!(0));
         assert_eq!(value["publishOutboxAfter"]["failedCount"], json!(0));
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
+    }
+
+    #[test]
+    fn backend_events_periodic_tick_discovers_project_descriptors_json() {
+        let tenex_base_dir = unique_temp_base_dir();
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        let project_dir = tenex_base_dir.join("projects").join("demo-project");
+        let stopped_project_dir = tenex_base_dir.join("projects").join("stopped-project");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        fs::create_dir_all(&project_dir).expect("project dir must create");
+        fs::create_dir_all(&stopped_project_dir).expect("stopped project dir must create");
+
+        let owner = xonly_pubkey_hex(0x0d);
+        let stopped_owner = xonly_pubkey_hex(0x0e);
+        let agent = xonly_pubkey_hex(0x0f);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+        fs::write(
+            agents_dir.join(format!("{agent}.json")),
+            r#"{"slug":"worker","status":"active"}"#,
+        )
+        .expect("agent file must write");
+        fs::write(
+            tenex_base_dir.join("llms.json"),
+            r#"{"configurations":{"alpha":{"provider":"openai","model":"gpt-4o"}}}"#,
+        )
+        .expect("llms file must write");
+        fs::write(
+            project_dir.join("schedules.json"),
+            r#"[{
+                "id": "task-1",
+                "title": "Nightly report",
+                "schedule": "0 1 * * *",
+                "prompt": "Run nightly report",
+                "targetAgentSlug": "worker"
+            }]"#,
+        )
+        .expect("schedules file must write");
+        fs::write(
+            project_dir.join("project.json"),
+            format!(
+                r#"{{
+                    "schemaVersion": 1,
+                    "status": "running",
+                    "projectOwnerPubkey": "{owner}",
+                    "projectDTag": "demo-project",
+                    "projectManagerPubkey": "{agent}",
+                    "worktrees": ["main", "feature/rust"]
+                }}"#
+            ),
+        )
+        .expect("project descriptor must write");
+        fs::write(
+            stopped_project_dir.join("project.json"),
+            format!(
+                r#"{{
+                    "schemaVersion": 1,
+                    "status": "stopped",
+                    "projectOwnerPubkey": "{stopped_owner}",
+                    "projectDTag": "stopped-project"
+                }}"#
+            ),
+        )
+        .expect("stopped project descriptor must write");
+
+        let output = run_cli([
+            "backend-events-periodic-tick",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("daemon path must be utf-8"),
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+            "--discover-projects",
+            "--first-due-at",
+            "1710001400",
+            "--created-at",
+            "1710001400",
+            "--accepted-at",
+            "1710001400100",
+            "--request-timestamp",
+            "1710001400050",
+        ])
+        .expect("backend-events-periodic-tick discovery command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        let project_task_name = format!("project-status:{owner}:demo-project");
+        assert_eq!(
+            value["registered"]["registeredTaskNames"],
+            json!(["backend-status", project_task_name.clone()])
+        );
+        assert_eq!(
+            value["tick"]["dueTaskNames"],
+            json!(["backend-status", project_task_name])
+        );
+        assert_eq!(
+            value["tick"]["projectStatuses"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            value["projectDescriptorReport"]["descriptors"][0]["projectDTag"],
+            json!("demo-project")
+        );
+        assert_eq!(
+            value["projectDescriptorReport"]["descriptors"][0]["worktrees"],
+            json!(["feature/rust", "main"])
+        );
+        assert_eq!(value["projectDescriptorReport"]["skippedFiles"], json!([]));
+        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(3));
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }

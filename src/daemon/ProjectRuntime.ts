@@ -38,6 +38,22 @@ import { trace, SpanStatusCode } from "@opentelemetry/api";
 import chalk from "chalk";
 import { shortenEventId } from "@/utils/conversation-id";
 
+const PROJECT_DESCRIPTOR_FILE_NAME = "project.json";
+const PROJECT_DESCRIPTOR_SCHEMA_VERSION = 1;
+
+type ProjectRuntimeDescriptorStatus = "running" | "stopped";
+
+interface ProjectRuntimeDescriptor {
+    schemaVersion: typeof PROJECT_DESCRIPTOR_SCHEMA_VERSION;
+    status: ProjectRuntimeDescriptorStatus;
+    projectOwnerPubkey: string;
+    projectDTag: string;
+    projectAddress?: string;
+    projectManagerPubkey?: string;
+    projectBasePath: string;
+    updatedAt: number;
+}
+
 /**
  * Self-contained runtime for a single project.
  * Manages its own lifecycle, status publishing, and event handling.
@@ -98,6 +114,7 @@ export class ProjectRuntime {
 
         const projectTitle = this.project.tagValue("title") || "Untitled";
         console.log(chalk.yellow(`🚀 Starting project: ${chalk.bold(projectTitle)}`));
+        let projectDescriptorRunning = false;
 
         trace.getActiveSpan()?.addEvent("project_runtime.starting", {
             "project.id": this.projectId,
@@ -146,6 +163,9 @@ export class ProjectRuntime {
                 projectTitle,
                 this.context
             );
+            await this.writeProjectStatusDescriptor("running");
+            projectDescriptorRunning = true;
+            trace.getActiveSpan()?.addEvent("project_runtime.project_descriptor_written");
             await Promise.all(
                 Array.from(this.context.agents.values()).map(async (agent) => {
                     await this.context?.promptCompilerRegistry?.registerAgent(agent);
@@ -311,6 +331,19 @@ export class ProjectRuntime {
             );
             console.log();
         } catch (error) {
+            if (projectDescriptorRunning) {
+                try {
+                    await this.writeProjectStatusDescriptor("stopped");
+                } catch (descriptorError) {
+                    logger.warn("[ProjectRuntime] Failed to mark project descriptor stopped after startup failure", {
+                        projectId: this.projectId,
+                        error: descriptorError instanceof Error
+                            ? descriptorError.message
+                            : String(descriptorError),
+                    });
+                }
+            }
+
             // Release prefix store reference if we acquired one during startup
             if (this.prefixStoreInitialized) {
                 await prefixKVStore.close();
@@ -473,6 +506,15 @@ export class ProjectRuntime {
             this.context.promptCompilerRegistry = undefined;
         }
 
+        try {
+            await this.writeProjectStatusDescriptor("stopped");
+        } catch (error) {
+            logger.warn("[ProjectRuntime] Failed to mark project descriptor stopped", {
+                projectId: this.projectId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+
         // Release our reference to the prefix KV store (but don't close it -
         // it's a daemon-global resource that outlives individual project runtimes)
         logger.info(`[ProjectRuntime] Releasing storage: ${this.projectId}`);
@@ -490,6 +532,31 @@ export class ProjectRuntime {
             : 0;
         console.log(chalk.green(`✅ Project stopped: ${chalk.bold(projectTitle)}`));
         console.log(chalk.gray(`   Uptime: ${uptime}s | Events processed: ${this.eventCount}`));
+    }
+
+    private async writeProjectStatusDescriptor(
+        status: ProjectRuntimeDescriptorStatus
+    ): Promise<void> {
+        const descriptor: ProjectRuntimeDescriptor = {
+            schemaVersion: PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+            status,
+            projectOwnerPubkey: this.project.pubkey,
+            projectDTag: this.projectId,
+            projectBasePath: this.projectBasePath,
+            updatedAt: Date.now(),
+        };
+        const projectAddress = this.project.tagId();
+        if (projectAddress) {
+            descriptor.projectAddress = projectAddress;
+        }
+        const projectManagerPubkey = this.context?.projectManager?.pubkey;
+        if (projectManagerPubkey) {
+            descriptor.projectManagerPubkey = projectManagerPubkey;
+        }
+        await fs.writeFile(
+            path.join(this.metadataPath, PROJECT_DESCRIPTOR_FILE_NAME),
+            `${JSON.stringify(descriptor, null, 2)}\n`
+        );
     }
 
     /**
