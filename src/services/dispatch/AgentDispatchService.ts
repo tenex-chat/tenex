@@ -1,10 +1,5 @@
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
-import {
-    executeDispatchViaAgentWorker,
-    getAgentWorkerDispatchIneligibility,
-    isAgentWorkerDispatchEnabled,
-} from "@/agents/execution/worker/dispatch-adapter";
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
@@ -35,7 +30,6 @@ import {
     handleDelegationCompletion,
     type DelegationCompletionResult,
 } from "@/services/dispatch/DelegationCompletionHandler";
-import { projectRuntimeRegistry } from "@/services/runtime/ProjectRuntimeRegistryService";
 
 const tracer = trace.getTracer("tenex.dispatch");
 const DELEGATION_COMPLETION_DEBOUNCE_MS = 2500;
@@ -147,18 +141,6 @@ export class AgentDispatchService {
                 delegationConversationId: shortenConversationId(
                     envelope.metadata.killSignalDelegationConversationId ?? ""
                 ),
-            });
-            return;
-        }
-
-        const parentProjectId = result.conversationId
-            ? ConversationStore.get(result.conversationId)?.getProjectId()
-            : undefined;
-        const parentRuntime = projectRuntimeRegistry.get(parentProjectId);
-
-        if (parentRuntime) {
-            await projectRuntimeRegistry.runInProjectContext(parentRuntime, async () => {
-                await this.routeKillWakeup(envelope, result, parentRuntime.agentExecutor, parentRuntime.projectContext);
             });
             return;
         }
@@ -952,30 +934,6 @@ export class AgentDispatchService {
             }
 
             await otelContext.with(trace.setSpan(otelContext.active(), agentSpan), async () => {
-                if (isAgentWorkerDispatchEnabled()) {
-                    const workerIneligibility = getAgentWorkerDispatchIneligibility({
-                        executionContext,
-                        projectCtx,
-                        targetAgent,
-                        activeRal,
-                        resumptionClaim,
-                    });
-
-                    if (!workerIneligibility) {
-                        agentSpan.addEvent("dispatch.agent_worker_selected");
-                        await executeDispatchViaAgentWorker({
-                            executionContext,
-                            projectCtx,
-                            targetAgent,
-                        });
-                        return;
-                    }
-
-                    agentSpan.addEvent("dispatch.agent_worker_skipped", {
-                        "worker.skip_reason": workerIneligibility,
-                    });
-                }
-
                 await agentExecutor.execute(executionContext);
             });
 
