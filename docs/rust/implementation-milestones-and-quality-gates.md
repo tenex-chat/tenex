@@ -346,6 +346,9 @@ Current implementation status:
   spawn the real TypeScript executor worker, observe tool-call and publish
   request frames, and verify the persisted conversation transcript and agent todo
   state in an ignored integration test.
+- `crates/tenex-daemon/src/daemon_worker_runtime.rs` now has a fake runtime
+  spine that proves queued dispatch, publish acceptance, and empty-queue
+  admission against a fake spawner.
 - The worker can seed a non-initial RAL from the execute frame, queue the
   triggering message as a RAL-scoped injection, hand the claim to
   `AgentExecutor`, and persist the continuation message under that RAL.
@@ -457,6 +460,10 @@ Quality gates:
 - Rust relay publisher coverage verifies relay URL parsing/defaults, exact
   signed event WebSocket frames, relay rejection reporting without event
   mutation, and draining an outbox record through a local mock relay.
+- The real Bun runtime spine gate is wired through
+  `bun run test:rust:daemon:runtime-spine`, with the ignored-test filter kept
+  in the quality-gates script so the main agent can rename the Rust test
+  without touching the package alias.
 - `TENEX_AGENT_WORKER` defaults off, and enabled routing records explicit skip
   reasons before falling back to the current in-process executor.
 - Worker does not start project-wide daemon services such as project status
@@ -886,9 +893,13 @@ Interoperability gate:
   interop gates after the standard fmt, test, and clippy checks.
 - `TENEX_RUN_RUST_INTEROP=1` remains a legacy alias for the publish interop
   gate.
+- `TENEX_RUN_RUST_DAEMON_RUNTIME_SPINE=1` runs the real Bun daemon-worker
+  runtime spine gate, and `bun run test:rust:daemon:runtime-spine` exposes the
+  same invocation as a package script.
 - The package script aliases `bun run test:rust:daemon:worker-interop`,
+  `bun run test:rust:daemon:runtime-spine`,
   `bun run test:rust:daemon:publish-interop`, and
-  `bun run test:rust:daemon:all-interop` set the same env flags for
+  `bun run test:rust:daemon:all-interop` set the corresponding env flags for
   convenience.
 
 Rollback:

@@ -16,6 +16,8 @@ worker_interop_enabled="${TENEX_RUN_RUST_WORKER_INTEROP:-0}"
 publish_interop_enabled="${TENEX_RUN_RUST_PUBLISH_INTEROP:-0}"
 all_interop_enabled="${TENEX_RUN_RUST_ALL_INTEROP:-0}"
 legacy_interop_enabled="${TENEX_RUN_RUST_INTEROP:-0}"
+runtime_spine_enabled="${TENEX_RUN_RUST_DAEMON_RUNTIME_SPINE:-0}"
+runtime_spine_test_filter="${TENEX_RUN_RUST_DAEMON_RUNTIME_SPINE_FILTER:-daemon_worker_runtime::tests::bun_agent_worker_real_bun_runtime_spine_round_trips_filesystem_state}"
 
 cargo fmt --check
 cargo test -p tenex-daemon --no-fail-fast
@@ -24,6 +26,7 @@ cargo clippy -p tenex-daemon --all-targets -- -D warnings
 if [[ "${all_interop_enabled}" == "1" ]]; then
   worker_interop_enabled="1"
   publish_interop_enabled="1"
+  runtime_spine_enabled="1"
 fi
 
 if [[ "${legacy_interop_enabled}" == "1" ]]; then
@@ -43,6 +46,11 @@ if [[ "${worker_interop_enabled}" == "1" ]]; then
     "worker_process::tests::bun_agent_worker_real_delegation_reports_waiting_state"
   run_ignored_test "worker: real no response" \
     "worker_process::tests::bun_agent_worker_real_no_response_reports_terminal_state"
+fi
+
+if [[ "${worker_interop_enabled}" == "1" || "${runtime_spine_enabled}" == "1" ]]; then
+  run_ignored_test "daemon worker runtime: real Bun spine" \
+    "${runtime_spine_test_filter}"
 fi
 
 if [[ "${publish_interop_enabled}" == "1" ]]; then

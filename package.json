@@ -32,6 +32,7 @@
     "test:integration": "bun test src/**/__tests__/*.integration.test.ts",
     "test:rust:daemon": "./scripts/rust-daemon-quality-gates.sh",
     "test:rust:daemon:worker-interop": "TENEX_RUN_RUST_WORKER_INTEROP=1 ./scripts/rust-daemon-quality-gates.sh",
+    "test:rust:daemon:runtime-spine": "TENEX_RUN_RUST_DAEMON_RUNTIME_SPINE=1 ./scripts/rust-daemon-quality-gates.sh",
     "test:rust:daemon:publish-interop": "TENEX_RUN_RUST_PUBLISH_INTEROP=1 ./scripts/rust-daemon-quality-gates.sh",
     "test:rust:daemon:all-interop": "TENEX_RUN_RUST_ALL_INTEROP=1 ./scripts/rust-daemon-quality-gates.sh",
     "test:rust:publish-interop": "cargo test -p tenex-daemon worker_process::tests::bun_agent_worker_publish_requests_relay_through_rust_outbox -- --ignored --exact --test-threads=1",
