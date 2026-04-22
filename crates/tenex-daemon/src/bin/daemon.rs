@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -65,6 +65,7 @@ const WHITELIST_RECONCILER_DEBOUNCE: Duration = Duration::from_secs(5);
 const WHITELIST_RECONCILER_IDLE_RETRY: Duration = Duration::from_secs(300);
 const WHITELIST_POLLER_INTERVAL: Duration = Duration::from_secs(2);
 static DAEMON_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+static DAEMON_RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DaemonCliOptions {
@@ -147,6 +148,15 @@ where
 
     let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)?;
 
+    // While the daemon is running, a dedicated thread watches for SIGHUP
+    // (via the global reload flag set by `request_daemon_reload`) and
+    // invokes `reload_whitelist_wiring` to swap the whitelisted owner set
+    // without restarting any supervisor thread. The watcher exits when the
+    // daemon stop flag is set.
+    let reload_watcher = whitelist_wiring
+        .as_ref()
+        .map(|wiring| spawn_reload_watcher(tenex_base_dir.clone(), wiring.reload_handle()));
+
     // Start the Nostr and Telegram gateway supervisors before the foreground
     // worker loop so relay messages can enqueue filesystem dispatches while
     // the loop admits and executes queued work.
@@ -194,6 +204,11 @@ where
         supervisor.request_stop();
         supervisor.join();
     }
+    if let Some(watcher) = reload_watcher {
+        // The foreground loop has exited, so `DAEMON_STOP_REQUESTED` is set
+        // and the watcher will exit on its next poll.
+        let _ = watcher.join();
+    }
     // Dropping the whitelist wiring closes the reconciler trigger channel,
     // which causes `run_reconciler_loop` to exit. The supervisor threads
     // detach here; on a clean shutdown the main thread exits immediately
@@ -211,14 +226,171 @@ where
 /// ingress, the heartbeat latch gate on the backend-events tick, and the
 /// background supervisor threads (reconciler + agent-inventory poller)
 /// that drive the outbound 14199 publishes.
+///
+/// The `reconciler_owners` and `poller_owners` handles are the same
+/// `Arc<RwLock<Vec<String>>>` passed to `ReconcilerDeps` and
+/// `AgentInventoryPoller`; SIGHUP-driven config reload swaps both in place
+/// without restarting the supervisor threads.
 struct WhitelistWiring {
     ingress: Arc<WhitelistIngress>,
     heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
+    nip46_registry: Arc<NIP46Registry>,
+    reconciler_owners: Arc<RwLock<Vec<String>>>,
+    poller_owners: Arc<RwLock<Vec<String>>>,
     /// Kept alive so that dropping the wiring closes the channel and exits
     /// the reconciler loop on shutdown.
     _trigger_tx: Sender<String>,
     _reconciler_thread: JoinHandle<()>,
     _poller_thread: JoinHandle<()>,
+}
+
+/// Sharable bundle of the reload-relevant handles inside
+/// [`WhitelistWiring`]. Cloning the bundle clones `Arc`s, so the reload
+/// watcher thread can hold its own copy without preventing shutdown.
+#[derive(Clone)]
+struct WhitelistReloadHandle {
+    heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
+    nip46_registry: Arc<NIP46Registry>,
+    reconciler_owners: Arc<RwLock<Vec<String>>>,
+    poller_owners: Arc<RwLock<Vec<String>>>,
+}
+
+impl WhitelistWiring {
+    fn reload_handle(&self) -> WhitelistReloadHandle {
+        WhitelistReloadHandle {
+            heartbeat_latch: Arc::clone(&self.heartbeat_latch),
+            nip46_registry: Arc::clone(&self.nip46_registry),
+            reconciler_owners: Arc::clone(&self.reconciler_owners),
+            poller_owners: Arc::clone(&self.poller_owners),
+        }
+    }
+}
+
+/// Outcome reported by [`reload_whitelist_wiring`]. Exposes enough to log the
+/// reload at `info!` and lets tests assert that the swap happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReloadOutcome {
+    previous_owner_count: usize,
+    new_owner_count: usize,
+    nip46_clients_cleared: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ReloadError {
+    #[error("reload config read failed: {0}")]
+    Config(String),
+}
+
+/// Poll interval for the SIGHUP reload watcher thread. Short enough that a
+/// SIGHUP arriving while the daemon is otherwise idle is picked up within a
+/// human-perceptible delay, long enough that the watcher does not burn CPU.
+const RELOAD_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Spawn the SIGHUP reload watcher. The thread exits when
+/// `DAEMON_STOP_REQUESTED` is set.
+fn spawn_reload_watcher(
+    tenex_base_dir: PathBuf,
+    handle: WhitelistReloadHandle,
+) -> JoinHandle<()> {
+    thread::Builder::new()
+        .name("whitelist-reload-watcher".to_string())
+        .spawn(move || run_reload_watcher(tenex_base_dir, handle))
+        .expect("reload watcher thread must spawn")
+}
+
+fn run_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) {
+    while !DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
+        if DAEMON_RELOAD_REQUESTED.swap(false, Ordering::SeqCst) {
+            match reload_whitelist_from_handle(&tenex_base_dir, &handle) {
+                Ok(outcome) => {
+                    tracing::info!(
+                        previous_owner_count = outcome.previous_owner_count,
+                        new_owner_count = outcome.new_owner_count,
+                        nip46_clients_cleared = outcome.nip46_clients_cleared,
+                        "SIGHUP reload complete"
+                    );
+                }
+                Err(error) => {
+                    tracing::error!(
+                        error = %error,
+                        "SIGHUP reload failed; keeping previous configuration"
+                    );
+                }
+            }
+        }
+        thread::sleep(RELOAD_WATCHER_POLL_INTERVAL);
+    }
+}
+
+/// Re-read `config.json`, clear the NIP-46 client cache, and swap the
+/// whitelisted owner sets in the reconciler, the agent inventory poller, and
+/// the heartbeat latch — all without restarting any supervisor thread. The
+/// heartbeat latch's own `replace_owners` preserves a latched `Stopped`
+/// state: owners that have already sent a stop snapshot stay stopped even
+/// when the whitelist changes.
+///
+/// The daemon binary reaches this entry point through the SIGHUP-driven
+/// watcher thread via `reload_whitelist_from_handle`; this wrapper is kept
+/// for tests that want to drive the reload synchronously from a single
+/// owning `WhitelistWiring` handle.
+#[cfg(test)]
+fn reload_whitelist_wiring(
+    tenex_base_dir: &Path,
+    wiring: &WhitelistWiring,
+) -> Result<ReloadOutcome, ReloadError> {
+    reload_whitelist_from_handle(tenex_base_dir, &wiring.reload_handle())
+}
+
+fn reload_whitelist_from_handle(
+    tenex_base_dir: &Path,
+    handle: &WhitelistReloadHandle,
+) -> Result<ReloadOutcome, ReloadError> {
+    let config =
+        read_backend_config(tenex_base_dir).map_err(|error| ReloadError::Config(error.to_string()))?;
+    let new_owners = config.whitelisted_pubkeys;
+
+    let previous_owner_count = handle
+        .reconciler_owners
+        .read()
+        .expect("reconciler owners lock must not be poisoned")
+        .len();
+
+    handle.nip46_registry.reload();
+
+    {
+        let mut guard = handle
+            .reconciler_owners
+            .write()
+            .expect("reconciler owners lock must not be poisoned");
+        *guard = new_owners.clone();
+    }
+    {
+        let mut guard = handle
+            .poller_owners
+            .write()
+            .expect("poller owners lock must not be poisoned");
+        *guard = new_owners.clone();
+    }
+    {
+        let mut latch = handle
+            .heartbeat_latch
+            .lock()
+            .expect("heartbeat latch lock must not be poisoned");
+        latch.replace_owners(new_owners.clone());
+    }
+
+    let new_owner_count = new_owners.len();
+    tracing::info!(
+        previous_owner_count,
+        new_owner_count,
+        "whitelist wiring reloaded after SIGHUP"
+    );
+
+    Ok(ReloadOutcome {
+        previous_owner_count,
+        new_owner_count,
+        nip46_clients_cleared: true,
+    })
 }
 
 fn build_whitelist_wiring(
@@ -273,11 +445,13 @@ fn build_whitelist_wiring(
         .first()
         .cloned()
         .unwrap_or_default();
+    let reconciler_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
+    let poller_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
     let reconciler_deps = ReconcilerDeps {
         tenex_base_dir: tenex_base_dir.to_path_buf(),
-        owners: config.whitelisted_pubkeys.clone(),
+        owners: Arc::clone(&reconciler_owners),
         snapshot_state,
-        nip46_registry,
+        nip46_registry: Arc::clone(&nip46_registry),
         nip46_config: config.nip46.clone(),
         default_relay,
         outbox: outbox_handle,
@@ -292,7 +466,7 @@ fn build_whitelist_wiring(
 
     let poller = AgentInventoryPoller {
         tenex_base_dir: tenex_base_dir.to_path_buf(),
-        owners: config.whitelisted_pubkeys.clone(),
+        owners: Arc::clone(&poller_owners),
         interval: WHITELIST_POLLER_INTERVAL,
         trigger_tx: trigger_tx.clone(),
     };
@@ -304,6 +478,9 @@ fn build_whitelist_wiring(
     Ok(Some(WhitelistWiring {
         ingress,
         heartbeat_latch,
+        nip46_registry,
+        reconciler_owners,
+        poller_owners,
         _trigger_tx: trigger_tx,
         _reconciler_thread: reconciler_thread,
         _poller_thread: poller_thread,
@@ -656,17 +833,26 @@ extern "C" fn request_daemon_stop(_signal: libc::c_int) {
     DAEMON_STOP_REQUESTED.store(true, Ordering::SeqCst);
 }
 
+extern "C" fn request_daemon_reload(_signal: libc::c_int) {
+    DAEMON_RELOAD_REQUESTED.store(true, Ordering::SeqCst);
+}
+
 fn install_signal_handlers() -> Result<(), CliError> {
     DAEMON_STOP_REQUESTED.store(false, Ordering::SeqCst);
+    DAEMON_RELOAD_REQUESTED.store(false, Ordering::SeqCst);
     for signal in [libc::SIGINT, libc::SIGTERM] {
-        install_signal_handler(signal)?;
+        install_signal_handler(signal, request_daemon_stop)?;
     }
+    install_signal_handler(libc::SIGHUP, request_daemon_reload)?;
     Ok(())
 }
 
-fn install_signal_handler(signal: libc::c_int) -> Result<(), CliError> {
+fn install_signal_handler(
+    signal: libc::c_int,
+    handler: extern "C" fn(libc::c_int),
+) -> Result<(), CliError> {
     let mut action = unsafe { std::mem::zeroed::<libc::sigaction>() };
-    action.sa_sigaction = request_daemon_stop as usize;
+    action.sa_sigaction = handler as usize;
     action.sa_flags = 0;
     let install_result = unsafe {
         libc::sigemptyset(&mut action.sa_mask);
@@ -1032,6 +1218,563 @@ mod tests {
             .expect("nip46 reply filter must be present when owners exist");
         assert_eq!(nip46_filter.kinds, vec![24133]);
         assert!(nip46_filter.authors.contains(&owner));
+
+        fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
+    }
+
+    fn write_whitelist_config(tenex_base_dir: &Path, owners: &[String]) {
+        let owners_json = serde_json::to_string(owners).expect("owners must serialize");
+        fs::write(
+            backend_config_path(tenex_base_dir),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": {owners_json},
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+    }
+
+    #[test]
+    fn reload_whitelist_wiring_swaps_reconciler_owners_and_clears_registry() {
+        use tenex_daemon::backend_config::Nip46Config;
+
+        let tenex_base_dir = unique_temp_dir("reload-swap");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+
+        let owner_initial = pubkey_hex(0x11);
+        let owner_new_a = pubkey_hex(0x22);
+        let owner_new_b = pubkey_hex(0x33);
+        write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
+
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+            .expect("wiring build must succeed")
+            .expect("non-empty whitelist must produce wiring");
+
+        // Prime the NIP-46 registry client cache for the initial owner so we
+        // can assert the reload clears it.
+        let nip46_config = Nip46Config::default();
+        wiring
+            .nip46_registry
+            .client_for_owner(&owner_initial, &nip46_config, "wss://relay.one/")
+            .expect("initial client must build");
+        assert!(
+            wiring
+                .nip46_registry
+                .client_for_cached_owner(&owner_initial)
+                .is_some(),
+            "initial owner client must be cached before reload"
+        );
+        assert_eq!(
+            wiring.heartbeat_latch.lock().unwrap().owner_count(),
+            1,
+            "latch starts with one configured owner"
+        );
+
+        // Flip the config on disk to a two-owner whitelist and reload.
+        write_whitelist_config(
+            &tenex_base_dir,
+            &[owner_new_a.clone(), owner_new_b.clone()],
+        );
+        let outcome = reload_whitelist_wiring(&tenex_base_dir, &wiring)
+            .expect("reload must succeed");
+
+        assert_eq!(outcome.previous_owner_count, 1);
+        assert_eq!(outcome.new_owner_count, 2);
+        assert!(outcome.nip46_clients_cleared);
+
+        assert_eq!(
+            *wiring.reconciler_owners.read().unwrap(),
+            vec![owner_new_a.clone(), owner_new_b.clone()],
+            "reconciler owners must contain the two reloaded owners"
+        );
+        assert_eq!(
+            *wiring.poller_owners.read().unwrap(),
+            vec![owner_new_a.clone(), owner_new_b.clone()],
+            "poller owners must contain the two reloaded owners"
+        );
+
+        {
+            let latch = wiring.heartbeat_latch.lock().unwrap();
+            assert_eq!(latch.owner_count(), 2);
+            assert!(latch.contains_owner(&owner_new_a));
+            assert!(latch.contains_owner(&owner_new_b));
+            assert!(!latch.contains_owner(&owner_initial));
+        }
+
+        assert!(
+            wiring
+                .nip46_registry
+                .client_for_cached_owner(&owner_initial)
+                .is_none(),
+            "reload must drop the previously-cached NIP-46 client"
+        );
+
+        drop(wiring);
+        fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn reload_whitelist_wiring_keeps_latch_stopped_if_previously_stopped() {
+        use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchState;
+        use tenex_daemon::nip46::protocol::NIP46_KIND;
+        use tenex_daemon::nostr_event::SignedNostrEvent;
+
+        let tenex_base_dir = unique_temp_dir("reload-latched-stopped");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+
+        let owner_initial = pubkey_hex(0x44);
+        let owner_new = pubkey_hex(0x55);
+        write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
+
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+            .expect("wiring build must succeed")
+            .expect("non-empty whitelist must produce wiring");
+
+        // Compute the backend pubkey from the config so we can craft a
+        // matching 14199 that latches the heartbeat to Stopped.
+        let backend_pubkey = read_backend_config(&tenex_base_dir)
+            .expect("config must read")
+            .backend_signer()
+            .expect("backend signer must build")
+            .pubkey_hex()
+            .to_string();
+
+        let stop_event = SignedNostrEvent {
+            id: "0".repeat(64),
+            pubkey: owner_initial.clone(),
+            created_at: 1_710_000_000,
+            kind: 14199,
+            tags: vec![vec!["p".to_string(), backend_pubkey.clone()]],
+            content: String::new(),
+            sig: "0".repeat(128),
+        };
+        wiring.ingress.handle_event(&stop_event);
+        // Ensure the ingress does not spuriously dispatch the stop-event as
+        // an NIP-46 envelope (it only listens for kind 14199 + kind 24133).
+        assert_ne!(stop_event.kind, NIP46_KIND);
+        assert_eq!(
+            wiring.heartbeat_latch.lock().unwrap().state(),
+            BackendHeartbeatLatchState::Stopped,
+            "ingress must latch heartbeat to Stopped after a matching 14199"
+        );
+
+        write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_new));
+        let outcome = reload_whitelist_wiring(&tenex_base_dir, &wiring)
+            .expect("reload must succeed");
+        assert_eq!(outcome.new_owner_count, 1);
+
+        let latch = wiring.heartbeat_latch.lock().unwrap();
+        assert_eq!(
+            latch.state(),
+            BackendHeartbeatLatchState::Stopped,
+            "latched-Stopped state must survive the reload"
+        );
+        assert!(!latch.should_heartbeat());
+        assert!(latch.contains_owner(&owner_new));
+        assert!(!latch.contains_owner(&owner_initial));
+        drop(latch);
+
+        drop(wiring);
+        fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn run_reconciler_loop_picks_up_new_owners_on_reload() {
+        use std::collections::BTreeSet;
+        use std::str::FromStr;
+        use std::sync::Mutex as StdMutex;
+        use std::sync::mpsc as std_mpsc;
+        use std::thread as std_thread;
+        use std::time::Instant;
+
+        use secp256k1::PublicKey;
+        use tenex_daemon::backend_config::{Nip46Config, OwnerNip46Config};
+        use tenex_daemon::backend_signer::HexBackendSigner;
+        use tenex_daemon::nip44;
+        use tenex_daemon::nip46::client::PublishOutboxHandle;
+        use tenex_daemon::nip46::pending::PendingNip46Requests;
+        use tenex_daemon::nip46::protocol::{Nip46Request, Nip46Response};
+        use tenex_daemon::nip46::registry::NIP46Registry;
+        use tenex_daemon::nostr_event::{
+            NormalizedNostrEvent, SignedNostrEvent, canonical_payload, event_hash_hex,
+        };
+        use tenex_daemon::project_agent_whitelist::reconciler::{
+            ReconcilerDeps, run_reconciler_loop,
+        };
+        use tenex_daemon::project_agent_whitelist::snapshot_state::SnapshotState;
+
+        const OWNER_A_SECRET_HEX: &str =
+            "0202020202020202020202020202020202020202020202020202020202020202";
+        const OWNER_B_SECRET_HEX: &str =
+            "0303030303030303030303030303030303030303030303030303030303030303";
+
+        struct CaptureOutbox {
+            captured: StdMutex<Vec<(SignedNostrEvent, Vec<String>)>>,
+        }
+
+        impl CaptureOutbox {
+            fn new() -> Arc<Self> {
+                Arc::new(Self {
+                    captured: StdMutex::new(Vec::new()),
+                })
+            }
+
+            fn captured(&self) -> Vec<(SignedNostrEvent, Vec<String>)> {
+                self.captured.lock().unwrap().clone()
+            }
+        }
+
+        impl PublishOutboxHandle for CaptureOutbox {
+            fn enqueue(
+                &self,
+                event: SignedNostrEvent,
+                relay_urls: Vec<String>,
+            ) -> Result<(), String> {
+                self.captured.lock().unwrap().push((event, relay_urls));
+                Ok(())
+            }
+        }
+
+        struct OwnerKeys {
+            secret: secp256k1::SecretKey,
+            keypair: secp256k1::Keypair,
+            xonly_hex: String,
+            secp: secp256k1::Secp256k1<secp256k1::All>,
+        }
+
+        impl OwnerKeys {
+            fn from_secret_hex(secret_hex: &str) -> Self {
+                let secret = secp256k1::SecretKey::from_str(secret_hex).expect("valid secret");
+                let secp = secp256k1::Secp256k1::new();
+                let keypair = secp256k1::Keypair::from_secret_key(&secp, &secret);
+                let (xonly, _) = keypair.x_only_public_key();
+                Self {
+                    secret,
+                    keypair,
+                    xonly_hex: hex::encode(xonly.serialize()),
+                    secp,
+                }
+            }
+
+            fn sign_event(&self, template: &NormalizedNostrEvent) -> SignedNostrEvent {
+                let mut filled = template.clone();
+                filled.pubkey = Some(self.xonly_hex.clone());
+                if filled.created_at.is_none() {
+                    filled.created_at = Some(1_710_000_000);
+                }
+                let canonical = canonical_payload(&filled).expect("canonical payload");
+                let id = event_hash_hex(&canonical);
+                let digest: [u8; 32] = hex::decode(&id).unwrap().try_into().unwrap();
+                let sig = self
+                    .secp
+                    .sign_schnorr_no_aux_rand(digest.as_slice(), &self.keypair);
+                SignedNostrEvent {
+                    id,
+                    pubkey: self.xonly_hex.clone(),
+                    created_at: filled.created_at.unwrap(),
+                    kind: filled.kind,
+                    tags: filled.tags,
+                    content: filled.content,
+                    sig: hex::encode(sig.to_byte_array()),
+                }
+            }
+        }
+
+        fn decrypt_request(
+            owner: &OwnerKeys,
+            backend_pubkey: &str,
+            captured: &SignedNostrEvent,
+        ) -> Nip46Request {
+            let backend_pk =
+                PublicKey::from_str(&format!("02{backend_pubkey}")).expect("valid backend pk");
+            let conversation_key =
+                nip44::conversation_key(&owner.secret, &backend_pk).expect("conversation key");
+            let plaintext = nip44::decrypt(&conversation_key, &captured.content)
+                .expect("decrypt ciphertext");
+            serde_json::from_slice(&plaintext).expect("parse request")
+        }
+
+        fn encrypt_response(
+            owner: &OwnerKeys,
+            backend_pubkey: &str,
+            response: &Nip46Response,
+        ) -> String {
+            let backend_pk =
+                PublicKey::from_str(&format!("02{backend_pubkey}")).expect("valid backend pk");
+            let conversation_key =
+                nip44::conversation_key(&owner.secret, &backend_pk).expect("conversation key");
+            let plaintext = serde_json::to_string(response).expect("serialize response");
+            nip44::encrypt(&conversation_key, plaintext.as_bytes()).expect("encrypt response")
+        }
+
+        fn wait_for_kind(
+            outbox: &CaptureOutbox,
+            kind: u64,
+            from_index: usize,
+            timeout: Duration,
+        ) -> Option<(usize, SignedNostrEvent)> {
+            let deadline = Instant::now() + timeout;
+            loop {
+                let captured = outbox.captured();
+                for (idx, (event, _)) in captured.iter().enumerate().skip(from_index) {
+                    if event.kind == kind {
+                        return Some((idx, event.clone()));
+                    }
+                }
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                std_thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        let tenex_base_dir = unique_temp_dir("reload-reconciler");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir_path = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir_path).expect("agents dir must create");
+
+        // Drop one agent file so the reconciler has something to publish.
+        let agent_pubkey = pubkey_hex(0x21);
+        fs::write(
+            agents_dir_path.join(format!("{agent_pubkey}.json")),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "slug": "alpha",
+                "status": "active",
+            }))
+            .expect("agent json must serialize"),
+        )
+        .expect("agent file must write");
+
+        let owner_a = OwnerKeys::from_secret_hex(OWNER_A_SECRET_HEX);
+        let owner_b = OwnerKeys::from_secret_hex(OWNER_B_SECRET_HEX);
+
+        let backend_signer = Arc::new(
+            HexBackendSigner::from_private_key_hex(TEST_SECRET_KEY_HEX)
+                .expect("backend signer must build"),
+        );
+        let backend_pubkey = backend_signer.pubkey_hex().to_string();
+
+        let outbox = CaptureOutbox::new();
+        let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = Arc::clone(&outbox) as _;
+        let pending = PendingNip46Requests::default();
+        let registry = Arc::new(NIP46Registry::new(
+            Arc::clone(&backend_signer),
+            pending,
+            Arc::clone(&outbox_handle),
+        ));
+
+        let mut owners_config = std::collections::HashMap::new();
+        owners_config.insert(
+            owner_a.xonly_hex.clone(),
+            OwnerNip46Config {
+                bunker_uri: Some(format!(
+                    "bunker://{}?relay=wss://relay.test/",
+                    owner_a.xonly_hex
+                )),
+            },
+        );
+        owners_config.insert(
+            owner_b.xonly_hex.clone(),
+            OwnerNip46Config {
+                bunker_uri: Some(format!(
+                    "bunker://{}?relay=wss://relay.test/",
+                    owner_b.xonly_hex
+                )),
+            },
+        );
+        let nip46_config = Nip46Config {
+            signing_timeout_ms: 2_000,
+            max_retries: 0,
+            owners: owners_config,
+        };
+
+        let reconciler_owners = Arc::new(RwLock::new(vec![owner_a.xonly_hex.clone()]));
+        let snapshot_state = Arc::new(SnapshotState::new());
+        let deps = ReconcilerDeps {
+            tenex_base_dir: tenex_base_dir.clone(),
+            owners: Arc::clone(&reconciler_owners),
+            snapshot_state: Arc::clone(&snapshot_state),
+            nip46_registry: Arc::clone(&registry),
+            nip46_config: nip46_config.clone(),
+            default_relay: "wss://relay.test/".to_string(),
+            outbox: Arc::clone(&outbox_handle),
+            debounce: Duration::from_millis(20),
+            idle_retry: Duration::from_millis(200),
+        };
+
+        let (trigger_tx, trigger_rx) = std_mpsc::channel::<String>();
+        let loop_handle = std_thread::spawn(move || run_reconciler_loop(deps, trigger_rx));
+
+        // Mock bunker driving both owners: sign whichever `sign_event`
+        // request lands in the outbox next.
+        let registry_for_bunker = Arc::clone(&registry);
+        let nip46_config_for_bunker = nip46_config.clone();
+        let outbox_for_bunker = Arc::clone(&outbox);
+        let backend_pubkey_for_bunker = backend_pubkey.clone();
+        let owner_a_secret = OWNER_A_SECRET_HEX.to_string();
+        let owner_b_secret = OWNER_B_SECRET_HEX.to_string();
+        let owner_a_pub = owner_a.xonly_hex.clone();
+        let owner_b_pub = owner_b.xonly_hex.clone();
+        let bunker_handle = std_thread::spawn(move || {
+            // Materialise clients so we have references for dispatch. The
+            // reconciler will dedupe via the shared registry.
+            let client_a = registry_for_bunker
+                .client_for_owner(
+                    &owner_a_pub,
+                    &nip46_config_for_bunker,
+                    "wss://relay.test/",
+                )
+                .expect("owner_a client must build");
+            let client_b = registry_for_bunker
+                .client_for_owner(
+                    &owner_b_pub,
+                    &nip46_config_for_bunker,
+                    "wss://relay.test/",
+                )
+                .expect("owner_b client must build");
+
+            let owner_a_keys = OwnerKeys::from_secret_hex(&owner_a_secret);
+            let owner_b_keys = OwnerKeys::from_secret_hex(&owner_b_secret);
+
+            let mut cursor = 0;
+            for _ in 0..2 {
+                // Each round: first a connect envelope, then a sign_event.
+                let (connect_idx, connect_event) = wait_for_kind(
+                    &outbox_for_bunker,
+                    24133,
+                    cursor,
+                    Duration::from_secs(5),
+                )
+                .expect("connect envelope must arrive");
+                cursor = connect_idx + 1;
+                let addressed_to_a = connect_event
+                    .tags
+                    .iter()
+                    .any(|tag| tag.get(1).map(|value| value == &owner_a_pub).unwrap_or(false));
+                let (client, keys) = if addressed_to_a {
+                    (&client_a, &owner_a_keys)
+                } else {
+                    (&client_b, &owner_b_keys)
+                };
+                let connect_request =
+                    decrypt_request(keys, &backend_pubkey_for_bunker, &connect_event);
+                assert_eq!(connect_request.method, "connect");
+                let connect_response = Nip46Response {
+                    id: connect_request.id,
+                    result: Some("ack".to_string()),
+                    error: None,
+                };
+                let encrypted_connect =
+                    encrypt_response(keys, &backend_pubkey_for_bunker, &connect_response);
+                client
+                    .dispatch_incoming(&encrypted_connect)
+                    .expect("connect dispatch");
+
+                let (sign_idx, sign_event) = wait_for_kind(
+                    &outbox_for_bunker,
+                    24133,
+                    cursor,
+                    Duration::from_secs(5),
+                )
+                .expect("sign envelope must arrive");
+                cursor = sign_idx + 1;
+                let sign_request =
+                    decrypt_request(keys, &backend_pubkey_for_bunker, &sign_event);
+                assert_eq!(sign_request.method, "sign_event");
+                let unsigned: NormalizedNostrEvent =
+                    serde_json::from_str(&sign_request.params[0]).unwrap();
+                let signed = keys.sign_event(&unsigned);
+                let sign_response = Nip46Response {
+                    id: sign_request.id,
+                    result: Some(serde_json::to_string(&signed).unwrap()),
+                    error: None,
+                };
+                let encrypted_sign =
+                    encrypt_response(keys, &backend_pubkey_for_bunker, &sign_response);
+                client
+                    .dispatch_incoming(&encrypted_sign)
+                    .expect("sign dispatch");
+            }
+        });
+
+        // First reconcile owner_a — it's in the owners list.
+        trigger_tx
+            .send(owner_a.xonly_hex.clone())
+            .expect("trigger owner_a");
+        let wait_until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let captured_for_a: Vec<_> = outbox
+                .captured()
+                .into_iter()
+                .filter(|(event, _)| event.kind == 14199 && event.pubkey == owner_a.xonly_hex)
+                .collect();
+            if !captured_for_a.is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < wait_until,
+                "timed out waiting for owner_a 14199 publication"
+            );
+            std_thread::sleep(Duration::from_millis(10));
+        }
+
+        // SIGHUP-style swap: replace the reconciler's owners set with [owner_b].
+        {
+            let mut guard = reconciler_owners.write().unwrap();
+            *guard = vec![owner_b.xonly_hex.clone()];
+        }
+
+        // Reconcile owner_b; the reconciler honours triggers regardless of
+        // the `owners` list, but if the shared set were the source of truth
+        // for other supervisors, this is now the only configured owner.
+        trigger_tx
+            .send(owner_b.xonly_hex.clone())
+            .expect("trigger owner_b");
+        let wait_until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let captured_for_b: Vec<_> = outbox
+                .captured()
+                .into_iter()
+                .filter(|(event, _)| event.kind == 14199 && event.pubkey == owner_b.xonly_hex)
+                .collect();
+            if !captured_for_b.is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < wait_until,
+                "timed out waiting for owner_b 14199 publication after reload"
+            );
+            std_thread::sleep(Duration::from_millis(10));
+        }
+
+        drop(trigger_tx);
+        loop_handle.join().expect("reconciler loop joins");
+        bunker_handle.join().expect("bunker joins");
+
+        let final_events: Vec<String> = outbox
+            .captured()
+            .into_iter()
+            .filter_map(|(event, _)| {
+                if event.kind == 14199 {
+                    Some(event.pubkey)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let observed: BTreeSet<String> = final_events.into_iter().collect();
+        assert!(observed.contains(&owner_a.xonly_hex));
+        assert!(observed.contains(&owner_b.xonly_hex));
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }

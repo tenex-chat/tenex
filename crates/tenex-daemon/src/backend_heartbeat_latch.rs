@@ -50,6 +50,16 @@ impl BackendHeartbeatLatchPlanner {
         self.state.is_active()
     }
 
+    /// Number of owner pubkeys currently configured.
+    pub fn owner_count(&self) -> usize {
+        self.owner_pubkeys.len()
+    }
+
+    /// Whether the given pubkey is currently in the owner set.
+    pub fn contains_owner(&self, owner_pubkey: &str) -> bool {
+        self.owner_pubkeys.contains(owner_pubkey)
+    }
+
     /// Replace the configured owner set.
     ///
     /// The `Stopped` state is latched: once a matching 14199 has been

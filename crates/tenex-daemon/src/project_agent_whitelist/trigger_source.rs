@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -16,9 +17,13 @@ use crate::backend_status_runtime::agents_dir;
 /// The downstream consumer uses the trigger to reconcile the observed local
 /// agent set against the most recently cached kind 14199 whitelist snapshot
 /// for each owner.
+///
+/// `owners` is shared with the daemon boot wiring so SIGHUP reloads can swap
+/// the whitelisted owner set atomically while the polling thread keeps
+/// running.
 pub struct AgentInventoryPoller {
     pub tenex_base_dir: PathBuf,
-    pub owners: Vec<String>,
+    pub owners: Arc<RwLock<Vec<String>>>,
     pub interval: Duration,
     pub trigger_tx: Sender<String>,
 }
@@ -28,8 +33,8 @@ impl AgentInventoryPoller {
     /// `last_seen`.
     ///
     /// Returns `true` when the set changed (including on the first observation)
-    /// and fires one trigger per owner in `self.owners`. Returns `false` when
-    /// the set is unchanged and nothing is fired.
+    /// and fires one trigger per owner currently held in `self.owners`.
+    /// Returns `false` when the set is unchanged and nothing is fired.
     ///
     /// Errors reading the inventory (e.g. the `agents/` directory is missing
     /// or transiently unreadable) are logged at `debug!` level and treated as
@@ -49,7 +54,12 @@ impl AgentInventoryPoller {
 
         *last_seen = Some(current);
 
-        for owner in &self.owners {
+        let owners_snapshot: Vec<String> = self
+            .owners
+            .read()
+            .expect("agent inventory owners lock must not be poisoned")
+            .clone();
+        for owner in &owners_snapshot {
             if let Err(err) = self.trigger_tx.send(owner.clone()) {
                 debug!(
                     owner = %owner,
@@ -134,7 +144,7 @@ mod tests {
     fn poller(base_dir: PathBuf, owners: Vec<String>, tx: Sender<String>) -> AgentInventoryPoller {
         AgentInventoryPoller {
             tenex_base_dir: base_dir,
-            owners,
+            owners: Arc::new(RwLock::new(owners)),
             interval: Duration::from_secs(2),
             trigger_tx: tx,
         }
