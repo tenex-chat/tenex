@@ -504,9 +504,7 @@ fn replace_word_bounded_italic(input: &str, delim: char) -> String {
                 let after_open = chars[cursor + 1];
                 // TS: first captured char is `[^_\n]` / `[^*\n]`, plus non-newline.
                 let inner_head_ok = after_open != '\n' && after_open != delim;
-                if inner_head_ok
-                    && let Some(close) = find_italic_close(&chars, cursor + 1, delim)
-                {
+                if inner_head_ok && let Some(close) = find_italic_close(&chars, cursor + 1, delim) {
                     let content: String = chars[cursor + 1..close].iter().collect();
                     let prefix: String = if cursor == 0 {
                         String::new()

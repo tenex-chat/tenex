@@ -8,6 +8,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::nostr_event::{NostrEventError, SignedNostrEvent, verify_signed_event};
+use crate::telegram::types::{ConversationVariant, RuntimeEventClass};
 use crate::worker_protocol::{
     AgentWorkerPublishResultMessageInput, AgentWorkerPublishResultStatus, WorkerProtocolDirection,
     WorkerProtocolError, build_agent_worker_publish_result_message,
@@ -73,6 +74,8 @@ struct WorkerPublishRequest {
     request_id: String,
     requires_event_id: bool,
     timeout_ms: u64,
+    runtime_event_class: RuntimeEventClass,
+    conversation_variant: Option<ConversationVariant>,
     event: SignedNostrEvent,
 }
 
@@ -241,6 +244,10 @@ pub struct PublishOutboxRequestRef {
     pub ral_number: u64,
     pub requires_event_id: bool,
     pub timeout_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_event_class: Option<RuntimeEventClass>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_variant: Option<ConversationVariant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -350,6 +357,8 @@ pub fn accept_worker_publish_request(
             ral_number: request.ral_number,
             requires_event_id: request.requires_event_id,
             timeout_ms: request.timeout_ms,
+            runtime_event_class: Some(request.runtime_event_class),
+            conversation_variant: request.conversation_variant,
         },
         event: request.event,
         attempts: Vec::new(),
@@ -386,6 +395,8 @@ pub fn accept_backend_signed_publish_event(
             ral_number: input.ral_number,
             requires_event_id: input.requires_event_id,
             timeout_ms: input.timeout_ms,
+            runtime_event_class: None,
+            conversation_variant: None,
         },
         event: input.event,
         attempts: Vec::new(),
@@ -1370,6 +1381,11 @@ mod tests {
         assert_eq!(record.request.request_id, "publish-fixture-01");
         assert_eq!(record.request.request_sequence, 41);
         assert_eq!(record.request.agent_pubkey, fixture.pubkey);
+        assert_eq!(
+            record.request.runtime_event_class,
+            Some(RuntimeEventClass::Complete)
+        );
+        assert_eq!(record.request.conversation_variant, None);
         assert_eq!(record.event, fixture.signed);
         verify_signed_event(&record.event).expect("accepted event must still verify");
 
@@ -1383,6 +1399,39 @@ mod tests {
             Ok(WorkerProtocolDirection::DaemonToWorker)
         );
         assert_eq!(publish_result["eventIds"], json!([fixture.signed.id]));
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn preserves_worker_publish_classification_in_pending_outbox() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut message = publish_request_message(&fixture, 41, 1710001000000);
+        message["runtimeEventClass"] = json!("conversation");
+        message["conversationVariant"] = json!("reasoning");
+
+        let record = accept_worker_publish_request(&daemon_dir, &message, 1710001000100)
+            .expect("publish request must be accepted");
+
+        assert_eq!(
+            record.request.runtime_event_class,
+            Some(RuntimeEventClass::Conversation)
+        );
+        assert_eq!(
+            record.request.conversation_variant,
+            Some(ConversationVariant::Reasoning)
+        );
+
+        let persisted =
+            read_pending_publish_outbox_record(&daemon_dir, &record.event.id).expect("record read");
+        assert_eq!(
+            persisted
+                .expect("record must persist")
+                .request
+                .conversation_variant,
+            Some(ConversationVariant::Reasoning)
+        );
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
@@ -1403,6 +1452,8 @@ mod tests {
         assert_eq!(record.request.request_sequence, 41);
         assert_eq!(record.request.correlation_id, "rust_backend_publish_outbox");
         assert_eq!(record.request.agent_pubkey, fixture.pubkey);
+        assert_eq!(record.request.runtime_event_class, None);
+        assert_eq!(record.request.conversation_variant, None);
         assert_eq!(record.event, fixture.signed);
         verify_signed_event(&record.event).expect("accepted backend event must still verify");
 
