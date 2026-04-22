@@ -1240,6 +1240,17 @@ Work:
 - Add a worker publish acceptor that persists a worker-signed `publish_request`
   into the Rust outbox and builds the accepted `publish_result` frame. Relay
   publication remains the outbox drainer's responsibility.
+- Add publish-request runtime handling that combines message routing, durable
+  outbox acceptance, accepted-result assembly, and injected worker-session send.
+- Add dispatch admission planning that scans queued dispatches in queue order,
+  applies explicit concurrency snapshots/limits, and returns the selected
+  dispatch plus planned lease record without writing the queue.
+- Add terminal-result runtime handling that combines message routing,
+  worker-result planning, completion planning, filesystem apply, and lock
+  release for terminal worker frames.
+- Add an in-memory worker runtime-state snapshot for active workers, latest
+  heartbeat, graceful signal markers, and conversion into concurrency and abort
+  planning inputs.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet

@@ -637,6 +637,18 @@ Scope:
 - Add a worker publish acceptor that durably accepts a worker-signed
   `publish_request` into the Rust outbox and builds the accepted
   `publish_result` frame without relay publishing.
+- Add publish-request runtime handling that routes a worker frame, accepts the
+  signed event into the outbox, and sends the accepted `publish_result` through
+  an injected worker session.
+- Add dispatch admission planning that chooses the oldest queued dispatch that
+  passes concurrency limits and returns the planned lease record without writing
+  it.
+- Add terminal-result runtime handling that routes terminal frames, plans the
+  RAL transition and dispatch completion, appends the planned filesystem
+  records, and releases held launch locks.
+- Add an in-memory worker runtime-state snapshot for active workers, heartbeat
+  updates, graceful signal markers, and conversion into concurrency and abort
+  planning inputs.
 - Keep TypeScript worker publishing directly for compatibility.
 - Rust observes published event IDs and terminal state.
 - Add JSONL truncation/replay tests for the dispatch queue immediately. The
