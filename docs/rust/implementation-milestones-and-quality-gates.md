@@ -619,6 +619,10 @@ Scope:
   dispatch. The library scheduler rejects duplicate active triggering events,
   validates active claim tokens, and treats completed/no-response/error/aborted/
   crashed RAL states as terminal.
+- Plan worker terminal transition records only after validating the active claim
+  token, active worker id, and journal sequence. The supported worker-emitted
+  outcomes are completed, waiting-for-delegation, no-response, aborted, and
+  error; crashed remains a reconciliation outcome.
 - Bootstrap scheduler state from the on-disk journal and persist a versioned
   `ral/snapshot.json` compaction cache without letting a stale snapshot override
   journal replay.

@@ -1165,6 +1165,11 @@ Work:
 - Add journal replay and snapshot compaction. Snapshot loading must stay
   fail-closed on unsupported schema versions and must not override authoritative
   journal replay until freshness checks are implemented.
+- Add a worker terminal transition planner that validates the active claim token,
+  verifies the reporting worker id, checks journal sequence order, and returns
+  the journal record for completed, waiting-for-delegation, no-response,
+  aborted, or error outcomes. Worker crashes remain a reconciliation result, not
+  a worker-emitted terminal transition.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
   scope.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust

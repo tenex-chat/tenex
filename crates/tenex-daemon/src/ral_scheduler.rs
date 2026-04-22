@@ -8,8 +8,8 @@ use thiserror::Error;
 
 use crate::ral_journal::{
     RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
-    RalJournalReplay, RalJournalResult, RalJournalSnapshot, RalReplayEntry, RalReplayStatus,
-    replay_ral_journal, write_ral_snapshot,
+    RalJournalReplay, RalJournalResult, RalJournalSnapshot, RalPendingDelegation, RalReplayEntry,
+    RalReplayStatus, RalTerminalSummary, RalWorkerError, replay_ral_journal, write_ral_snapshot,
 };
 
 static CLAIM_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -406,6 +406,80 @@ impl RalScheduler {
         Ok(RalOrphanReconciliationPlan { actions })
     }
 
+    pub fn plan_worker_transition(
+        &self,
+        input: RalWorkerTransitionInput,
+    ) -> Result<RalWorkerTransitionPlan, RalSchedulerError> {
+        if input.sequence <= self.state.last_sequence {
+            return Err(RalSchedulerError::NonIncreasingJournalSequence {
+                sequence: input.sequence,
+                last_sequence: self.state.last_sequence,
+            });
+        }
+
+        let entry = self.validate_claim_token(&input.identity, &input.claim_token)?;
+        if entry.worker_id.as_deref() != Some(input.worker_id.as_str()) {
+            return Err(RalSchedulerError::WorkerClaimMismatch {
+                identity: Box::new(input.identity),
+                expected_worker_id: entry.worker_id.clone(),
+                actual_worker_id: input.worker_id,
+            });
+        }
+
+        let event = match input.transition {
+            RalWorkerTransition::WaitingForDelegation {
+                pending_delegations,
+                terminal,
+            } => RalJournalEvent::WaitingForDelegation {
+                identity: input.identity.clone(),
+                worker_id: input.worker_id.clone(),
+                claim_token: input.claim_token.clone(),
+                pending_delegations,
+                terminal,
+            },
+            RalWorkerTransition::Completed { terminal } => RalJournalEvent::Completed {
+                identity: input.identity.clone(),
+                worker_id: input.worker_id.clone(),
+                claim_token: input.claim_token.clone(),
+                terminal,
+            },
+            RalWorkerTransition::NoResponse { terminal } => RalJournalEvent::NoResponse {
+                identity: input.identity.clone(),
+                worker_id: input.worker_id.clone(),
+                claim_token: input.claim_token.clone(),
+                terminal,
+            },
+            RalWorkerTransition::Error { error, terminal } => RalJournalEvent::Error {
+                identity: input.identity.clone(),
+                worker_id: input.worker_id.clone(),
+                claim_token: input.claim_token.clone(),
+                error,
+                terminal,
+            },
+            RalWorkerTransition::Aborted {
+                abort_reason,
+                terminal,
+            } => RalJournalEvent::Aborted {
+                identity: input.identity.clone(),
+                worker_id: Some(input.worker_id.clone()),
+                claim_token: Some(input.claim_token.clone()),
+                abort_reason,
+                terminal,
+            },
+        };
+
+        Ok(RalWorkerTransitionPlan {
+            record: RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                input.writer_version,
+                input.sequence,
+                input.timestamp,
+                input.correlation_id,
+                event,
+            ),
+        })
+    }
+
     fn entry_or_error(
         &self,
         identity: &RalJournalIdentity,
@@ -483,6 +557,45 @@ pub enum RalOrphanReconciliationReason {
     ClaimedWorkerMissing,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalWorkerTransitionInput {
+    pub identity: RalJournalIdentity,
+    pub worker_id: String,
+    pub claim_token: String,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub correlation_id: String,
+    pub writer_version: String,
+    pub transition: RalWorkerTransition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RalWorkerTransition {
+    WaitingForDelegation {
+        pending_delegations: Vec<RalPendingDelegation>,
+        terminal: RalTerminalSummary,
+    },
+    Completed {
+        terminal: RalTerminalSummary,
+    },
+    NoResponse {
+        terminal: RalTerminalSummary,
+    },
+    Error {
+        error: RalWorkerError,
+        terminal: RalTerminalSummary,
+    },
+    Aborted {
+        abort_reason: String,
+        terminal: RalTerminalSummary,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalWorkerTransitionPlan {
+    pub record: RalJournalRecord,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RalSchedulerError {
     #[error("active RAL already exists for triggering event {triggering_event_id}")]
@@ -521,6 +634,14 @@ pub enum RalSchedulerError {
     InvalidClaimToken { identity: Box<RalJournalIdentity> },
     #[error("RAL journal sequence space exhausted")]
     RalJournalSequenceExhausted,
+    #[error("RAL journal sequence {sequence} is not greater than replay sequence {last_sequence}")]
+    NonIncreasingJournalSequence { sequence: u64, last_sequence: u64 },
+    #[error("worker {actual_worker_id} does not own the active RAL claim")]
+    WorkerClaimMismatch {
+        identity: Box<RalJournalIdentity>,
+        expected_worker_id: Option<String>,
+        actual_worker_id: String,
+    },
 }
 
 pub fn classify_ral_status(status: RalReplayStatus) -> RalStatusClass {
@@ -1163,6 +1284,259 @@ mod tests {
         );
     }
 
+    #[test]
+    fn worker_transition_plans_completed_record_after_validating_claim() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let identity = namespace.identity(1);
+        let records = vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+        ];
+        let scheduler = make_scheduler(records.clone());
+        let plan = scheduler
+            .plan_worker_transition(worker_transition_input(
+                identity.clone(),
+                "worker-a",
+                "claim-a",
+                3,
+                RalWorkerTransition::Completed {
+                    terminal: RalTerminalSummary {
+                        published_user_visible_event: true,
+                        pending_delegations_remain: false,
+                        accumulated_runtime_ms: 123,
+                        final_event_ids: vec!["event-a".to_string()],
+                        keep_worker_warm: false,
+                    },
+                },
+            ))
+            .expect("worker transition must plan");
+
+        assert_eq!(plan.record.sequence, 3);
+        assert_eq!(plan.record.timestamp, 1710002000003);
+        assert_eq!(plan.record.correlation_id, "transition-test");
+        match &plan.record.event {
+            RalJournalEvent::Completed {
+                identity: event_identity,
+                worker_id,
+                claim_token,
+                terminal,
+            } => {
+                assert_eq!(event_identity, &identity);
+                assert_eq!(worker_id, "worker-a");
+                assert_eq!(claim_token, "claim-a");
+                assert_eq!(terminal.final_event_ids, vec!["event-a".to_string()]);
+                assert_eq!(terminal.accumulated_runtime_ms, 123);
+            }
+            other => panic!("expected completed event, got {other:?}"),
+        }
+
+        let mut replay_records = records;
+        replay_records.push(plan.record);
+        let replay = replay_ral_journal_records(replay_records).expect("replay must succeed");
+        let entry = replay.states.get(&identity).expect("entry must replay");
+        assert_eq!(entry.status, RalReplayStatus::Completed);
+        assert_eq!(entry.active_claim_token, None);
+        assert_eq!(entry.final_event_ids, vec!["event-a".to_string()]);
+    }
+
+    #[test]
+    fn worker_transition_supports_waiting_no_response_error_and_aborted_events() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let identity = namespace.identity(1);
+        let scheduler = make_scheduler(vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+        ]);
+
+        let planned = [
+            worker_transition_input(
+                identity.clone(),
+                "worker-a",
+                "claim-a",
+                3,
+                RalWorkerTransition::WaitingForDelegation {
+                    pending_delegations: vec![pending_delegation(
+                        "delegation-a",
+                        RalDelegationType::Ask,
+                    )],
+                    terminal: terminal(),
+                },
+            ),
+            worker_transition_input(
+                identity.clone(),
+                "worker-a",
+                "claim-a",
+                4,
+                RalWorkerTransition::NoResponse {
+                    terminal: terminal(),
+                },
+            ),
+            worker_transition_input(
+                identity.clone(),
+                "worker-a",
+                "claim-a",
+                5,
+                RalWorkerTransition::Error {
+                    error: RalWorkerError {
+                        code: "execution_failed".to_string(),
+                        message: "execution failed".to_string(),
+                        retryable: false,
+                    },
+                    terminal: terminal(),
+                },
+            ),
+            worker_transition_input(
+                identity.clone(),
+                "worker-a",
+                "claim-a",
+                6,
+                RalWorkerTransition::Aborted {
+                    abort_reason: "stop requested".to_string(),
+                    terminal: terminal(),
+                },
+            ),
+        ]
+        .into_iter()
+        .map(|input| {
+            scheduler
+                .plan_worker_transition(input)
+                .expect("transition must plan")
+                .record
+                .event
+        })
+        .collect::<Vec<_>>();
+
+        assert!(matches!(
+            &planned[0],
+            RalJournalEvent::WaitingForDelegation {
+                pending_delegations,
+                ..
+            } if pending_delegations.len() == 1
+        ));
+        assert!(matches!(&planned[1], RalJournalEvent::NoResponse { .. }));
+        assert!(matches!(
+            &planned[2],
+            RalJournalEvent::Error { error, .. } if error.code == "execution_failed"
+        ));
+        assert!(matches!(
+            &planned[3],
+            RalJournalEvent::Aborted {
+                worker_id,
+                claim_token,
+                abort_reason,
+                ..
+            } if worker_id.as_deref() == Some("worker-a")
+                && claim_token.as_deref() == Some("claim-a")
+                && abort_reason == "stop requested"
+        ));
+    }
+
+    #[test]
+    fn worker_transition_rejects_stale_sequence_wrong_claim_and_wrong_worker() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let identity = namespace.identity(1);
+        let scheduler = make_scheduler(vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+        ]);
+
+        match scheduler.plan_worker_transition(worker_transition_input(
+            identity.clone(),
+            "worker-a",
+            "claim-a",
+            2,
+            RalWorkerTransition::Completed {
+                terminal: terminal(),
+            },
+        )) {
+            Err(RalSchedulerError::NonIncreasingJournalSequence {
+                sequence,
+                last_sequence,
+            }) => {
+                assert_eq!(sequence, 2);
+                assert_eq!(last_sequence, 2);
+            }
+            other => panic!("expected stale sequence rejection, got {other:?}"),
+        }
+
+        match scheduler.plan_worker_transition(worker_transition_input(
+            identity.clone(),
+            "worker-a",
+            "wrong-claim",
+            3,
+            RalWorkerTransition::Completed {
+                terminal: terminal(),
+            },
+        )) {
+            Err(RalSchedulerError::InvalidClaimToken {
+                identity: error_identity,
+            }) => {
+                assert_eq!(error_identity.as_ref(), &identity);
+            }
+            other => panic!("expected invalid claim token rejection, got {other:?}"),
+        }
+
+        match scheduler.plan_worker_transition(worker_transition_input(
+            identity.clone(),
+            "worker-b",
+            "claim-a",
+            3,
+            RalWorkerTransition::Completed {
+                terminal: terminal(),
+            },
+        )) {
+            Err(RalSchedulerError::WorkerClaimMismatch {
+                identity: error_identity,
+                expected_worker_id,
+                actual_worker_id,
+            }) => {
+                assert_eq!(error_identity.as_ref(), &identity);
+                assert_eq!(expected_worker_id.as_deref(), Some("worker-a"));
+                assert_eq!(actual_worker_id, "worker-b");
+            }
+            other => panic!("expected worker claim mismatch, got {other:?}"),
+        }
+    }
+
     fn make_scheduler(records: Vec<RalJournalRecord>) -> RalScheduler {
         let replay = replay_ral_journal_records(records).expect("replay must succeed");
         RalScheduler::from_replay(&replay)
@@ -1229,6 +1603,25 @@ mod tests {
             timestamp,
             correlation_id: "reconcile-test".to_string(),
             writer_version: "test-version".to_string(),
+        }
+    }
+
+    fn worker_transition_input(
+        identity: RalJournalIdentity,
+        worker_id: &str,
+        claim_token: &str,
+        sequence: u64,
+        transition: RalWorkerTransition,
+    ) -> RalWorkerTransitionInput {
+        RalWorkerTransitionInput {
+            identity,
+            worker_id: worker_id.to_string(),
+            claim_token: claim_token.to_string(),
+            sequence,
+            timestamp: 1710002000000 + sequence,
+            correlation_id: "transition-test".to_string(),
+            writer_version: "test-version".to_string(),
+            transition,
         }
     }
 
