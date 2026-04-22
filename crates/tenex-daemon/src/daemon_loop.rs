@@ -109,7 +109,7 @@ pub struct DaemonWorkerLoopInput<'a> {
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
-    pub publish: Option<WorkerMessagePublishContext>,
+    pub first_publish_result_sequence: Option<u64>,
     pub max_frames: u64,
 }
 
@@ -427,9 +427,10 @@ where
         worker_config,
         writer_version,
         resolved_pending_delegations,
-        publish,
+        first_publish_result_sequence,
         max_frames,
     } = worker;
+    let mut next_publish_result_sequence = first_publish_result_sequence;
 
     run_daemon_maintenance_loop_until_stopped(
         clock,
@@ -438,6 +439,16 @@ where
         input.max_iterations,
         input.sleep_ms,
         |now_ms| {
+            let publish =
+                next_publish_result_sequence.map(|result_sequence| WorkerMessagePublishContext {
+                    accepted_at: now_ms,
+                    result_sequence,
+                    result_timestamp: now_ms,
+                });
+            if let Some(result_sequence) = next_publish_result_sequence.as_mut() {
+                *result_sequence = result_sequence.saturating_add(1);
+            }
+
             run_daemon_tick_once_from_filesystem_with_worker(
                 DaemonMaintenanceInput {
                     tenex_base_dir: input.tenex_base_dir,

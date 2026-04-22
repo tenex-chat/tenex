@@ -8,7 +8,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::daemon_foreground::{
-    DaemonForegroundStoppableInput, run_daemon_foreground_until_stopped_from_filesystem,
+    DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
+    run_daemon_foreground_until_stopped_from_filesystem_with_worker,
 };
 use tenex_daemon::daemon_loop::{
     DaemonMaintenanceLoopClock, DaemonMaintenanceLoopSleeper, DaemonMaintenanceLoopStopSignal,
@@ -19,12 +20,21 @@ use tenex_daemon::daemon_shell::DaemonShell;
 use tenex_daemon::publish_outbox::PublishOutboxMaintenanceReport;
 use tenex_daemon::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
+use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
+use tenex_daemon::worker_dispatch_execution::AgentWorkerProcessDispatchSpawner;
+use tenex_daemon::worker_process::{
+    AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
+};
+use tenex_daemon::worker_runtime_state::WorkerRuntimeState;
 
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
+const DEFAULT_WORKER_MAX_FRAMES: u64 = 4_096;
 const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
+const WORKER_ENGINE_ENV: &str = "TENEX_AGENT_WORKER_ENGINE";
+const AGENT_WORKER_ENGINE: &str = "agent";
 static DAEMON_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,7 +139,11 @@ where
 
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let shell = DaemonShell::new(&daemon_dir);
-    let report = run_daemon_foreground_until_stopped_from_filesystem(
+    let worker_command = build_agent_worker_command()?;
+    let worker_config = AgentWorkerProcessConfig::default();
+    let mut worker_runtime_state = WorkerRuntimeState::default();
+    let mut worker_spawner = AgentWorkerProcessDispatchSpawner;
+    let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
         &shell,
         DaemonForegroundStoppableInput {
             tenex_base_dir: &tenex_base_dir,
@@ -137,9 +151,21 @@ where
             sleep_ms: options.sleep_ms,
             retry_policy: PublishOutboxRetryPolicy::default(),
         },
+        DaemonForegroundWorkerInput {
+            runtime_state: &mut worker_runtime_state,
+            limits: WorkerConcurrencyLimits::default(),
+            correlation_id_prefix: "daemon-foreground-worker".to_string(),
+            command: worker_command,
+            worker_config: &worker_config,
+            writer_version: daemon_writer_version(),
+            resolved_pending_delegations: Vec::new(),
+            first_publish_result_sequence: Some(1),
+            max_frames: DEFAULT_WORKER_MAX_FRAMES,
+        },
         clock,
         sleeper,
         stop_signal,
+        &mut worker_spawner,
         publisher,
     )
     .map_err(|error| runtime_error(error.to_string()))?;
@@ -171,6 +197,29 @@ where
         sleep_ms: options.sleep_ms,
         steps,
     })
+}
+
+fn build_agent_worker_command() -> Result<AgentWorkerCommand, CliError> {
+    Ok(bun_agent_worker_command(&repository_root()?, bun_program())
+        .env(WORKER_ENGINE_ENV, AGENT_WORKER_ENGINE))
+}
+
+fn repository_root() -> Result<PathBuf, CliError> {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .ok_or_else(|| runtime_error("failed to resolve repository root"))
+}
+
+fn bun_program() -> PathBuf {
+    env::var_os("BUN_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("bun"))
+}
+
+fn daemon_writer_version() -> String {
+    format!("tenex-daemon@{}", env!("CARGO_PKG_VERSION"))
 }
 
 fn actual_relay_publisher(options: &DaemonCliOptions) -> Result<NostrRelayPublisher, CliError> {
