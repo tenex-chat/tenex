@@ -259,8 +259,7 @@ mod tests {
     fn replace_owners_keeps_planner_active_for_non_empty_replacement() {
         let backend = owner(0x02);
         let initial = owner(0x03);
-        let mut planner =
-            BackendHeartbeatLatchPlanner::new(backend.clone(), vec![initial]);
+        let mut planner = BackendHeartbeatLatchPlanner::new(backend.clone(), vec![initial]);
 
         let replacement = owner(0x04);
         planner.replace_owners(vec![replacement.clone()]);
@@ -283,8 +282,7 @@ mod tests {
     fn replace_owners_flips_active_to_stopped_for_empty_replacement() {
         let backend = owner(0x02);
         let initial = owner(0x03);
-        let mut planner =
-            BackendHeartbeatLatchPlanner::new(backend, vec![initial]);
+        let mut planner = BackendHeartbeatLatchPlanner::new(backend, vec![initial]);
 
         assert_eq!(planner.state(), BackendHeartbeatLatchState::Active);
         planner.replace_owners(Vec::<String>::new());
@@ -296,8 +294,7 @@ mod tests {
     fn replace_owners_preserves_latched_stopped_state() {
         let backend = owner(0x02);
         let initial = owner(0x03);
-        let mut planner =
-            BackendHeartbeatLatchPlanner::new(backend.clone(), vec![initial.clone()]);
+        let mut planner = BackendHeartbeatLatchPlanner::new(backend.clone(), vec![initial.clone()]);
 
         // Latch the planner into Stopped via a matching snapshot.
         let matching = normalized_event(

@@ -288,10 +288,7 @@ const RELOAD_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Spawn the SIGHUP reload watcher. The thread exits when
 /// `DAEMON_STOP_REQUESTED` is set.
-fn spawn_reload_watcher(
-    tenex_base_dir: PathBuf,
-    handle: WhitelistReloadHandle,
-) -> JoinHandle<()> {
+fn spawn_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) -> JoinHandle<()> {
     thread::Builder::new()
         .name("whitelist-reload-watcher".to_string())
         .spawn(move || run_reload_watcher(tenex_base_dir, handle))
@@ -345,8 +342,8 @@ fn reload_whitelist_from_handle(
     tenex_base_dir: &Path,
     handle: &WhitelistReloadHandle,
 ) -> Result<ReloadOutcome, ReloadError> {
-    let config =
-        read_backend_config(tenex_base_dir).map_err(|error| ReloadError::Config(error.to_string()))?;
+    let config = read_backend_config(tenex_base_dir)
+        .map_err(|error| ReloadError::Config(error.to_string()))?;
     let new_owners = config.whitelisted_pubkeys;
 
     let previous_owner_count = handle
@@ -1277,12 +1274,9 @@ mod tests {
         );
 
         // Flip the config on disk to a two-owner whitelist and reload.
-        write_whitelist_config(
-            &tenex_base_dir,
-            &[owner_new_a.clone(), owner_new_b.clone()],
-        );
-        let outcome = reload_whitelist_wiring(&tenex_base_dir, &wiring)
-            .expect("reload must succeed");
+        write_whitelist_config(&tenex_base_dir, &[owner_new_a.clone(), owner_new_b.clone()]);
+        let outcome =
+            reload_whitelist_wiring(&tenex_base_dir, &wiring).expect("reload must succeed");
 
         assert_eq!(outcome.previous_owner_count, 1);
         assert_eq!(outcome.new_owner_count, 2);
@@ -1368,8 +1362,8 @@ mod tests {
         );
 
         write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_new));
-        let outcome = reload_whitelist_wiring(&tenex_base_dir, &wiring)
-            .expect("reload must succeed");
+        let outcome =
+            reload_whitelist_wiring(&tenex_base_dir, &wiring).expect("reload must succeed");
         assert_eq!(outcome.new_owner_count, 1);
 
         let latch = wiring.heartbeat_latch.lock().unwrap();
@@ -1498,8 +1492,8 @@ mod tests {
                 PublicKey::from_str(&format!("02{backend_pubkey}")).expect("valid backend pk");
             let conversation_key =
                 nip44::conversation_key(&owner.secret, &backend_pk).expect("conversation key");
-            let plaintext = nip44::decrypt(&conversation_key, &captured.content)
-                .expect("decrypt ciphertext");
+            let plaintext =
+                nip44::decrypt(&conversation_key, &captured.content).expect("decrypt ciphertext");
             serde_json::from_slice(&plaintext).expect("parse request")
         }
 
@@ -1629,18 +1623,10 @@ mod tests {
             // Materialise clients so we have references for dispatch. The
             // reconciler will dedupe via the shared registry.
             let client_a = registry_for_bunker
-                .client_for_owner(
-                    &owner_a_pub,
-                    &nip46_config_for_bunker,
-                    "wss://relay.test/",
-                )
+                .client_for_owner(&owner_a_pub, &nip46_config_for_bunker, "wss://relay.test/")
                 .expect("owner_a client must build");
             let client_b = registry_for_bunker
-                .client_for_owner(
-                    &owner_b_pub,
-                    &nip46_config_for_bunker,
-                    "wss://relay.test/",
-                )
+                .client_for_owner(&owner_b_pub, &nip46_config_for_bunker, "wss://relay.test/")
                 .expect("owner_b client must build");
 
             let owner_a_keys = OwnerKeys::from_secret_hex(&owner_a_secret);
@@ -1649,18 +1635,15 @@ mod tests {
             let mut cursor = 0;
             for _ in 0..2 {
                 // Each round: first a connect envelope, then a sign_event.
-                let (connect_idx, connect_event) = wait_for_kind(
-                    &outbox_for_bunker,
-                    24133,
-                    cursor,
-                    Duration::from_secs(5),
-                )
-                .expect("connect envelope must arrive");
+                let (connect_idx, connect_event) =
+                    wait_for_kind(&outbox_for_bunker, 24133, cursor, Duration::from_secs(5))
+                        .expect("connect envelope must arrive");
                 cursor = connect_idx + 1;
-                let addressed_to_a = connect_event
-                    .tags
-                    .iter()
-                    .any(|tag| tag.get(1).map(|value| value == &owner_a_pub).unwrap_or(false));
+                let addressed_to_a = connect_event.tags.iter().any(|tag| {
+                    tag.get(1)
+                        .map(|value| value == &owner_a_pub)
+                        .unwrap_or(false)
+                });
                 let (client, keys) = if addressed_to_a {
                     (&client_a, &owner_a_keys)
                 } else {
@@ -1680,16 +1663,11 @@ mod tests {
                     .dispatch_incoming(&encrypted_connect)
                     .expect("connect dispatch");
 
-                let (sign_idx, sign_event) = wait_for_kind(
-                    &outbox_for_bunker,
-                    24133,
-                    cursor,
-                    Duration::from_secs(5),
-                )
-                .expect("sign envelope must arrive");
+                let (sign_idx, sign_event) =
+                    wait_for_kind(&outbox_for_bunker, 24133, cursor, Duration::from_secs(5))
+                        .expect("sign envelope must arrive");
                 cursor = sign_idx + 1;
-                let sign_request =
-                    decrypt_request(keys, &backend_pubkey_for_bunker, &sign_event);
+                let sign_request = decrypt_request(keys, &backend_pubkey_for_bunker, &sign_event);
                 assert_eq!(sign_request.method, "sign_event");
                 let unsigned: NormalizedNostrEvent =
                     serde_json::from_str(&sign_request.params[0]).unwrap();

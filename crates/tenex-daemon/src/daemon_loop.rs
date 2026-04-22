@@ -19,6 +19,11 @@ use crate::daemon_worker_runtime::{
     DaemonWorkerRuntimeFilesystemInput, DaemonWorkerRuntimeOutcome,
     DaemonWorkerTelegramEgressRuntimeInput, run_daemon_worker_runtime_once_from_filesystem,
 };
+use crate::operations_status_runtime::{
+    OperationsStatusPublishRuntimeInput, OperationsStatusRuntimeError,
+    OperationsStatusRuntimeInput, plan_operations_status_drafts,
+    publish_operations_status_transition_from_runtime,
+};
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
     PublishOutboxRetryPolicy,
@@ -123,7 +128,14 @@ pub struct DaemonWorkerLoopInput<'a> {
 pub struct DaemonTickWithWorkerOutcome {
     pub maintenance: DaemonMaintenanceOutcome,
     pub worker_runtime: DaemonWorkerRuntimeOutcome,
+    pub operations_status: DaemonOperationsStatusTickOutcome,
     pub publish_outbox: PublishOutboxMaintenanceReport,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DaemonOperationsStatusTickOutcome {
+    pub active_event_ids: Vec<String>,
+    pub cleanup_event_ids: Vec<String>,
 }
 
 #[derive(Debug, Error)]
@@ -157,6 +169,8 @@ pub enum DaemonTickWithWorkerError {
     Maintenance(#[from] DaemonMaintenanceError),
     #[error("daemon worker runtime failed: {message}")]
     WorkerRuntime { message: String },
+    #[error("operations-status runtime failed: {0}")]
+    OperationsStatus(#[from] OperationsStatusRuntimeError),
     #[error("publish-outbox maintenance failed: {0}")]
     PublishOutbox(#[from] PublishOutboxError),
 }
@@ -288,6 +302,14 @@ where
     let now_ms = input.now_ms;
     let maintenance =
         run_daemon_maintenance_once_from_filesystem_with_telegram(input, &mut *telegram_publisher)?;
+    let previous_active_conversations = active_operations_by_project(
+        worker.runtime_state,
+        maintenance
+            .project_descriptor_report
+            .descriptors
+            .iter()
+            .map(|descriptor| descriptor.project_d_tag.as_str()),
+    );
     let telegram_egress =
         worker_telegram_egress_runtime_input(tenex_base_dir, &worker.writer_version);
     let worker_runtime = run_daemon_worker_runtime_once_from_filesystem(
@@ -308,6 +330,40 @@ where
             max_frames: worker.max_frames,
         },
     );
+    let worker_runtime = match worker_runtime {
+        Ok(worker_runtime) => worker_runtime,
+        Err(source) => {
+            maintain_publish_runtime(PublishRuntimeMaintainInput {
+                daemon_dir,
+                publisher,
+                now: now_ms,
+                retry_policy,
+            })?;
+            return Err(DaemonTickWithWorkerError::WorkerRuntime {
+                message: source.to_string(),
+            });
+        }
+    };
+    let operations_status = publish_operations_status_transitions(
+        tenex_base_dir,
+        daemon_dir,
+        now_ms,
+        &maintenance,
+        &previous_active_conversations,
+        worker.runtime_state,
+    );
+    let operations_status = match operations_status {
+        Ok(operations_status) => operations_status,
+        Err(source) => {
+            maintain_publish_runtime(PublishRuntimeMaintainInput {
+                daemon_dir,
+                publisher,
+                now: now_ms,
+                retry_policy,
+            })?;
+            return Err(source.into());
+        }
+    };
     let publish_outbox = maintain_publish_runtime(PublishRuntimeMaintainInput {
         daemon_dir,
         publisher,
@@ -315,16 +371,85 @@ where
         retry_policy,
     })?
     .maintenance_report;
-    let worker_runtime =
-        worker_runtime.map_err(|source| DaemonTickWithWorkerError::WorkerRuntime {
-            message: source.to_string(),
-        })?;
 
     Ok(DaemonTickWithWorkerOutcome {
         maintenance,
         worker_runtime,
+        operations_status,
         publish_outbox,
     })
+}
+
+fn publish_operations_status_transitions(
+    tenex_base_dir: &Path,
+    daemon_dir: &Path,
+    now_ms: u64,
+    maintenance: &DaemonMaintenanceOutcome,
+    previous_active_conversations: &[(String, Vec<String>)],
+    runtime_state: &WorkerRuntimeState,
+) -> Result<DaemonOperationsStatusTickOutcome, OperationsStatusRuntimeError> {
+    let mut outcome = DaemonOperationsStatusTickOutcome::default();
+    let created_at = now_ms / 1_000;
+
+    for descriptor in &maintenance.project_descriptor_report.descriptors {
+        let previous = previous_active_conversations
+            .iter()
+            .find(|(project_id, _)| project_id == &descriptor.project_d_tag)
+            .map_or(&[][..], |(_, conversation_ids)| conversation_ids.as_slice());
+        let published = publish_operations_status_transition_from_runtime(
+            OperationsStatusPublishRuntimeInput {
+                tenex_base_dir,
+                daemon_dir,
+                project_id: &descriptor.project_d_tag,
+                project_owner_pubkey: &descriptor.project_owner_pubkey,
+                project_d_tag: &descriptor.project_d_tag,
+                created_at,
+                accepted_at: now_ms,
+                request_timestamp: now_ms,
+                previous_active_conversation_ids: previous,
+                runtime_state,
+            },
+        )?;
+
+        outcome.active_event_ids.extend(
+            published
+                .active
+                .into_iter()
+                .map(|published| published.publish.record.event.id),
+        );
+        outcome.cleanup_event_ids.extend(
+            published
+                .cleanup
+                .into_iter()
+                .map(|published| published.publish.record.event.id),
+        );
+    }
+
+    Ok(outcome)
+}
+
+fn active_operations_by_project<'a>(
+    runtime_state: &WorkerRuntimeState,
+    project_ids: impl Iterator<Item = &'a str>,
+) -> Vec<(String, Vec<String>)> {
+    let empty_values: Vec<String> = Vec::new();
+    let empty_project_tag: Vec<String> = Vec::new();
+
+    project_ids
+        .map(|project_id| {
+            let conversation_ids = plan_operations_status_drafts(OperationsStatusRuntimeInput {
+                project_id,
+                created_at: 0,
+                whitelisted_pubkeys: &empty_values,
+                project_tag: &empty_project_tag,
+                runtime_state,
+            })
+            .into_iter()
+            .map(|draft| draft.conversation_id)
+            .collect();
+            (project_id.to_string(), conversation_ids)
+        })
+        .collect()
 }
 
 fn worker_telegram_egress_runtime_input(
@@ -544,6 +669,7 @@ pub fn current_unix_time_ms() -> u64 {
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
+    use crate::backend_events::operations_status::OPERATIONS_STATUS_KIND;
     use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::dispatch_queue::{
         DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
@@ -552,7 +678,9 @@ mod tests {
     use crate::nostr_event::SignedNostrEvent;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
+        read_published_publish_outbox_record,
     };
+    use crate::ral_journal::RalJournalIdentity;
     use crate::ral_lock::build_ral_lock_info;
     use crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason;
     use crate::worker_dispatch_execution::BootedWorkerDispatch;
@@ -561,12 +689,14 @@ mod tests {
         WorkerDispatchInputSourceType, WorkerDispatchInputWriterMetadata,
         write_create_or_compare_equal,
     };
+    use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
     use crate::worker_process::AgentWorkerReady;
     use crate::worker_protocol::{
         AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,
         AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
         AGENT_WORKER_STREAM_BATCH_MS, AgentWorkerExecutionFlags, WorkerProtocolConfig,
     };
+    use crate::worker_runtime_state::WorkerRuntimeStartedDispatch;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
     use std::collections::VecDeque;
@@ -973,6 +1103,74 @@ mod tests {
     }
 
     #[test]
+    fn filesystem_tick_with_worker_publishes_operations_status_from_active_runtime() {
+        let fixture = TickFilesystemFixture::new("daemon-loop-worker-operations-status", 0x08);
+        let mut publisher = RecordingPublisher::default();
+        let mut telegram_publisher = NoTelegramPublisher;
+        let mut spawner = EmptyQueueSpawner::default();
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = AgentWorkerProcessConfig::default();
+        let conversation_id = event_id_hex(0x44);
+        register_active_runtime_worker(
+            &mut runtime_state,
+            "worker-operations",
+            "dispatch-operations",
+            "demo-project",
+            TEST_AGENT_PUBKEY,
+            &conversation_id,
+            WorkerHeartbeatState::Streaming,
+        );
+
+        let outcome = run_daemon_tick_once_from_filesystem_with_worker(
+            DaemonMaintenanceInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                now_ms: 1_710_001_000_000,
+                heartbeat_latch: None,
+            },
+            DaemonWorkerTickInput {
+                runtime_state: &mut runtime_state,
+                limits: WorkerConcurrencyLimits::default(),
+                correlation_id: "daemon-loop-worker-operations-status".to_string(),
+                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                command: AgentWorkerCommand::new("bun"),
+                worker_config: &worker_config,
+                writer_version: "daemon-loop-test@0".to_string(),
+                resolved_pending_delegations: Vec::new(),
+                publish: None,
+                max_frames: 1,
+            },
+            &mut spawner,
+            &mut publisher,
+            PublishOutboxRetryPolicy::default(),
+            &mut telegram_publisher,
+        )
+        .expect("filesystem tick with active runtime must succeed");
+
+        assert_eq!(outcome.operations_status.active_event_ids.len(), 1);
+        assert!(outcome.operations_status.cleanup_event_ids.is_empty());
+        assert_eq!(outcome.publish_outbox.diagnostics_before.pending_count, 4);
+        assert_eq!(outcome.publish_outbox.drained.len(), 4);
+        assert_eq!(outcome.publish_outbox.diagnostics_after.published_count, 4);
+        assert_eq!(publisher.event_ids.len(), 4);
+
+        let operations_event_id = &outcome.operations_status.active_event_ids[0];
+        let published =
+            read_published_publish_outbox_record(&fixture.daemon_dir, operations_event_id)
+                .expect("operations status published record read must succeed")
+                .expect("operations status published record must exist");
+        assert_eq!(published.event.kind, OPERATIONS_STATUS_KIND);
+        assert_eq!(published.request.conversation_id, conversation_id);
+        assert!(
+            published
+                .event
+                .tags
+                .iter()
+                .any(|tag| tag == &vec!["p".to_string(), TEST_AGENT_PUBKEY.to_string()])
+        );
+    }
+
+    #[test]
     fn filesystem_tick_with_worker_drains_publish_outbox_after_worker_runtime_error() {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
         seed_queued_dispatch(&fixture.daemon_dir);
@@ -1316,6 +1514,49 @@ mod tests {
         .expect("dispatch input sidecar must write");
     }
 
+    fn register_active_runtime_worker(
+        runtime_state: &mut WorkerRuntimeState,
+        worker_id: &str,
+        dispatch_id: &str,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+        state: WorkerHeartbeatState,
+    ) {
+        let identity = RalJournalIdentity {
+            project_id: project_id.to_string(),
+            agent_pubkey: agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
+            ral_number: 1,
+        };
+        runtime_state
+            .register_started_dispatch(WorkerRuntimeStartedDispatch {
+                worker_id: worker_id.to_string(),
+                pid: 4242,
+                dispatch_id: dispatch_id.to_string(),
+                identity: identity.clone(),
+                claim_token: "claim-operations-status".to_string(),
+                started_at: 1_710_000_999_000,
+            })
+            .expect("active worker must register");
+        runtime_state
+            .update_worker_heartbeat(
+                worker_id,
+                WorkerHeartbeatSnapshot {
+                    worker_id: worker_id.to_string(),
+                    correlation_id: "heartbeat-operations-status".to_string(),
+                    sequence: 1,
+                    worker_timestamp: 1_710_000_999_500,
+                    observed_at: 1_710_000_999_750,
+                    identity,
+                    state,
+                    active_tool_count: 0,
+                    accumulated_runtime_ms: 250,
+                },
+            )
+            .expect("active worker heartbeat must update");
+    }
+
     fn triggering_envelope(event_id: &str) -> Value {
         json!({
             "transport": "nostr",
@@ -1364,5 +1605,9 @@ mod tests {
         let keypair = Keypair::from_secret_key(&secp, &secret);
         let (xonly, _) = keypair.x_only_public_key();
         hex::encode(xonly.serialize())
+    }
+
+    fn event_id_hex(fill_byte: u8) -> String {
+        hex::encode([fill_byte; 32])
     }
 }

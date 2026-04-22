@@ -444,10 +444,9 @@ mod tests {
             .heartbeat_event_id
             .as_ref()
             .expect("heartbeat must publish when latch is absent");
-        let heartbeat =
-            read_pending_publish_outbox_record(&daemon_dir, heartbeat_event_id)
-                .expect("heartbeat record read must succeed")
-                .expect("heartbeat record must exist");
+        let heartbeat = read_pending_publish_outbox_record(&daemon_dir, heartbeat_event_id)
+            .expect("heartbeat record read must succeed")
+            .expect("heartbeat record must exist");
         let installed = read_pending_publish_outbox_record(
             &daemon_dir,
             &backend_status.installed_agent_list_event_id,

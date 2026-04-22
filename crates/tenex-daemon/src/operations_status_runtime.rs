@@ -1,9 +1,20 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::path::Path;
 
+use crate::backend_config::{BackendConfigError, BackendConfigSnapshot, read_backend_config};
+use crate::backend_event_publish::{
+    BackendEventPublishContext, BackendEventPublishError, publish_backend_operations_status,
+};
 use crate::backend_events::operations_status::OperationsStatusInputs;
+use crate::publish_runtime::BackendPublishRuntimeOutcome;
 use crate::worker_heartbeat::WorkerHeartbeatState;
 use crate::worker_runtime_state::{ActiveWorkerRuntimeSnapshot, WorkerRuntimeState};
+use thiserror::Error;
+
+pub const OPERATIONS_STATUS_TIMEOUT_MS: u64 = 30_000;
+pub const OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE: u64 = 40;
+pub const OPERATIONS_STATUS_RAL_NUMBER: u64 = 0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationsStatusRuntimeInput<'a> {
@@ -53,6 +64,41 @@ impl OperationsStatusDraft {
 pub struct OperationsStatusTransitionPlan {
     pub active_drafts: Vec<OperationsStatusDraft>,
     pub cleanup_drafts: Vec<OperationsStatusDraft>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsStatusPublishRuntimeInput<'a> {
+    pub tenex_base_dir: &'a Path,
+    pub daemon_dir: &'a Path,
+    pub project_id: &'a str,
+    pub project_owner_pubkey: &'a str,
+    pub project_d_tag: &'a str,
+    pub created_at: u64,
+    pub accepted_at: u64,
+    pub request_timestamp: u64,
+    pub previous_active_conversation_ids: &'a [String],
+    pub runtime_state: &'a WorkerRuntimeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsStatusPublishedDraft {
+    pub draft: OperationsStatusDraft,
+    pub publish: BackendPublishRuntimeOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsStatusPublishRuntimeOutcome {
+    pub config: Option<BackendConfigSnapshot>,
+    pub active: Vec<OperationsStatusPublishedDraft>,
+    pub cleanup: Vec<OperationsStatusPublishedDraft>,
+}
+
+#[derive(Debug, Error)]
+pub enum OperationsStatusRuntimeError {
+    #[error("backend config failed: {0}")]
+    Config(#[from] BackendConfigError),
+    #[error("backend event publish failed: {0}")]
+    EventPublish(#[from] BackendEventPublishError),
 }
 
 pub fn plan_operations_status_drafts(
@@ -123,6 +169,143 @@ pub fn plan_operations_status_cleanup(
     }
 }
 
+pub fn publish_operations_status_transition_from_runtime(
+    input: OperationsStatusPublishRuntimeInput<'_>,
+) -> Result<OperationsStatusPublishRuntimeOutcome, OperationsStatusRuntimeError> {
+    let empty_values: Vec<String> = Vec::new();
+    let empty_project_tag: Vec<String> = Vec::new();
+    let probe_plan = plan_operations_status_transition(OperationsStatusTransitionInput {
+        previous_active_conversation_ids: input.previous_active_conversation_ids,
+        runtime: OperationsStatusRuntimeInput {
+            project_id: input.project_id,
+            created_at: input.created_at,
+            whitelisted_pubkeys: &empty_values,
+            project_tag: &empty_project_tag,
+            runtime_state: input.runtime_state,
+        },
+    });
+
+    if probe_plan.active_drafts.is_empty() && probe_plan.cleanup_drafts.is_empty() {
+        return Ok(OperationsStatusPublishRuntimeOutcome {
+            config: None,
+            active: Vec::new(),
+            cleanup: Vec::new(),
+        });
+    }
+
+    let config = read_backend_config(input.tenex_base_dir)?;
+    let signer = config.backend_signer()?;
+    let project_tag = project_a_tag(input.project_owner_pubkey, input.project_d_tag);
+    let plan = plan_operations_status_transition(OperationsStatusTransitionInput {
+        previous_active_conversation_ids: input.previous_active_conversation_ids,
+        runtime: OperationsStatusRuntimeInput {
+            project_id: input.project_id,
+            created_at: input.created_at,
+            whitelisted_pubkeys: &config.whitelisted_pubkeys,
+            project_tag: &project_tag,
+            runtime_state: input.runtime_state,
+        },
+    });
+
+    let mut next_sequence = OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE;
+    let mut active = Vec::new();
+    for draft in plan.active_drafts {
+        active.push(publish_operations_status_draft(
+            input.daemon_dir,
+            input.accepted_at,
+            input.request_timestamp,
+            input.project_id,
+            input.project_d_tag,
+            "active",
+            next_sequence,
+            draft,
+            &signer,
+        )?);
+        next_sequence = next_sequence.saturating_add(1);
+    }
+
+    let mut cleanup = Vec::new();
+    for draft in plan.cleanup_drafts {
+        cleanup.push(publish_operations_status_draft(
+            input.daemon_dir,
+            input.accepted_at,
+            input.request_timestamp,
+            input.project_id,
+            input.project_d_tag,
+            "cleanup",
+            next_sequence,
+            draft,
+            &signer,
+        )?);
+        next_sequence = next_sequence.saturating_add(1);
+    }
+
+    Ok(OperationsStatusPublishRuntimeOutcome {
+        config: Some(config),
+        active,
+        cleanup,
+    })
+}
+
+fn publish_operations_status_draft<S: crate::backend_events::heartbeat::BackendSigner>(
+    daemon_dir: &Path,
+    accepted_at: u64,
+    request_timestamp: u64,
+    project_id: &str,
+    project_d_tag: &str,
+    variant: &str,
+    request_sequence: u64,
+    draft: OperationsStatusDraft,
+    signer: &S,
+) -> Result<OperationsStatusPublishedDraft, BackendEventPublishError> {
+    let request_id = operations_status_request_id(
+        project_d_tag,
+        &draft.conversation_id,
+        variant,
+        draft.created_at,
+    );
+    let correlation_id = operations_status_correlation_id(project_d_tag);
+    let publish = publish_backend_operations_status(
+        BackendEventPublishContext {
+            daemon_dir,
+            accepted_at,
+            request_id: &request_id,
+            request_sequence,
+            request_timestamp,
+            correlation_id: &correlation_id,
+            project_id,
+            conversation_id: &draft.conversation_id,
+            ral_number: OPERATIONS_STATUS_RAL_NUMBER,
+            wait_for_relay_ok: false,
+            timeout_ms: OPERATIONS_STATUS_TIMEOUT_MS,
+        },
+        draft.as_inputs(),
+        signer,
+    )?;
+
+    Ok(OperationsStatusPublishedDraft { draft, publish })
+}
+
+fn operations_status_request_id(
+    project_d_tag: &str,
+    conversation_id: &str,
+    variant: &str,
+    created_at: u64,
+) -> String {
+    format!("operations-status:{variant}:{project_d_tag}:{conversation_id}:{created_at}")
+}
+
+fn operations_status_correlation_id(project_d_tag: &str) -> String {
+    format!("operations-status:{project_d_tag}")
+}
+
+fn project_a_tag(project_owner_pubkey: &str, project_d_tag: &str) -> Vec<String> {
+    vec![
+        "a".to_string(),
+        format!("31933:{project_owner_pubkey}:{project_d_tag}"),
+    ]
+}
+
 fn worker_has_active_operation(worker: &ActiveWorkerRuntimeSnapshot) -> bool {
     let Some(heartbeat) = worker.last_heartbeat.as_ref() else {
         return false;
@@ -157,16 +340,24 @@ fn active_operations_by_conversation(
 mod tests {
     use super::*;
     use crate::backend_events::heartbeat::BackendSigner;
-    use crate::backend_events::operations_status::encode_operations_status;
+    use crate::backend_events::operations_status::{
+        OPERATIONS_STATUS_KIND, encode_operations_status,
+    };
     use crate::nostr_event::verify_signed_event;
+    use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::ral_journal::RalJournalIdentity;
     use crate::worker_heartbeat::WorkerHeartbeatSnapshot;
     use crate::worker_runtime_state::{WorkerRuntimeStartedDispatch, WorkerRuntimeState};
     use secp256k1::{Keypair, Secp256k1, SecretKey, Signing};
+    use std::fs;
+    use std::path::PathBuf;
     use std::str::FromStr;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const TEST_SECRET_KEY_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     struct Secp256k1Signer<C: Signing> {
         secp: Secp256k1<C>,
@@ -526,6 +717,111 @@ mod tests {
         );
     }
 
+    #[test]
+    fn publishes_operations_status_transition_into_pending_outbox() {
+        let tenex_base_dir = unique_temp_dir("operations-status-runtime-base");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+
+        let project_owner = pubkey_hex(0x02);
+        let whitelisted = pubkey_hex(0x03);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{whitelisted}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+
+        let mut runtime_state = WorkerRuntimeState::default();
+        let current_conversation = event_id_hex(0x30);
+        let stale_conversation = event_id_hex(0x31);
+        let active_agent = pubkey_hex(0x04);
+        register_worker(
+            &mut runtime_state,
+            WorkerFixture {
+                worker_id: "worker-current",
+                dispatch_id: "dispatch-current",
+                project_id: "demo-project",
+                agent_pubkey: &active_agent,
+                conversation_id: &current_conversation,
+                state: Some(WorkerHeartbeatState::Streaming),
+                active_tool_count: 0,
+            },
+        );
+
+        let previous_active_conversation_ids =
+            vec![current_conversation.clone(), stale_conversation.clone()];
+        let outcome = publish_operations_status_transition_from_runtime(
+            OperationsStatusPublishRuntimeInput {
+                tenex_base_dir: &tenex_base_dir,
+                daemon_dir: &daemon_dir,
+                project_id: "demo-project",
+                project_owner_pubkey: &project_owner,
+                project_d_tag: "demo-project",
+                created_at: 1_700_000_020,
+                accepted_at: 1_700_000_020_100,
+                request_timestamp: 1_700_000_020_050,
+                previous_active_conversation_ids: &previous_active_conversation_ids,
+                runtime_state: &runtime_state,
+            },
+        )
+        .expect("operations status transition must publish");
+
+        assert!(outcome.config.is_some());
+        assert_eq!(outcome.active.len(), 1);
+        assert_eq!(outcome.cleanup.len(), 1);
+
+        let active = &outcome.active[0].publish.record;
+        let cleanup = &outcome.cleanup[0].publish.record;
+        assert_eq!(active.event.kind, OPERATIONS_STATUS_KIND);
+        assert_eq!(cleanup.event.kind, OPERATIONS_STATUS_KIND);
+        assert_eq!(
+            active.request.request_sequence,
+            OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE
+        );
+        assert_eq!(
+            cleanup.request.request_sequence,
+            OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE + 1
+        );
+        assert_eq!(active.request.project_id, "demo-project");
+        assert_eq!(cleanup.request.conversation_id, stale_conversation);
+        assert!(
+            active
+                .event
+                .tags
+                .iter()
+                .any(|tag| tag == &vec!["p".to_string(), active_agent.clone()])
+        );
+        assert!(
+            cleanup
+                .event
+                .tags
+                .iter()
+                .all(|tag| tag.first().is_none_or(|name| name != "p"))
+        );
+        assert!(
+            active
+                .event
+                .tags
+                .iter()
+                .any(|tag| tag == &project_tag(&project_owner))
+        );
+
+        read_pending_publish_outbox_record(&daemon_dir, &active.event.id)
+            .expect("active record read must succeed")
+            .expect("active record must exist");
+        read_pending_publish_outbox_record(&daemon_dir, &cleanup.event.id)
+            .expect("cleanup record read must succeed")
+            .expect("cleanup record must exist");
+
+        cleanup_temp_dir(tenex_base_dir);
+    }
+
     struct WorkerFixture<'a> {
         worker_id: &'a str,
         dispatch_id: &'a str,
@@ -594,5 +890,20 @@ mod tests {
             "a".to_string(),
             format!("31933:{owner_pubkey}:demo-project"),
         ]
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must be after UNIX_EPOCH")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("{prefix}-{unique}-{counter}"))
+    }
+
+    fn cleanup_temp_dir(path: PathBuf) {
+        if path.exists() {
+            fs::remove_dir_all(path).expect("temp dir cleanup must succeed");
+        }
     }
 }

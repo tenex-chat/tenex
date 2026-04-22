@@ -537,9 +537,8 @@ mod tests {
     }
 
     fn scheduler_from_records_for(worker_id: &str) -> RalScheduler {
-        let replay =
-            replay_ral_journal_records(initial_ral_records_for(worker_id))
-                .expect("journal replay must succeed");
+        let replay = replay_ral_journal_records(initial_ral_records_for(worker_id))
+            .expect("journal replay must succeed");
         RalScheduler::new(&RalJournalReplay {
             last_sequence: replay.last_sequence,
             states: replay.states,
