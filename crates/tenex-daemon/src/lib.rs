@@ -28,6 +28,7 @@ pub mod inbound_runtime;
 pub mod nostr_classification;
 pub mod nostr_event;
 pub mod nostr_inbound;
+pub mod nostr_ingress;
 pub mod operations_status_runtime;
 pub mod periodic_tick;
 pub mod periodic_tick_state;
