@@ -146,6 +146,15 @@ pub struct PublishOutboxRequeueOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PublishOutboxCancellationOutcome {
+    pub event_id: String,
+    pub request_id: String,
+    pub project_id: String,
+    pub source_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublishOutboxMaintenanceReport {
     pub diagnostics_before: PublishOutboxDiagnostics,
     pub requeued: Vec<PublishOutboxRequeueOutcome>,
@@ -709,6 +718,41 @@ pub fn requeue_due_failed_publish_outbox_records(
             pending_publish_outbox_record_path(daemon_dir, &record.event.id),
             &record,
         )?);
+    }
+
+    Ok(outcomes)
+}
+
+pub fn cancel_pending_publish_outbox_records_matching<F>(
+    daemon_dir: impl AsRef<Path>,
+    mut predicate: F,
+) -> PublishOutboxResult<Vec<PublishOutboxCancellationOutcome>>
+where
+    F: FnMut(&PublishOutboxRecord) -> bool,
+{
+    let paths = list_pending_publish_outbox_record_paths(&daemon_dir)?;
+    let mut outcomes = Vec::new();
+
+    for source_path in paths {
+        let Some(record) = read_optional_record(&source_path)? else {
+            continue;
+        };
+        if record.status != PublishOutboxStatus::Accepted {
+            return Err(PublishOutboxError::InvalidDrainStatus {
+                status: record.status,
+            });
+        }
+        if !predicate(&record) {
+            continue;
+        }
+        remove_optional_file(&source_path)?;
+        sync_parent_dir(&source_path)?;
+        outcomes.push(PublishOutboxCancellationOutcome {
+            event_id: record.event.id,
+            request_id: record.request.request_id,
+            project_id: record.request.project_id,
+            source_path,
+        });
     }
 
     Ok(outcomes)
@@ -1991,10 +2035,9 @@ mod tests {
         let diagnostics =
             inspect_publish_outbox(&daemon_dir, 1710001001200).expect("diagnostics must inspect");
         assert_eq!(diagnostics.pending_count, 1);
-        let record =
-            read_pending_publish_outbox_record(&daemon_dir, "event-legacy-01")
-                .expect("legacy record read must succeed")
-                .expect("legacy record must exist");
+        let record = read_pending_publish_outbox_record(&daemon_dir, "event-legacy-01")
+            .expect("legacy record read must succeed")
+            .expect("legacy record must exist");
         assert!(!record.request.wait_for_relay_ok);
         assert_eq!(record.request.timeout_ms, 0);
 

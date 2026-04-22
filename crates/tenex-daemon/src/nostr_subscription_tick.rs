@@ -249,6 +249,18 @@ fn dispatch_diagnostic(
                 dispatch_id: None,
             }
         }
+        NostrIngressOutcome::ProjectBooted { class, boot } => {
+            NostrSubscriptionTickDispatch::Ignored {
+                frame_index,
+                event_id,
+                code: "project_booted".to_string(),
+                detail: format!("project {} boot state written to disk", boot.project_d_tag),
+                class: Some(class),
+                project_id: Some(boot.project_d_tag),
+                pubkeys: Vec::new(),
+                dispatch_id: None,
+            }
+        }
     }
 }
 
@@ -256,7 +268,8 @@ fn ingress_class(ingress: &NostrIngressOutcome) -> DaemonNostrEventClass {
     match ingress {
         NostrIngressOutcome::Routed { class, .. }
         | NostrIngressOutcome::Ignored { class, .. }
-        | NostrIngressOutcome::ProjectUpdated { class, .. } => *class,
+        | NostrIngressOutcome::ProjectUpdated { class, .. }
+        | NostrIngressOutcome::ProjectBooted { class, .. } => *class,
     }
 }
 

@@ -1050,6 +1050,8 @@ mod tests {
     use tenex_daemon::filesystem_state::{
         build_lock_info, build_restart_state, save_restart_state_file, write_lock_info_file,
     };
+    use tenex_daemon::nostr_event::SignedNostrEvent;
+    use tenex_daemon::project_boot_state::record_project_boot_event;
     use tenex_daemon::scheduler_wakeups::{
         WakeupEnqueueRequest, WakeupFailureClassification, WakeupRetryPolicy, WakeupTarget,
         enqueue_wakeup, mark_wakeup_failed,
@@ -1682,6 +1684,20 @@ mod tests {
             ),
         )
         .expect("project descriptor must write");
+        record_project_boot_event(
+            &daemon_dir,
+            &SignedNostrEvent {
+                id: "boot-event-demo-project".to_string(),
+                pubkey: owner.clone(),
+                created_at: 1_710_000_999,
+                kind: 24000,
+                tags: vec![vec!["a".to_string(), format!("31933:{owner}:demo-project")]],
+                content: String::new(),
+                sig: "0".repeat(128),
+            },
+            1_710_000_999_000,
+        )
+        .expect("project boot state must write");
 
         let output = run_cli([
             "daemon-maintenance",

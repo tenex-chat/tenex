@@ -44,7 +44,7 @@ pub enum DaemonNostrEventClass {
 
 impl DaemonNostrEventClass {
     pub fn should_normalize_for_worker(self) -> bool {
-        matches!(self, Self::Conversation | Self::Boot)
+        matches!(self, Self::Conversation)
     }
 
     pub fn is_daemon_control_event(self) -> bool {
@@ -53,6 +53,7 @@ impl DaemonNostrEventClass {
             Self::Project
                 | Self::Lesson
                 | Self::LessonComment
+                | Self::Boot
                 | Self::AgentCreate
                 | Self::ConfigUpdate
         )
@@ -178,7 +179,7 @@ mod tests {
             DaemonNostrEventClass::Conversation
         );
         assert!(DaemonNostrEventClass::Conversation.should_normalize_for_worker());
-        assert!(DaemonNostrEventClass::Boot.should_normalize_for_worker());
+        assert!(!DaemonNostrEventClass::Boot.should_normalize_for_worker());
         assert!(DaemonNostrEventClass::Project.is_daemon_control_event());
         assert!(!DaemonNostrEventClass::NeverRoute.is_daemon_control_event());
     }

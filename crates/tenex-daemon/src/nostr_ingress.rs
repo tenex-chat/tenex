@@ -11,6 +11,9 @@ use crate::inbound_runtime::{
 use crate::nostr_classification::{DaemonNostrEventClass, classify_for_daemon};
 use crate::nostr_event::SignedNostrEvent;
 use crate::nostr_inbound::signed_event_to_inbound_envelope;
+use crate::project_boot_state::{
+    ProjectBootOutcome, ProjectBootStateError, record_project_boot_event,
+};
 use crate::project_nostr_ingress::{
     ProjectNostrIngressError, ProjectNostrIngressOutcome, handle_project_nostr_event,
 };
@@ -35,6 +38,10 @@ pub enum NostrIngressOutcome {
         class: DaemonNostrEventClass,
         project: ProjectNostrIngressOutcome,
     },
+    ProjectBooted {
+        class: DaemonNostrEventClass,
+        boot: ProjectBootOutcome,
+    },
     Ignored {
         class: DaemonNostrEventClass,
         reason: NostrIngressIgnoredReason,
@@ -56,6 +63,8 @@ pub enum NostrIngressError {
     BackendConfig(#[from] BackendConfigError),
     #[error("failed to write project state: {0}")]
     ProjectIngress(#[from] ProjectNostrIngressError),
+    #[error("failed to write project boot state: {0}")]
+    ProjectBootState(#[from] ProjectBootStateError),
 }
 
 pub fn process_verified_nostr_event(
@@ -71,6 +80,11 @@ pub fn process_verified_nostr_event(
             .unwrap_or("/tmp/tenex-projects");
         let project = handle_project_nostr_event(input.tenex_base_dir, input.event, projects_base)?;
         return Ok(NostrIngressOutcome::ProjectUpdated { class, project });
+    }
+
+    if class == DaemonNostrEventClass::Boot {
+        let boot = record_project_boot_event(input.daemon_dir, input.event, input.timestamp)?;
+        return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
     }
 
     if !class.should_normalize_for_worker() {
@@ -101,9 +115,9 @@ fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
         DaemonNostrEventClass::Project
         | DaemonNostrEventClass::Lesson
         | DaemonNostrEventClass::LessonComment
+        | DaemonNostrEventClass::Boot
         | DaemonNostrEventClass::AgentCreate
         | DaemonNostrEventClass::ConfigUpdate => "daemon_control_event",
-        DaemonNostrEventClass::Boot => "conversation_not_ignored",
         DaemonNostrEventClass::Other => "unsupported_nostr_event_class",
         DaemonNostrEventClass::Conversation => "conversation_not_ignored",
     }
@@ -204,6 +218,37 @@ mod tests {
         };
         assert_eq!(class, DaemonNostrEventClass::ConfigUpdate);
         assert_eq!(reason.code, "daemon_control_event");
+    }
+
+    #[test]
+    fn boot_event_records_project_boot_state_without_dispatch() {
+        let temp_dir = tempdir().expect("temp dir must create");
+        let base_dir = temp_dir.path();
+        let daemon_dir = base_dir.join("daemon");
+        let owner = pubkey_hex(0x11);
+        let project_reference = format!("31933:{owner}:project-alpha");
+        let event = signed_event(
+            24000,
+            "boot-event",
+            vec![vec!["a", project_reference.as_str()]],
+        );
+
+        let outcome = process_verified_nostr_event(NostrIngressInput {
+            daemon_dir: &daemon_dir,
+            tenex_base_dir: base_dir,
+            event: &event,
+            timestamp: 1_710_000_800_003,
+            writer_version: "nostr-ingress-test@0",
+        })
+        .expect("nostr ingress must process");
+
+        let NostrIngressOutcome::ProjectBooted { class, boot } = outcome else {
+            panic!("expected project boot outcome");
+        };
+        assert_eq!(class, DaemonNostrEventClass::Boot);
+        assert_eq!(boot.project_owner_pubkey, owner);
+        assert_eq!(boot.project_d_tag, "project-alpha");
+        assert!(!daemon_dir.join("dispatch-queue.jsonl").exists());
     }
 
     fn signed_event(kind: u64, event_id: &str, tags: Vec<Vec<&str>>) -> SignedNostrEvent {

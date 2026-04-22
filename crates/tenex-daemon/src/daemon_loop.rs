@@ -317,7 +317,7 @@ where
     let maintenance =
         run_daemon_maintenance_once_from_filesystem_with_telegram(input, &mut *telegram_publisher)?;
     let project_ids = maintenance
-        .project_descriptor_report
+        .booted_project_descriptor_report
         .descriptors
         .iter()
         .map(|descriptor| descriptor.project_d_tag.as_str())
@@ -428,6 +428,10 @@ fn log_daemon_tick_publish_summary(
     let backend_enqueued_event_count = backend_enqueued_event_count(maintenance);
     let backend_due_task_count = maintenance.backend_events.tick.due_task_names.len();
     let project_descriptor_count = maintenance.project_descriptor_report.descriptors.len();
+    let booted_project_descriptor_count = maintenance
+        .booted_project_descriptor_report
+        .descriptors
+        .len();
     let project_status_count = maintenance.backend_events.tick.project_statuses.len();
     let operations_active_event_count =
         operations_status.map_or(0, |status| status.active_event_ids.len());
@@ -462,6 +466,7 @@ fn log_daemon_tick_publish_summary(
             backend_due_task_count,
             backend_enqueued_event_count,
             project_descriptor_count,
+            booted_project_descriptor_count,
             project_status_count,
             worker_outcome = ?worker_outcome,
             operations_active_event_count,
@@ -483,6 +488,7 @@ fn log_daemon_tick_publish_summary(
             backend_due_task_count,
             backend_enqueued_event_count,
             project_descriptor_count,
+            booted_project_descriptor_count,
             project_status_count,
             worker_outcome = ?worker_outcome,
             publish_pending_after,
@@ -547,7 +553,7 @@ fn publish_operations_status_transitions(
     let mut outcome = DaemonOperationsStatusTickOutcome::default();
     let created_at = now_ms / 1_000;
 
-    for descriptor in &maintenance.project_descriptor_report.descriptors {
+    for descriptor in &maintenance.booted_project_descriptor_report.descriptors {
         let previous = previous_active_conversations
             .iter()
             .find(|(project_id, _)| project_id == &descriptor.project_d_tag)
@@ -833,6 +839,7 @@ mod tests {
     };
     use crate::nostr_event::SignedNostrEvent;
     use crate::operations_status_state::read_operations_status_active_snapshot;
+    use crate::project_boot_state::record_project_boot_event;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
         read_published_publish_outbox_record,
@@ -1523,6 +1530,23 @@ mod tests {
                 ),
             )
             .expect("project descriptor must write");
+            record_project_boot_event(
+                &daemon_dir,
+                &SignedNostrEvent {
+                    id: format!("boot-event-{prefix}"),
+                    pubkey: owner_pubkey.clone(),
+                    created_at: 1_710_000_999,
+                    kind: 24000,
+                    tags: vec![vec![
+                        "a".to_string(),
+                        format!("31933:{owner_pubkey}:demo-project"),
+                    ]],
+                    content: String::new(),
+                    sig: "0".repeat(128),
+                },
+                1_710_000_999_000,
+            )
+            .expect("project boot state must write");
 
             Self {
                 tenex_base_dir,

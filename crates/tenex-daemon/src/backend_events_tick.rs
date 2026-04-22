@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -123,6 +124,24 @@ pub fn ensure_backend_events_tasks(
     projects: &[BackendEventsTickProject<'_>],
 ) -> Result<BackendEventsTaskRegistration, PeriodicTickError> {
     let mut registered_task_names = Vec::new();
+    let desired_project_tasks = projects
+        .iter()
+        .map(|project| {
+            backend_events_project_status_task_name(
+                project.project_owner_pubkey,
+                project.project_d_tag,
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    for task in scheduler.inspect().tasks {
+        if task
+            .name
+            .starts_with(&format!("{PROJECT_STATUS_TICK_TASK_PREFIX}:"))
+            && !desired_project_tasks.contains(&task.name)
+        {
+            scheduler.remove_task(&task.name)?;
+        }
+    }
 
     if !scheduler.has_task(BACKEND_STATUS_TICK_TASK_NAME) {
         scheduler.register_task(
@@ -133,11 +152,7 @@ pub fn ensure_backend_events_tasks(
         registered_task_names.push(BACKEND_STATUS_TICK_TASK_NAME.to_string());
     }
 
-    for project in projects {
-        let task_name = backend_events_project_status_task_name(
-            project.project_owner_pubkey,
-            project.project_d_tag,
-        );
+    for task_name in desired_project_tasks {
         if scheduler.has_task(&task_name) {
             continue;
         }
@@ -324,6 +339,54 @@ mod tests {
         );
         assert!(second.registered_task_names.is_empty());
         assert_eq!(scheduler.inspect().tasks.len(), 2);
+    }
+
+    #[test]
+    fn ensure_backend_events_tasks_removes_stale_project_tasks() {
+        let owner = pubkey_hex(0x02);
+        let active_project = BackendEventsTickProject {
+            project_owner_pubkey: &owner,
+            project_d_tag: "active-project",
+            project_manager_pubkey: None,
+            project_base_path: None,
+            worktrees: None,
+        };
+        let mut scheduler = PeriodicScheduler::new();
+        scheduler
+            .register_task(BACKEND_STATUS_TICK_TASK_NAME, 30, 100)
+            .expect("backend task");
+        scheduler
+            .register_task(
+                backend_events_project_status_task_name(&owner, "stale-project"),
+                30,
+                100,
+            )
+            .expect("stale project task");
+
+        let registration =
+            ensure_backend_events_tasks(&mut scheduler, 100, std::slice::from_ref(&active_project))
+                .expect("registration must succeed");
+
+        assert_eq!(
+            registration.registered_task_names,
+            vec![backend_events_project_status_task_name(
+                &owner,
+                "active-project"
+            )]
+        );
+        let task_names = scheduler
+            .inspect()
+            .tasks
+            .into_iter()
+            .map(|task| task.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            task_names,
+            vec![
+                BACKEND_STATUS_TICK_TASK_NAME.to_string(),
+                backend_events_project_status_task_name(&owner, "active-project"),
+            ]
+        );
     }
 
     #[test]
