@@ -42,7 +42,7 @@ The goal is **always** the right long-term, sustainable, idiomatic, coherent fix
 
 ### Layer Hierarchy (Dependencies Flow DOWN Only)
 ```
-Layer 4: commands/ daemon/ event-handler/
+Layer 4: event-handler/
     ↓
 Layer 3: services/ agents/ conversations/ tools/
     ↓
@@ -60,9 +60,9 @@ Layer 0: lib/  ← ZERO TENEX imports
 | Layer | Can Import | Cannot Import |
 |-------|------------|---------------|
 | `lib/` | Node built-ins, npm only | ANY `@/` imports |
-| `utils/` | `lib/` | `services/`, `agents/`, `commands/` |
-| `services/` | `utils/`, `lib/`, `llm/`, `nostr/` | `commands/`, `daemon/`, `event-handler/` |
-| `commands/` | Everything below | N/A |
+| `utils/` | `lib/` | `services/`, `agents/`, `event-handler/` |
+| `services/` | `utils/`, `lib/`, `llm/`, `nostr/` | `event-handler/` |
+| `event-handler/` | Everything below | N/A |
 
 ### Services Organization
 ```
