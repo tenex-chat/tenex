@@ -12,6 +12,7 @@ pub mod subscription_filters;
 pub mod worker_abort;
 pub mod worker_completion;
 pub mod worker_completion_apply;
+pub mod worker_concurrency;
 pub mod worker_dispatch_execution;
 pub mod worker_dispatch_spawn;
 pub mod worker_dispatch_start;
