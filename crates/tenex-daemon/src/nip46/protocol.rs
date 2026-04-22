@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::backend_events::heartbeat::BackendSigner;
+use crate::nostr_event::{
+    NormalizedNostrEvent, NostrEventError, SignedNostrEvent, canonical_payload, event_hash_hex,
+};
+
 pub const NIP46_KIND: u64 = 24133;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +34,10 @@ pub enum Nip46ProtocolError {
     IdMismatch { expected: String, actual: String },
     #[error("nip-46 json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("nip-46 event canonicalization failed: {0}")]
+    Canonicalize(#[from] NostrEventError),
+    #[error("nip-46 event signing failed: {0}")]
+    Sign(#[from] secp256k1::Error),
 }
 
 pub fn new_request_id() -> String {
@@ -59,6 +68,49 @@ pub fn build_connect_request(remote_pubkey: &str, secret: Option<&str>) -> (Stri
         params,
     };
     (id, request)
+}
+
+pub fn build_nip46_event(
+    backend_signer: &dyn BackendSigner,
+    remote_pubkey: &str,
+    encrypted_content: &str,
+    created_at: u64,
+) -> Result<SignedNostrEvent, Nip46ProtocolError> {
+    let signer_pubkey = backend_signer.xonly_pubkey_hex();
+    let tags: Vec<Vec<String>> = vec![vec!["p".to_string(), remote_pubkey.to_string()]];
+
+    let normalized = NormalizedNostrEvent {
+        kind: NIP46_KIND,
+        content: encrypted_content.to_string(),
+        tags: tags.clone(),
+        pubkey: Some(signer_pubkey.clone()),
+        created_at: Some(created_at),
+    };
+
+    let canonical = canonical_payload(&normalized)?;
+    let id = event_hash_hex(&canonical);
+    let digest = decode_event_id(&id)?;
+    let sig = backend_signer.sign_schnorr(&digest)?;
+
+    Ok(SignedNostrEvent {
+        id,
+        pubkey: signer_pubkey,
+        created_at,
+        kind: NIP46_KIND,
+        tags,
+        content: encrypted_content.to_string(),
+        sig,
+    })
+}
+
+fn decode_event_id(id_hex: &str) -> Result<[u8; 32], NostrEventError> {
+    let bytes = hex::decode(id_hex)?;
+    bytes
+        .try_into()
+        .map_err(|bytes: Vec<u8>| NostrEventError::InvalidDigestLength {
+            field: "event id",
+            actual: bytes.len(),
+        })
 }
 
 pub fn extract_result(
@@ -199,5 +251,60 @@ mod tests {
         assert_eq!(decoded.id, "abc");
         assert!(decoded.result.is_none());
         assert!(decoded.error.is_none());
+    }
+
+    #[test]
+    fn build_nip46_event_has_correct_kind_tags_and_signature() {
+        use crate::backend_signer::HexBackendSigner;
+        use crate::nostr_event::verify_signed_event;
+
+        let signer = HexBackendSigner::from_private_key_hex(
+            "0101010101010101010101010101010101010101010101010101010101010101",
+        )
+        .unwrap();
+        let remote = "4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766";
+        let event = build_nip46_event(&signer, remote, "ciphertext", 1_700_000_000).unwrap();
+
+        assert_eq!(event.kind, 24133);
+        assert_eq!(event.content, "ciphertext");
+        assert_eq!(event.tags, vec![vec!["p".to_string(), remote.to_string()]]);
+        assert_eq!(event.pubkey, signer.pubkey_hex());
+        verify_signed_event(&event).unwrap();
+    }
+
+    #[test]
+    fn build_nip46_event_id_matches_canonical_hash() {
+        use crate::backend_signer::HexBackendSigner;
+
+        let signer = HexBackendSigner::from_private_key_hex(
+            "0101010101010101010101010101010101010101010101010101010101010101",
+        )
+        .unwrap();
+        let remote = "4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766";
+        let event = build_nip46_event(&signer, remote, "ciphertext", 1_700_000_000).unwrap();
+
+        let canonical = canonical_payload(&event.normalized()).expect("canonical payload");
+        let expected_id = event_hash_hex(&canonical);
+        assert_eq!(event.id, expected_id);
+    }
+
+    #[test]
+    fn build_nip46_event_with_empty_content_and_different_timestamp() {
+        use crate::backend_signer::HexBackendSigner;
+        use crate::nostr_event::verify_signed_event;
+
+        let signer = HexBackendSigner::from_private_key_hex(
+            "0101010101010101010101010101010101010101010101010101010101010101",
+        )
+        .unwrap();
+        let remote = "4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766";
+
+        let original = build_nip46_event(&signer, remote, "ciphertext", 1_700_000_000).unwrap();
+        let event = build_nip46_event(&signer, remote, "", 1_700_000_500).unwrap();
+
+        assert_eq!(event.content, "");
+        assert_eq!(event.created_at, 1_700_000_500);
+        verify_signed_event(&event).unwrap();
+        assert_ne!(event.id, original.id);
     }
 }
