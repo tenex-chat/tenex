@@ -57,6 +57,7 @@ pub mod scheduled_task_maintenance;
 pub mod scheduler_wakeups;
 pub mod skill_whitelist;
 pub mod subscription_filters;
+pub mod subscription_runtime;
 pub mod telegram;
 pub mod telegram_outbox;
 pub mod worker_abort;
