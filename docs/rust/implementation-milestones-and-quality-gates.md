@@ -856,6 +856,9 @@ Landed slices:
   orchestration slice that reads global config and installed-agent inventory,
   signs backend heartbeat and installed-agent-list events, and enqueues them
   into the durable Rust publish outbox without publishing directly to relays.
+- `crates/tenex-daemon/src/bin/daemon-control.rs` — `backend-events-enqueue-status`
+  CLI wiring that calls the backend status runtime for enqueue diagnostics,
+  surfacing the resulting outbox state without direct relay publishing.
 - `crates/tenex-daemon/src/project_status_sources.rs` — filesystem readers for
   global `llms.json` model config keys and per-project `schedules.json`
   records, with deterministic ordering and TS-aligned cron/one-off task
@@ -868,6 +871,22 @@ Landed slices:
   projection from active worker heartbeat state into kind `24133`
   operations-status drafts, including transition-aware cleanup drafts with no
   active-agent `p` tags. Library-only; no periodic status publisher wiring.
+
+Planned next runtime boundaries:
+
+- `crates/tenex-daemon/src/periodic_tick.rs` is already present as the
+  timerless scheduler primitive; the next boundary is wiring it into the
+  daemon main loop so backend-status, project-status, heartbeat, and
+  publish-outbox maintenance can run on a single tick source.
+- `crates/tenex-daemon/src/backend_status_runtime.rs` remains backend-status
+  only: heartbeat and installed-agent-list enqueueing through
+  `daemon-control backend-events-enqueue-status`. Project-status stays out of
+  this boundary until its own runtime slice lands.
+- `crates/tenex-daemon/src/project_status_sources.rs` and
+  `crates/tenex-daemon/src/project_status_snapshot.rs` remain the filesystem
+  and owned-shape inputs for a future project-status runtime boundary; the
+  missing piece is the daemon wiring that turns those inputs into scheduled
+  backend publishes.
 
 Scope:
 
