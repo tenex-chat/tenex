@@ -81,7 +81,7 @@ pub fn run_daemon_maintenance_once_from_filesystem(
 /// so upstream diagnostics are oblivious to whether a publisher was wired.
 pub fn run_daemon_maintenance_once_from_filesystem_with_telegram<P>(
     input: DaemonMaintenanceInput<'_>,
-    telegram_publisher: P,
+    mut telegram_publisher: P,
 ) -> Result<DaemonMaintenanceOutcome, DaemonMaintenanceError>
 where
     P: TelegramMaintenancePublisher,
@@ -160,7 +160,7 @@ where
 /// Bot API client without widening the outbox library's surface.
 pub trait TelegramMaintenancePublisher {
     fn run_maintenance(
-        self,
+        &mut self,
         daemon_dir: &Path,
         now_ms: u64,
     ) -> Result<TelegramOutboxMaintenanceReport, TelegramOutboxError>;
@@ -174,7 +174,7 @@ pub struct NoTelegramPublisher;
 
 impl TelegramMaintenancePublisher for NoTelegramPublisher {
     fn run_maintenance(
-        self,
+        &mut self,
         daemon_dir: &Path,
         now_ms: u64,
     ) -> Result<TelegramOutboxMaintenanceReport, TelegramOutboxError> {
@@ -191,11 +191,23 @@ impl<'a, P: TelegramDeliveryPublisher> TelegramMaintenancePublisher
     for WithTelegramPublisher<'a, P>
 {
     fn run_maintenance(
-        self,
+        &mut self,
         daemon_dir: &Path,
         now_ms: u64,
     ) -> Result<TelegramOutboxMaintenanceReport, TelegramOutboxError> {
         run_telegram_outbox_maintenance(daemon_dir, self.0, now_ms)
+    }
+}
+
+/// Blanket impl that lets daemon plumbing forward a trait-object maintenance
+/// publisher through generic call sites without re-wrapping at every layer.
+impl<T: TelegramMaintenancePublisher + ?Sized> TelegramMaintenancePublisher for &mut T {
+    fn run_maintenance(
+        &mut self,
+        daemon_dir: &Path,
+        now_ms: u64,
+    ) -> Result<TelegramOutboxMaintenanceReport, TelegramOutboxError> {
+        (**self).run_maintenance(daemon_dir, now_ms)
     }
 }
 

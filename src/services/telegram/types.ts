@@ -1,7 +1,3 @@
-import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
-import type {
-    TelegramChatAdministratorMetadata,
-} from "@/events/runtime/InboundEnvelope";
 import type {
     RuntimeAgentRef,
 } from "@/events/runtime/RuntimeAgent";
@@ -222,27 +218,4 @@ export interface TelegramAnswerCallbackQueryParams {
 export interface TelegramGatewayBinding {
     agent: RuntimeAgentRef;
     config: TelegramAgentConfig;
-}
-
-export interface TelegramChatContextSnapshot {
-    chatTitle?: string;
-    topicTitle?: string;
-    chatUsername?: string;
-    memberCount?: number;
-    administrators?: TelegramChatAdministratorMetadata[];
-}
-
-export type TelegramInboundMediaType = "voice" | "audio" | "document" | "photo" | "video";
-
-export interface TelegramInboundMediaInfo {
-    localPath: string;
-    type: TelegramInboundMediaType;
-    duration?: number;
-    fileName?: string;
-}
-
-export interface TelegramInboundEnvelopeResult {
-    envelope: InboundEnvelope;
-    binding: TelegramGatewayBinding;
-    normalizedMessage: TelegramMessage;
 }

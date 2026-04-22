@@ -1,6 +1,5 @@
 //! Blocking Telegram media downloader used by the gateway.
 //!
-//! Behavior oracle: `src/services/telegram/TelegramMediaDownloadService.ts`.
 //! The gateway looks up a file's relative path via `getFile`, derives the
 //! public download URL with `file_download_url`, streams the bytes to disk,
 //! and hands the resulting absolute path to the inbound normalizer.

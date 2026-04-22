@@ -7,9 +7,7 @@
 //! [`crate::telegram::ingress_runtime::process_telegram_update`] which
 //! normalises, authorises and enqueues the inbound dispatch.
 //!
-//! Behavior oracle: `src/services/telegram/TelegramGatewayService.ts` plus
-//! the `skipTelegramBacklog` / `runTelegramPollingLoop` helpers in
-//! `telegram-gateway-utils.ts`. Key invariants we preserve from TS:
+//! Key gateway invariants:
 //!
 //! - Backlog skip runs once per bot on startup so we never re-process
 //!   updates that accumulated while the daemon was down.
@@ -21,7 +19,7 @@
 //! - Network / 5xx / timeout errors use exponential backoff starting at 1 s
 //!   and capped at 60 s, matching the TS `errorBackoffMs` approach but
 //!   upgraded from a constant to exponential to avoid hammering the API
-//!   during relay outages.
+//!   during Bot API outages.
 //! - The stop flag is checked between polls and between per-update
 //!   processing steps; a pending poll is not interrupted but is also
 //!   short-circuited when possible.
@@ -725,7 +723,7 @@ struct MediaTarget {
 }
 
 /// Extract the highest-priority media attachment from a message.
-/// Priority matches `telegram-gateway-utils.ts::extractTelegramMediaTarget`:
+/// Priority:
 /// voice → audio → document → video → largest photo.
 fn extract_media_target(update: &Value) -> Option<MediaTarget> {
     let obj = update.as_object()?;

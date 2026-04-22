@@ -20,6 +20,7 @@ pub mod gateway;
 pub mod inbound;
 pub mod ingress_runtime;
 pub mod media;
+pub mod publisher_registry;
 pub mod renderer;
 pub mod types;
 

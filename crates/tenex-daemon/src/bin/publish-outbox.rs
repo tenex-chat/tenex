@@ -1,9 +1,10 @@
 use std::env;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::publish_outbox::{inspect_publish_outbox, run_publish_outbox_maintenance};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
 
@@ -21,6 +22,7 @@ enum PublishOutboxCommand {
 struct PublishOutboxCliOptions {
     command: PublishOutboxCommand,
     daemon_dir: PathBuf,
+    tenex_base_dir: Option<PathBuf>,
     now_ms: u64,
     relay_timeout_ms: u64,
     relay_urls: Vec<String>,
@@ -67,7 +69,7 @@ where
         }
         PublishOutboxCommand::Maintain => {
             let relay_config = build_relay_config(&options)?;
-            let mut publisher = NostrRelayPublisher::new(relay_config);
+            let mut publisher = build_relay_publisher(&options, relay_config);
             let report =
                 run_publish_outbox_maintenance(&options.daemon_dir, &mut publisher, options.now_ms)
                     .map_err(|error| runtime_error(error.to_string()))?;
@@ -90,6 +92,7 @@ fn parse_publish_outbox_args(args: &[String]) -> Result<PublishOutboxCliOptions,
     };
 
     let mut daemon_dir = None;
+    let mut tenex_base_dir = None;
     let mut now_ms = None;
     let mut relay_timeout_ms = DEFAULT_RELAY_TIMEOUT_MS;
     let mut relay_urls = Vec::new();
@@ -103,6 +106,13 @@ fn parse_publish_outbox_args(args: &[String]) -> Result<PublishOutboxCliOptions,
                     .get(index)
                     .ok_or_else(|| usage_error("--daemon-dir requires a value"))?;
                 daemon_dir = Some(PathBuf::from(value));
+            }
+            "--tenex-base-dir" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--tenex-base-dir requires a value"))?;
+                tenex_base_dir = Some(PathBuf::from(value));
             }
             "--now-ms" => {
                 index += 1;
@@ -142,10 +152,36 @@ fn parse_publish_outbox_args(args: &[String]) -> Result<PublishOutboxCliOptions,
     Ok(PublishOutboxCliOptions {
         command,
         daemon_dir,
+        tenex_base_dir,
         now_ms,
         relay_timeout_ms,
         relay_urls,
     })
+}
+
+fn build_relay_publisher(
+    options: &PublishOutboxCliOptions,
+    relay_config: RelayPublisherConfig,
+) -> NostrRelayPublisher {
+    let tenex_base_dir = options
+        .tenex_base_dir
+        .clone()
+        .unwrap_or_else(|| infer_tenex_base_dir(&options.daemon_dir));
+    match read_backend_config(&tenex_base_dir).and_then(|config| config.backend_signer()) {
+        Ok(signer) => NostrRelayPublisher::with_auth_signer(relay_config, signer),
+        Err(_) => NostrRelayPublisher::new(relay_config),
+    }
+}
+
+fn infer_tenex_base_dir(daemon_dir: &Path) -> PathBuf {
+    if daemon_dir.file_name().and_then(|name| name.to_str()) == Some("daemon") {
+        return daemon_dir
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| daemon_dir.to_path_buf());
+    }
+
+    daemon_dir.to_path_buf()
 }
 
 fn build_relay_config(options: &PublishOutboxCliOptions) -> Result<RelayPublisherConfig, CliError> {
@@ -177,7 +213,7 @@ fn usage() -> String {
     [
         "usage:",
         "  publish-outbox inspect --daemon-dir <path> [--now-ms <ms>]",
-        "  publish-outbox maintain --daemon-dir <path> [--now-ms <ms>] [--relay-timeout-ms <ms>] [--relay-url <url>]...",
+        "  publish-outbox maintain --daemon-dir <path> [--tenex-base-dir <path>] [--now-ms <ms>] [--relay-timeout-ms <ms>] [--relay-url <url>]...",
     ]
     .join("\n")
 }

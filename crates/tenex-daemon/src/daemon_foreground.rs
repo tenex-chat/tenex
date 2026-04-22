@@ -10,6 +10,7 @@ use crate::daemon_loop::{
     run_daemon_tick_loop_from_filesystem, run_daemon_tick_loop_until_stopped_from_filesystem,
     run_daemon_tick_loop_until_stopped_from_filesystem_with_worker,
 };
+use crate::daemon_maintenance::TelegramMaintenancePublisher;
 use crate::daemon_shell::{DaemonShell, DaemonShellError, DaemonShellStopMode};
 use crate::process_liveness::ProcessLivenessProbe;
 use crate::publish_outbox::PublishOutboxRelayPublisher;
@@ -255,6 +256,7 @@ pub fn run_daemon_foreground_until_stopped_from_filesystem_with_worker<
     stop_signal: &mut Stop,
     spawner: &mut Spawner,
     publisher: &mut P,
+    telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<DaemonForegroundWithWorkerReport, DaemonForegroundWithWorkerError>
 where
     Probe: ProcessLivenessProbe + Clone,
@@ -298,6 +300,7 @@ where
         spawner,
         publisher,
         input.retry_policy,
+        telegram_publisher,
     );
 
     match tick_result {
@@ -332,6 +335,7 @@ where
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
+    use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
     use crate::dispatch_queue::{
         DispatchQueueRecordParams, DispatchQueueStatus, append_dispatch_queue_record,
@@ -689,6 +693,7 @@ mod tests {
             stop_on_or_after: 2,
         };
         let mut publisher = RecordingPublisher::default();
+        let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
         let mut runtime_state = WorkerRuntimeState::default();
         let worker_config = AgentWorkerProcessConfig::default();
@@ -717,6 +722,7 @@ mod tests {
             &mut stop_signal,
             &mut spawner,
             &mut publisher,
+            &mut telegram_publisher,
         )
         .expect("foreground worker runner must succeed");
 
@@ -768,6 +774,7 @@ mod tests {
             spawn_calls: 0,
         };
         let mut publisher = RecordingPublisher::default();
+        let mut telegram_publisher = NoTelegramPublisher;
         let mut runtime_state = WorkerRuntimeState::default();
         let worker_config = AgentWorkerProcessConfig::default();
 
@@ -795,6 +802,7 @@ mod tests {
             &mut stop_signal,
             &mut spawner,
             &mut publisher,
+            &mut telegram_publisher,
         )
         .expect("foreground worker runner must complete queued dispatch");
 

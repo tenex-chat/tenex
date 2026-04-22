@@ -8,9 +8,8 @@
 //! enqueued, and if so, returns a ready-to-persist
 //! [`crate::telegram_outbox::TelegramDeliveryRequest`].
 //!
-//! The function is the single place where the TS behavior oracle
-//! (`TelegramRuntimePublisherService.ts` and `TelegramDeliveryService.ts`)
-//! is encoded on the Rust side. It does no I/O.
+//! The function is the single Rust-owned delivery classification boundary. It
+//! does no I/O.
 //!
 //! Matrix (matches TS exactly):
 //!
@@ -28,9 +27,9 @@
 //! | stream_text_delta  | n/a       | -                                   | None               |
 //!
 //! Voice marker: when the delivery payload is a FinalReply and the accepted
-//! content matches exactly one `[[telegram_voice:/absolute/path]]` marker
-//! (mirroring `extractTelegramVoiceReply`), the planner splits the delivery
-//! into up to two records: a voice record plus (optionally) a remaining-text
+//! content matches exactly one `[[telegram_voice:/absolute/path]]` marker,
+//! the planner splits the delivery into up to two records: a voice record
+//! plus (optionally) a remaining-text
 //! record. This preserves the TS send-voice-then-text behavior while keeping
 //! the outbox record as the single durable boundary.
 

@@ -1,15 +1,12 @@
 //! Durable per-chat Telegram context.
 //!
-//! Behavior oracle: `src/services/telegram/TelegramChatContextService.ts` and
-//! `src/services/telegram/TelegramChatContextStoreService.ts`.
-//!
 //! Each chat (keyed by Telegram `chat_id`) gets a snapshot stamped with a
 //! schema version, a writer identity, and atomic write/rename semantics. The
 //! Rust inbound normalizer reads the snapshot to enrich
 //! [`crate::inbound_envelope::TelegramTransportMetadata`] without calling the
-//! Bot API on every message. A periodic TTL-gated refresh (matching the TS
-//! service's `apiSyncTtlMs`) repopulates administrators, chat title/member
-//! count and (for forum topics) the topic title.
+//! Bot API on every message. A periodic TTL-gated refresh repopulates
+//! administrators, chat title/member count and (for forum topics) the topic
+//! title.
 //!
 //! Storage layout:
 //!
@@ -40,9 +37,9 @@ use crate::telegram::client::{ChatAdministrator, ChatId, TelegramBotClient, Tele
 
 pub const TELEGRAM_CHAT_CONTEXT_SCHEMA_VERSION: u32 = 1;
 pub const TELEGRAM_CHAT_CONTEXT_WRITER: &str = "tenex-daemon";
-/// TS oracle `DEFAULT_API_SYNC_TTL_MS` = 5 minutes.
+/// Default refresh interval for best-effort Bot API chat metadata.
 pub const DEFAULT_API_SYNC_TTL_MS: u64 = 5 * 60 * 1000;
-/// TS oracle `MAX_SEEN_PARTICIPANTS` = 25.
+/// Maximum speakers retained in the per-chat rolling context snapshot.
 pub const MAX_SEEN_PARTICIPANTS: usize = 25;
 
 const DIR_NAME: &str = "telegram/chat-context";
@@ -70,9 +67,8 @@ pub enum ChatContextError {
 
 pub type ChatContextResult<T> = Result<T, ChatContextError>;
 
-/// Snapshot persisted to disk per chat. Mirrors
-/// `TelegramChatContextRecord` on the TS side but stamps the daemon-owned
-/// durable file with `schemaVersion`, `writer`, `writerVersion`, and
+/// Snapshot persisted to disk per chat. The daemon-owned durable file is
+/// stamped with `schemaVersion`, `writer`, `writerVersion`, and
 /// `createdAt`/`updatedAt`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

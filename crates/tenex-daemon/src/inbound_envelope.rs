@@ -204,10 +204,8 @@ mod tests {
 
     #[test]
     fn telegram_envelope_round_trips_against_ts_shape() {
-        // This is a golden sample that matches what
-        // `TelegramInboundAdapter.toEnvelope` produces for a supergroup
-        // topic message with administrators, seen participants, and a reply
-        // reference. Any drift between TS and Rust will fail this test.
+        // This golden sample covers a supergroup topic message with
+        // administrators, seen participants, and a reply reference.
         let golden = json!({
             "transport": "telegram",
             "principal": {

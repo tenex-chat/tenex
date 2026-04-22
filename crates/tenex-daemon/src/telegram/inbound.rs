@@ -1,29 +1,22 @@
 //! Normalize a raw Telegram Bot API update into an [`InboundEnvelope`].
 //!
-//! Behavior oracle: `src/services/telegram/TelegramInboundAdapter.ts` plus the
-//! filter gate in `TelegramGatewayService.processUpdate` (bot-authored
-//! messages, unsupported chat types, unprocessable messages) and the
-//! transport-metadata enrichment in
-//! `src/telemetry/TelegramTelemetry.ts::buildTelegramTransportMetadata`.
-//!
 //! The normalizer is a pure function. All side effects (downloading media,
 //! looking up identity bindings, refreshing chat context) stay out of this
-//! module: callers thread in everything the TS adapter relied on as
-//! parameters via [`InboundNormalizationInput`]. The only runtime dependency
-//! is [`serde_json`] for reading the already-parsed [`Update`] shape.
+//! module: callers thread every runtime dependency in as parameters via
+//! [`InboundNormalizationInput`]. The only direct dependency is [`serde_json`]
+//! for reading the already-parsed [`Update`] shape.
 //!
-//! Shape parity with TypeScript: the returned [`InboundEnvelope`] serializes
-//! to the exact JSON the TS runtime emits. The round-trip golden test lives
+//! Shape parity: the returned [`InboundEnvelope`] serializes to the shared
+//! runtime envelope JSON consumed by the worker. The round-trip golden test lives
 //! in `crate::inbound_envelope::tests::telegram_envelope_round_trips_against_ts_shape`.
 //!
 //! Return semantics:
 //!
-//! - `None` when the update is not routable. Matches the TS gateway filters:
-//!   missing `message`/`edited_message`, missing sender, bot-authored
+//! - `None` when the update is not routable: missing
+//!   `message`/`edited_message`, missing sender, bot-authored
 //!   messages, `channel` chat type, and messages with neither text nor
-//!   caption (media-only messages are routable in TS only after media
-//!   download produces synthesized text; Rust leaves that to the gateway
-//!   slice and drops media-only messages here).
+//!   caption (media-only messages become routable only after the gateway
+//!   downloads media and provides synthesized attachment text).
 //! - `Some(envelope)` otherwise. The caller is responsible for the recipient
 //!   list (agent pubkey) and the project binding.
 
@@ -42,19 +35,19 @@ const NDK_KIND_TEXT: i64 = 1;
 
 /// A recipient to include in the envelope's `recipients` array. One entry
 /// per agent registration that the incoming message is being routed to.
-/// Mirrors the TS adapter's `toRecipient(agent.pubkey, agent.name)` helper.
 #[derive(Debug, Clone)]
 pub struct InboundRecipient<'a> {
     pub agent_pubkey: &'a str,
     pub agent_name: &'a str,
 }
 
-/// Optional media attachment enrichment. Mirrors the TS adapter's
-/// `mediaInfo` parameter, which is produced by a prior media download step.
+/// Optional media attachment enrichment produced by a prior media download
+/// step.
 ///
 /// The `local_path` must already be an absolute path on disk; the normalizer
-/// does not touch the filesystem. The TS adapter formats the text with the
-/// attachment marker inline (e.g. `"caption\n[voice message: /path, duration: 3s]"`).
+/// does not touch the filesystem. The normalized content includes the
+/// attachment marker inline (for example
+/// `"caption\n[voice message: /path, duration: 3s]"`).
 #[derive(Debug, Clone)]
 pub struct InboundMediaInfo<'a> {
     pub local_path: &'a str,
@@ -84,9 +77,8 @@ impl InboundMediaType {
     }
 }
 
-/// Input to [`normalize_telegram_update`]. Every field the TS adapter and
-/// gateway consult to build an envelope is an explicit parameter here; there
-/// is no hidden ambient state.
+/// Input to [`normalize_telegram_update`]. Every field needed to build an
+/// envelope is an explicit parameter here; there is no hidden ambient state.
 #[derive(Debug, Clone)]
 pub struct InboundNormalizationInput<'a> {
     /// The raw Bot API update, exactly as [`crate::telegram::client::Update`]
@@ -107,7 +99,7 @@ pub struct InboundNormalizationInput<'a> {
     pub chat_context_snapshot: Option<&'a ChatContextSnapshot>,
 
     /// `linked_pubkey` for the sender's principal, as stored by the identity
-    /// binding layer. The TS adapter reads this from `IdentityBindingStore`.
+    /// binding layer.
     pub sender_linked_pubkey: Option<&'a str>,
 
     /// Optional media attachment descriptor (populated by the gateway's
@@ -115,25 +107,22 @@ pub struct InboundNormalizationInput<'a> {
     pub media_info: Option<&'a InboundMediaInfo<'a>>,
 
     /// `replyToId` hint: the previous message the current chat session is
-    /// replying to. The TS adapter takes this as
-    /// `replyToNativeMessageId: session?.lastMessageId`. When `None`, and the
-    /// update carries its own `reply_to_message.message_id`, that native id is
-    /// used instead, matching the fallback TS derivation.
+    /// replying to. When `None`, and the update carries its own
+    /// `reply_to_message.message_id`, that native id is used instead.
     pub session_reply_to_native_id: Option<&'a str>,
 
-    /// Agent recipients. Usually one entry (the registration's agent); the
-    /// TS gateway emits exactly one.
+    /// Agent recipients. Usually one entry (the registration's agent).
     pub recipients: &'a [InboundRecipient<'a>],
 
     /// The project this chat is bound to. Goes into
-    /// `ChannelRef.projectBinding`. `None` means "unbound chat"; the TS
-    /// gateway won't reach the adapter without a binding, but the shape
-    /// allows for it (the binding field itself is optional on the envelope).
+    /// `ChannelRef.projectBinding`. `None` means "unbound chat"; the shape
+    /// allows for it because the binding field itself is optional on the
+    /// envelope.
     pub project_binding: Option<&'a str>,
 }
 
 /// Convert a Telegram update into an [`InboundEnvelope`]. Returns `None`
-/// when the update is not routable per the TS gateway's filter rules.
+/// when the update is not routable.
 pub fn normalize_telegram_update(input: InboundNormalizationInput<'_>) -> Option<InboundEnvelope> {
     // 1. Resolve the message we'll work with. TS treats
     //    `callback_query.message` as routable only for config flows; the
@@ -161,10 +150,8 @@ pub fn normalize_telegram_update(input: InboundNormalizationInput<'_>) -> Option
     let sender_id = from.get("id").and_then(Value::as_i64)?;
     let sender_is_bot = from.get("is_bot").and_then(Value::as_bool).unwrap_or(false);
 
-    // Drop the bot's own echoed messages. Matches
-    // `TelegramGatewayService.processUpdate`'s `message.from.is_bot` guard:
-    // any bot-authored message is a non-routable echo, including messages
-    // authored by a different bot which the TS gateway also drops.
+    // Drop bot-authored messages as non-routable echoes, including messages
+    // from different bots.
     if sender_is_bot {
         return None;
     }
@@ -183,16 +170,16 @@ pub fn normalize_telegram_update(input: InboundNormalizationInput<'_>) -> Option
         "group" => TelegramChatType::Group,
         "supergroup" => TelegramChatType::Supergroup,
         // `channel` chats are explicitly filtered by
-        // `isSupportedTelegramChatType` in the TS oracle.
+        // Channels are not routable for the Telegram agent gateway.
         _ => return None,
     };
 
     // 4. Thread / topic id. Optional, used for forum-topic messages.
     let message_thread_id = message.get("message_thread_id").and_then(Value::as_i64);
 
-    // 5. Content. Matches `TelegramInboundAdapter.toEnvelope`:
-    //    text?.trim() || caption?.trim() || "", optionally augmented with a
-    //    media marker. Empty content + no media is unprocessable.
+    // 5. Content: text?.trim() || caption?.trim() || "", optionally
+    //    augmented with a media marker. Empty content + no media is
+    //    unprocessable.
     let text_content = message
         .get("text")
         .and_then(Value::as_str)

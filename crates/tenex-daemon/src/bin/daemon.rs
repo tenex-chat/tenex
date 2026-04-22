@@ -16,14 +16,23 @@ use tenex_daemon::daemon_loop::{
     SystemDaemonMaintenanceLoopClock, ThreadDaemonMaintenanceLoopSleeper,
 };
 use tenex_daemon::daemon_maintenance::DaemonMaintenanceOutcome;
+use tenex_daemon::daemon_maintenance::{NoTelegramPublisher, WithTelegramPublisher};
 use tenex_daemon::daemon_shell::DaemonShell;
+use tenex_daemon::nostr_subscription_gateway::{
+    NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
+    NostrSubscriptionGatewaySupervisor, start_nostr_subscription_gateway,
+};
 use tenex_daemon::publish_outbox::PublishOutboxMaintenanceReport;
 use tenex_daemon::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
+use tenex_daemon::subscription_runtime::{
+    NostrSubscriptionPlanInput, build_nostr_subscription_plan,
+};
 use tenex_daemon::telegram::agent_config::read_agent_gateway_bots;
 use tenex_daemon::telegram::gateway::{
     GatewayConfig, NoopIngressObserver, TelegramGatewaySupervisor, start_telegram_gateway,
 };
+use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
 use tenex_daemon::worker_dispatch_execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{
@@ -117,27 +126,76 @@ where
     let mut stop_signal = ProcessSignalStopSignal;
     let mut publisher = actual_relay_publisher(&options)?;
 
-    // Start the Telegram gateway supervisor (if any agents have bot tokens
-    // configured). Dropping the supervisor at the end of the function sets
-    // the stop flag; we additionally request_stop explicitly and join so
-    // in-flight polls finish before the process exits.
+    // Start the Nostr and Telegram gateway supervisors before the foreground
+    // worker loop so relay messages can enqueue filesystem dispatches while
+    // the loop admits and executes queued work.
+    let nostr_supervisor = start_nostr_subscription_supervisor_from_options(&options)?;
     let gateway_supervisor = start_gateway_supervisor_from_options(&options)?;
 
-    let diagnostics_result = run_daemon_foreground(
-        &options,
-        &mut clock,
-        &mut sleeper,
-        &mut stop_signal,
-        &mut publisher,
-    );
+    let mut telegram_registry = build_telegram_publisher_registry_from_options(&options)?;
+    let diagnostics_result = if telegram_registry.is_empty() {
+        let mut telegram_publisher = NoTelegramPublisher;
+        run_daemon_foreground(
+            &options,
+            &mut clock,
+            &mut sleeper,
+            &mut stop_signal,
+            &mut publisher,
+            &mut telegram_publisher,
+        )
+    } else {
+        let mut telegram_publisher = WithTelegramPublisher(&mut telegram_registry);
+        run_daemon_foreground(
+            &options,
+            &mut clock,
+            &mut sleeper,
+            &mut stop_signal,
+            &mut publisher,
+            &mut telegram_publisher,
+        )
+    };
 
     if let Some(supervisor) = gateway_supervisor {
+        supervisor.request_stop();
+        supervisor.join();
+    }
+    if let Some(supervisor) = nostr_supervisor {
         supervisor.request_stop();
         supervisor.join();
     }
 
     let diagnostics = diagnostics_result?;
     serde_json::to_string_pretty(&diagnostics).map_err(|error| runtime_error(error.to_string()))
+}
+
+fn start_nostr_subscription_supervisor_from_options(
+    options: &DaemonCliOptions,
+) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
+    let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
+    let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
+        tenex_base_dir: &tenex_base_dir,
+        since: Some(current_unix_time_ms() / 1_000),
+        lesson_definition_ids: &[],
+    })
+    .map_err(|error| runtime_error(format!("nostr subscription plan failed: {error}")))?;
+    if plan.relay_urls.is_empty() || plan.filters.is_empty() {
+        return Ok(None);
+    }
+
+    let mut config =
+        NostrSubscriptionGatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), plan);
+    config.writer_version = daemon_writer_version();
+    let supervisor = start_nostr_subscription_gateway(config, NoopNostrSubscriptionObserver)
+        .map_err(|error| runtime_error(format!("failed to start nostr subscription: {error}")))?;
+    Ok(Some(supervisor))
+}
+
+fn build_telegram_publisher_registry_from_options(
+    options: &DaemonCliOptions,
+) -> Result<TelegramPublisherRegistry, CliError> {
+    let (tenex_base_dir, _) = resolve_daemon_paths(options)?;
+    TelegramPublisherRegistry::from_agent_config(&tenex_base_dir)
+        .map_err(|error| runtime_error(format!("telegram publisher registry failed: {error}")))
 }
 
 /// Build a [`TelegramGatewaySupervisor`] from the on-disk agent
@@ -180,6 +238,7 @@ fn run_daemon_foreground<C, S, Stop, P>(
     sleeper: &mut S,
     stop_signal: &mut Stop,
     publisher: &mut P,
+    telegram_publisher: &mut dyn tenex_daemon::daemon_maintenance::TelegramMaintenancePublisher,
 ) -> Result<DaemonForegroundDiagnostics, CliError>
 where
     C: DaemonMaintenanceLoopClock,
@@ -219,6 +278,7 @@ where
         stop_signal,
         &mut worker_spawner,
         publisher,
+        telegram_publisher,
     )
     .map_err(|error| runtime_error(error.to_string()))?;
 
@@ -617,6 +677,7 @@ mod tests {
         let mut sleeper = RecordingSleeper::default();
         let mut stop_signal = NeverStopDaemonMaintenanceLoop;
         let mut publisher = RecordingPublisher::default();
+        let mut telegram_publisher = NoTelegramPublisher;
 
         let diagnostics = run_daemon_foreground(
             &options,
@@ -624,6 +685,7 @@ mod tests {
             &mut sleeper,
             &mut stop_signal,
             &mut publisher,
+            &mut telegram_publisher,
         )
         .expect("foreground runner must succeed");
 

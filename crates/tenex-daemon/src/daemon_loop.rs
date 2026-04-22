@@ -7,7 +7,8 @@ use thiserror::Error;
 
 use crate::daemon_maintenance::{
     DaemonMaintenanceError, DaemonMaintenanceInput, DaemonMaintenanceOutcome,
-    run_daemon_maintenance_once_from_filesystem,
+    TelegramMaintenancePublisher, run_daemon_maintenance_once_from_filesystem,
+    run_daemon_maintenance_once_from_filesystem_with_telegram,
 };
 use crate::daemon_worker_runtime::{
     DaemonWorkerRuntimeFilesystemInput, DaemonWorkerRuntimeOutcome,
@@ -262,6 +263,7 @@ pub fn run_daemon_tick_once_from_filesystem_with_worker<P, S>(
     spawner: &mut S,
     publisher: &mut P,
     retry_policy: PublishOutboxRetryPolicy,
+    telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<DaemonTickWithWorkerOutcome, DaemonTickWithWorkerError>
 where
     P: PublishOutboxRelayPublisher,
@@ -272,7 +274,8 @@ where
 {
     let daemon_dir = input.daemon_dir;
     let now_ms = input.now_ms;
-    let maintenance = run_daemon_maintenance_once_from_filesystem(input)?;
+    let maintenance =
+        run_daemon_maintenance_once_from_filesystem_with_telegram(input, &mut *telegram_publisher)?;
     let worker_runtime = run_daemon_worker_runtime_once_from_filesystem(
         spawner,
         DaemonWorkerRuntimeFilesystemInput {
@@ -404,6 +407,7 @@ pub fn run_daemon_tick_loop_until_stopped_from_filesystem_with_worker<C, Sleep, 
     spawner: &mut S,
     publisher: &mut P,
     retry_policy: PublishOutboxRetryPolicy,
+    telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<
     DaemonMaintenanceLoopOutcome<DaemonTickWithWorkerOutcome>,
     DaemonMaintenanceLoopError<DaemonTickWithWorkerError>,
@@ -470,6 +474,7 @@ where
                 spawner,
                 publisher,
                 retry_policy,
+                &mut *telegram_publisher,
             )
         },
     )
@@ -486,6 +491,7 @@ pub fn current_unix_time_ms() -> u64 {
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
+    use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::nostr_event::SignedNostrEvent;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
@@ -841,6 +847,7 @@ mod tests {
     fn filesystem_tick_with_worker_runs_worker_runtime_before_publish_drain() {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-empty-queue", 0x06);
         let mut publisher = RecordingPublisher::default();
+        let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
         let mut runtime_state = WorkerRuntimeState::default();
         let worker_config = AgentWorkerProcessConfig::default();
@@ -866,6 +873,7 @@ mod tests {
             &mut spawner,
             &mut publisher,
             PublishOutboxRetryPolicy::default(),
+            &mut telegram_publisher,
         )
         .expect("filesystem tick with worker must succeed");
 

@@ -1,6 +1,6 @@
 {
     "name": "daemon-filesystem-state-basic",
-    "description": "Canonical daemon filesystem state files shared by the current TypeScript daemon and the Rust daemon migration.",
+    "description": "Canonical Rust daemon filesystem state fixture retained for compatibility/provenance checks.",
     "daemonDirName": "daemon",
     "relativePaths": {
         "lockfile": "tenex.lock",

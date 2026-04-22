@@ -56,7 +56,7 @@ export async function migratePrefixKVStore(): Promise<void>
 **Add to**: `bun doctor migration` command
 
 ### 3. Auto-Run Migrations on Daemon Start
-**File**: `src/daemon/Daemon.ts` or startup code
+**File**: Rust daemon startup code under `crates/tenex-daemon/src/bin/daemon.rs`
 
 **Logic**:
 ```typescript

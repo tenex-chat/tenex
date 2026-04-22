@@ -29,6 +29,8 @@ pub mod nostr_classification;
 pub mod nostr_event;
 pub mod nostr_inbound;
 pub mod nostr_ingress;
+pub mod nostr_subscription_action;
+pub mod nostr_subscription_gateway;
 pub mod nostr_subscription_ingress;
 pub mod nostr_subscription_tick;
 pub mod operations_status_runtime;

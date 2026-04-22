@@ -13,7 +13,6 @@ const inboundAdapterImportNeedle = `@/nostr/NostrInboundAdapter`;
 const allowedConcreteImports = new Set([
     "src/agents/execution/AgentExecutor.ts",
     "src/nostr/AgentPublisher.ts",
-    "src/services/telegram/TelegramRuntimePublisherService.ts",
 ]);
 const allowedDispatchImports = new Set([
     "src/services/ingress/RuntimeIngressService.ts",

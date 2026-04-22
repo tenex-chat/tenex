@@ -1,13 +1,16 @@
 # Rust Telegram Adapter Design (M8 Slice)
 
+Historical note: this slice captured the TypeScript-to-Rust port while the
+TypeScript Telegram services still existed. The current runtime ownership is
+Rust-first; references to TypeScript service names below are provenance for the
+port, not live code owners.
+
 ## Context
 
-TENEX is migrating Telegram from TypeScript-resident transport services to a
+TENEX migrated Telegram from TypeScript-resident transport services to a
 Rust-native adapter. The canonical migration plan is
 `docs/rust/agent-execution-worker-migration.md` (target ownership) and
-`docs/rust/implementation-milestones-and-quality-gates.md` M8. The behavior
-oracle is `src/services/telegram/` plus `src/services/ingress/` and
-`src/events/runtime/InboundEnvelope.ts`.
+`docs/rust/implementation-milestones-and-quality-gates.md` M8.
 
 The single architectural constraint: Rust owns the Telegram adapter entirely,
 TypeScript owns only the agent execution worker, and the worker must not call

@@ -6,13 +6,15 @@ use thiserror::Error;
 use crate::inbound_runtime::InboundRuntimeOutcome;
 use crate::nostr_classification::DaemonNostrEventClass;
 use crate::nostr_ingress::NostrIngressOutcome;
+use crate::nostr_subscription_action::{
+    NostrSubscriptionIntakeAction, NostrSubscriptionIntakeActionInput,
+    NostrSubscriptionIntakeIgnoredReason, plan_nostr_subscription_intake_action,
+};
 use crate::nostr_subscription_ingress::{
     NostrSubscriptionIngressError, NostrSubscriptionIngressInput, NostrSubscriptionIngressOutcome,
     process_relay_subscription_frame,
 };
-use crate::subscription_filters::{
-    RelaySubscriptionFrame, SubscriptionMessageError, parse_relay_subscription_message,
-};
+use crate::subscription_filters::RelaySubscriptionFrame;
 
 #[derive(Debug, Clone, Copy)]
 pub struct NostrSubscriptionTickInput<'a> {
@@ -108,28 +110,19 @@ pub fn run_nostr_subscription_intake_tick(
     };
 
     for (frame_index, raw_message) in input.raw_messages.iter().enumerate() {
-        let frame = match parse_relay_subscription_message(raw_message) {
-            Ok(frame) => frame,
-            Err(error) => {
-                diagnostics
-                    .ignored_frames
-                    .push(parse_error_ignored_frame(frame_index, &error));
-                continue;
-            }
-        };
-
-        if let Some(subscription_id) = frame_subscription_id(&frame) {
-            if subscription_id != input.planned_subscription_id {
-                diagnostics
-                    .ignored_frames
-                    .push(subscription_mismatch_ignored_frame(
-                        frame_index,
-                        subscription_id,
-                        input.planned_subscription_id,
-                    ));
-                continue;
-            }
-        }
+        let frame =
+            match plan_nostr_subscription_intake_action(NostrSubscriptionIntakeActionInput {
+                planned_subscription_id: input.planned_subscription_id,
+                raw_message,
+            }) {
+                NostrSubscriptionIntakeAction::ProcessFrame { frame } => frame,
+                NostrSubscriptionIntakeAction::Ignore { reason } => {
+                    diagnostics
+                        .ignored_frames
+                        .push(intake_ignored_frame(frame_index, reason));
+                    continue;
+                }
+            };
 
         let outcome = process_relay_subscription_frame(NostrSubscriptionIngressInput {
             daemon_dir: input.daemon_dir,
@@ -252,19 +245,6 @@ fn ingress_class(ingress: &NostrIngressOutcome) -> DaemonNostrEventClass {
     }
 }
 
-fn frame_subscription_id(frame: &RelaySubscriptionFrame) -> Option<&str> {
-    match frame {
-        RelaySubscriptionFrame::Event {
-            subscription_id, ..
-        }
-        | RelaySubscriptionFrame::Eose { subscription_id }
-        | RelaySubscriptionFrame::Closed {
-            subscription_id, ..
-        } => Some(subscription_id),
-        RelaySubscriptionFrame::Notice { .. } | RelaySubscriptionFrame::Auth { .. } => None,
-    }
-}
-
 fn frame_event_kind(frame: &RelaySubscriptionFrame) -> Option<u64> {
     match frame {
         RelaySubscriptionFrame::Event { event, .. } => Some(event.kind),
@@ -275,38 +255,15 @@ fn frame_event_kind(frame: &RelaySubscriptionFrame) -> Option<u64> {
     }
 }
 
-fn parse_error_ignored_frame(
+fn intake_ignored_frame(
     frame_index: usize,
-    error: &SubscriptionMessageError,
+    reason: NostrSubscriptionIntakeIgnoredReason,
 ) -> NostrSubscriptionTickIgnoredFrame {
     NostrSubscriptionTickIgnoredFrame {
         frame_index,
-        code: parse_error_code(error).to_string(),
-        subscription_id: None,
-        detail: error.to_string(),
-    }
-}
-
-fn parse_error_code(error: &SubscriptionMessageError) -> &'static str {
-    match error {
-        SubscriptionMessageError::Json(_) => "invalid_json",
-        SubscriptionMessageError::InvalidFrame(_) => "invalid_frame",
-        SubscriptionMessageError::Nostr(_) => "invalid_event",
-    }
-}
-
-fn subscription_mismatch_ignored_frame(
-    frame_index: usize,
-    subscription_id: &str,
-    planned_subscription_id: &str,
-) -> NostrSubscriptionTickIgnoredFrame {
-    NostrSubscriptionTickIgnoredFrame {
-        frame_index,
-        code: "subscription_mismatch".to_string(),
-        subscription_id: Some(subscription_id.to_string()),
-        detail: format!(
-            "relay frame subscription id {subscription_id:?} does not match planned subscription id {planned_subscription_id:?}"
-        ),
+        code: reason.code,
+        subscription_id: reason.subscription_id,
+        detail: reason.detail,
     }
 }
 
