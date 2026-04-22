@@ -47,26 +47,46 @@ Contract source of truth:
 
 Events that need compatibility coverage:
 
-| Event | Kind | Compatibility requirement |
-| --- | --- | --- |
-| project | `31933` | Same project d-tag extraction, `a` tag references, deletion behavior, membership tags. |
-| conversation | `1` | Same threading, project tags, p-tags, reply targets, transport metadata. |
-| boot project | `24000` | Same project boot semantics via `a` tag. |
-| agent create | `24001` | Same backend-targeted create/install behavior. |
-| project status | `24010` | Same client-visible project runtime state shape. |
-| installed agent list | `24011` | Same backend inventory semantics. |
-| backend heartbeat | `24012` | Same owner-directed heartbeat semantics. |
-| operations status | `24133` | Same active execution/status semantics or an explicitly documented compatibility subset. |
-| stop command | `24134` | Same stop/kill routing semantics. |
-| stream text delta | `24135` | Same stream sequence, tags, and best-effort behavior. |
-| agent config update | `24020` | Same global vs project-scoped update behavior. |
-| agent delete | `24030` | Same global/project delete behavior and project republish side effects. |
-| agent lesson | `4129` | Same trust and hydration semantics. |
-| agent definition | `4199` | Same install/discovery metadata. |
-| MCP tool | `4200` | Same MCP tool extraction and install behavior. |
+| Event | Kind | Signer | Rust role | Compatibility requirement |
+| --- | --- | --- | --- | --- |
+| project | `31933` | user | observe + route | Same project d-tag extraction, `a` tag references, deletion behavior, membership tags. |
+| conversation | `1` | agent | verify + relay-publish (pass-through) | Same threading, project tags, p-tags, reply targets, transport metadata as the agent emits. |
+| boot project | `24000` | user | observe + route | Same project boot semantics via `a` tag. |
+| project status | `24010` | backend | encode + sign + publish | Ephemeral. Same client-visible project runtime state shape. |
+| installed agent list | `24011` | backend | encode + sign + publish | Ephemeral. Same backend inventory semantics. |
+| backend heartbeat | `24012` | backend | encode + sign + publish | Ephemeral. Same owner-directed heartbeat semantics. |
+| operations status | `24133` | backend | encode + sign + publish | Ephemeral. Same active execution/status semantics or an explicitly documented compatibility subset. |
+| stop command | `24134` | user | observe + route | Same stop/kill routing semantics. |
+| stream text delta | `24135` | agent | verify + relay-publish (pass-through) | Same stream sequence, tags, and best-effort behavior as the agent emits. |
+| agent config update | `24020` | user | observe + route | Same global vs project-scoped update behavior. |
+| agent delete | `24030` | user | observe + route | Same global/project delete behavior and project republish side effects. |
+| agent lesson | `4129` | agent | verify + relay-publish (pass-through) | Same trust and hydration semantics as the agent emits. |
+| agent definition | `4199` | user | observe + route | Same install/discovery metadata. |
+| MCP tool | `4200` | user | observe + route | Same MCP tool extraction and install behavior. |
 
-Quality gates should compare raw event JSON where possible. If an event ID
-differs because signing time or created_at differs, compare normalized events:
+Signer semantics determine what compatibility actually requires of Rust:
+
+- **User-signed** events are encoded and signed by clients. Rust never encodes
+  or re-signs them. Rust must correctly verify the schnorr signature where
+  trust decisions depend on it, and must correctly extract routing inputs
+  (`a`, `p`, `e`, thread, delegation, d-tag, replaceable semantics). No
+  cross-language encoder contract applies.
+- **Agent-signed** events are encoded and signed by the worker running the
+  agent. Rust never encodes or re-signs them either: the worker ships the
+  complete signed event in a `publish_request` frame, and Rust publishes the
+  exact bytes to relays after verifying the NIP-01 hash and schnorr signature
+  against the claimed agent pubkey. No cross-language encoder contract
+  applies.
+- **Backend-signed** events are encoded and signed by Rust itself once
+  publishing authority flips. TypeScript is not running as a parallel encoder
+  for the same event: authority for each backend-signed kind transitions from
+  TypeScript to Rust atomically. The contract Rust owes clients is therefore
+  not "byte-match the TypeScript encoder" but "produce a valid NIP-01 event
+  with the client-visible kind, content, tags, and signer identity the
+  migration preserves."
+
+Quality gates compare raw event JSON where possible. When an event id differs
+because signing time or `created_at` differs, compare normalized events:
 
 - same kind
 - same content
@@ -77,21 +97,24 @@ differs because signing time or created_at differs, compare normalized events:
 - same client-visible metadata
 - same signer role
 
-Normalization is not enough for signing compatibility. For every event kind
-Rust publishes, compatibility tests must also verify:
+For every event kind Rust itself encodes, additional self-consistency gates
+apply:
 
-- byte equality of the NIP-01 canonical serialization payload used for hashing,
-  given identical semantic input
-- schnorr signature validity against the event pubkey and canonical payload
-- deterministic nested JSON `content` serialization where clients or event IDs
-  depend on it
-- stable tag order unless a specific client audit proves the order is irrelevant
-- replaceable-event `created_at` semantics for kind `31933`, `24010`, and any
-  other replaceable/ephemeral status events clients use for ordering
+- Rust's canonical NIP-01 serialization produces an event id equal to
+  `sha256(canonical_payload)`.
+- Rust's schnorr signature verifies against the canonical payload and the
+  backend pubkey.
+- Nested JSON `content` serialization is deterministic where clients depend
+  on the exact string.
+- Tag order matches the order clients rely on, documented per kind.
 
-If Rust uses a different Nostr library from TypeScript, the canonical
-serialization tests are mandatory before Rust-owned publishing can leave shadow
-or canary mode.
+For every event kind Rust verifies but does not encode (user-signed and
+agent-signed sets), Rust's only wire contract is correct schnorr verification
+against the claimed pubkey and correct routing-input extraction.
+
+There is no scenario where both Rust and TypeScript encode the same event
+kind for the same execution. Cross-language encoder byte parity is therefore
+not a quality gate anywhere in this plan.
 
 ### Filesystem Contract
 
@@ -806,29 +829,34 @@ Scope:
   - tool use
   - stream text delta
 - Port only Rust/backend-authored publish paths, such as project status,
-  operations status, backend heartbeats, config/delete side effects, and any
-  transport-specific control-plane events that cannot live in an ephemeral
-  worker.
-- Add normalized raw-event comparison tests against TypeScript encoders for any
-  Rust-authored events.
-- Add byte-level canonical serialization tests for every Rust-authored event
-  kind.
-- Add signer identity tests for backend-signed events and verification tests for
-  worker-signed agent events.
-- Add relay round-trip tests: publish with Rust, fetch/decode with TypeScript.
-- Add replaceable-event `created_at` policy for kind `31933`, `24010`, and any
-  status event clients use as latest-state inputs.
+  operations status, backend heartbeats, and any transport-specific
+  control-plane events that cannot live in an ephemeral worker. Agent config
+  update (kind `24020`) and agent delete (kind `24030`) are user-signed and
+  are not backend-authored; Rust receives them but does not encode them. Kind
+  `24001` is not part of this plan's compatibility surface.
+- Add NIP-01 self-conformance tests for every event kind Rust encodes: the
+  event id equals `sha256(canonical_payload)`, and the schnorr signature
+  verifies against the canonical payload and backend pubkey.
+- Add signer identity tests for backend-signed events.
+- Add schnorr verification tests for worker-signed agent events and
+  user-signed client events that Rust accepts into its publish path or uses
+  for trust decisions.
+- Add relay round-trip tests: publish with Rust, fetch and decode with the
+  TypeScript subscriber path, and assert the decoded semantic shape matches
+  the emitted event.
 - Persist enough daemon-side publish context that enabling M8 does not require
   rerunning completed worker executions to derive transport delivery records.
 
 Quality gates:
 
-- Rust-published backend events match TypeScript encoder fixtures.
-- Worker-signed agent events retain their original event ID and signature after
-  Rust acceptance and relay publishing.
-- Rust canonical pre-hash bytes match TypeScript for any Rust-authored events,
-  or the deliberate difference is documented and event IDs/signatures are proven
-  valid.
+- Worker-signed agent events retain their original event ID and signature
+  after Rust acceptance and relay publishing.
+- Rust-encoded backend events are valid NIP-01: event id equals
+  `sha256(canonical_payload)` and the schnorr signature verifies against the
+  backend pubkey and canonical payload.
+- Rust-encoded backend events carry the same client-visible kind, content
+  shape, recipient `p` tags, and project `a` tags that clients observed from
+  the TypeScript backend before the authority flip.
 - Worker can block for publish result when it needs event IDs for threading, and
   Rust can return durable `accepted` before relay publication finishes.
 - Stream text deltas preserve sequence behavior.
@@ -850,10 +878,18 @@ Interoperability gate:
 - Existing clients accept Rust-published events without code changes.
 - A mixed environment with TypeScript and Rust backends does not duplicate
   events for the same execution.
-- Run `bun run test:rust:publish-interop` to execute the opt-in Rust-to-Bun
-  publish interop gate. This command runs the ignored Rust test serially and
-  requires Bun and installed TypeScript dependencies because it drives the real
-  worker process and the TypeScript Nostr consume probe.
+- Run `TENEX_RUN_RUST_WORKER_INTEROP=1 bun run test:rust:daemon` to execute the
+  worker interop gate after the standard fmt, test, and clippy checks.
+- Run `TENEX_RUN_RUST_PUBLISH_INTEROP=1 bun run test:rust:daemon` to execute
+  the publish interop gate after the standard fmt, test, and clippy checks.
+- Run `TENEX_RUN_RUST_ALL_INTEROP=1 bun run test:rust:daemon` to execute both
+  interop gates after the standard fmt, test, and clippy checks.
+- `TENEX_RUN_RUST_INTEROP=1` remains a legacy alias for the publish interop
+  gate.
+- The package script aliases `bun run test:rust:daemon:worker-interop`,
+  `bun run test:rust:daemon:publish-interop`, and
+  `bun run test:rust:daemon:all-interop` set the same env flags for
+  convenience.
 
 Rollback:
 
@@ -1016,11 +1052,14 @@ These gates apply to every milestone after M0.
 
 ### Contract Tests
 
-- Nostr event golden tests pass.
-- NIP-01 canonical serialization byte tests pass for every Rust-published kind.
-- Schnorr signature verification tests pass.
+- Nostr event golden tests pass for routing and decoding on every kind Rust
+  observes.
+- NIP-01 self-conformance tests pass for every kind Rust encodes: canonical
+  payload, event id, and schnorr signature are internally consistent.
+- Schnorr signature verification tests pass on worker-signed and user-signed
+  events Rust accepts.
 - Nested JSON `content` ordering tests pass for event kinds that use JSON
-  content bodies.
+  content bodies and where clients depend on a specific ordering.
 - Filesystem compatibility tests pass.
 - Worker protocol schema tests pass.
 - CLI compatibility tests pass for touched commands.
@@ -1086,8 +1125,13 @@ These gates apply to every milestone after M0.
 
 ### Golden Event Fixture Suite
 
-Create a fixture suite that exercises TypeScript encoders and decoders, then
-requires Rust to match normalized raw events.
+Create a fixture suite that supplies realistic samples of every event kind
+Rust observes so its routing, decoding, and verification paths are exercised
+against stable inputs. For the subset of kinds Rust itself encodes, the same
+suite additionally exercises Rust's encoder for NIP-01 self-consistency. The
+suite is not a cross-language encoder parity contract: user-signed and
+agent-signed kinds are encoded outside Rust entirely, and backend-signed
+kinds are encoded by Rust alone once authority flips.
 
 Fixture categories:
 
@@ -1125,12 +1169,11 @@ It must not ignore:
 - stream sequence
 - transport metadata tags
 
-Additional encoder gates:
+Additional gates for kinds Rust encodes:
 
-- canonical NIP-01 pre-hash byte equality for deterministic fixtures
-- signature validity
-- backend signer identity
-- replaceable-event timestamp policy
+- canonical NIP-01 self-consistency: event id equals `sha256(canonical_payload)`
+- signature validity against the backend pubkey
+- backend signer identity preserved across the authority flip
 - relay publish/fetch/decode round trip with TypeScript subscribers
 
 ### Client Replay Harness
@@ -1220,8 +1263,9 @@ Rust daemon can become the default only when:
 - RAL journal repair or fail-closed tooling exists
 - operator docs describe startup, status, stop, rollback, and known limitations
 - unsupported transports or services are feature-gated and visible to operators
-- byte-level Nostr serialization, signature, relay round-trip, and signer
-  identity gates pass for all Rust-published event kinds
+- NIP-01 self-conformance, schnorr signature, relay round-trip, and signer
+  identity gates pass for every event kind Rust publishes (encoded or
+  pass-through)
 
 ## First Implementation Slice
 
