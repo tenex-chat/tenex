@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::backend_config::{BackendConfigSnapshot, read_backend_config};
@@ -17,7 +18,8 @@ pub const CHECK_IDENTITY_RELAYS: &str = "identity-relays";
 pub const CHECK_DAEMON_DIRECTORY: &str = "daemon-directory";
 pub const CHECK_LOCKFILE: &str = "lockfile";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReadinessStatus {
     Ok,
     Missing,
@@ -31,14 +33,16 @@ impl ReadinessStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReadinessCheck {
     pub name: String,
     pub status: ReadinessStatus,
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DaemonReadinessReport {
     pub schema_version: u32,
     pub ready: bool,

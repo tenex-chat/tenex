@@ -18,7 +18,11 @@ use tenex_daemon::daemon_control::{
     read_daemon_restart_state_compatibility,
 };
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
+use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
+use tenex_daemon::project_status_runtime::{
+    ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
+};
 use tenex_daemon::publish_outbox::{PublishOutboxDiagnostics, inspect_publish_outbox};
 use tenex_daemon::scheduler_wakeups::{inspect_scheduler_wakeups, run_scheduler_maintenance};
 
@@ -32,6 +36,8 @@ enum DaemonControlCommand {
     Diagnostics,
     BackendEventsPlan,
     BackendEventsEnqueueStatus,
+    BackendEventsEnqueueProjectStatus,
+    Readiness,
     SchedulerWakeups,
     SchedulerWakeupsMaintain,
     Status,
@@ -49,6 +55,10 @@ struct DaemonControlCliOptions {
     created_at: Option<u64>,
     accepted_at: Option<u64>,
     request_timestamp: Option<u64>,
+    project_owner_pubkey: Option<String>,
+    project_d_tag: Option<String>,
+    project_manager_pubkey: Option<String>,
+    worktrees: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -100,6 +110,27 @@ struct BackendEventsEnqueueStatusDiagnostics {
     skipped_agent_file_count: usize,
     heartbeat_event_id: String,
     installed_agent_list_event_id: String,
+    publish_outbox_after: PublishOutboxDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendEventsEnqueueProjectStatusDiagnostics {
+    schema_version: u32,
+    tenex_base_dir: PathBuf,
+    daemon_dir: PathBuf,
+    created_at: u64,
+    accepted_at: u64,
+    request_timestamp: u64,
+    project_owner_pubkey: String,
+    project_d_tag: String,
+    backend_pubkey: String,
+    owner_pubkey_count: usize,
+    active_agent_count: usize,
+    llm_model_count: usize,
+    scheduled_task_count: usize,
+    worktree_count: usize,
+    project_status_event_id: String,
     publish_outbox_after: PublishOutboxDiagnostics,
 }
 
@@ -161,6 +192,16 @@ where
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
+        DaemonControlCommand::BackendEventsEnqueueProjectStatus => {
+            let diagnostics = enqueue_backend_events_project_status(&options)?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
+        DaemonControlCommand::Readiness => serde_json::to_string_pretty(
+            &inspect_daemon_readiness(&options.tenex_base_dir)
+                .map_err(|error| runtime_error(error.to_string()))?,
+        )
+        .map_err(|error| runtime_error(error.to_string())),
         DaemonControlCommand::SchedulerWakeups => serde_json::to_string_pretty(
             &inspect_scheduler_wakeups(&options.daemon_dir, options.inspected_at)
                 .map_err(|error| runtime_error(error.to_string()))?,
@@ -210,6 +251,57 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
             .map_err(|error| runtime_error(error.to_string()))?,
         profile_names: inspect_profile_names(&options.daemon_dir, options.inspected_at)
             .map_err(|error| runtime_error(error.to_string()))?,
+    })
+}
+
+fn enqueue_backend_events_project_status(
+    options: &DaemonControlCliOptions,
+) -> Result<BackendEventsEnqueueProjectStatusDiagnostics, CliError> {
+    let accepted_at = options.accepted_at.unwrap_or(options.inspected_at);
+    let request_timestamp = options.request_timestamp.unwrap_or(accepted_at);
+    let created_at = options.created_at.unwrap_or(accepted_at / 1_000);
+    let project_owner_pubkey = options
+        .project_owner_pubkey
+        .as_deref()
+        .ok_or_else(|| usage_error("--project-owner-pubkey is required"))?;
+    let project_d_tag = options
+        .project_d_tag
+        .as_deref()
+        .ok_or_else(|| usage_error("--project-d-tag is required"))?;
+
+    let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
+        tenex_base_dir: &options.tenex_base_dir,
+        daemon_dir: &options.daemon_dir,
+        created_at,
+        accepted_at,
+        request_timestamp,
+        project_owner_pubkey,
+        project_d_tag,
+        project_manager_pubkey: options.project_manager_pubkey.as_deref(),
+        agents: None,
+        worktrees: Some(&options.worktrees),
+    })
+    .map_err(|error| runtime_error(error.to_string()))?;
+    let publish_outbox_after = inspect_publish_outbox(&options.daemon_dir, accepted_at)
+        .map_err(|error| runtime_error(error.to_string()))?;
+
+    Ok(BackendEventsEnqueueProjectStatusDiagnostics {
+        schema_version: 1,
+        tenex_base_dir: options.tenex_base_dir.clone(),
+        daemon_dir: options.daemon_dir.clone(),
+        created_at,
+        accepted_at,
+        request_timestamp,
+        project_owner_pubkey: project_owner_pubkey.to_string(),
+        project_d_tag: project_d_tag.to_string(),
+        backend_pubkey: outcome.project_status.record.event.pubkey.clone(),
+        owner_pubkey_count: outcome.config.whitelisted_pubkeys.len(),
+        active_agent_count: outcome.agent_inventory.active_agents.len(),
+        llm_model_count: outcome.llm_model_keys.len(),
+        scheduled_task_count: outcome.scheduled_tasks.len(),
+        worktree_count: outcome.snapshot.worktrees.len(),
+        project_status_event_id: outcome.project_status.record.event.id,
+        publish_outbox_after,
     })
 }
 
@@ -364,6 +456,10 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         Some("diagnostics") => DaemonControlCommand::Diagnostics,
         Some("backend-events-plan") => DaemonControlCommand::BackendEventsPlan,
         Some("backend-events-enqueue-status") => DaemonControlCommand::BackendEventsEnqueueStatus,
+        Some("backend-events-enqueue-project-status") => {
+            DaemonControlCommand::BackendEventsEnqueueProjectStatus
+        }
+        Some("readiness") => DaemonControlCommand::Readiness,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
         Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
         Some("status") => DaemonControlCommand::Status,
@@ -385,6 +481,10 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let mut created_at = None;
     let mut accepted_at = None;
     let mut request_timestamp = None;
+    let mut project_owner_pubkey = None;
+    let mut project_d_tag = None;
+    let mut project_manager_pubkey = None;
+    let mut worktrees = Vec::new();
     let mut index = 1;
 
     while index < args.len() {
@@ -431,6 +531,34 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .ok_or_else(|| usage_error("--request-timestamp requires a value"))?;
                 request_timestamp = Some(parse_u64_arg("--request-timestamp", value)?);
             }
+            "--project-owner-pubkey" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--project-owner-pubkey requires a value"))?;
+                project_owner_pubkey = Some(value.clone());
+            }
+            "--project-d-tag" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--project-d-tag requires a value"))?;
+                project_d_tag = Some(value.clone());
+            }
+            "--project-manager-pubkey" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--project-manager-pubkey requires a value"))?;
+                project_manager_pubkey = Some(value.clone());
+            }
+            "--worktree" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--worktree requires a value"))?;
+                worktrees.push(value.clone());
+            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -442,7 +570,14 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         index += 1;
     }
 
-    let daemon_dir = daemon_dir.ok_or_else(|| usage_error("--daemon-dir is required"))?;
+    let daemon_dir = match daemon_dir {
+        Some(daemon_dir) => daemon_dir,
+        None if command == DaemonControlCommand::Readiness => tenex_base_dir
+            .as_ref()
+            .map(|base_dir| base_dir.join("daemon"))
+            .ok_or_else(|| usage_error("--daemon-dir or --tenex-base-dir is required"))?,
+        None => return Err(usage_error("--daemon-dir is required")),
+    };
     let tenex_base_dir = tenex_base_dir.unwrap_or_else(|| infer_tenex_base_dir(&daemon_dir));
 
     Ok(DaemonControlCliOptions {
@@ -453,6 +588,10 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         created_at,
         accepted_at,
         request_timestamp,
+        project_owner_pubkey,
+        project_d_tag,
+        project_manager_pubkey,
+        worktrees,
     })
 }
 
@@ -488,6 +627,8 @@ fn usage() -> String {
         "  daemon-control diagnostics --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control backend-events-plan --daemon-dir <path> [--tenex-base-dir <path>] [--inspected-at <ms>]",
         "  daemon-control backend-events-enqueue-status --daemon-dir <path> [--tenex-base-dir <path>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
+        "  daemon-control backend-events-enqueue-project-status --daemon-dir <path> [--tenex-base-dir <path>] --project-owner-pubkey <hex> --project-d-tag <d> [--project-manager-pubkey <hex>] [--worktree <branch>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
+        "  daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control status --daemon-dir <path>",
@@ -616,6 +757,63 @@ mod tests {
         assert_eq!(options.created_at, Some(1_710_001_000));
         assert_eq!(options.accepted_at, Some(1_710_001_000_100));
         assert_eq!(options.request_timestamp, Some(1_710_001_000_050));
+    }
+
+    #[test]
+    fn parses_backend_events_enqueue_project_status_args() {
+        let options = parse_daemon_control_args(&[
+            "backend-events-enqueue-project-status".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--project-owner-pubkey".to_string(),
+            xonly_pubkey_hex(0x02),
+            "--project-d-tag".to_string(),
+            "demo-project".to_string(),
+            "--project-manager-pubkey".to_string(),
+            xonly_pubkey_hex(0x03),
+            "--worktree".to_string(),
+            "main".to_string(),
+            "--worktree".to_string(),
+            "feature/rust".to_string(),
+            "--created-at".to_string(),
+            "1710001000".to_string(),
+            "--accepted-at".to_string(),
+            "1710001000100".to_string(),
+            "--request-timestamp".to_string(),
+            "1710001000050".to_string(),
+        ])
+        .expect("backend-events-enqueue-project-status args must parse");
+
+        assert_eq!(
+            options.command,
+            DaemonControlCommand::BackendEventsEnqueueProjectStatus
+        );
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert_eq!(options.project_d_tag.as_deref(), Some("demo-project"));
+        assert_eq!(
+            options.worktrees,
+            vec!["main".to_string(), "feature/rust".to_string()]
+        );
+        assert_eq!(options.created_at, Some(1_710_001_000));
+        assert_eq!(options.accepted_at, Some(1_710_001_000_100));
+        assert_eq!(options.request_timestamp, Some(1_710_001_000_050));
+    }
+
+    #[test]
+    fn parses_readiness_args_with_tenex_base_dir_only() {
+        let options = parse_daemon_control_args(&[
+            "readiness".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+        ])
+        .expect("readiness args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::Readiness);
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex/daemon"));
     }
 
     #[test]
@@ -1112,6 +1310,135 @@ mod tests {
         assert_eq!(
             value["publishOutboxAfter"]["oldestPending"]["agentPubkey"],
             json!(TEST_BACKEND_PUBKEY_HEX)
+        );
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
+    }
+
+    #[test]
+    fn backend_events_enqueue_project_status_writes_pending_outbox_record_json() {
+        let tenex_base_dir = unique_temp_base_dir();
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        let project_dir = tenex_base_dir.join("projects").join("demo-project");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        fs::create_dir_all(&project_dir).expect("project dir must create");
+
+        let owner = xonly_pubkey_hex(0x06);
+        let extra_owner = xonly_pubkey_hex(0x07);
+        let agent = xonly_pubkey_hex(0x08);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}", "{extra_owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+        fs::write(
+            agents_dir.join(format!("{agent}.json")),
+            r#"{"slug":"worker","status":"active"}"#,
+        )
+        .expect("agent file must write");
+        fs::write(
+            tenex_base_dir.join("llms.json"),
+            r#"{"configurations":{"alpha":{"provider":"openai","model":"gpt-4o"}}}"#,
+        )
+        .expect("llms file must write");
+        fs::write(
+            project_dir.join("schedules.json"),
+            r#"[{
+                "id": "task-1",
+                "title": "Nightly report",
+                "schedule": "0 1 * * *",
+                "prompt": "Run nightly report",
+                "targetAgentSlug": "worker"
+            }]"#,
+        )
+        .expect("schedules file must write");
+
+        let output = run_cli([
+            "backend-events-enqueue-project-status",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("daemon path must be utf-8"),
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+            "--project-owner-pubkey",
+            &owner,
+            "--project-d-tag",
+            "demo-project",
+            "--project-manager-pubkey",
+            &agent,
+            "--worktree",
+            "main",
+            "--created-at",
+            "1710001200",
+            "--accepted-at",
+            "1710001200100",
+            "--request-timestamp",
+            "1710001200050",
+        ])
+        .expect("backend-events-enqueue-project-status command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["createdAt"], json!(1_710_001_200u64));
+        assert_eq!(value["acceptedAt"], json!(1_710_001_200_100u64));
+        assert_eq!(value["requestTimestamp"], json!(1_710_001_200_050u64));
+        assert_eq!(value["projectOwnerPubkey"], json!(owner));
+        assert_eq!(value["projectDTag"], json!("demo-project"));
+        assert_eq!(value["backendPubkey"], json!(TEST_BACKEND_PUBKEY_HEX));
+        assert_eq!(value["ownerPubkeyCount"], json!(2));
+        assert_eq!(value["activeAgentCount"], json!(1));
+        assert_eq!(value["llmModelCount"], json!(1));
+        assert_eq!(value["scheduledTaskCount"], json!(1));
+        assert_eq!(value["worktreeCount"], json!(1));
+        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(1));
+        assert_eq!(value["publishOutboxAfter"]["publishedCount"], json!(0));
+        assert_eq!(value["publishOutboxAfter"]["failedCount"], json!(0));
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
+    }
+
+    #[test]
+    fn readiness_outputs_startup_gate_json() {
+        let tenex_base_dir = unique_temp_base_dir();
+        fs::create_dir_all(&tenex_base_dir).expect("base dir must create");
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#,
+                xonly_pubkey_hex(0x09)
+            ),
+        )
+        .expect("config must write");
+
+        let output = run_cli([
+            "readiness",
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+        ])
+        .expect("readiness command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["ready"], json!(true));
+        assert_eq!(value["checks"][0]["name"], json!("base-directory"));
+        assert_eq!(value["checks"][0]["status"], json!("ok"));
+        assert!(
+            value["checks"]
+                .as_array()
+                .expect("checks must be an array")
+                .iter()
+                .any(|check| check["name"] == json!("lockfile") && check["status"] == json!("ok"))
         );
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");

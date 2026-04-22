@@ -554,8 +554,8 @@ Landed slices:
   `DaemonReadinessReport` with stable check names, a schema version, and an
   overall `ready` boolean. Composes `backend_config::read_backend_config`,
   `filesystem_state` lockfile helpers, and the `process_liveness` PID probe.
-  Intended as the startup gate for the upcoming main loop and as the backing
-  library for a future `daemon-control readiness` subcommand.
+  Intended as the startup gate for the upcoming main loop and now exposed by
+  the `daemon-control readiness` JSON operator command.
 
 Scope:
 
@@ -867,13 +867,21 @@ Landed slices:
   orchestration slice that reads global config and installed-agent inventory,
   signs backend heartbeat and installed-agent-list events, and enqueues them
   into the durable Rust publish outbox without publishing directly to relays.
-- `crates/tenex-daemon/src/bin/daemon-control.rs` — `backend-events-enqueue-status`
-  CLI wiring that calls the backend status runtime for enqueue diagnostics,
-  surfacing the resulting outbox state without direct relay publishing.
+- `crates/tenex-daemon/src/bin/daemon-control.rs` —
+  `backend-events-enqueue-status`,
+  `backend-events-enqueue-project-status`, and `readiness` CLI wiring for
+  enqueue diagnostics and startup-readiness JSON without direct relay
+  publishing.
 - `crates/tenex-daemon/src/project_status_sources.rs` — filesystem readers for
   global `llms.json` model config keys and per-project `schedules.json`
   records, with deterministic ordering and TS-aligned cron/one-off task
   projection for the project-status snapshot pipeline.
+- `crates/tenex-daemon/src/project_status_runtime.rs` — filesystem-backed
+  project-status enqueue runtime that reads config, active agent inventory,
+  global LLM model keys, and per-project scheduled tasks, then signs and
+  enqueues kind `24010` through the Rust publish outbox. The
+  `daemon-control backend-events-enqueue-project-status` command exercises
+  this boundary with explicit project owner/tag inputs.
 - `daemon-control backend-events-plan` — read-only diagnostics over publish
   outbox state plus backend status publisher readiness, including config,
   signer, relay, and installed-agent inventory availability without mutating
@@ -891,13 +899,13 @@ Planned next runtime boundaries:
   publish-outbox maintenance can run on a single tick source.
 - `crates/tenex-daemon/src/backend_status_runtime.rs` remains backend-status
   only: heartbeat and installed-agent-list enqueueing through
-  `daemon-control backend-events-enqueue-status`. Project-status stays out of
-  this boundary until its own runtime slice lands.
-- `crates/tenex-daemon/src/project_status_sources.rs` and
-  `crates/tenex-daemon/src/project_status_snapshot.rs` remain the filesystem
-  and owned-shape inputs for a future project-status runtime boundary; the
-  missing piece is the daemon wiring that turns those inputs into scheduled
-  backend publishes.
+  `daemon-control backend-events-enqueue-status`. Project-status uses the
+  separate `project_status_runtime` boundary and
+  `daemon-control backend-events-enqueue-project-status`.
+- The remaining project-status work is daemon wiring: deriving project
+  owner/tag inputs from live daemon context or project metadata, feeding
+  runtime agent/worktree state into the snapshot, and scheduling periodic
+  backend publishes from the shared tick source.
 
 Scope:
 
