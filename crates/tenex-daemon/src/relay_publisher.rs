@@ -209,8 +209,12 @@ pub fn publish_signed_event_to_relay_with_auth_signer(
                 if let Some(challenge) = parse_auth_challenge(&value)? {
                     let auth_signer =
                         auth_signer.ok_or(RelayPublishError::AuthRequiredWithoutSigner)?;
-                    let auth_event =
-                        build_auth_event(relay_url, &challenge, auth_signer, now_unix_secs())?;
+                    let auth_event = build_relay_auth_event(
+                        relay_url,
+                        &challenge,
+                        auth_signer,
+                        now_unix_secs(),
+                    )?;
                     pending_auth_event_ids.insert(auth_event.id.clone());
                     socket.send(Message::text(build_auth_message(&auth_event)?))?;
                     resend_event_after_auth = true;
@@ -332,7 +336,7 @@ fn parse_auth_challenge(value: &Value) -> Result<Option<String>, RelayPublishErr
         .ok_or_else(|| RelayPublishError::InvalidAuthFrame("missing challenge".to_string()))
 }
 
-fn build_auth_event(
+pub fn build_relay_auth_event(
     relay_url: &str,
     challenge: &str,
     signer: &dyn RelayAuthSigner,

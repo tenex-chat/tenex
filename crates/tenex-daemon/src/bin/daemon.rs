@@ -182,8 +182,14 @@ fn start_nostr_subscription_supervisor_from_options(
         return Ok(None);
     }
 
+    let backend_config =
+        read_backend_config(&tenex_base_dir).map_err(|error| runtime_error(error.to_string()))?;
+    let auth_signer = backend_config
+        .backend_signer()
+        .map_err(|error| runtime_error(error.to_string()))?;
     let mut config =
-        NostrSubscriptionGatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), plan);
+        NostrSubscriptionGatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), plan)
+            .with_auth_signer(auth_signer);
     config.writer_version = daemon_writer_version();
     let supervisor = start_nostr_subscription_gateway(config, NoopNostrSubscriptionObserver)
         .map_err(|error| runtime_error(format!("failed to start nostr subscription: {error}")))?;

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,6 +16,9 @@ use crate::nostr_subscription_tick::{
     NostrSubscriptionTickIgnoredFrame, NostrSubscriptionTickInput,
     NostrSubscriptionTickProcessedEvent, run_nostr_subscription_intake_tick,
 };
+use crate::relay_publisher::{
+    RelayAuthSigner, RelayPublishError, build_auth_message, build_relay_auth_event,
+};
 use crate::subscription_filters::{
     NostrFilter, RelaySubscriptionFrame, build_close_message, build_req_message,
     parse_relay_subscription_message,
@@ -25,7 +29,7 @@ pub const DEFAULT_SUBSCRIPTION_ID: &str = "tenex-main";
 pub const DEFAULT_RELAY_READ_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DEFAULT_RECONNECT_BACKOFF: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NostrSubscriptionGatewayConfig {
     pub tenex_base_dir: PathBuf,
     pub daemon_dir: PathBuf,
@@ -34,6 +38,7 @@ pub struct NostrSubscriptionGatewayConfig {
     pub writer_version: String,
     pub relay_read_timeout: Duration,
     pub reconnect_backoff: Duration,
+    pub auth_signer: Option<Arc<dyn RelayAuthSigner + Send + Sync>>,
 }
 
 impl NostrSubscriptionGatewayConfig {
@@ -46,7 +51,32 @@ impl NostrSubscriptionGatewayConfig {
             writer_version: format!("tenex-daemon@{}", env!("CARGO_PKG_VERSION")),
             relay_read_timeout: DEFAULT_RELAY_READ_TIMEOUT,
             reconnect_backoff: DEFAULT_RECONNECT_BACKOFF,
+            auth_signer: None,
         }
+    }
+
+    pub fn with_auth_signer<S>(mut self, auth_signer: S) -> Self
+    where
+        S: RelayAuthSigner + Send + Sync + 'static,
+    {
+        self.auth_signer = Some(Arc::new(auth_signer));
+        self
+    }
+}
+
+impl fmt::Debug for NostrSubscriptionGatewayConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NostrSubscriptionGatewayConfig")
+            .field("tenex_base_dir", &self.tenex_base_dir)
+            .field("daemon_dir", &self.daemon_dir)
+            .field("plan", &self.plan)
+            .field("subscription_id", &self.subscription_id)
+            .field("writer_version", &self.writer_version)
+            .field("relay_read_timeout", &self.relay_read_timeout)
+            .field("reconnect_backoff", &self.reconnect_backoff)
+            .field("auth_signer_configured", &self.auth_signer.is_some())
+            .finish()
     }
 }
 
@@ -165,6 +195,10 @@ fn run_relay_loop(
             read_timeout: config.relay_read_timeout,
             stop_after_eose: false,
             max_messages: None,
+            auth_signer: config
+                .auth_signer
+                .as_ref()
+                .map(|signer| signer.as_ref() as &dyn RelayAuthSigner),
             stop_flag: &stop_flag,
         });
 
@@ -177,7 +211,7 @@ fn run_relay_loop(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct NostrSubscriptionRelayInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
@@ -188,7 +222,26 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub read_timeout: Duration,
     pub stop_after_eose: bool,
     pub max_messages: Option<usize>,
+    pub auth_signer: Option<&'a dyn RelayAuthSigner>,
     pub stop_flag: &'a AtomicBool,
+}
+
+impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NostrSubscriptionRelayInput")
+            .field("tenex_base_dir", &self.tenex_base_dir)
+            .field("daemon_dir", &self.daemon_dir)
+            .field("relay_url", &self.relay_url)
+            .field("subscription_id", &self.subscription_id)
+            .field("filters", &self.filters)
+            .field("writer_version", &self.writer_version)
+            .field("read_timeout", &self.read_timeout)
+            .field("stop_after_eose", &self.stop_after_eose)
+            .field("max_messages", &self.max_messages)
+            .field("auth_signer_configured", &self.auth_signer.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Error)]
@@ -203,6 +256,10 @@ pub enum NostrSubscriptionRelayError {
     Json(#[from] serde_json::Error),
     #[error("nostr subscription tick failed: {0}")]
     Tick(#[from] NostrSubscriptionTickError),
+    #[error("relay requires AUTH but no relay auth signer is configured")]
+    AuthRequiredWithoutSigner,
+    #[error("relay AUTH failed: {0}")]
+    RelayAuth(#[from] RelayPublishError),
 }
 
 pub fn run_nostr_subscription_relay_once(
@@ -242,6 +299,7 @@ pub fn run_nostr_subscription_relay_once(
 
         match message {
             Message::Text(text) => {
+                let auth_challenge = auth_challenge_from_text_frame(text.as_str());
                 let stop_after_this_frame = should_stop_after_text_frame(
                     text.as_str(),
                     input.subscription_id,
@@ -260,6 +318,22 @@ pub fn run_nostr_subscription_relay_once(
                     writer_version: input.writer_version,
                 })?;
                 append_tick_diagnostics(&mut diagnostics, tick, frame_index);
+                if let Some(challenge) = auth_challenge {
+                    let auth_signer = input
+                        .auth_signer
+                        .ok_or(NostrSubscriptionRelayError::AuthRequiredWithoutSigner)?;
+                    let auth_event = build_relay_auth_event(
+                        input.relay_url,
+                        &challenge,
+                        auth_signer,
+                        current_unix_time_ms() / 1_000,
+                    )?;
+                    socket.send(Message::text(build_auth_message(&auth_event)?))?;
+                    socket.send(Message::text(build_req_message(
+                        input.subscription_id,
+                        input.filters,
+                    )?))?;
+                }
                 if stop_after_this_frame {
                     break;
                 }
@@ -276,6 +350,13 @@ pub fn run_nostr_subscription_relay_once(
     let _ = socket.close(None);
 
     Ok(diagnostics)
+}
+
+fn auth_challenge_from_text_frame(message: &str) -> Option<String> {
+    match parse_relay_subscription_message(message) {
+        Ok(RelaySubscriptionFrame::Auth { challenge }) => Some(challenge),
+        _ => None,
+    }
 }
 
 fn empty_diagnostics(subscription_id: &str, relay_url: &str) -> NostrSubscriptionTickDiagnostics {
@@ -450,9 +531,11 @@ fn current_unix_time_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend_signer::HexBackendSigner;
     use crate::dispatch_queue::replay_dispatch_queue;
     use crate::nostr_event::{
         NormalizedNostrEvent, SignedNostrEvent, canonical_payload, event_hash_hex,
+        verify_signed_event,
     };
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
@@ -461,6 +544,10 @@ mod tests {
     use std::sync::mpsc::{Receiver, channel};
     use std::time::Duration;
     use tempfile::tempdir;
+
+    const TEST_SECRET_KEY_HEX: &str =
+        "0101010101010101010101010101010101010101010101010101010101010101";
+    const AUTH_CHALLENGE: &str = "subscription-auth-challenge-01";
 
     #[test]
     fn relay_once_sends_req_consumes_event_and_closes_subscription() {
@@ -499,6 +586,7 @@ mod tests {
             read_timeout: Duration::from_secs(2),
             stop_after_eose: true,
             max_messages: None,
+            auth_signer: None,
             stop_flag: &stop_flag,
         })
         .expect("relay subscription must drain");
@@ -516,6 +604,99 @@ mod tests {
         let captured = relay.join();
         assert_eq!(captured.req[0], "REQ");
         assert_eq!(captured.req[1], DEFAULT_SUBSCRIPTION_ID);
+        assert_eq!(
+            captured.close,
+            Some(json!(["CLOSE", DEFAULT_SUBSCRIPTION_ID]))
+        );
+    }
+
+    #[test]
+    fn relay_once_authenticates_and_resubscribes_after_auth_challenge() {
+        let temp_dir = tempdir().expect("temp dir must create");
+        let base_dir = temp_dir.path();
+        let daemon_dir = base_dir.join("daemon");
+        let owner = pubkey_hex(0x11);
+        let agent = pubkey_hex(0x21);
+        write_project(base_dir, "project-alpha", &owner, "/repo/alpha");
+        write_agent_index(base_dir, "project-alpha", &[&agent]);
+        write_agent(base_dir, &agent, "alpha-agent");
+
+        let event = signed_event(
+            0x31,
+            1,
+            vec![vec!["p".to_string(), agent.clone()]],
+            "hello after auth",
+            1_710_001_100,
+        );
+        let relay = MockAuthSubscriptionRelay::start(vec![
+            json!(["EVENT", DEFAULT_SUBSCRIPTION_ID, event.clone()]),
+            json!(["EOSE", DEFAULT_SUBSCRIPTION_ID]),
+        ]);
+        let relay_url = relay.url.clone();
+        let stop_flag = AtomicBool::new(false);
+        let signer = HexBackendSigner::from_private_key_hex(TEST_SECRET_KEY_HEX)
+            .expect("test signer must load");
+
+        let diagnostics = run_nostr_subscription_relay_once(NostrSubscriptionRelayInput {
+            tenex_base_dir: base_dir,
+            daemon_dir: &daemon_dir,
+            relay_url: &relay.url,
+            subscription_id: DEFAULT_SUBSCRIPTION_ID,
+            filters: &[NostrFilter {
+                pubkeys: vec![agent.clone()],
+                ..NostrFilter::default()
+            }],
+            writer_version: "nostr-subscription-gateway-test@0",
+            read_timeout: Duration::from_secs(2),
+            stop_after_eose: true,
+            max_messages: None,
+            auth_signer: Some(&signer),
+            stop_flag: &stop_flag,
+        })
+        .expect("relay subscription must authenticate and drain");
+
+        assert_eq!(diagnostics.raw_message_count, 3);
+        assert_eq!(diagnostics.processed_events.len(), 1);
+        assert_eq!(diagnostics.processed_events[0].event_id, event.id);
+        assert_eq!(diagnostics.ignored_frames.len(), 2);
+        assert!(
+            diagnostics
+                .ignored_frames
+                .iter()
+                .any(|frame| frame.code == "auth")
+        );
+        assert!(
+            diagnostics
+                .ignored_frames
+                .iter()
+                .any(|frame| frame.code == "eose")
+        );
+
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(queue.queued.len(), 1);
+        assert_eq!(queue.queued[0].triggering_event_id, event.id);
+
+        let captured = relay.join();
+        assert_eq!(captured.initial_req[0], "REQ");
+        assert_eq!(captured.initial_req[1], DEFAULT_SUBSCRIPTION_ID);
+        assert_eq!(captured.retried_req, captured.initial_req);
+        assert_eq!(captured.auth[0], "AUTH");
+        let auth_event: SignedNostrEvent =
+            serde_json::from_value(captured.auth[1].clone()).expect("AUTH event must decode");
+        assert_eq!(auth_event.pubkey, signer.pubkey_hex());
+        assert_eq!(auth_event.kind, 22242);
+        assert_eq!(auth_event.content, "");
+        assert!(
+            auth_event
+                .tags
+                .contains(&vec!["relay".to_string(), relay_url])
+        );
+        assert!(
+            auth_event
+                .tags
+                .contains(&vec!["challenge".to_string(), AUTH_CHALLENGE.to_string()])
+        );
+        verify_signed_event(&auth_event).expect("AUTH event signature must verify");
         assert_eq!(
             captured.close,
             Some(json!(["CLOSE", DEFAULT_SUBSCRIPTION_ID]))
@@ -555,9 +736,22 @@ mod tests {
         close: Option<Value>,
     }
 
+    struct CapturedAuthRelayFrames {
+        initial_req: Value,
+        auth: Value,
+        retried_req: Value,
+        close: Option<Value>,
+    }
+
     struct MockSubscriptionRelay {
         url: String,
         captured: Receiver<CapturedRelayFrames>,
+        handle: JoinHandle<()>,
+    }
+
+    struct MockAuthSubscriptionRelay {
+        url: String,
+        captured: Receiver<CapturedAuthRelayFrames>,
         handle: JoinHandle<()>,
     }
 
@@ -612,6 +806,74 @@ mod tests {
             self.handle.join().expect("mock relay thread must join");
             captured
         }
+    }
+
+    impl MockAuthSubscriptionRelay {
+        fn start(frames_to_send: Vec<Value>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("mock relay must bind");
+            let url = format!(
+                "ws://{}",
+                listener.local_addr().expect("mock relay addr must exist")
+            );
+            let (sender, receiver) = channel();
+            let handle = thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("mock relay must accept");
+                let mut websocket =
+                    tungstenite::accept(stream).expect("mock relay handshake must succeed");
+                let initial_req = read_mock_relay_json_message(&mut websocket);
+                websocket
+                    .send(Message::text(
+                        serde_json::to_string(&json!(["AUTH", AUTH_CHALLENGE]))
+                            .expect("AUTH challenge must serialize"),
+                    ))
+                    .expect("mock relay must send AUTH challenge");
+                let auth = read_mock_relay_json_message(&mut websocket);
+                let retried_req = read_mock_relay_json_message(&mut websocket);
+                for frame in frames_to_send {
+                    websocket
+                        .send(Message::text(
+                            serde_json::to_string(&frame).expect("frame must serialize"),
+                        ))
+                        .expect("mock relay must send frame");
+                }
+                let close_message = websocket
+                    .read()
+                    .expect("mock relay must read CLOSE before websocket close");
+                let close = close_message
+                    .to_text()
+                    .ok()
+                    .and_then(|text| serde_json::from_str(text).ok());
+                sender
+                    .send(CapturedAuthRelayFrames {
+                        initial_req,
+                        auth,
+                        retried_req,
+                        close,
+                    })
+                    .expect("captured frames must send");
+            });
+
+            Self {
+                url,
+                captured: receiver,
+                handle,
+            }
+        }
+
+        fn join(self) -> CapturedAuthRelayFrames {
+            let captured = self
+                .captured
+                .recv_timeout(Duration::from_secs(2))
+                .expect("mock relay must capture frames");
+            self.handle.join().expect("mock relay thread must join");
+            captured
+        }
+    }
+
+    fn read_mock_relay_json_message(websocket: &mut tungstenite::WebSocket<TcpStream>) -> Value {
+        let message = websocket.read().expect("mock relay must read message");
+        serde_json::from_str(message.to_text().expect("mock relay message must be text"))
+            .expect("mock relay message must be json")
     }
 
     fn signed_event(
