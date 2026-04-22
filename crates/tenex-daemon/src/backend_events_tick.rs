@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::backend_status_runtime::{
@@ -36,12 +37,14 @@ pub struct BackendEventsTickInput<'a> {
     pub projects: &'a [BackendEventsTickProject<'a>],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackendEventsTaskRegistration {
     pub registered_task_names: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackendEventsTickBackendStatusOutcome {
     pub task_name: String,
     pub heartbeat_event_id: String,
@@ -49,7 +52,8 @@ pub struct BackendEventsTickBackendStatusOutcome {
     pub enqueued_event_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackendEventsTickProjectStatusOutcome {
     pub task_name: String,
     pub project_owner_pubkey: String,
@@ -59,7 +63,8 @@ pub struct BackendEventsTickProjectStatusOutcome {
     pub enqueued_event_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackendEventsTickOutcome {
     pub due_task_names: Vec<String>,
     pub backend_status: Option<BackendEventsTickBackendStatusOutcome>,

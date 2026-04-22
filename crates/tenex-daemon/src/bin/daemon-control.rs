@@ -7,6 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tenex_daemon::agent_inventory::read_installed_agent_inventory;
 use tenex_daemon::backend_config::read_backend_config;
+use tenex_daemon::backend_events_tick::{
+    BackendEventsTaskRegistration, BackendEventsTickInput, BackendEventsTickOutcome,
+    BackendEventsTickProject, ensure_backend_events_tasks, tick_backend_events,
+};
 use tenex_daemon::backend_status_runtime::{
     BackendStatusRuntimeInput, agents_dir, publish_backend_status_from_filesystem,
 };
@@ -20,6 +24,7 @@ use tenex_daemon::daemon_control::{
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
+use tenex_daemon::periodic_tick::PeriodicScheduler;
 use tenex_daemon::project_status_runtime::{
     ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
@@ -37,6 +42,7 @@ enum DaemonControlCommand {
     BackendEventsPlan,
     BackendEventsEnqueueStatus,
     BackendEventsEnqueueProjectStatus,
+    BackendEventsPeriodicTick,
     Readiness,
     SchedulerWakeups,
     SchedulerWakeupsMaintain,
@@ -55,6 +61,7 @@ struct DaemonControlCliOptions {
     created_at: Option<u64>,
     accepted_at: Option<u64>,
     request_timestamp: Option<u64>,
+    first_due_at: Option<u64>,
     project_owner_pubkey: Option<String>,
     project_d_tag: Option<String>,
     project_manager_pubkey: Option<String>,
@@ -134,6 +141,21 @@ struct BackendEventsEnqueueProjectStatusDiagnostics {
     publish_outbox_after: PublishOutboxDiagnostics,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendEventsPeriodicTickDiagnostics {
+    schema_version: u32,
+    tenex_base_dir: PathBuf,
+    daemon_dir: PathBuf,
+    now: u64,
+    first_due_at: u64,
+    accepted_at: u64,
+    request_timestamp: u64,
+    registered: BackendEventsTaskRegistration,
+    tick: BackendEventsTickOutcome,
+    publish_outbox_after: PublishOutboxDiagnostics,
+}
+
 #[derive(Debug)]
 struct CliError {
     message: String,
@@ -197,6 +219,11 @@ where
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
+        DaemonControlCommand::BackendEventsPeriodicTick => {
+            let diagnostics = run_backend_events_periodic_tick(&options)?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
         DaemonControlCommand::Readiness => serde_json::to_string_pretty(
             &inspect_daemon_readiness(&options.tenex_base_dir)
                 .map_err(|error| runtime_error(error.to_string()))?,
@@ -251,6 +278,68 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
             .map_err(|error| runtime_error(error.to_string()))?,
         profile_names: inspect_profile_names(&options.daemon_dir, options.inspected_at)
             .map_err(|error| runtime_error(error.to_string()))?,
+    })
+}
+
+fn run_backend_events_periodic_tick(
+    options: &DaemonControlCliOptions,
+) -> Result<BackendEventsPeriodicTickDiagnostics, CliError> {
+    let accepted_at = options.accepted_at.unwrap_or(options.inspected_at);
+    let request_timestamp = options.request_timestamp.unwrap_or(accepted_at);
+    let now = options.created_at.unwrap_or(accepted_at / 1_000);
+    let first_due_at = options.first_due_at.unwrap_or(now);
+    let project = match (
+        options.project_owner_pubkey.as_deref(),
+        options.project_d_tag.as_deref(),
+    ) {
+        (Some(project_owner_pubkey), Some(project_d_tag)) => Some(BackendEventsTickProject {
+            project_owner_pubkey,
+            project_d_tag,
+            project_manager_pubkey: options.project_manager_pubkey.as_deref(),
+            worktrees: Some(&options.worktrees),
+        }),
+        (None, None)
+            if options.project_manager_pubkey.is_some() || !options.worktrees.is_empty() =>
+        {
+            return Err(usage_error(
+                "--project-owner-pubkey and --project-d-tag are required when project-specific options are set",
+            ));
+        }
+        (None, None) => None,
+        _ => {
+            return Err(usage_error(
+                "--project-owner-pubkey and --project-d-tag must be provided together",
+            ));
+        }
+    };
+    let projects = project.as_slice();
+    let mut scheduler = PeriodicScheduler::new();
+    let registered = ensure_backend_events_tasks(&mut scheduler, first_due_at, projects)
+        .map_err(|error| runtime_error(error.to_string()))?;
+    let tick = tick_backend_events(BackendEventsTickInput {
+        now,
+        scheduler: &mut scheduler,
+        tenex_base_dir: &options.tenex_base_dir,
+        daemon_dir: &options.daemon_dir,
+        accepted_at,
+        request_timestamp,
+        projects,
+    })
+    .map_err(|error| runtime_error(error.to_string()))?;
+    let publish_outbox_after = inspect_publish_outbox(&options.daemon_dir, accepted_at)
+        .map_err(|error| runtime_error(error.to_string()))?;
+
+    Ok(BackendEventsPeriodicTickDiagnostics {
+        schema_version: 1,
+        tenex_base_dir: options.tenex_base_dir.clone(),
+        daemon_dir: options.daemon_dir.clone(),
+        now,
+        first_due_at,
+        accepted_at,
+        request_timestamp,
+        registered,
+        tick,
+        publish_outbox_after,
     })
 }
 
@@ -459,6 +548,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         Some("backend-events-enqueue-project-status") => {
             DaemonControlCommand::BackendEventsEnqueueProjectStatus
         }
+        Some("backend-events-periodic-tick") => DaemonControlCommand::BackendEventsPeriodicTick,
         Some("readiness") => DaemonControlCommand::Readiness,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
         Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
@@ -481,6 +571,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let mut created_at = None;
     let mut accepted_at = None;
     let mut request_timestamp = None;
+    let mut first_due_at = None;
     let mut project_owner_pubkey = None;
     let mut project_d_tag = None;
     let mut project_manager_pubkey = None;
@@ -530,6 +621,13 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .get(index)
                     .ok_or_else(|| usage_error("--request-timestamp requires a value"))?;
                 request_timestamp = Some(parse_u64_arg("--request-timestamp", value)?);
+            }
+            "--first-due-at" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--first-due-at requires a value"))?;
+                first_due_at = Some(parse_u64_arg("--first-due-at", value)?);
             }
             "--project-owner-pubkey" => {
                 index += 1;
@@ -588,6 +686,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         created_at,
         accepted_at,
         request_timestamp,
+        first_due_at,
         project_owner_pubkey,
         project_d_tag,
         project_manager_pubkey,
@@ -628,6 +727,7 @@ fn usage() -> String {
         "  daemon-control backend-events-plan --daemon-dir <path> [--tenex-base-dir <path>] [--inspected-at <ms>]",
         "  daemon-control backend-events-enqueue-status --daemon-dir <path> [--tenex-base-dir <path>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control backend-events-enqueue-project-status --daemon-dir <path> [--tenex-base-dir <path>] --project-owner-pubkey <hex> --project-d-tag <d> [--project-manager-pubkey <hex>] [--worktree <branch>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
+        "  daemon-control backend-events-periodic-tick --daemon-dir <path> [--tenex-base-dir <path>] [--project-owner-pubkey <hex> --project-d-tag <d>] [--project-manager-pubkey <hex>] [--worktree <branch>] [--first-due-at <s>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
@@ -797,6 +897,42 @@ mod tests {
             options.worktrees,
             vec!["main".to_string(), "feature/rust".to_string()]
         );
+        assert_eq!(options.created_at, Some(1_710_001_000));
+        assert_eq!(options.accepted_at, Some(1_710_001_000_100));
+        assert_eq!(options.request_timestamp, Some(1_710_001_000_050));
+    }
+
+    #[test]
+    fn parses_backend_events_periodic_tick_args() {
+        let options = parse_daemon_control_args(&[
+            "backend-events-periodic-tick".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--project-owner-pubkey".to_string(),
+            xonly_pubkey_hex(0x0a),
+            "--project-d-tag".to_string(),
+            "demo-project".to_string(),
+            "--first-due-at".to_string(),
+            "1710000990".to_string(),
+            "--created-at".to_string(),
+            "1710001000".to_string(),
+            "--accepted-at".to_string(),
+            "1710001000100".to_string(),
+            "--request-timestamp".to_string(),
+            "1710001000050".to_string(),
+        ])
+        .expect("backend-events-periodic-tick args must parse");
+
+        assert_eq!(
+            options.command,
+            DaemonControlCommand::BackendEventsPeriodicTick
+        );
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert_eq!(options.project_d_tag.as_deref(), Some("demo-project"));
+        assert_eq!(options.first_due_at, Some(1_710_000_990));
         assert_eq!(options.created_at, Some(1_710_001_000));
         assert_eq!(options.accepted_at, Some(1_710_001_000_100));
         assert_eq!(options.request_timestamp, Some(1_710_001_000_050));
@@ -1398,6 +1534,112 @@ mod tests {
         assert_eq!(value["scheduledTaskCount"], json!(1));
         assert_eq!(value["worktreeCount"], json!(1));
         assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(1));
+        assert_eq!(value["publishOutboxAfter"]["publishedCount"], json!(0));
+        assert_eq!(value["publishOutboxAfter"]["failedCount"], json!(0));
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
+    }
+
+    #[test]
+    fn backend_events_periodic_tick_writes_backend_and_project_outbox_records_json() {
+        let tenex_base_dir = unique_temp_base_dir();
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        let project_dir = tenex_base_dir.join("projects").join("demo-project");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        fs::create_dir_all(&project_dir).expect("project dir must create");
+
+        let owner = xonly_pubkey_hex(0x0b);
+        let agent = xonly_pubkey_hex(0x0c);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+        fs::write(
+            agents_dir.join(format!("{agent}.json")),
+            r#"{"slug":"worker","status":"active"}"#,
+        )
+        .expect("agent file must write");
+        fs::write(
+            tenex_base_dir.join("llms.json"),
+            r#"{"configurations":{"alpha":{"provider":"openai","model":"gpt-4o"}}}"#,
+        )
+        .expect("llms file must write");
+        fs::write(
+            project_dir.join("schedules.json"),
+            r#"[{
+                "id": "task-1",
+                "title": "Nightly report",
+                "schedule": "0 1 * * *",
+                "prompt": "Run nightly report",
+                "targetAgentSlug": "worker"
+            }]"#,
+        )
+        .expect("schedules file must write");
+
+        let output = run_cli([
+            "backend-events-periodic-tick",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("daemon path must be utf-8"),
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+            "--project-owner-pubkey",
+            &owner,
+            "--project-d-tag",
+            "demo-project",
+            "--project-manager-pubkey",
+            &agent,
+            "--worktree",
+            "main",
+            "--first-due-at",
+            "1710001300",
+            "--created-at",
+            "1710001300",
+            "--accepted-at",
+            "1710001300100",
+            "--request-timestamp",
+            "1710001300050",
+        ])
+        .expect("backend-events-periodic-tick command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        let project_task_name = format!("project-status:{owner}:demo-project");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["now"], json!(1_710_001_300u64));
+        assert_eq!(value["firstDueAt"], json!(1_710_001_300u64));
+        assert_eq!(
+            value["registered"]["registeredTaskNames"],
+            json!(["backend-status", project_task_name.clone()])
+        );
+        assert_eq!(
+            value["tick"]["dueTaskNames"],
+            json!(["backend-status", project_task_name])
+        );
+        assert_eq!(
+            value["tick"]["backendStatus"]["enqueuedEventCount"],
+            json!(2)
+        );
+        assert_eq!(
+            value["tick"]["projectStatuses"][0]["enqueuedEventCount"],
+            json!(1)
+        );
+        assert_eq!(
+            value["tick"]["schedulerSnapshot"]["tasks"][0]["intervalSeconds"],
+            json!(30)
+        );
+        assert_eq!(
+            value["tick"]["schedulerSnapshot"]["tasks"][0]["nextDueAt"],
+            json!(1_710_001_330u64)
+        );
+        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(3));
         assert_eq!(value["publishOutboxAfter"]["publishedCount"], json!(0));
         assert_eq!(value["publishOutboxAfter"]["failedCount"], json!(0));
 

@@ -872,9 +872,9 @@ Landed slices:
   into the durable Rust publish outbox without publishing directly to relays.
 - `crates/tenex-daemon/src/bin/daemon-control.rs` —
   `backend-events-enqueue-status`,
-  `backend-events-enqueue-project-status`, and `readiness` CLI wiring for
-  enqueue diagnostics and startup-readiness JSON without direct relay
-  publishing.
+  `backend-events-enqueue-project-status`, `backend-events-periodic-tick`, and
+  `readiness` CLI wiring for enqueue diagnostics, one-shot periodic tick
+  diagnostics, and startup-readiness JSON without direct relay publishing.
 - `crates/tenex-daemon/src/project_status_sources.rs` — filesystem readers for
   global `llms.json` model config keys and per-project `schedules.json`
   records, with deterministic ordering and TS-aligned cron/one-off task
@@ -890,7 +890,9 @@ Landed slices:
   registers backend-status plus per-project status tasks on the same scheduler,
   consumes due task names once, and enqueues heartbeat, installed-agent-list,
   and project-status records through their filesystem-backed runtimes on the
-  existing 30-second TypeScript status cadence.
+  existing 30-second TypeScript status cadence. The
+  `daemon-control backend-events-periodic-tick` command exercises this as a
+  one-shot operator diagnostic with explicit project owner/tag inputs.
 - `daemon-control backend-events-plan` — read-only diagnostics over publish
   outbox state plus backend status publisher readiness, including config,
   signer, relay, and installed-agent inventory availability without mutating

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use serde::Serialize;
 use thiserror::Error;
 
 pub const PERIODIC_TICK_SCHEDULER_SCHEMA_VERSION: u32 = 1;
@@ -33,14 +34,16 @@ pub struct PeriodicScheduler {
     tasks: BTreeMap<String, PeriodicTaskEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PeriodicTaskSnapshot {
     pub name: String,
     pub interval_seconds: u64,
     pub next_due_at: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PeriodicSchedulerSnapshot {
     pub schema_version: u32,
     pub tasks: Vec<PeriodicTaskSnapshot>,
