@@ -281,6 +281,14 @@ pub fn run_daemon_tick_once_from_filesystem<P: PublishOutboxRelayPublisher>(
         retry_policy,
     })?
     .maintenance_report;
+    log_daemon_tick_publish_summary(
+        "daemon tick",
+        now_ms,
+        &maintenance,
+        None,
+        None,
+        &publish_outbox,
+    );
 
     Ok(DaemonTickOutcome {
         maintenance,
@@ -392,6 +400,14 @@ where
         retry_policy,
     })?
     .maintenance_report;
+    log_daemon_tick_publish_summary(
+        "daemon worker tick",
+        now_ms,
+        &maintenance,
+        Some(&worker_runtime),
+        Some(&operations_status),
+        &publish_outbox,
+    );
 
     Ok(DaemonTickWithWorkerOutcome {
         maintenance,
@@ -399,6 +415,106 @@ where
         operations_status,
         publish_outbox,
     })
+}
+
+fn log_daemon_tick_publish_summary(
+    message: &'static str,
+    now_ms: u64,
+    maintenance: &DaemonMaintenanceOutcome,
+    worker_runtime: Option<&DaemonWorkerRuntimeOutcome>,
+    operations_status: Option<&DaemonOperationsStatusTickOutcome>,
+    publish_outbox: &PublishOutboxMaintenanceReport,
+) {
+    let backend_enqueued_event_count = backend_enqueued_event_count(maintenance);
+    let backend_due_task_count = maintenance.backend_events.tick.due_task_names.len();
+    let project_descriptor_count = maintenance.project_descriptor_report.descriptors.len();
+    let project_status_count = maintenance.backend_events.tick.project_statuses.len();
+    let operations_active_event_count =
+        operations_status.map_or(0, |status| status.active_event_ids.len());
+    let operations_cleanup_event_count =
+        operations_status.map_or(0, |status| status.cleanup_event_ids.len());
+    let worker_outcome = worker_runtime.map(worker_runtime_outcome_label);
+    let publish_pending_before = publish_outbox.diagnostics_before.pending_count;
+    let publish_failed_before = publish_outbox.diagnostics_before.failed_count;
+    let publish_requeued_count = publish_outbox.requeued.len();
+    let publish_drained_count = publish_outbox.drained.len();
+    let publish_pending_after = publish_outbox.diagnostics_after.pending_count;
+    let publish_published_after = publish_outbox.diagnostics_after.published_count;
+    let publish_failed_after = publish_outbox.diagnostics_after.failed_count;
+    let publish_retry_due_after = publish_outbox.diagnostics_after.retry_due_count;
+    let has_activity = backend_due_task_count > 0
+        || backend_enqueued_event_count > 0
+        || operations_active_event_count > 0
+        || operations_cleanup_event_count > 0
+        || publish_pending_before > 0
+        || publish_failed_before > 0
+        || publish_requeued_count > 0
+        || publish_drained_count > 0
+        || matches!(
+            worker_runtime,
+            Some(DaemonWorkerRuntimeOutcome::SessionCompleted { .. })
+        );
+
+    if has_activity {
+        tracing::info!(
+            tick_kind = message,
+            now_ms,
+            backend_due_task_count,
+            backend_enqueued_event_count,
+            project_descriptor_count,
+            project_status_count,
+            worker_outcome = ?worker_outcome,
+            operations_active_event_count,
+            operations_cleanup_event_count,
+            publish_pending_before,
+            publish_failed_before,
+            publish_requeued_count,
+            publish_drained_count,
+            publish_pending_after,
+            publish_published_after,
+            publish_failed_after,
+            publish_retry_due_after,
+            "daemon tick publish summary"
+        );
+    } else {
+        tracing::debug!(
+            tick_kind = message,
+            now_ms,
+            backend_due_task_count,
+            backend_enqueued_event_count,
+            project_descriptor_count,
+            project_status_count,
+            worker_outcome = ?worker_outcome,
+            publish_pending_after,
+            publish_published_after,
+            publish_failed_after,
+            publish_retry_due_after,
+            "daemon tick publish summary"
+        );
+    }
+}
+
+fn backend_enqueued_event_count(maintenance: &DaemonMaintenanceOutcome) -> usize {
+    maintenance
+        .backend_events
+        .tick
+        .backend_status
+        .as_ref()
+        .map_or(0, |status| status.enqueued_event_count)
+        + maintenance
+            .backend_events
+            .tick
+            .project_statuses
+            .iter()
+            .map(|status| status.enqueued_event_count)
+            .sum::<usize>()
+}
+
+fn worker_runtime_outcome_label(outcome: &DaemonWorkerRuntimeOutcome) -> &'static str {
+    match outcome {
+        DaemonWorkerRuntimeOutcome::NotAdmitted { .. } => "not_admitted",
+        DaemonWorkerRuntimeOutcome::SessionCompleted { .. } => "session_completed",
+    }
 }
 
 fn read_active_operations_by_project_from_filesystem<'a>(

@@ -161,6 +161,12 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
                 event_kind = event.kind,
             )
             .entered();
+            tracing::info!(
+                relay_url = %relay_url,
+                event_id = %event.id,
+                event_kind = event.kind,
+                "publishing nostr event to relay"
+            );
             let auth_signer = self
                 .auth_signer
                 .as_ref()
@@ -173,7 +179,7 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
             ) {
                 Ok(result) => {
                     if result.accepted {
-                        tracing::debug!(relay_url = %relay_url, event_id = %event.id, "nostr event published");
+                        tracing::info!(relay_url = %relay_url, event_id = %event.id, "nostr event published");
                     } else {
                         tracing::warn!(
                             relay_url = %relay_url,

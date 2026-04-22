@@ -363,24 +363,57 @@ pub fn run_nostr_subscription_relay_once(
                     tracing::debug!(
                         relay_url = %input.relay_url,
                         event_id = %event.event_id,
+                        event_kind = event.kind,
+                        class = ?event.class,
                         "nostr event received"
                     );
                 }
                 for dispatch in &tick.dispatches {
-                    if let crate::nostr_subscription_tick::NostrSubscriptionTickDispatch::Queued {
-                        event_id,
-                        dispatch_id,
-                        agent_pubkey,
-                        ..
-                    } = dispatch
-                    {
-                        tracing::info!(
-                            relay_url = %input.relay_url,
-                            event_id = %event_id,
-                            dispatch_id = %dispatch_id,
-                            agent_pubkey = %agent_pubkey,
-                            "inbound nostr event dispatched"
-                        );
+                    match dispatch {
+                        crate::nostr_subscription_tick::NostrSubscriptionTickDispatch::Queued {
+                            event_id,
+                            dispatch_id,
+                            project_id,
+                            agent_pubkey,
+                            conversation_id,
+                            queued,
+                            already_existed,
+                            ..
+                        } => {
+                            tracing::info!(
+                                relay_url = %input.relay_url,
+                                event_id = %event_id,
+                                dispatch_id = %dispatch_id,
+                                project_id = %project_id,
+                                agent_pubkey = %agent_pubkey,
+                                conversation_id = %conversation_id,
+                                queued = *queued,
+                                already_existed = *already_existed,
+                                "inbound nostr event dispatched"
+                            );
+                        }
+                        crate::nostr_subscription_tick::NostrSubscriptionTickDispatch::Ignored {
+                            event_id,
+                            code,
+                            detail,
+                            class,
+                            project_id,
+                            pubkeys,
+                            dispatch_id,
+                            ..
+                        } => {
+                            tracing::info!(
+                                relay_url = %input.relay_url,
+                                event_id = %event_id,
+                                code = %code,
+                                detail = %detail,
+                                class = ?class,
+                                project_id = ?project_id,
+                                pubkeys = ?pubkeys,
+                                dispatch_id = ?dispatch_id,
+                                "inbound nostr event ignored"
+                            );
+                        }
                     }
                 }
                 append_tick_diagnostics(&mut diagnostics, tick, frame_index);

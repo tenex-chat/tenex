@@ -581,6 +581,15 @@ pub fn drain_pending_publish_outbox_with_retry_policy<P: PublishOutboxRelayPubli
             });
         }
         verify_signed_event(&record.event)?;
+        tracing::info!(
+            event_id = %record.event.id,
+            event_kind = record.event.kind,
+            request_id = %record.request.request_id,
+            project_id = %record.request.project_id,
+            conversation_id = %record.request.conversation_id,
+            agent_pubkey = %record.request.agent_pubkey,
+            "publish outbox draining event"
+        );
 
         match publisher.publish_signed_event(&record.event) {
             Ok(report) if relay_report_indicates_published(&report) => {
@@ -593,6 +602,12 @@ pub fn drain_pending_publish_outbox_with_retry_policy<P: PublishOutboxRelayPubli
                     retryable: false,
                     next_attempt_at: None,
                 });
+                tracing::info!(
+                    event_id = %record.event.id,
+                    request_id = %record.request.request_id,
+                    relay_results = ?record.attempts.last().map(|attempt| &attempt.relay_results),
+                    "publish outbox event published"
+                );
                 outcomes.push(transition_pending_record(
                     daemon_dir,
                     &source_path,
@@ -613,6 +628,14 @@ pub fn drain_pending_publish_outbox_with_retry_policy<P: PublishOutboxRelayPubli
                     retryable,
                     next_attempt_at,
                 });
+                tracing::warn!(
+                    event_id = %record.event.id,
+                    request_id = %record.request.request_id,
+                    retryable,
+                    next_attempt_at = ?next_attempt_at,
+                    relay_results = ?record.attempts.last().map(|attempt| &attempt.relay_results),
+                    "publish outbox event was not accepted by any relay"
+                );
                 outcomes.push(transition_pending_record(
                     daemon_dir,
                     &source_path,
@@ -633,6 +656,14 @@ pub fn drain_pending_publish_outbox_with_retry_policy<P: PublishOutboxRelayPubli
                     retryable: error.retryable,
                     next_attempt_at,
                 });
+                tracing::warn!(
+                    event_id = %record.event.id,
+                    request_id = %record.request.request_id,
+                    retryable = error.retryable,
+                    next_attempt_at = ?next_attempt_at,
+                    error = ?record.attempts.last().and_then(|attempt| attempt.error.as_deref()),
+                    "publish outbox event failed"
+                );
                 outcomes.push(transition_pending_record(
                     daemon_dir,
                     &source_path,
