@@ -1354,6 +1354,18 @@ Additional gates for kinds Rust encodes:
 
 ### Client Replay Harness
 
+Landed slices:
+
+- `tools/rust-migration/capture-relay-events.ts` — bun-runtime CLI that
+  subscribes to one or more relays with optional kind/author filters and
+  writes every received event as JSONL. Each record captures capturedAt,
+  relay, subscription id, the raw signed event, schnorr-verified flag (via
+  nostr-tools), and NIP-01 hash-matches-id flag; a `.summary.json` side
+  file records per-relay totals, unique-event count, invalid-signature
+  count, hash-mismatch count, and duplicate-skipped count. Deduplicates by
+  event id across relays. Runs until `--duration-seconds` elapses or
+  SIGINT/SIGTERM. Consumed by the future replay harness below.
+
 Build a replay harness that can feed captured relay events into:
 
 - TypeScript daemon
