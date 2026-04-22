@@ -385,7 +385,7 @@ mod tests {
     fn write_agent(agents_dir: &Path, pubkey: &str, slug: &str, status: &str) {
         fs::write(
             agents_dir.join(format!("{pubkey}.json")),
-            format!(r#"{{"slug":"{slug}","status":"{status}","nsec":"nsec-placeholder"}}"#),
+            format!(r#"{{"slug":"{slug}","status":"{status}"}}"#),
         )
         .expect("agent must write");
     }

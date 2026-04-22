@@ -7,7 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tenex_daemon::agent_inventory::read_installed_agent_inventory;
 use tenex_daemon::backend_config::read_backend_config;
-use tenex_daemon::backend_status_runtime::agents_dir;
+use tenex_daemon::backend_status_runtime::{
+    BackendStatusRuntimeInput, agents_dir, publish_backend_status_from_filesystem,
+};
 use tenex_daemon::caches::prefix_lookup::{PrefixLookupDiagnostics, inspect_prefix_lookup};
 use tenex_daemon::caches::profile_names::{ProfileNamesDiagnostics, inspect_profile_names};
 use tenex_daemon::caches::trust_pubkeys::{TrustPubkeysDiagnostics, inspect_trust_pubkeys};
@@ -29,6 +31,7 @@ enum DaemonControlCommand {
     Caches,
     Diagnostics,
     BackendEventsPlan,
+    BackendEventsEnqueueStatus,
     SchedulerWakeups,
     SchedulerWakeupsMaintain,
     Status,
@@ -43,6 +46,9 @@ struct DaemonControlCliOptions {
     daemon_dir: PathBuf,
     tenex_base_dir: PathBuf,
     inspected_at: u64,
+    created_at: Option<u64>,
+    accepted_at: Option<u64>,
+    request_timestamp: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -76,6 +82,25 @@ struct BackendEventsStatusPublisherReadiness {
     relay_url_count: usize,
     active_agent_count: Option<usize>,
     skipped_agent_file_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendEventsEnqueueStatusDiagnostics {
+    schema_version: u32,
+    tenex_base_dir: PathBuf,
+    daemon_dir: PathBuf,
+    created_at: u64,
+    accepted_at: u64,
+    request_timestamp: u64,
+    backend_pubkey: String,
+    owner_pubkey_count: usize,
+    relay_url_count: usize,
+    active_agent_count: usize,
+    skipped_agent_file_count: usize,
+    heartbeat_event_id: String,
+    installed_agent_list_event_id: String,
+    publish_outbox_after: PublishOutboxDiagnostics,
 }
 
 #[derive(Debug)]
@@ -131,6 +156,11 @@ where
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
+        DaemonControlCommand::BackendEventsEnqueueStatus => {
+            let diagnostics = enqueue_backend_events_status(&options)?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
         DaemonControlCommand::SchedulerWakeups => serde_json::to_string_pretty(
             &inspect_scheduler_wakeups(&options.daemon_dir, options.inspected_at)
                 .map_err(|error| runtime_error(error.to_string()))?,
@@ -180,6 +210,42 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
             .map_err(|error| runtime_error(error.to_string()))?,
         profile_names: inspect_profile_names(&options.daemon_dir, options.inspected_at)
             .map_err(|error| runtime_error(error.to_string()))?,
+    })
+}
+
+fn enqueue_backend_events_status(
+    options: &DaemonControlCliOptions,
+) -> Result<BackendEventsEnqueueStatusDiagnostics, CliError> {
+    let accepted_at = options.accepted_at.unwrap_or(options.inspected_at);
+    let request_timestamp = options.request_timestamp.unwrap_or(accepted_at);
+    let created_at = options.created_at.unwrap_or(accepted_at / 1_000);
+    let input = BackendStatusRuntimeInput::new(
+        &options.tenex_base_dir,
+        &options.daemon_dir,
+        created_at,
+        accepted_at,
+        request_timestamp,
+    );
+    let outcome = publish_backend_status_from_filesystem(input)
+        .map_err(|error| runtime_error(error.to_string()))?;
+    let publish_outbox_after = inspect_publish_outbox(&options.daemon_dir, accepted_at)
+        .map_err(|error| runtime_error(error.to_string()))?;
+
+    Ok(BackendEventsEnqueueStatusDiagnostics {
+        schema_version: 1,
+        tenex_base_dir: options.tenex_base_dir.clone(),
+        daemon_dir: options.daemon_dir.clone(),
+        created_at,
+        accepted_at,
+        request_timestamp,
+        backend_pubkey: outcome.heartbeat.record.event.pubkey.clone(),
+        owner_pubkey_count: outcome.config.whitelisted_pubkeys.len(),
+        relay_url_count: outcome.config.effective_relay_urls().len(),
+        active_agent_count: outcome.agent_inventory.active_agents.len(),
+        skipped_agent_file_count: outcome.agent_inventory.skipped_files.len(),
+        heartbeat_event_id: outcome.heartbeat.record.event.id,
+        installed_agent_list_event_id: outcome.installed_agent_list.record.event.id,
+        publish_outbox_after,
     })
 }
 
@@ -297,6 +363,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         Some("caches") => DaemonControlCommand::Caches,
         Some("diagnostics") => DaemonControlCommand::Diagnostics,
         Some("backend-events-plan") => DaemonControlCommand::BackendEventsPlan,
+        Some("backend-events-enqueue-status") => DaemonControlCommand::BackendEventsEnqueueStatus,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
         Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
         Some("status") => DaemonControlCommand::Status,
@@ -315,6 +382,9 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let mut daemon_dir = None;
     let mut tenex_base_dir = None;
     let mut inspected_at = None;
+    let mut created_at = None;
+    let mut accepted_at = None;
+    let mut request_timestamp = None;
     let mut index = 1;
 
     while index < args.len() {
@@ -340,6 +410,27 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .ok_or_else(|| usage_error("--inspected-at requires a value"))?;
                 inspected_at = Some(parse_u64_arg("--inspected-at", value)?);
             }
+            "--created-at" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--created-at requires a value"))?;
+                created_at = Some(parse_u64_arg("--created-at", value)?);
+            }
+            "--accepted-at" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--accepted-at requires a value"))?;
+                accepted_at = Some(parse_u64_arg("--accepted-at", value)?);
+            }
+            "--request-timestamp" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--request-timestamp requires a value"))?;
+                request_timestamp = Some(parse_u64_arg("--request-timestamp", value)?);
+            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -359,6 +450,9 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         daemon_dir,
         tenex_base_dir,
         inspected_at: inspected_at.unwrap_or_else(current_unix_time_ms),
+        created_at,
+        accepted_at,
+        request_timestamp,
     })
 }
 
@@ -393,6 +487,7 @@ fn usage() -> String {
         "  daemon-control caches --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control diagnostics --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control backend-events-plan --daemon-dir <path> [--tenex-base-dir <path>] [--inspected-at <ms>]",
+        "  daemon-control backend-events-enqueue-status --daemon-dir <path> [--tenex-base-dir <path>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control status --daemon-dir <path>",
@@ -493,6 +588,34 @@ mod tests {
         assert_eq!(options.command, DaemonControlCommand::BackendEventsPlan);
         assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
         assert_eq!(options.inspected_at, 1710001000000);
+    }
+
+    #[test]
+    fn parses_backend_events_enqueue_status_args() {
+        let options = parse_daemon_control_args(&[
+            "backend-events-enqueue-status".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--created-at".to_string(),
+            "1710001000".to_string(),
+            "--accepted-at".to_string(),
+            "1710001000100".to_string(),
+            "--request-timestamp".to_string(),
+            "1710001000050".to_string(),
+        ])
+        .expect("backend-events-enqueue-status args must parse");
+
+        assert_eq!(
+            options.command,
+            DaemonControlCommand::BackendEventsEnqueueStatus
+        );
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert_eq!(options.created_at, Some(1_710_001_000));
+        assert_eq!(options.accepted_at, Some(1_710_001_000_100));
+        assert_eq!(options.request_timestamp, Some(1_710_001_000_050));
     }
 
     #[test]
@@ -898,7 +1021,7 @@ mod tests {
         .expect("config must write");
         fs::write(
             agents_dir.join(format!("{agent}.json")),
-            r#"{"slug":"worker","status":"active","nsec":"nsec-placeholder"}"#,
+            r#"{"slug":"worker","status":"active"}"#,
         )
         .expect("agent file must write");
 
@@ -923,6 +1046,73 @@ mod tests {
         assert_eq!(readiness["relayUrlCount"], json!(1));
         assert_eq!(readiness["activeAgentCount"], json!(1));
         assert_eq!(readiness["skippedAgentFileCount"], json!(0));
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
+    }
+
+    #[test]
+    fn backend_events_enqueue_status_writes_pending_outbox_records_json() {
+        let tenex_base_dir = unique_temp_base_dir();
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+
+        let owner = xonly_pubkey_hex(0x04);
+        let agent = xonly_pubkey_hex(0x05);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+        fs::write(
+            agents_dir.join(format!("{agent}.json")),
+            r#"{"slug":"worker","status":"active"}"#,
+        )
+        .expect("agent file must write");
+
+        let output = run_cli([
+            "backend-events-enqueue-status",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("daemon path must be utf-8"),
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+            "--created-at",
+            "1710001000",
+            "--accepted-at",
+            "1710001000100",
+            "--request-timestamp",
+            "1710001000050",
+        ])
+        .expect("backend-events-enqueue-status command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["createdAt"], json!(1_710_001_000u64));
+        assert_eq!(value["acceptedAt"], json!(1_710_001_000_100u64));
+        assert_eq!(value["requestTimestamp"], json!(1_710_001_000_050u64));
+        assert_eq!(value["backendPubkey"], json!(TEST_BACKEND_PUBKEY_HEX));
+        assert_eq!(value["ownerPubkeyCount"], json!(1));
+        assert_eq!(value["relayUrlCount"], json!(1));
+        assert_eq!(value["activeAgentCount"], json!(1));
+        assert_eq!(value["skippedAgentFileCount"], json!(0));
+        assert_ne!(
+            value["heartbeatEventId"],
+            value["installedAgentListEventId"]
+        );
+        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(2));
+        assert_eq!(value["publishOutboxAfter"]["publishedCount"], json!(0));
+        assert_eq!(value["publishOutboxAfter"]["failedCount"], json!(0));
+        assert_eq!(
+            value["publishOutboxAfter"]["oldestPending"]["agentPubkey"],
+            json!(TEST_BACKEND_PUBKEY_HEX)
+        );
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }
