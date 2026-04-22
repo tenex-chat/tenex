@@ -187,6 +187,7 @@ Existing operator workflows must continue to work:
 - `tenex daemon status`
 - `tenex daemon stop`
 - `tenex daemon stop --force`
+- `tenex daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]`
 
 During migration, the TypeScript CLI may keep temporary developer launch
 controls, but the production target is a single Rust daemon path. Status and
@@ -893,12 +894,18 @@ Landed slices:
   project descriptors from shared filesystem state, invokes backend-events
   maintenance with those projects, and runs scheduler-wakeup maintenance from
   the same caller-owned timestamp.
+- `crates/tenex-daemon/src/daemon_loop.rs` — bounded, testable daemon tick
+  loop. It injects clock/sleeper traits, records per-iteration diagnostics, and
+  provides the filesystem tick that runs daemon maintenance first and
+  publish-outbox relay draining last through the shared
+  `PublishOutboxRelayPublisher` interface.
 - `crates/tenex-daemon/src/bin/daemon-control.rs` —
   `backend-events-enqueue-status`,
   `backend-events-enqueue-project-status`, `backend-events-periodic-tick`, and
-  `readiness` CLI wiring for enqueue diagnostics, one-shot periodic tick
-  diagnostics, filesystem project discovery diagnostics, and startup-readiness
-  JSON without direct relay publishing.
+  `daemon-maintenance`, `readiness` CLI wiring for enqueue diagnostics, one-shot
+  periodic tick diagnostics, filesystem project discovery diagnostics,
+  one-shot daemon maintenance JSON, and startup-readiness JSON without direct
+  relay publishing.
 - `crates/tenex-daemon/src/project_status_descriptors.rs` — filesystem reader
   for `$TENEX_BASE_DIR/projects/<project-dTag>/project.json` descriptors. It
   validates owner / project-manager pubkeys, skips stopped descriptors, reports
@@ -946,13 +953,14 @@ Landed slices:
 
 Planned next runtime boundaries:
 
-- `crates/tenex-daemon/src/periodic_tick.rs` and
-  `crates/tenex-daemon/src/backend_events_tick.rs` are present as the
-  timerless scheduler primitive and backend-events tick runner, and
-  `crates/tenex-daemon/src/daemon_maintenance.rs` is now the one-pass daemon
-  maintenance caller. The remaining boundary is the actual foreground loop
-  around that caller so backend-status, project-status, heartbeat, scheduler
-  wakeups, and publish-outbox maintenance can run from one tick source.
+- `crates/tenex-daemon/src/periodic_tick.rs`,
+  `crates/tenex-daemon/src/backend_events_tick.rs`,
+  `crates/tenex-daemon/src/daemon_maintenance.rs`, and
+  `crates/tenex-daemon/src/daemon_loop.rs` now provide the timerless scheduler,
+  backend-events tick runner, one-pass daemon maintenance caller, and bounded
+  loop composition. The remaining boundary is the actual foreground process
+  that owns lock/status lifecycle, real clock/sleeping, relay configuration,
+  and `NostrRelayPublisher` construction.
 - `crates/tenex-daemon/src/backend_status_runtime.rs` remains backend-status
   only: heartbeat and installed-agent-list enqueueing through
   `daemon-control backend-events-enqueue-status`. Project-status uses the
@@ -1247,36 +1255,54 @@ Rollback:
 - Stop Rust daemon, start TypeScript daemon, and verify clients recover without
   state repair.
 
-### M10: Default Cutover
+### M10: Clean Cutover
 
-Goal: make Rust daemon the default control plane.
+Goal: delete the TypeScript daemon and all compatibility shims. Rust is the
+only control plane. No fallback path.
 
 Scope:
 
-- Make launch path default to Rust.
-- Keep TypeScript daemon fallback for one release cycle.
-- Update `MODULE_INVENTORY.md`, `docs/ARCHITECTURE.md`, README, and operator
-  docs.
-- Document unsupported features, if any.
-- Add repair tools for RAL journal and worker state.
-- Add release checklist for protocol fixtures.
+- Delete `src/commands/daemon.ts`, `src/daemon/Daemon.ts`,
+  `src/daemon/RuntimeLifecycle.ts`, `src/daemon/ProjectRuntime.ts`, and all
+  remaining TypeScript daemon infrastructure that is no longer reachable from
+  agent execution workers.
+- Remove `TENEX_RUST_DAEMON`, `TENEX_AGENT_WORKER`, and all other temporary
+  migration feature flags from both TypeScript and Rust.
+- Remove the `dispatch-adapter.ts` TypeScript-daemon worker bridge and the
+  in-process `AgentExecutor` dispatch route it guarded.
+- Remove the compatibility RAL bridge (`ral-bridge.ts`) and any remaining
+  `RALRegistry` call sites that were kept for the transition.
+- Remove the compatibility publisher factory and `WorkerPublishRequestPublisher`
+  TypeScript path once Rust is the sole relay publisher.
+- Delete dead TypeScript daemon services: `SubscriptionManager`,
+  `DaemonRouter`, `RuntimeLifecycle`, status publisher loops, operations status
+  interval, agent config watcher, daemon-level skill whitelist subscription,
+  conversation indexing job, daemon-level agent definition monitor.
+- Delete or inline any TypeScript wrapper that exists only to bridge to Rust
+  behavior; no shims, no adapters kept "just in case".
+- Update `MODULE_INVENTORY.md`, `docs/ARCHITECTURE.md`, and any operator docs
+  to reflect the new boundary: Rust is the daemon, Bun is execution-only.
+- Add repair tools for RAL journal and worker state if not already present.
+- Ensure `bun test` passes with only the worker-execution path wired.
 
 Quality gates:
 
-- All previous milestone gates remain green.
-- Full test suite passes.
-- Rust daemon has completed a canary soak without compatibility blockers.
-- Rollback has been tested from the release candidate.
-- Docs describe both default and fallback paths.
+- All M0–M9 quality gates remain green.
+- Full test suite passes with TypeScript daemon code removed.
+- No reference to deleted TypeScript daemon files remains in live code paths.
+- Rust daemon has completed M9 canary without compatibility blockers.
+- NIP-01 self-conformance, schnorr signature, relay round-trip, and signer
+  identity gates pass for every event kind Rust publishes.
 
 Interoperability gate:
 
-- Rust daemon can participate in the same relay/project ecosystem as existing
-  TENEX clients and any remaining TypeScript backends.
+- Existing TENEX clients work against the Rust daemon with no TypeScript daemon
+  process running at all.
 
 Rollback:
 
-- Feature flag or command path starts TypeScript daemon fallback.
+- None. M10 is a one-way deletion. If M9 reveals a blocker, fix it before
+  cutting over rather than carrying a fallback.
 
 ## Global Quality Gates
 
@@ -1498,18 +1524,19 @@ records, and rollback paths before authority transfers.
 
 ## Release Criteria
 
-Rust daemon can become the default only when:
+M10 (clean cutover) can proceed only when:
 
-- all M0-M9 quality gates are green for the supported feature set
+- all M0–M9 quality gates are green for the supported feature set
 - no client-visible schema change is required
-- rollback to TypeScript daemon has been tested on the same filesystem state
-- rollback has been tested with active/waiting/queued execution state
 - RAL journal repair or fail-closed tooling exists
-- operator docs describe startup, status, stop, rollback, and known limitations
-- unsupported transports or services are feature-gated and visible to operators
+- operator docs describe startup, status, stop, and known limitations
+- unsupported transports or services are explicitly handled before cutover, not
+  feature-flagged and deferred
 - NIP-01 self-conformance, schnorr signature, relay round-trip, and signer
   identity gates pass for every event kind Rust publishes (encoded or
   pass-through)
+- TypeScript daemon code has been identified and is ready to delete — no
+  lingering references that would require a compatibility shim after deletion
 
 ## First Implementation Slice
 

@@ -1281,28 +1281,39 @@ Exit criteria:
 - TypeScript `ProjectRuntime` is no longer needed for daemon behavior.
 - External events can wake agents without any Bun daemon process alive.
 
-### Phase 9: Cutover and Cleanup
+### Phase 9: Clean Cutover: Delete the TypeScript Daemon
 
 Goals:
 
-- Make Rust daemon the default control plane.
+- Delete all TypeScript daemon code that is no longer needed.
+- Rust is the only control plane. No fallback, no compatibility shims.
 
 Work:
 
-- Add operator-facing migration notes.
-- Add rollback command or flag.
-- Keep TypeScript daemon path available for at least one release.
-- Update `MODULE_INVENTORY.md` and architecture docs with the new Rust boundary.
-- Remove or deprecate in-process daemon execution once Rust mode is stable.
-- Remove compatibility publishing after Rust-owned publishing is proven.
-- Remove compatibility RAL bridge after Rust RAL authority is complete.
+- Delete `src/commands/daemon.ts`, `src/daemon/Daemon.ts`,
+  `src/daemon/RuntimeLifecycle.ts`, `src/daemon/ProjectRuntime.ts`, and all
+  remaining TypeScript daemon infrastructure unreachable from execution workers.
+- Remove `dispatch-adapter.ts` and the in-process `AgentExecutor` dispatch
+  route it guarded.
+- Remove the compatibility RAL bridge (`ral-bridge.ts`) and all remaining
+  `RALRegistry` call sites kept only for transition.
+- Remove the compatibility publisher factory and `WorkerPublishRequestPublisher`
+  TypeScript path.
+- Delete dead TypeScript daemon services: `SubscriptionManager`, `DaemonRouter`,
+  `RuntimeLifecycle`, status publisher loops, operations status interval, agent
+  config watcher, skill whitelist subscription, conversation indexing job,
+  daemon-level agent definition monitor.
+- Remove all temporary migration env flags: `TENEX_RUST_DAEMON`,
+  `TENEX_AGENT_WORKER`, and all related overrides from both TypeScript and Rust.
+- Update `MODULE_INVENTORY.md` and architecture docs to reflect the new
+  boundary: Rust is the daemon, Bun is execution-only.
 
 Exit criteria:
 
-- Rust daemon is default.
-- Bun is started only for agent execution workers or explicitly configured
-  transport adapters.
-- Status, stop, restart, and execution behavior are documented.
+- TypeScript daemon code is gone, not deprecated or feature-flagged.
+- `bun test` passes with only the worker execution path.
+- Bun is started only for agent execution workers or transport adapters.
+- No migration shim, adapter, or compatibility wrapper remains in the codebase.
 
 ## Operational Controls
 
@@ -1489,12 +1500,17 @@ not add a new database for daemon/RAL coordination state.
 
 ## Rollback Strategy
 
-Before production cutover, each phase should have a repair or rollback path:
+Before M10 (clean cutover), each phase should have a repair path. Rollback
+means fixing or disabling the Rust feature, not reverting to TypeScript code.
+There is no TypeScript daemon fallback after M10; fix blockers in M9 before
+cutting over.
 
-- If worker execution fails, disable `TENEX_AGENT_WORKER`.
-- If Rust daemon shadow mode disagrees, keep TypeScript daemon authoritative.
-- If Rust dispatch fails, fall back to TypeScript in-process dispatch.
-- If Rust-owned RAL state fails, fall back to TypeScript RAL compatibility mode.
+- If worker execution fails during M1–M4, fix the worker or disable the
+  out-of-process route; the in-process executor remains until M5 is ready.
+- If Rust daemon shadow mode disagrees, treat it as a Rust bug to fix before
+  enabling routing authority.
+- If Rust dispatch or RAL state fails pre-M10, fix the specific failure; do not
+  re-enable TypeScript daemon code that has already been removed.
 - If filesystem journal recovery fails, Rust must refuse new dispatch until the
   operator repairs or rolls back state.
 - If Rust publishing fails, stop accepting new publish requests, drain or repair

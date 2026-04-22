@@ -23,6 +23,9 @@ use tenex_daemon::daemon_control::{
     read_daemon_restart_state_compatibility,
 };
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
+use tenex_daemon::daemon_maintenance::{
+    DaemonMaintenanceInput, DaemonMaintenanceOutcome, run_daemon_maintenance_once_from_filesystem,
+};
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
 use tenex_daemon::project_status_descriptors::{
@@ -46,6 +49,7 @@ enum DaemonControlCommand {
     BackendEventsEnqueueStatus,
     BackendEventsEnqueueProjectStatus,
     BackendEventsPeriodicTick,
+    DaemonMaintenance,
     Readiness,
     SchedulerWakeups,
     SchedulerWakeupsMaintain,
@@ -155,6 +159,14 @@ struct BackendEventsPeriodicTickDiagnostics {
     project_descriptor_report: Option<ProjectStatusDescriptorReport>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonMaintenanceDiagnostics {
+    schema_version: u32,
+    #[serde(flatten)]
+    maintenance: DaemonMaintenanceOutcome,
+}
+
 #[derive(Debug)]
 struct CliError {
     message: String,
@@ -220,6 +232,11 @@ where
         }
         DaemonControlCommand::BackendEventsPeriodicTick => {
             let diagnostics = run_backend_events_periodic_tick(&options)?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
+        DaemonControlCommand::DaemonMaintenance => {
+            let diagnostics = run_daemon_maintenance(&options)?;
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
@@ -376,6 +393,22 @@ fn run_backend_events_periodic_tick(
         schema_version: 1,
         maintenance,
         project_descriptor_report,
+    })
+}
+
+fn run_daemon_maintenance(
+    options: &DaemonControlCliOptions,
+) -> Result<DaemonMaintenanceDiagnostics, CliError> {
+    let diagnostics = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
+        tenex_base_dir: &options.tenex_base_dir,
+        daemon_dir: &options.daemon_dir,
+        now_ms: options.inspected_at,
+    })
+    .map_err(|error| runtime_error(error.to_string()))?;
+
+    Ok(DaemonMaintenanceDiagnostics {
+        schema_version: 1,
+        maintenance: diagnostics,
     })
 }
 
@@ -586,6 +619,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
             DaemonControlCommand::BackendEventsEnqueueProjectStatus
         }
         Some("backend-events-periodic-tick") => DaemonControlCommand::BackendEventsPeriodicTick,
+        Some("daemon-maintenance") => DaemonControlCommand::DaemonMaintenance,
         Some("readiness") => DaemonControlCommand::Readiness,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
         Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
@@ -711,10 +745,14 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
 
     let daemon_dir = match daemon_dir {
         Some(daemon_dir) => daemon_dir,
-        None if command == DaemonControlCommand::Readiness => tenex_base_dir
-            .as_ref()
-            .map(|base_dir| base_dir.join("daemon"))
-            .ok_or_else(|| usage_error("--daemon-dir or --tenex-base-dir is required"))?,
+        None if command == DaemonControlCommand::Readiness
+            || command == DaemonControlCommand::DaemonMaintenance =>
+        {
+            tenex_base_dir
+                .as_ref()
+                .map(|base_dir| base_dir.join("daemon"))
+                .ok_or_else(|| usage_error("--daemon-dir or --tenex-base-dir is required"))?
+        }
         None => return Err(usage_error("--daemon-dir is required")),
     };
     let tenex_base_dir = tenex_base_dir.unwrap_or_else(|| infer_tenex_base_dir(&daemon_dir));
@@ -770,6 +808,7 @@ fn usage() -> String {
         "  daemon-control backend-events-enqueue-status --daemon-dir <path> [--tenex-base-dir <path>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control backend-events-enqueue-project-status --daemon-dir <path> [--tenex-base-dir <path>] --project-owner-pubkey <hex> --project-d-tag <d> [--project-manager-pubkey <hex>] [--worktree <branch>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control backend-events-periodic-tick --daemon-dir <path> [--tenex-base-dir <path>] [--discover-projects | --project-owner-pubkey <hex> --project-d-tag <d>] [--project-manager-pubkey <hex>] [--worktree <branch>] [--first-due-at <s>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
+        "  daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]",
         "  daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
@@ -1002,6 +1041,23 @@ mod tests {
         assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
         assert!(options.discover_projects);
         assert_eq!(options.first_due_at, Some(1_710_000_990));
+    }
+
+    #[test]
+    fn parses_daemon_maintenance_args_with_tenex_base_dir_only() {
+        let options = parse_daemon_control_args(&[
+            "daemon-maintenance".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--inspected-at".to_string(),
+            "1710001000000".to_string(),
+        ])
+        .expect("daemon-maintenance args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::DaemonMaintenance);
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex/daemon"));
+        assert_eq!(options.inspected_at, 1710001000000);
     }
 
     #[test]
@@ -1321,6 +1377,80 @@ mod tests {
         assert_eq!(value["diagnosticsAfter"]["duePendingCount"], json!(1));
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn daemon_maintenance_outputs_maintenance_json() {
+        let tenex_base_dir = unique_temp_base_dir();
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        let project_dir = tenex_base_dir.join("projects").join("demo-project");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        fs::create_dir_all(&project_dir).expect("project dir must create");
+
+        let owner = xonly_pubkey_hex(0x02);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+        fs::write(
+            project_dir.join("project.json"),
+            format!(
+                r#"{{
+                    "schemaVersion": 1,
+                    "status": "running",
+                    "projectOwnerPubkey": "{owner}",
+                    "projectDTag": "demo-project",
+                    "worktrees": ["main"]
+                }}"#
+            ),
+        )
+        .expect("project descriptor must write");
+
+        let output = run_cli([
+            "daemon-maintenance",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("temp path must be utf-8"),
+            "--inspected-at",
+            "1710001000000",
+        ])
+        .expect("daemon maintenance command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["tenexBaseDir"], json!(tenex_base_dir));
+        assert_eq!(value["daemonDir"], json!(daemon_dir));
+        assert_eq!(value["nowMs"], json!(1_710_001_000_000u64));
+        assert_eq!(value["nowSeconds"], json!(1_710_001_000u64));
+        assert_eq!(
+            value["projectDescriptorReport"]["descriptors"][0]["projectDTag"],
+            json!("demo-project")
+        );
+        assert_eq!(
+            value["backendEvents"]["tick"]["dueTaskNames"],
+            json!([
+                "backend-status",
+                format!("project-status:{owner}:demo-project")
+            ])
+        );
+        assert_eq!(
+            value["backendEvents"]["publishOutboxAfter"]["pendingCount"],
+            json!(3)
+        );
+        assert_eq!(
+            value["schedulerWakeups"]["diagnosticsAfter"]["pendingCount"],
+            json!(0)
+        );
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp tenex base dir cleanup must succeed");
     }
 
     #[test]
