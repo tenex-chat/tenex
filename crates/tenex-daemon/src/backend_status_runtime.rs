@@ -8,10 +8,11 @@ use crate::agent_inventory::{
 use crate::backend_config::{BackendConfigError, BackendConfigSnapshot, read_backend_config};
 use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_heartbeat,
-    publish_backend_installed_agent_list,
+    publish_backend_installed_agent_list, publish_backend_profile,
 };
 use crate::backend_events::heartbeat::HeartbeatInputs;
 use crate::backend_events::installed_agent_list::InstalledAgentListInputs;
+use crate::backend_profile::BackendProfileInputs;
 use crate::publish_runtime::BackendPublishRuntimeOutcome;
 
 pub const BACKEND_STATUS_PROJECT_ID: &str = "backend-status";
@@ -54,6 +55,7 @@ pub struct BackendStatusRuntimeOutcome {
     pub config: BackendConfigSnapshot,
     pub heartbeat: BackendPublishRuntimeOutcome,
     pub installed_agent_list: BackendPublishRuntimeOutcome,
+    pub backend_profile: Option<BackendPublishRuntimeOutcome>,
     pub agent_inventory: AgentInventoryReport,
 }
 
@@ -85,6 +87,20 @@ pub fn publish_backend_status_from_filesystem(
 ) -> Result<BackendStatusRuntimeOutcome, BackendStatusRuntimeError> {
     let config = read_backend_config(input.tenex_base_dir)?;
     let signer = config.backend_signer()?;
+    let backend_profile = if config.generated_tenex_private_key {
+        let request_id = backend_status_request_id("backend-profile", input.created_at);
+        Some(publish_backend_profile(
+            backend_status_context(&input, &request_id, 0),
+            BackendProfileInputs {
+                created_at: input.created_at,
+                backend_name: config.backend_name_or_default(),
+                whitelisted_pubkeys: &config.whitelisted_pubkeys,
+            },
+            &signer,
+        )?)
+    } else {
+        None
+    };
     let heartbeat_request_id = backend_status_request_id("heartbeat", input.created_at);
 
     let heartbeat = publish_backend_heartbeat(
@@ -113,6 +129,7 @@ pub fn publish_backend_status_from_filesystem(
         config,
         heartbeat,
         installed_agent_list,
+        backend_profile,
         agent_inventory,
     })
 }
@@ -193,6 +210,7 @@ mod tests {
     use crate::backend_config::backend_config_path;
     use crate::backend_events::heartbeat::BACKEND_HEARTBEAT_KIND;
     use crate::backend_events::installed_agent_list::INSTALLED_AGENT_LIST_KIND;
+    use crate::backend_profile::BACKEND_PROFILE_KIND;
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
@@ -285,6 +303,63 @@ mod tests {
     }
 
     #[test]
+    fn publishes_backend_profile_when_backend_key_is_generated() {
+        let tenex_base_dir = unique_temp_dir("generated-profile");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = agents_dir(&tenex_base_dir);
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+
+        let owner = pubkey_hex(0x08);
+        fs::write(
+            backend_config_path(&tenex_base_dir),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "backendName": "local backend"
+                }}"#
+            ),
+        )
+        .expect("config must write");
+
+        let input = BackendStatusRuntimeInput::new(
+            &tenex_base_dir,
+            &daemon_dir,
+            1_710_001_050,
+            1_710_001_050_100,
+            1_710_001_050_050,
+        );
+        let outcome =
+            publish_backend_status_from_filesystem(input).expect("backend status must enqueue");
+        let profile = outcome
+            .backend_profile
+            .as_ref()
+            .expect("generated backend key must enqueue backend profile");
+
+        assert_eq!(profile.record.event.kind, BACKEND_PROFILE_KIND);
+        assert!(profile.record.event.content.contains("local backend"));
+        assert_eq!(
+            profile.record.event.tags,
+            vec![
+                vec!["p".to_string(), owner],
+                vec!["bot".to_string()],
+                vec!["t".to_string(), "tenex".to_string()],
+                vec!["t".to_string(), "tenex-backend".to_string()],
+            ]
+        );
+        assert_eq!(profile.record.request.request_sequence, 0);
+        assert_eq!(
+            profile.record.request.request_id,
+            "backend-status:backend-profile:1710001050"
+        );
+        let profile_record =
+            read_pending_publish_outbox_record(&daemon_dir, &profile.record.event.id)
+                .expect("pending profile read must succeed")
+                .expect("pending profile must exist");
+        assert_eq!(profile_record, profile.record);
+    }
+
+    #[test]
     fn publishes_heartbeat_without_requiring_agent_inventory_dir() {
         let tenex_base_dir = unique_temp_dir("heartbeat-only");
         let daemon_dir = tenex_base_dir.join("daemon");
@@ -336,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_private_key_fails_before_publishing() {
+    fn missing_private_key_generates_key_and_publishes_heartbeat() {
         let tenex_base_dir = unique_temp_dir("missing-key");
         let daemon_dir = tenex_base_dir.join("daemon");
         fs::create_dir_all(&tenex_base_dir).expect("base dir must create");
@@ -354,13 +429,18 @@ mod tests {
             1_710_001_300_100,
             1_710_001_300_050,
         );
-        let error = publish_backend_heartbeat_from_filesystem(input)
-            .expect_err("missing signer key must fail");
+        let outcome = publish_backend_heartbeat_from_filesystem(input)
+            .expect("missing signer key must be generated");
 
-        assert!(matches!(
-            error,
-            BackendStatusRuntimeError::Config(BackendConfigError::MissingPrivateKey)
-        ));
+        assert_eq!(outcome.heartbeat.record.event.kind, BACKEND_HEARTBEAT_KIND);
+        assert!(outcome.config.generated_tenex_private_key);
+        assert!(
+            outcome
+                .config
+                .tenex_private_key
+                .as_ref()
+                .is_some_and(|key| key.len() == 64)
+        );
     }
 
     fn write_config(base_dir: &Path, owners: &[&str]) {

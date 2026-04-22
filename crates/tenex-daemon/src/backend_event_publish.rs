@@ -14,6 +14,9 @@ use crate::backend_events::operations_status::{
 use crate::backend_events::project_status::{
     ProjectStatusEncodeError, ProjectStatusInputs, encode_project_status,
 };
+use crate::backend_profile::{
+    BackendProfileEncodeError, BackendProfileInputs, encode_backend_profile,
+};
 use crate::nostr_event::SignedNostrEvent;
 use crate::publish_outbox::PublishOutboxError;
 use crate::publish_runtime::{
@@ -45,6 +48,8 @@ pub enum BackendEventPublishError {
     InstalledAgentList(#[from] InstalledAgentListEncodeError),
     #[error("operations-status encode failed: {0}")]
     OperationsStatus(#[from] OperationsStatusEncodeError),
+    #[error("backend-profile encode failed: {0}")]
+    BackendProfile(#[from] BackendProfileEncodeError),
     #[error("publish outbox error: {0}")]
     PublishOutbox(#[from] PublishOutboxError),
 }
@@ -82,6 +87,15 @@ pub fn publish_backend_operations_status<S: BackendSigner>(
     signer: &S,
 ) -> Result<BackendPublishRuntimeOutcome, BackendEventPublishError> {
     let event = encode_operations_status(&inputs, signer)?;
+    enqueue_backend_signed_event(context, event, signer).map_err(BackendEventPublishError::from)
+}
+
+pub fn publish_backend_profile<S: BackendSigner>(
+    context: BackendEventPublishContext<'_>,
+    inputs: BackendProfileInputs<'_>,
+    signer: &S,
+) -> Result<BackendPublishRuntimeOutcome, BackendEventPublishError> {
+    let event = encode_backend_profile(&inputs, signer)?;
     enqueue_backend_signed_event(context, event, signer).map_err(BackendEventPublishError::from)
 }
 

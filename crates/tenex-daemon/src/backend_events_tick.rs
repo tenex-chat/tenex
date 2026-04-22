@@ -60,6 +60,7 @@ pub struct BackendEventsTaskRegistration {
 #[serde(rename_all = "camelCase")]
 pub struct BackendEventsTickBackendStatusOutcome {
     pub task_name: String,
+    pub backend_profile_event_id: Option<String>,
     pub heartbeat_event_id: String,
     pub installed_agent_list_event_id: String,
     pub enqueued_event_count: usize,
@@ -195,9 +196,13 @@ pub fn tick_backend_events_for_due_tasks(
         ))?;
         Some(BackendEventsTickBackendStatusOutcome {
             task_name: BACKEND_STATUS_TICK_TASK_NAME.to_string(),
+            backend_profile_event_id: outcome
+                .backend_profile
+                .as_ref()
+                .map(|profile| profile.record.event.id.clone()),
             heartbeat_event_id: outcome.heartbeat.record.event.id,
             installed_agent_list_event_id: outcome.installed_agent_list.record.event.id,
-            enqueued_event_count: 2,
+            enqueued_event_count: 2 + usize::from(outcome.backend_profile.is_some()),
         })
     } else {
         None

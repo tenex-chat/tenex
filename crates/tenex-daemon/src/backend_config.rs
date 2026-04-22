@@ -3,7 +3,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use secp256k1::SecretKey;
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use thiserror::Error;
 use url::Url;
 
@@ -23,6 +25,15 @@ pub enum BackendConfigError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    #[error("backend config io error while writing {path}: {source}")]
+    WriteIo { path: PathBuf, source: io::Error },
+    #[error("backend config json error while writing {path}: {source}")]
+    WriteJson {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    #[error("backend private key generation failed: {0}")]
+    KeyGeneration(String),
     #[error("backend config tenexPrivateKey is missing")]
     MissingPrivateKey,
     #[error("backend signer error: {0}")]
@@ -42,6 +53,7 @@ pub struct BackendConfigSnapshot {
     pub relays: Vec<String>,
     pub identity_relays: Vec<String>,
     pub blossom_server_url: Option<String>,
+    pub generated_tenex_private_key: bool,
 }
 
 impl fmt::Debug for BackendConfigSnapshot {
@@ -60,6 +72,10 @@ impl fmt::Debug for BackendConfigSnapshot {
             .field("relays", &self.relays)
             .field("identity_relays", &self.identity_relays)
             .field("blossom_server_url", &self.blossom_server_url)
+            .field(
+                "generated_tenex_private_key",
+                &self.generated_tenex_private_key,
+            )
             .finish()
     }
 }
@@ -124,8 +140,14 @@ pub fn read_backend_config(
         path: config_path.clone(),
         source,
     })?;
-    let raw: RawTenexConfig =
+    let mut value: Value =
         serde_json::from_str(&content).map_err(|source| BackendConfigError::Json {
+            path: config_path.clone(),
+            source,
+        })?;
+    let generated_tenex_private_key = ensure_config_private_key(&config_path, &mut value)?;
+    let raw: RawTenexConfig =
+        serde_json::from_value(value).map_err(|source| BackendConfigError::Json {
             path: config_path.clone(),
             source,
         })?;
@@ -140,7 +162,53 @@ pub fn read_backend_config(
         relays: raw.relays,
         identity_relays: raw.identity_relays,
         blossom_server_url: raw.blossom_server_url,
+        generated_tenex_private_key,
     })
+}
+
+fn ensure_config_private_key(config_path: &Path, value: &mut Value) -> BackendConfigResult<bool> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| BackendConfigError::Json {
+            path: config_path.to_path_buf(),
+            source: serde_json::from_str::<Map<String, Value>>("[]")
+                .expect_err("array must not parse as object"),
+        })?;
+    let has_key = object
+        .get("tenexPrivateKey")
+        .and_then(Value::as_str)
+        .is_some_and(|key| !key.trim().is_empty());
+    if has_key {
+        return Ok(false);
+    }
+
+    object.insert(
+        "tenexPrivateKey".to_string(),
+        Value::String(generate_backend_private_key_hex()?),
+    );
+    let updated =
+        serde_json::to_string_pretty(value).map_err(|source| BackendConfigError::WriteJson {
+            path: config_path.to_path_buf(),
+            source,
+        })?;
+    fs::write(config_path, format!("{updated}\n")).map_err(|source| {
+        BackendConfigError::WriteIo {
+            path: config_path.to_path_buf(),
+            source,
+        }
+    })?;
+    Ok(true)
+}
+
+fn generate_backend_private_key_hex() -> BackendConfigResult<String> {
+    loop {
+        let mut bytes = [0_u8; 32];
+        getrandom::fill(&mut bytes)
+            .map_err(|error| BackendConfigError::KeyGeneration(error.to_string()))?;
+        if SecretKey::from_byte_array(bytes).is_ok() {
+            return Ok(hex::encode(bytes));
+        }
+    }
 }
 
 fn retain_nonempty(values: Vec<String>) -> Vec<String> {
@@ -245,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn defaults_missing_optional_fields() {
+    fn defaults_missing_optional_fields_and_generates_backend_key() {
         let base_dir = temp_dir("defaults_missing_optional_fields");
         fs::create_dir_all(&base_dir).expect("create temp config dir");
         fs::write(backend_config_path(&base_dir), "{}").expect("write config");
@@ -263,8 +331,16 @@ mod tests {
             snapshot.effective_identity_relay_urls(),
             vec!["wss://purplepag.es".to_string()]
         );
-        assert!(snapshot.tenex_private_key.is_none());
+        let generated_key = snapshot
+            .tenex_private_key
+            .as_ref()
+            .expect("missing backend key must be generated");
+        assert_eq!(generated_key.len(), 64);
+        assert!(snapshot.generated_tenex_private_key);
         assert!(snapshot.projects_base.is_none());
+
+        let persisted = fs::read_to_string(backend_config_path(&base_dir)).expect("read config");
+        assert!(persisted.contains("tenexPrivateKey"));
     }
 
     #[test]
@@ -295,6 +371,7 @@ mod tests {
             relays: Vec::new(),
             identity_relays: Vec::new(),
             blossom_server_url: None,
+            generated_tenex_private_key: false,
         };
 
         assert!(matches!(
@@ -348,6 +425,7 @@ mod tests {
             relays: Vec::new(),
             identity_relays: Vec::new(),
             blossom_server_url: None,
+            generated_tenex_private_key: false,
         };
 
         let debug = format!("{snapshot:?}");
