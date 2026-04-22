@@ -1,0 +1,131 @@
+{
+    "name": "caches-basic",
+    "description": "Canonical Rust daemon cache filesystem paths, record shapes, and diagnostics for Bun compatibility tests.",
+    "daemonDirName": "daemon",
+    "relativePaths": {
+        "cachesDir": "caches",
+        "cachesTmpDir": "caches/tmp",
+        "trustPubkeys": "caches/trust-pubkeys.json",
+        "prefixLookup": "caches/prefix-lookup.json",
+        "profileNames": "caches/profile-names.json"
+    },
+    "writer": "rust-daemon",
+    "schemaVersions": {
+        "trustPubkeys": 1,
+        "trustPubkeysDiagnostics": 1,
+        "prefixLookup": 1,
+        "prefixLookupDiagnostics": 1,
+        "profileNames": 1,
+        "profileNamesDiagnostics": 1
+    },
+    "snapshots": {
+        "trustPubkeys": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000100,
+            "pubkeys": [
+                "1111111111111111111111111111111111111111111111111111111111111111",
+                "2222222222222222222222222222222222222222222222222222222222222222",
+                "3333333333333333333333333333333333333333333333333333333333333333"
+            ]
+        },
+        "prefixLookup": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000200,
+            "prefixes": {
+                "111111": "1111111111111111111111111111111111111111111111111111111111111111",
+                "222222": "2222222222222222222222222222222222222222222222222222222222222222"
+            }
+        },
+        "profileNames": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000300,
+            "entries": {
+                "1111111111111111111111111111111111111111111111111111111111111111": {
+                    "displayName": "Alice",
+                    "nip05": "alice@example.test",
+                    "observedAt": 1710001000150
+                },
+                "2222222222222222222222222222222222222222222222222222222222222222": {
+                    "displayName": "Bob",
+                    "observedAt": 1710001000180
+                },
+                "3333333333333333333333333333333333333333333333333333333333333333": {
+                    "nip05": "carol@example.test",
+                    "observedAt": 1710001000200
+                }
+            }
+        }
+    },
+    "diagnostics": {
+        "trustPubkeysEmpty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000000,
+            "present": false,
+            "pubkeyCount": 0,
+            "snapshotSchemaVersion": null,
+            "writer": null,
+            "writerVersion": null,
+            "updatedAt": null
+        },
+        "trustPubkeysPopulated": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000500,
+            "present": true,
+            "pubkeyCount": 3,
+            "snapshotSchemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000100
+        },
+        "prefixLookupEmpty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000000,
+            "present": false,
+            "prefixCount": 0,
+            "snapshotSchemaVersion": null,
+            "writer": null,
+            "writerVersion": null,
+            "updatedAt": null
+        },
+        "prefixLookupPopulated": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000500,
+            "present": true,
+            "prefixCount": 2,
+            "snapshotSchemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000200
+        },
+        "profileNamesEmpty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000000,
+            "present": false,
+            "entryCount": 0,
+            "displayNameCount": 0,
+            "nip05Count": 0,
+            "snapshotSchemaVersion": null,
+            "writer": null,
+            "writerVersion": null,
+            "updatedAt": null
+        },
+        "profileNamesPopulated": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000500,
+            "present": true,
+            "entryCount": 3,
+            "displayNameCount": 2,
+            "nip05Count": 2,
+            "snapshotSchemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000300
+        }
+    }
+}
