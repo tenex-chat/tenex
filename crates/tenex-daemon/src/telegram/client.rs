@@ -404,6 +404,23 @@ pub struct ChatAdministrator {
     pub custom_title: Option<String>,
 }
 
+/// Result of `getFile`. Telegram returns a relative `file_path`; the
+/// client exposes [`TelegramBotClient::file_download_url`] to construct the
+/// corresponding public download URL.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct TelegramFile {
+    #[serde(default)]
+    pub file_id: Option<String>,
+    #[serde(default)]
+    pub file_unique_id: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<i64>,
+    /// Relative path under `/file/bot<token>/`. Always present in practice;
+    /// we keep it `Option` to reflect the raw Bot API shape.
+    #[serde(default)]
+    pub file_path: Option<String>,
+}
+
 /// Result of `getForumTopic`. Slice 3 consumes `name` to populate
 /// `TelegramTransportMetadata.topicTitle`; the other fields are surfaced for
 /// completeness.
@@ -637,6 +654,56 @@ impl TelegramBotClient {
         &self,
     ) -> Result<Vec<serde_json::Value>, TelegramClientError> {
         self.get_query("getForumTopicIconStickers", &[])
+    }
+
+    /// Call `getFile` with a `file_id` and return the full [`TelegramFile`].
+    /// The `file_path` field is what [`TelegramBotClient::file_download_url`]
+    /// needs to produce the actual download URL.
+    pub fn get_file(&self, file_id: &str) -> Result<TelegramFile, TelegramClientError> {
+        self.get_query("getFile", &[("file_id", file_id.to_string())])
+    }
+
+    /// Build the public download URL for a given `file_path` returned by
+    /// `getFile`. Mirrors `TelegramBotClient.getFileDownloadUrl` in TS.
+    pub fn file_download_url(&self, file_path: &str) -> String {
+        let base = self.config.api_base_url.trim_end_matches('/');
+        format!("{base}/file/bot{}/{file_path}", self.config.bot_token)
+    }
+
+    /// GET a file by absolute URL, writing the response body to `target` via
+    /// a streaming copy. The caller is responsible for creating any parent
+    /// directories before invoking this function.
+    pub fn download_file_to(
+        &self,
+        download_url: &str,
+        target: &std::path::Path,
+    ) -> Result<u64, TelegramClientError> {
+        let mut response = self
+            .http
+            .get(download_url)
+            .send()
+            .map_err(TelegramClientError::Network)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(TelegramClientError::Http {
+                status: status.as_u16(),
+                description: format!("telegram file download failed: {status}"),
+            });
+        }
+        let mut file =
+            std::fs::File::create(target).map_err(|source| TelegramClientError::Http {
+                status: 0,
+                description: format!("create {}: {source}", target.display()),
+            })?;
+        let bytes = response
+            .copy_to(&mut file)
+            .map_err(TelegramClientError::Network)?;
+        file.sync_all()
+            .map_err(|source| TelegramClientError::Http {
+                status: 0,
+                description: format!("sync {}: {source}", target.display()),
+            })?;
+        Ok(bytes)
     }
 
     /// Fetch the metadata of a single forum topic (supergroup + topic id).
