@@ -602,6 +602,9 @@ Scope:
 - Compose launch plans with lock acquisition before worker-spawn wiring:
   acquire allocation then state locks for a planned launch, and release the
   allocation lock if the state lock is already held.
+- Add a pure dispatch-to-spawn planner before process orchestration. It carries
+  the Bun worker command and validated execute message as an immutable intent
+  without starting a child process, waiting for readiness, or writing stdin.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.

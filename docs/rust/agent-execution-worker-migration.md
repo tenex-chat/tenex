@@ -1200,6 +1200,10 @@ Work:
   before the state lock and rolling back the allocation lock if state acquisition
   fails. This remains separate from worker spawn so lock behavior is testable on
   its own.
+- Add a pure dispatch-to-spawn planner that combines the chosen Bun worker
+  command with the validated execute message. The planner is the handoff shape
+  for future process orchestration and intentionally performs no spawn,
+  readiness wait, or stdin write.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet
