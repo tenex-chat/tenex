@@ -554,8 +554,15 @@ Landed slices:
   `DaemonReadinessReport` with stable check names, a schema version, and an
   overall `ready` boolean. Composes `backend_config::read_backend_config`,
   `filesystem_state` lockfile helpers, and the `process_liveness` PID probe.
+<<<<<<< HEAD
   Intended as the startup gate for the upcoming main loop and now exposed by
   the `daemon-control readiness` JSON operator command.
+=======
+  All report types derive `Serialize`/`Deserialize` with `camelCase` fields
+  and lowercase `snake_case` status variants so `daemon-control readiness`
+  can emit the report as JSON without a wrapper type. Intended as the
+  startup gate for the upcoming main loop.
+>>>>>>> 585a5bcc (docs: note daemon readiness report is JSON-serialisable)
 
 Scope:
 
