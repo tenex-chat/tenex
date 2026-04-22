@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -65,6 +65,15 @@ pub struct ScheduledTaskDuePlannerOutcome {
     pub scheduler_snapshot: Option<PeriodicSchedulerSnapshot>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledTaskFinalizationOutcome {
+    pub project_d_tag: String,
+    pub task_id: String,
+    pub path: PathBuf,
+    pub updated: bool,
+    pub removed: bool,
+}
+
 #[derive(Debug, Error)]
 pub enum ScheduledTaskDuePlannerError {
     #[error("scheduled task planner source read failed at {path}: {source}")]
@@ -74,6 +83,8 @@ pub enum ScheduledTaskDuePlannerError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    #[error("scheduled task planner source write failed at {path}: {source}")]
+    Write { path: PathBuf, source: io::Error },
     #[error("scheduled task planner periodic scheduler failed: {0}")]
     Periodic(#[from] PeriodicTickError),
 }
@@ -231,6 +242,79 @@ pub fn plan_due_scheduled_tasks(
         plans,
         truncated,
         scheduler_snapshot: None,
+    })
+}
+
+pub fn finalize_scheduled_task_trigger_plan(
+    base_dir: &Path,
+    plan: &ScheduledTaskTriggerPlan,
+) -> Result<ScheduledTaskFinalizationOutcome, ScheduledTaskDuePlannerError> {
+    let path = project_schedules_path(base_dir, &plan.project_d_tag);
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            return Ok(ScheduledTaskFinalizationOutcome {
+                project_d_tag: plan.project_d_tag.clone(),
+                task_id: plan.task_id.clone(),
+                path,
+                updated: false,
+                removed: false,
+            });
+        }
+        Err(source) => return Err(ScheduledTaskDuePlannerError::Read { path, source }),
+    };
+
+    let mut raw: serde_json::Value =
+        serde_json::from_str(&content).map_err(|source| ScheduledTaskDuePlannerError::Parse {
+            path: path.clone(),
+            source,
+        })?;
+    let Some(tasks) = raw.as_array_mut() else {
+        return Ok(ScheduledTaskFinalizationOutcome {
+            project_d_tag: plan.project_d_tag.clone(),
+            task_id: plan.task_id.clone(),
+            path,
+            updated: false,
+            removed: false,
+        });
+    };
+
+    let original_len = tasks.len();
+    let mut updated = false;
+    match plan.kind {
+        ProjectStatusScheduledTaskKind::Oneoff => {
+            tasks.retain(|task| {
+                task.get("id").and_then(serde_json::Value::as_str) != Some(&plan.task_id)
+            });
+        }
+        ProjectStatusScheduledTaskKind::Cron => {
+            for task in tasks.iter_mut() {
+                if task.get("id").and_then(serde_json::Value::as_str) != Some(&plan.task_id) {
+                    continue;
+                }
+                if let Some(object) = task.as_object_mut() {
+                    object.insert(
+                        "lastRun".to_string(),
+                        serde_json::Value::String(format_unix_seconds_iso8601(plan.due_at)),
+                    );
+                    updated = true;
+                }
+                break;
+            }
+        }
+    }
+
+    let removed = tasks.len() != original_len;
+    if updated || removed {
+        write_json_atomic(&path, &raw)?;
+    }
+
+    Ok(ScheduledTaskFinalizationOutcome {
+        project_d_tag: plan.project_d_tag.clone(),
+        task_id: plan.task_id.clone(),
+        path,
+        updated,
+        removed,
     })
 }
 
@@ -641,6 +725,89 @@ fn is_leap_year(year: i64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
+fn format_unix_seconds_iso8601(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    let rem = seconds % 86_400;
+    let (year, month, day) = civil_from_days(days as i64);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z",
+        hour = rem / 3_600,
+        minute = (rem % 3_600) / 60,
+        second = rem % 60,
+    )
+}
+
+fn write_json_atomic(
+    path: &Path,
+    value: &serde_json::Value,
+) -> Result<(), ScheduledTaskDuePlannerError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| ScheduledTaskDuePlannerError::Write {
+            path: path.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "schedule path has no parent"),
+        })?;
+    fs::create_dir_all(parent).map_err(|source| ScheduledTaskDuePlannerError::Write {
+        path: parent.to_path_buf(),
+        source,
+    })?;
+
+    let tmp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("schedules.json"),
+        now_nanos()
+    ));
+
+    let write_result = (|| {
+        let mut file =
+            File::create(&tmp_path).map_err(|source| ScheduledTaskDuePlannerError::Write {
+                path: tmp_path.clone(),
+                source,
+            })?;
+        serde_json::to_writer_pretty(&mut file, value).map_err(|source| {
+            ScheduledTaskDuePlannerError::Parse {
+                path: tmp_path.clone(),
+                source,
+            }
+        })?;
+        file.write_all(b"\n")
+            .map_err(|source| ScheduledTaskDuePlannerError::Write {
+                path: tmp_path.clone(),
+                source,
+            })?;
+        file.sync_all()
+            .map_err(|source| ScheduledTaskDuePlannerError::Write {
+                path: tmp_path.clone(),
+                source,
+            })?;
+        fs::rename(&tmp_path, path).map_err(|source| ScheduledTaskDuePlannerError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|source| ScheduledTaskDuePlannerError::Write {
+                path: parent.to_path_buf(),
+                source,
+            })
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
+    write_result
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
+}
+
 fn unix_seconds_to_utc_components(seconds: u64) -> UtcComponents {
     let days = seconds / 86_400;
     let rem = seconds % 86_400;
@@ -1026,6 +1193,98 @@ mod tests {
         assert!(CronSchedule::parse("0 9 ? * *").is_none());
     }
 
+    #[test]
+    fn finalizing_cron_task_updates_last_run_to_due_at() {
+        let base_dir = unique_temp_dir("scheduled-task-finalize-cron");
+        write_project_schedules(
+            &base_dir,
+            "demo-project",
+            r#"[
+                {
+                    "id": "task-recurring",
+                    "title": "Daily summary",
+                    "schedule": "0 9 * * *",
+                    "prompt": "Summarize",
+                    "fromPubkey": "owner",
+                    "targetAgentSlug": "reporter",
+                    "projectId": "demo-project"
+                },
+                {
+                    "id": "task-other",
+                    "schedule": "0 10 * * *",
+                    "prompt": "Other",
+                    "fromPubkey": "owner",
+                    "targetAgentSlug": "reporter",
+                    "projectId": "demo-project"
+                }
+            ]"#,
+        );
+
+        let outcome = finalize_scheduled_task_trigger_plan(
+            &base_dir,
+            &trigger_plan(
+                "task-recurring",
+                ProjectStatusScheduledTaskKind::Cron,
+                ts("2026-04-22T09:00:00Z"),
+            ),
+        )
+        .expect("finalization must succeed");
+
+        assert!(outcome.updated);
+        assert!(!outcome.removed);
+        let persisted: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(outcome.path).expect("schedules read"))
+                .expect("schedules parse");
+        assert_eq!(persisted[0]["lastRun"], "2026-04-22T09:00:00Z");
+        assert!(persisted[1].get("lastRun").is_none());
+    }
+
+    #[test]
+    fn finalizing_oneoff_task_removes_it_from_schedules() {
+        let base_dir = unique_temp_dir("scheduled-task-finalize-oneoff");
+        write_project_schedules(
+            &base_dir,
+            "demo-project",
+            r#"[
+                {
+                    "id": "task-oneoff",
+                    "schedule": "2026-04-22T09:00:00Z",
+                    "prompt": "Oneoff",
+                    "fromPubkey": "owner",
+                    "targetAgentSlug": "reporter",
+                    "projectId": "demo-project",
+                    "type": "oneoff"
+                },
+                {
+                    "id": "task-recurring",
+                    "schedule": "0 10 * * *",
+                    "prompt": "Recurring",
+                    "fromPubkey": "owner",
+                    "targetAgentSlug": "reporter",
+                    "projectId": "demo-project"
+                }
+            ]"#,
+        );
+
+        let outcome = finalize_scheduled_task_trigger_plan(
+            &base_dir,
+            &trigger_plan(
+                "task-oneoff",
+                ProjectStatusScheduledTaskKind::Oneoff,
+                ts("2026-04-22T09:00:00Z"),
+            ),
+        )
+        .expect("finalization must succeed");
+
+        assert!(!outcome.updated);
+        assert!(outcome.removed);
+        let persisted: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(outcome.path).expect("schedules read"))
+                .expect("schedules parse");
+        assert_eq!(persisted.as_array().expect("array").len(), 1);
+        assert_eq!(persisted[0]["id"], "task-recurring");
+    }
+
     fn write_project_schedules(base_dir: &Path, project_d_tag: &str, content: &str) {
         let path = project_schedules_path(base_dir, project_d_tag);
         fs::create_dir_all(path.parent().expect("schedules path must have parent"))
@@ -1035,6 +1294,27 @@ mod tests {
 
     fn ts(value: &str) -> u64 {
         parse_unix_seconds_from_iso8601(value).expect("timestamp must parse")
+    }
+
+    fn trigger_plan(
+        task_id: &str,
+        kind: ProjectStatusScheduledTaskKind,
+        due_at: u64,
+    ) -> ScheduledTaskTriggerPlan {
+        ScheduledTaskTriggerPlan {
+            project_d_tag: "demo-project".to_string(),
+            project_ref: "31933:owner:demo-project".to_string(),
+            task_id: task_id.to_string(),
+            title: "Task".to_string(),
+            prompt: "Run the task".to_string(),
+            from_pubkey: "owner".to_string(),
+            target_agent: "reporter".to_string(),
+            target_channel: None,
+            schedule: "0 9 * * *".to_string(),
+            kind,
+            due_at,
+            last_run: None,
+        }
     }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
