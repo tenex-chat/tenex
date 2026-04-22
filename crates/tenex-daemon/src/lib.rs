@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 pub mod backend_events;
+=======
+pub mod caches;
+>>>>>>> 9e122249 (Add Rust caches module scaffold)
 pub mod daemon_control;
 pub mod daemon_diagnostics;
 pub mod daemon_shell;
