@@ -148,6 +148,104 @@ pub fn write_agent_definitions(
     outcome
 }
 
+pub fn read_agent_definitions(
+    daemon_dir: impl AsRef<Path>,
+) -> AgentDefinitionWatcherResult<Option<AgentDefinitionSnapshot>> {
+    let path = agent_definitions_path(daemon_dir);
+    match fs::read_to_string(&path) {
+        Ok(content) => {
+            let snapshot: AgentDefinitionSnapshot = serde_json::from_str(&content)?;
+            if snapshot.schema_version != AGENT_DEFINITION_WATCHER_SCHEMA_VERSION {
+                return Err(AgentDefinitionWatcherError::UnsupportedSchemaVersion {
+                    found: snapshot.schema_version,
+                    expected: AGENT_DEFINITION_WATCHER_SCHEMA_VERSION,
+                });
+            }
+            for entry in &snapshot.definitions {
+                validate_entry(entry)?;
+            }
+            Ok(Some(snapshot))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn inspect_agent_definitions(
+    daemon_dir: impl AsRef<Path>,
+    now: u64,
+) -> AgentDefinitionWatcherResult<AgentDefinitionWatcherDiagnostics> {
+    let snapshot = read_agent_definitions(daemon_dir)?;
+    Ok(match snapshot {
+        Some(snapshot) => {
+            let total_agent_pubkeys = snapshot
+                .definitions
+                .iter()
+                .map(|entry| entry.agent_pubkey.as_str())
+                .collect::<HashSet<_>>()
+                .len();
+            let total_author_pubkeys = snapshot
+                .definitions
+                .iter()
+                .map(|entry| entry.author_pubkey.as_str())
+                .collect::<HashSet<_>>()
+                .len();
+            let oldest_observed_at = snapshot
+                .definitions
+                .iter()
+                .map(|entry| entry.last_observed_at)
+                .min();
+            let latest_observed_at = snapshot
+                .definitions
+                .iter()
+                .map(|entry| entry.last_observed_at)
+                .max();
+            let oldest_created_at = snapshot
+                .definitions
+                .iter()
+                .map(|entry| entry.created_at)
+                .min();
+            let latest_created_at = snapshot
+                .definitions
+                .iter()
+                .map(|entry| entry.created_at)
+                .max();
+            AgentDefinitionWatcherDiagnostics {
+                schema_version: AGENT_DEFINITION_WATCHER_DIAGNOSTICS_SCHEMA_VERSION,
+                inspected_at: now,
+                present: true,
+                total_definitions: snapshot.definitions.len(),
+                total_agent_pubkeys,
+                total_author_pubkeys,
+                oldest_observed_at,
+                latest_observed_at,
+                oldest_created_at,
+                latest_created_at,
+                snapshot_schema_version: Some(snapshot.schema_version),
+                writer: Some(snapshot.writer),
+                writer_version: Some(snapshot.writer_version),
+                updated_at: Some(snapshot.updated_at),
+            }
+        }
+        None => AgentDefinitionWatcherDiagnostics {
+            schema_version: AGENT_DEFINITION_WATCHER_DIAGNOSTICS_SCHEMA_VERSION,
+            inspected_at: now,
+            present: false,
+            total_definitions: 0,
+            total_agent_pubkeys: 0,
+            total_author_pubkeys: 0,
+            oldest_observed_at: None,
+            latest_observed_at: None,
+            oldest_created_at: None,
+            latest_created_at: None,
+            snapshot_schema_version: None,
+            writer: None,
+            writer_version: None,
+            updated_at: None,
+        },
+    })
+}
+
 fn validate_writer_fields(
     snapshot: &AgentDefinitionSnapshot,
 ) -> AgentDefinitionWatcherResult<()> {
@@ -613,6 +711,230 @@ mod tests {
                 "stray tmp file present: {name_str}"
             );
         }
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn round_trip_returns_identical_snapshot_after_canonical_sort() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut entry_alpha = sample_entry(0x11, "alpha", 1_710_000_000_010);
+        entry_alpha.tools = vec!["zeta".to_string(), "alpha".to_string()];
+        let mut entry_beta = sample_entry(0x22, "beta", 1_710_000_000_020);
+        entry_beta.skills = vec![full_hex(0xbb), full_hex(0xaa)];
+        let snapshot = sample_snapshot(1_710_000_000_100, vec![entry_alpha, entry_beta]);
+
+        let written =
+            write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+        let read_back = read_agent_definitions(&daemon_dir)
+            .expect("read must succeed")
+            .expect("snapshot must exist");
+
+        assert_eq!(read_back, written);
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn read_returns_none_when_file_missing() {
+        let daemon_dir = unique_temp_daemon_dir();
+
+        let result = read_agent_definitions(&daemon_dir).expect("read must succeed");
+
+        assert!(result.is_none());
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn schema_version_mismatch_fails_closed_on_read() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+        write_agent_definitions(&daemon_dir, &snapshot).expect("initial write must succeed");
+
+        let path = agent_definitions_path(&daemon_dir);
+        let mut value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(999);
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+
+        let error =
+            read_agent_definitions(&daemon_dir).expect_err("bad schema must fail read");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::UnsupportedSchemaVersion {
+                found: 999,
+                expected: AGENT_DEFINITION_WATCHER_SCHEMA_VERSION
+            }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn truncated_json_fails_closed_on_read() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+        write_agent_definitions(&daemon_dir, &snapshot).expect("initial write must succeed");
+
+        let path = agent_definitions_path(&daemon_dir);
+        fs::write(&path, b"{\"schemaVersion\":1,\"writer\":").unwrap();
+
+        let error = read_agent_definitions(&daemon_dir)
+            .expect_err("truncated JSON must fail read");
+
+        assert!(matches!(error, AgentDefinitionWatcherError::Json(_)));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn read_rejects_corrupt_entry_in_persisted_snapshot() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+        write_agent_definitions(&daemon_dir, &snapshot).expect("initial write must succeed");
+
+        let path = agent_definitions_path(&daemon_dir);
+        let mut value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        value["definitions"][0]["eventId"] = serde_json::json!("not-hex");
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+
+        let error =
+            read_agent_definitions(&daemon_dir).expect_err("corrupt eventId must fail read");
+
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::InvalidEventId { .. }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn two_sequential_writes_are_idempotent() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+
+        let first_write =
+            write_agent_definitions(&daemon_dir, &snapshot).expect("first write must succeed");
+        let second_write =
+            write_agent_definitions(&daemon_dir, &snapshot).expect("second write must succeed");
+
+        assert_eq!(first_write, second_write);
+
+        let read_back = read_agent_definitions(&daemon_dir)
+            .expect("read must succeed")
+            .expect("snapshot must exist");
+        assert_eq!(read_back, second_write);
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn diagnostics_reflect_missing_file() {
+        let daemon_dir = unique_temp_daemon_dir();
+
+        let diagnostics = inspect_agent_definitions(&daemon_dir, 1_710_000_000_900)
+            .expect("inspect must succeed");
+
+        assert_eq!(
+            diagnostics.schema_version,
+            AGENT_DEFINITION_WATCHER_DIAGNOSTICS_SCHEMA_VERSION
+        );
+        assert_eq!(diagnostics.inspected_at, 1_710_000_000_900);
+        assert!(!diagnostics.present);
+        assert_eq!(diagnostics.total_definitions, 0);
+        assert_eq!(diagnostics.total_agent_pubkeys, 0);
+        assert_eq!(diagnostics.total_author_pubkeys, 0);
+        assert_eq!(diagnostics.oldest_observed_at, None);
+        assert_eq!(diagnostics.latest_observed_at, None);
+        assert_eq!(diagnostics.oldest_created_at, None);
+        assert_eq!(diagnostics.latest_created_at, None);
+        assert_eq!(diagnostics.snapshot_schema_version, None);
+        assert_eq!(diagnostics.writer, None);
+        assert_eq!(diagnostics.writer_version, None);
+        assert_eq!(diagnostics.updated_at, None);
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn diagnostics_count_unique_pubkeys_and_observed_ranges() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut shared_author = sample_entry(0x11, "primary", 1_710_000_000_010);
+        let mut other_author = sample_entry(0x22, "secondary", 1_710_000_000_050);
+        shared_author.author_pubkey = xonly_hex_from_seed(0xcc);
+        other_author.author_pubkey = xonly_hex_from_seed(0xcc);
+        shared_author.last_observed_at = 1_710_000_000_020;
+        other_author.last_observed_at = 1_710_000_000_060;
+        let snapshot = sample_snapshot(
+            1_710_000_000_500,
+            vec![shared_author, other_author],
+        );
+        write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+
+        let diagnostics = inspect_agent_definitions(&daemon_dir, 1_710_000_001_000)
+            .expect("inspect must succeed");
+
+        assert!(diagnostics.present);
+        assert_eq!(diagnostics.total_definitions, 2);
+        assert_eq!(diagnostics.total_agent_pubkeys, 2);
+        assert_eq!(diagnostics.total_author_pubkeys, 1);
+        assert_eq!(diagnostics.oldest_observed_at, Some(1_710_000_000_020));
+        assert_eq!(diagnostics.latest_observed_at, Some(1_710_000_000_060));
+        assert_eq!(diagnostics.oldest_created_at, Some(1_710_000_000_010));
+        assert_eq!(diagnostics.latest_created_at, Some(1_710_000_000_050));
+        assert_eq!(
+            diagnostics.snapshot_schema_version,
+            Some(AGENT_DEFINITION_WATCHER_SCHEMA_VERSION)
+        );
+        assert_eq!(
+            diagnostics.writer.as_deref(),
+            Some(AGENT_DEFINITION_WATCHER_WRITER)
+        );
+        assert_eq!(diagnostics.writer_version.as_deref(), Some("test-version"));
+        assert_eq!(diagnostics.updated_at, Some(1_710_000_000_500));
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn written_snapshot_carries_required_fields() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let snapshot = sample_snapshot(
+            1_710_000_000_100,
+            vec![sample_entry(0x11, "primary", 1_710_000_000_010)],
+        );
+
+        write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+
+        let raw = fs::read_to_string(agent_definitions_path(&daemon_dir))
+            .expect("read must succeed");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("JSON must parse");
+        assert_eq!(
+            value["schemaVersion"],
+            serde_json::json!(AGENT_DEFINITION_WATCHER_SCHEMA_VERSION)
+        );
+        assert_eq!(
+            value["writer"],
+            serde_json::json!(AGENT_DEFINITION_WATCHER_WRITER)
+        );
+        assert_eq!(value["writerVersion"], serde_json::json!("test-version"));
+        assert_eq!(value["updatedAt"], serde_json::json!(1_710_000_000_100u64));
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
     }
