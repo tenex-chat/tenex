@@ -6,6 +6,7 @@ pub mod backend_events;
 pub mod backend_heartbeat_latch;
 pub mod backend_signer;
 pub mod backend_status_runtime;
+pub mod backend_status_tick;
 pub mod caches;
 pub mod daemon_control;
 pub mod daemon_diagnostics;
