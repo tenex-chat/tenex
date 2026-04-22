@@ -15,6 +15,7 @@ pub mod routing;
 pub mod routing_shadow;
 pub mod routing_shadow_log;
 pub mod subscription_filters;
+pub mod telegram_outbox;
 pub mod worker_abort;
 pub mod worker_completion;
 pub mod worker_completion_apply;
