@@ -56,9 +56,13 @@ class TestableSchedulerService extends SchedulerService {
     /**
      * Public wrapper to test the private executeTask method.
      */
-    public async testExecuteTask(task: ScheduledTask): Promise<void> {
+    public async testExecuteTask(task: ScheduledTask): Promise<boolean> {
         // biome-ignore lint/suspicious/noExplicitAny: Testing requires private access
         return (this as any).executeTask(task);
+    }
+
+    public disableScheduledExecutionForTest(): void {
+        this.disableScheduledExecution();
     }
 
     /**
@@ -98,6 +102,13 @@ class TestableSchedulerService extends SchedulerService {
         (this as any).projectStateResolver = null;
         // biome-ignore lint/suspicious/noExplicitAny: Testing requires private access
         (this as any).targetPubkeyResolver = null;
+        // biome-ignore lint/suspicious/noExplicitAny: Testing requires private access
+        (this as any).scheduledExecutionDisabled = false;
+        // Restore prototype methods after tests replace them with spies.
+        // biome-ignore lint/suspicious/noExplicitAny: Testing requires private access
+        delete (this as any).ensureProjectRunning;
+        // biome-ignore lint/suspicious/noExplicitAny: Testing requires private access
+        delete (this as any).publishAgentTriggerEvent;
     }
 }
 
@@ -114,8 +125,13 @@ function getTestableInstance(): TestableSchedulerService {
     };
 
     // biome-ignore lint/suspicious/noExplicitAny: Testing requires prototype manipulation
-    (instance as any).testExecuteTask = async function(task: ScheduledTask): Promise<void> {
+    (instance as any).testExecuteTask = async function(task: ScheduledTask): Promise<boolean> {
         return TestableSchedulerService.prototype.testExecuteTask.call(this, task);
+    };
+
+    // biome-ignore lint/suspicious/noExplicitAny: Testing requires prototype manipulation
+    (instance as any).disableScheduledExecutionForTest = function(): void {
+        TestableSchedulerService.prototype.disableScheduledExecutionForTest.call(this);
     };
 
     // biome-ignore lint/suspicious/noExplicitAny: Testing requires prototype manipulation
@@ -545,7 +561,7 @@ describe("SchedulerService Auto-Boot", () => {
             service.spyOnPublishAgentTriggerEvent(publishSpy);
 
             // Execute the task
-            await service.testExecuteTask(task);
+            const executed = await service.testExecuteTask(task);
 
             // Verify ensureProjectRunning was called
             expect(ensureProjectRunningSpy).toHaveBeenCalledTimes(1);
@@ -557,6 +573,73 @@ describe("SchedulerService Auto-Boot", () => {
 
             // CRITICAL: Verify the ORDER - ensureProjectRunning MUST come first
             expect(callOrder).toEqual(["ensureProjectRunning", "publishAgentTriggerEvent"]);
+            expect(executed).toBe(true);
+        });
+
+        it("should skip scheduled execution in --only mode before project checks or publishing", async () => {
+            const service = getTestableInstance();
+            service.disableScheduledExecutionForTest();
+
+            const task: ScheduledTask = {
+                id: "task-only-1",
+                title: "Daily report",
+                schedule: "0 9 * * *",
+                prompt: "test prompt",
+                fromPubkey: "from123",
+                targetAgentSlug: "architect",
+                projectId: "31933:owner:test-project",
+            };
+
+            const ensureProjectRunningSpy = vi.fn().mockResolvedValue(true);
+            service.spyOnEnsureProjectRunning(ensureProjectRunningSpy);
+
+            const publishSpy = vi.fn();
+            service.spyOnPublishAgentTriggerEvent(publishSpy);
+
+            const executed = await service.testExecuteTask(task);
+
+            expect(executed).toBe(false);
+            expect(ensureProjectRunningSpy).not.toHaveBeenCalled();
+            expect(publishSpy).not.toHaveBeenCalled();
+            expect(task.lastRun).toBeUndefined();
+            expect(mockLogger.info).toHaveBeenCalledWith(
+                "Skipping scheduled task execution (--only mode active)",
+                {
+                    taskId: task.id,
+                    projectId: task.projectId,
+                    schedule: task.schedule,
+                    title: task.title,
+                }
+            );
+        });
+
+        it("should not publish scheduled events in --only mode even when the project is running", async () => {
+            const service = getTestableInstance();
+            service.disableScheduledExecutionForTest();
+
+            const task: ScheduledTask = {
+                id: "task-only-running",
+                schedule: "* * * * *",
+                prompt: "test prompt",
+                fromPubkey: "from123",
+                targetAgentSlug: "architect",
+                projectId: "31933:owner:test-project",
+            };
+
+            const mockBootHandler = vi.fn();
+            const mockStateResolver = vi.fn().mockReturnValue(true);
+            const mockTargetResolver = vi.fn();
+            service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
+
+            const publishSpy = vi.fn();
+            service.spyOnPublishAgentTriggerEvent(publishSpy);
+
+            const executed = await service.testExecuteTask(task);
+
+            expect(executed).toBe(false);
+            expect(mockStateResolver).not.toHaveBeenCalled();
+            expect(mockBootHandler).not.toHaveBeenCalled();
+            expect(publishSpy).not.toHaveBeenCalled();
         });
 
         it("should skip task when ensureProjectRunning throws, without calling publishAgentTriggerEvent", async () => {
@@ -585,7 +668,7 @@ describe("SchedulerService Auto-Boot", () => {
             service.spyOnPublishAgentTriggerEvent(publishSpy);
 
             // Execute the task - should NOT throw despite ensureProjectRunning failing
-            await service.testExecuteTask(task);
+            const executed = await service.testExecuteTask(task);
 
             // ensureProjectRunning was called and threw
             expect(ensureProjectRunningSpy).toHaveBeenCalledTimes(1);
@@ -601,6 +684,7 @@ describe("SchedulerService Auto-Boot", () => {
                     projectId: task.projectId,
                 })
             );
+            expect(executed).toBe(false);
         });
     });
 });

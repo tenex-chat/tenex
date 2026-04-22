@@ -33,7 +33,7 @@ daemonCommand
     }, [])
     .option("--supervised", "Run in supervised mode (enables graceful restart via SIGHUP)")
     .option("--foreground", "Run in the foreground instead of forking to the background")
-    .option("--only", "Only start projects explicitly specified via -b or via Nostr; cron tasks will not auto-boot projects")
+    .option("--only", "Disable scheduler-originated conversations; scheduled tasks will not be processed")
     .option("--exclude-agents <slugs>", "Comma-separated agent slugs this backend must not run locally")
     .option("--only-agents <slugs>", "Comma-separated agent slugs this backend is allowed to run locally")
     .action(async (options) => {
@@ -204,8 +204,9 @@ daemonCommand
             // This enables Layer 3 (SchedulerService) to use Layer 4 (Daemon) functionality
             // without direct imports, maintaining architectural separation
             schedulerService.setProjectCallbacks(
-                // Boot handler: called when a scheduled task needs to boot a project.
-                // --boot only affects eager startup; later explicit/scheduled boots stay unrestricted.
+                // Boot handler: called when scheduled execution needs to boot a project.
+                // --boot only affects eager startup; later explicit/scheduled boots stay unrestricted
+                // unless scheduler-originated execution is disabled by --only.
                 async (projectId: string) => {
                     await daemon.startRuntime(projectId as import("@/types/project-ids").ProjectDTag);
                 },
@@ -249,10 +250,10 @@ daemonCommand
             );
             console.log(chalk.gray("✓ Scheduler callbacks registered"));
 
-            // In --only mode, prevent cron tasks from auto-booting projects
+            // In --only mode, prevent scheduled tasks from starting conversations.
             if (options.only) {
-                schedulerService.disableCronAutoBooting();
-                console.log(chalk.yellow("🔒 Only mode: cron tasks will not auto-boot projects"));
+                schedulerService.disableScheduledExecution();
+                console.log(chalk.yellow("🔒 Only mode: scheduled tasks will not start conversations"));
             }
 
             // Initialize scheduler AFTER callbacks are registered

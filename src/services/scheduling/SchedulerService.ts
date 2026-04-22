@@ -82,8 +82,8 @@ export class SchedulerService {
     private projectStateResolver: ProjectStateResolver | null = null;
     private targetPubkeyResolver: TargetPubkeyResolver | null = null;
 
-    // When true, cron/missed-task execution will not auto-boot projects that aren't running
-    private cronAutoBootDisabled = false;
+    // When true, scheduled tasks remain registered but due executions are skipped.
+    private scheduledExecutionDisabled = false;
 
     private constructor() {}
 
@@ -108,12 +108,13 @@ export class SchedulerService {
     }
 
     /**
-     * Disable auto-booting projects for cron/missed-task execution.
-     * When disabled, scheduled tasks will be skipped for projects that are not already running.
+     * Disable scheduler-originated task execution.
+     * Scheduled task definitions remain loaded and persisted, but due cron,
+     * one-off, and catch-up executions will not publish events.
      */
-    public disableCronAutoBooting(): void {
-        this.cronAutoBootDisabled = true;
-        logger.debug("Cron auto-booting disabled (--only mode)");
+    public disableScheduledExecution(): void {
+        this.scheduledExecutionDisabled = true;
+        logger.debug("Scheduled task execution disabled (--only mode)");
     }
 
     public static getInstance(): SchedulerService {
@@ -447,7 +448,11 @@ export class SchedulerService {
      */
     private async executeOneoffTask(task: ScheduledTask): Promise<void> {
         try {
-            await this.executeTask(task);
+            const executed = await this.executeTask(task);
+            if (!executed) {
+                this.oneoffTimers.delete(task.id);
+                return;
+            }
 
             // Auto-delete after successful execution
             logger.info(`One-off task ${task.id} executed successfully, auto-deleting`);
@@ -699,10 +704,10 @@ export class SchedulerService {
 
             try {
                 logger.info(`Executing catch-up for task ${task.id} (${i + 1}/${tasks.length})`);
-                await this.executeTask(task);
+                const executed = await this.executeTask(task);
 
                 // Auto-delete one-off tasks after successful catch-up execution
-                if (task.type === "oneoff") {
+                if (executed && task.type === "oneoff") {
                     logger.info(`One-off task ${task.id} catch-up completed, auto-deleting`);
                     this.oneoffTimers.delete(task.id);
                     this.taskMetadata.delete(task.id);
@@ -710,7 +715,7 @@ export class SchedulerService {
                 }
 
                 // Add delay between tasks (except after the last one)
-                if (i < tasks.length - 1) {
+                if (executed && i < tasks.length - 1) {
                     await this.delay(delayBetweenTasksMs);
                 }
             } catch (error) {
@@ -761,14 +766,6 @@ export class SchedulerService {
             if (this.projectStateResolver(runtimeProjectId)) {
                 // Project already running, nothing to do
                 return true;
-            }
-
-            // In --only mode, don't auto-boot projects for cron tasks
-            if (this.cronAutoBootDisabled) {
-                logger.info("Skipping auto-boot for cron task (--only mode active)", {
-                    projectId,
-                });
-                return false;
             }
 
             logger.info("Project not running, booting for scheduled task", {
@@ -832,17 +829,32 @@ export class SchedulerService {
     }
 
     /**
-     * Execute a scheduled task. Throws on failure to allow callers to handle errors.
+     * Execute a scheduled task.
      * Updates lastRun only AFTER successful publish to ensure failed tasks can be retried.
+     * Returns false when execution is intentionally skipped before publish.
      *
      * Skips execution if the task's project cannot be started, preventing events
      * from being published into an ambiguous routing state where they might be
      * routed to the wrong project via P-tag fallback.
      */
-    private async executeTask(task: ScheduledTask): Promise<void> {
+    private async executeTask(task: ScheduledTask): Promise<boolean> {
         trace.getActiveSpan()?.addEvent("scheduler.task_executing", {
             "task.id": task.id,
         });
+
+        if (this.scheduledExecutionDisabled) {
+            logger.info("Skipping scheduled task execution (--only mode active)", {
+                taskId: task.id,
+                projectId: task.projectId,
+                schedule: task.schedule,
+                title: task.title,
+            });
+            trace.getActiveSpan()?.addEvent("scheduler.task_skipped_execution_disabled", {
+                "task.id": task.id,
+                "project.id": task.projectId,
+            });
+            return false;
+        }
 
         // Ensure project is running before executing task (auto-boot if needed)
         // If the project can't be started, skip execution to prevent wrong-project routing
@@ -878,7 +890,7 @@ export class SchedulerService {
                 "task.id": task.id,
                 "project.id": task.projectId,
             });
-            return;
+            return false;
         }
 
         // Try to get NDK instance if not already set
@@ -901,6 +913,7 @@ export class SchedulerService {
         trace.getActiveSpan()?.addEvent("scheduler.task_triggered", {
             "task.id": task.id,
         });
+        return true;
     }
 
     /**
