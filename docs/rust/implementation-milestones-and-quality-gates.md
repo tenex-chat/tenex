@@ -546,6 +546,17 @@ Rollback:
 Goal: introduce Rust as an operator-visible daemon shell without processing
 production events.
 
+Landed slices:
+
+- `crates/tenex-daemon/src/daemon_readiness.rs` — pure-read startup readiness
+  probe. Aggregates base-directory / config-file / backend-signer / relays /
+  identity-relays / daemon-directory / lockfile checks into a single
+  `DaemonReadinessReport` with stable check names, a schema version, and an
+  overall `ready` boolean. Composes `backend_config::read_backend_config`,
+  `filesystem_state` lockfile helpers, and the `process_liveness` PID probe.
+  Intended as the startup gate for the upcoming main loop and as the backing
+  library for a future `daemon-control readiness` subcommand.
+
 Scope:
 
 - Implement Rust CLI flags equivalent to current daemon command.
