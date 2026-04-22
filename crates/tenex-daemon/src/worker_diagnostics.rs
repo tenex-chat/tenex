@@ -552,9 +552,9 @@ mod tests {
                 reason: "operator requested drain".to_string(),
             })
         );
-        assert_eq!(snapshot.active_workers[0].claim_token_present, true);
+        assert!(snapshot.active_workers[0].claim_token_present);
         assert_eq!(snapshot.active_workers[1].worker_id, "worker-b");
-        assert_eq!(snapshot.active_workers[1].claim_token_present, false);
+        assert!(!snapshot.active_workers[1].claim_token_present);
         assert_eq!(snapshot.active_workers[1].heartbeat, None);
 
         assert_eq!(
