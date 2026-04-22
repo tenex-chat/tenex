@@ -19,6 +19,7 @@ pub mod worker_dispatch_start;
 pub mod worker_heartbeat;
 pub mod worker_launch;
 pub mod worker_launch_lock;
+pub mod worker_message;
 pub mod worker_process;
 pub mod worker_protocol;
 pub mod worker_publish;
