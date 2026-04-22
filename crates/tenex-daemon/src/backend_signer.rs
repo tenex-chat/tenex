@@ -57,6 +57,10 @@ impl HexBackendSigner {
     pub fn pubkey_hex(&self) -> &str {
         &self.xonly_hex
     }
+
+    pub(crate) fn secret_key(&self) -> SecretKey {
+        self.keypair.secret_key()
+    }
 }
 
 impl BackendSigner for HexBackendSigner {
