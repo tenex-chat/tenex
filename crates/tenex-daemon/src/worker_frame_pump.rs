@@ -100,7 +100,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nostr_event::CompatibilityEventFixture;
+    use crate::nostr_event::Nip01EventFixture;
     use crate::worker_dispatch_execution::WorkerDispatchSession;
     use crate::worker_message_flow::{
         WorkerMessageFlowInput, WorkerMessageFlowOutcome, WorkerMessagePublishContext,
@@ -309,7 +309,7 @@ mod tests {
     }
 
     fn publish_request_message(
-        fixture: &CompatibilityEventFixture,
+        fixture: &Nip01EventFixture,
         sequence: u64,
         timestamp: u64,
     ) -> Value {
@@ -330,7 +330,7 @@ mod tests {
         })
     }
 
-    fn signed_event_fixture() -> CompatibilityEventFixture {
+    fn signed_event_fixture() -> Nip01EventFixture {
         serde_json::from_str(STREAM_TEXT_DELTA_FIXTURE).expect("fixture must parse")
     }
 

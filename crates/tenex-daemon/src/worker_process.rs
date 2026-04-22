@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_protocol::{
     AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES, AGENT_WORKER_MAX_FRAME_BYTES,
     AgentWorkerShutdownMessageInput, WorkerProtocolConfig, WorkerProtocolError,
@@ -127,7 +128,7 @@ pub struct BootedAgentWorkerProcess {
 pub struct AgentWorkerProcess {
     child: Child,
     stdin: Option<ChildStdin>,
-    messages: mpsc::Receiver<WorkerProcessResult<Value>>,
+    frames: mpsc::Receiver<WorkerProcessResult<Vec<u8>>>,
     stderr: Arc<Mutex<String>>,
 }
 
@@ -157,11 +158,11 @@ impl AgentWorkerProcess {
             .ok_or(WorkerProcessError::MissingPipe("stderr"))?;
 
         let stderr = spawn_stderr_collector(stderr);
-        let messages = spawn_stdout_reader(stdout);
+        let frames = spawn_stdout_reader(stdout);
         let mut process = AgentWorkerProcess {
             child,
             stdin: Some(stdin),
-            messages,
+            frames,
             stderr,
         };
 
@@ -207,18 +208,8 @@ impl AgentWorkerProcess {
     }
 
     pub fn next_message(&mut self, timeout: Duration) -> WorkerProcessResult<Value> {
-        match self.messages.recv_timeout(timeout) {
-            Ok(message) => message,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(WorkerProcessError::MessageTimeout {
-                timeout_ms: duration_millis(timeout),
-                stderr: self.stderr_snapshot(),
-            }),
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err(WorkerProcessError::MessageChannelClosed {
-                    stderr: self.stderr_snapshot(),
-                })
-            }
-        }
+        let frame = self.next_frame_timeout(timeout)?;
+        Ok(decode_agent_worker_protocol_frame(&frame)?)
     }
 
     pub fn wait_for_exit(&mut self, timeout: Duration) -> WorkerProcessResult<ExitStatus> {
@@ -255,9 +246,33 @@ impl AgentWorkerProcess {
             .unwrap_or_default()
     }
 
+    fn next_frame_timeout(&mut self, timeout: Duration) -> WorkerProcessResult<Vec<u8>> {
+        match self.frames.recv_timeout(timeout) {
+            Ok(frame) => frame,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(WorkerProcessError::MessageTimeout {
+                timeout_ms: duration_millis(timeout),
+                stderr: self.stderr_snapshot(),
+            }),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(WorkerProcessError::MessageChannelClosed {
+                    stderr: self.stderr_snapshot(),
+                })
+            }
+        }
+    }
+
+    fn next_frame_blocking(&mut self) -> WorkerProcessResult<Vec<u8>> {
+        match self.frames.recv() {
+            Ok(frame) => frame,
+            Err(_) => Err(WorkerProcessError::MessageChannelClosed {
+                stderr: self.stderr_snapshot(),
+            }),
+        }
+    }
+
     fn read_ready(&mut self, timeout: Duration) -> WorkerProcessResult<AgentWorkerReady> {
-        let message = match self.messages.recv_timeout(timeout) {
-            Ok(message) => message?,
+        let frame = match self.frames.recv_timeout(timeout) {
+            Ok(frame) => frame?,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 return Err(WorkerProcessError::BootTimeout {
                     timeout_ms: duration_millis(timeout),
@@ -271,7 +286,15 @@ impl AgentWorkerProcess {
             }
         };
 
-        parse_ready_message(message)
+        parse_ready_message(decode_agent_worker_protocol_frame(&frame)?)
+    }
+}
+
+impl WorkerFrameReceiver for AgentWorkerProcess {
+    type Error = WorkerProcessError;
+
+    fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
+        self.next_frame_blocking()
     }
 }
 
@@ -281,7 +304,7 @@ impl Drop for AgentWorkerProcess {
     }
 }
 
-pub fn read_agent_worker_protocol_message<R: Read>(reader: &mut R) -> WorkerProcessResult<Value> {
+pub fn read_agent_worker_protocol_frame<R: Read>(reader: &mut R) -> WorkerProcessResult<Vec<u8>> {
     let mut length_prefix = [0_u8; AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES];
     reader.read_exact(&mut length_prefix)?;
 
@@ -305,19 +328,24 @@ pub fn read_agent_worker_protocol_message<R: Read>(reader: &mut R) -> WorkerProc
     );
     reader.read_exact(&mut frame[AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES..])?;
 
+    Ok(frame)
+}
+
+pub fn read_agent_worker_protocol_message<R: Read>(reader: &mut R) -> WorkerProcessResult<Value> {
+    let frame = read_agent_worker_protocol_frame(reader)?;
     Ok(decode_agent_worker_protocol_frame(&frame)?)
 }
 
-fn spawn_stdout_reader<R>(mut stdout: R) -> mpsc::Receiver<WorkerProcessResult<Value>>
+fn spawn_stdout_reader<R>(mut stdout: R) -> mpsc::Receiver<WorkerProcessResult<Vec<u8>>>
 where
     R: Read + Send + 'static,
 {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         loop {
-            let message = read_agent_worker_protocol_message(&mut stdout);
-            let should_continue = message.is_ok();
-            if sender.send(message).is_err() || !should_continue {
+            let frame = read_agent_worker_protocol_frame(&mut stdout);
+            let should_continue = frame.is_ok();
+            if sender.send(frame).is_err() || !should_continue {
                 break;
             }
         }
@@ -483,6 +511,25 @@ mod tests {
             .and_then(Path::parent)
             .expect("crate must live under repo_root/crates/tenex-daemon")
             .to_path_buf()
+    }
+
+    #[test]
+    fn reads_raw_frame_from_stream() {
+        let message = json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "ping",
+            "correlationId": "rust_stream_reader",
+            "sequence": 1,
+            "timestamp": 1710000700000_u64,
+            "timeoutMs": 5000,
+        });
+        let frame = encode_agent_worker_protocol_frame(&message).expect("frame must encode");
+        let mut reader = io::Cursor::new(frame.clone());
+
+        assert_eq!(
+            read_agent_worker_protocol_frame(&mut reader).expect("frame must read"),
+            frame
+        );
     }
 
     #[test]

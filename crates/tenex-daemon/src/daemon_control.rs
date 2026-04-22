@@ -4,23 +4,27 @@ use crate::daemon_shell::{
 use crate::daemon_status::DaemonStatusSnapshot;
 use crate::filesystem_state::RestartStateData;
 use crate::process_liveness::ProcessLivenessProbe;
+use serde::Serialize;
 
 pub type DaemonControlResult<T> = DaemonShellResult<T>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DaemonControlInspection {
     pub status_snapshot: DaemonStatusSnapshot,
     pub lock_state: DaemonLockState,
     pub restart_state_compatibility: DaemonRestartStateCompatibility,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum DaemonRestartStateCompatibility {
     Missing,
     Present { restart_state: RestartStateData },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum DaemonControlStartPlan {
     Allowed {
         lock_state: DaemonLockState,
@@ -31,14 +35,16 @@ pub enum DaemonControlStartPlan {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum DaemonControlStartRefusalReason {
     BusyLock {
         owner: crate::filesystem_state::LockInfo,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum DaemonControlStopPlan {
     Allowed {
         lock_state: DaemonLockState,
@@ -51,7 +57,8 @@ pub enum DaemonControlStopPlan {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DaemonControlStopRefusalReason {
     MissingLock,
     StaleLock,

@@ -432,7 +432,7 @@ mod tests {
         DispatchQueueRecord, DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
         append_dispatch_queue_record, build_dispatch_queue_record, replay_dispatch_queue,
     };
-    use crate::nostr_event::CompatibilityEventFixture;
+    use crate::nostr_event::Nip01EventFixture;
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::ral_journal::{
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
@@ -850,7 +850,7 @@ mod tests {
     }
 
     fn publish_request_message(
-        fixture: &CompatibilityEventFixture,
+        fixture: &Nip01EventFixture,
         sequence: u64,
         timestamp: u64,
     ) -> Value {
@@ -884,7 +884,7 @@ mod tests {
         }
     }
 
-    fn signed_event_fixture() -> CompatibilityEventFixture {
+    fn signed_event_fixture() -> Nip01EventFixture {
         serde_json::from_str(STREAM_TEXT_DELTA_FIXTURE).expect("fixture must parse")
     }
 

@@ -143,7 +143,7 @@ mod tests {
         DispatchQueueRecord, DispatchQueueRecordParams, DispatchQueueState, DispatchQueueStatus,
         DispatchRalIdentity, build_dispatch_queue_record, replay_dispatch_queue_records,
     };
-    use crate::nostr_event::CompatibilityEventFixture;
+    use crate::nostr_event::Nip01EventFixture;
     use crate::ral_journal::{
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
         RalJournalReplay, replay_ral_journal_records,
@@ -153,6 +153,9 @@ mod tests {
     use crate::worker_completion::WorkerCompletionDispatchInput;
     use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
     use crate::worker_launch_lock::acquire_worker_launch_locks;
+    use crate::worker_process::{
+        AgentWorkerProcess, AgentWorkerProcessConfig, bun_agent_worker_command,
+    };
     use crate::worker_protocol::{WorkerProtocolFixture, encode_agent_worker_protocol_frame};
     use crate::worker_runtime_state::{WorkerRuntimeStartedDispatch, WorkerRuntimeState};
     use serde_json::{Value, json};
@@ -160,15 +163,23 @@ mod tests {
     use std::error::Error;
     use std::fmt;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
         "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
     );
     const STREAM_TEXT_DELTA_FIXTURE: &str =
         include_str!("../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("crate must live under repo_root/crates/tenex-daemon")
+            .to_path_buf()
+    }
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -410,8 +421,99 @@ mod tests {
         cleanup_temp_dir(daemon_dir);
     }
 
+    #[test]
+    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    fn bun_agent_worker_session_loop_handles_real_process_to_completion() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let scheduler = scheduler_from_records();
+        let dispatch_state = dispatch_state_from_records();
+        let owner = build_ral_lock_info(100, "host-a", 1_000);
+        let locks = acquire_worker_launch_locks(&daemon_dir, &launch_plan(), &owner)
+            .expect("launch locks must acquire");
+        let execute_message = fixture_valid_message("execute");
+        let identity = identity_from_message(&execute_message);
+
+        let bun = std::env::var("BUN_BIN").unwrap_or_else(|_| "bun".to_string());
+        let command = bun_agent_worker_command(&repo_root(), bun)
+            .env("TENEX_AGENT_WORKER_ENGINE", "mock")
+            .env("LOG_LEVEL", "silent");
+        let mut worker = AgentWorkerProcess::spawn(
+            &command,
+            &AgentWorkerProcessConfig {
+                boot_timeout: Duration::from_secs(5),
+            },
+        )
+        .expect("agent worker must boot");
+        let worker_id = worker.ready.worker_id.clone();
+        let mut runtime_state = runtime_state_for(&worker_id, identity);
+
+        worker
+            .process
+            .send_message(&execute_message)
+            .expect("execute must send");
+
+        let outcome = run_worker_session_loop(
+            &mut worker.process,
+            WorkerSessionLoopInput {
+                daemon_dir: &daemon_dir,
+                runtime_state: &mut runtime_state,
+                worker_id: &worker_id,
+                observed_at: 1_710_000_403_000,
+                publish: None,
+                terminal: Some(WorkerMessageTerminalContext {
+                    scheduler: &scheduler,
+                    dispatch_state: &dispatch_state,
+                    result_context: result_context(),
+                    dispatch: Some(dispatch_input()),
+                    locks,
+                }),
+                max_frames: 8,
+            },
+        )
+        .expect("session loop must stop on terminal frame");
+
+        assert_eq!(outcome.frame_count, 3);
+        assert_eq!(
+            outcome.final_reason,
+            WorkerSessionLoopFinalReason::TerminalResultHandled
+        );
+        assert!(runtime_state.get_worker(&worker_id).is_none());
+
+        let status = worker
+            .process
+            .wait_for_exit(Duration::from_secs(5))
+            .expect("worker must exit");
+        assert!(status.success(), "worker exited with {status}");
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
     fn frame_for(message: &Value) -> Vec<u8> {
         encode_agent_worker_protocol_frame(message).expect("frame must encode")
+    }
+
+    fn identity_from_message(message: &Value) -> RalJournalIdentity {
+        RalJournalIdentity {
+            project_id: message
+                .get("projectId")
+                .and_then(Value::as_str)
+                .expect("message must include projectId")
+                .to_string(),
+            agent_pubkey: message
+                .get("agentPubkey")
+                .and_then(Value::as_str)
+                .expect("message must include agentPubkey")
+                .to_string(),
+            conversation_id: message
+                .get("conversationId")
+                .and_then(Value::as_str)
+                .expect("message must include conversationId")
+                .to_string(),
+            ral_number: message
+                .get("ralNumber")
+                .and_then(Value::as_u64)
+                .expect("message must include ralNumber"),
+        }
     }
 
     fn runtime_state_for(worker_id: &str, identity: RalJournalIdentity) -> WorkerRuntimeState {
@@ -537,7 +639,7 @@ mod tests {
     }
 
     fn publish_request_message(
-        fixture: &CompatibilityEventFixture,
+        fixture: &Nip01EventFixture,
         sequence: u64,
         timestamp: u64,
     ) -> Value {
@@ -571,7 +673,7 @@ mod tests {
         }
     }
 
-    fn signed_event_fixture() -> CompatibilityEventFixture {
+    fn signed_event_fixture() -> Nip01EventFixture {
         serde_json::from_str(STREAM_TEXT_DELTA_FIXTURE).expect("fixture must parse")
     }
 

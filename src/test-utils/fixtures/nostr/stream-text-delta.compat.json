@@ -1,6 +1,6 @@
 {
     "name": "stream-text-delta-basic",
-    "description": "Canonical TENEX stream text delta event fixture for Rust migration compatibility tests.",
+    "description": "NIP-01 canonical serialization and schnorr signature test vector for kind 24135 (agent-signed stream text delta). Used by the TypeScript encoder stability regression test and the Rust NIP-01 canonicalizer + schnorr verifier conformance tests. Not a cross-language encoder parity fixture: agent-signed events are encoded and signed by the worker alone, and Rust only verifies and relays them.",
     "secretKeyHex": "0101010101010101010101010101010101010101010101010101010101010101",
     "pubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
     "created_at": 1710000000,

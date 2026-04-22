@@ -78,18 +78,10 @@ pub struct TelegramSenderIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum TelegramDeliveryPayload {
-    HtmlText {
-        html: String,
-    },
-    PlainText {
-        text: String,
-    },
-    AskError {
-        html: String,
-    },
-    ReservedVoice {
-        marker: String,
-    },
+    HtmlText { html: String },
+    PlainText { text: String },
+    AskError { html: String },
+    ReservedVoice { marker: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -444,8 +436,9 @@ pub fn inspect_telegram_outbox(
     let daemon_dir = daemon_dir.as_ref();
     let pending_records =
         read_records_from_paths(list_pending_telegram_outbox_record_paths(daemon_dir)?)?;
-    let delivered_records =
-        read_records_from_paths(list_record_paths(delivered_telegram_outbox_dir(daemon_dir))?)?;
+    let delivered_records = read_records_from_paths(list_record_paths(
+        delivered_telegram_outbox_dir(daemon_dir),
+    )?)?;
     let failed_records =
         read_records_from_paths(list_failed_telegram_outbox_record_paths(daemon_dir)?)?;
 
@@ -718,7 +711,9 @@ fn validate_delivery_request(request: &TelegramDeliveryRequest) -> TelegramOutbo
     Ok(())
 }
 
-fn pending_diagnostic_from_record(record: &TelegramOutboxRecord) -> TelegramOutboxPendingDiagnostic {
+fn pending_diagnostic_from_record(
+    record: &TelegramOutboxRecord,
+) -> TelegramOutboxPendingDiagnostic {
     TelegramOutboxPendingDiagnostic {
         record_id: record.record_id.clone(),
         nostr_event_id: record.nostr_event_id.clone(),
@@ -1235,7 +1230,12 @@ mod tests {
                 .join("tmp")
         );
 
-        for variant_name in ["pendingHtml", "pendingPlain", "pendingAskError", "pendingVoice"] {
+        for variant_name in [
+            "pendingHtml",
+            "pendingPlain",
+            "pendingAskError",
+            "pendingVoice",
+        ] {
             let record: TelegramOutboxRecord =
                 serde_json::from_value(fixture["records"][variant_name].clone())
                     .unwrap_or_else(|_| panic!("{variant_name} record must deserialize"));
@@ -1453,7 +1453,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            TelegramOutboxError::MissingField { field: "correlationId" }
+            TelegramOutboxError::MissingField {
+                field: "correlationId"
+            }
         ));
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
@@ -1470,7 +1472,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            TelegramOutboxError::MissingField { field: "writerVersion" }
+            TelegramOutboxError::MissingField {
+                field: "writerVersion"
+            }
         ));
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
@@ -1650,14 +1654,12 @@ mod tests {
         drain_pending_telegram_outbox(&daemon_dir, &mut failing_publisher, 1710001000200)
             .expect("drain must move to failed");
 
-        let not_due =
-            requeue_due_failed_telegram_outbox_records(&daemon_dir, 1710001001199)
-                .expect("not-due requeue scan must succeed");
+        let not_due = requeue_due_failed_telegram_outbox_records(&daemon_dir, 1710001001199)
+            .expect("not-due requeue scan must succeed");
         assert!(not_due.is_empty());
 
-        let requeued =
-            requeue_due_failed_telegram_outbox_records(&daemon_dir, 1710001001200)
-                .expect("due requeue scan must succeed");
+        let requeued = requeue_due_failed_telegram_outbox_records(&daemon_dir, 1710001001200)
+            .expect("due requeue scan must succeed");
         assert_eq!(requeued.len(), 1);
         assert_eq!(requeued[0].status, TelegramOutboxStatus::Pending);
 
@@ -1666,12 +1668,9 @@ mod tests {
                 telegram_message_id: 6001,
                 delivered_at: 1710001001300,
             }]);
-        let final_outcomes = drain_pending_telegram_outbox(
-            &daemon_dir,
-            &mut delivered_publisher,
-            1710001001300,
-        )
-        .expect("second drain must deliver");
+        let final_outcomes =
+            drain_pending_telegram_outbox(&daemon_dir, &mut delivered_publisher, 1710001001300)
+                .expect("second drain must deliver");
         assert_eq!(final_outcomes[0].status, TelegramOutboxStatus::Delivered);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
@@ -1691,9 +1690,8 @@ mod tests {
         drain_pending_telegram_outbox(&daemon_dir, &mut publisher, 1710001000200)
             .expect("drain must move to failed");
 
-        let requeued =
-            requeue_due_failed_telegram_outbox_records(&daemon_dir, 1_710_009_999_999)
-                .expect("requeue scan must succeed");
+        let requeued = requeue_due_failed_telegram_outbox_records(&daemon_dir, 1_710_009_999_999)
+            .expect("requeue scan must succeed");
         assert!(requeued.is_empty());
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
@@ -1793,8 +1791,8 @@ mod tests {
         )
         .expect("orphan tmp write must succeed");
 
-        let diagnostics = inspect_telegram_outbox(&daemon_dir, 1710001000400)
-            .expect("inspect must succeed");
+        let diagnostics =
+            inspect_telegram_outbox(&daemon_dir, 1710001000400).expect("inspect must succeed");
 
         assert_eq!(
             diagnostics.schema_version,
@@ -1841,12 +1839,9 @@ mod tests {
                 telegram_message_id: 8001,
                 delivered_at: 1710001001200,
             }]);
-        let report = run_telegram_outbox_maintenance(
-            &daemon_dir,
-            &mut delivered_publisher,
-            1710001001200,
-        )
-        .expect("maintenance must succeed");
+        let report =
+            run_telegram_outbox_maintenance(&daemon_dir, &mut delivered_publisher, 1710001001200)
+                .expect("maintenance must succeed");
 
         assert_eq!(report.diagnostics_before.failed_count, 1);
         assert_eq!(report.diagnostics_before.retry_due_count, 1);

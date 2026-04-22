@@ -1070,7 +1070,7 @@ fn now_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nostr_event::CompatibilityEventFixture;
+    use crate::nostr_event::Nip01EventFixture;
     use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
     use serde_json::json;
     use std::collections::VecDeque;
@@ -1874,7 +1874,7 @@ mod tests {
     }
 
     fn publish_request_message(
-        fixture: &CompatibilityEventFixture,
+        fixture: &Nip01EventFixture,
         sequence: u64,
         timestamp: u64,
     ) -> Value {
@@ -1895,7 +1895,7 @@ mod tests {
         })
     }
 
-    fn signed_event_fixture() -> CompatibilityEventFixture {
+    fn signed_event_fixture() -> Nip01EventFixture {
         serde_json::from_str(STREAM_TEXT_DELTA_FIXTURE).expect("fixture must parse")
     }
 

@@ -22,7 +22,7 @@ pub enum NostrEventError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct CompatibilityEventFixture {
+pub struct Nip01EventFixture {
     pub name: String,
     pub description: String,
     #[serde(rename = "secretKeyHex")]
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn stream_text_delta_fixture_matches_nip01_hash_and_signature() {
-        let fixture: CompatibilityEventFixture =
+        let fixture: Nip01EventFixture =
             serde_json::from_str(STREAM_TEXT_DELTA_FIXTURE).expect("fixture must parse");
 
         let canonical = canonical_payload(&fixture.normalized).expect("canonical payload");

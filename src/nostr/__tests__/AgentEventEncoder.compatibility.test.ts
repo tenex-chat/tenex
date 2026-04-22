@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKKind } from "@/nostr/kinds";
 import {
-    createCompatibilityFixture,
+    buildNip01EventFixture,
     createMockInboundEnvelope,
     publicKeyForSecret,
-    signCompatibilityEvent,
+    signNostrTestEvent,
     toUnsignedNostrEvent,
-    verifyCompatibilityEvent,
+    verifyNostrEventSignature,
 } from "@/test-utils";
 import * as projectsModule from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -27,7 +27,7 @@ function bytesFromHex(hex: string): Uint8Array {
     return bytes;
 }
 
-describe("AgentEventEncoder compatibility fixtures", () => {
+describe("AgentEventEncoder stream-text-delta NIP-01 vector", () => {
     beforeEach(() => {
         spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
         spyOn(projectsModule, "getProjectContext").mockReturnValue({
@@ -49,7 +49,7 @@ describe("AgentEventEncoder compatibility fixtures", () => {
         mock.restore();
     });
 
-    it("captures canonical stream-delta serialization and signature invariants", () => {
+    it("produces a stable stream-text-delta event whose canonical payload, hash, and signature match the frozen NIP-01 vector", () => {
         const secretKey = bytesFromHex(streamTextDeltaFixture.secretKeyHex);
         const pubkey = publicKeyForSecret(secretKey);
         const createdAt = streamTextDeltaFixture.created_at;
@@ -91,8 +91,8 @@ describe("AgentEventEncoder compatibility fixtures", () => {
             pubkey,
             created_at: createdAt,
         });
-        const fixture = createCompatibilityFixture(unsigned);
-        const signed = signCompatibilityEvent(
+        const fixture = buildNip01EventFixture(unsigned);
+        const signed = signNostrTestEvent(
             {
                 kind: unsigned.kind,
                 tags: unsigned.tags,
@@ -109,10 +109,10 @@ describe("AgentEventEncoder compatibility fixtures", () => {
         expect(signed.id).toBe(fixture.eventHash);
         expect(signed.pubkey).toBe(pubkey);
         expect(signed.kind).toBe(NDKKind.TenexStreamTextDelta);
-        expect(verifyCompatibilityEvent(signed)).toBe(true);
+        expect(verifyNostrEventSignature(signed)).toBe(true);
         expect(streamTextDeltaFixture.signed.id).toBe(streamTextDeltaFixture.eventHash);
         expect(streamTextDeltaFixture.signed.pubkey).toBe(pubkey);
         expect(streamTextDeltaFixture.signed.kind).toBe(NDKKind.TenexStreamTextDelta);
-        expect(verifyCompatibilityEvent(streamTextDeltaFixture.signed)).toBe(true);
+        expect(verifyNostrEventSignature(streamTextDeltaFixture.signed)).toBe(true);
     });
 });

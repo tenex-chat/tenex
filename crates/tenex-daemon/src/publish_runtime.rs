@@ -53,7 +53,7 @@ pub fn maintain_publish_runtime<P: PublishOutboxRelayPublisher>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nostr_event::CompatibilityEventFixture;
+    use crate::nostr_event::Nip01EventFixture;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, accept_worker_publish_request,
         drain_pending_publish_outbox, read_pending_publish_outbox_record,
@@ -178,7 +178,7 @@ mod tests {
     }
 
     fn publish_request_message(
-        fixture: &CompatibilityEventFixture,
+        fixture: &Nip01EventFixture,
         sequence: u64,
         timestamp: u64,
     ) -> Value {
@@ -199,7 +199,7 @@ mod tests {
         })
     }
 
-    fn signed_event_fixture() -> CompatibilityEventFixture {
+    fn signed_event_fixture() -> Nip01EventFixture {
         serde_json::from_str(include_str!(
             "../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json"
         ))

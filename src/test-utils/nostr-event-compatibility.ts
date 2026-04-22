@@ -19,7 +19,7 @@ export interface NormalizedNostrEvent {
     created_at?: number;
 }
 
-export interface CompatibilityEventFixture {
+export interface Nip01EventFixture {
     normalized: NormalizedNostrEvent;
     canonicalPayload: string;
     eventHash: string;
@@ -73,7 +73,7 @@ export function canonicalNostrPayload(event: UnsignedEvent): string {
     return serializeEvent(event);
 }
 
-export function createCompatibilityFixture(event: UnsignedEvent): CompatibilityEventFixture {
+export function buildNip01EventFixture(event: UnsignedEvent): Nip01EventFixture {
     return {
         normalized: normalizeNostrEvent(event),
         canonicalPayload: canonicalNostrPayload(event),
@@ -81,14 +81,14 @@ export function createCompatibilityFixture(event: UnsignedEvent): CompatibilityE
     };
 }
 
-export function signCompatibilityEvent(
+export function signNostrTestEvent(
     template: EventTemplate,
     secretKey: Uint8Array
 ): VerifiedEvent {
     return finalizeEvent(template, secretKey);
 }
 
-export function verifyCompatibilityEvent(event: Event): boolean {
+export function verifyNostrEventSignature(event: Event): boolean {
     return verifyEvent(event);
 }
 

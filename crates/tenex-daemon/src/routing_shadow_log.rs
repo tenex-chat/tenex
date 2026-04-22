@@ -3,6 +3,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::routing_shadow::{
@@ -44,7 +45,7 @@ pub enum RoutingShadowLogError {
 
 pub type RoutingShadowLogResult<T> = Result<T, RoutingShadowLogError>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RoutingShadowLogDiagnostics {
     pub record_count: usize,
     pub latest_observed_at: Option<u64>,

@@ -19,7 +19,8 @@ use time::macros::format_description;
 const UTC_MILLIS_FORMAT: &[FormatItem<'static>] =
     format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z");
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum DaemonLockState {
     Missing,
     Busy { owner: LockInfo },

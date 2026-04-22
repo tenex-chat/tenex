@@ -111,7 +111,7 @@ impl From<WorkerPublishError> for WorkerPublishFlowError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nostr_event::CompatibilityEventFixture;
+    use crate::nostr_event::Nip01EventFixture;
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::worker_protocol::{
         AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolDirection,
@@ -310,7 +310,7 @@ mod tests {
     }
 
     fn publish_request_message(
-        fixture: &CompatibilityEventFixture,
+        fixture: &Nip01EventFixture,
         sequence: u64,
         timestamp: u64,
     ) -> Value {
@@ -343,7 +343,7 @@ mod tests {
             .clone()
     }
 
-    fn signed_event_fixture() -> CompatibilityEventFixture {
+    fn signed_event_fixture() -> Nip01EventFixture {
         serde_json::from_str(STREAM_TEXT_DELTA_FIXTURE).expect("fixture must parse")
     }
 
