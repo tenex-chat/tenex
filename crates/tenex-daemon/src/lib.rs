@@ -21,6 +21,7 @@ pub mod daemon_status;
 pub mod daemon_worker_runtime;
 pub mod dispatch_queue;
 pub mod filesystem_state;
+pub mod inbound_dispatch;
 pub mod inbound_envelope;
 pub mod nostr_event;
 pub mod nostr_inbound;
