@@ -348,12 +348,7 @@ mod tests {
         let entries: Vec<_> = fs::read_dir(media_dir(tmp.path()))
             .expect("media dir")
             .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(".partial")
-            })
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".partial"))
             .collect();
         assert!(entries.is_empty(), "no partial files should be left behind");
     }
