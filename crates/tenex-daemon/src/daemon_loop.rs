@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::path::Path;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
@@ -19,6 +21,24 @@ pub trait DaemonMaintenanceLoopClock {
 
 pub trait DaemonMaintenanceLoopSleeper {
     fn sleep_ms(&mut self, sleep_ms: u64);
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SystemDaemonMaintenanceLoopClock;
+
+impl DaemonMaintenanceLoopClock for SystemDaemonMaintenanceLoopClock {
+    fn now_ms(&mut self) -> u64 {
+        current_unix_time_ms()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ThreadDaemonMaintenanceLoopSleeper;
+
+impl DaemonMaintenanceLoopSleeper for ThreadDaemonMaintenanceLoopSleeper {
+    fn sleep_ms(&mut self, sleep_ms: u64) {
+        thread::sleep(Duration::from_millis(sleep_ms));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +192,13 @@ where
     )
 }
 
+pub fn current_unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +258,12 @@ mod tests {
     }
 
     impl StdError for FakeLoopError {}
+
+    #[test]
+    fn system_clock_reports_nonzero_unix_time() {
+        let mut clock = SystemDaemonMaintenanceLoopClock;
+        assert!(clock.now_ms() > 0);
+    }
 
     #[test]
     fn bounded_loop_with_zero_iterations_does_nothing() {
