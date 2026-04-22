@@ -24,6 +24,10 @@ use crate::operations_status_runtime::{
     OperationsStatusRuntimeInput, plan_operations_status_drafts,
     publish_operations_status_transition_from_runtime,
 };
+use crate::operations_status_state::{
+    OperationsStatusStateError, operations_status_active_snapshot_from_projects,
+    read_operations_status_active_snapshot, write_operations_status_active_snapshot,
+};
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
     PublishOutboxRetryPolicy,
@@ -171,6 +175,8 @@ pub enum DaemonTickWithWorkerError {
     WorkerRuntime { message: String },
     #[error("operations-status runtime failed: {0}")]
     OperationsStatus(#[from] OperationsStatusRuntimeError),
+    #[error("operations-status state failed: {0}")]
+    OperationsStatusState(#[from] OperationsStatusStateError),
     #[error("publish-outbox maintenance failed: {0}")]
     PublishOutbox(#[from] PublishOutboxError),
 }
@@ -302,14 +308,14 @@ where
     let now_ms = input.now_ms;
     let maintenance =
         run_daemon_maintenance_once_from_filesystem_with_telegram(input, &mut *telegram_publisher)?;
-    let previous_active_conversations = active_operations_by_project(
-        worker.runtime_state,
-        maintenance
-            .project_descriptor_report
-            .descriptors
-            .iter()
-            .map(|descriptor| descriptor.project_d_tag.as_str()),
-    );
+    let project_ids = maintenance
+        .project_descriptor_report
+        .descriptors
+        .iter()
+        .map(|descriptor| descriptor.project_d_tag.as_str())
+        .collect::<Vec<_>>();
+    let previous_active_conversations =
+        read_active_operations_by_project_from_filesystem(daemon_dir, project_ids.iter().copied())?;
     let telegram_egress =
         worker_telegram_egress_runtime_input(tenex_base_dir, &worker.writer_version);
     let worker_runtime = run_daemon_worker_runtime_once_from_filesystem(
@@ -344,6 +350,8 @@ where
             });
         }
     };
+    let current_active_conversations =
+        active_operations_by_project(worker.runtime_state, project_ids.iter().copied());
     let operations_status = publish_operations_status_transitions(
         tenex_base_dir,
         daemon_dir,
@@ -364,6 +372,19 @@ where
             return Err(source.into());
         }
     };
+    let operations_status_state = write_operations_status_active_snapshot(
+        daemon_dir,
+        operations_status_active_snapshot_from_projects(current_active_conversations),
+    );
+    if let Err(source) = operations_status_state {
+        maintain_publish_runtime(PublishRuntimeMaintainInput {
+            daemon_dir,
+            publisher,
+            now: now_ms,
+            retry_policy,
+        })?;
+        return Err(source.into());
+    }
     let publish_outbox = maintain_publish_runtime(PublishRuntimeMaintainInput {
         daemon_dir,
         publisher,
@@ -378,6 +399,25 @@ where
         operations_status,
         publish_outbox,
     })
+}
+
+fn read_active_operations_by_project_from_filesystem<'a>(
+    daemon_dir: &Path,
+    project_ids: impl Iterator<Item = &'a str>,
+) -> Result<Vec<(String, Vec<String>)>, OperationsStatusStateError> {
+    let snapshot = read_operations_status_active_snapshot(daemon_dir)?;
+
+    Ok(project_ids
+        .map(|project_id| {
+            let conversation_ids = snapshot
+                .projects
+                .iter()
+                .find(|project| project.project_id == project_id)
+                .map(|project| project.conversation_ids.clone())
+                .unwrap_or_default();
+            (project_id.to_string(), conversation_ids)
+        })
+        .collect())
 }
 
 fn publish_operations_status_transitions(
@@ -676,6 +716,7 @@ mod tests {
         append_dispatch_queue_record, build_dispatch_queue_record,
     };
     use crate::nostr_event::SignedNostrEvent;
+    use crate::operations_status_state::read_operations_status_active_snapshot;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
         read_published_publish_outbox_record,
@@ -1167,6 +1208,111 @@ mod tests {
                 .tags
                 .iter()
                 .any(|tag| tag == &vec!["p".to_string(), TEST_AGENT_PUBKEY.to_string()])
+        );
+    }
+
+    #[test]
+    fn filesystem_tick_with_worker_cleans_operations_status_after_runtime_restart() {
+        let fixture = TickFilesystemFixture::new("daemon-loop-worker-operations-restart", 0x09);
+        let mut publisher = RecordingPublisher::default();
+        let mut telegram_publisher = NoTelegramPublisher;
+        let mut spawner = EmptyQueueSpawner::default();
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = AgentWorkerProcessConfig::default();
+        let conversation_id = event_id_hex(0x45);
+        register_active_runtime_worker(
+            &mut runtime_state,
+            "worker-before-restart",
+            "dispatch-before-restart",
+            "demo-project",
+            TEST_AGENT_PUBKEY,
+            &conversation_id,
+            WorkerHeartbeatState::Streaming,
+        );
+
+        let first_tick = run_daemon_tick_once_from_filesystem_with_worker(
+            DaemonMaintenanceInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                now_ms: 1_710_001_000_000,
+                heartbeat_latch: None,
+            },
+            DaemonWorkerTickInput {
+                runtime_state: &mut runtime_state,
+                limits: WorkerConcurrencyLimits::default(),
+                correlation_id: "daemon-loop-worker-operations-restart:first".to_string(),
+                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                command: AgentWorkerCommand::new("bun"),
+                worker_config: &worker_config,
+                writer_version: "daemon-loop-test@0".to_string(),
+                resolved_pending_delegations: Vec::new(),
+                publish: None,
+                max_frames: 1,
+            },
+            &mut spawner,
+            &mut publisher,
+            PublishOutboxRetryPolicy::default(),
+            &mut telegram_publisher,
+        )
+        .expect("first tick must publish active operations status");
+
+        assert_eq!(first_tick.operations_status.active_event_ids.len(), 1);
+        let state_after_first = read_operations_status_active_snapshot(&fixture.daemon_dir)
+            .expect("operations-status state must read after active tick");
+        assert_eq!(state_after_first.projects.len(), 1);
+        assert_eq!(state_after_first.projects[0].project_id, "demo-project");
+        assert_eq!(
+            state_after_first.projects[0].conversation_ids,
+            vec![conversation_id.clone()]
+        );
+
+        let mut restarted_runtime_state = WorkerRuntimeState::default();
+        let second_tick = run_daemon_tick_once_from_filesystem_with_worker(
+            DaemonMaintenanceInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                now_ms: 1_710_001_001_000,
+                heartbeat_latch: None,
+            },
+            DaemonWorkerTickInput {
+                runtime_state: &mut restarted_runtime_state,
+                limits: WorkerConcurrencyLimits::default(),
+                correlation_id: "daemon-loop-worker-operations-restart:second".to_string(),
+                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_001_000),
+                command: AgentWorkerCommand::new("bun"),
+                worker_config: &worker_config,
+                writer_version: "daemon-loop-test@0".to_string(),
+                resolved_pending_delegations: Vec::new(),
+                publish: None,
+                max_frames: 1,
+            },
+            &mut spawner,
+            &mut publisher,
+            PublishOutboxRetryPolicy::default(),
+            &mut telegram_publisher,
+        )
+        .expect("restart tick must publish cleanup operations status");
+
+        assert!(second_tick.operations_status.active_event_ids.is_empty());
+        assert_eq!(second_tick.operations_status.cleanup_event_ids.len(), 1);
+        let cleanup_event_id = &second_tick.operations_status.cleanup_event_ids[0];
+        let cleanup = read_published_publish_outbox_record(&fixture.daemon_dir, cleanup_event_id)
+            .expect("cleanup record read must succeed")
+            .expect("cleanup record must exist");
+        assert_eq!(cleanup.event.kind, OPERATIONS_STATUS_KIND);
+        assert_eq!(cleanup.request.conversation_id, conversation_id);
+        assert!(
+            cleanup
+                .event
+                .tags
+                .iter()
+                .all(|tag| tag.first().is_none_or(|name| name != "p"))
+        );
+        assert!(
+            read_operations_status_active_snapshot(&fixture.daemon_dir)
+                .expect("operations-status state must read after cleanup")
+                .projects
+                .is_empty()
         );
     }
 

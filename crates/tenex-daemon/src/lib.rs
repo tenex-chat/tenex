@@ -44,6 +44,7 @@ pub mod nostr_subscription_gateway;
 pub mod nostr_subscription_ingress;
 pub mod nostr_subscription_tick;
 pub mod operations_status_runtime;
+pub mod operations_status_state;
 pub mod periodic_tick;
 pub mod periodic_tick_state;
 pub mod process_liveness;

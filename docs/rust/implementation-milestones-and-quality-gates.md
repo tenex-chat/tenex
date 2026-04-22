@@ -853,7 +853,8 @@ Landed slices:
 - `crates/tenex-daemon/src/backend_events/operations_status.rs` — Rust encoder
   and signer for kind `24133` operations status, preserving TypeScript tag
   ordering (`e`, human `P`, active-agent `p`, project `a`) and cleanup events
-  with no active-agent tags. Library-only; no daemon wiring.
+  with no active-agent tags. Wired through the Rust daemon loop and publish
+  outbox paths.
 - `crates/tenex-daemon/src/publish_outbox.rs` — filesystem-backed acceptance,
   idempotency, retry, diagnostics, maintenance, and relay-drain primitives for
   exact signed Nostr events, including worker-signed publish requests and
@@ -890,10 +891,10 @@ Landed slices:
   `daemon-control backend-events-periodic-tick` command now delegates through
   this library path.
 - `crates/tenex-daemon/src/daemon_maintenance.rs` — daemon-level one-pass
-  maintenance boundary for the future Rust main loop. It discovers active
-  project descriptors from shared filesystem state, invokes backend-events
-  maintenance with those projects, and runs scheduler-wakeup maintenance from
-  the same caller-owned timestamp.
+  maintenance boundary for the Rust main loop. It discovers active project
+  descriptors from shared filesystem state, invokes backend-events maintenance
+  with those projects, and runs scheduler-wakeup maintenance from the same
+  caller-owned timestamp.
 - `crates/tenex-daemon/src/daemon_loop.rs` — bounded, testable daemon tick
   loop. It injects clock/sleeper traits, records per-iteration diagnostics, and
   provides the filesystem tick that runs daemon maintenance first and
@@ -953,7 +954,11 @@ Landed slices:
 - `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
   projection from active worker heartbeat state into kind `24133`
   operations-status drafts, including transition-aware cleanup drafts with no
-  active-agent `p` tags. Library-only; no periodic status wiring.
+  active-agent `p` tags. Wired through the Rust daemon loop and daemon-control
+  runtime wiring.
+- `crates/tenex-daemon/src/operations_status_state.rs` — durable filesystem
+  snapshot of active operations-status conversations, so daemon restarts can
+  publish cleanup events even after in-memory worker state is gone.
 
 Planned next runtime boundaries:
 
@@ -972,10 +977,9 @@ Planned next runtime boundaries:
   `daemon-control backend-events-enqueue-status`. Project-status uses the
   separate `project_status_runtime` boundary and
   `daemon-control backend-events-enqueue-project-status`.
-- The remaining project-status work is daemon wiring and final parity polish:
-  invoking the central backend-events tick from the long-running Rust daemon
-  loop, then tightening any client-visible differences such as unassigned
-  configurable tool tags or skill visibility edge cases.
+- The remaining project-status work is end-to-end acceptance in the long-running
+  Rust daemon path, then tightening any client-visible differences such as
+  unassigned configurable tool tags or skill visibility edge cases.
 
 Scope:
 
@@ -1105,7 +1109,8 @@ Landed slices:
 - `crates/tenex-daemon/src/telegram_outbox.rs` — Rust-owned Telegram transport
   outbox with pending / delivered / failed / tmp states, deterministic record
   IDs, retryable-vs-permanent failure classification, requeue scan, diagnostics,
-  and maintenance pass. Library-only; no Bot API HTTP client, no daemon wiring.
+  and maintenance pass, wired through the Rust Telegram delivery path and daemon
+  maintenance.
 - `crates/tenex-daemon/src/caches/` — filesystem-backed caches for trust
   pubkeys, prefix lookups, and profile names under
   `$TENEX_BASE_DIR/daemon/caches/`, with atomic writes, schema-version and
@@ -1116,7 +1121,7 @@ Landed slices:
 - `crates/tenex-daemon/src/scheduler_wakeups.rs` — filesystem-backed scheduler
   wakeup records with pending/fired/failed/tmp states, retry classification,
   due-listing, cancellation, requeue scans, diagnostics, and maintenance
-  reports. Library-only dispatch substrate; no long-lived wakeup service wiring.
+  reports, wired through daemon maintenance and diagnostics.
 - `daemon-control scheduler-wakeups` and `daemon-control
   scheduler-wakeups-maintain` — read-only diagnostics and maintenance report
   JSON over the scheduler wakeup filesystem state.
@@ -1149,7 +1154,7 @@ Landed slices:
   of requiring project owner/tag CLI arguments.
 - `crates/tenex-daemon/src/backend_events_maintenance.rs` — caller-facing
   maintenance boundary around the backend-events tick and scheduler-state
-  persistence. This is the unit the future Rust daemon loop should invoke for
+  persistence. This is the unit the Rust daemon loop invokes for
   backend-authored status work.
 
 Scope:
@@ -1157,10 +1162,8 @@ Scope:
 - Move project status publishing to Rust or a dedicated adapter. If M7 is
   enabled before this, M7 must provide an interim Rust-compatible status
   publisher so clients do not lose status.
-- Move operations status to Rust or derive it from worker/RAL journal state. If
-  only a compatibility subset is available, feature-gate it and document the
-  exact missing fields.
-- Implement the Rust-native Telegram gateway/adapter.
+- Drive Telegram delivery through the Rust daemon path and real-client
+  acceptance fixtures.
 - Add a Rust-owned Telegram transport outbox under
   `$TENEX_BASE_DIR/daemon/transport-outbox/telegram/`, with pending, delivered,
   failed, and tmp states.
@@ -1178,11 +1181,13 @@ Scope:
   adapter, normalizing updates into the same `InboundEnvelope` contract before
   Rust dispatch.
 - Decide and implement MCP notification strategy.
-- Move scheduler wakeups to Rust.
 - Move agent definition monitoring or isolate it as an adapter.
 - Move skill whitelist hydration or isolate it as an adapter.
 - Define filesystem-backed caches for trust pubkeys, prefix lookups, and
   profile names.
+- Drive full Rust daemon E2E acceptance for operations status, scheduler
+  wakeups, and Telegram delivery through the production daemon entrypoint and
+  real-client fixtures.
 
 Quality gates:
 
