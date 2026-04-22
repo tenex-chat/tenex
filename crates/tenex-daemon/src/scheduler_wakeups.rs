@@ -1466,10 +1466,7 @@ mod tests {
 
         let error = mark_wakeup_fired(&daemon_dir, "missing-id", 1_710_001_150, "dispatched")
             .expect_err("missing pending record must be rejected");
-        assert!(matches!(
-            error,
-            SchedulerWakeupError::WakeupNotFound { .. }
-        ));
+        assert!(matches!(error, SchedulerWakeupError::WakeupNotFound { .. }));
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
@@ -1587,10 +1584,7 @@ mod tests {
             WakeupRetryPolicy::default(),
         )
         .expect_err("missing record must be rejected");
-        assert!(matches!(
-            error,
-            SchedulerWakeupError::WakeupNotFound { .. }
-        ));
+        assert!(matches!(error, SchedulerWakeupError::WakeupNotFound { .. }));
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
