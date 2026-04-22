@@ -15,6 +15,7 @@ pub mod chat_context;
 pub mod client;
 pub mod delivery;
 pub mod delivery_plan;
+pub mod inbound;
 pub mod renderer;
 pub mod types;
 

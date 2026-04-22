@@ -9,11 +9,23 @@ use crate::daemon_maintenance::{
     DaemonMaintenanceError, DaemonMaintenanceInput, DaemonMaintenanceOutcome,
     run_daemon_maintenance_once_from_filesystem,
 };
+use crate::daemon_worker_runtime::{
+    DaemonWorkerRuntimeFilesystemInput, DaemonWorkerRuntimeOutcome,
+    run_daemon_worker_runtime_once_from_filesystem,
+};
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
     PublishOutboxRetryPolicy,
 };
 use crate::publish_runtime::{PublishRuntimeMaintainInput, maintain_publish_runtime};
+use crate::ral_journal::RalPendingDelegation;
+use crate::ral_lock::RalLockInfo;
+use crate::worker_concurrency::WorkerConcurrencyLimits;
+use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpawner};
+use crate::worker_frame_pump::WorkerFrameReceiver;
+use crate::worker_message_flow::WorkerMessagePublishContext;
+use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
+use crate::worker_runtime_state::WorkerRuntimeState;
 
 pub trait DaemonMaintenanceLoopClock {
     fn now_ms(&mut self) -> u64;
@@ -73,6 +85,41 @@ pub struct DaemonTickOutcome {
     pub publish_outbox: PublishOutboxMaintenanceReport,
 }
 
+#[derive(Debug)]
+pub struct DaemonWorkerTickInput<'a> {
+    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub limits: WorkerConcurrencyLimits,
+    pub correlation_id: String,
+    pub lock_owner: RalLockInfo,
+    pub command: AgentWorkerCommand,
+    pub worker_config: &'a AgentWorkerProcessConfig,
+    pub writer_version: String,
+    pub resolved_pending_delegations: Vec<RalPendingDelegation>,
+    pub publish: Option<WorkerMessagePublishContext>,
+    pub max_frames: u64,
+}
+
+#[derive(Debug)]
+pub struct DaemonWorkerLoopInput<'a> {
+    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub limits: WorkerConcurrencyLimits,
+    pub correlation_id_prefix: String,
+    pub lock_owner: RalLockInfo,
+    pub command: AgentWorkerCommand,
+    pub worker_config: &'a AgentWorkerProcessConfig,
+    pub writer_version: String,
+    pub resolved_pending_delegations: Vec<RalPendingDelegation>,
+    pub publish: Option<WorkerMessagePublishContext>,
+    pub max_frames: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonTickWithWorkerOutcome {
+    pub maintenance: DaemonMaintenanceOutcome,
+    pub worker_runtime: DaemonWorkerRuntimeOutcome,
+    pub publish_outbox: PublishOutboxMaintenanceReport,
+}
+
 #[derive(Debug, Error)]
 pub enum DaemonMaintenanceLoopError<E>
 where
@@ -94,6 +141,16 @@ where
 pub enum DaemonTickError {
     #[error("daemon maintenance failed: {0}")]
     Maintenance(#[from] DaemonMaintenanceError),
+    #[error("publish-outbox maintenance failed: {0}")]
+    PublishOutbox(#[from] PublishOutboxError),
+}
+
+#[derive(Debug, Error)]
+pub enum DaemonTickWithWorkerError {
+    #[error("daemon maintenance failed: {0}")]
+    Maintenance(#[from] DaemonMaintenanceError),
+    #[error("daemon worker runtime failed: {message}")]
+    WorkerRuntime { message: String },
     #[error("publish-outbox maintenance failed: {0}")]
     PublishOutbox(#[from] PublishOutboxError),
 }
@@ -199,6 +256,58 @@ pub fn run_daemon_tick_once_from_filesystem<P: PublishOutboxRelayPublisher>(
     })
 }
 
+pub fn run_daemon_tick_once_from_filesystem_with_worker<P, S>(
+    input: DaemonMaintenanceInput<'_>,
+    worker: DaemonWorkerTickInput<'_>,
+    spawner: &mut S,
+    publisher: &mut P,
+    retry_policy: PublishOutboxRetryPolicy,
+) -> Result<DaemonTickWithWorkerOutcome, DaemonTickWithWorkerError>
+where
+    P: PublishOutboxRelayPublisher,
+    S: WorkerDispatchSpawner,
+    S::Session: WorkerFrameReceiver
+        + WorkerDispatchSession<Error = <S::Session as WorkerFrameReceiver>::Error>
+        + 'static,
+{
+    let daemon_dir = input.daemon_dir;
+    let now_ms = input.now_ms;
+    let maintenance = run_daemon_maintenance_once_from_filesystem(input)?;
+    let worker_runtime = run_daemon_worker_runtime_once_from_filesystem(
+        spawner,
+        DaemonWorkerRuntimeFilesystemInput {
+            daemon_dir,
+            runtime_state: worker.runtime_state,
+            limits: worker.limits,
+            now_ms,
+            correlation_id: worker.correlation_id,
+            lock_owner: worker.lock_owner,
+            command: worker.command,
+            worker_config: worker.worker_config,
+            writer_version: worker.writer_version,
+            resolved_pending_delegations: worker.resolved_pending_delegations,
+            publish: worker.publish,
+            max_frames: worker.max_frames,
+        },
+    )
+    .map_err(|source| DaemonTickWithWorkerError::WorkerRuntime {
+        message: source.to_string(),
+    })?;
+    let publish_outbox = maintain_publish_runtime(PublishRuntimeMaintainInput {
+        daemon_dir,
+        publisher,
+        now: now_ms,
+        retry_policy,
+    })?
+    .maintenance_report;
+
+    Ok(DaemonTickWithWorkerOutcome {
+        maintenance,
+        worker_runtime,
+        publish_outbox,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DaemonMaintenanceLoopInput<'a> {
     pub tenex_base_dir: &'a Path,
@@ -286,6 +395,75 @@ where
     )
 }
 
+pub fn run_daemon_tick_loop_until_stopped_from_filesystem_with_worker<C, Sleep, Stop, P, S>(
+    input: DaemonMaintenanceStoppableLoopInput<'_>,
+    worker: DaemonWorkerLoopInput<'_>,
+    clock: &mut C,
+    sleeper: &mut Sleep,
+    stop_signal: &mut Stop,
+    spawner: &mut S,
+    publisher: &mut P,
+    retry_policy: PublishOutboxRetryPolicy,
+) -> Result<
+    DaemonMaintenanceLoopOutcome<DaemonTickWithWorkerOutcome>,
+    DaemonMaintenanceLoopError<DaemonTickWithWorkerError>,
+>
+where
+    C: DaemonMaintenanceLoopClock,
+    Sleep: DaemonMaintenanceLoopSleeper,
+    Stop: DaemonMaintenanceLoopStopSignal,
+    P: PublishOutboxRelayPublisher,
+    S: WorkerDispatchSpawner,
+    S::Session: WorkerFrameReceiver
+        + WorkerDispatchSession<Error = <S::Session as WorkerFrameReceiver>::Error>
+        + 'static,
+{
+    let DaemonWorkerLoopInput {
+        runtime_state,
+        limits,
+        correlation_id_prefix,
+        lock_owner,
+        command,
+        worker_config,
+        writer_version,
+        resolved_pending_delegations,
+        publish,
+        max_frames,
+    } = worker;
+
+    run_daemon_maintenance_loop_until_stopped(
+        clock,
+        sleeper,
+        stop_signal,
+        input.max_iterations,
+        input.sleep_ms,
+        |now_ms| {
+            run_daemon_tick_once_from_filesystem_with_worker(
+                DaemonMaintenanceInput {
+                    tenex_base_dir: input.tenex_base_dir,
+                    daemon_dir: input.daemon_dir,
+                    now_ms,
+                },
+                DaemonWorkerTickInput {
+                    runtime_state: &mut *runtime_state,
+                    limits,
+                    correlation_id: format!("{correlation_id_prefix}:{now_ms}"),
+                    lock_owner: lock_owner.clone(),
+                    command: command.clone(),
+                    worker_config,
+                    writer_version: writer_version.clone(),
+                    resolved_pending_delegations: resolved_pending_delegations.clone(),
+                    publish,
+                    max_frames,
+                },
+                spawner,
+                publisher,
+                retry_policy,
+            )
+        },
+    )
+}
+
 pub fn current_unix_time_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -301,6 +479,9 @@ mod tests {
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
     };
+    use crate::ral_lock::build_ral_lock_info;
+    use crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason;
+    use crate::worker_dispatch_execution::BootedWorkerDispatch;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::collections::VecDeque;
     use std::error::Error as StdError;
@@ -645,6 +826,59 @@ mod tests {
         assert_eq!(publish_outbox.retryable_failed_count, 3);
     }
 
+    #[test]
+    fn filesystem_tick_with_worker_runs_worker_runtime_before_publish_drain() {
+        let fixture = TickFilesystemFixture::new("daemon-loop-worker-empty-queue", 0x06);
+        let mut publisher = RecordingPublisher::default();
+        let mut spawner = EmptyQueueSpawner::default();
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = AgentWorkerProcessConfig::default();
+
+        let outcome = run_daemon_tick_once_from_filesystem_with_worker(
+            DaemonMaintenanceInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                now_ms: 1_710_001_000_000,
+            },
+            DaemonWorkerTickInput {
+                runtime_state: &mut runtime_state,
+                limits: WorkerConcurrencyLimits::default(),
+                correlation_id: "daemon-loop-worker-empty-queue".to_string(),
+                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                command: AgentWorkerCommand::new("bun"),
+                worker_config: &worker_config,
+                writer_version: "daemon-loop-test@0".to_string(),
+                resolved_pending_delegations: Vec::new(),
+                publish: None,
+                max_frames: 1,
+            },
+            &mut spawner,
+            &mut publisher,
+            PublishOutboxRetryPolicy::default(),
+        )
+        .expect("filesystem tick with worker must succeed");
+
+        assert_eq!(
+            outcome.maintenance.backend_events.tick.due_task_names,
+            vec![
+                "backend-status".to_string(),
+                format!("project-status:{}:demo-project", fixture.owner_pubkey),
+            ]
+        );
+        assert!(matches!(
+            outcome.worker_runtime,
+            DaemonWorkerRuntimeOutcome::NotAdmitted {
+                reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
+                blocked_candidates: _,
+            }
+        ));
+        assert_eq!(spawner.spawn_calls, 0);
+        assert_eq!(outcome.publish_outbox.diagnostics_before.pending_count, 3);
+        assert_eq!(outcome.publish_outbox.drained.len(), 3);
+        assert_eq!(outcome.publish_outbox.diagnostics_after.pending_count, 0);
+        assert_eq!(publisher.event_ids.len(), 3);
+    }
+
     #[derive(Debug)]
     struct TickFilesystemFixture {
         tenex_base_dir: PathBuf,
@@ -740,6 +974,55 @@ mod tests {
             })
         }
     }
+
+    #[derive(Debug, Default)]
+    struct EmptyQueueSpawner {
+        spawn_calls: usize,
+    }
+
+    impl WorkerDispatchSpawner for EmptyQueueSpawner {
+        type Session = EmptyQueueSession;
+        type Error = EmptyQueueWorkerError;
+
+        fn spawn_worker(
+            &mut self,
+            command: &AgentWorkerCommand,
+            config: &AgentWorkerProcessConfig,
+        ) -> Result<BootedWorkerDispatch<Self::Session>, Self::Error> {
+            self.spawn_calls += 1;
+            panic!("worker should not spawn for empty queue: {command:?} {config:?}");
+        }
+    }
+
+    #[derive(Debug)]
+    struct EmptyQueueSession;
+
+    impl WorkerDispatchSession for EmptyQueueSession {
+        type Error = EmptyQueueWorkerError;
+
+        fn send_worker_message(&mut self, message: &serde_json::Value) -> Result<(), Self::Error> {
+            panic!("empty queue session should not receive messages: {message:?}");
+        }
+    }
+
+    impl WorkerFrameReceiver for EmptyQueueSession {
+        type Error = EmptyQueueWorkerError;
+
+        fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
+            panic!("empty queue session should not receive frames");
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct EmptyQueueWorkerError(&'static str);
+
+    impl fmt::Display for EmptyQueueWorkerError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
+    impl StdError for EmptyQueueWorkerError {}
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
