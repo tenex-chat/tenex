@@ -50,4 +50,15 @@ describe("AgentWorkerProtocol frame codec compatibility fixture", () => {
             expect(() => decodeAgentWorkerProtocolFrame(bytesFromHex(invalidFrame.frameHex))).toThrow();
         }
     });
+
+    it("rejects declared oversized payloads before reading payload bytes", () => {
+        const maxPayloadBytes = AGENT_WORKER_MAX_FRAME_BYTES - AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES;
+        const frame = new Uint8Array(AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES);
+        const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+        view.setUint32(0, maxPayloadBytes + 1, false);
+
+        expect(() => decodeAgentWorkerProtocolFrame(frame)).toThrow(
+            `Agent worker protocol payload exceeds ${maxPayloadBytes} bytes`
+        );
+    });
 });

@@ -653,6 +653,87 @@
             }
         },
         {
+            "name": "stream-delta-with-both-delta-and-content-ref",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410100,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1,
+                "delta": "inline and referenced",
+                "contentRef": {
+                    "path": "/tmp/tenex/worker/exec_01hzzzzzzzzzzzzzzzzzzzzzzz/delta-ambiguous.txt",
+                    "byteLength": 1048577,
+                    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            }
+        },
+        {
+            "name": "stream-delta-content-ref-empty-path",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410200,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1,
+                "contentRef": {
+                    "path": "",
+                    "byteLength": 1,
+                    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            }
+        },
+        {
+            "name": "stream-delta-content-ref-zero-byte-length",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410300,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1,
+                "contentRef": {
+                    "path": "/tmp/tenex/worker/exec_01hzzzzzzzzzzzzzzzzzzzzzzz/delta-empty.txt",
+                    "byteLength": 0,
+                    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            }
+        },
+        {
+            "name": "stream-delta-content-ref-invalid-sha256",
+            "message": {
+                "version": 1,
+                "type": "stream_delta",
+                "correlationId": "exec_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 1,
+                "timestamp": 1710000410400,
+                "projectId": "project-alpha",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 3,
+                "batchSequence": 1,
+                "contentRef": {
+                    "path": "/tmp/tenex/worker/exec_01hzzzzzzzzzzzzzzzzzzzzzzz/delta-invalid-sha.txt",
+                    "byteLength": 1,
+                    "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+                }
+            }
+        },
+        {
             "name": "terminal-message-missing-final-state",
             "message": {
                 "version": 1,

@@ -59,6 +59,10 @@
         {
             "name": "invalid-message-payload",
             "frameHex": "000000027b7d"
+        },
+        {
+            "name": "declared-payload-too-large",
+            "frameHex": "000ffffd"
         }
     ]
 }

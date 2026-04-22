@@ -628,15 +628,19 @@ fn validate_stream_delta(object: &Map<String, Value>) -> WorkerProtocolResult<()
     validate_execution_identity(object)?;
     require_positive_u64(object, "batchSequence")?;
 
-    let has_delta = object
-        .get("delta")
-        .is_some_and(|value| value.as_str().is_some_and(|text| !text.is_empty()));
+    let has_delta = object.contains_key("delta");
     let has_content_ref = object.contains_key("contentRef");
-    if !has_delta && !has_content_ref {
+    if has_delta == has_content_ref {
+        if has_delta {
+            return Err(WorkerProtocolError::InvalidField("delta|contentRef"));
+        }
         return Err(WorkerProtocolError::MissingField("delta|contentRef"));
     }
-    if object.contains_key("delta") {
-        require_string(object, "delta")?;
+    if has_delta {
+        let delta = require_string(object, "delta")?;
+        if delta.len() as u64 > AGENT_WORKER_STREAM_BATCH_MAX_BYTES {
+            return Err(WorkerProtocolError::InvalidField("delta"));
+        }
     }
     if has_content_ref {
         validate_content_ref(object, "contentRef")?;
@@ -1257,6 +1261,85 @@ mod tests {
     }
 
     #[test]
+    fn stream_delta_payload_and_content_ref_semantics_are_validated() {
+        let mut inline_delta = stream_delta_message();
+        inline_delta["delta"] = json!("x".repeat(AGENT_WORKER_STREAM_BATCH_MAX_BYTES as usize));
+        assert_eq!(
+            validate_agent_worker_protocol_message(&inline_delta),
+            Ok(WorkerProtocolDirection::WorkerToDaemon)
+        );
+
+        inline_delta["delta"] = json!("x".repeat(AGENT_WORKER_STREAM_BATCH_MAX_BYTES as usize + 1));
+        assert_eq!(
+            validate_agent_worker_protocol_message(&inline_delta),
+            Err(WorkerProtocolError::InvalidField("delta"))
+        );
+
+        let mut referenced_delta = stream_delta_message();
+        referenced_delta["contentRef"] = json!({
+            "path": "/tmp/tenex/worker/exec_stream_delta_semantics/delta-2.txt",
+            "byteLength": AGENT_WORKER_MAX_FRAME_BYTES + 1,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        });
+        assert_eq!(
+            validate_agent_worker_protocol_message(&referenced_delta),
+            Ok(WorkerProtocolDirection::WorkerToDaemon)
+        );
+
+        let mut ambiguous_delta = referenced_delta.clone();
+        ambiguous_delta["delta"] = json!("inline and referenced");
+        assert_eq!(
+            validate_agent_worker_protocol_message(&ambiguous_delta),
+            Err(WorkerProtocolError::InvalidField("delta|contentRef"))
+        );
+
+        let mut invalid_content_ref = stream_delta_message();
+        invalid_content_ref["contentRef"] = json!({
+            "path": "",
+            "byteLength": 1,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        });
+        assert_eq!(
+            validate_agent_worker_protocol_message(&invalid_content_ref),
+            Err(WorkerProtocolError::InvalidField("path"))
+        );
+
+        invalid_content_ref["contentRef"] = json!({
+            "path": "/tmp/tenex/worker/exec_stream_delta_semantics/delta-2.txt",
+            "byteLength": 0,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        });
+        assert_eq!(
+            validate_agent_worker_protocol_message(&invalid_content_ref),
+            Err(WorkerProtocolError::InvalidField("byteLength"))
+        );
+
+        invalid_content_ref["contentRef"] = json!({
+            "path": "/tmp/tenex/worker/exec_stream_delta_semantics/delta-2.txt",
+            "byteLength": 1,
+            "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        });
+        assert_eq!(
+            validate_agent_worker_protocol_message(&invalid_content_ref),
+            Err(WorkerProtocolError::InvalidField("sha256"))
+        );
+    }
+
+    #[test]
+    fn frame_codec_rejects_declared_oversized_payload_without_allocating() {
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&((AGENT_WORKER_MAX_PAYLOAD_BYTES + 1) as u32).to_be_bytes());
+
+        assert_eq!(
+            decode_agent_worker_protocol_frame(&frame),
+            Err(WorkerProtocolError::FramePayloadTooLarge {
+                payload_bytes: AGENT_WORKER_MAX_PAYLOAD_BYTES + 1,
+                max_payload_bytes: AGENT_WORKER_MAX_PAYLOAD_BYTES,
+            })
+        );
+    }
+
+    #[test]
     fn worker_protocol_fixture_matches_rust_validator() {
         let fixture: WorkerProtocolFixture =
             serde_json::from_str(WORKER_PROTOCOL_FIXTURE).expect("fixture must parse");
@@ -1360,6 +1443,21 @@ mod tests {
             "requestSequence": 8,
             "status": status,
             "eventIds": [],
+        })
+    }
+
+    fn stream_delta_message() -> Value {
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "stream_delta",
+            "correlationId": "exec_stream_delta_semantics",
+            "sequence": 10,
+            "timestamp": 1710000410500_u64,
+            "projectId": "project-alpha",
+            "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "conversationId": "conversation-alpha",
+            "ralNumber": 3,
+            "batchSequence": 1,
         })
     }
 

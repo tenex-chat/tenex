@@ -45,6 +45,7 @@ export type AgentWorkerProtocolDirection = "daemon_to_worker" | "worker_to_daemo
 const hexPubkeySchema = z.string().regex(/^[0-9a-f]{64}$/);
 const positiveIntegerSchema = z.number().int().positive();
 const nonNegativeIntegerSchema = z.number().int().nonnegative();
+const utf8Encoder = new TextEncoder();
 
 const runtimeTransportSchema = z.enum(["local", "mcp", "nostr", "telegram"]);
 
@@ -262,8 +263,26 @@ const streamDeltaMessageSchema = frameSchema("stream_delta", {
     batchSequence: positiveIntegerSchema,
     delta: z.string().min(1).optional(),
     contentRef: contentRefSchema.optional(),
-}).refine((message) => message.delta !== undefined || message.contentRef !== undefined, {
-    message: "stream_delta requires either delta or contentRef",
+}).superRefine((message, context) => {
+    const hasDelta = message.delta !== undefined;
+    const hasContentRef = message.contentRef !== undefined;
+    if (hasDelta === hasContentRef) {
+        context.addIssue({
+            code: "custom",
+            path: ["delta", "contentRef"],
+            message: "stream_delta requires exactly one of delta or contentRef",
+        });
+    }
+    if (
+        hasDelta &&
+        utf8Encoder.encode(message.delta).byteLength > AGENT_WORKER_STREAM_BATCH_MAX_BYTES
+    ) {
+        context.addIssue({
+            code: "custom",
+            path: ["delta"],
+            message: `stream_delta delta exceeds ${AGENT_WORKER_STREAM_BATCH_MAX_BYTES} bytes`,
+        });
+    }
 });
 
 const reasoningDeltaMessageSchema = frameSchema("reasoning_delta", {
