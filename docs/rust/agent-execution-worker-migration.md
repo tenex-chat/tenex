@@ -1208,6 +1208,11 @@ Work:
   spawning, then boots the worker and sends the execute frame through injected
   spawn/session interfaces. Unit tests use fakes, while production wiring can
   adapt the same path to `AgentWorkerProcess`.
+- Add a worker-result adapter that validates worker-to-daemon terminal frames
+  and converts `complete`, `waiting_for_delegation`, `no_response`, `aborted`,
+  and terminal `error` messages into Rust RAL transition inputs. The adapter
+  keeps worker frame sequence/timestamp metadata separate from daemon journal
+  sequence/timestamp authority.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet

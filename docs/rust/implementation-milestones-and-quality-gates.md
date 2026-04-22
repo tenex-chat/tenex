@@ -609,6 +609,9 @@ Scope:
   message before spawning, then boots a worker and sends the execute frame
   through injected interfaces in unit tests and the real process adapter in
   production wiring.
+- Add a worker-result adapter that validates Bun terminal result frames and
+  converts them into Rust RAL transition inputs, while keeping worker protocol
+  sequence/timestamp metadata separate from daemon journal authority.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.
