@@ -847,6 +847,10 @@ Landed slices:
   such as owner pubkeys, relay URLs with TypeScript-compatible defaults,
   backend profile metadata, project base, and a redacted signer constructor for
   `tenexPrivateKey`.
+- `crates/tenex-daemon/src/backend_status_runtime.rs` — filesystem-backed
+  orchestration slice that reads global config and installed-agent inventory,
+  signs backend heartbeat and installed-agent-list events, and enqueues them
+  into the durable Rust publish outbox without publishing directly to relays.
 - `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
   projection from active worker heartbeat state into kind `24133`
   operations-status drafts, including transition-aware cleanup drafts with no
