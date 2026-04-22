@@ -11,6 +11,7 @@ pub mod routing;
 pub mod subscription_filters;
 pub mod worker_dispatch_execution;
 pub mod worker_dispatch_spawn;
+pub mod worker_dispatch_start;
 pub mod worker_heartbeat;
 pub mod worker_launch;
 pub mod worker_launch_lock;
