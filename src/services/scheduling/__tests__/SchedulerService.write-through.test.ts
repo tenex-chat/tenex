@@ -169,6 +169,26 @@ describe("SchedulerService Write-Through", () => {
             );
         });
 
+        it("skips cron tasks that node-cron accepts but Rust cannot execute", async () => {
+            const unsupportedCronTask = makeTask({
+                id: "unsupported-cron",
+                schedule: "0 9 * * 1#2",
+                type: "cron",
+            });
+            const validTask = makeTask({ id: "good-cron", schedule: "0 10 * * MON" });
+            mockFileExists.mockResolvedValue(true);
+            mockReadJsonFile.mockResolvedValue([unsupportedCronTask, validTask]);
+
+            const result = await service.reloadTasksFromJson("test-project");
+
+            expect(result).toHaveLength(1);
+            expect(result[0].id).toBe("good-cron");
+            expect(mockLogger.warn).toHaveBeenCalledWith(
+                "Skipping schedule with invalid cron expression",
+                { taskId: "unsupported-cron", schedule: "0 9 * * 1#2" }
+            );
+        });
+
         it("does NOT validate cron expression for oneoff tasks", async () => {
             const oneoffTask: ScheduledTask = {
                 ...makeTask({ id: "oneoff-1", type: "oneoff" }),
@@ -295,6 +315,20 @@ describe("SchedulerService Write-Through", () => {
             const priv = getPrivate(service);
             expect(priv.taskMetadata.has("pre-existing")).toBe(true);
             expect(priv.taskMetadata.has(newTaskId)).toBe(true);
+        });
+
+        it("rejects cron syntax unsupported by the Rust scheduler", async () => {
+            await expect(
+                service.addTask(
+                    "0 9 * * 1#2",
+                    "Unsupported cron",
+                    "pubkey456",
+                    "another-agent",
+                    "test-project"
+                )
+            ).rejects.toThrow("Invalid cron expression: 0 9 * * 1#2");
+
+            expect(mockWriteJsonFile).not.toHaveBeenCalled();
         });
     });
 

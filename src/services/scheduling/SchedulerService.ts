@@ -13,6 +13,25 @@ function truncatePubkey(pubkey: string): string {
     return pubkey.substring(0, 8);
 }
 
+function isRustSchedulerCronCompatible(schedule: string): boolean {
+    if (!cron.validate(schedule)) {
+        return false;
+    }
+
+    const fields = schedule.trim().split(/\s+/);
+    if (fields.length !== 5 && fields.length !== 6) {
+        return false;
+    }
+
+    if (schedule.includes("?") || schedule.includes("#")) {
+        return false;
+    }
+
+    const dayOfMonthField = fields[fields.length - 3];
+    const dayOfWeekField = fields[fields.length - 1];
+    return !/[LW]/i.test(dayOfMonthField) && !/L/i.test(dayOfWeekField);
+}
+
 export type { ScheduledTask };
 
 /**
@@ -44,7 +63,7 @@ export class SchedulerService {
         options?: { title?: string; targetChannel?: string; projectRef?: string } | string,
         targetChannel?: string
     ): Promise<string> {
-        if (!cron.validate(schedule)) {
+        if (!isRustSchedulerCronCompatible(schedule)) {
             throw new Error(`Invalid cron expression: ${schedule}`);
         }
 
@@ -202,7 +221,7 @@ export class SchedulerService {
                 continue;
             }
 
-            if (task.type !== "oneoff" && !cron.validate(task.schedule)) {
+            if (task.type !== "oneoff" && !isRustSchedulerCronCompatible(task.schedule)) {
                 logger.warn("Skipping schedule with invalid cron expression", {
                     taskId: task.id,
                     schedule: task.schedule,

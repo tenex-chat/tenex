@@ -112,6 +112,7 @@ struct ScheduledTaskSource {
     execute_at: Option<String>,
     created_at: Option<u64>,
     last_run: Option<u64>,
+    last_run_present: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,6 +307,12 @@ fn convert_raw_scheduled_task(
 
     let project_ref = nonempty(raw.project_ref).unwrap_or(project_id);
 
+    let last_run_present = raw.last_run.is_some();
+    let last_run = raw
+        .last_run
+        .as_deref()
+        .and_then(parse_unix_seconds_from_iso8601);
+
     Some(ScheduledTaskSource {
         project_d_tag: project_d_tag.to_string(),
         project_ref,
@@ -322,10 +329,8 @@ fn convert_raw_scheduled_task(
             .created_at
             .as_deref()
             .and_then(parse_unix_seconds_from_iso8601),
-        last_run: raw
-            .last_run
-            .as_deref()
-            .and_then(parse_unix_seconds_from_iso8601),
+        last_run,
+        last_run_present,
     })
 }
 
@@ -337,7 +342,7 @@ fn due_at(task: &ScheduledTaskSource, now: u64, grace_start: u64) -> Option<u64>
 }
 
 fn oneoff_due_at(task: &ScheduledTaskSource, now: u64, grace_start: u64) -> Option<u64> {
-    if task.last_run.is_some() {
+    if task.last_run_present {
         return None;
     }
 
@@ -351,6 +356,10 @@ fn oneoff_due_at(task: &ScheduledTaskSource, now: u64, grace_start: u64) -> Opti
 }
 
 fn cron_due_at(task: &ScheduledTaskSource, now: u64, grace_start: u64) -> Option<u64> {
+    if task.last_run_present && task.last_run.is_none() {
+        return None;
+    }
+
     let anchor = task.last_run.or(task.created_at)?;
     if anchor >= now {
         return None;
@@ -403,11 +412,11 @@ impl CronSchedule {
             seconds: parse_cron_field(second_field, 0, 59, CronFieldNames::None, false)?,
             minutes: parse_cron_field(minute_field, 0, 59, CronFieldNames::None, false)?,
             hours: parse_cron_field(hour_field, 0, 23, CronFieldNames::None, false)?,
-            days_of_month: parse_cron_field(day_field, 1, 31, CronFieldNames::None, true)?,
+            days_of_month: parse_cron_field(day_field, 1, 31, CronFieldNames::None, false)?,
             months: parse_cron_field(month_field, 1, 12, CronFieldNames::Month, false)?,
-            days_of_week: parse_cron_field(weekday_field, 0, 7, CronFieldNames::Weekday, true)?,
-            day_of_month_any: cron_field_is_any(day_field, true),
-            day_of_week_any: cron_field_is_any(weekday_field, true),
+            days_of_week: parse_cron_field(weekday_field, 0, 7, CronFieldNames::Weekday, false)?,
+            day_of_month_any: cron_field_is_any(day_field, false),
+            day_of_week_any: cron_field_is_any(weekday_field, false),
         })
     }
 
@@ -587,24 +596,49 @@ fn parse_offset_seconds(value: &str) -> Option<i64> {
     let (hours, minutes) = value.get(1..)?.split_once(':')?;
     let hours: i64 = hours.parse().ok()?;
     let minutes: i64 = minutes.parse().ok()?;
+    if !(0..=23).contains(&hours) || !(0..=59).contains(&minutes) {
+        return None;
+    }
     Some(sign * (hours * 3_600 + minutes * 60))
 }
 
 fn parse_date(value: &str) -> Option<(i64, i64, i64)> {
     let (year, rest) = value.split_once('-')?;
     let (month, day) = rest.split_once('-')?;
-    Some((year.parse().ok()?, month.parse().ok()?, day.parse().ok()?))
+    let year: i64 = year.parse().ok()?;
+    let month: i64 = month.parse().ok()?;
+    let day: i64 = day.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=days_in_month(year, month)).contains(&day) {
+        return None;
+    }
+    Some((year, month, day))
 }
 
 fn parse_time(value: &str) -> Option<(i64, i64, i64)> {
     let core = value.split_once('.').map_or(value, |(left, _)| left);
     let (hour, rest) = core.split_once(':')?;
     let (minute, second) = rest.split_once(':')?;
-    Some((
-        hour.parse().ok()?,
-        minute.parse().ok()?,
-        second.parse().ok()?,
-    ))
+    let hour: i64 = hour.parse().ok()?;
+    let minute: i64 = minute.parse().ok()?;
+    let second: i64 = second.parse().ok()?;
+    if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) || !(0..=59).contains(&second) {
+        return None;
+    }
+    Some((hour, minute, second))
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 fn unix_seconds_to_utc_components(seconds: u64) -> UtcComponents {
@@ -724,6 +758,50 @@ mod tests {
                 project_d_tag: "demo-project",
             }],
             now: ts("2026-04-22T09:00:20Z"),
+            grace_seconds: SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS,
+            max_plans: 10,
+        })
+        .expect("planner must read schedules");
+
+        assert!(outcome.plans.is_empty());
+    }
+
+    #[test]
+    fn invalid_last_run_fails_closed_for_recurring_and_oneoff_tasks() {
+        let base_dir = unique_temp_dir("scheduled-task-planner-invalid-last-run");
+        write_project_schedules(
+            &base_dir,
+            "demo-project",
+            r#"[
+                {
+                    "id": "task-recurring-invalid-last-run",
+                    "schedule": "0 9 * * *",
+                    "prompt": "Recurring",
+                    "fromPubkey": "owner",
+                    "targetAgentSlug": "reporter",
+                    "projectId": "demo-project",
+                    "createdAt": "2026-04-22T08:00:00Z",
+                    "lastRun": "not-a-date"
+                },
+                {
+                    "id": "task-oneoff-invalid-last-run",
+                    "schedule": "2026-04-22T09:00:00Z",
+                    "prompt": "Oneoff",
+                    "fromPubkey": "owner",
+                    "targetAgentSlug": "reporter",
+                    "projectId": "demo-project",
+                    "type": "oneoff",
+                    "lastRun": "not-a-date"
+                }
+            ]"#,
+        );
+
+        let outcome = plan_due_scheduled_tasks(ScheduledTaskDuePlannerInput {
+            tenex_base_dir: &base_dir,
+            projects: &[ScheduledTaskDuePlannerProject {
+                project_d_tag: "demo-project",
+            }],
+            now: ts("2026-04-22T09:00:00Z"),
             grace_seconds: SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS,
             max_plans: 10,
         })
@@ -932,6 +1010,20 @@ mod tests {
         assert!(!second.tick_due);
         assert!(second.due_task_names.is_empty());
         assert!(second.plans.is_empty());
+    }
+
+    #[test]
+    fn timestamp_and_cron_parsing_rejects_invalid_values_and_question_mark() {
+        assert!(parse_unix_seconds_from_iso8601("2026-02-29T09:00:00Z").is_none());
+        assert!(parse_unix_seconds_from_iso8601("2024-02-29T09:00:00Z").is_some());
+        assert!(parse_unix_seconds_from_iso8601("2026-13-01T09:00:00Z").is_none());
+        assert!(parse_unix_seconds_from_iso8601("2026-04-22T24:00:00Z").is_none());
+        assert!(parse_unix_seconds_from_iso8601("2026-04-22T09:60:00Z").is_none());
+        assert!(parse_unix_seconds_from_iso8601("2026-04-22T09:00:60Z").is_none());
+        assert!(parse_unix_seconds_from_iso8601("2026-04-22T09:00:00+24:00").is_none());
+
+        assert!(CronSchedule::parse("0 9 * * *").is_some());
+        assert!(CronSchedule::parse("0 9 ? * *").is_none());
     }
 
     fn write_project_schedules(base_dir: &Path, project_d_tag: &str, content: &str) {
