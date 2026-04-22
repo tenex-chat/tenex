@@ -28,7 +28,6 @@ import { logger } from "@/utils/logger";
 import { getCoreToolsForAgent } from "@/agents/constants";
 import { createAskTool } from "./implementations/ask";
 import { createDelegateTool } from "./implementations/delegate";
-import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
 import { createKillTool } from "./implementations/kill";
 import { createLessonLearnTool } from "./implementations/learn";
@@ -76,7 +75,6 @@ const toolFactories: Partial<Record<ToolName, ToolFactory>> = {
     ask: createAskTool,
 
     // Delegation tools
-    delegate_crossproject: createDelegateCrossProjectTool,
     delegate_followup: createDelegateFollowupTool,
     delegate: createDelegateTool,
     self_delegate: createSelfDelegateTool as ToolFactory,

@@ -28,7 +28,6 @@ export const SKILL_MANAGEMENT_TOOLS: ToolName[] = ["skill_list", "skills_set"] a
 export const DELEGATE_TOOLS: ToolName[] = [
     "ask",
     "delegate",
-    "delegate_crossproject",
     "delegate_followup",
 ] as const;
 
@@ -80,7 +79,6 @@ export function getDelegateToolsForAgent(category?: AgentCategory): ToolName[] {
 
     if (category !== "domain-expert") {
         tools.push("delegate");
-        tools.push("delegate_crossproject");
         tools.push("delegate_followup");
     }
 

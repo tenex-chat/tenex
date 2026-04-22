@@ -11,8 +11,8 @@ Actions that agents can invoke. Tools own validation, call into services or lowe
 
 ## Current Tool Families
 
-- Agent orchestration: `agents_write`, `ask`, `delegate`, `delegate_crossproject`, `delegate_followup`, `self_delegate`
-- Project and conversation context: `project_list`, `modify_project`, `conversation_get`, `conversation_list`, `conversation_search`, `todo_write`, `lesson_learn`
+- Agent orchestration: `agents_write`, `ask`, `delegate`, `delegate_followup`, `self_delegate`
+- Project and conversation context: `modify_project`, `conversation_get`, `conversation_list`, `conversation_search`, `todo_write`, `lesson_learn`
 - Knowledge and indexing: `rag_*`, `skills_set`
 - Execution control: `shell`, `kill`, `schedule_task`, `no_response` (Telegram-triggered turns only)
 - Integrations: `mcp_*`, `nostr_publish_as_user`, `skills_set`, `send_message`

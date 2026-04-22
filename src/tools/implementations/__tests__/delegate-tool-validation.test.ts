@@ -277,8 +277,7 @@ describe("Delegation tools - Self-delegation validation", () => {
         });
     });
 
-    // delegate_crossproject tool tests require daemon mocking
-    // and are covered in integration tests
+    // Cross-project delegation moved out of the TypeScript tool surface.
 });
 
 describe("Delegation tools - RAL isolation", () => {

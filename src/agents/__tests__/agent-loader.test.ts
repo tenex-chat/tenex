@@ -93,7 +93,6 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
 
         // Domain-experts must not receive delegation tools
         expect(instance.tools).not.toContain("delegate");
-        expect(instance.tools).not.toContain("delegate_crossproject");
         expect(instance.tools).not.toContain("delegate_followup");
 
         // But they do retain ask
@@ -127,7 +126,6 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
 
         expect(instance.category).toBe("domain-expert");
         expect(instance.tools).not.toContain("delegate");
-        expect(instance.tools).not.toContain("delegate_crossproject");
         expect(instance.tools).not.toContain("delegate_followup");
         expect(instance.tools).toContain("ask");
 

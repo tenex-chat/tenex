@@ -37,8 +37,6 @@ export type ToolName =
     | "delegate_followup"
     | "self_delegate"
     | "ask"
-    | "project_list"
-    | "delegate_crossproject"
     | "schedule_task"
     | "rag_collection_create"
     | "rag_add_documents"

@@ -35,7 +35,7 @@ describe("Skill Tool Permissions", () => {
     describe("getToolsObject with skill permissions", () => {
         describe("only-tool mode (highest priority)", () => {
             it("should return EXACTLY the tools specified in onlyTools with NO auto-injection", () => {
-                const baseTools = ["ask", "kill", "delegate_crossproject", "delegate"];
+                const baseTools = ["ask", "kill", "delegate_followup", "delegate"];
                 const skillPermissions: SkillToolPermissions = {
                     onlyTools: ["ask", "kill"],
                 };
@@ -46,7 +46,7 @@ describe("Skill Tool Permissions", () => {
                 // Should have EXACTLY the only-tools - NO auto-injection (security feature)
                 expect(toolNames).toContain("ask");
                 expect(toolNames).toContain("kill");
-                expect(toolNames).not.toContain("delegate_crossproject");
+                expect(toolNames).not.toContain("delegate_followup");
                 expect(toolNames).not.toContain("delegate");
                 expect(toolNames.length).toBe(2); // Exactly 2 tools
             });
@@ -54,22 +54,22 @@ describe("Skill Tool Permissions", () => {
             it("should completely ignore allow-tool when only-tool is set", () => {
                 const baseTools = ["ask"];
                 const skillPermissions: SkillToolPermissions = {
-                    onlyTools: ["delegate_crossproject"],
+                    onlyTools: ["delegate_followup"],
                     allowTools: ["delegate", "kill"], // Should be ignored
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
                 expect(toolNames).not.toContain("delegate");
                 expect(toolNames).not.toContain("ask");
             });
 
             it("should completely ignore deny-tool when only-tool is set", () => {
-                const baseTools = ["ask", "delegate_crossproject", "delegate"];
+                const baseTools = ["ask", "delegate_followup", "delegate"];
                 const skillPermissions: SkillToolPermissions = {
-                    onlyTools: ["ask", "delegate_crossproject"],
+                    onlyTools: ["ask", "delegate_followup"],
                     denyTools: ["ask"], // Should be ignored - ask should still be included
                 };
 
@@ -77,12 +77,12 @@ describe("Skill Tool Permissions", () => {
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
                 expect(toolNames).not.toContain("delegate");
             });
 
             it("should fall back to base tools when onlyTools array is empty", () => {
-                const baseTools = ["ask", "delegate_crossproject"];
+                const baseTools = ["ask", "delegate_followup"];
                 const skillPermissions: SkillToolPermissions = {
                     onlyTools: [], // Empty array does NOT trigger only-tool mode
                 };
@@ -94,7 +94,7 @@ describe("Skill Tool Permissions", () => {
 
                 // Base tools should remain - empty onlyTools doesn't mean "no tools"
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
             });
         });
 
@@ -102,28 +102,28 @@ describe("Skill Tool Permissions", () => {
             it("should add allowed tools to the base set", () => {
                 const baseTools = ["ask"];
                 const skillPermissions: SkillToolPermissions = {
-                    allowTools: ["delegate_crossproject", "delegate"],
+                    allowTools: ["delegate_followup", "delegate"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
                 expect(toolNames).toContain("delegate");
             });
 
             it("should not duplicate tools already in base set", () => {
-                const baseTools = ["ask", "delegate_crossproject"];
+                const baseTools = ["ask", "delegate_followup"];
                 const skillPermissions: SkillToolPermissions = {
-                    allowTools: ["ask", "delegate_crossproject"], // Already in base
+                    allowTools: ["ask", "delegate_followup"], // Already in base
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
                 // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
                 expect(toolNames).toContain("todo_write");
@@ -133,16 +133,16 @@ describe("Skill Tool Permissions", () => {
                 expect(toolNames).toContain("home_fs_edit");
                 expect(toolNames).toContain("home_fs_glob");
                 expect(toolNames).toContain("home_fs_grep");
-                // CORE_AGENT_TOOLS + ask + delegate_crossproject + home_fs_* (5 tools)
+                // CORE_AGENT_TOOLS + ask + delegate_followup + home_fs_* (5 tools)
                 expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 2 + 5);
             });
         });
 
         describe("deny-tool mode", () => {
             it("should remove denied tools from the base set", () => {
-                const baseTools = ["ask", "kill", "delegate_crossproject", "delegate"];
+                const baseTools = ["ask", "kill", "delegate_followup", "delegate"];
                 const skillPermissions: SkillToolPermissions = {
-                    denyTools: ["delegate_crossproject", "delegate"],
+                    denyTools: ["delegate_followup", "delegate"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
@@ -150,12 +150,12 @@ describe("Skill Tool Permissions", () => {
 
                 expect(toolNames).toContain("ask");
                 expect(toolNames).toContain("kill");
-                expect(toolNames).not.toContain("delegate_crossproject");
+                expect(toolNames).not.toContain("delegate_followup");
                 expect(toolNames).not.toContain("delegate");
             });
 
             it("should handle denying non-existent tools gracefully", () => {
-                const baseTools = ["ask", "delegate_crossproject"];
+                const baseTools = ["ask", "delegate_followup"];
                 const skillPermissions: SkillToolPermissions = {
                     denyTools: ["non_existent_tool", "another_fake_tool"],
                 };
@@ -165,11 +165,11 @@ describe("Skill Tool Permissions", () => {
 
                 // Original tools should remain
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
             });
 
             it("should block auto-injected core tools (kill) when denied", () => {
-                const baseTools = ["ask", "delegate_crossproject"];
+                const baseTools = ["ask", "delegate_followup"];
                 const skillPermissions: SkillToolPermissions = {
                     denyTools: ["kill"], // Block the auto-injected kill tool
                 };
@@ -180,7 +180,7 @@ describe("Skill Tool Permissions", () => {
                 // Core tools should NOT be auto-injected when explicitly denied (SECURITY)
                 expect(toolNames).not.toContain("kill");
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
             });
         });
 
@@ -188,7 +188,7 @@ describe("Skill Tool Permissions", () => {
             it("should apply both allow and deny (add then remove)", () => {
                 const baseTools = ["ask"];
                 const skillPermissions: SkillToolPermissions = {
-                    allowTools: ["delegate_crossproject", "delegate"],
+                    allowTools: ["delegate_followup", "delegate"],
                     denyTools: ["ask"], // Remove the original tool
                 };
 
@@ -196,47 +196,47 @@ describe("Skill Tool Permissions", () => {
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).not.toContain("ask"); // Denied
-                expect(toolNames).toContain("delegate_crossproject"); // Allowed
+                expect(toolNames).toContain("delegate_followup"); // Allowed
                 expect(toolNames).toContain("delegate"); // Allowed
             });
 
             it("should deny tools even if they were added by allow", () => {
                 const baseTools = ["ask"];
                 const skillPermissions: SkillToolPermissions = {
-                    allowTools: ["delegate_crossproject", "delegate"],
-                    denyTools: ["delegate_crossproject"], // Deny something we just allowed
+                    allowTools: ["delegate_followup", "delegate"],
+                    denyTools: ["delegate_followup"], // Deny something we just allowed
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
-                expect(toolNames).not.toContain("delegate_crossproject"); // Denied even though allowed
+                expect(toolNames).not.toContain("delegate_followup"); // Denied even though allowed
                 expect(toolNames).toContain("delegate");
             });
         });
 
         describe("no skill permissions", () => {
             it("should return base tools when no permissions provided", () => {
-                const baseTools = ["ask", "delegate_crossproject", "delegate"];
+                const baseTools = ["ask", "delegate_followup", "delegate"];
 
                 const tools = getToolsObject(baseTools, mockContext, undefined);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
                 expect(toolNames).toContain("delegate");
             });
 
             it("should return base tools when permissions is empty object", () => {
-                const baseTools = ["ask", "delegate_crossproject"];
+                const baseTools = ["ask", "delegate_followup"];
                 const skillPermissions: SkillToolPermissions = {};
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
             });
         });
 
@@ -274,16 +274,16 @@ describe("Skill Tool Permissions", () => {
 
         describe("only-tool mode strict exclusivity", () => {
             it("should produce exact tool count with no extras", () => {
-                const baseTools = ["ask", "kill", "delegate_crossproject", "delegate", "lesson_learn"];
+                const baseTools = ["ask", "kill", "delegate_followup", "delegate", "lesson_learn"];
                 const skillPermissions: SkillToolPermissions = {
-                    onlyTools: ["delegate_crossproject", "ask"],
+                    onlyTools: ["delegate_followup", "ask"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
                 const toolNames = Object.keys(tools);
 
                 // Exactly 2 tools, nothing else
-                expect(toolNames).toEqual(expect.arrayContaining(["delegate_crossproject", "ask"]));
+                expect(toolNames).toEqual(expect.arrayContaining(["delegate_followup", "ask"]));
                 expect(toolNames.length).toBe(2);
             });
         });
@@ -292,7 +292,7 @@ describe("Skill Tool Permissions", () => {
             it("should grant tools via only-tool to agent with empty tools array", () => {
                 const baseTools: string[] = []; // Agent has no default tools
                 const skillPermissions: SkillToolPermissions = {
-                    onlyTools: ["ask", "delegate_crossproject"],
+                    onlyTools: ["ask", "delegate_followup"],
                 };
 
                 const tools = getToolsObject(baseTools, mockContext, skillPermissions);
@@ -300,7 +300,7 @@ describe("Skill Tool Permissions", () => {
 
                 // Skill grants tools even with empty base
                 expect(toolNames).toContain("ask");
-                expect(toolNames).toContain("delegate_crossproject");
+                expect(toolNames).toContain("delegate_followup");
                 expect(toolNames.length).toBe(2);
             });
 
