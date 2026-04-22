@@ -826,8 +826,8 @@ Landed slices:
   path as worker-authored events.
 - `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
   projection from active worker heartbeat state into kind `24133`
-  operations-status drafts, including cleanup drafts with no active-agent
-  `p` tags. Library-only; no periodic status publisher wiring.
+  operations-status drafts, including transition-aware cleanup drafts with no
+  active-agent `p` tags. Library-only; no periodic status publisher wiring.
 
 Scope:
 

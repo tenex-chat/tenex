@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use crate::backend_events::operations_status::OperationsStatusInputs;
 use crate::worker_heartbeat::WorkerHeartbeatState;
@@ -22,6 +23,12 @@ pub struct OperationsStatusCleanupInput<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsStatusTransitionInput<'a> {
+    pub previous_active_conversation_ids: &'a [String],
+    pub runtime: OperationsStatusRuntimeInput<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationsStatusDraft {
     pub created_at: u64,
     pub conversation_id: String,
@@ -42,23 +49,16 @@ impl OperationsStatusDraft {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsStatusTransitionPlan {
+    pub active_drafts: Vec<OperationsStatusDraft>,
+    pub cleanup_drafts: Vec<OperationsStatusDraft>,
+}
+
 pub fn plan_operations_status_drafts(
     input: OperationsStatusRuntimeInput<'_>,
 ) -> Vec<OperationsStatusDraft> {
-    let mut by_conversation: BTreeMap<String, Vec<String>> = BTreeMap::new();
-
-    for worker in input.runtime_state.workers() {
-        if worker.identity.project_id != input.project_id || !worker_has_active_operation(worker) {
-            continue;
-        }
-
-        by_conversation
-            .entry(worker.identity.conversation_id.clone())
-            .or_default()
-            .push(worker.identity.agent_pubkey.clone());
-    }
-
-    by_conversation
+    active_operations_by_conversation(&input)
         .into_iter()
         .map(|(conversation_id, agent_pubkeys)| OperationsStatusDraft {
             created_at: input.created_at,
@@ -68,6 +68,47 @@ pub fn plan_operations_status_drafts(
             project_tag: input.project_tag.to_vec(),
         })
         .collect()
+}
+
+pub fn plan_operations_status_transition(
+    input: OperationsStatusTransitionInput<'_>,
+) -> OperationsStatusTransitionPlan {
+    let active_by_conversation = active_operations_by_conversation(&input.runtime);
+    let active_conversation_ids: BTreeSet<String> =
+        active_by_conversation.keys().cloned().collect();
+    let previous_conversation_ids: BTreeSet<String> = input
+        .previous_active_conversation_ids
+        .iter()
+        .cloned()
+        .collect();
+
+    let active_drafts = active_by_conversation
+        .into_iter()
+        .map(|(conversation_id, agent_pubkeys)| OperationsStatusDraft {
+            created_at: input.runtime.created_at,
+            conversation_id,
+            whitelisted_pubkeys: input.runtime.whitelisted_pubkeys.to_vec(),
+            agent_pubkeys,
+            project_tag: input.runtime.project_tag.to_vec(),
+        })
+        .collect();
+
+    let cleanup_drafts = previous_conversation_ids
+        .difference(&active_conversation_ids)
+        .map(|conversation_id| {
+            plan_operations_status_cleanup(OperationsStatusCleanupInput {
+                created_at: input.runtime.created_at,
+                conversation_id,
+                whitelisted_pubkeys: input.runtime.whitelisted_pubkeys,
+                project_tag: input.runtime.project_tag,
+            })
+        })
+        .collect();
+
+    OperationsStatusTransitionPlan {
+        active_drafts,
+        cleanup_drafts,
+    }
 }
 
 pub fn plan_operations_status_cleanup(
@@ -91,6 +132,25 @@ fn worker_has_active_operation(worker: &ActiveWorkerRuntimeSnapshot) -> bool {
         heartbeat.state,
         WorkerHeartbeatState::Streaming | WorkerHeartbeatState::Acting
     ) || heartbeat.active_tool_count > 0
+}
+
+fn active_operations_by_conversation(
+    input: &OperationsStatusRuntimeInput<'_>,
+) -> BTreeMap<String, Vec<String>> {
+    let mut by_conversation: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for worker in input.runtime_state.workers() {
+        if worker.identity.project_id != input.project_id || !worker_has_active_operation(worker) {
+            continue;
+        }
+
+        by_conversation
+            .entry(worker.identity.conversation_id.clone())
+            .or_default()
+            .push(worker.identity.agent_pubkey.clone());
+    }
+
+    by_conversation
 }
 
 #[cfg(test)]
@@ -311,6 +371,159 @@ mod tests {
         );
         assert!(event.tags.iter().all(|tag| tag[0] != "p"));
         verify_signed_event(&event).expect("cleanup event signature must verify");
+    }
+
+    #[test]
+    fn plans_transition_cleanup_for_stale_conversation_only() {
+        let mut runtime_state = WorkerRuntimeState::default();
+        let current_conversation = event_id_hex(0x20);
+        let stale_conversation = event_id_hex(0x21);
+        let project_owner = pubkey_hex(0x02);
+        let whitelisted = vec![pubkey_hex(0x03)];
+        let project_tag = project_tag(&project_owner);
+        let active_agent = pubkey_hex(0x04);
+
+        register_worker(
+            &mut runtime_state,
+            WorkerFixture {
+                worker_id: "worker-current",
+                dispatch_id: "dispatch-current",
+                project_id: "project-alpha",
+                agent_pubkey: &active_agent,
+                conversation_id: &current_conversation,
+                state: Some(WorkerHeartbeatState::Streaming),
+                active_tool_count: 0,
+            },
+        );
+
+        let previous_active_conversation_ids =
+            vec![current_conversation.clone(), stale_conversation];
+        let plan = plan_operations_status_transition(OperationsStatusTransitionInput {
+            previous_active_conversation_ids: &previous_active_conversation_ids,
+            runtime: OperationsStatusRuntimeInput {
+                project_id: "project-alpha",
+                created_at: 1_700_000_010,
+                whitelisted_pubkeys: &whitelisted,
+                project_tag: &project_tag,
+                runtime_state: &runtime_state,
+            },
+        });
+
+        assert_eq!(
+            plan.active_drafts,
+            vec![OperationsStatusDraft {
+                created_at: 1_700_000_010,
+                conversation_id: current_conversation,
+                whitelisted_pubkeys: whitelisted.clone(),
+                agent_pubkeys: vec![active_agent],
+                project_tag: project_tag.clone(),
+            }]
+        );
+        assert_eq!(
+            plan.cleanup_drafts,
+            vec![OperationsStatusDraft {
+                created_at: 1_700_000_010,
+                conversation_id: event_id_hex(0x21),
+                whitelisted_pubkeys: whitelisted.clone(),
+                agent_pubkeys: Vec::new(),
+                project_tag: project_tag.clone(),
+            }]
+        );
+    }
+
+    #[test]
+    fn plans_transition_without_cleanup_for_still_active_conversation() {
+        let mut runtime_state = WorkerRuntimeState::default();
+        let conversation_id = event_id_hex(0x22);
+        let project_owner = pubkey_hex(0x02);
+        let whitelisted = vec![pubkey_hex(0x03)];
+        let project_tag = project_tag(&project_owner);
+        let active_agent = pubkey_hex(0x04);
+
+        register_worker(
+            &mut runtime_state,
+            WorkerFixture {
+                worker_id: "worker-current",
+                dispatch_id: "dispatch-current",
+                project_id: "project-alpha",
+                agent_pubkey: &active_agent,
+                conversation_id: &conversation_id,
+                state: Some(WorkerHeartbeatState::Acting),
+                active_tool_count: 0,
+            },
+        );
+
+        let previous_active_conversation_ids = vec![conversation_id.clone()];
+        let plan = plan_operations_status_transition(OperationsStatusTransitionInput {
+            previous_active_conversation_ids: &previous_active_conversation_ids,
+            runtime: OperationsStatusRuntimeInput {
+                project_id: "project-alpha",
+                created_at: 1_700_000_011,
+                whitelisted_pubkeys: &whitelisted,
+                project_tag: &project_tag,
+                runtime_state: &runtime_state,
+            },
+        });
+
+        assert_eq!(plan.cleanup_drafts, Vec::<OperationsStatusDraft>::new());
+        assert_eq!(
+            plan.active_drafts,
+            vec![OperationsStatusDraft {
+                created_at: 1_700_000_011,
+                conversation_id,
+                whitelisted_pubkeys: whitelisted,
+                agent_pubkeys: vec![active_agent],
+                project_tag,
+            }]
+        );
+    }
+
+    #[test]
+    fn plans_transition_without_cleanup_for_unrelated_project_activity() {
+        let mut runtime_state = WorkerRuntimeState::default();
+        let stale_conversation = event_id_hex(0x23);
+        let unrelated_project_conversation = event_id_hex(0x24);
+        let project_owner = pubkey_hex(0x02);
+        let whitelisted = vec![pubkey_hex(0x03)];
+        let project_tag = project_tag(&project_owner);
+        let unrelated_agent = pubkey_hex(0x04);
+
+        register_worker(
+            &mut runtime_state,
+            WorkerFixture {
+                worker_id: "worker-unrelated",
+                dispatch_id: "dispatch-unrelated",
+                project_id: "project-beta",
+                agent_pubkey: &unrelated_agent,
+                conversation_id: &unrelated_project_conversation,
+                state: Some(WorkerHeartbeatState::Streaming),
+                active_tool_count: 0,
+            },
+        );
+
+        let previous_active_conversation_ids = vec![stale_conversation.clone()];
+        let plan = plan_operations_status_transition(OperationsStatusTransitionInput {
+            previous_active_conversation_ids: &previous_active_conversation_ids,
+            runtime: OperationsStatusRuntimeInput {
+                project_id: "project-alpha",
+                created_at: 1_700_000_012,
+                whitelisted_pubkeys: &whitelisted,
+                project_tag: &project_tag,
+                runtime_state: &runtime_state,
+            },
+        });
+
+        assert!(plan.active_drafts.is_empty());
+        assert_eq!(
+            plan.cleanup_drafts,
+            vec![OperationsStatusDraft {
+                created_at: 1_700_000_012,
+                conversation_id: stale_conversation,
+                whitelisted_pubkeys: whitelisted,
+                agent_pubkeys: Vec::new(),
+                project_tag,
+            }]
+        );
     }
 
     struct WorkerFixture<'a> {
