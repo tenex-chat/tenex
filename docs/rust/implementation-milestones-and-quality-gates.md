@@ -612,6 +612,9 @@ Scope:
 - Add a worker-result adapter that validates Bun terminal result frames and
   converts them into Rust RAL transition inputs, while keeping worker protocol
   sequence/timestamp metadata separate from daemon journal authority.
+- Add heartbeat snapshot/freshness planning. Rust validates heartbeat frames,
+  records daemon-observed receipt time, and classifies missed heartbeats from
+  that observation time instead of trusting worker clocks.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.

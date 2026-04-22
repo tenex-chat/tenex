@@ -1213,6 +1213,10 @@ Work:
   and terminal `error` messages into Rust RAL transition inputs. The adapter
   keeps worker frame sequence/timestamp metadata separate from daemon journal
   sequence/timestamp authority.
+- Add heartbeat snapshot/freshness planning. Heartbeat frames are validated
+  against the shared worker protocol, stored with daemon-observed receipt time,
+  and classified for missed-heartbeat handling from that observation time rather
+  than the worker-provided timestamp.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet
