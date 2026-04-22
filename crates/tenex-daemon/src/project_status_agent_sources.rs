@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use secp256k1::XOnlyPublicKey;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -65,7 +65,7 @@ impl ProjectStatusAgentSourceReport {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectStatusAgentSourceSkippedFile {
     pub path: PathBuf,
     pub reason: String,

@@ -94,7 +94,7 @@ fn route_by_a_tag(event: &RoutingEvent, context: &RoutingContext<'_>) -> Option<
         let Some(address) = tag.get(1) else {
             continue;
         };
-        let Some(d_tag) = try_extract_d_tag_from_address(address) else {
+        let Some(d_tag) = extract_project_d_tag_from_address(address) else {
             continue;
         };
 
@@ -201,7 +201,7 @@ fn project_a_tags(event: &RoutingEvent) -> impl Iterator<Item = &Vec<String>> {
     })
 }
 
-fn try_extract_d_tag_from_address(value: &str) -> Option<String> {
+pub fn extract_project_d_tag_from_address(value: &str) -> Option<String> {
     let first_colon = value.find(':')?;
     let second_colon = value[first_colon + 1..].find(':')? + first_colon + 1;
     let kind = &value[..first_colon];
