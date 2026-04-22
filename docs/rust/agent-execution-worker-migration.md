@@ -1217,6 +1217,14 @@ Work:
   against the shared worker protocol, stored with daemon-observed receipt time,
   and classified for missed-heartbeat handling from that observation time rather
   than the worker-provided timestamp.
+- Compose lock-scoped dispatch start. The Rust handoff acquires RAL launch
+  locks, starts the worker through the trait-backed execution path, returns the
+  held locks on success, and releases them on validation, spawn, or execute-send
+  failure.
+- Add a worker-completion planner that consumes a validated worker-result
+  transition, asks the scheduler to validate claim/worker ownership, and returns
+  the RAL journal record plus an optional dispatch queue completion record. The
+  planner remains side-effect-free and keeps both sequence spaces explicit.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet

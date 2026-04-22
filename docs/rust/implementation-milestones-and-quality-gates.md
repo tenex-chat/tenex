@@ -615,6 +615,13 @@ Scope:
 - Add heartbeat snapshot/freshness planning. Rust validates heartbeat frames,
   records daemon-observed receipt time, and classifies missed heartbeats from
   that observation time instead of trusting worker clocks.
+- Compose lock-scoped dispatch start by acquiring launch locks, starting the
+  worker through the trait-backed execution handoff, and releasing locks on any
+  validation, spawn, or execute-send failure.
+- Add a worker-completion planner that consumes a validated worker result
+  transition, uses scheduler state to validate claim/worker ownership, and
+  returns the RAL journal record plus optional dispatch completion record
+  without writing either file.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.
