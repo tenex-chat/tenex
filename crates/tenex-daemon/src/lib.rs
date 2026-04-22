@@ -27,6 +27,7 @@ pub mod inbound_envelope;
 pub mod inbound_routing;
 pub mod inbound_runtime;
 pub mod nip44;
+pub mod nip46;
 pub mod nostr_classification;
 pub mod nostr_event;
 pub mod nostr_inbound;
