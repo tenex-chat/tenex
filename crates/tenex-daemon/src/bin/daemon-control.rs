@@ -1860,7 +1860,8 @@ mod tests {
             format!(
                 r#"{{
                     "whitelistedPubkeys": ["{owner}"],
-                    "relays": ["wss://relay.one", "https://not-a-relay"]
+                    "relays": ["wss://relay.one", "https://not-a-relay"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}"
                 }}"#
             ),
         )
@@ -1922,8 +1923,28 @@ mod tests {
             json!([format!("31933:{owner}:demo-project")])
         );
         assert_eq!(value["plan"]["agentMentionsFilter"]["#p"], json!([agent]));
+        assert_eq!(
+            value["plan"]["projectAgentSnapshotFilter"]["kinds"],
+            json!([14199])
+        );
+        assert_eq!(
+            value["plan"]["projectAgentSnapshotFilter"]["authors"],
+            json!([owner])
+        );
+        assert_eq!(
+            value["plan"]["nip46ReplyFilter"]["kinds"],
+            json!([24133])
+        );
+        assert_eq!(
+            value["plan"]["nip46ReplyFilter"]["authors"],
+            json!([owner])
+        );
+        assert_eq!(
+            value["plan"]["nip46ReplyFilter"]["#p"],
+            json!([TEST_BACKEND_PUBKEY_HEX])
+        );
         assert_eq!(value["plan"]["lessonFilters"][0]["#e"], json!([lesson]));
-        assert_eq!(value["plan"]["filters"].as_array().unwrap().len(), 6);
+        assert_eq!(value["plan"]["filters"].as_array().unwrap().len(), 8);
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }

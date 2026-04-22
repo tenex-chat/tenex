@@ -765,6 +765,8 @@ mod tests {
             static_filters: Vec::new(),
             project_tagged_filter: None,
             agent_mentions_filter: None,
+            project_agent_snapshot_filter: None,
+            nip46_reply_filter: None,
             lesson_filters: Vec::new(),
         };
 
