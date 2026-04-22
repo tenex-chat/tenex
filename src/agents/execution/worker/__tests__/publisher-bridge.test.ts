@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { NDKPrivateKeySigner, type NDKEvent } from "@nostr-dev-kit/ndk";
+import { getEventHash, verifyEvent, type Event as NostrEvent } from "nostr-tools";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import {
     AGENT_WORKER_PROTOCOL_VERSION,
@@ -176,7 +177,7 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
 
             const [publishRequest] = publishRequests;
             expect(publishRequest.runtimeEventClass).toBe(testCase.runtimeEventClass);
-            expect(publishRequest.event.pubkey).toBe(harness.agent.pubkey);
+            expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
 
             if (testCase.conversationVariant) {
                 expect(publishRequest.conversationVariant).toBe(testCase.conversationVariant);
@@ -294,4 +295,11 @@ function baseEventContext(): EventContext {
 
 function isPublishRequest(message: AgentWorkerProtocolMessage): message is PublishRequestMessage {
     return message.type === "publish_request";
+}
+
+function expectSignedPublishRequest(message: PublishRequestMessage, agentPubkey: string): void {
+    expect(message.event.pubkey).toBe(agentPubkey);
+    expect(message.event.pubkey).toBe(message.agentPubkey);
+    expect(message.event.id).toBe(getEventHash(message.event));
+    expect(verifyEvent(message.event as NostrEvent)).toBe(true);
 }
