@@ -842,6 +842,11 @@ Landed slices:
   of the backend signer contract for the same raw 64-hex `tenexPrivateKey`
   value that TypeScript stores in global config, with private-key redaction in
   debug output.
+- `crates/tenex-daemon/src/backend_config.rs` — filesystem-backed reader for
+  `$TENEX_BASE_DIR/config.json`, exposing Rust-owned backend publishing inputs
+  such as owner pubkeys, relay URLs with TypeScript-compatible defaults,
+  backend profile metadata, project base, and a redacted signer constructor for
+  `tenexPrivateKey`.
 - `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
   projection from active worker heartbeat state into kind `24133`
   operations-status drafts, including transition-aware cleanup drafts with no
