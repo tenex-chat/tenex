@@ -190,6 +190,53 @@ pub struct AgentWorkerExecuteMessageInput<'a> {
     pub execution_flags: AgentWorkerExecutionFlags,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentWorkerShutdownMessageInput {
+    pub correlation_id: String,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub reason: String,
+    pub force_kill_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWorkerPublishResultStatus {
+    Accepted,
+    Published,
+    Failed,
+    Timeout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWorkerErrorObject {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentWorkerPublishResultMessageInput {
+    pub correlation_id: String,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub request_id: String,
+    pub request_sequence: u64,
+    pub status: AgentWorkerPublishResultStatus,
+    pub event_ids: Vec<String>,
+    pub error: Option<AgentWorkerErrorObject>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentWorkerAckMessageInput {
+    pub correlation_id: String,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub acknowledged_sequence: u64,
+    pub durable: bool,
+}
+
 pub fn validate_worker_protocol_config(config: &WorkerProtocolConfig) -> WorkerProtocolResult<()> {
     if config.version != AGENT_WORKER_PROTOCOL_VERSION {
         return Err(WorkerProtocolError::UnsupportedVersion(config.version));
@@ -295,6 +342,68 @@ pub fn build_agent_worker_execute_message(
         "ralClaimToken": &input.dispatch.claim_token,
         "triggeringEnvelope": input.triggering_envelope,
         "executionFlags": input.execution_flags,
+    });
+
+    validate_agent_worker_protocol_message(&message)?;
+    Ok(message)
+}
+
+pub fn build_agent_worker_shutdown_message(
+    input: AgentWorkerShutdownMessageInput,
+) -> WorkerProtocolResult<Value> {
+    let message = json!({
+        "version": AGENT_WORKER_PROTOCOL_VERSION,
+        "type": "shutdown",
+        "correlationId": input.correlation_id,
+        "sequence": input.sequence,
+        "timestamp": input.timestamp,
+        "reason": input.reason,
+        "forceKillTimeoutMs": input.force_kill_timeout_ms,
+    });
+
+    validate_agent_worker_protocol_message(&message)?;
+    Ok(message)
+}
+
+pub fn build_agent_worker_publish_result_message(
+    input: AgentWorkerPublishResultMessageInput,
+) -> WorkerProtocolResult<Value> {
+    let mut message = json!({
+        "version": AGENT_WORKER_PROTOCOL_VERSION,
+        "type": "publish_result",
+        "correlationId": input.correlation_id,
+        "sequence": input.sequence,
+        "timestamp": input.timestamp,
+        "requestId": input.request_id,
+        "requestSequence": input.request_sequence,
+        "status": input.status,
+        "eventIds": input.event_ids,
+    });
+
+    if let Some(error) = input.error {
+        let error = serde_json::to_value(error)
+            .map_err(|error| WorkerProtocolError::JsonEncodeFailed(error.to_string()))?;
+        message
+            .as_object_mut()
+            .expect("publish_result message must be a JSON object")
+            .insert("error".to_string(), error);
+    }
+
+    validate_agent_worker_protocol_message(&message)?;
+    Ok(message)
+}
+
+pub fn build_agent_worker_ack_message(
+    input: AgentWorkerAckMessageInput,
+) -> WorkerProtocolResult<Value> {
+    let message = json!({
+        "version": AGENT_WORKER_PROTOCOL_VERSION,
+        "type": "ack",
+        "correlationId": input.correlation_id,
+        "sequence": input.sequence,
+        "timestamp": input.timestamp,
+        "acknowledgedSequence": input.acknowledged_sequence,
+        "durable": input.durable,
     });
 
     validate_agent_worker_protocol_message(&message)?;
@@ -905,7 +1014,7 @@ mod tests {
 
     #[test]
     fn execute_message_builder_matches_shared_fixture_and_round_trips() {
-        let expected = fixture_execute_message();
+        let expected = fixture_valid_message("execute");
         let dispatch = fixture_dispatch_from_execute(&expected, DispatchQueueStatus::Leased);
 
         let built = build_agent_worker_execute_message(fixture_execute_input(&dispatch, &expected))
@@ -924,7 +1033,7 @@ mod tests {
 
     #[test]
     fn execute_message_builder_rejects_non_leased_dispatch_records() {
-        let expected = fixture_execute_message();
+        let expected = fixture_valid_message("execute");
 
         for status in [
             DispatchQueueStatus::Queued,
@@ -948,7 +1057,7 @@ mod tests {
 
     #[test]
     fn execute_message_builder_rejects_triggering_envelope_mismatch() {
-        let expected = fixture_execute_message();
+        let expected = fixture_valid_message("execute");
         let dispatch = fixture_dispatch_from_execute(&expected, DispatchQueueStatus::Leased);
         let mut input = fixture_execute_input(&dispatch, &expected);
         input.triggering_envelope["message"]["nativeId"] = json!("different-event-id");
@@ -967,7 +1076,7 @@ mod tests {
 
     #[test]
     fn execute_message_builder_validates_explicit_context_and_record_identity() {
-        let expected = fixture_execute_message();
+        let expected = fixture_valid_message("execute");
         let dispatch = fixture_dispatch_from_execute(&expected, DispatchQueueStatus::Leased);
         let mut input = fixture_execute_input(&dispatch, &expected);
         input.project_base_path.clear();
@@ -984,6 +1093,83 @@ mod tests {
         assert_eq!(
             build_agent_worker_execute_message(fixture_execute_input(&invalid_dispatch, &expected)),
             Err(WorkerProtocolError::InvalidField("agentPubkey"))
+        );
+    }
+
+    #[test]
+    fn parent_to_worker_builders_match_shared_fixture_messages() {
+        let shutdown = fixture_valid_message("shutdown");
+        assert_builder_matches_fixture(
+            build_agent_worker_shutdown_message(AgentWorkerShutdownMessageInput {
+                correlation_id: value_string(&shutdown, "correlationId"),
+                sequence: value_u64(&shutdown, "sequence"),
+                timestamp: value_u64(&shutdown, "timestamp"),
+                reason: value_string(&shutdown, "reason"),
+                force_kill_timeout_ms: value_u64(&shutdown, "forceKillTimeoutMs"),
+            })
+            .expect("shutdown must build"),
+            shutdown,
+        );
+
+        let publish_result = fixture_valid_message("publish-result");
+        assert_builder_matches_fixture(
+            build_agent_worker_publish_result_message(AgentWorkerPublishResultMessageInput {
+                correlation_id: value_string(&publish_result, "correlationId"),
+                sequence: value_u64(&publish_result, "sequence"),
+                timestamp: value_u64(&publish_result, "timestamp"),
+                request_id: value_string(&publish_result, "requestId"),
+                request_sequence: value_u64(&publish_result, "requestSequence"),
+                status: AgentWorkerPublishResultStatus::Published,
+                event_ids: value_string_array(&publish_result, "eventIds"),
+                error: None,
+            })
+            .expect("publish_result must build"),
+            publish_result,
+        );
+
+        let ack = fixture_valid_message("ack");
+        assert_builder_matches_fixture(
+            build_agent_worker_ack_message(AgentWorkerAckMessageInput {
+                correlation_id: value_string(&ack, "correlationId"),
+                sequence: value_u64(&ack, "sequence"),
+                timestamp: value_u64(&ack, "timestamp"),
+                acknowledged_sequence: value_u64(&ack, "acknowledgedSequence"),
+                durable: ack["durable"].as_bool().expect("durable must be bool"),
+            })
+            .expect("ack must build"),
+            ack,
+        );
+    }
+
+    #[test]
+    fn parent_to_worker_builders_validate_inputs() {
+        assert_eq!(
+            build_agent_worker_shutdown_message(AgentWorkerShutdownMessageInput {
+                correlation_id: "correlation".to_string(),
+                sequence: 1,
+                timestamp: 1710000400000,
+                reason: "operator_shutdown".to_string(),
+                force_kill_timeout_ms: 0,
+            }),
+            Err(WorkerProtocolError::InvalidField("forceKillTimeoutMs"))
+        );
+
+        assert_eq!(
+            build_agent_worker_publish_result_message(AgentWorkerPublishResultMessageInput {
+                correlation_id: "correlation".to_string(),
+                sequence: 2,
+                timestamp: 1710000400001,
+                request_id: "request-1".to_string(),
+                request_sequence: 1,
+                status: AgentWorkerPublishResultStatus::Failed,
+                event_ids: Vec::new(),
+                error: Some(AgentWorkerErrorObject {
+                    code: String::new(),
+                    message: "publish failed".to_string(),
+                    retryable: true,
+                }),
+            }),
+            Err(WorkerProtocolError::InvalidField("code"))
         );
     }
 
@@ -1057,15 +1243,27 @@ mod tests {
         }
     }
 
-    fn fixture_execute_message() -> Value {
+    fn fixture_valid_message(name: &'static str) -> Value {
         let fixture: WorkerProtocolFixture =
             serde_json::from_str(WORKER_PROTOCOL_FIXTURE).expect("fixture must parse");
         fixture
             .valid_messages
             .into_iter()
-            .find(|message| message.name == "execute")
-            .expect("fixture must include execute message")
+            .find(|message| message.name == name)
+            .unwrap_or_else(|| panic!("fixture must include {name} message"))
             .message
+    }
+
+    fn assert_builder_matches_fixture(built: Value, expected: Value) {
+        assert_eq!(built, expected);
+        assert_eq!(
+            validate_agent_worker_protocol_message(&built),
+            Ok(WorkerProtocolDirection::DaemonToWorker)
+        );
+
+        let encoded = encode_agent_worker_protocol_frame(&built).expect("frame must encode");
+        let decoded = decode_agent_worker_protocol_frame(&encoded).expect("frame must decode");
+        assert_eq!(decoded, expected);
     }
 
     fn fixture_dispatch_from_execute(
@@ -1129,5 +1327,24 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("fixture field {key} must be string"))
             .to_string()
+    }
+
+    fn value_string_array(value: &Value, key: &'static str) -> Vec<String> {
+        value[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("fixture field {key} must be array"))
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .unwrap_or_else(|| panic!("fixture field {key} item must be string"))
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn value_u64(value: &Value, key: &'static str) -> u64 {
+        value[key]
+            .as_u64()
+            .unwrap_or_else(|| panic!("fixture field {key} must be u64"))
     }
 }

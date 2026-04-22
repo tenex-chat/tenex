@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::worker_protocol::{
     AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES, AGENT_WORKER_MAX_FRAME_BYTES,
-    AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolConfig, WorkerProtocolError,
-    decode_agent_worker_protocol_frame, encode_agent_worker_protocol_frame,
-    validate_worker_protocol_config,
+    AgentWorkerShutdownMessageInput, WorkerProtocolConfig, WorkerProtocolError,
+    build_agent_worker_shutdown_message, decode_agent_worker_protocol_frame,
+    encode_agent_worker_protocol_frame, validate_worker_protocol_config,
 };
 
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -192,15 +192,14 @@ impl AgentWorkerProcess {
         reason: &str,
         force_kill_timeout_ms: u64,
     ) -> WorkerProcessResult<()> {
-        self.send_message(&json!({
-            "version": AGENT_WORKER_PROTOCOL_VERSION,
-            "type": "shutdown",
-            "correlationId": correlation_id,
-            "sequence": sequence,
-            "timestamp": timestamp,
-            "reason": reason,
-            "forceKillTimeoutMs": force_kill_timeout_ms,
-        }))
+        let message = build_agent_worker_shutdown_message(AgentWorkerShutdownMessageInput {
+            correlation_id: correlation_id.to_string(),
+            sequence,
+            timestamp,
+            reason: reason.to_string(),
+            force_kill_timeout_ms,
+        })?;
+        self.send_message(&message)
     }
 
     pub fn close_stdin(&mut self) {
@@ -460,6 +459,7 @@ mod tests {
     };
     use crate::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
     use crate::worker_protocol::{AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolFixture};
+    use serde_json::json;
     use std::fs;
     use std::net::TcpListener;
     use std::sync::mpsc;

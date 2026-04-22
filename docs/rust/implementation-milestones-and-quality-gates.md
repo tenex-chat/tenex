@@ -584,6 +584,9 @@ Scope:
   message through the shared worker protocol rules, requires
   `triggeringEnvelope.message.nativeId` to match the queued triggering event,
   and does not read filesystem state or infer worker/process authority.
+- Keep daemon-to-worker control frames centralized in the worker protocol
+  module: `shutdown`, `publish_result`, and `ack` builders must validate their
+  output against the shared protocol schema before callers frame or send them.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.

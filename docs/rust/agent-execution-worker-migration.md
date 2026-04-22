@@ -1181,6 +1181,9 @@ Work:
   record plus explicit runtime context, validates the result through the shared
   worker protocol contract, and checks that the triggering envelope native id
   matches the queued triggering event id.
+- Move daemon-to-worker `shutdown`, `publish_result`, and `ack` assembly behind
+  Rust protocol helpers so process supervision and publishing code no longer
+  hand-build compatible JSON frames.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
   scope.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust

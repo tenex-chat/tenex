@@ -4,12 +4,13 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::nostr_event::{NostrEventError, SignedNostrEvent, verify_signed_event};
 use crate::worker_protocol::{
-    AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolDirection, WorkerProtocolError,
+    AgentWorkerPublishResultMessageInput, AgentWorkerPublishResultStatus, WorkerProtocolDirection,
+    WorkerProtocolError, build_agent_worker_publish_result_message,
     validate_agent_worker_protocol_message,
 };
 
@@ -360,17 +361,17 @@ pub fn build_accepted_publish_result(
     sequence: u64,
     timestamp: u64,
 ) -> Value {
-    json!({
-        "version": AGENT_WORKER_PROTOCOL_VERSION,
-        "type": "publish_result",
-        "correlationId": record.request.correlation_id,
-        "sequence": sequence,
-        "timestamp": timestamp,
-        "requestId": record.request.request_id,
-        "requestSequence": record.request.request_sequence,
-        "status": "accepted",
-        "eventIds": [record.event.id],
+    build_agent_worker_publish_result_message(AgentWorkerPublishResultMessageInput {
+        correlation_id: record.request.correlation_id.clone(),
+        sequence,
+        timestamp,
+        request_id: record.request.request_id.clone(),
+        request_sequence: record.request.request_sequence,
+        status: AgentWorkerPublishResultStatus::Accepted,
+        event_ids: vec![record.event.id.clone()],
+        error: None,
     })
+    .expect("accepted publish_result from outbox record must satisfy worker protocol")
 }
 
 pub fn list_pending_publish_outbox_record_paths(
@@ -1070,6 +1071,8 @@ fn now_nanos() -> u128 {
 mod tests {
     use super::*;
     use crate::nostr_event::CompatibilityEventFixture;
+    use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
+    use serde_json::json;
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
