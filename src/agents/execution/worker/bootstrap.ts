@@ -17,6 +17,11 @@ import {
     type WorkerProtocolPublisherExecutionState,
 } from "./publisher-bridge";
 import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
+import {
+    WorkerTelegramSendBridge,
+    setActiveTelegramSendBridge,
+    type TelegramSendResultSource,
+} from "./telegram-send-bridge";
 
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type AgentWorkerExecutor = Pick<AgentExecutor, "execute">;
@@ -49,6 +54,7 @@ export interface AgentWorkerBootstrapDependencies {
         options: ConstructorParameters<typeof AgentExecutor>[0]
     ) => AgentWorkerExecutor;
     publishResults?: Parameters<typeof createWorkerProtocolPublisherFactory>[0]["publishResults"];
+    telegramSendResults?: TelegramSendResultSource;
 }
 
 export async function executeAgentWorkerRequest(
@@ -108,6 +114,20 @@ export async function executeAgentWorkerRequest(
     const executor =
         dependencies.createExecutor?.(executorOptions) ?? new AgentExecutor(executorOptions);
 
+    let telegramSendRequestCounter = 0;
+    const telegramBridge = dependencies.telegramSendResults
+        ? new WorkerTelegramSendBridge({
+              emit,
+              correlationId: message.correlationId,
+              nextRequestCorrelationId: () => {
+                  telegramSendRequestCounter += 1;
+                  return `${message.correlationId}:tg-send:${telegramSendRequestCounter}`;
+              },
+              results: dependencies.telegramSendResults,
+          })
+        : undefined;
+    setActiveTelegramSendBridge(telegramBridge);
+
     try {
         return await projectContextStore.run(projectContext, async () => {
             await ensureTriggeringEnvelopeStored(message);
@@ -166,6 +186,7 @@ export async function executeAgentWorkerRequest(
             };
         });
     } finally {
+        setActiveTelegramSendBridge(undefined);
         await mcpManager.shutdown();
         await ConversationStore.cleanup();
         ConversationCatalogService.closeProject(

@@ -524,6 +524,102 @@ Kept (worker-side or Slice 5 scope, not replaced by Rust yet):
 - `src/services/telegram/types.ts` — still referenced by agent-config
   types.
 
+## Slice 6 — `send_message`
+
+Closes the last worker-side direct-Bot-API path. The agent-owned
+`send_message` tool now emits a worker-protocol frame that the Rust daemon
+resolves and enqueues onto the existing Telegram outbox. Bot API delivery
+is unchanged — it still happens during the daemon maintenance tick through
+`TelegramPublisherRegistry`.
+
+### Protocol
+
+Two new length-prefixed JSON frame types on worker-protocol v1:
+
+- `telegram_send_request` (worker → daemon): `{ senderAgentPubkey,
+  channelId, content }`. Content is UTF-8 bounded by the shared frame
+  payload max; sender pubkey is 64-hex; channelId and content are
+  non-empty. The `projectId` carried on the enclosing execute frame is
+  stamped on every worker-to-daemon message including this one, and the
+  handler reuses it as the authoritative project scope for the binding
+  lookup.
+- `telegram_send_result` (daemon → worker): `{ status: "accepted" |
+  "failed", errorReason?, errorDetail? }`. `errorReason` is required iff
+  `status === "failed"`, and `errorDetail` is optional (forbidden on
+  `accepted`). The reasons emitted by the daemon are a fixed set:
+  `unbound_channel`, `invalid_channel_id`, `invalid_thread_target`,
+  `missing_project_id`, `project_id_mismatch`, `render_failed`, and
+  `outbox_error`.
+
+Both frames appear in the shared
+`src/test-utils/fixtures/worker-protocol/agent-execution.compat.json`
+fixture (valid + invalid cases) so TS zod and Rust validation stay in
+lock-step. The frame routing mirrors `publish_request` →
+`publish_result`: the worker session holds a per-correlation-id
+coordinator and awaits the reply, and the daemon's message-flow layer
+routes on a new `WorkerMessageAction::TelegramSendRequestCandidate`.
+
+### Rust handler
+
+`crates/tenex-daemon/src/worker_telegram_send_flow.rs` owns the flow. It:
+
+1. reclassifies the frame via `plan_worker_message_handling`
+2. reads `transport-bindings.json` and confirms `(agent, channel,
+   telegram)` is remembered and project-scoped to the request
+3. parses the channel id via the new `telegram::channel_id` module
+   (TS-compat port of `parseTelegramChannelId` +
+   `getTelegramThreadTargetValidationError`) into `(chat_id: i64,
+   message_thread_id: Option<i64>)`
+4. renders the content to HTML via `telegram::renderer`
+5. stamps a `TelegramOutboxRecord` with `delivery_reason =
+   ProactiveSend`, `payload = HtmlText`, `reply_to_telegram_message_id =
+   None`, and a synthesized `nostr_event_id = worker-send:{correlation}:
+   {channel}` so retries for the same request converge on one record
+6. replies with the correlated `telegram_send_result`
+
+The context the flow needs — data dir for bindings, backend pubkey for
+the project-binding stamp, writer version — is carried in a new
+`WorkerTelegramSendMessageContext` plumbed through
+`WorkerMessageFlowInput` → `WorkerSessionLoopInput`. The existing daemon
+runtime boot path currently passes `telegram_send: None`; once an
+end-to-end integration test lands (see open questions), the context will
+be populated from `backend_signer` + `ConfigService::getConfigPath("data")`.
+
+### Schema version bump
+
+`TelegramDeliveryReason` gains a `ProactiveSend` variant. Per the
+"every durable Rust file: schemaVersion, fail-closed" rule, the
+permissible value set on disk widens, so
+`TELEGRAM_OUTBOX_RECORD_SCHEMA_VERSION` goes to `2`. Existing fixtures
+were migrated. `TELEGRAM_OUTBOX_DIAGNOSTICS_SCHEMA_VERSION` is
+unchanged.
+
+### Worker-side bridge
+
+`src/agents/execution/worker/telegram-send-bridge.ts` exposes a minimal
+`TelegramSendBridge` interface. The agent worker session owns a
+`TelegramSendResultCoordinator` that correlates replies by correlation
+id, and a bridge instance is published via
+`setActiveTelegramSendBridge(…)` during every execution in
+`bootstrap.ts`. The `send_message` tool pulls the active bridge and
+emits a request; on reply it returns `{ success, channelId }` or `{
+error }`. Legacy fallback checks (bot-token presence, client-side
+channel parsing, binding-store lookup) are removed — the daemon is the
+single source of truth and reports structured error reasons.
+
+### TS deletions
+
+- `src/services/telegram/TelegramBotClient.ts` + test
+- `src/services/telegram/TelegramBotClient.telemetry.test.ts`
+- `src/services/telegram/TelegramDeliveryService.ts` + test
+- `src/services/telegram/telegram-message-renderer.ts` + test
+- `src/services/telegram/index.ts` re-exports pruned to retain only the
+  chat-context store and the shared identifier utilities
+
+`src/utils/telegram-identifiers.ts` is kept because the prompt-builder
+fragment and the runtime diagnostic-event-snapshot still parse channel
+ids for TS-only paths.
+
 ## Trade-offs
 
 - **Why not port everything now?** Because a partial adapter that does not

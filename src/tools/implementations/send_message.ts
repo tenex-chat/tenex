@@ -1,19 +1,10 @@
 import { z } from "zod";
 import { tool } from "ai";
-import type { ToolExecutionContext, AISdkTool } from "@/tools/types";
 import {
-    getTransportBindingStore,
-    type TransportBindingStore,
-} from "@/services/ingress/TransportBindingStoreService";
-import { getProjectContext } from "@/services/projects";
-import {
-    getTelegramThreadTargetValidationError,
-    parseTelegramChannelId,
-} from "@/utils/telegram-identifiers";
-import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
-
-// Shared instance preserves the TelegramBotClient cache across tool executions.
-const deliveryService = new TelegramDeliveryService();
+    getActiveTelegramSendBridge,
+    type TelegramSendBridge,
+} from "@/agents/execution/worker/telegram-send-bridge";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 
 const sendMessageSchema = z.object({
     channelId: z.string().describe("The channel ID to send to (from your channel bindings)"),
@@ -25,58 +16,42 @@ type SendMessageInput = z.infer<typeof sendMessageSchema>;
 export function createSendMessageTool(
     context: ToolExecutionContext,
     options: {
-        channelBindingStore?: Pick<TransportBindingStore, "getBinding">;
+        bridge?: TelegramSendBridge;
     } = {}
 ): AISdkTool {
-    const channelBindingStore = options.channelBindingStore ?? getTransportBindingStore();
     const aiTool = tool({
         description:
             "Send a proactive message to one of your bound channels. " +
             "Use the channel IDs from your channel bindings in the system prompt.",
         inputSchema: sendMessageSchema,
         execute: async (input: SendMessageInput) => {
-            const telegramConfig = context.agent.telegram;
-            if (!telegramConfig?.botToken) {
-                return { error: "No Telegram bot token configured for this agent" };
+            const bridge = options.bridge ?? getActiveTelegramSendBridge();
+            if (!bridge) {
+                return {
+                    error: "Telegram send bridge is not available in this execution context",
+                };
             }
 
-            const parsed = parseTelegramChannelId(input.channelId);
-            if (!parsed) {
-                return { error: `Invalid channel ID format: ${input.channelId}` };
+            if (!input.channelId) {
+                return { error: "channelId is required" };
+            }
+            if (!input.content) {
+                return { error: "content is required" };
             }
 
-            const threadTargetError = getTelegramThreadTargetValidationError(
-                parsed.chatId,
-                parsed.messageThreadId
-            );
-            if (threadTargetError) {
-                return { error: `${threadTargetError} Channel: ${input.channelId}` };
-            }
-
-            const projectId = getProjectContext().project.dTag
-                ?? getProjectContext().project.tagValue("d");
-            if (!projectId) {
-                return { error: "Project context is missing a project ID for transport binding lookup" };
-            }
-
-            const binding = channelBindingStore.getBinding(
-                context.agent.pubkey,
-                input.channelId,
-                "telegram"
-            );
-            if (!binding || binding.projectId !== projectId) {
-                return { error: `Channel ${input.channelId} is not in your remembered transport bindings` };
-            }
-
-            await deliveryService.sendToChannel({
-                botToken: telegramConfig.botToken,
-                apiBaseUrl: telegramConfig.apiBaseUrl,
-                chatId: parsed.chatId,
-                messageThreadId: parsed.messageThreadId,
+            const result = await bridge.sendProactive({
+                senderAgentPubkey: context.agent.pubkey,
+                channelId: input.channelId,
                 content: input.content,
             });
 
-            return { success: true, channelId: input.channelId };
+            if (result.status === "accepted") {
+                return { success: true, channelId: input.channelId };
+            }
+
+            const reason = result.errorReason ?? "send_failed";
+            const detail = result.errorDetail ? `: ${result.errorDetail}` : "";
+            return { error: `Telegram send failed (${reason})${detail}` };
         },
     });
 

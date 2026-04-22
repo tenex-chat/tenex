@@ -16,6 +16,7 @@ import type {
     AgentWorkerOutboundProtocolMessage,
     AgentWorkerProtocolEmit,
 } from "./protocol-emitter";
+import { TelegramSendResultCoordinator } from "./telegram-send-bridge";
 
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type PingMessage = Extract<AgentWorkerProtocolMessage, { type: "ping" }>;
@@ -24,6 +25,7 @@ type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish
 class AgentWorkerSession {
     private sequence = 0;
     private readonly publishResults = new PublishResultCoordinator();
+    private readonly telegramSendResults = new TelegramSendResultCoordinator();
     private readonly protocolSink = createProtocolStdoutSink();
     private readonly emit: AgentWorkerProtocolEmit = async (message) => {
         const framedMessage = {
@@ -96,6 +98,7 @@ class AgentWorkerSession {
                 const nextExecution = this.handleIncomingMessage(result.iteration.value);
                 if (nextExecution === "shutdown") {
                     this.publishResults.rejectAll(new Error("worker shutdown requested"));
+                    this.telegramSendResults.rejectAll(new Error("worker shutdown requested"));
                     return;
                 }
                 if (nextExecution) {
@@ -113,6 +116,7 @@ class AgentWorkerSession {
             const nextExecution = this.handleIncomingMessage(result.value);
             if (nextExecution === "shutdown") {
                 this.publishResults.rejectAll(new Error("worker shutdown requested"));
+                this.telegramSendResults.rejectAll(new Error("worker shutdown requested"));
                 return;
             }
             activeExecution = nextExecution;
@@ -129,6 +133,11 @@ class AgentWorkerSession {
 
         if (message.type === "publish_result") {
             this.publishResults.resolve(message);
+            return undefined;
+        }
+
+        if (message.type === "telegram_send_result") {
+            this.telegramSendResults.resolve(message);
             return undefined;
         }
 
@@ -164,6 +173,7 @@ class AgentWorkerSession {
             try {
                 const result = await executeAgentWorkerRequest(message, this.emit, {
                     publishResults: this.publishResults,
+                    telegramSendResults: this.telegramSendResults,
                 });
 
                 const terminalBase = {
