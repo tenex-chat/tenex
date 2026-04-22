@@ -4,8 +4,9 @@ use thiserror::Error;
 
 use crate::daemon_loop::{
     DaemonMaintenanceLoopClock, DaemonMaintenanceLoopError, DaemonMaintenanceLoopInput,
-    DaemonMaintenanceLoopOutcome, DaemonMaintenanceLoopSleeper, DaemonTickError, DaemonTickOutcome,
-    run_daemon_tick_loop_from_filesystem,
+    DaemonMaintenanceLoopOutcome, DaemonMaintenanceLoopSleeper, DaemonMaintenanceLoopStopSignal,
+    DaemonMaintenanceStoppableLoopInput, DaemonTickError, DaemonTickOutcome,
+    run_daemon_tick_loop_from_filesystem, run_daemon_tick_loop_until_stopped_from_filesystem,
 };
 use crate::daemon_shell::{DaemonShell, DaemonShellError, DaemonShellStopMode};
 use crate::process_liveness::ProcessLivenessProbe;
@@ -16,6 +17,14 @@ use crate::publish_outbox::PublishOutboxRetryPolicy;
 pub struct DaemonForegroundInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub max_iterations: u64,
+    pub sleep_ms: u64,
+    pub retry_policy: PublishOutboxRetryPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DaemonForegroundStoppableInput<'a> {
+    pub tenex_base_dir: &'a Path,
+    pub max_iterations: Option<u64>,
     pub sleep_ms: u64,
     pub retry_policy: PublishOutboxRetryPolicy,
 }
@@ -113,6 +122,68 @@ where
     }
 }
 
+pub fn run_daemon_foreground_until_stopped_from_filesystem<C, S, Stop, P, Probe>(
+    shell: &DaemonShell<Probe>,
+    input: DaemonForegroundStoppableInput<'_>,
+    clock: &mut C,
+    sleeper: &mut S,
+    stop_signal: &mut Stop,
+    publisher: &mut P,
+) -> Result<DaemonForegroundReport, DaemonForegroundError>
+where
+    Probe: ProcessLivenessProbe + Clone,
+    C: DaemonMaintenanceLoopClock,
+    S: DaemonMaintenanceLoopSleeper,
+    Stop: DaemonMaintenanceLoopStopSignal,
+    P: PublishOutboxRelayPublisher,
+{
+    let started_at_ms = clock.now_ms();
+    let session = shell
+        .start_foreground(started_at_ms)
+        .map_err(|source| DaemonForegroundError::Start { source })?;
+
+    let tick_result = run_daemon_tick_loop_until_stopped_from_filesystem(
+        DaemonMaintenanceStoppableLoopInput {
+            tenex_base_dir: input.tenex_base_dir,
+            daemon_dir: shell.daemon_dir(),
+            max_iterations: input.max_iterations,
+            sleep_ms: input.sleep_ms,
+        },
+        clock,
+        sleeper,
+        stop_signal,
+        publisher,
+        input.retry_policy,
+    );
+
+    match tick_result {
+        Ok(tick_loop) => {
+            let report = DaemonForegroundReport {
+                tenex_base_dir: input.tenex_base_dir.to_path_buf(),
+                daemon_dir: shell.daemon_dir().to_path_buf(),
+                started_at_ms,
+                tick_loop,
+            };
+            match session.stop(DaemonShellStopMode::Shutdown) {
+                Ok(()) => Ok(report),
+                Err(source) => Err(DaemonForegroundError::Shutdown {
+                    report: Box::new(report),
+                    source,
+                }),
+            }
+        }
+        Err(source) => match session.stop(DaemonShellStopMode::Shutdown) {
+            Ok(()) => Err(DaemonForegroundError::Tick {
+                source: Box::new(source),
+            }),
+            Err(stop_error) => Err(DaemonForegroundError::TickAndStop {
+                source: Box::new(source),
+                stop_error,
+            }),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +233,19 @@ mod tests {
     impl DaemonMaintenanceLoopSleeper for RecordingSleeper {
         fn sleep_ms(&mut self, sleep_ms: u64) {
             self.sleeps_ms.push(sleep_ms);
+        }
+    }
+
+    #[derive(Debug)]
+    struct StopAfterChecks {
+        checks: usize,
+        stop_on_or_after: usize,
+    }
+
+    impl DaemonMaintenanceLoopStopSignal for StopAfterChecks {
+        fn should_stop(&mut self) -> bool {
+            self.checks += 1;
+            self.checks >= self.stop_on_or_after
         }
     }
 
@@ -252,6 +336,55 @@ mod tests {
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
         assert!(publish_outbox.published_count > 0);
+    }
+
+    #[test]
+    fn foreground_runner_until_stopped_honors_stop_signal_and_shuts_down() {
+        let fixture =
+            foreground_fixture("foreground_runner_until_stopped_honors_stop_signal_and_shuts_down");
+        let shell = test_shell(&fixture.daemon_dir);
+        let mut clock = RecordingClock {
+            now_ms_values: VecDeque::from(vec![1_710_001_000_000, 1_710_001_000_100]),
+            observed_now_ms_values: Vec::new(),
+        };
+        let mut sleeper = RecordingSleeper::default();
+        let mut stop_signal = StopAfterChecks {
+            checks: 0,
+            stop_on_or_after: 2,
+        };
+        let mut publisher = RecordingPublisher::default();
+
+        let report = run_daemon_foreground_until_stopped_from_filesystem(
+            &shell,
+            DaemonForegroundStoppableInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                max_iterations: None,
+                sleep_ms: 25,
+                retry_policy: PublishOutboxRetryPolicy::default(),
+            },
+            &mut clock,
+            &mut sleeper,
+            &mut stop_signal,
+            &mut publisher,
+        )
+        .expect("foreground runner must stop cleanly");
+
+        assert_eq!(report.tick_loop.steps.len(), 1);
+        assert_eq!(
+            clock.observed_now_ms_values,
+            vec![1_710_001_000_000, 1_710_001_000_100]
+        );
+        assert!(sleeper.sleeps_ms.is_empty());
+        assert_eq!(stop_signal.checks, 2);
+        assert!(!publisher.published_event_ids.is_empty());
+        assert_eq!(
+            read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
+            None
+        );
+        assert_eq!(
+            read_status_file(&fixture.daemon_dir).expect("status read must succeed"),
+            None
+        );
     }
 
     #[test]

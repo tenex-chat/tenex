@@ -23,6 +23,10 @@ pub trait DaemonMaintenanceLoopSleeper {
     fn sleep_ms(&mut self, sleep_ms: u64);
 }
 
+pub trait DaemonMaintenanceLoopStopSignal {
+    fn should_stop(&mut self) -> bool;
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SystemDaemonMaintenanceLoopClock;
 
@@ -38,6 +42,15 @@ pub struct ThreadDaemonMaintenanceLoopSleeper;
 impl DaemonMaintenanceLoopSleeper for ThreadDaemonMaintenanceLoopSleeper {
     fn sleep_ms(&mut self, sleep_ms: u64) {
         thread::sleep(Duration::from_millis(sleep_ms));
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NeverStopDaemonMaintenanceLoop;
+
+impl DaemonMaintenanceLoopStopSignal for NeverStopDaemonMaintenanceLoop {
+    fn should_stop(&mut self) -> bool {
+        false
     }
 }
 
@@ -90,7 +103,7 @@ pub fn run_daemon_maintenance_loop<C, S, F, T, E>(
     sleeper: &mut S,
     max_iterations: u64,
     sleep_ms: u64,
-    mut run_once: F,
+    run_once: F,
 ) -> Result<DaemonMaintenanceLoopOutcome<T>, DaemonMaintenanceLoopError<E>>
 where
     C: DaemonMaintenanceLoopClock,
@@ -98,9 +111,36 @@ where
     F: FnMut(u64) -> Result<T, E>,
     E: Error + Send + Sync + 'static,
 {
-    let mut steps = Vec::new();
+    let mut stop_signal = NeverStopDaemonMaintenanceLoop;
+    run_daemon_maintenance_loop_until_stopped(
+        clock,
+        sleeper,
+        &mut stop_signal,
+        Some(max_iterations),
+        sleep_ms,
+        run_once,
+    )
+}
 
-    for iteration_index in 0..max_iterations {
+pub fn run_daemon_maintenance_loop_until_stopped<C, S, Stop, F, T, E>(
+    clock: &mut C,
+    sleeper: &mut S,
+    stop_signal: &mut Stop,
+    max_iterations: Option<u64>,
+    sleep_ms: u64,
+    mut run_once: F,
+) -> Result<DaemonMaintenanceLoopOutcome<T>, DaemonMaintenanceLoopError<E>>
+where
+    C: DaemonMaintenanceLoopClock,
+    S: DaemonMaintenanceLoopSleeper,
+    Stop: DaemonMaintenanceLoopStopSignal,
+    F: FnMut(u64) -> Result<T, E>,
+    E: Error + Send + Sync + 'static,
+{
+    let mut steps = Vec::new();
+    let mut iteration_index = 0;
+
+    while max_iterations.is_none_or(|limit| iteration_index < limit) && !stop_signal.should_stop() {
         let now_ms = clock.now_ms();
         let maintenance_outcome =
             run_once(now_ms).map_err(|source| DaemonMaintenanceLoopError::Maintenance {
@@ -110,7 +150,11 @@ where
                 source,
             })?;
 
-        let sleep_after_ms = if iteration_index + 1 < max_iterations {
+        let next_iteration_index = iteration_index.saturating_add(1);
+        let stop_requested = stop_signal.should_stop();
+        let should_sleep =
+            max_iterations.is_none_or(|limit| next_iteration_index < limit) && !stop_requested;
+        let sleep_after_ms = if should_sleep {
             sleeper.sleep_ms(sleep_ms);
             Some(sleep_ms)
         } else {
@@ -123,6 +167,11 @@ where
             maintenance_outcome,
             sleep_after_ms,
         });
+
+        iteration_index = next_iteration_index;
+        if stop_requested {
+            break;
+        }
     }
 
     Ok(DaemonMaintenanceLoopOutcome { steps })
@@ -158,6 +207,14 @@ pub struct DaemonMaintenanceLoopInput<'a> {
     pub sleep_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DaemonMaintenanceStoppableLoopInput<'a> {
+    pub tenex_base_dir: &'a Path,
+    pub daemon_dir: &'a Path,
+    pub max_iterations: Option<u64>,
+    pub sleep_ms: u64,
+}
+
 pub fn run_daemon_tick_loop_from_filesystem<C, S, P>(
     input: DaemonMaintenanceLoopInput<'_>,
     clock: &mut C,
@@ -176,6 +233,43 @@ where
     run_daemon_maintenance_loop(
         clock,
         sleeper,
+        input.max_iterations,
+        input.sleep_ms,
+        |now_ms| {
+            run_daemon_tick_once_from_filesystem(
+                DaemonMaintenanceInput {
+                    tenex_base_dir: input.tenex_base_dir,
+                    daemon_dir: input.daemon_dir,
+                    now_ms,
+                },
+                publisher,
+                retry_policy,
+            )
+        },
+    )
+}
+
+pub fn run_daemon_tick_loop_until_stopped_from_filesystem<C, S, Stop, P>(
+    input: DaemonMaintenanceStoppableLoopInput<'_>,
+    clock: &mut C,
+    sleeper: &mut S,
+    stop_signal: &mut Stop,
+    publisher: &mut P,
+    retry_policy: PublishOutboxRetryPolicy,
+) -> Result<
+    DaemonMaintenanceLoopOutcome<DaemonTickOutcome>,
+    DaemonMaintenanceLoopError<DaemonTickError>,
+>
+where
+    C: DaemonMaintenanceLoopClock,
+    S: DaemonMaintenanceLoopSleeper,
+    Stop: DaemonMaintenanceLoopStopSignal,
+    P: PublishOutboxRelayPublisher,
+{
+    run_daemon_maintenance_loop_until_stopped(
+        clock,
+        sleeper,
+        stop_signal,
         input.max_iterations,
         input.sleep_ms,
         |now_ms| {
@@ -245,6 +339,19 @@ mod tests {
     impl DaemonMaintenanceLoopSleeper for RecordingSleeper {
         fn sleep_ms(&mut self, sleep_ms: u64) {
             self.sleeps_ms.push(sleep_ms);
+        }
+    }
+
+    #[derive(Debug)]
+    struct StopAfterChecks {
+        checks: usize,
+        stop_on_or_after: usize,
+    }
+
+    impl DaemonMaintenanceLoopStopSignal for StopAfterChecks {
+        fn should_stop(&mut self) -> bool {
+            self.checks += 1;
+            self.checks >= self.stop_on_or_after
         }
     }
 
@@ -365,6 +472,74 @@ mod tests {
                 source: FakeLoopError("boom"),
             }
         ));
+    }
+
+    #[test]
+    fn stoppable_loop_exits_without_sleeping_after_stop_signal() {
+        let mut clock = RecordingClock {
+            now_ms_values: VecDeque::from(vec![11, 22, 33]),
+            observed_now_ms_values: Vec::new(),
+        };
+        let mut sleeper = RecordingSleeper::default();
+        let mut stop_signal = StopAfterChecks {
+            checks: 0,
+            stop_on_or_after: 4,
+        };
+        let mut run_once_calls = Vec::new();
+
+        let outcome = run_daemon_maintenance_loop_until_stopped(
+            &mut clock,
+            &mut sleeper,
+            &mut stop_signal,
+            None,
+            15,
+            |now_ms| {
+                run_once_calls.push(now_ms);
+                Ok::<String, FakeLoopError>(format!("maintenance@{now_ms}"))
+            },
+        )
+        .expect("stoppable loop must succeed");
+
+        assert_eq!(run_once_calls, vec![11, 22]);
+        assert_eq!(clock.observed_now_ms_values, vec![11, 22]);
+        assert_eq!(sleeper.sleeps_ms, vec![15]);
+        assert_eq!(outcome.steps.len(), 2);
+        assert_eq!(outcome.steps[0].sleep_after_ms, Some(15));
+        assert_eq!(outcome.steps[1].sleep_after_ms, None);
+        assert_eq!(stop_signal.checks, 4);
+    }
+
+    #[test]
+    fn stoppable_loop_can_exit_before_first_iteration() {
+        let mut clock = RecordingClock {
+            now_ms_values: VecDeque::from(vec![11]),
+            observed_now_ms_values: Vec::new(),
+        };
+        let mut sleeper = RecordingSleeper::default();
+        let mut stop_signal = StopAfterChecks {
+            checks: 0,
+            stop_on_or_after: 1,
+        };
+        let mut run_once_calls = Vec::new();
+
+        let outcome = run_daemon_maintenance_loop_until_stopped(
+            &mut clock,
+            &mut sleeper,
+            &mut stop_signal,
+            None,
+            15,
+            |now_ms| {
+                run_once_calls.push(now_ms);
+                Ok::<String, FakeLoopError>(format!("maintenance@{now_ms}"))
+            },
+        )
+        .expect("stoppable loop must succeed");
+
+        assert!(outcome.steps.is_empty());
+        assert!(run_once_calls.is_empty());
+        assert!(clock.observed_now_ms_values.is_empty());
+        assert!(sleeper.sleeps_ms.is_empty());
+        assert_eq!(stop_signal.checks, 1);
     }
 
     #[test]
