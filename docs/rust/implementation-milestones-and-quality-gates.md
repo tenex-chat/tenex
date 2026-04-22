@@ -61,7 +61,6 @@ Events that need compatibility coverage:
 | stream text delta | `24135` | Same stream sequence, tags, and best-effort behavior. |
 | agent config update | `24020` | Same global vs project-scoped update behavior. |
 | agent delete | `24030` | Same global/project delete behavior and project republish side effects. |
-| encrypted config update | `25000` | Same decryption and handling semantics for configured features. |
 | agent lesson | `4129` | Same trust and hydration semantics. |
 | agent definition | `4199` | Same install/discovery metadata. |
 | MCP tool | `4200` | Same MCP tool extraction and install behavior. |
@@ -258,7 +257,6 @@ Quality gates:
   - stream text delta
   - project-scoped config update
   - backend heartbeat and installed agent list
-  - encrypted config update decryption vector for kind `25000`
 - Fixtures are stored in a stable location and reviewed as protocol artifacts.
 - Every compatibility fixture has a classification owner. If Rust later differs
   from TypeScript, the disagreement must be recorded as one of:
@@ -818,8 +816,6 @@ Scope:
 - Add signer identity tests for backend-signed events and verification tests for
   worker-signed agent events.
 - Add relay round-trip tests: publish with Rust, fetch/decode with TypeScript.
-- Add kind `25000` NIP-44 v2 decryption vectors before Rust owns any encrypted
-  config handling.
 - Add replaceable-event `created_at` policy for kind `31933`, `24010`, and any
   status event clients use as latest-state inputs.
 - Persist enough daemon-side publish context that enabling M8 does not require
@@ -1025,8 +1021,6 @@ These gates apply to every milestone after M0.
 - Schnorr signature verification tests pass.
 - Nested JSON `content` ordering tests pass for event kinds that use JSON
   content bodies.
-- NIP-44 v2 decryption vector tests pass before Rust handles encrypted config
-  events.
 - Filesystem compatibility tests pass.
 - Worker protocol schema tests pass.
 - CLI compatibility tests pass for touched commands.
@@ -1190,6 +1184,30 @@ must prevent duplicate handling:
 - cross-backend delegation must be in the supported matrix before it is allowed
 - stop commands must be scoped so one backend does not kill another backend's
   local execution accidentally
+
+## Deferred Scope
+
+The following surfaces are explicitly **out of scope** for M0–M10. They are
+tracked as follow-up work to begin only after the Rust daemon has reached
+default cutover and the M0–M10 gates are green. Until then, these capabilities
+remain TypeScript-owned and are not part of any compatibility, fixture, or
+rollback gate in this plan. Adding them earlier is a scope change that requires
+re-opening the milestone plan.
+
+- **Encrypted config update — kind `25000` (NIP-44 v2).** Rust does not decrypt,
+  route, re-emit, or store kind `25000` payloads. No NIP-44 v2 decryption
+  vector is required by any milestone in this plan. If Rust observes a kind
+  `25000` event in shadow or authoritative mode, it must treat the event as
+  pass-through and leave handling to the TypeScript path.
+- **Push notification transports (APNs, FCM, or equivalent).** No Rust-owned
+  push delivery, push outbox, or device-token state is in scope. Any existing
+  TypeScript push integration continues to run unchanged during the migration
+  and is not considered part of the Rust compatibility surface.
+
+Follow-up work, when opened, should reuse the same contract-and-fixture
+discipline this plan uses for Nostr event kinds and transport outboxes:
+canonical payload fixtures, decryption/delivery vectors, durable outbox
+records, and rollback paths before authority transfers.
 
 ## Release Criteria
 
