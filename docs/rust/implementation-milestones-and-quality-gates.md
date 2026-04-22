@@ -851,6 +851,10 @@ Landed slices:
   orchestration slice that reads global config and installed-agent inventory,
   signs backend heartbeat and installed-agent-list events, and enqueues them
   into the durable Rust publish outbox without publishing directly to relays.
+- `daemon-control backend-events-plan` — read-only diagnostics over publish
+  outbox state plus backend status publisher readiness, including config,
+  signer, relay, and installed-agent inventory availability without mutating
+  outbox or relay state.
 - `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
   projection from active worker heartbeat state into kind `24133`
   operations-status drafts, including transition-aware cleanup drafts with no

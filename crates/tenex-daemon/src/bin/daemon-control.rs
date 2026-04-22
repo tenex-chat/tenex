@@ -5,6 +5,9 @@ use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use tenex_daemon::agent_inventory::read_installed_agent_inventory;
+use tenex_daemon::backend_config::read_backend_config;
+use tenex_daemon::backend_status_runtime::agents_dir;
 use tenex_daemon::caches::prefix_lookup::{PrefixLookupDiagnostics, inspect_prefix_lookup};
 use tenex_daemon::caches::profile_names::{ProfileNamesDiagnostics, inspect_profile_names};
 use tenex_daemon::caches::trust_pubkeys::{TrustPubkeysDiagnostics, inspect_trust_pubkeys};
@@ -38,6 +41,7 @@ enum DaemonControlCommand {
 struct DaemonControlCliOptions {
     command: DaemonControlCommand,
     daemon_dir: PathBuf,
+    tenex_base_dir: PathBuf,
     inspected_at: u64,
 }
 
@@ -65,7 +69,13 @@ struct BackendEventsPlanDiagnostics {
 struct BackendEventsStatusPublisherReadiness {
     kind: &'static str,
     ready: bool,
-    reason: &'static str,
+    reason: String,
+    tenex_base_dir: PathBuf,
+    backend_pubkey: Option<String>,
+    owner_pubkey_count: usize,
+    relay_url_count: usize,
+    active_agent_count: Option<usize>,
+    skipped_agent_file_count: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -183,12 +193,103 @@ fn inspect_backend_events_plan(
         schema_version: 1,
         inspected_at: options.inspected_at,
         publish_outbox,
-        status_publisher_readiness: BackendEventsStatusPublisherReadiness {
-            kind: "unavailable",
-            ready: false,
-            reason: "backend_config module not wired into daemon-control yet",
-        },
+        status_publisher_readiness: inspect_backend_status_publisher_readiness(
+            &options.tenex_base_dir,
+        ),
     })
+}
+
+fn inspect_backend_status_publisher_readiness(
+    tenex_base_dir: &PathBuf,
+) -> BackendEventsStatusPublisherReadiness {
+    let config = match read_backend_config(tenex_base_dir) {
+        Ok(config) => config,
+        Err(error) => {
+            return backend_status_unready(
+                tenex_base_dir,
+                format!("backend config unavailable: {error}"),
+                None,
+                0,
+                0,
+                None,
+                None,
+            );
+        }
+    };
+
+    let owner_pubkey_count = config.whitelisted_pubkeys.len();
+    let relay_url_count = config.effective_relay_urls().len();
+    let signer = match config.backend_signer() {
+        Ok(signer) => signer,
+        Err(error) => {
+            return backend_status_unready(
+                tenex_base_dir,
+                format!("backend signer unavailable: {error}"),
+                None,
+                owner_pubkey_count,
+                relay_url_count,
+                None,
+                None,
+            );
+        }
+    };
+
+    if config.whitelisted_pubkeys.is_empty() {
+        return backend_status_unready(
+            tenex_base_dir,
+            "no whitelistedPubkeys configured".to_string(),
+            Some(signer.pubkey_hex().to_string()),
+            owner_pubkey_count,
+            relay_url_count,
+            None,
+            None,
+        );
+    }
+
+    match read_installed_agent_inventory(agents_dir(tenex_base_dir)) {
+        Ok(report) => BackendEventsStatusPublisherReadiness {
+            kind: "backend-status",
+            ready: true,
+            reason: "ready".to_string(),
+            tenex_base_dir: tenex_base_dir.clone(),
+            backend_pubkey: Some(signer.pubkey_hex().to_string()),
+            owner_pubkey_count,
+            relay_url_count,
+            active_agent_count: Some(report.active_agents.len()),
+            skipped_agent_file_count: Some(report.skipped_files.len()),
+        },
+        Err(error) => backend_status_unready(
+            tenex_base_dir,
+            format!("agent inventory unavailable: {error}"),
+            Some(signer.pubkey_hex().to_string()),
+            owner_pubkey_count,
+            relay_url_count,
+            None,
+            None,
+        ),
+    }
+}
+
+fn backend_status_unready(
+    tenex_base_dir: &PathBuf,
+    reason: String,
+    backend_pubkey: Option<String>,
+    owner_pubkey_count: usize,
+    relay_url_count: usize,
+    active_agent_count: Option<usize>,
+    skipped_agent_file_count: Option<usize>,
+) -> BackendEventsStatusPublisherReadiness {
+    BackendEventsStatusPublisherReadiness {
+        kind: "backend-status",
+        ready: false,
+        reason,
+        tenex_base_dir: tenex_base_dir.clone(),
+        backend_pubkey,
+        owner_pubkey_count,
+        relay_url_count,
+        active_agent_count,
+        skipped_agent_file_count,
+    }
 }
 
 fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions, CliError> {
@@ -212,6 +313,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     };
 
     let mut daemon_dir = None;
+    let mut tenex_base_dir = None;
     let mut inspected_at = None;
     let mut index = 1;
 
@@ -223,6 +325,13 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .get(index)
                     .ok_or_else(|| usage_error("--daemon-dir requires a value"))?;
                 daemon_dir = Some(PathBuf::from(value));
+            }
+            "--tenex-base-dir" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--tenex-base-dir requires a value"))?;
+                tenex_base_dir = Some(PathBuf::from(value));
             }
             "--inspected-at" => {
                 index += 1;
@@ -243,12 +352,25 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     }
 
     let daemon_dir = daemon_dir.ok_or_else(|| usage_error("--daemon-dir is required"))?;
+    let tenex_base_dir = tenex_base_dir.unwrap_or_else(|| infer_tenex_base_dir(&daemon_dir));
 
     Ok(DaemonControlCliOptions {
         command,
         daemon_dir,
+        tenex_base_dir,
         inspected_at: inspected_at.unwrap_or_else(current_unix_time_ms),
     })
+}
+
+fn infer_tenex_base_dir(daemon_dir: &PathBuf) -> PathBuf {
+    if daemon_dir.file_name().and_then(|name| name.to_str()) == Some("daemon") {
+        return daemon_dir
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| daemon_dir.clone());
+    }
+
+    daemon_dir.clone()
 }
 
 fn parse_u64_arg(name: &str, value: &str) -> Result<u64, CliError> {
@@ -270,7 +392,7 @@ fn usage() -> String {
         "usage:",
         "  daemon-control caches --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control diagnostics --daemon-dir <path> [--inspected-at <ms>]",
-        "  daemon-control backend-events-plan --daemon-dir <path> [--inspected-at <ms>]",
+        "  daemon-control backend-events-plan --daemon-dir <path> [--tenex-base-dir <path>] [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control status --daemon-dir <path>",
@@ -298,6 +420,7 @@ fn runtime_error(message: impl Into<String>) -> CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
     use std::fs;
@@ -319,6 +442,10 @@ mod tests {
     };
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    const TEST_SECRET_KEY_HEX: &str =
+        "0101010101010101010101010101010101010101010101010101010101010101";
+    const TEST_BACKEND_PUBKEY_HEX: &str =
+        "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f";
 
     #[test]
     fn parses_caches_args() {
@@ -728,15 +855,76 @@ mod tests {
         assert_eq!(value["publishOutbox"]["failedCount"], json!(0));
         assert_eq!(
             value["statusPublisherReadiness"]["kind"],
-            json!("unavailable")
+            json!("backend-status")
         );
         assert_eq!(value["statusPublisherReadiness"]["ready"], json!(false));
-        assert_eq!(
-            value["statusPublisherReadiness"]["reason"],
-            json!("backend_config module not wired into daemon-control yet")
+        assert!(
+            value["statusPublisherReadiness"]["reason"]
+                .as_str()
+                .expect("readiness reason must be a string")
+                .contains("backend config unavailable")
         );
+        assert_eq!(
+            value["statusPublisherReadiness"]["ownerPubkeyCount"],
+            json!(0)
+        );
+        assert_eq!(value["statusPublisherReadiness"]["relayUrlCount"], json!(0));
+        assert!(value["statusPublisherReadiness"]["backendPubkey"].is_null());
+        assert!(value["statusPublisherReadiness"]["activeAgentCount"].is_null());
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn backend_events_plan_reports_ready_filesystem_inputs() {
+        let tenex_base_dir = unique_temp_base_dir();
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+
+        let owner = xonly_pubkey_hex(0x02);
+        let agent = xonly_pubkey_hex(0x03);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+        fs::write(
+            agents_dir.join(format!("{agent}.json")),
+            r#"{"slug":"worker","status":"active","nsec":"nsec-placeholder"}"#,
+        )
+        .expect("agent file must write");
+
+        let output = run_cli([
+            "backend-events-plan",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("daemon path must be utf-8"),
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+            "--inspected-at",
+            "1710001000000",
+        ])
+        .expect("backend-events-plan command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        let readiness = &value["statusPublisherReadiness"];
+        assert_eq!(readiness["kind"], json!("backend-status"));
+        assert_eq!(readiness["ready"], json!(true));
+        assert_eq!(readiness["reason"], json!("ready"));
+        assert_eq!(readiness["backendPubkey"], json!(TEST_BACKEND_PUBKEY_HEX));
+        assert_eq!(readiness["ownerPubkeyCount"], json!(1));
+        assert_eq!(readiness["relayUrlCount"], json!(1));
+        assert_eq!(readiness["activeAgentCount"], json!(1));
+        assert_eq!(readiness["skippedAgentFileCount"], json!(0));
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }
 
     #[test]
@@ -849,5 +1037,26 @@ mod tests {
         ));
         fs::create_dir_all(&daemon_dir).expect("temp daemon dir must be created");
         daemon_dir
+    }
+
+    fn unique_temp_base_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must be after UNIX_EPOCH")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        env::temp_dir().join(format!(
+            "tenex-daemon-control-base-{}-{counter}-{unique}",
+            process::id()
+        ))
+    }
+
+    fn xonly_pubkey_hex(fill_byte: u8) -> String {
+        let secret_bytes = [fill_byte; 32];
+        let secret = SecretKey::from_byte_array(secret_bytes).expect("valid secret");
+        let secp = Secp256k1::new();
+        let keypair = Keypair::from_secret_key(&secp, &secret);
+        let (xonly, _) = keypair.x_only_public_key();
+        hex::encode(xonly.serialize())
     }
 }
