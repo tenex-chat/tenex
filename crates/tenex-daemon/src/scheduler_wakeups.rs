@@ -2003,4 +2003,75 @@ mod tests {
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
+
+    #[test]
+    fn maintenance_requeues_due_retry_and_snapshots_diagnostics() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+        mark_wakeup_failed(
+            &daemon_dir,
+            &record.wakeup_id,
+            1_710_001_150,
+            WakeupFailureClassification::Retryable,
+            Some("transient".to_string()),
+            Some(50),
+            WakeupRetryPolicy::default(),
+        )
+        .expect("fail retryable");
+
+        let report =
+            run_scheduler_maintenance(&daemon_dir, 1_710_001_250).expect("maintenance must run");
+
+        assert_eq!(report.diagnostics_before.failed_count, 1);
+        assert_eq!(report.diagnostics_before.retryable_failed_count, 1);
+        assert_eq!(report.diagnostics_before.due_retry_count, 1);
+        assert_eq!(report.requeued.len(), 1);
+        assert_eq!(report.requeued[0].wakeup_id, record.wakeup_id);
+        assert_eq!(
+            report.requeued[0].target_path,
+            pending_scheduler_wakeup_record_path(&daemon_dir, &record.wakeup_id)
+        );
+        assert_eq!(report.diagnostics_after.failed_count, 0);
+        assert_eq!(report.diagnostics_after.pending_count, 1);
+        assert_eq!(report.diagnostics_after.due_pending_count, 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn maintenance_is_idempotent_without_due_records() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+        mark_wakeup_failed(
+            &daemon_dir,
+            &record.wakeup_id,
+            1_710_001_150,
+            WakeupFailureClassification::Retryable,
+            None,
+            Some(600),
+            WakeupRetryPolicy::default(),
+        )
+        .expect("fail retryable");
+
+        let report =
+            run_scheduler_maintenance(&daemon_dir, 1_710_001_200).expect("maintenance must run");
+
+        assert_eq!(report.diagnostics_before.failed_count, 1);
+        assert_eq!(report.diagnostics_before.due_retry_count, 0);
+        assert!(report.requeued.is_empty());
+        assert_eq!(report.diagnostics_after.failed_count, 1);
+        assert_eq!(report.diagnostics_after.retryable_failed_count, 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
 }
