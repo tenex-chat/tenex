@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tracing::warn;
@@ -40,7 +40,12 @@ pub enum ReconcileOutcome {
 
 pub struct ReconcilerDeps {
     pub tenex_base_dir: PathBuf,
-    pub owners: Vec<String>,
+    /// Whitelisted owner pubkeys shared with the daemon boot and the SIGHUP
+    /// reload path. The reconciler itself does not iterate this set — each
+    /// reconcile is driven by a trigger message carrying a specific owner
+    /// pubkey — but the shared lock lets the daemon swap the configured set
+    /// atomically and gives tests a way to observe the current configuration.
+    pub owners: Arc<RwLock<Vec<String>>>,
     pub snapshot_state: Arc<SnapshotState>,
     pub nip46_registry: Arc<NIP46Registry>,
     pub nip46_config: Nip46Config,
@@ -327,7 +332,7 @@ mod tests {
 
         let deps = ReconcilerDeps {
             tenex_base_dir,
-            owners: vec![owner.xonly_hex.clone()],
+            owners: Arc::new(RwLock::new(vec![owner.xonly_hex.clone()])),
             snapshot_state,
             nip46_registry: Arc::clone(&registry),
             nip46_config,
