@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
+use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::daemon_loop::{
     DaemonMaintenanceLoopClock, DaemonMaintenanceLoopError, DaemonMaintenanceLoopInput,
     DaemonMaintenanceLoopOutcome, DaemonMaintenanceLoopSleeper, DaemonMaintenanceLoopStopSignal,
@@ -22,20 +24,25 @@ use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_runtime_state::WorkerRuntimeState;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct DaemonForegroundInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub max_iterations: u64,
     pub sleep_ms: u64,
     pub retry_policy: PublishOutboxRetryPolicy,
+    /// Optional latch shared with the whitelist ingress; when present, the
+    /// inner maintenance loop gates the kind 24012 heartbeat on it.
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct DaemonForegroundStoppableInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub max_iterations: Option<u64>,
     pub sleep_ms: u64,
     pub retry_policy: PublishOutboxRetryPolicy,
+    /// See [`DaemonForegroundInput::heartbeat_latch`].
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug)]
@@ -143,6 +150,7 @@ where
             daemon_dir: shell.daemon_dir(),
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
+            heartbeat_latch: input.heartbeat_latch.clone(),
         },
         clock,
         sleeper,
@@ -204,6 +212,7 @@ where
             daemon_dir: shell.daemon_dir(),
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
+            heartbeat_latch: input.heartbeat_latch.clone(),
         },
         clock,
         sleeper,
@@ -281,6 +290,7 @@ where
             daemon_dir: shell.daemon_dir(),
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
+            heartbeat_latch: input.heartbeat_latch.clone(),
         },
         DaemonWorkerLoopInput {
             runtime_state: worker.runtime_state,
@@ -595,6 +605,7 @@ mod tests {
                 max_iterations: 2,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                heartbeat_latch: None,
             },
             &mut clock,
             &mut sleeper,
@@ -653,6 +664,7 @@ mod tests {
                 max_iterations: None,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                heartbeat_latch: None,
             },
             &mut clock,
             &mut sleeper,
@@ -705,6 +717,7 @@ mod tests {
                 max_iterations: None,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
                 runtime_state: &mut runtime_state,
@@ -785,6 +798,7 @@ mod tests {
                 max_iterations: None,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
                 runtime_state: &mut runtime_state,
@@ -872,6 +886,7 @@ mod tests {
                 max_iterations: 1,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                heartbeat_latch: None,
             },
             &mut clock,
             &mut sleeper,

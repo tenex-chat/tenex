@@ -282,6 +282,7 @@ where
             max_iterations: options.iterations,
             sleep_ms: options.sleep_ms,
             retry_policy: PublishOutboxRetryPolicy::default(),
+            heartbeat_latch: None,
         },
         DaemonForegroundWorkerInput {
             runtime_state: &mut worker_runtime_state,

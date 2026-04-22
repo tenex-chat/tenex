@@ -1,8 +1,10 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::backend_status_runtime::{
     BackendStatusRuntimeError, BackendStatusRuntimeInput, publish_backend_status_from_filesystem,
 };
@@ -36,6 +38,10 @@ pub struct BackendEventsTickInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub projects: &'a [BackendEventsTickProject<'a>],
+    /// When `Some` and the planner is in the `Stopped` state, the kind
+    /// 24012 heartbeat is skipped for this tick. Installed agent list and
+    /// other status events continue to publish.
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug)]
@@ -48,6 +54,8 @@ pub struct BackendEventsDueTickInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub projects: &'a [BackendEventsTickProject<'a>],
+    /// See [`BackendEventsTickInput::heartbeat_latch`].
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -61,7 +69,9 @@ pub struct BackendEventsTaskRegistration {
 pub struct BackendEventsTickBackendStatusOutcome {
     pub task_name: String,
     pub backend_profile_event_id: Option<String>,
-    pub heartbeat_event_id: String,
+    /// `None` when the heartbeat latch observed a matching kind 14199 and
+    /// gated the heartbeat for this tick.
+    pub heartbeat_event_id: Option<String>,
     pub installed_agent_list_event_id: String,
     pub enqueued_event_count: usize,
 }
@@ -159,6 +169,7 @@ pub fn tick_backend_events(
         accepted_at: input.accepted_at,
         request_timestamp: input.request_timestamp,
         projects: input.projects,
+        heartbeat_latch: input.heartbeat_latch,
     })
 }
 
@@ -174,6 +185,7 @@ pub fn tick_backend_events_for_due_tasks(
         accepted_at,
         request_timestamp,
         projects,
+        heartbeat_latch,
     } = input;
     let backend_due_task_names = due_task_names
         .iter()
@@ -187,22 +199,33 @@ pub fn tick_backend_events_for_due_tasks(
         .iter()
         .any(|task_name| task_name == BACKEND_STATUS_TICK_TASK_NAME)
     {
-        let outcome = publish_backend_status_from_filesystem(BackendStatusRuntimeInput::new(
+        let mut runtime_input = BackendStatusRuntimeInput::new(
             tenex_base_dir,
             daemon_dir,
             now,
             accepted_at,
             request_timestamp,
-        ))?;
+        );
+        if let Some(latch) = heartbeat_latch {
+            runtime_input = runtime_input.with_heartbeat_latch(latch);
+        }
+        let outcome = publish_backend_status_from_filesystem(runtime_input)?;
+        let heartbeat_event_id = outcome
+            .heartbeat
+            .as_ref()
+            .map(|heartbeat| heartbeat.record.event.id.clone());
+        let enqueued_event_count = usize::from(outcome.backend_profile.is_some())
+            + usize::from(outcome.heartbeat.is_some())
+            + 1;
         Some(BackendEventsTickBackendStatusOutcome {
             task_name: BACKEND_STATUS_TICK_TASK_NAME.to_string(),
             backend_profile_event_id: outcome
                 .backend_profile
                 .as_ref()
                 .map(|profile| profile.record.event.id.clone()),
-            heartbeat_event_id: outcome.heartbeat.record.event.id,
+            heartbeat_event_id,
             installed_agent_list_event_id: outcome.installed_agent_list.record.event.id,
-            enqueued_event_count: 2 + usize::from(outcome.backend_profile.is_some()),
+            enqueued_event_count,
         })
     } else {
         None
@@ -328,6 +351,7 @@ mod tests {
             accepted_at: 100_000,
             request_timestamp: 100_000,
             projects: std::slice::from_ref(&project),
+            heartbeat_latch: None,
         })
         .expect("not-due tick must succeed");
 
@@ -394,6 +418,7 @@ mod tests {
             accepted_at: 100_050,
             request_timestamp: 100_025,
             projects: std::slice::from_ref(&project),
+            heartbeat_latch: None,
         })
         .expect("due tick must enqueue backend events");
 
@@ -415,8 +440,12 @@ mod tests {
         assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 130);
         assert_eq!(outcome.scheduler_snapshot.tasks[1].next_due_at, 130);
 
+        let heartbeat_event_id = backend_status
+            .heartbeat_event_id
+            .as_ref()
+            .expect("heartbeat must publish when latch is absent");
         let heartbeat =
-            read_pending_publish_outbox_record(&daemon_dir, &backend_status.heartbeat_event_id)
+            read_pending_publish_outbox_record(&daemon_dir, heartbeat_event_id)
                 .expect("heartbeat record read must succeed")
                 .expect("heartbeat record must exist");
         let installed = read_pending_publish_outbox_record(
@@ -444,12 +473,72 @@ mod tests {
             accepted_at: 100_050,
             request_timestamp: 100_025,
             projects: std::slice::from_ref(&project),
+            heartbeat_latch: None,
         })
         .expect("same-now tick must be no-op");
 
         assert!(second.due_task_names.is_empty());
         assert!(second.backend_status.is_none());
         assert!(second.project_statuses.is_empty());
+
+        cleanup_temp_dir(tenex_base_dir);
+    }
+
+    #[test]
+    fn tick_backend_events_skips_heartbeat_when_latch_is_stopped() {
+        let tenex_base_dir = unique_temp_dir("latch-stopped");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+
+        let owner = pubkey_hex(0x04);
+        let worker = pubkey_hex(0x06);
+        write_config(&tenex_base_dir, &[&owner]);
+        write_agent(&agents_dir, &worker, "worker");
+
+        let mut scheduler = PeriodicScheduler::new();
+        ensure_backend_events_tasks(&mut scheduler, 100, &[])
+            .expect("task registration must succeed");
+
+        let backend_pubkey = pubkey_hex(0x02);
+        let latch = Arc::new(Mutex::new(BackendHeartbeatLatchPlanner::new(
+            backend_pubkey,
+            Vec::<String>::new(),
+        )));
+        assert!(!latch.lock().unwrap().should_heartbeat());
+
+        let outcome = tick_backend_events(BackendEventsTickInput {
+            now: 100,
+            scheduler: &mut scheduler,
+            tenex_base_dir: &tenex_base_dir,
+            daemon_dir: &daemon_dir,
+            accepted_at: 100_050,
+            request_timestamp: 100_025,
+            projects: &[],
+            heartbeat_latch: Some(Arc::clone(&latch)),
+        })
+        .expect("due tick must enqueue non-heartbeat backend events");
+
+        let backend_status = outcome
+            .backend_status
+            .as_ref()
+            .expect("backend status must publish");
+        assert!(
+            backend_status.heartbeat_event_id.is_none(),
+            "heartbeat must be gated when latch is stopped"
+        );
+        assert!(!backend_status.installed_agent_list_event_id.is_empty());
+        assert_eq!(backend_status.enqueued_event_count, 1);
+
+        // Installed-agent-list is still persisted to the publish outbox.
+        let installed = read_pending_publish_outbox_record(
+            &daemon_dir,
+            &backend_status.installed_agent_list_event_id,
+        )
+        .expect("installed-agent-list record read must succeed")
+        .expect("installed-agent-list record must exist");
+        assert_eq!(installed.event.kind, INSTALLED_AGENT_LIST_KIND);
 
         cleanup_temp_dir(tenex_base_dir);
     }

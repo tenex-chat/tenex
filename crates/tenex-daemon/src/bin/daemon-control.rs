@@ -473,6 +473,7 @@ fn run_backend_events_periodic_tick(
         accepted_at,
         request_timestamp,
         projects,
+        heartbeat_latch: None,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 
@@ -490,6 +491,7 @@ fn run_daemon_maintenance(
         tenex_base_dir: &options.tenex_base_dir,
         daemon_dir: &options.daemon_dir,
         now_ms: options.inspected_at,
+        heartbeat_latch: None,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 
@@ -527,6 +529,7 @@ fn run_daemon_foreground(
             max_iterations: iterations,
             sleep_ms: options.sleep_ms,
             retry_policy: PublishOutboxRetryPolicy::default(),
+            heartbeat_latch: None,
         },
         &mut clock,
         &mut sleeper,
@@ -631,6 +634,9 @@ fn enqueue_backend_events_status(
     let publish_outbox_after = inspect_publish_outbox(&options.daemon_dir, accepted_at)
         .map_err(|error| runtime_error(error.to_string()))?;
 
+    let heartbeat = outcome
+        .heartbeat
+        .expect("daemon-control always publishes heartbeat (no latch configured)");
     Ok(BackendEventsEnqueueStatusDiagnostics {
         schema_version: 1,
         tenex_base_dir: options.tenex_base_dir.clone(),
@@ -638,12 +644,12 @@ fn enqueue_backend_events_status(
         created_at,
         accepted_at,
         request_timestamp,
-        backend_pubkey: outcome.heartbeat.record.event.pubkey.clone(),
+        backend_pubkey: heartbeat.record.event.pubkey.clone(),
         owner_pubkey_count: outcome.config.whitelisted_pubkeys.len(),
         relay_url_count: outcome.config.effective_relay_urls().len(),
         active_agent_count: outcome.agent_inventory.active_agents.len(),
         skipped_agent_file_count: outcome.agent_inventory.skipped_files.len(),
-        heartbeat_event_id: outcome.heartbeat.record.event.id,
+        heartbeat_event_id: heartbeat.record.event.id,
         installed_agent_list_event_id: outcome.installed_agent_list.record.event.id,
         publish_outbox_after,
     })

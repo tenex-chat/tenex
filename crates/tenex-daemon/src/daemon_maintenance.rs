@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -8,6 +9,7 @@ use crate::backend_events_maintenance::{
     BackendEventsMaintenanceSharedSchedulerInput, maintain_backend_events_from_shared_scheduler,
 };
 use crate::backend_events_tick::{BackendEventsTickProject, ensure_backend_events_tasks};
+use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::periodic_tick_state::{
     PeriodicTickStateError, read_periodic_scheduler_state, write_periodic_scheduler_state,
 };
@@ -29,11 +31,14 @@ use crate::telegram_outbox::{
 pub const DAEMON_MAINTENANCE_WRITER_VERSION: &str =
     concat!("tenex-daemon@", env!("CARGO_PKG_VERSION"));
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct DaemonMaintenanceInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
     pub now_ms: u64,
+    /// When present, the backend-events maintenance pass gates the kind
+    /// 24012 heartbeat on the latch state.
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -116,6 +121,7 @@ where
             registered: backend_events_registration,
             due_task_names: due_task_names.clone(),
             scheduler_snapshot: scheduler_snapshot.clone(),
+            heartbeat_latch: input.heartbeat_latch.clone(),
         },
     )?;
     let scheduled_tasks = maintain_scheduled_tasks_from_shared_scheduler(
@@ -301,6 +307,7 @@ mod tests {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
+            heartbeat_latch: None,
         })
         .expect("daemon maintenance must run");
 
@@ -458,6 +465,7 @@ mod tests {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
+            heartbeat_latch: None,
         })
         .expect("daemon maintenance must run");
 
