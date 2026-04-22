@@ -234,14 +234,26 @@ fn dispatch_diagnostic(
             pubkeys: Vec::new(),
             dispatch_id: None,
         },
+        NostrIngressOutcome::ProjectUpdated { class, project } => {
+            NostrSubscriptionTickDispatch::Ignored {
+                frame_index,
+                event_id,
+                code: "project_updated".to_string(),
+                detail: format!("project {} state written to disk", project.project_d_tag),
+                class: Some(class),
+                project_id: Some(project.project_d_tag),
+                pubkeys: Vec::new(),
+                dispatch_id: None,
+            }
+        }
     }
 }
 
 fn ingress_class(ingress: &NostrIngressOutcome) -> DaemonNostrEventClass {
     match ingress {
-        NostrIngressOutcome::Routed { class, .. } | NostrIngressOutcome::Ignored { class, .. } => {
-            *class
-        }
+        NostrIngressOutcome::Routed { class, .. }
+        | NostrIngressOutcome::Ignored { class, .. }
+        | NostrIngressOutcome::ProjectUpdated { class, .. } => *class,
     }
 }
 

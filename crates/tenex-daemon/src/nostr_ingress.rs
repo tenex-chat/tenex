@@ -3,6 +3,7 @@ use std::path::Path;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
     resolve_and_enqueue_inbound_dispatch,
@@ -10,6 +11,9 @@ use crate::inbound_runtime::{
 use crate::nostr_classification::{DaemonNostrEventClass, classify_for_daemon};
 use crate::nostr_event::SignedNostrEvent;
 use crate::nostr_inbound::signed_event_to_inbound_envelope;
+use crate::project_nostr_ingress::{
+    ProjectNostrIngressError, ProjectNostrIngressOutcome, handle_project_nostr_event,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct NostrIngressInput<'a> {
@@ -26,6 +30,10 @@ pub enum NostrIngressOutcome {
     Routed {
         class: DaemonNostrEventClass,
         inbound: InboundRuntimeOutcome,
+    },
+    ProjectUpdated {
+        class: DaemonNostrEventClass,
+        project: ProjectNostrIngressOutcome,
     },
     Ignored {
         class: DaemonNostrEventClass,
@@ -44,12 +52,31 @@ pub struct NostrIngressIgnoredReason {
 pub enum NostrIngressError {
     #[error("nostr inbound runtime failed: {0}")]
     InboundRuntime(#[from] InboundRuntimeError),
+    #[error("failed to read backend config for project ingress: {0}")]
+    BackendConfig(#[from] BackendConfigError),
+    #[error("failed to write project state: {0}")]
+    ProjectIngress(#[from] ProjectNostrIngressError),
 }
 
 pub fn process_verified_nostr_event(
     input: NostrIngressInput<'_>,
 ) -> Result<NostrIngressOutcome, NostrIngressError> {
     let class = classify_for_daemon(input.event);
+
+    if class == DaemonNostrEventClass::Project {
+        let config = read_backend_config(input.tenex_base_dir)?;
+        let projects_base = config
+            .projects_base
+            .as_deref()
+            .unwrap_or("/tmp/tenex-projects");
+        let project = handle_project_nostr_event(
+            input.tenex_base_dir,
+            input.event,
+            projects_base,
+        )?;
+        return Ok(NostrIngressOutcome::ProjectUpdated { class, project });
+    }
+
     if !class.should_normalize_for_worker() {
         return Ok(NostrIngressOutcome::Ignored {
             class,
