@@ -1,3 +1,4 @@
+pub mod daemon_shell;
 pub mod daemon_status;
 pub mod dispatch_queue;
 pub mod filesystem_state;
@@ -23,6 +24,7 @@ pub mod worker_dispatch_execution;
 pub mod worker_dispatch_spawn;
 pub mod worker_dispatch_start;
 pub mod worker_dispatch_tick;
+pub mod worker_frame_pump;
 pub mod worker_heartbeat;
 pub mod worker_launch;
 pub mod worker_launch_lock;
