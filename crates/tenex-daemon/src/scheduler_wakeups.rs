@@ -368,9 +368,8 @@ pub fn list_due_wakeups(
     daemon_dir: impl AsRef<Path>,
     now: u64,
 ) -> SchedulerWakeupResult<Vec<WakeupRecord>> {
-    let pending_records = read_records_from_paths(list_pending_scheduler_wakeup_paths(
-        daemon_dir.as_ref(),
-    )?)?;
+    let pending_records =
+        read_records_from_paths(list_pending_scheduler_wakeup_paths(daemon_dir.as_ref())?)?;
     let mut due: Vec<WakeupRecord> = pending_records
         .into_iter()
         .filter(|record| record.scheduled_for <= now)
@@ -567,8 +566,7 @@ pub fn inspect_scheduler_wakeups(
         read_records_from_paths(list_pending_scheduler_wakeup_paths(daemon_dir)?)?;
     let fired_records =
         read_records_from_paths(list_record_paths(fired_scheduler_wakeup_dir(daemon_dir))?)?;
-    let failed_records =
-        read_records_from_paths(list_failed_scheduler_wakeup_paths(daemon_dir)?)?;
+    let failed_records = read_records_from_paths(list_failed_scheduler_wakeup_paths(daemon_dir)?)?;
 
     let due_pending_count = pending_records
         .iter()
@@ -655,10 +653,7 @@ pub fn run_scheduler_maintenance(
     })
 }
 
-fn validate_enqueue_request(
-    request: &WakeupEnqueueRequest,
-    now: u64,
-) -> SchedulerWakeupResult<()> {
+fn validate_enqueue_request(request: &WakeupEnqueueRequest, now: u64) -> SchedulerWakeupResult<()> {
     if request.writer_version.is_empty() {
         return Err(SchedulerWakeupError::MissingField {
             field: "writerVersion",
@@ -867,9 +862,7 @@ fn transition_record(
     fs::create_dir_all(tmp_scheduler_wakeup_dir(daemon_dir))?;
 
     if read_optional_record(&target_path)?.is_some() {
-        return Err(SchedulerWakeupError::WakeupIdConflict {
-            path: target_path,
-        });
+        return Err(SchedulerWakeupError::WakeupIdConflict { path: target_path });
     }
 
     let tmp_path = tmp_scheduler_wakeup_dir(daemon_dir).join(format!(
@@ -1119,10 +1112,13 @@ mod tests {
         let daemon_dir = unique_temp_daemon_dir();
         let request = project_wakeup_request(1_710_001_100, "project-alpha", "trace-01");
 
-        let record = enqueue_wakeup(&daemon_dir, request, 1_710_001_000)
-            .expect("enqueue must succeed");
+        let record =
+            enqueue_wakeup(&daemon_dir, request, 1_710_001_000).expect("enqueue must succeed");
 
-        assert_eq!(record.schema_version, SCHEDULER_WAKEUPS_RECORD_SCHEMA_VERSION);
+        assert_eq!(
+            record.schema_version,
+            SCHEDULER_WAKEUPS_RECORD_SCHEMA_VERSION
+        );
         assert_eq!(record.writer, SCHEDULER_WAKEUPS_WRITER);
         assert_eq!(record.status, WakeupStatus::Pending);
         assert_eq!(record.created_at, 1_710_001_000);
@@ -1144,14 +1140,13 @@ mod tests {
         let first = project_wakeup_request(1_710_001_100, "project-alpha", "trace-01");
         let second = project_wakeup_request(1_710_001_100, "project-alpha", "trace-01");
 
-        let first_record = enqueue_wakeup(&daemon_dir, first, 1_710_001_000)
-            .expect("first enqueue must succeed");
+        let first_record =
+            enqueue_wakeup(&daemon_dir, first, 1_710_001_000).expect("first enqueue must succeed");
         let second_record = enqueue_wakeup(&daemon_dir, second, 1_710_001_050)
             .expect("duplicate enqueue must be idempotent");
 
         assert_eq!(first_record, second_record);
-        let paths =
-            list_pending_scheduler_wakeup_paths(&daemon_dir).expect("listing must succeed");
+        let paths = list_pending_scheduler_wakeup_paths(&daemon_dir).expect("listing must succeed");
         assert_eq!(paths.len(), 1);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
@@ -1283,5 +1278,97 @@ mod tests {
         assert_eq!(policy.delay_for_failure_count(2), 120);
         let high = policy.delay_for_failure_count(100);
         assert_eq!(high, policy.max_delay_secs);
+    }
+
+    #[test]
+    fn list_due_wakeups_only_returns_records_past_scheduled_for() {
+        let daemon_dir = unique_temp_daemon_dir();
+        enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "future"),
+            1_710_001_000,
+        )
+        .expect("future enqueue");
+        let mut past_request = project_wakeup_request(1_710_000_900, "project-alpha", "past");
+        past_request.allow_backdated = true;
+        enqueue_wakeup(&daemon_dir, past_request, 1_710_001_000).expect("past enqueue");
+
+        let due_at_t1 = list_due_wakeups(&daemon_dir, 1_710_000_950).expect("due listing");
+        assert_eq!(due_at_t1.len(), 1);
+        assert_eq!(due_at_t1[0].scheduled_for, 1_710_000_900);
+
+        let due_at_t2 = list_due_wakeups(&daemon_dir, 1_710_001_200).expect("due listing");
+        assert_eq!(due_at_t2.len(), 2);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn list_due_wakeups_sorts_by_scheduled_for_then_wakeup_id() {
+        let daemon_dir = unique_temp_daemon_dir();
+        enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_500, "project-alpha", "trace-c"),
+            1_710_001_000,
+        )
+        .expect("enqueue c");
+        enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-a"),
+            1_710_001_000,
+        )
+        .expect("enqueue a");
+        enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-b"),
+            1_710_001_000,
+        )
+        .expect("enqueue b");
+
+        let due = list_due_wakeups(&daemon_dir, 1_710_002_000).expect("due listing");
+        assert_eq!(due.len(), 3);
+        assert_eq!(due[0].scheduled_for, 1_710_001_100);
+        assert_eq!(due[1].scheduled_for, 1_710_001_100);
+        assert_eq!(due[2].scheduled_for, 1_710_001_500);
+        assert!(due[0].wakeup_id < due[1].wakeup_id);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn cancel_removes_pending_record() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+
+        let outcome = cancel_wakeup(&daemon_dir, &record.wakeup_id)
+            .expect("cancel must succeed")
+            .expect("cancel must return outcome");
+        assert_eq!(outcome.previous_status, WakeupStatus::Pending);
+        assert_eq!(outcome.wakeup_id, record.wakeup_id);
+
+        assert!(
+            read_pending_wakeup_record(&daemon_dir, &record.wakeup_id)
+                .expect("pending read")
+                .is_none()
+        );
+        let paths = list_pending_scheduler_wakeup_paths(&daemon_dir).expect("pending listing");
+        assert!(paths.is_empty());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn cancel_unknown_wakeup_returns_none() {
+        let daemon_dir = unique_temp_daemon_dir();
+
+        let outcome = cancel_wakeup(&daemon_dir, "unknown-id").expect("cancel must succeed");
+        assert!(outcome.is_none());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
 }
