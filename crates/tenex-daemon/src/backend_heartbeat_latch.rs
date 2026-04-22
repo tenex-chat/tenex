@@ -50,6 +50,20 @@ impl BackendHeartbeatLatchPlanner {
         self.state.is_active()
     }
 
+    /// Replace the configured owner set.
+    ///
+    /// The `Stopped` state is latched: once a matching 14199 has been
+    /// observed for any prior owner, the planner remains `Stopped` even if
+    /// the owner set is replaced. When the planner is still `Active`, the
+    /// new state is recomputed from the replacement set: an empty set flips
+    /// the planner to `Stopped`, any non-empty set leaves it `Active`.
+    pub fn replace_owners(&mut self, new_owners: impl IntoIterator<Item = String>) {
+        self.owner_pubkeys = new_owners.into_iter().collect();
+        if self.state.is_active() && self.owner_pubkeys.is_empty() {
+            self.state = BackendHeartbeatLatchState::Stopped;
+        }
+    }
+
     pub fn observe_signed_event(&mut self, event: &SignedNostrEvent) -> BackendHeartbeatLatchState {
         self.observe_snapshot(event.kind, Some(event.pubkey.as_str()), &event.tags)
     }
@@ -229,6 +243,72 @@ mod tests {
             BackendHeartbeatLatchState::Active
         );
         assert!(planner.should_heartbeat());
+    }
+
+    #[test]
+    fn replace_owners_keeps_planner_active_for_non_empty_replacement() {
+        let backend = owner(0x02);
+        let initial = owner(0x03);
+        let mut planner =
+            BackendHeartbeatLatchPlanner::new(backend.clone(), vec![initial]);
+
+        let replacement = owner(0x04);
+        planner.replace_owners(vec![replacement.clone()]);
+
+        assert_eq!(planner.state(), BackendHeartbeatLatchState::Active);
+        assert!(planner.should_heartbeat());
+
+        let event = normalized_event(
+            PROJECT_AGENT_SNAPSHOT_KIND,
+            Some(replacement),
+            vec![vec!["p".to_string(), backend]],
+        );
+        assert_eq!(
+            planner.observe_normalized_event(&event),
+            BackendHeartbeatLatchState::Stopped
+        );
+    }
+
+    #[test]
+    fn replace_owners_flips_active_to_stopped_for_empty_replacement() {
+        let backend = owner(0x02);
+        let initial = owner(0x03);
+        let mut planner =
+            BackendHeartbeatLatchPlanner::new(backend, vec![initial]);
+
+        assert_eq!(planner.state(), BackendHeartbeatLatchState::Active);
+        planner.replace_owners(Vec::<String>::new());
+        assert_eq!(planner.state(), BackendHeartbeatLatchState::Stopped);
+        assert!(!planner.should_heartbeat());
+    }
+
+    #[test]
+    fn replace_owners_preserves_latched_stopped_state() {
+        let backend = owner(0x02);
+        let initial = owner(0x03);
+        let mut planner =
+            BackendHeartbeatLatchPlanner::new(backend.clone(), vec![initial.clone()]);
+
+        // Latch the planner into Stopped via a matching snapshot.
+        let matching = normalized_event(
+            PROJECT_AGENT_SNAPSHOT_KIND,
+            Some(initial),
+            vec![vec!["p".to_string(), backend]],
+        );
+        assert_eq!(
+            planner.observe_normalized_event(&matching),
+            BackendHeartbeatLatchState::Stopped
+        );
+
+        // Replacing owners after latching must not re-open the heartbeat.
+        let replacement = owner(0x05);
+        planner.replace_owners(vec![replacement]);
+        assert_eq!(planner.state(), BackendHeartbeatLatchState::Stopped);
+        assert!(!planner.should_heartbeat());
+
+        planner.replace_owners(Vec::<String>::new());
+        assert_eq!(planner.state(), BackendHeartbeatLatchState::Stopped);
+        assert!(!planner.should_heartbeat());
     }
 
     #[test]
