@@ -19,6 +19,7 @@ pub mod operations_status_runtime;
 pub mod periodic_tick;
 pub mod process_liveness;
 pub mod project_status_snapshot;
+pub mod project_status_sources;
 pub mod publish_outbox;
 pub mod publish_runtime;
 pub mod ral_journal;
