@@ -1,6 +1,6 @@
 use std::env;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -266,7 +266,7 @@ fn inspect_backend_events_plan(
 }
 
 fn inspect_backend_status_publisher_readiness(
-    tenex_base_dir: &PathBuf,
+    tenex_base_dir: &Path,
 ) -> BackendEventsStatusPublisherReadiness {
     let config = match read_backend_config(tenex_base_dir) {
         Ok(config) => config,
@@ -317,7 +317,7 @@ fn inspect_backend_status_publisher_readiness(
             kind: "backend-status",
             ready: true,
             reason: "ready".to_string(),
-            tenex_base_dir: tenex_base_dir.clone(),
+            tenex_base_dir: tenex_base_dir.to_path_buf(),
             backend_pubkey: Some(signer.pubkey_hex().to_string()),
             owner_pubkey_count,
             relay_url_count,
@@ -337,7 +337,7 @@ fn inspect_backend_status_publisher_readiness(
 }
 
 fn backend_status_unready(
-    tenex_base_dir: &PathBuf,
+    tenex_base_dir: &Path,
     reason: String,
     backend_pubkey: Option<String>,
     owner_pubkey_count: usize,
@@ -349,7 +349,7 @@ fn backend_status_unready(
         kind: "backend-status",
         ready: false,
         reason,
-        tenex_base_dir: tenex_base_dir.clone(),
+        tenex_base_dir: tenex_base_dir.to_path_buf(),
         backend_pubkey,
         owner_pubkey_count,
         relay_url_count,
@@ -456,15 +456,15 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     })
 }
 
-fn infer_tenex_base_dir(daemon_dir: &PathBuf) -> PathBuf {
+fn infer_tenex_base_dir(daemon_dir: &Path) -> PathBuf {
     if daemon_dir.file_name().and_then(|name| name.to_str()) == Some("daemon") {
         return daemon_dir
             .parent()
             .map(PathBuf::from)
-            .unwrap_or_else(|| daemon_dir.clone());
+            .unwrap_or_else(|| daemon_dir.to_path_buf());
     }
 
-    daemon_dir.clone()
+    daemon_dir.to_path_buf()
 }
 
 fn parse_u64_arg(name: &str, value: &str) -> Result<u64, CliError> {

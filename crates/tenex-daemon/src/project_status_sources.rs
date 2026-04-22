@@ -207,7 +207,7 @@ fn split_timezone_offset(value: &str) -> Option<(&str, i64)> {
         return Some((time, 0));
     }
 
-    let sign_index = value.rfind(|ch| ch == '+' || ch == '-')?;
+    let sign_index = value.rfind(['+', '-'])?;
     if sign_index < 8 {
         return None;
     }

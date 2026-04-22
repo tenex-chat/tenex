@@ -84,7 +84,7 @@ impl BackendHeartbeatLatchPlanner {
         }
 
         if tags.iter().any(|tag| {
-            tag.get(0).is_some_and(|field| field == "p")
+            tag.first().is_some_and(|field| field == "p")
                 && tag
                     .get(1)
                     .is_some_and(|value| value == self.backend_pubkey.as_str())
