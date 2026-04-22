@@ -332,6 +332,10 @@ fn worker_projects_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon_worker_runtime::{
+        DaemonWorkerRuntimeInput, DaemonWorkerRuntimeOutcome, DaemonWorkerTerminalRuntimeInput,
+        run_daemon_worker_runtime_once,
+    };
     use crate::dispatch_queue::{
         DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
         append_dispatch_queue_record, build_dispatch_queue_record, dispatch_queue_path,
@@ -340,6 +344,8 @@ mod tests {
         DaemonStatusData, RuntimeStatusEntry, build_lock_info, build_restart_state,
         save_restart_state_file, write_lock_info_file, write_status_file,
     };
+    use crate::nostr_event::Nip01EventFixture;
+    use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::publish_outbox::{
         PublishOutboxRecord, failed_publish_outbox_record_path, pending_publish_outbox_record_path,
         published_publish_outbox_record_path,
@@ -348,6 +354,7 @@ mod tests {
         RalDelegationType, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
         RalPendingDelegation, RalTerminalSummary, append_ral_journal_record, ral_journal_path,
     };
+    use crate::ral_lock::build_ral_lock_info;
     use crate::routing::{ProjectFixture, RoutingEvent};
     use crate::routing_shadow::{RoutingShadowInput, build_routing_shadow_record};
     use crate::routing_shadow_log::append_routing_shadow_record;
@@ -356,15 +363,32 @@ mod tests {
         failed_telegram_outbox_record_path, pending_telegram_outbox_record_path,
     };
     use crate::worker_abort::WorkerAbortSignal;
+    use crate::worker_dispatch_execution::{
+        BootedWorkerDispatch, WorkerDispatchSession, WorkerDispatchSpawner,
+    };
+    use crate::worker_frame_pump::WorkerFrameReceiver;
     use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
+    use crate::worker_message_flow::WorkerMessagePublishContext;
+    use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig, AgentWorkerReady};
+    use crate::worker_protocol::{
+        AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,
+        AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
+        AGENT_WORKER_STREAM_BATCH_MS, AgentWorkerExecutionFlags, WorkerProtocolConfig,
+        encode_agent_worker_protocol_frame,
+    };
     use crate::worker_runtime_state::{
         WorkerRuntimeGracefulSignal, WorkerRuntimeStartedDispatch, WorkerRuntimeState,
     };
-    use serde_json::Value;
+    use crate::worker_session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
+    use serde_json::{Value, json};
+    use std::collections::VecDeque;
+    use std::error::Error;
+    use std::fmt;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const PUBLISH_OUTBOX_FIXTURE: &str =
         include_str!("../../../src/test-utils/fixtures/daemon/publish-outbox.compat.json");
@@ -971,6 +995,91 @@ mod tests {
     }
 
     #[test]
+    fn inspects_completed_runtime_execution_from_files_only_after_terminal_cleanup() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_runtime_execution_files(&daemon_dir);
+
+        let fixture = signed_event_fixture();
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::from([
+                frame_for(&publish_request_message(&fixture)),
+                frame_for(&complete_message(vec![fixture.signed.id.clone()])),
+            ]),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = worker_config();
+
+        let outcome = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input(
+                &daemon_dir,
+                &mut runtime_state,
+                &worker_config,
+                Some(WorkerMessagePublishContext {
+                    accepted_at: 1_710_001_000_090,
+                    result_sequence: 900,
+                    result_timestamp: 1_710_001_000_100,
+                }),
+                4,
+            ),
+        )
+        .expect("runtime execution must complete");
+
+        assert_eq!(
+            outcome,
+            DaemonWorkerRuntimeOutcome::SessionCompleted {
+                dispatch_id: "dispatch-runtime".to_string(),
+                worker_id: "worker-alpha".to_string(),
+                session: WorkerSessionLoopOutcome {
+                    frame_count: 2,
+                    final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                },
+            }
+        );
+        assert!(runtime_state.is_empty());
+        assert!(
+            sent_messages
+                .lock()
+                .expect("sent message lock must not be poisoned")
+                .iter()
+                .any(|message| message["type"] == "execute")
+        );
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending publish outbox must read")
+                .is_some()
+        );
+
+        let before = collect_file_manifest(&daemon_dir);
+        let snapshot = inspect_daemon_diagnostics(DaemonDiagnosticsInput {
+            daemon_dir: &daemon_dir,
+            inspected_at: 1_710_001_000_400,
+            worker_runtime_state: None,
+        })
+        .expect("runtime diagnostics must inspect");
+        let after = collect_file_manifest(&daemon_dir);
+
+        assert_eq!(before, after);
+        assert_eq!(snapshot.dispatch_queue.queued_count, 0);
+        assert_eq!(snapshot.dispatch_queue.leased_count, 0);
+        assert_eq!(snapshot.dispatch_queue.terminal_count, 1);
+        assert_eq!(snapshot.dispatch_queue.completed_count, 1);
+        assert_eq!(snapshot.dispatch_queue.cancelled_count, 0);
+        assert_eq!(snapshot.ral_journal.state_count, 1);
+        assert_eq!(snapshot.ral_journal.active_count, 0);
+        assert_eq!(snapshot.ral_journal.terminal_count, 1);
+        assert_eq!(snapshot.ral_journal.completed_count, 1);
+        assert_eq!(snapshot.publish_outbox.pending_count, 1);
+        assert_eq!(snapshot.publish_outbox.published_count, 0);
+        assert_eq!(snapshot.publish_outbox.failed_count, 0);
+        assert!(snapshot.worker_runtime.is_none());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
     fn fails_closed_on_corrupt_dispatch_queue() {
         let daemon_dir = unique_temp_daemon_dir();
         write_corrupt_dispatch_queue_file(&daemon_dir);
@@ -1044,6 +1153,325 @@ mod tests {
         assert_eq!(before, after);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[derive(Debug, Clone)]
+    struct RecordingSpawner {
+        incoming_frames: VecDeque<Vec<u8>>,
+        sent_messages: Arc<Mutex<Vec<Value>>>,
+    }
+
+    impl WorkerDispatchSpawner for RecordingSpawner {
+        type Session = RecordingSession;
+        type Error = FakeWorkerError;
+
+        fn spawn_worker(
+            &mut self,
+            _command: &AgentWorkerCommand,
+            _config: &AgentWorkerProcessConfig,
+        ) -> Result<BootedWorkerDispatch<Self::Session>, Self::Error> {
+            Ok(BootedWorkerDispatch {
+                ready: ready_message("worker-alpha"),
+                session: RecordingSession {
+                    incoming_frames: self.incoming_frames.clone(),
+                    sent_messages: Arc::clone(&self.sent_messages),
+                },
+            })
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct RecordingSession {
+        incoming_frames: VecDeque<Vec<u8>>,
+        sent_messages: Arc<Mutex<Vec<Value>>>,
+    }
+
+    impl WorkerFrameReceiver for RecordingSession {
+        type Error = FakeWorkerError;
+
+        fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
+            self.incoming_frames
+                .pop_front()
+                .ok_or(FakeWorkerError("missing worker frame"))
+        }
+    }
+
+    impl WorkerDispatchSession for RecordingSession {
+        type Error = FakeWorkerError;
+
+        fn send_worker_message(&mut self, message: &Value) -> Result<(), Self::Error> {
+            self.sent_messages
+                .lock()
+                .expect("sent message lock must not be poisoned")
+                .push(message.clone());
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct FakeWorkerError(&'static str);
+
+    impl fmt::Display for FakeWorkerError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
+    impl Error for FakeWorkerError {}
+
+    fn runtime_agent_pubkey() -> &'static str {
+        "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+    }
+
+    fn seed_runtime_execution_files(daemon_dir: &Path) {
+        append_dispatch_queue_record(
+            daemon_dir,
+            &build_dispatch_queue_record(DispatchQueueRecordParams {
+                sequence: 1,
+                timestamp: 1_710_001_000_001,
+                correlation_id: "lease-dispatch-runtime".to_string(),
+                dispatch_id: "dispatch-runtime".to_string(),
+                ral: DispatchRalIdentity {
+                    project_id: "project-alpha".to_string(),
+                    agent_pubkey: runtime_agent_pubkey().to_string(),
+                    conversation_id: "conversation-alpha".to_string(),
+                    ral_number: 1,
+                },
+                triggering_event_id: "event-runtime".to_string(),
+                claim_token: "claim-runtime".to_string(),
+                status: DispatchQueueStatus::Queued,
+            }),
+        )
+        .expect("runtime queued dispatch record must write");
+        append_ral_journal_record(
+            daemon_dir,
+            &RalJournalRecord::new(
+                "rust-daemon",
+                "test-version",
+                1,
+                1_710_001_000_001,
+                "corr-runtime-allocated",
+                RalJournalEvent::Allocated {
+                    identity: RalJournalIdentity {
+                        project_id: "project-alpha".to_string(),
+                        agent_pubkey: runtime_agent_pubkey().to_string(),
+                        conversation_id: "conversation-alpha".to_string(),
+                        ral_number: 1,
+                    },
+                    triggering_event_id: Some("event-runtime".to_string()),
+                },
+            ),
+        )
+        .expect("runtime allocated RAL record must append");
+        append_ral_journal_record(
+            daemon_dir,
+            &RalJournalRecord::new(
+                "rust-daemon",
+                "test-version",
+                2,
+                1_710_001_000_002,
+                "corr-runtime-claimed",
+                RalJournalEvent::Claimed {
+                    identity: RalJournalIdentity {
+                        project_id: "project-alpha".to_string(),
+                        agent_pubkey: runtime_agent_pubkey().to_string(),
+                        conversation_id: "conversation-alpha".to_string(),
+                        ral_number: 1,
+                    },
+                    worker_id: "worker-alpha".to_string(),
+                    claim_token: "claim-runtime".to_string(),
+                },
+            ),
+        )
+        .expect("runtime claimed RAL record must append");
+    }
+
+    fn signed_event_fixture() -> Nip01EventFixture {
+        serde_json::from_str(include_str!(
+            "../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json"
+        ))
+        .expect("fixture must parse")
+    }
+
+    fn runtime_input<'a>(
+        daemon_dir: &'a Path,
+        runtime_state: &'a mut WorkerRuntimeState,
+        worker_config: &'a AgentWorkerProcessConfig,
+        publish: Option<WorkerMessagePublishContext>,
+        max_frames: u64,
+    ) -> DaemonWorkerRuntimeInput<'a> {
+        DaemonWorkerRuntimeInput {
+            daemon_dir,
+            runtime_state,
+            limits: crate::worker_concurrency::WorkerConcurrencyLimits {
+                global: None,
+                per_project: None,
+                per_agent: None,
+            },
+            lease_sequence: 2,
+            lease_timestamp: 1_710_001_000_010,
+            lease_correlation_id: "lease-dispatch-runtime".to_string(),
+            execute_sequence: 10,
+            execute_timestamp: 1_710_001_000_020,
+            project_base_path: "/repo".to_string(),
+            metadata_path: "/repo/.tenex/project.json".to_string(),
+            triggering_envelope: triggering_envelope("event-runtime"),
+            execution_flags: AgentWorkerExecutionFlags {
+                is_delegation_completion: false,
+                has_pending_delegations: false,
+                debug: false,
+            },
+            lock_owner: build_ral_lock_info(100, "host-alpha", 1_710_001_000_000),
+            command: worker_command(),
+            worker_config,
+            started_at: 1_710_001_000_030,
+            frame_observed_at: 1_710_001_000_040,
+            publish,
+            terminal: DaemonWorkerTerminalRuntimeInput {
+                journal_sequence: 3,
+                journal_timestamp: 1_710_001_000_050,
+                writer_version: "test-version".to_string(),
+                resolved_pending_delegations: Vec::new(),
+                dispatch_sequence: 3,
+                dispatch_timestamp: 1_710_001_000_060,
+                dispatch_correlation_id: "complete-dispatch-runtime".to_string(),
+            },
+            max_frames,
+        }
+    }
+
+    fn worker_config() -> AgentWorkerProcessConfig {
+        AgentWorkerProcessConfig {
+            boot_timeout: Duration::from_millis(250),
+        }
+    }
+
+    fn worker_command() -> AgentWorkerCommand {
+        AgentWorkerCommand::new("bun")
+            .arg("run")
+            .arg("src/agents/execution/worker/agent-worker.ts")
+            .current_dir("/repo")
+            .env("TENEX_AGENT_WORKER_ENGINE", "agent")
+    }
+
+    fn triggering_envelope(native_id: &str) -> Value {
+        json!({
+            "transport": "nostr",
+            "principal": {
+                "id": "nostr:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "transport": "nostr",
+                "linkedPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "kind": "human"
+            },
+            "channel": {
+                "id": "conversation:conversation-alpha",
+                "transport": "nostr",
+                "kind": "conversation"
+            },
+            "message": {
+                "id": native_id,
+                "transport": "nostr",
+                "nativeId": native_id
+            },
+            "recipients": [{
+                "id": format!("nostr:{}", runtime_agent_pubkey()),
+                "transport": "nostr",
+                "linkedPubkey": runtime_agent_pubkey(),
+                "kind": "agent"
+            }],
+            "content": "hello",
+            "occurredAt": 1_710_001_000_000_u64,
+            "capabilities": ["reply", "delegate"],
+            "metadata": {},
+            "conversationId": "conversation-alpha",
+            "agentPubkey": runtime_agent_pubkey(),
+            "projectId": "project-alpha",
+            "source": "nostr"
+        })
+    }
+
+    fn publish_request_message(fixture: &Nip01EventFixture) -> Value {
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "publish_request",
+            "correlationId": "runtime-alpha-publish",
+            "sequence": 20,
+            "timestamp": 1_710_001_000_100_u64,
+            "projectId": "project-alpha",
+            "agentPubkey": runtime_agent_pubkey(),
+            "conversationId": "conversation-alpha",
+            "ralNumber": 1_u64,
+            "requestId": "publish-fixture-01",
+            "requiresEventId": true,
+            "timeoutMs": 30_000_u64,
+            "event": &fixture.signed,
+        })
+    }
+
+    fn complete_message(final_event_ids: Vec<String>) -> Value {
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "complete",
+            "correlationId": "runtime-alpha",
+            "sequence": 21,
+            "timestamp": 1_710_001_000_200_u64,
+            "projectId": "project-alpha",
+            "agentPubkey": runtime_agent_pubkey(),
+            "conversationId": "conversation-alpha",
+            "ralNumber": 1_u64,
+            "finalRalState": "completed",
+            "publishedUserVisibleEvent": true,
+            "pendingDelegationsRemain": false,
+            "accumulatedRuntimeMs": 900_u64,
+            "finalEventIds": final_event_ids,
+            "keepWorkerWarm": false,
+        })
+    }
+
+    fn frame_for(message: &Value) -> Vec<u8> {
+        encode_agent_worker_protocol_frame(message).expect("message must encode")
+    }
+
+    fn ready_message(worker_id: &str) -> AgentWorkerReady {
+        AgentWorkerReady {
+            worker_id: worker_id.to_string(),
+            pid: 123,
+            protocol: WorkerProtocolConfig {
+                version: AGENT_WORKER_PROTOCOL_VERSION,
+                encoding: AGENT_WORKER_PROTOCOL_ENCODING.to_string(),
+                max_frame_bytes: AGENT_WORKER_MAX_FRAME_BYTES,
+                stream_batch_ms: AGENT_WORKER_STREAM_BATCH_MS,
+                stream_batch_max_bytes: AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
+                heartbeat_interval_ms: Some(30_000),
+                missed_heartbeat_threshold: Some(3),
+                worker_boot_timeout_ms: Some(30_000),
+                graceful_abort_timeout_ms: Some(5_000),
+                force_kill_timeout_ms: Some(5_000),
+                idle_ttl_ms: Some(60_000),
+            },
+            message: json!({
+                "version": AGENT_WORKER_PROTOCOL_VERSION,
+                "type": "ready",
+                "correlationId": worker_id,
+                "sequence": 1,
+                "timestamp": 1_710_001_000_000_u64,
+                "workerId": worker_id,
+                "pid": 123_u64,
+                "protocol": {
+                    "version": AGENT_WORKER_PROTOCOL_VERSION,
+                    "encoding": AGENT_WORKER_PROTOCOL_ENCODING,
+                    "maxFrameBytes": AGENT_WORKER_MAX_FRAME_BYTES,
+                    "streamBatchMs": AGENT_WORKER_STREAM_BATCH_MS,
+                    "streamBatchMaxBytes": AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
+                    "heartbeatIntervalMs": 30_000_u64,
+                    "missedHeartbeatThreshold": 3_u64,
+                    "workerBootTimeoutMs": 30_000_u64,
+                    "gracefulAbortTimeoutMs": 5_000_u64,
+                    "forceKillTimeoutMs": 5_000_u64,
+                    "idleTtlMs": 60_000_u64,
+                },
+            }),
+        }
     }
 
     fn write_publish_outbox_record(
