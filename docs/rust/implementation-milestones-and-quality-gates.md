@@ -336,6 +336,11 @@ Current implementation status:
 - The worker publisher bridge emits `stream_delta`, `publish_request`, terminal
   state, delegation registration, and tool completion protocol messages instead
   of requiring relay publishing from the ephemeral process.
+- Shared Rust/TypeScript worker protocol validation now pins
+  `publish_result` status/error semantics and `stream_delta` payload semantics:
+  failed/timeout results require an error, accepted/published results reject an
+  error, and stream deltas require exactly one inline delta or content reference
+  with inline payloads capped by the shared byte limit.
 - TypeScript child-process smoke coverage drives both the mock engine and the
   real executor engine over stdio, including tool-call persistence through the
   shared filesystem state.
@@ -800,8 +805,13 @@ Landed slices:
   schnorr signer for kind `24012` backend heartbeat, with NIP-01 self-conformance
   tests (event id equals `sha256(canonical_payload)`, signature verifies against
   the claimed xonly pubkey, ordered `p` tags, empty content, no self p-tag).
-  Library-only; no daemon wiring. First backend-signed encoder; templates the
-  remaining `24010`, `24011`, `24133` encoders.
+  Library-only; no daemon wiring.
+- `crates/tenex-daemon/src/backend_events/project_status.rs` — Rust encoder and
+  signer for kind `24010` project status, preserving the TypeScript-compatible
+  client-visible content and tag ordering. Library-only; no daemon wiring.
+- `crates/tenex-daemon/src/backend_events/installed_agent_list.rs` — Rust
+  encoder and signer for kind `24011` installed-agent-list, preserving owner
+  `p` tags and deterministic agent tags. Library-only; no daemon wiring.
 
 Scope:
 
@@ -937,6 +947,15 @@ Landed slices:
   `$TENEX_BASE_DIR/daemon/caches/`, with atomic writes, schema-version and
   writer stamps, fail-closed reads on corruption or version mismatch, and
   per-cache diagnostics. Library-only; no daemon wiring.
+- `daemon-control caches` — read-only JSON diagnostics over the filesystem
+  caches: trust pubkeys, prefix lookup, and profile names.
+- `crates/tenex-daemon/src/scheduler_wakeups.rs` — filesystem-backed scheduler
+  wakeup records with pending/fired/failed/tmp states, retry classification,
+  due-listing, cancellation, requeue scans, diagnostics, and maintenance
+  reports. Library-only dispatch substrate; no long-lived wakeup service wiring.
+- `daemon-control scheduler-wakeups` and `daemon-control
+  scheduler-wakeups-maintain` — read-only diagnostics and maintenance report
+  JSON over the scheduler wakeup filesystem state.
 
 Scope:
 
