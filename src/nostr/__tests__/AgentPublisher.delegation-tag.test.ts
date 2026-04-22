@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as projectsModule from "@/services/projects";
 import { AgentPublisher } from "../AgentPublisher";
 import type { AskConfig, DelegateConfig } from "../types";
@@ -8,19 +8,23 @@ import type { EventContext } from "../types";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { logger } from "@/utils/logger";
 import * as ndkClientModule from "../ndkClient";
+import * as rustPublishOutbox from "../RustPublishOutbox";
 import * as traceContextModule from "../trace-context";
 
 // Minimal mocks - only mock what's necessary for these specific tests
 
 describe("AgentPublisher - Delegation Tag", () => {
-    let mockPublish: ReturnType<typeof mock>;
-    let capturedEvents: NDKEvent[] = [];
+    let capturedEnqueues: Array<{
+        event: NDKEvent;
+        context: rustPublishOutbox.RustPublishOutboxContext;
+    }> = [];
     let mockAgentInstance: AgentInstance;
     let publisher: AgentPublisher;
-    let publishSpy: ReturnType<typeof spyOn>;
+    let enqueueSpy: ReturnType<typeof spyOn>;
+    let directPublishSpy: ReturnType<typeof spyOn>;
 
-    beforeEach(() => {
-        capturedEvents = [];
+    beforeEach(async () => {
+        capturedEnqueues = [];
         const mockRelay = {
             url: "wss://relay.test",
             once: mock(() => undefined),
@@ -51,23 +55,21 @@ describe("AgentPublisher - Delegation Tag", () => {
         spyOn(logger, "warn").mockImplementation(() => {});
         spyOn(logger, "error").mockImplementation(() => {});
 
-        // Mock NDKEvent.publish to capture events
-        mockPublish = mock(() =>
-            Promise.resolve(new Set([mockRelay]))
-        );
-
-        publishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
-            capturedEvents.push(this);
-            return mockPublish();
+        enqueueSpy = spyOn(
+            rustPublishOutbox,
+            "enqueueSignedEventForRustPublish"
+        ).mockImplementation(async (event, context = {}) => {
+            capturedEnqueues.push({ event, context });
+            return event.rawEvent() as Awaited<ReturnType<typeof rustPublishOutbox.enqueueSignedEventForRustPublish>>;
         });
-
-
+        directPublishSpy = spyOn(NDKEvent.prototype, "publish");
+        const signer = NDKPrivateKeySigner.generate();
 
         // Create mock AgentInstance with minimal required properties
         mockAgentInstance = {
             slug: "test-agent",
-            pubkey: "test-agent-pubkey",
-            sign: mock((_event: NDKEvent) => Promise.resolve()),
+            pubkey: (await signer.user()).pubkey,
+            sign: mock((event: NDKEvent) => event.sign(signer)),
             projectTag: "31933:testpubkey:test-project",
         } as unknown as AgentInstance;
 
@@ -75,10 +77,22 @@ describe("AgentPublisher - Delegation Tag", () => {
     });
 
     afterEach(() => {
-        capturedEvents = [];
-        publishSpy?.mockRestore();
+        capturedEnqueues = [];
+        enqueueSpy?.mockRestore();
+        directPublishSpy?.mockRestore();
         mock.restore();
     });
+
+    function expectSingleEnqueuedEvent(): NDKEvent {
+        expect(capturedEnqueues.length).toBe(1);
+        expect(enqueueSpy).toHaveBeenCalledTimes(1);
+        expect(directPublishSpy).not.toHaveBeenCalled();
+
+        const { event, context } = capturedEnqueues[0];
+        expect(event.rawEvent().sig).toBeString();
+        expect(context.requestId).toStartWith("agent:");
+        return event;
+    }
 
     /**
      * Helper to create a valid EventContext for testing.
@@ -120,8 +134,7 @@ describe("AgentPublisher - Delegation Tag", () => {
 
             await publisher.delegate(config, context);
 
-            expect(capturedEvents.length).toBe(1);
-            const event = capturedEvents[0];
+            const event = expectSingleEnqueuedEvent();
 
             // Check for delegation tag
             const delegationTag = event.tags.find((tag) => tag[0] === "delegation");
@@ -170,8 +183,7 @@ describe("AgentPublisher - Delegation Tag", () => {
 
             await publisher.delegate(config, context);
 
-            expect(capturedEvents.length).toBe(1);
-            const event = capturedEvents[0];
+            const event = expectSingleEnqueuedEvent();
 
             const variantTag = event.tags.find((tag) => tag[0] === "variant");
             expect(variantTag).toBeDefined();
@@ -200,8 +212,7 @@ describe("AgentPublisher - Delegation Tag", () => {
 
             await publisher.ask(config, context);
 
-            expect(capturedEvents.length).toBe(1);
-            const event = capturedEvents[0];
+            const event = expectSingleEnqueuedEvent();
 
             // Check for delegation tag
             const delegationTag = event.tags.find((tag) => tag[0] === "delegation");
@@ -231,8 +242,7 @@ describe("AgentPublisher - Delegation Tag", () => {
 
             await publisher.ask(config, context);
 
-            expect(capturedEvents.length).toBe(1);
-            const event = capturedEvents[0];
+            const event = expectSingleEnqueuedEvent();
 
             const teamTag = event.tags.find((tag) => tag[0] === "team");
             expect(teamTag).toBeDefined();
