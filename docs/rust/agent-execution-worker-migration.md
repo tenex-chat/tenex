@@ -170,6 +170,13 @@ writer for:
 Workers report facts through the protocol. Rust validates them, writes the
 filesystem state, then acknowledges when the transition matters for correctness.
 
+`workers/dispatch-queue.jsonl` is a typed append-only Rust contract. Each record
+contains `schemaVersion`, `sequence`, `timestamp`, `correlationId`,
+`dispatchId`, RAL identity, `triggeringEventId`, `claimToken`, and a
+queued/leased/terminal status. Replay uses the latest record per `dispatchId`,
+ignores a truncated final JSONL record, and fails closed on corrupt non-final
+records.
+
 ## Non-Goals
 
 - Do not rewrite `AgentExecutor` in Rust in the first migration.

@@ -1,6 +1,8 @@
+pub mod dispatch_queue;
 pub mod filesystem_state;
 pub mod nostr_event;
 pub mod publish_outbox;
+pub mod ral_journal;
 pub mod relay_publisher;
 pub mod routing;
 pub mod subscription_filters;

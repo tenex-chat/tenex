@@ -572,13 +572,16 @@ Scope:
 
 - Implement worker spawning and process-group cleanup.
 - Implement worker pool and warm reuse.
-- Implement dispatch queue with filesystem journal.
+- Implement dispatch queue with filesystem journal. The library contract stores
+  typed records in `daemon/workers/dispatch-queue.jsonl` and replays the latest
+  queued/leased/terminal state per dispatch id.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.
 - Rust observes published event IDs and terminal state.
-- Add JSONL truncation/replay tests for the dispatch queue immediately. Do not
-  wait for the RAL journal milestone to test filesystem journal failure modes.
+- Add JSONL truncation/replay tests for the dispatch queue immediately. The
+  dispatch queue replay ignores a truncated final record and rejects corrupt
+  non-final records instead of silently continuing.
 
 Quality gates:
 

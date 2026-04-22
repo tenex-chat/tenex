@@ -1,0 +1,883 @@
+use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+pub const RAL_DIR_NAME: &str = "ral";
+pub const RAL_JOURNAL_FILE_NAME: &str = "journal.jsonl";
+pub const RAL_JOURNAL_RECORD_SCHEMA_VERSION: u32 = 1;
+pub const RAL_JOURNAL_WRITER_RUST_DAEMON: &str = "rust-daemon";
+
+#[derive(Debug, Error)]
+pub enum RalJournalError {
+    #[error("RAL journal io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("RAL journal json error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("RAL journal json error at {path}:{line}: {source}")]
+    JsonLine {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error(
+        "RAL journal sequence {sequence} is not greater than previous sequence {previous_sequence}"
+    )]
+    NonIncreasingSequence {
+        sequence: u64,
+        previous_sequence: u64,
+    },
+}
+
+pub type RalJournalResult<T> = Result<T, RalJournalError>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalJournalIdentity {
+    pub project_id: String,
+    pub agent_pubkey: String,
+    pub conversation_id: String,
+    pub ral_number: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RalDelegationType {
+    Standard,
+    Followup,
+    External,
+    Ask,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalPendingDelegation {
+    pub delegation_conversation_id: String,
+    pub recipient_pubkey: String,
+    pub delegation_type: RalDelegationType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalTerminalSummary {
+    pub published_user_visible_event: bool,
+    pub pending_delegations_remain: bool,
+    pub accumulated_runtime_ms: u64,
+    pub final_event_ids: Vec<String>,
+    pub keep_worker_warm: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum RalJournalEvent {
+    Allocated {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(
+            rename = "triggeringEventId",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        triggering_event_id: Option<String>,
+    },
+    Claimed {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId")]
+        worker_id: String,
+        #[serde(rename = "claimToken")]
+        claim_token: String,
+    },
+    WaitingForDelegation {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId")]
+        worker_id: String,
+        #[serde(rename = "claimToken")]
+        claim_token: String,
+        #[serde(rename = "pendingDelegations")]
+        pending_delegations: Vec<RalPendingDelegation>,
+        #[serde(flatten)]
+        terminal: RalTerminalSummary,
+    },
+    Completed {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId")]
+        worker_id: String,
+        #[serde(rename = "claimToken")]
+        claim_token: String,
+        #[serde(flatten)]
+        terminal: RalTerminalSummary,
+    },
+    NoResponse {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId")]
+        worker_id: String,
+        #[serde(rename = "claimToken")]
+        claim_token: String,
+        #[serde(flatten)]
+        terminal: RalTerminalSummary,
+    },
+    Aborted {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId", default, skip_serializing_if = "Option::is_none")]
+        worker_id: Option<String>,
+        #[serde(
+            rename = "claimToken",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        claim_token: Option<String>,
+        #[serde(rename = "abortReason")]
+        abort_reason: String,
+        #[serde(flatten)]
+        terminal: RalTerminalSummary,
+    },
+    Crashed {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId")]
+        worker_id: String,
+        #[serde(
+            rename = "claimToken",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        claim_token: Option<String>,
+        #[serde(rename = "crashReason")]
+        crash_reason: String,
+        #[serde(
+            rename = "lastHeartbeatAt",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        last_heartbeat_at: Option<u64>,
+    },
+}
+
+impl RalJournalEvent {
+    pub fn identity(&self) -> &RalJournalIdentity {
+        match self {
+            Self::Allocated { identity, .. }
+            | Self::Claimed { identity, .. }
+            | Self::WaitingForDelegation { identity, .. }
+            | Self::Completed { identity, .. }
+            | Self::NoResponse { identity, .. }
+            | Self::Aborted { identity, .. }
+            | Self::Crashed { identity, .. } => identity,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalJournalRecord {
+    pub schema_version: u32,
+    pub writer: String,
+    pub writer_version: String,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub correlation_id: String,
+    #[serde(flatten)]
+    pub event: RalJournalEvent,
+}
+
+impl RalJournalRecord {
+    pub fn new(
+        writer: impl Into<String>,
+        writer_version: impl Into<String>,
+        sequence: u64,
+        timestamp: u64,
+        correlation_id: impl Into<String>,
+        event: RalJournalEvent,
+    ) -> Self {
+        Self {
+            schema_version: RAL_JOURNAL_RECORD_SCHEMA_VERSION,
+            writer: writer.into(),
+            writer_version: writer_version.into(),
+            sequence,
+            timestamp,
+            correlation_id: correlation_id.into(),
+            event,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RalReplayStatus {
+    Allocated,
+    Claimed,
+    WaitingForDelegation,
+    Completed,
+    NoResponse,
+    Aborted,
+    Crashed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalReplayEntry {
+    pub identity: RalJournalIdentity,
+    pub status: RalReplayStatus,
+    pub last_sequence: u64,
+    pub updated_at: u64,
+    pub last_correlation_id: String,
+    pub worker_id: Option<String>,
+    pub active_claim_token: Option<String>,
+    pub pending_delegations: Vec<RalPendingDelegation>,
+    pub triggering_event_id: Option<String>,
+    pub final_event_ids: Vec<String>,
+    pub accumulated_runtime_ms: u64,
+    pub abort_reason: Option<String>,
+    pub crash_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalJournalReplay {
+    pub last_sequence: u64,
+    pub states: HashMap<RalJournalIdentity, RalReplayEntry>,
+}
+
+pub fn ral_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
+    daemon_dir.as_ref().join(RAL_DIR_NAME)
+}
+
+pub fn ral_journal_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
+    ral_dir(daemon_dir).join(RAL_JOURNAL_FILE_NAME)
+}
+
+pub fn append_ral_journal_record(
+    daemon_dir: impl AsRef<Path>,
+    record: &RalJournalRecord,
+) -> RalJournalResult<()> {
+    let journal_path = ral_journal_path(daemon_dir);
+    let journal_dir = journal_path
+        .parent()
+        .expect("RAL journal path must have a parent directory");
+    fs::create_dir_all(journal_dir)?;
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&journal_path)?;
+    serde_json::to_writer(&mut file, record)?;
+    file.write_all(b"\n")?;
+    file.sync_all()?;
+    sync_parent_dir(&journal_path)?;
+
+    Ok(())
+}
+
+pub fn read_ral_journal_records(
+    daemon_dir: impl AsRef<Path>,
+) -> RalJournalResult<Vec<RalJournalRecord>> {
+    read_ral_journal_records_from_path(ral_journal_path(daemon_dir))
+}
+
+pub fn read_ral_journal_records_from_path(
+    path: impl AsRef<Path>,
+) -> RalJournalResult<Vec<RalJournalRecord>> {
+    let path = path.as_ref();
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+
+    let ends_with_newline = content.ends_with('\n');
+    let line_count = content.lines().count();
+    let mut records = Vec::with_capacity(line_count);
+
+    for (line_index, line) in content.lines().enumerate() {
+        let line_number = line_index + 1;
+        let is_final_unterminated_line = !ends_with_newline && line_number == line_count;
+        match serde_json::from_str::<RalJournalRecord>(line) {
+            Ok(record) => records.push(record),
+            Err(source) if is_final_unterminated_line && source.is_eof() => break,
+            Err(source) => {
+                return Err(RalJournalError::JsonLine {
+                    path: path.to_path_buf(),
+                    line: line_number,
+                    source,
+                });
+            }
+        }
+    }
+
+    Ok(records)
+}
+
+pub fn replay_ral_journal(daemon_dir: impl AsRef<Path>) -> RalJournalResult<RalJournalReplay> {
+    replay_ral_journal_records(read_ral_journal_records(daemon_dir)?)
+}
+
+pub fn replay_ral_journal_records<I>(records: I) -> RalJournalResult<RalJournalReplay>
+where
+    I: IntoIterator<Item = RalJournalRecord>,
+{
+    let mut last_sequence: Option<u64> = None;
+    let mut states = HashMap::new();
+
+    for record in records {
+        if let Some(previous_sequence) = last_sequence
+            && record.sequence <= previous_sequence
+        {
+            return Err(RalJournalError::NonIncreasingSequence {
+                sequence: record.sequence,
+                previous_sequence,
+            });
+        }
+
+        apply_record(&mut states, &record);
+        last_sequence = Some(record.sequence);
+    }
+
+    Ok(RalJournalReplay {
+        last_sequence: last_sequence.unwrap_or(0),
+        states,
+    })
+}
+
+pub fn next_ral_journal_sequence(daemon_dir: impl AsRef<Path>) -> RalJournalResult<u64> {
+    Ok(replay_ral_journal(daemon_dir)?
+        .last_sequence
+        .saturating_add(1))
+}
+
+fn apply_record(
+    states: &mut HashMap<RalJournalIdentity, RalReplayEntry>,
+    record: &RalJournalRecord,
+) {
+    let identity = record.event.identity().clone();
+    let entry = states
+        .entry(identity.clone())
+        .or_insert_with(|| empty_replay_entry(identity.clone(), record));
+
+    entry.identity = identity;
+    entry.last_sequence = record.sequence;
+    entry.updated_at = record.timestamp;
+    entry.last_correlation_id = record.correlation_id.clone();
+
+    match &record.event {
+        RalJournalEvent::Allocated {
+            triggering_event_id,
+            ..
+        } => {
+            entry.status = RalReplayStatus::Allocated;
+            entry.worker_id = None;
+            entry.active_claim_token = None;
+            entry.pending_delegations.clear();
+            entry.triggering_event_id = triggering_event_id.clone();
+            entry.final_event_ids.clear();
+            entry.accumulated_runtime_ms = 0;
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::Claimed {
+            worker_id,
+            claim_token,
+            ..
+        } => {
+            entry.status = RalReplayStatus::Claimed;
+            entry.worker_id = Some(worker_id.clone());
+            entry.active_claim_token = Some(claim_token.clone());
+            entry.pending_delegations.clear();
+            entry.final_event_ids.clear();
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::WaitingForDelegation {
+            worker_id,
+            pending_delegations,
+            terminal,
+            ..
+        } => {
+            entry.status = RalReplayStatus::WaitingForDelegation;
+            entry.worker_id = Some(worker_id.clone());
+            entry.active_claim_token = None;
+            entry.pending_delegations = pending_delegations.clone();
+            apply_terminal_summary(entry, terminal);
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::Completed {
+            worker_id,
+            terminal,
+            ..
+        } => {
+            entry.status = RalReplayStatus::Completed;
+            entry.worker_id = Some(worker_id.clone());
+            entry.active_claim_token = None;
+            entry.pending_delegations.clear();
+            apply_terminal_summary(entry, terminal);
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::NoResponse {
+            worker_id,
+            terminal,
+            ..
+        } => {
+            entry.status = RalReplayStatus::NoResponse;
+            entry.worker_id = Some(worker_id.clone());
+            entry.active_claim_token = None;
+            entry.pending_delegations.clear();
+            apply_terminal_summary(entry, terminal);
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::Aborted {
+            worker_id,
+            abort_reason,
+            terminal,
+            ..
+        } => {
+            entry.status = RalReplayStatus::Aborted;
+            entry.worker_id = worker_id.clone();
+            entry.active_claim_token = None;
+            entry.pending_delegations.clear();
+            apply_terminal_summary(entry, terminal);
+            entry.abort_reason = Some(abort_reason.clone());
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::Crashed {
+            worker_id,
+            crash_reason,
+            ..
+        } => {
+            entry.status = RalReplayStatus::Crashed;
+            entry.worker_id = Some(worker_id.clone());
+            entry.active_claim_token = None;
+            entry.pending_delegations.clear();
+            entry.final_event_ids.clear();
+            entry.abort_reason = None;
+            entry.crash_reason = Some(crash_reason.clone());
+        }
+    }
+}
+
+fn empty_replay_entry(identity: RalJournalIdentity, record: &RalJournalRecord) -> RalReplayEntry {
+    RalReplayEntry {
+        identity,
+        status: RalReplayStatus::Allocated,
+        last_sequence: record.sequence,
+        updated_at: record.timestamp,
+        last_correlation_id: record.correlation_id.clone(),
+        worker_id: None,
+        active_claim_token: None,
+        pending_delegations: Vec::new(),
+        triggering_event_id: None,
+        final_event_ids: Vec::new(),
+        accumulated_runtime_ms: 0,
+        abort_reason: None,
+        crash_reason: None,
+    }
+}
+
+fn apply_terminal_summary(entry: &mut RalReplayEntry, terminal: &RalTerminalSummary) {
+    entry.final_event_ids = terminal.final_event_ids.clone();
+    entry.accumulated_runtime_ms = terminal.accumulated_runtime_ms;
+}
+
+fn sync_parent_dir(path: &Path) -> RalJournalResult<()> {
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn ral_journal_paths_match_filesystem_contract() {
+        let daemon_dir = Path::new("/tmp/tenex-daemon");
+
+        assert_eq!(ral_dir(daemon_dir), daemon_dir.join(RAL_DIR_NAME));
+        assert_eq!(
+            ral_journal_path(daemon_dir),
+            daemon_dir.join(RAL_DIR_NAME).join(RAL_JOURNAL_FILE_NAME)
+        );
+    }
+
+    #[test]
+    fn record_schema_round_trips_required_event_variants() {
+        let identity = sample_identity();
+        let variants = vec![
+            (
+                "allocated",
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-event-1".to_string()),
+                },
+            ),
+            (
+                "claimed",
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-1".to_string(),
+                    claim_token: "claim-1".to_string(),
+                },
+            ),
+            (
+                "waiting_for_delegation",
+                RalJournalEvent::WaitingForDelegation {
+                    identity: identity.clone(),
+                    worker_id: "worker-1".to_string(),
+                    claim_token: "claim-1".to_string(),
+                    pending_delegations: vec![RalPendingDelegation {
+                        delegation_conversation_id: "delegation-1".to_string(),
+                        recipient_pubkey: "b".repeat(64),
+                        delegation_type: RalDelegationType::Ask,
+                    }],
+                    terminal: terminal(Vec::new(), 10),
+                },
+            ),
+            (
+                "completed",
+                RalJournalEvent::Completed {
+                    identity: identity.clone(),
+                    worker_id: "worker-2".to_string(),
+                    claim_token: "claim-2".to_string(),
+                    terminal: terminal(vec!["event-complete".to_string()], 20),
+                },
+            ),
+            (
+                "no_response",
+                RalJournalEvent::NoResponse {
+                    identity: identity.clone(),
+                    worker_id: "worker-3".to_string(),
+                    claim_token: "claim-3".to_string(),
+                    terminal: terminal(Vec::new(), 30),
+                },
+            ),
+            (
+                "aborted",
+                RalJournalEvent::Aborted {
+                    identity: identity.clone(),
+                    worker_id: Some("worker-4".to_string()),
+                    claim_token: Some("claim-4".to_string()),
+                    abort_reason: "stop requested".to_string(),
+                    terminal: terminal(Vec::new(), 40),
+                },
+            ),
+            (
+                "crashed",
+                RalJournalEvent::Crashed {
+                    identity,
+                    worker_id: "worker-5".to_string(),
+                    claim_token: Some("claim-5".to_string()),
+                    crash_reason: "worker process exited".to_string(),
+                    last_heartbeat_at: Some(50),
+                },
+            ),
+        ];
+
+        for (sequence, (event_name, event)) in variants.into_iter().enumerate() {
+            let journal_record = record((sequence + 1) as u64, "corr-schema", event);
+            let value =
+                serde_json::to_value(&journal_record).expect("journal record must serialize");
+            assert_eq!(value["schemaVersion"], RAL_JOURNAL_RECORD_SCHEMA_VERSION);
+            assert_eq!(value["writer"], RAL_JOURNAL_WRITER_RUST_DAEMON);
+            assert_eq!(value["writerVersion"], "test-version");
+            assert_eq!(value["correlationId"], "corr-schema");
+            assert_eq!(value["event"], event_name);
+
+            let round_tripped: RalJournalRecord =
+                serde_json::from_value(value).expect("journal record must deserialize");
+            assert_eq!(round_tripped, journal_record);
+        }
+    }
+
+    #[test]
+    fn append_read_and_replay_ral_journal_records() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let identity = sample_identity();
+        let allocated = record(
+            1,
+            "corr-1",
+            RalJournalEvent::Allocated {
+                identity: identity.clone(),
+                triggering_event_id: Some("trigger-event-1".to_string()),
+            },
+        );
+        let claimed = record(
+            2,
+            "corr-2",
+            RalJournalEvent::Claimed {
+                identity: identity.clone(),
+                worker_id: "worker-1".to_string(),
+                claim_token: "claim-1".to_string(),
+            },
+        );
+        let waiting = record(
+            3,
+            "corr-3",
+            RalJournalEvent::WaitingForDelegation {
+                identity: identity.clone(),
+                worker_id: "worker-1".to_string(),
+                claim_token: "claim-1".to_string(),
+                pending_delegations: vec![RalPendingDelegation {
+                    delegation_conversation_id: "delegation-1".to_string(),
+                    recipient_pubkey: "b".repeat(64),
+                    delegation_type: RalDelegationType::Standard,
+                }],
+                terminal: terminal(vec!["event-waiting".to_string()], 25),
+            },
+        );
+        let resumed_claim = record(
+            4,
+            "corr-4",
+            RalJournalEvent::Claimed {
+                identity: identity.clone(),
+                worker_id: "worker-2".to_string(),
+                claim_token: "claim-2".to_string(),
+            },
+        );
+        let completed = record(
+            5,
+            "corr-5",
+            RalJournalEvent::Completed {
+                identity: identity.clone(),
+                worker_id: "worker-2".to_string(),
+                claim_token: "claim-2".to_string(),
+                terminal: terminal(vec!["event-complete".to_string()], 42),
+            },
+        );
+
+        for journal_record in [&allocated, &claimed, &waiting, &resumed_claim, &completed] {
+            append_ral_journal_record(&daemon_dir, journal_record)
+                .expect("journal append must succeed");
+        }
+
+        let records = read_ral_journal_records(&daemon_dir).expect("journal read must succeed");
+        assert_eq!(
+            records,
+            vec![
+                allocated.clone(),
+                claimed.clone(),
+                waiting.clone(),
+                resumed_claim.clone(),
+                completed.clone()
+            ]
+        );
+
+        let journal_content =
+            fs::read_to_string(ral_journal_path(&daemon_dir)).expect("journal file must read");
+        let first_line: serde_json::Value = serde_json::from_str(
+            journal_content
+                .lines()
+                .next()
+                .expect("journal must contain a first line"),
+        )
+        .expect("journal line must parse");
+        assert_eq!(
+            first_line["schemaVersion"],
+            RAL_JOURNAL_RECORD_SCHEMA_VERSION
+        );
+        assert_eq!(first_line["writer"], RAL_JOURNAL_WRITER_RUST_DAEMON);
+        assert_eq!(first_line["writerVersion"], "test-version");
+        assert_eq!(first_line["correlationId"], "corr-1");
+        assert_eq!(first_line["event"], "allocated");
+
+        let replay = replay_ral_journal(&daemon_dir).expect("journal replay must succeed");
+        assert_eq!(replay.last_sequence, 5);
+        assert_eq!(
+            next_ral_journal_sequence(&daemon_dir).expect("next sequence must be computed"),
+            6
+        );
+
+        let replay_entry = replay
+            .states
+            .get(&identity)
+            .expect("identity must replay to a current state");
+        assert_eq!(replay_entry.status, RalReplayStatus::Completed);
+        assert_eq!(replay_entry.worker_id, Some("worker-2".to_string()));
+        assert_eq!(replay_entry.active_claim_token, None);
+        assert_eq!(replay_entry.pending_delegations, Vec::new());
+        assert_eq!(
+            replay_entry.triggering_event_id,
+            Some("trigger-event-1".to_string())
+        );
+        assert_eq!(
+            replay_entry.final_event_ids,
+            vec!["event-complete".to_string()]
+        );
+        assert_eq!(replay_entry.accumulated_runtime_ms, 42);
+        assert_eq!(replay_entry.last_correlation_id, "corr-5");
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn replay_ignores_truncated_final_jsonl_line() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let valid = record(
+            1,
+            "corr-1",
+            RalJournalEvent::Allocated {
+                identity: sample_identity(),
+                triggering_event_id: None,
+            },
+        );
+        append_ral_journal_record(&daemon_dir, &valid).expect("journal append must succeed");
+
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(ral_journal_path(&daemon_dir))
+            .expect("journal file must open");
+        file.write_all(b"{\"schemaVersion\":1,\"writer\"")
+            .expect("truncated line write must succeed");
+        file.sync_all().expect("journal sync must succeed");
+
+        let records = read_ral_journal_records(&daemon_dir).expect("journal read must succeed");
+        assert_eq!(records, vec![valid]);
+
+        let replay = replay_ral_journal(&daemon_dir).expect("journal replay must succeed");
+        assert_eq!(replay.last_sequence, 1);
+        assert_eq!(replay.states.len(), 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn replay_fails_on_corrupt_non_final_jsonl_line() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let journal_path = ral_journal_path(&daemon_dir);
+        fs::create_dir_all(
+            journal_path
+                .parent()
+                .expect("journal path must have parent directory"),
+        )
+        .expect("journal directory must be created");
+
+        let valid_first = serde_json::to_string(&record(
+            1,
+            "corr-1",
+            RalJournalEvent::Allocated {
+                identity: sample_identity(),
+                triggering_event_id: None,
+            },
+        ))
+        .expect("record must serialize");
+        let valid_third = serde_json::to_string(&record(
+            2,
+            "corr-2",
+            RalJournalEvent::Crashed {
+                identity: sample_identity(),
+                worker_id: "worker-1".to_string(),
+                claim_token: Some("claim-1".to_string()),
+                crash_reason: "worker process exited".to_string(),
+                last_heartbeat_at: Some(12_345),
+            },
+        ))
+        .expect("record must serialize");
+        fs::write(
+            &journal_path,
+            format!("{valid_first}\n{{\"schemaVersion\":\n{valid_third}\n"),
+        )
+        .expect("corrupt journal must be written");
+
+        match replay_ral_journal(&daemon_dir) {
+            Err(RalJournalError::JsonLine { line, source, .. }) => {
+                assert_eq!(line, 2);
+                assert!(source.is_eof());
+            }
+            other => panic!("expected corrupt non-final JSONL error, got {other:?}"),
+        }
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn replay_rejects_non_increasing_sequences() {
+        let identity = sample_identity();
+        let records = vec![
+            record(
+                2,
+                "corr-2",
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: None,
+                },
+            ),
+            record(
+                2,
+                "corr-2-duplicate",
+                RalJournalEvent::Claimed {
+                    identity,
+                    worker_id: "worker-1".to_string(),
+                    claim_token: "claim-1".to_string(),
+                },
+            ),
+        ];
+
+        match replay_ral_journal_records(records) {
+            Err(RalJournalError::NonIncreasingSequence {
+                sequence,
+                previous_sequence,
+            }) => {
+                assert_eq!(sequence, 2);
+                assert_eq!(previous_sequence, 2);
+            }
+            other => panic!("expected non-increasing sequence error, got {other:?}"),
+        }
+    }
+
+    fn sample_identity() -> RalJournalIdentity {
+        RalJournalIdentity {
+            project_id: "project-d-tag".to_string(),
+            agent_pubkey: "a".repeat(64),
+            conversation_id: "conversation-1".to_string(),
+            ral_number: 3,
+        }
+    }
+
+    fn terminal(final_event_ids: Vec<String>, accumulated_runtime_ms: u64) -> RalTerminalSummary {
+        RalTerminalSummary {
+            published_user_visible_event: !final_event_ids.is_empty(),
+            pending_delegations_remain: false,
+            accumulated_runtime_ms,
+            final_event_ids,
+            keep_worker_warm: false,
+        }
+    }
+
+    fn record(sequence: u64, correlation_id: &str, event: RalJournalEvent) -> RalJournalRecord {
+        RalJournalRecord::new(
+            RAL_JOURNAL_WRITER_RUST_DAEMON,
+            "test-version",
+            sequence,
+            sequence * 1_000,
+            correlation_id,
+            event,
+        )
+    }
+
+    fn unique_temp_daemon_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must be after UNIX_EPOCH")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let daemon_dir = std::env::temp_dir().join(format!(
+            "tenex-ral-journal-{}-{unique}-{counter}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&daemon_dir).expect("temp daemon dir must be created");
+        daemon_dir
+    }
+}

@@ -1,0 +1,225 @@
+{
+    "name": "ral-lifecycle-basic",
+    "description": "Observable TypeScript RALRegistry lifecycle semantics used as a Rust replay compatibility oracle.",
+    "identity": {
+        "projectId": "project-alpha",
+        "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "delegateePubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "conversationId": "conversation-ral-lifecycle-01",
+        "triggeringEventId": "trigger-ral-lifecycle-01",
+        "delegationConversationId": "delegation-ral-lifecycle-01"
+    },
+    "clock": {
+        "createdAt": 1710002000000,
+        "delegationMergedAt": 1710002000100,
+        "delegationCompletedAt": 1710002000500,
+        "silentCompletionRequestedAt": 1710002000900
+    },
+    "freshTurn": {
+        "expected": {
+            "ralNumber": 1,
+            "isStreaming": false,
+            "queuedInjections": [],
+            "activeToolCount": 0,
+            "pendingDelegations": [],
+            "completedDelegations": [],
+            "outstandingWork": {
+                "hasWork": false,
+                "details": {
+                    "queuedInjections": 0,
+                    "pendingDelegations": 0,
+                    "completedDelegations": 0
+                }
+            }
+        }
+    },
+    "waitingForDelegation": {
+        "pendingDelegation": {
+            "type": "standard",
+            "delegationConversationId": "delegation-ral-lifecycle-01",
+            "recipientPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "senderPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "prompt": "Original delegated task prompt.",
+            "ralNumber": 1
+        },
+        "mergeResult": {
+            "insertedCount": 1,
+            "mergedCount": 0
+        },
+        "expected": {
+            "pendingDelegationCount": 1,
+            "completedDelegationCount": 0,
+            "findStateWaitingForDelegation": true,
+            "findResumableRAL": false,
+            "outstandingWork": {
+                "hasWork": true,
+                "details": {
+                    "queuedInjections": 0,
+                    "pendingDelegations": 1,
+                    "completedDelegations": 0
+                }
+            }
+        }
+    },
+    "duplicatePendingDelegation": {
+        "expectation": "Merging the same delegationConversationId again updates the existing pending delegation instead of appending a duplicate.",
+        "pendingDelegation": {
+            "type": "standard",
+            "delegationConversationId": "delegation-ral-lifecycle-01",
+            "recipientPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "senderPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "prompt": "Updated delegated task prompt.",
+            "ralNumber": 1
+        },
+        "mergeResult": {
+            "insertedCount": 0,
+            "mergedCount": 1
+        },
+        "expected": {
+            "pendingDelegationCount": 1,
+            "completedDelegationCount": 0
+        }
+    },
+    "completedDelegation": {
+        "completion": {
+            "delegationConversationId": "delegation-ral-lifecycle-01",
+            "recipientPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "response": "Delegated task completed.",
+            "completedAt": 1710002000500
+        },
+        "recordCompletionLocation": {
+            "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "conversationId": "conversation-ral-lifecycle-01",
+            "ralNumber": 1
+        },
+        "completedDelegation": {
+            "delegationConversationId": "delegation-ral-lifecycle-01",
+            "recipientPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "senderPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ralNumber": 1,
+            "transcript": [
+                {
+                    "senderPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "recipientPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "content": "Updated delegated task prompt.",
+                    "timestamp": 1710002000499
+                },
+                {
+                    "senderPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "recipientPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "content": "Delegated task completed.",
+                    "timestamp": 1710002000500
+                }
+            ],
+            "completedAt": 1710002000500,
+            "status": "completed"
+        },
+        "expected": {
+            "pendingDelegationCount": 0,
+            "completedDelegationCount": 1,
+            "findStateWaitingForDelegation": false,
+            "findResumableRAL": true,
+            "outstandingWork": {
+                "hasWork": true,
+                "details": {
+                    "queuedInjections": 0,
+                    "pendingDelegations": 0,
+                    "completedDelegations": 1
+                }
+            },
+            "afterClearCompletedDelegations": {
+                "completedDelegationCount": 0,
+                "outstandingWork": {
+                    "hasWork": false,
+                    "details": {
+                        "queuedInjections": 0,
+                        "pendingDelegations": 0,
+                        "completedDelegations": 0
+                    }
+                }
+            }
+        }
+    },
+    "noResponse": {
+        "expected": {
+            "requestSilentCompletionResult": true,
+            "silentCompletionRequested": true,
+            "outstandingWork": {
+                "hasWork": false,
+                "details": {
+                    "queuedInjections": 0,
+                    "pendingDelegations": 0,
+                    "completedDelegations": 0
+                }
+            },
+            "clearSilentCompletionRequestResult": true,
+            "ralExistsAfterClear": false
+        }
+    },
+    "duplicateTrigger": {
+        "expectation": "RALRegistry.create does not deduplicate by originalTriggeringEventId; duplicate trigger suppression is an upstream dispatch/conversation responsibility.",
+        "expected": {
+            "firstRalNumber": 1,
+            "secondRalNumber": 2,
+            "activeRalCount": 2,
+            "originalTriggeringEventIds": [
+                "trigger-ral-lifecycle-01",
+                "trigger-ral-lifecycle-01"
+            ]
+        }
+    },
+    "workerTerminalMessages": {
+        "waitingForDelegation": {
+            "version": 1,
+            "type": "waiting_for_delegation",
+            "correlationId": "ral-lifecycle-compat-01",
+            "sequence": 10,
+            "timestamp": 1710002000600,
+            "projectId": "project-alpha",
+            "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "conversationId": "conversation-ral-lifecycle-01",
+            "ralNumber": 1,
+            "pendingDelegations": ["delegation-ral-lifecycle-01"],
+            "finalRalState": "waiting_for_delegation",
+            "publishedUserVisibleEvent": true,
+            "pendingDelegationsRemain": true,
+            "accumulatedRuntimeMs": 125,
+            "finalEventIds": ["assistant-visible-event-01"],
+            "keepWorkerWarm": false
+        },
+        "complete": {
+            "version": 1,
+            "type": "complete",
+            "correlationId": "ral-lifecycle-compat-01",
+            "sequence": 11,
+            "timestamp": 1710002000700,
+            "projectId": "project-alpha",
+            "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "conversationId": "conversation-ral-lifecycle-01",
+            "ralNumber": 1,
+            "finalRalState": "completed",
+            "publishedUserVisibleEvent": true,
+            "pendingDelegationsRemain": false,
+            "accumulatedRuntimeMs": 180,
+            "finalEventIds": ["assistant-complete-event-01"],
+            "keepWorkerWarm": false
+        },
+        "noResponse": {
+            "version": 1,
+            "type": "no_response",
+            "correlationId": "ral-lifecycle-compat-01",
+            "sequence": 12,
+            "timestamp": 1710002000900,
+            "projectId": "project-alpha",
+            "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "conversationId": "conversation-ral-lifecycle-01",
+            "ralNumber": 1,
+            "finalRalState": "no_response",
+            "publishedUserVisibleEvent": false,
+            "pendingDelegationsRemain": false,
+            "accumulatedRuntimeMs": 40,
+            "finalEventIds": [],
+            "keepWorkerWarm": false
+        }
+    }
+}
