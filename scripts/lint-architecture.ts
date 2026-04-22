@@ -56,7 +56,7 @@ async function checkLibImports(file: string, content: string) {
 	const lines = content.split("\n");
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
-		const importMatch = line.match(/from ['"]@\/(utils|services|agents|conversations|tools|event-handler|nostr|llm|prompts)/);
+		const importMatch = line.match(/from ['"]@\/(utils|services|agents|conversations|tools|nostr|llm|prompts)/);
 		if (importMatch) {
 			addError({
 				file,
@@ -75,7 +75,7 @@ async function checkUtilsImports(file: string, content: string) {
 	const lines = content.split("\n");
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
-		const importMatch = line.match(/from ['"]@\/(services|agents|conversations|tools|event-handler)/);
+		const importMatch = line.match(/from ['"]@\/(services|agents|conversations|tools)/);
 		if (importMatch) {
 			addError({
 				file,

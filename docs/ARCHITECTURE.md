@@ -61,7 +61,7 @@ The `services/` layer contains stateful business logic and domain services:
 - Delegation/RAL state tracking
 - MCP integration
 
-**Rule:** Services can import from `utils/`, `lib/`, `nostr/`, `llm/`, but not from application entrypoints such as `event-handler/` or Rust binaries.
+**Rule:** Services can import from `utils/`, `lib/`, `nostr/`, `llm/`, but not from Rust application entrypoints.
 
 ---
 
@@ -138,7 +138,7 @@ Teams are a local-only service concern. `src/services/teams/` loads JSON definit
 ---
 
 ### Layer 4: Application Entry Points
-**Modules:** `event-handler/` and Rust binaries under `crates/`
+**Modules:** Rust binaries under `crates/`
 
 **Purpose:** Runtime orchestration and event routing
 
@@ -383,7 +383,7 @@ import { notificationService } from "@/services/notifications";
 
 **Adding to services/:**
 - Can import from `utils/`, `lib/`, `nostr/`, `llm/`, `prompts/`, `events/`
-- Cannot import from application entrypoints such as `event-handler/` or Rust binaries
+- Cannot import from Rust application entrypoints
 
 ---
 

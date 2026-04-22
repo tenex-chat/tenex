@@ -42,8 +42,6 @@ The goal is **always** the right long-term, sustainable, idiomatic, coherent fix
 
 ### Layer Hierarchy (Dependencies Flow DOWN Only)
 ```
-Layer 4: event-handler/
-    ↓
 Layer 3: services/ agents/ conversations/ tools/
     ↓
 Layer 2: llm/ nostr/ prompts/ events/
@@ -60,9 +58,9 @@ Layer 0: lib/  ← ZERO TENEX imports
 | Layer | Can Import | Cannot Import |
 |-------|------------|---------------|
 | `lib/` | Node built-ins, npm only | ANY `@/` imports |
-| `utils/` | `lib/` | `services/`, `agents/`, `event-handler/` |
-| `services/` | `utils/`, `lib/`, `llm/`, `nostr/` | `event-handler/` |
-| `event-handler/` | Everything below | N/A |
+| `utils/` | `lib/` | `services/`, `agents/`, `conversations/`, `tools/` |
+| `services/` | `utils/`, `lib/`, `llm/`, `nostr/` | Rust entrypoints |
+| `agents/`, `conversations/`, `tools/` | `services/`, `utils/`, `lib/`, `llm/`, `nostr/`, `prompts/`, `events/` | Rust entrypoints |
 
 ### Services Organization
 ```

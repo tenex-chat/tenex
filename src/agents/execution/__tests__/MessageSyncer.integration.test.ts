@@ -25,7 +25,6 @@ import type { AgentInstance } from "@/agents/types";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { EventHandler } from "@/event-handler";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { config } from "@/services/ConfigService";
 import { AgentMetadataStore } from "@/services/agents/AgentMetadataStore";
@@ -43,7 +42,6 @@ describeIntegration("MessageSyncer E2E - Tool Error Handling", () => {
     const metadataPath = join(testDir, "metadata");
 
     let projectContext: ProjectContext;
-    let eventHandler: EventHandler;
     let agentSigner: NDKPrivateKeySigner;
     let userSigner: NDKPrivateKeySigner;
     let ndk: NDK;
@@ -132,9 +130,6 @@ describeIntegration("MessageSyncer E2E - Tool Error Handling", () => {
             agentRegistry
         );
 
-        // Initialize event handler
-        eventHandler = new EventHandler();
-        await eventHandler.initialize();
     });
 
     afterAll(async () => {

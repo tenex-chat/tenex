@@ -47,7 +47,7 @@ Look for similar code in the codebase and follow established patterns.
 - **TENEX helpers** → `src/utils/`
 - **Business logic** → `src/services/`
 - **Domain logic** → `src/agents/`, `src/conversations/`, `src/tools/`
-- **Entry points** → `src/event-handler/` and Rust daemon crates under `crates/`
+- **Entry points** → Rust daemon crates under `crates/`; TypeScript runtime modules are invoked directly by Rust worker processes
 
 **Create subdirectories** when you have 3+ related files:
 ```

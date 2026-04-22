@@ -12,7 +12,7 @@ This document describes how delegation and RAL (Reason-Act Loop) state is tracke
 | `src/agents/execution/ToolExecutionTracker.ts` | Publishes tool-use events and records delegation references |
 | `src/services/dispatch/DelegationCompletionHandler.ts` | Records delegation completions when responses arrive |
 | `src/services/dispatch/AgentDispatchService.ts` | Queues injections or spawns new executions based on RAL state |
-| `src/event-handler/reply.ts` | Delegates incoming chat events to the dispatch service |
+| `crates/tenex-daemon/src/inbound_runtime.rs` | Routes inbound Nostr/Telegram envelopes into filesystem worker dispatch records |
 | `src/nostr/AgentPublisher.ts` | Publishes delegation, completion, ask, and tool-use events |
 | `src/nostr/AgentEventEncoder.ts` | Defines event tags and shared encoding logic |
 

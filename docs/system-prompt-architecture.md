@@ -69,7 +69,6 @@ When those inputs change:
 Lesson and lesson-comment ingestion happens outside the compiler:
 
 - The Rust control plane routes lesson and lesson-comment events into worker-visible project state.
-- **`src/event-handler/index.ts`** stores runtime-local lesson events in `ProjectContext`
 
 The compiler does not own NDK subscriptions, EOSE coordination, or comment-event parsing.
 
