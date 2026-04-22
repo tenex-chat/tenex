@@ -166,10 +166,7 @@ mod tests {
     fn build_connect_request_with_secret_includes_two_params() {
         let (_id, request) = build_connect_request("pk", Some("xyz"));
         assert_eq!(request.method, "connect");
-        assert_eq!(
-            request.params,
-            vec!["pk".to_string(), "xyz".to_string()]
-        );
+        assert_eq!(request.params, vec!["pk".to_string(), "xyz".to_string()]);
     }
 
     #[test]

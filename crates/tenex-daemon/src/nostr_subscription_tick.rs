@@ -316,7 +316,7 @@ mod tests {
             "mismatched subscription",
             1_710_001_101,
         );
-        let raw_messages = vec![
+        let raw_messages = [
             relay_event_message("tenex-main", &event),
             r#"["EOSE","tenex-main"]"#.to_string(),
             r#"["NOTICE","relay maintenance"]"#.to_string(),

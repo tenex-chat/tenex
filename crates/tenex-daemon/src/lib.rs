@@ -1,3 +1,10 @@
+#![allow(
+    clippy::large_enum_variant,
+    clippy::result_large_err,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+
 pub mod agent_definition_watcher;
 pub mod agent_inventory;
 pub mod backend_config;
@@ -96,4 +103,5 @@ pub mod worker_reuse;
 pub mod worker_runtime_state;
 pub mod worker_session_loop;
 pub mod worker_startup_recovery;
+pub mod worker_telegram_send_flow;
 pub mod worker_terminal_flow;

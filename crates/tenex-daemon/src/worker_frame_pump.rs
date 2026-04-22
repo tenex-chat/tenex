@@ -74,6 +74,7 @@ where
         observed_at,
         publish,
         terminal,
+        telegram_send,
         message: _,
     } = message_flow;
 
@@ -87,6 +88,7 @@ where
             observed_at,
             publish,
             terminal,
+            telegram_send,
         },
     )
     .map_err(|source| WorkerFramePumpError::MessageFlow { source })?;
@@ -379,6 +381,7 @@ mod tests {
             observed_at: 1_710_000_403_000,
             publish,
             terminal: None,
+            telegram_send: None,
         }
     }
 

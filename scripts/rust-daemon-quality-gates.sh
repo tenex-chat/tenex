@@ -20,6 +20,7 @@ runtime_spine_enabled="${TENEX_RUN_RUST_DAEMON_RUNTIME_SPINE:-0}"
 runtime_spine_test_filter="${TENEX_RUN_RUST_DAEMON_RUNTIME_SPINE_FILTER:-daemon_worker_runtime::tests::bun_agent_worker_real_bun_runtime_spine_round_trips_filesystem_state}"
 
 cargo fmt --check
+bun run audit:transport-runtime
 cargo test -p tenex-daemon --no-fail-fast
 cargo clippy -p tenex-daemon --all-targets -- -D warnings
 

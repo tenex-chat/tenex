@@ -13,7 +13,12 @@ pub const TELEGRAM_OUTBOX_DELIVERED_DIR_NAME: &str = "delivered";
 pub const TELEGRAM_OUTBOX_FAILED_DIR_NAME: &str = "failed";
 pub const TELEGRAM_OUTBOX_TMP_DIR_NAME: &str = "tmp";
 pub const TELEGRAM_OUTBOX_WRITER: &str = "rust-daemon";
-pub const TELEGRAM_OUTBOX_RECORD_SCHEMA_VERSION: u32 = 1;
+// Bumped to 2 in slice 6 of the Rust Telegram migration: the new
+// `TelegramDeliveryReason::ProactiveSend` variant introduced by the worker's
+// `send_message` tool widens the permissible enum set on disk. Daemons on
+// schema v1 must fail-closed when encountering a v2 record so the broader
+// set is never silently rejected by an older reader.
+pub const TELEGRAM_OUTBOX_RECORD_SCHEMA_VERSION: u32 = 2;
 pub const TELEGRAM_OUTBOX_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_TELEGRAM_OUTBOX_RETRY_INITIAL_DELAY_MS: u64 = 1_000;
 pub const DEFAULT_TELEGRAM_OUTBOX_RETRY_MAX_DELAY_MS: u64 = 60_000;
@@ -93,6 +98,9 @@ pub enum TelegramDeliveryReason {
     AskError,
     ToolPublicationMirror,
     Voice,
+    /// Proactive `send_message` tool invocation from an agent. Introduced in
+    /// schema v2 alongside the worker protocol `telegram_send_request` frame.
+    ProactiveSend,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -1758,7 +1766,7 @@ mod tests {
             error,
             TelegramOutboxError::UnsupportedSchemaVersion {
                 found: 999,
-                expected: 1,
+                expected: TELEGRAM_OUTBOX_RECORD_SCHEMA_VERSION,
             }
         ));
 

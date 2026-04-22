@@ -1931,14 +1931,8 @@ mod tests {
             value["plan"]["projectAgentSnapshotFilter"]["authors"],
             json!([owner])
         );
-        assert_eq!(
-            value["plan"]["nip46ReplyFilter"]["kinds"],
-            json!([24133])
-        );
-        assert_eq!(
-            value["plan"]["nip46ReplyFilter"]["authors"],
-            json!([owner])
-        );
+        assert_eq!(value["plan"]["nip46ReplyFilter"]["kinds"], json!([24133]));
+        assert_eq!(value["plan"]["nip46ReplyFilter"]["authors"], json!([owner]));
         assert_eq!(
             value["plan"]["nip46ReplyFilter"]["#p"],
             json!([TEST_BACKEND_PUBKEY_HEX])

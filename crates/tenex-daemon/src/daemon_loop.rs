@@ -7,6 +7,7 @@ use tracing;
 
 use thiserror::Error;
 
+use crate::backend_config::read_backend_config;
 use crate::daemon_maintenance::{
     DaemonMaintenanceError, DaemonMaintenanceInput, DaemonMaintenanceOutcome,
     TelegramMaintenancePublisher, run_daemon_maintenance_once_from_filesystem,
@@ -14,7 +15,7 @@ use crate::daemon_maintenance::{
 };
 use crate::daemon_worker_runtime::{
     DaemonWorkerRuntimeFilesystemInput, DaemonWorkerRuntimeOutcome,
-    run_daemon_worker_runtime_once_from_filesystem,
+    DaemonWorkerTelegramSendRuntimeInput, run_daemon_worker_runtime_once_from_filesystem,
 };
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
@@ -281,9 +282,11 @@ where
         + 'static,
 {
     let daemon_dir = input.daemon_dir;
+    let tenex_base_dir = input.tenex_base_dir;
     let now_ms = input.now_ms;
     let maintenance =
         run_daemon_maintenance_once_from_filesystem_with_telegram(input, &mut *telegram_publisher)?;
+    let telegram_send = worker_telegram_send_runtime_input(tenex_base_dir, &worker.writer_version);
     let worker_runtime = run_daemon_worker_runtime_once_from_filesystem(
         spawner,
         DaemonWorkerRuntimeFilesystemInput {
@@ -298,6 +301,7 @@ where
             writer_version: worker.writer_version,
             resolved_pending_delegations: worker.resolved_pending_delegations,
             publish: worker.publish,
+            telegram_send,
             max_frames: worker.max_frames,
         },
     );
@@ -317,6 +321,31 @@ where
         maintenance,
         worker_runtime,
         publish_outbox,
+    })
+}
+
+fn worker_telegram_send_runtime_input(
+    tenex_base_dir: &Path,
+    writer_version: &str,
+) -> Option<DaemonWorkerTelegramSendRuntimeInput> {
+    let backend_pubkey = match read_backend_config(tenex_base_dir)
+        .and_then(|config| config.backend_signer())
+        .map(|signer| signer.pubkey_hex().to_string())
+    {
+        Ok(pubkey) => pubkey,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "worker telegram send context unavailable; proactive telegram sends will fail closed"
+            );
+            return None;
+        }
+    };
+
+    Some(DaemonWorkerTelegramSendRuntimeInput {
+        data_dir: tenex_base_dir.join("data"),
+        backend_pubkey,
+        writer_version: writer_version.to_string(),
     })
 }
 

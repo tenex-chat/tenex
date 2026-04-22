@@ -54,18 +54,12 @@ pub fn handle_project_nostr_event(
         .into_iter()
         .map(str::to_string)
         .collect();
-    let project_base_path = format!(
-        "{}/{}",
-        projects_base.trim_end_matches('/'),
-        d_tag
-    );
+    let project_base_path = format!("{}/{}", projects_base.trim_end_matches('/'), d_tag);
 
     let descriptor_path = project_descriptor_path(tenex_base_dir, d_tag);
     let is_new_project = !descriptor_path.exists();
 
-    let project_dir = tenex_base_dir
-        .join(PROJECTS_DIR_NAME)
-        .join(d_tag);
+    let project_dir = tenex_base_dir.join(PROJECTS_DIR_NAME).join(d_tag);
     fs::create_dir_all(&project_dir).map_err(ProjectNostrIngressError::CreateDir)?;
 
     let descriptor = json!({
@@ -92,7 +86,9 @@ pub fn handle_project_nostr_event(
         RawAgentIndex::default()
     };
 
-    index.by_project.insert(d_tag.to_string(), agent_pubkeys.clone());
+    index
+        .by_project
+        .insert(d_tag.to_string(), agent_pubkeys.clone());
 
     fs::write(
         &index_path,
@@ -180,13 +176,15 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&descriptor_path).unwrap()).unwrap();
         assert_eq!(descriptor["projectOwnerPubkey"], owner.as_str());
         assert_eq!(descriptor["projectDTag"], "my-project");
-        assert_eq!(descriptor["projectBasePath"], "/workspace/projects/my-project");
+        assert_eq!(
+            descriptor["projectBasePath"],
+            "/workspace/projects/my-project"
+        );
         assert_eq!(descriptor["status"], "active");
 
         let index_path = base.join("agents").join("index.json");
         assert!(index_path.exists());
-        let index: Value =
-            serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
+        let index: Value = serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
         let by_project = &index["byProject"]["my-project"];
         assert_eq!(by_project[0], agent1.as_str());
         assert_eq!(by_project[1], agent2.as_str());
@@ -223,8 +221,14 @@ mod tests {
             &fs::read_to_string(base.join("agents").join("index.json")).unwrap(),
         )
         .unwrap();
-        assert!(index["byProject"]["other-project"].is_array(), "other-project preserved");
-        assert!(index["byProject"]["new-project"].is_array(), "new-project added");
+        assert!(
+            index["byProject"]["other-project"].is_array(),
+            "other-project preserved"
+        );
+        assert!(
+            index["byProject"]["new-project"].is_array(),
+            "new-project added"
+        );
     }
 
     #[test]

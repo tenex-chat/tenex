@@ -51,9 +51,7 @@ pub fn init(daemon_dir: &Path) -> TelemetryGuard {
             .with(otel_layer)
             .init();
     } else {
-        tracing_subscriber::registry()
-            .with(fmt_layer)
-            .init();
+        tracing_subscriber::registry().with(fmt_layer).init();
     }
 
     TelemetryGuard {

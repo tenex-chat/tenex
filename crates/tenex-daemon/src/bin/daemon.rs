@@ -7,7 +7,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
-use tenex_daemon::telemetry;
 use tenex_daemon::daemon_foreground::{
     DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
     run_daemon_foreground_until_stopped_from_filesystem_with_worker,
@@ -34,6 +33,7 @@ use tenex_daemon::telegram::gateway::{
     GatewayConfig, NoopIngressObserver, TelegramGatewaySupervisor, start_telegram_gateway,
 };
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
+use tenex_daemon::telemetry;
 use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
 use tenex_daemon::worker_dispatch_execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{

@@ -1327,6 +1327,7 @@ mod tests {
             started_at: 1_710_001_000_030,
             frame_observed_at: 1_710_001_000_040,
             publish,
+            telegram_send: None,
             terminal: DaemonWorkerTerminalRuntimeInput {
                 journal_sequence: 3,
                 journal_timestamp: 1_710_001_000_050,

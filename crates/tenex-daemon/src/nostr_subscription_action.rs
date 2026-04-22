@@ -41,15 +41,15 @@ pub fn plan_nostr_subscription_intake_action(
         }
     };
 
-    if let Some(subscription_id) = frame_subscription_id(&frame) {
-        if subscription_id != input.planned_subscription_id {
-            return NostrSubscriptionIntakeAction::Ignore {
-                reason: subscription_mismatch_ignored_reason(
-                    subscription_id,
-                    input.planned_subscription_id,
-                ),
-            };
-        }
+    if let Some(subscription_id) = frame_subscription_id(&frame)
+        && subscription_id != input.planned_subscription_id
+    {
+        return NostrSubscriptionIntakeAction::Ignore {
+            reason: subscription_mismatch_ignored_reason(
+                subscription_id,
+                input.planned_subscription_id,
+            ),
+        };
     }
 
     NostrSubscriptionIntakeAction::ProcessFrame { frame }

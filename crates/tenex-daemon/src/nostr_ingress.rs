@@ -69,11 +69,7 @@ pub fn process_verified_nostr_event(
             .projects_base
             .as_deref()
             .unwrap_or("/tmp/tenex-projects");
-        let project = handle_project_nostr_event(
-            input.tenex_base_dir,
-            input.event,
-            projects_base,
-        )?;
+        let project = handle_project_nostr_event(input.tenex_base_dir, input.event, projects_base)?;
         return Ok(NostrIngressOutcome::ProjectUpdated { class, project });
     }
 

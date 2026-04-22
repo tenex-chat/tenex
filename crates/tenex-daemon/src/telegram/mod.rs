@@ -12,6 +12,7 @@
 
 pub mod agent_config;
 pub mod bindings;
+pub mod channel_id;
 pub mod chat_context;
 pub mod client;
 pub mod commands;

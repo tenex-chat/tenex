@@ -76,7 +76,8 @@ impl NIP46Client {
     ) -> Result<Self, SignError> {
         let owner_public = PublicKey::from_str(&format!("02{owner_pubkey}"))
             .map_err(|err| SignError::InvalidOwnerPubkey(err.to_string()))?;
-        let conversation_key = nip44::conversation_key(&backend_signer.secret_key(), &owner_public)?;
+        let conversation_key =
+            nip44::conversation_key(&backend_signer.secret_key(), &owner_public)?;
 
         Ok(Self {
             owner_pubkey,
@@ -183,17 +184,13 @@ impl NIP46Client {
                             self.bunker.secret.as_deref(),
                         ),
                         "sign_event" => {
-                            let payload = request
-                                .params
-                                .first()
-                                .cloned()
-                                .unwrap_or_default();
+                            let payload = request.params.first().cloned().unwrap_or_default();
                             build_sign_event_request(&payload)
                         }
                         other => {
-                            return Err(SignError::Protocol(Nip46ProtocolError::Remote(
-                                format!("unsupported nip-46 method for retry: {other}"),
-                            )));
+                            return Err(SignError::Protocol(Nip46ProtocolError::Remote(format!(
+                                "unsupported nip-46 method for retry: {other}"
+                            ))));
                         }
                     };
                     id = next_id;
@@ -255,11 +252,7 @@ mod tests {
     }
 
     impl PublishOutboxHandle for MockOutbox {
-        fn enqueue(
-            &self,
-            event: SignedNostrEvent,
-            relay_urls: Vec<String>,
-        ) -> Result<(), String> {
+        fn enqueue(&self, event: SignedNostrEvent, relay_urls: Vec<String>) -> Result<(), String> {
             self.captured.lock().unwrap().push((event, relay_urls));
             Ok(())
         }
@@ -418,22 +411,33 @@ mod tests {
         let completer: JoinHandle<()> = thread::spawn(move || {
             // First request: connect
             let connect_event = wait_for_captured(&completer_outbox, 0);
-            let connect_request =
-                decrypt_request(&owner_for_completer, &backend_pubkey_for_completer, &connect_event);
+            let connect_request = decrypt_request(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &connect_event,
+            );
             assert_eq!(connect_request.method, "connect");
             let connect_response = Nip46Response {
                 id: connect_request.id,
                 result: Some("ack".to_string()),
                 error: None,
             };
-            let encrypted_connect =
-                encrypt_response(&owner_for_completer, &backend_pubkey_for_completer, &connect_response);
-            completer_client.dispatch_incoming(&encrypted_connect).unwrap();
+            let encrypted_connect = encrypt_response(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &connect_response,
+            );
+            completer_client
+                .dispatch_incoming(&encrypted_connect)
+                .unwrap();
 
             // Second request: sign_event
             let sign_event = wait_for_captured(&completer_outbox, 1);
-            let sign_request =
-                decrypt_request(&owner_for_completer, &backend_pubkey_for_completer, &sign_event);
+            let sign_request = decrypt_request(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &sign_event,
+            );
             assert_eq!(sign_request.method, "sign_event");
             let unsigned: NormalizedNostrEvent =
                 serde_json::from_str(&sign_request.params[0]).unwrap();
@@ -443,8 +447,11 @@ mod tests {
                 result: Some(serde_json::to_string(&signed).unwrap()),
                 error: None,
             };
-            let encrypted_sign =
-                encrypt_response(&owner_for_completer, &backend_pubkey_for_completer, &sign_response);
+            let encrypted_sign = encrypt_response(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &sign_response,
+            );
             completer_client.dispatch_incoming(&encrypted_sign).unwrap();
         });
 
@@ -503,28 +510,42 @@ mod tests {
         let completer = thread::spawn(move || {
             // Connect ack
             let connect_event = wait_for_captured(&completer_outbox, 0);
-            let connect_request =
-                decrypt_request(&owner_for_completer, &backend_pubkey_for_completer, &connect_event);
+            let connect_request = decrypt_request(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &connect_event,
+            );
             let connect_response = Nip46Response {
                 id: connect_request.id,
                 result: Some("ack".to_string()),
                 error: None,
             };
-            let encrypted_connect =
-                encrypt_response(&owner_for_completer, &backend_pubkey_for_completer, &connect_response);
-            completer_client.dispatch_incoming(&encrypted_connect).unwrap();
+            let encrypted_connect = encrypt_response(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &connect_response,
+            );
+            completer_client
+                .dispatch_incoming(&encrypted_connect)
+                .unwrap();
 
             // Sign request denied
             let sign_event = wait_for_captured(&completer_outbox, 1);
-            let sign_request =
-                decrypt_request(&owner_for_completer, &backend_pubkey_for_completer, &sign_event);
+            let sign_request = decrypt_request(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &sign_event,
+            );
             let deny_response = Nip46Response {
                 id: sign_request.id,
                 result: None,
                 error: Some("denied".to_string()),
             };
-            let encrypted_deny =
-                encrypt_response(&owner_for_completer, &backend_pubkey_for_completer, &deny_response);
+            let encrypted_deny = encrypt_response(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &deny_response,
+            );
             completer_client.dispatch_incoming(&encrypted_deny).unwrap();
         });
 
@@ -561,17 +582,25 @@ mod tests {
         let completer = thread::spawn(move || {
             // Connect (shared)
             let connect_event = wait_for_captured(&completer_outbox, 0);
-            let connect_request =
-                decrypt_request(&owner_for_completer, &backend_pubkey_for_completer, &connect_event);
+            let connect_request = decrypt_request(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &connect_event,
+            );
             assert_eq!(connect_request.method, "connect");
             let connect_response = Nip46Response {
                 id: connect_request.id,
                 result: Some("ack".to_string()),
                 error: None,
             };
-            let encrypted_connect =
-                encrypt_response(&owner_for_completer, &backend_pubkey_for_completer, &connect_response);
-            completer_client.dispatch_incoming(&encrypted_connect).unwrap();
+            let encrypted_connect = encrypt_response(
+                &owner_for_completer,
+                &backend_pubkey_for_completer,
+                &connect_response,
+            );
+            completer_client
+                .dispatch_incoming(&encrypted_connect)
+                .unwrap();
 
             for index in 1..=2 {
                 let event = wait_for_captured(&completer_outbox, index);
@@ -586,8 +615,11 @@ mod tests {
                     result: Some(serde_json::to_string(&signed).unwrap()),
                     error: None,
                 };
-                let encrypted =
-                    encrypt_response(&owner_for_completer, &backend_pubkey_for_completer, &response);
+                let encrypted = encrypt_response(
+                    &owner_for_completer,
+                    &backend_pubkey_for_completer,
+                    &response,
+                );
                 completer_client.dispatch_incoming(&encrypted).unwrap();
             }
         });

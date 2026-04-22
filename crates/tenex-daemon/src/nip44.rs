@@ -47,7 +47,11 @@ pub fn calc_padded_len(unpadded: usize) -> usize {
         return 32;
     }
     let next_power = 1usize << ((unpadded - 1).ilog2() + 1);
-    let chunk = if next_power <= 256 { 32 } else { next_power / 8 };
+    let chunk = if next_power <= 256 {
+        32
+    } else {
+        next_power / 8
+    };
     ((unpadded - 1) / chunk + 1) * chunk
 }
 
@@ -165,7 +169,8 @@ fn verify_mac(
     let mut mac = HmacSha256::new_from_slice(hmac_key).map_err(|_| Nip44Error::HkdfExpand)?;
     mac.update(nonce);
     mac.update(ciphertext);
-    mac.verify_slice(expected).map_err(|_| Nip44Error::HmacMismatch)
+    mac.verify_slice(expected)
+        .map_err(|_| Nip44Error::HmacMismatch)
 }
 
 pub fn message_keys(
@@ -177,7 +182,8 @@ pub fn message_keys(
 
     let hk = Hkdf::<Sha256>::from_prk(conversation_key).map_err(|_| Nip44Error::HkdfExpand)?;
     let mut okm = [0u8; 76];
-    hk.expand(nonce, &mut okm).map_err(|_| Nip44Error::HkdfExpand)?;
+    hk.expand(nonce, &mut okm)
+        .map_err(|_| Nip44Error::HkdfExpand)?;
     let mut chacha_key = [0u8; 32];
     chacha_key.copy_from_slice(&okm[0..32]);
     let mut chacha_nonce = [0u8; 12];
@@ -223,7 +229,12 @@ mod conversation_key_tests {
             let secret = SecretKey::from_str(&case.sec1).unwrap();
             let peer = PublicKey::from_str(&format!("02{}", case.pub2)).unwrap();
             let key = conversation_key(&secret, &peer).unwrap();
-            assert_eq!(hex::encode(key), case.conversation_key, "vector: {}", case.sec1);
+            assert_eq!(
+                hex::encode(key),
+                case.conversation_key,
+                "vector: {}",
+                case.sec1
+            );
         }
     }
 }
@@ -319,7 +330,10 @@ mod encrypt_decrypt_tests {
         let cases: Vec<Case> =
             serde_json::from_value(parsed["v2"]["valid"]["encrypt_decrypt_long_msg"].clone())
                 .unwrap();
-        assert!(!cases.is_empty(), "no encrypt_decrypt_long_msg vectors loaded");
+        assert!(
+            !cases.is_empty(),
+            "no encrypt_decrypt_long_msg vectors loaded"
+        );
         for case in cases {
             let ck = decode_ck(&case.conversation_key);
             let nonce = decode_nonce(&case.nonce);
@@ -396,9 +410,11 @@ mod encrypt_decrypt_tests {
     fn encrypt_rejects_all_invalid_length_vectors() {
         let parsed = fixtures();
         let cases: Vec<usize> =
-            serde_json::from_value(parsed["v2"]["invalid"]["encrypt_msg_lengths"].clone())
-                .unwrap();
-        assert!(!cases.is_empty(), "no invalid encrypt length vectors loaded");
+            serde_json::from_value(parsed["v2"]["invalid"]["encrypt_msg_lengths"].clone()).unwrap();
+        assert!(
+            !cases.is_empty(),
+            "no invalid encrypt length vectors loaded"
+        );
         let ck = [0u8; 32];
         let nonce = [0u8; 32];
         for len in cases {
@@ -428,8 +444,9 @@ mod encrypt_decrypt_tests {
             for (i, slot) in nonce.iter_mut().enumerate() {
                 *slot = seed_byte.wrapping_add(i as u8);
             }
-            let plaintext: Vec<u8> =
-                (0..len).map(|i| ((i as u16).wrapping_mul(31) & 0xff) as u8).collect();
+            let plaintext: Vec<u8> = (0..len)
+                .map(|i| ((i as u16).wrapping_mul(31) & 0xff) as u8)
+                .collect();
 
             let payload = encrypt_with_nonce(&ck, &nonce, &plaintext).unwrap();
             let decrypted = decrypt(&ck, &payload).unwrap();
@@ -469,9 +486,24 @@ mod message_keys_tests {
             let mut nonce = [0u8; 32];
             nonce.copy_from_slice(&hex::decode(&entry.nonce).unwrap());
             let (chacha_key, chacha_nonce, hmac_key) = message_keys(&ck, &nonce).unwrap();
-            assert_eq!(hex::encode(chacha_key), entry.chacha_key, "nonce: {}", entry.nonce);
-            assert_eq!(hex::encode(chacha_nonce), entry.chacha_nonce, "nonce: {}", entry.nonce);
-            assert_eq!(hex::encode(hmac_key), entry.hmac_key, "nonce: {}", entry.nonce);
+            assert_eq!(
+                hex::encode(chacha_key),
+                entry.chacha_key,
+                "nonce: {}",
+                entry.nonce
+            );
+            assert_eq!(
+                hex::encode(chacha_nonce),
+                entry.chacha_nonce,
+                "nonce: {}",
+                entry.nonce
+            );
+            assert_eq!(
+                hex::encode(hmac_key),
+                entry.hmac_key,
+                "nonce: {}",
+                entry.nonce
+            );
         }
     }
 }

@@ -29,6 +29,7 @@ pub enum WorkerMessageAction {
     TerminalResultCandidate { kind: WorkerTerminalResultKind },
     PublishRequestCandidate,
     PublishedNotification { mode: WorkerPublishedMode },
+    TelegramSendRequestCandidate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +128,7 @@ fn action_for_worker_message(
         "aborted" => Ok(terminal(WorkerTerminalResultKind::Aborted)),
         "error" => Ok(terminal(WorkerTerminalResultKind::Error)),
         "heartbeat" => Ok(WorkerMessageAction::HeartbeatSnapshotCandidate),
+        "telegram_send_request" => Ok(WorkerMessageAction::TelegramSendRequestCandidate),
         _ => Err(WorkerMessageError::UnsupportedWorkerMessageType {
             message_type: message_type.to_string(),
         }),

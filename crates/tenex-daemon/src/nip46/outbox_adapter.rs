@@ -84,10 +84,8 @@ mod tests {
         let signer = backend_signer();
         let event = signed_nip46_event(&signer);
 
-        let adapter = PublishOutboxAdapter::new(
-            tmp.path().to_path_buf(),
-            signer.pubkey_hex().to_string(),
-        );
+        let adapter =
+            PublishOutboxAdapter::new(tmp.path().to_path_buf(), signer.pubkey_hex().to_string());
 
         adapter
             .enqueue(event.clone(), vec!["wss://relay".to_string()])
@@ -100,7 +98,10 @@ mod tests {
         assert_eq!(persisted.event, event);
         assert_eq!(persisted.request.agent_pubkey, signer.pubkey_hex());
         assert!(
-            persisted.request.request_id.starts_with(NIP46_OUTBOX_REQUEST_PREFIX),
+            persisted
+                .request
+                .request_id
+                .starts_with(NIP46_OUTBOX_REQUEST_PREFIX),
             "request_id {} should carry nip46 prefix",
             persisted.request.request_id
         );
@@ -115,10 +116,7 @@ mod tests {
         let signer = backend_signer();
         let event = signed_nip46_event(&signer);
 
-        let adapter = PublishOutboxAdapter::new(
-            blocking_file,
-            signer.pubkey_hex().to_string(),
-        );
+        let adapter = PublishOutboxAdapter::new(blocking_file, signer.pubkey_hex().to_string());
 
         let err = adapter
             .enqueue(event, vec!["wss://relay".to_string()])

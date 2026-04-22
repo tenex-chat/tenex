@@ -9,7 +9,8 @@ use crate::worker_dispatch_execution::WorkerDispatchSession;
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_message_flow::{
     WorkerMessageFlowError, WorkerMessageFlowInput, WorkerMessageFlowOutcome,
-    WorkerMessagePublishContext, WorkerMessageTerminalContext, handle_worker_message_flow,
+    WorkerMessagePublishContext, WorkerMessageTerminalContext, WorkerTelegramSendMessageContext,
+    handle_worker_message_flow,
 };
 use crate::worker_protocol::{WorkerProtocolError, decode_agent_worker_protocol_frame};
 use crate::worker_runtime_state::WorkerRuntimeState;
@@ -22,6 +23,7 @@ pub struct WorkerSessionLoopInput<'a> {
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
+    pub telegram_send: Option<WorkerTelegramSendMessageContext<'a>>,
     pub max_frames: u64,
 }
 
@@ -101,6 +103,7 @@ where
                 observed_at: input.observed_at,
                 publish: input.publish,
                 terminal,
+                telegram_send: input.telegram_send,
             },
         )
         .map_err(|source| WorkerSessionLoopError::MessageFlow { source })?;
@@ -124,7 +127,8 @@ where
             | WorkerMessageFlowOutcome::PublishRequestHandled { .. }
             | WorkerMessageFlowOutcome::ControlTelemetry { .. }
             | WorkerMessageFlowOutcome::StreamTelemetry { .. }
-            | WorkerMessageFlowOutcome::PublishedNotification { .. } => {}
+            | WorkerMessageFlowOutcome::PublishedNotification { .. }
+            | WorkerMessageFlowOutcome::TelegramSendRequestHandled { .. } => {}
         }
     }
 }
@@ -263,6 +267,7 @@ mod tests {
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
+                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -308,6 +313,7 @@ mod tests {
                     result_timestamp: 1_710_001_000_200,
                 }),
                 terminal: None,
+                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -344,6 +350,7 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: None,
                 terminal: None,
+                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -377,6 +384,7 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: None,
                 terminal: None,
+                telegram_send: None,
                 max_frames: 4,
             },
         )
@@ -405,6 +413,7 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: None,
                 terminal: None,
+                telegram_send: None,
                 max_frames: 1,
             },
         )
@@ -467,6 +476,7 @@ mod tests {
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
+                telegram_send: None,
                 max_frames: 8,
             },
         )

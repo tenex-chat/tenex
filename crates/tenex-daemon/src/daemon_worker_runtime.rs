@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tracing;
 
@@ -34,7 +34,9 @@ use crate::worker_dispatch_tick::{
 };
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_launch::{WorkerLaunchPlanInput, plan_worker_launch};
-use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
+use crate::worker_message_flow::{
+    WorkerMessagePublishContext, WorkerMessageTerminalContext, WorkerTelegramSendMessageContext,
+};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
 use crate::worker_result::WorkerResultTransitionContext;
@@ -43,6 +45,7 @@ use crate::worker_session_loop::{
     WorkerSessionLoopError, WorkerSessionLoopInput, WorkerSessionLoopOutcome,
     run_worker_session_loop,
 };
+use crate::worker_telegram_send_flow::WorkerTelegramSendContext;
 
 #[derive(Debug)]
 pub struct DaemonWorkerRuntimeInput<'a> {
@@ -64,6 +67,7 @@ pub struct DaemonWorkerRuntimeInput<'a> {
     pub started_at: u64,
     pub frame_observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext>,
+    pub telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
     pub terminal: DaemonWorkerTerminalRuntimeInput,
     pub max_frames: u64,
 }
@@ -81,7 +85,15 @@ pub struct DaemonWorkerRuntimeFilesystemInput<'a> {
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
     pub publish: Option<WorkerMessagePublishContext>,
+    pub telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
     pub max_frames: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonWorkerTelegramSendRuntimeInput {
+    pub data_dir: PathBuf,
+    pub backend_pubkey: String,
+    pub writer_version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,6 +206,7 @@ where
         writer_version,
         resolved_pending_delegations,
         publish,
+        telegram_send,
         max_frames,
     } = input;
 
@@ -273,6 +286,7 @@ where
         runtime_state,
         now_ms,
         publish,
+        telegram_send,
         DaemonWorkerFilesystemTerminalInput {
             timestamp: now_ms,
             writer_version,
@@ -316,6 +330,7 @@ where
         started_at,
         frame_observed_at,
         publish,
+        telegram_send,
         terminal,
         max_frames,
     } = input;
@@ -363,6 +378,7 @@ where
             runtime_state,
             frame_observed_at,
             publish,
+            telegram_send,
             terminal,
             max_frames,
             *started,
@@ -549,6 +565,7 @@ fn run_started_worker_session<S>(
     runtime_state: &mut WorkerRuntimeState,
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext>,
+    telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
     terminal: DaemonWorkerTerminalRuntimeInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -577,6 +594,7 @@ where
         runtime_state,
         frame_observed_at,
         publish,
+        telegram_send,
         terminal,
         max_frames,
         started,
@@ -590,6 +608,7 @@ fn run_started_worker_session_from_filesystem<S>(
     runtime_state: &mut WorkerRuntimeState,
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext>,
+    telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
     terminal: DaemonWorkerFilesystemTerminalInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -628,6 +647,7 @@ where
         runtime_state,
         frame_observed_at,
         publish,
+        telegram_send,
         terminal,
         max_frames,
         started,
@@ -641,6 +661,7 @@ fn run_started_worker_session_with_state<S>(
     runtime_state: &mut WorkerRuntimeState,
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext>,
+    telegram_send: Option<DaemonWorkerTelegramSendRuntimeInput>,
     terminal: DaemonWorkerTerminalRuntimeInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -668,6 +689,19 @@ where
     .entered();
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
 
+    let telegram_send = telegram_send
+        .as_ref()
+        .map(|telegram| WorkerTelegramSendMessageContext {
+            accepted_at: frame_observed_at,
+            result_sequence: terminal.dispatch_sequence.saturating_add(1),
+            result_timestamp: frame_observed_at,
+            context: WorkerTelegramSendContext {
+                data_dir: telegram.data_dir.as_path(),
+                backend_pubkey: telegram.backend_pubkey.as_str(),
+                writer_version: telegram.writer_version.as_str(),
+            },
+        });
+
     let session = run_worker_session_loop(
         &mut session,
         WorkerSessionLoopInput {
@@ -677,8 +711,8 @@ where
             observed_at: frame_observed_at,
             publish,
             terminal: Some(WorkerMessageTerminalContext {
-                scheduler: &scheduler,
-                dispatch_state: &dispatch_state,
+                scheduler,
+                dispatch_state,
                 result_context: WorkerResultTransitionContext {
                     worker_id: worker_id.clone(),
                     claim_token,
@@ -695,6 +729,7 @@ where
                 }),
                 locks: started.started.locks,
             }),
+            telegram_send,
             max_frames,
         },
     )
@@ -1517,6 +1552,7 @@ mod tests {
             started_at: 1_710_000_700_030,
             frame_observed_at: 1_710_000_700_040,
             publish,
+            telegram_send: None,
             terminal: DaemonWorkerTerminalRuntimeInput {
                 journal_sequence: 3,
                 journal_timestamp: 1_710_000_700_050,
@@ -1572,6 +1608,7 @@ mod tests {
             writer_version: "test-version".to_string(),
             resolved_pending_delegations: Vec::new(),
             publish,
+            telegram_send: None,
             max_frames,
         }
     }

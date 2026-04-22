@@ -25,6 +25,10 @@ use crate::worker_result::WorkerResultTransitionContext;
 use crate::worker_runtime_state::{
     ActiveWorkerRuntimeSnapshot, WorkerRuntimeState, WorkerRuntimeStateError,
 };
+use crate::worker_telegram_send_flow::{
+    WorkerTelegramSendContext, WorkerTelegramSendFlowError, WorkerTelegramSendFlowInput,
+    WorkerTelegramSendFlowOutcome, handle_worker_telegram_send_request,
+};
 use crate::worker_terminal_flow::{
     AppliedWorkerTerminalFlow, WorkerTerminalFlowError, WorkerTerminalFlowInput,
     handle_worker_terminal_result,
@@ -38,6 +42,21 @@ pub struct WorkerMessageFlowInput<'a> {
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
+    /// Telegram proactive-send context. Required when a
+    /// `telegram_send_request` frame arrives; higher layers must plumb
+    /// this from daemon state. Absent contexts surface as
+    /// [`WorkerMessageFlowError::MissingTelegramSendContext`].
+    pub telegram_send: Option<WorkerTelegramSendMessageContext<'a>>,
+}
+
+/// Context carrying the per-flow state needed to enqueue a Telegram outbox
+/// record from a worker `telegram_send_request`.
+#[derive(Debug, Clone, Copy)]
+pub struct WorkerTelegramSendMessageContext<'a> {
+    pub accepted_at: u64,
+    pub result_sequence: u64,
+    pub result_timestamp: u64,
+    pub context: WorkerTelegramSendContext<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +103,9 @@ pub enum WorkerMessageFlowOutcome {
     BootFailureCandidate {
         message: WorkerMessagePlan,
         candidate: WorkerBootFailureCandidate,
+    },
+    TelegramSendRequestHandled {
+        outcome: Box<WorkerTelegramSendFlowOutcome>,
     },
 }
 
@@ -140,6 +162,8 @@ pub enum WorkerMessageFlowError {
     MissingPublishContext { message_type: String },
     #[error("worker message type {message_type} needs terminal context")]
     MissingTerminalContext { message_type: String },
+    #[error("worker message type {message_type} needs telegram send context")]
+    MissingTelegramSendContext { message_type: String },
     #[error("worker publish flow failed: {source}")]
     Publish {
         #[source]
@@ -149,6 +173,11 @@ pub enum WorkerMessageFlowError {
     Terminal {
         #[source]
         source: Box<WorkerTerminalFlowError>,
+    },
+    #[error("worker telegram send flow failed: {source}")]
+    TelegramSend {
+        #[source]
+        source: Box<WorkerTelegramSendFlowError>,
     },
 }
 
@@ -253,6 +282,29 @@ where
             Ok(WorkerMessageFlowOutcome::BootFailureCandidate {
                 message: message_plan,
                 candidate,
+            })
+        }
+        WorkerMessageAction::TelegramSendRequestCandidate => {
+            let telegram_send = input.telegram_send.ok_or_else(|| {
+                WorkerMessageFlowError::MissingTelegramSendContext {
+                    message_type: message_plan.metadata.message_type.clone(),
+                }
+            })?;
+            let outcome = handle_worker_telegram_send_request(
+                session,
+                WorkerTelegramSendFlowInput {
+                    daemon_dir: input.daemon_dir,
+                    message: &message_plan.message,
+                    context: telegram_send.context,
+                    accepted_at: telegram_send.accepted_at,
+                    result_sequence: telegram_send.result_sequence,
+                    result_timestamp: telegram_send.result_timestamp,
+                },
+            )
+            .map_err(WorkerMessageFlowError::from)?;
+
+            Ok(WorkerMessageFlowOutcome::TelegramSendRequestHandled {
+                outcome: Box::new(outcome),
             })
         }
     }
@@ -425,6 +477,14 @@ impl From<WorkerTerminalFlowError> for WorkerMessageFlowError {
     }
 }
 
+impl From<WorkerTelegramSendFlowError> for WorkerMessageFlowError {
+    fn from(source: WorkerTelegramSendFlowError) -> Self {
+        Self::TelegramSend {
+            source: Box::new(source),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,6 +561,7 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: None,
                 terminal: None,
+                telegram_send: None,
             },
         )
         .expect("heartbeat message flow must succeed");
@@ -547,6 +608,7 @@ mod tests {
                     result_timestamp: 1_710_001_000_200,
                 }),
                 terminal: None,
+                telegram_send: None,
             },
         )
         .expect("publish request message flow must succeed");
@@ -602,6 +664,7 @@ mod tests {
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
+                telegram_send: None,
             },
         )
         .expect("terminal message flow must succeed");
@@ -646,6 +709,7 @@ mod tests {
                 observed_at: 1_710_000_401_500,
                 publish: None,
                 terminal: None,
+                telegram_send: None,
             },
         )
         .expect("stream telemetry message flow must succeed");
@@ -678,6 +742,7 @@ mod tests {
                 observed_at: 1_710_000_401_150,
                 publish: None,
                 terminal: None,
+                telegram_send: None,
             },
         )
         .expect("boot error message flow must classify");
@@ -716,6 +781,7 @@ mod tests {
                 observed_at: 1_710_000_500_050,
                 publish: None,
                 terminal: None,
+                telegram_send: None,
             },
         )
         .expect_err("terminal message needs terminal context");

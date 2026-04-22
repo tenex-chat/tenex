@@ -40,7 +40,9 @@ pub fn parse_bunker_uri(raw: &str) -> Result<BunkerUri, BunkerUriError> {
     let parsed = Url::parse(&format!("http://{rest}"))
         .map_err(|err| BunkerUriError::Parse(err.to_string()))?;
 
-    let remote_pubkey = parsed.host_str().ok_or(BunkerUriError::MissingRemotePubkey)?;
+    let remote_pubkey = parsed
+        .host_str()
+        .ok_or(BunkerUriError::MissingRemotePubkey)?;
 
     XOnlyPublicKey::from_str(remote_pubkey)
         .map_err(|err| BunkerUriError::InvalidRemotePubkey(err.to_string()))?;

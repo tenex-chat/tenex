@@ -21,6 +21,7 @@ const DAEMON_TO_WORKER_MESSAGE_TYPES: &[&str] = &[
     "ping",
     "publish_result",
     "ack",
+    "telegram_send_result",
 ];
 
 const WORKER_TO_DAEMON_MESSAGE_TYPES: &[&str] = &[
@@ -43,7 +44,11 @@ const WORKER_TO_DAEMON_MESSAGE_TYPES: &[&str] = &[
     "aborted",
     "error",
     "heartbeat",
+    "telegram_send_request",
 ];
+
+pub const TELEGRAM_SEND_CONTENT_MAX_BYTES: usize =
+    AGENT_WORKER_MAX_FRAME_BYTES as usize - AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -237,6 +242,23 @@ pub struct AgentWorkerAckMessageInput {
     pub durable: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWorkerTelegramSendResultStatus {
+    Accepted,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentWorkerTelegramSendResultMessageInput {
+    pub correlation_id: String,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub status: AgentWorkerTelegramSendResultStatus,
+    pub error_reason: Option<String>,
+    pub error_detail: Option<String>,
+}
+
 pub fn validate_worker_protocol_config(config: &WorkerProtocolConfig) -> WorkerProtocolResult<()> {
     if config.version != AGENT_WORKER_PROTOCOL_VERSION {
         return Err(WorkerProtocolError::UnsupportedVersion(config.version));
@@ -299,6 +321,8 @@ pub fn validate_agent_worker_protocol_message(
         "aborted" => validate_aborted(object)?,
         "error" => validate_error_message(object)?,
         "heartbeat" => validate_heartbeat(object)?,
+        "telegram_send_request" => validate_telegram_send_request(object)?,
+        "telegram_send_result" => validate_telegram_send_result(object)?,
         _ => {
             return Err(WorkerProtocolError::UnknownMessageType(
                 message_type.to_string(),
@@ -387,6 +411,52 @@ pub fn build_agent_worker_publish_result_message(
             .as_object_mut()
             .expect("publish_result message must be a JSON object")
             .insert("error".to_string(), error);
+    }
+
+    validate_agent_worker_protocol_message(&message)?;
+    Ok(message)
+}
+
+pub fn build_agent_worker_telegram_send_result_message(
+    input: AgentWorkerTelegramSendResultMessageInput,
+) -> WorkerProtocolResult<Value> {
+    let mut message = json!({
+        "version": AGENT_WORKER_PROTOCOL_VERSION,
+        "type": "telegram_send_result",
+        "correlationId": input.correlation_id,
+        "sequence": input.sequence,
+        "timestamp": input.timestamp,
+        "status": input.status,
+    });
+
+    let object = message
+        .as_object_mut()
+        .expect("telegram_send_result message must be a JSON object");
+
+    match input.status {
+        AgentWorkerTelegramSendResultStatus::Failed => {
+            let reason = input
+                .error_reason
+                .as_ref()
+                .filter(|value| !value.is_empty())
+                .ok_or(WorkerProtocolError::MissingField("errorReason"))?;
+            object.insert("errorReason".to_string(), Value::String(reason.clone()));
+            if let Some(detail) = input
+                .error_detail
+                .as_ref()
+                .filter(|value| !value.is_empty())
+            {
+                object.insert("errorDetail".to_string(), Value::String(detail.clone()));
+            }
+        }
+        AgentWorkerTelegramSendResultStatus::Accepted => {
+            if input.error_reason.is_some() {
+                return Err(WorkerProtocolError::InvalidField("errorReason"));
+            }
+            if input.error_detail.is_some() {
+                return Err(WorkerProtocolError::InvalidField("errorDetail"));
+            }
+        }
     }
 
     validate_agent_worker_protocol_message(&message)?;
@@ -793,6 +863,46 @@ fn validate_heartbeat(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     )?;
     require_u64(object, "activeToolCount")?;
     require_u64(object, "accumulatedRuntimeMs")?;
+    Ok(())
+}
+
+fn validate_telegram_send_request(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    require_hex_pubkey(object, "senderAgentPubkey")?;
+    require_string(object, "channelId")?;
+    let content = require_string(object, "content")?;
+    if content.len() > TELEGRAM_SEND_CONTENT_MAX_BYTES {
+        return Err(WorkerProtocolError::InvalidField("content"));
+    }
+    Ok(())
+}
+
+fn validate_telegram_send_result(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    let status = require_string(object, "status")?;
+    if !["accepted", "failed"].contains(&status) {
+        return Err(WorkerProtocolError::InvalidField("status"));
+    }
+    let has_error_reason = object.contains_key("errorReason");
+    let has_error_detail = object.contains_key("errorDetail");
+    match status {
+        "failed" => {
+            if !has_error_reason {
+                return Err(WorkerProtocolError::MissingField("errorReason"));
+            }
+            require_string(object, "errorReason")?;
+            if has_error_detail {
+                require_string(object, "errorDetail")?;
+            }
+        }
+        "accepted" => {
+            if has_error_reason {
+                return Err(WorkerProtocolError::InvalidField("errorReason"));
+            }
+            if has_error_detail {
+                return Err(WorkerProtocolError::InvalidField("errorDetail"));
+            }
+        }
+        _ => unreachable!("status is validated by require_one_of above"),
+    }
     Ok(())
 }
 
