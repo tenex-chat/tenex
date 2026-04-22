@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::dispatch_queue::workers_dir;
 use crate::worker_protocol::{
-    AgentWorkerExecutionFlags, WorkerProtocolError, validate_agent_worker_protocol_message,
+    validate_agent_worker_protocol_message, AgentWorkerExecutionFlags, WorkerProtocolError,
 };
 
 pub const WORKER_DISPATCH_INPUT_SCHEMA_VERSION: u32 = 1;
@@ -576,6 +576,10 @@ mod tests {
     use serde_json::json;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
+        "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
+    );
+
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
@@ -722,6 +726,93 @@ mod tests {
         assert_eq!(fields.project_base_path, "/repo");
         assert_eq!(fields.metadata_path, "/repo/.tenex/project.json");
         assert!(fields.execution_flags.has_pending_delegations);
+    }
+
+    #[test]
+    fn fixture_execute_fields_serialize_and_resolve_to_bun_worker_protocol_shape() {
+        let fixture: Value =
+            serde_json::from_str(WORKER_PROTOCOL_FIXTURE).expect("fixture must parse");
+        let execution = fixture["execution"].clone();
+        let execute_message = fixture["validMessages"]
+            .as_array()
+            .expect("validMessages must be an array")
+            .iter()
+            .find(|message| message["name"] == "execute")
+            .unwrap_or_else(|| panic!("fixture message execute must exist"))["message"]
+            .clone();
+        let triggering_envelope = execute_message["triggeringEnvelope"].clone();
+        let project_base_path = execution["projectBasePath"]
+            .as_str()
+            .expect("execution.projectBasePath must be a string")
+            .to_string();
+        let metadata_path = execution["metadataPath"]
+            .as_str()
+            .expect("execution.metadataPath must be a string")
+            .to_string();
+        let native_id = triggering_envelope["message"]["nativeId"]
+            .as_str()
+            .expect("triggeringEnvelope.message.nativeId must be a string")
+            .to_string();
+
+        let resolved_fields =
+            WorkerDispatchInput::from_execute_message(WorkerDispatchInputFromExecuteMessage {
+                dispatch_id: "dispatch-fixture".to_string(),
+                source_type: WorkerDispatchInputSourceType::Nostr,
+                writer: writer_metadata(),
+                execute_message: execute_message.clone(),
+                source_metadata: Some(execution.clone()),
+            })
+            .resolved_execute_fields()
+            .expect("fixture execute message must resolve to execute fields");
+
+        assert_eq!(resolved_fields.triggering_event_id, native_id);
+        assert_eq!(resolved_fields.project_base_path, project_base_path);
+        assert_eq!(resolved_fields.metadata_path, metadata_path);
+        assert_eq!(resolved_fields.triggering_envelope, triggering_envelope);
+        assert_eq!(
+            resolved_fields.execution_flags,
+            AgentWorkerExecutionFlags {
+                is_delegation_completion: false,
+                has_pending_delegations: false,
+                debug: true,
+            }
+        );
+
+        let dispatch_input =
+            WorkerDispatchInput::from_execute_fields(WorkerDispatchInputFromExecuteFields {
+                dispatch_id: "dispatch-fixture".to_string(),
+                source_type: WorkerDispatchInputSourceType::Nostr,
+                writer: writer_metadata(),
+                execute_fields: resolved_fields.clone(),
+                source_metadata: Some(execution.clone()),
+            });
+
+        validate_worker_dispatch_input(&dispatch_input)
+            .expect("fixture dispatch input must validate");
+        assert_eq!(
+            dispatch_input
+                .execute_fields
+                .as_ref()
+                .expect("dispatch input must carry execute fields"),
+            &resolved_fields
+        );
+
+        let serialized =
+            serde_json::to_value(&dispatch_input).expect("fixture dispatch input must serialize");
+        assert_eq!(serialized["sourceMetadata"], execution);
+        assert_eq!(
+            serialized["executeFields"]["projectBasePath"],
+            project_base_path
+        );
+        assert_eq!(serialized["executeFields"]["metadataPath"], metadata_path);
+        assert_eq!(
+            serialized["executeFields"]["triggeringEnvelope"]["message"]["nativeId"],
+            native_id
+        );
+        assert_eq!(
+            serialized["executeFields"]["executionFlags"],
+            execute_message["executionFlags"]
+        );
     }
 
     #[test]
