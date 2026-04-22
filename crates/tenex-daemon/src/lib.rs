@@ -8,6 +8,7 @@ pub mod daemon_worker_runtime;
 pub mod dispatch_queue;
 pub mod filesystem_state;
 pub mod nostr_event;
+pub mod operations_status_runtime;
 pub mod process_liveness;
 pub mod publish_outbox;
 pub mod publish_runtime;

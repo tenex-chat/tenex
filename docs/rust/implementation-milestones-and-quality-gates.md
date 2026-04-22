@@ -824,6 +824,10 @@ Landed slices:
   maintain, and backend-event enqueue wrappers over the publish outbox so
   backend-authored status/heartbeat encoders can enter the same durable publish
   path as worker-authored events.
+- `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
+  projection from active worker heartbeat state into kind `24133`
+  operations-status drafts, including cleanup drafts with no active-agent
+  `p` tags. Library-only; no periodic status publisher wiring.
 
 Scope:
 
