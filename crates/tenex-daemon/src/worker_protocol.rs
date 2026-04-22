@@ -1,5 +1,6 @@
-use serde::Deserialize;
-use serde_json::{Map, Value};
+use crate::dispatch_queue::{DispatchQueueRecord, DispatchQueueStatus};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
 use thiserror::Error;
 
 pub const AGENT_WORKER_PROTOCOL_VERSION: u64 = 1;
@@ -63,6 +64,20 @@ pub enum WorkerProtocolError {
     UnsupportedVersion(u64),
     #[error("unknown message type: {0}")]
     UnknownMessageType(String),
+    #[error(
+        "dispatch {dispatch_id} is not leased for worker execution; latest status is {status:?}"
+    )]
+    DispatchNotLeasedForExecute {
+        dispatch_id: String,
+        status: DispatchQueueStatus,
+    },
+    #[error(
+        "triggering envelope native id {native_id} does not match dispatch triggering event {triggering_event_id}"
+    )]
+    TriggeringEnvelopeMismatch {
+        triggering_event_id: String,
+        native_id: String,
+    },
     #[error("frame is missing length prefix: {actual} bytes")]
     FrameTooShort { actual: usize },
     #[error("frame payload exceeds maximum: {payload_bytes} > {max_payload_bytes}")]
@@ -156,6 +171,25 @@ pub struct InvalidWorkerFrameFixture {
     pub frame_hex: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWorkerExecutionFlags {
+    pub is_delegation_completion: bool,
+    pub has_pending_delegations: bool,
+    pub debug: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentWorkerExecuteMessageInput<'a> {
+    pub dispatch: &'a DispatchQueueRecord,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub project_base_path: String,
+    pub metadata_path: String,
+    pub triggering_envelope: Value,
+    pub execution_flags: AgentWorkerExecutionFlags,
+}
+
 pub fn validate_worker_protocol_config(config: &WorkerProtocolConfig) -> WorkerProtocolResult<()> {
     if config.version != AGENT_WORKER_PROTOCOL_VERSION {
         return Err(WorkerProtocolError::UnsupportedVersion(config.version));
@@ -226,6 +260,45 @@ pub fn validate_agent_worker_protocol_message(
     }
 
     Ok(direction)
+}
+
+pub fn build_agent_worker_execute_message(
+    input: AgentWorkerExecuteMessageInput<'_>,
+) -> WorkerProtocolResult<Value> {
+    if input.dispatch.status != DispatchQueueStatus::Leased {
+        return Err(WorkerProtocolError::DispatchNotLeasedForExecute {
+            dispatch_id: input.dispatch.dispatch_id.clone(),
+            status: input.dispatch.status,
+        });
+    }
+
+    let envelope_native_id = triggering_envelope_native_id(&input.triggering_envelope)?;
+    if envelope_native_id != input.dispatch.triggering_event_id {
+        return Err(WorkerProtocolError::TriggeringEnvelopeMismatch {
+            triggering_event_id: input.dispatch.triggering_event_id.clone(),
+            native_id: envelope_native_id.to_string(),
+        });
+    }
+
+    let message = json!({
+        "version": AGENT_WORKER_PROTOCOL_VERSION,
+        "type": "execute",
+        "correlationId": &input.dispatch.correlation_id,
+        "sequence": input.sequence,
+        "timestamp": input.timestamp,
+        "projectId": &input.dispatch.ral.project_id,
+        "projectBasePath": input.project_base_path,
+        "metadataPath": input.metadata_path,
+        "agentPubkey": &input.dispatch.ral.agent_pubkey,
+        "conversationId": &input.dispatch.ral.conversation_id,
+        "ralNumber": input.dispatch.ral.ral_number,
+        "ralClaimToken": &input.dispatch.claim_token,
+        "triggeringEnvelope": input.triggering_envelope,
+        "executionFlags": input.execution_flags,
+    });
+
+    validate_agent_worker_protocol_message(&message)?;
+    Ok(message)
 }
 
 pub fn canonical_agent_worker_protocol_json(value: &Value) -> WorkerProtocolResult<String> {
@@ -808,15 +881,111 @@ fn require_string_array(
     Ok(())
 }
 
+fn triggering_envelope_native_id(envelope: &Value) -> WorkerProtocolResult<&str> {
+    let envelope = envelope
+        .as_object()
+        .ok_or(WorkerProtocolError::InvalidField("triggeringEnvelope"))?;
+    let message = require_object(envelope, "message")?;
+    require_string(message, "nativeId")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dispatch_queue::{
+        DispatchQueueRecordParams, DispatchRalIdentity, build_dispatch_queue_record,
+    };
+    use serde_json::json;
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
         "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
     );
     const WORKER_FRAME_CODEC_FIXTURE: &str =
         include_str!("../../../src/test-utils/fixtures/worker-protocol/frame-codec.compat.json");
+
+    #[test]
+    fn execute_message_builder_matches_shared_fixture_and_round_trips() {
+        let expected = fixture_execute_message();
+        let dispatch = fixture_dispatch_from_execute(&expected, DispatchQueueStatus::Leased);
+
+        let built = build_agent_worker_execute_message(fixture_execute_input(&dispatch, &expected))
+            .expect("execute message must build");
+
+        assert_eq!(built, expected);
+        assert_eq!(
+            validate_agent_worker_protocol_message(&built),
+            Ok(WorkerProtocolDirection::DaemonToWorker)
+        );
+
+        let encoded = encode_agent_worker_protocol_frame(&built).expect("frame must encode");
+        let decoded = decode_agent_worker_protocol_frame(&encoded).expect("frame must decode");
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn execute_message_builder_rejects_non_leased_dispatch_records() {
+        let expected = fixture_execute_message();
+
+        for status in [
+            DispatchQueueStatus::Queued,
+            DispatchQueueStatus::Completed,
+            DispatchQueueStatus::Cancelled,
+        ] {
+            let dispatch = fixture_dispatch_from_execute(&expected, status);
+            let error =
+                build_agent_worker_execute_message(fixture_execute_input(&dispatch, &expected))
+                    .expect_err("non-leased dispatch must not build");
+
+            assert_eq!(
+                error,
+                WorkerProtocolError::DispatchNotLeasedForExecute {
+                    dispatch_id: "dispatch-fixture".to_string(),
+                    status,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn execute_message_builder_rejects_triggering_envelope_mismatch() {
+        let expected = fixture_execute_message();
+        let dispatch = fixture_dispatch_from_execute(&expected, DispatchQueueStatus::Leased);
+        let mut input = fixture_execute_input(&dispatch, &expected);
+        input.triggering_envelope["message"]["nativeId"] = json!("different-event-id");
+
+        let error = build_agent_worker_execute_message(input)
+            .expect_err("mismatched triggering envelope must fail");
+
+        assert_eq!(
+            error,
+            WorkerProtocolError::TriggeringEnvelopeMismatch {
+                triggering_event_id: "trigger-event-id".to_string(),
+                native_id: "different-event-id".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn execute_message_builder_validates_explicit_context_and_record_identity() {
+        let expected = fixture_execute_message();
+        let dispatch = fixture_dispatch_from_execute(&expected, DispatchQueueStatus::Leased);
+        let mut input = fixture_execute_input(&dispatch, &expected);
+        input.project_base_path.clear();
+
+        assert_eq!(
+            build_agent_worker_execute_message(input),
+            Err(WorkerProtocolError::InvalidField("projectBasePath"))
+        );
+
+        let mut invalid_dispatch =
+            fixture_dispatch_from_execute(&expected, DispatchQueueStatus::Leased);
+        invalid_dispatch.ral.agent_pubkey = "not-a-hex-pubkey".to_string();
+
+        assert_eq!(
+            build_agent_worker_execute_message(fixture_execute_input(&invalid_dispatch, &expected)),
+            Err(WorkerProtocolError::InvalidField("agentPubkey"))
+        );
+    }
 
     #[test]
     fn worker_protocol_fixture_matches_rust_validator() {
@@ -886,5 +1055,79 @@ mod tests {
                 invalid_frame.name
             );
         }
+    }
+
+    fn fixture_execute_message() -> Value {
+        let fixture: WorkerProtocolFixture =
+            serde_json::from_str(WORKER_PROTOCOL_FIXTURE).expect("fixture must parse");
+        fixture
+            .valid_messages
+            .into_iter()
+            .find(|message| message.name == "execute")
+            .expect("fixture must include execute message")
+            .message
+    }
+
+    fn fixture_dispatch_from_execute(
+        execute: &Value,
+        status: DispatchQueueStatus,
+    ) -> DispatchQueueRecord {
+        build_dispatch_queue_record(DispatchQueueRecordParams {
+            sequence: 42,
+            timestamp: 1710000400999,
+            correlation_id: value_string(execute, "correlationId"),
+            dispatch_id: "dispatch-fixture".to_string(),
+            ral: DispatchRalIdentity {
+                project_id: value_string(execute, "projectId"),
+                agent_pubkey: value_string(execute, "agentPubkey"),
+                conversation_id: value_string(execute, "conversationId"),
+                ral_number: execute["ralNumber"]
+                    .as_u64()
+                    .expect("fixture ral number must be u64"),
+            },
+            triggering_event_id: execute["triggeringEnvelope"]["message"]["nativeId"]
+                .as_str()
+                .expect("fixture triggering native id must be string")
+                .to_string(),
+            claim_token: value_string(execute, "ralClaimToken"),
+            status,
+        })
+    }
+
+    fn fixture_execute_input<'a>(
+        dispatch: &'a DispatchQueueRecord,
+        execute: &Value,
+    ) -> AgentWorkerExecuteMessageInput<'a> {
+        let flags = &execute["executionFlags"];
+        AgentWorkerExecuteMessageInput {
+            dispatch,
+            sequence: execute["sequence"]
+                .as_u64()
+                .expect("fixture sequence must be u64"),
+            timestamp: execute["timestamp"]
+                .as_u64()
+                .expect("fixture timestamp must be u64"),
+            project_base_path: value_string(execute, "projectBasePath"),
+            metadata_path: value_string(execute, "metadataPath"),
+            triggering_envelope: execute["triggeringEnvelope"].clone(),
+            execution_flags: AgentWorkerExecutionFlags {
+                is_delegation_completion: flags["isDelegationCompletion"]
+                    .as_bool()
+                    .expect("fixture delegation flag must be bool"),
+                has_pending_delegations: flags["hasPendingDelegations"]
+                    .as_bool()
+                    .expect("fixture pending flag must be bool"),
+                debug: flags["debug"]
+                    .as_bool()
+                    .expect("fixture debug flag must be bool"),
+            },
+        }
+    }
+
+    fn value_string(value: &Value, key: &'static str) -> String {
+        value[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("fixture field {key} must be string"))
+            .to_string()
     }
 }

@@ -579,6 +579,11 @@ Scope:
   be leased, leased records can complete, and queued or leased records can be
   cancelled. The planner preserves the existing queue schema and does not infer
   worker ownership.
+- Assemble worker `execute` messages from leased dispatch queue/RAL data plus
+  explicit caller-supplied runtime context. The helper validates the assembled
+  message through the shared worker protocol rules, requires
+  `triggeringEnvelope.message.nativeId` to match the queued triggering event,
+  and does not read filesystem state or infer worker/process authority.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.
@@ -633,7 +638,8 @@ Scope:
 - Plan dispatch preparation bundles without side effects: a RAL allocation
   journal record, a matching claim journal record with caller-supplied claim
   token, and a queued dispatch record. RAL journal and dispatch queue sequence
-  spaces remain independent and are validated separately.
+  spaces remain independent and are validated separately; this bundle does not
+  grant worker execution authority until the dispatch is leased.
 - Implement orphan reconciliation planning and recovery classification. The
   current Rust library planner is transient: it proposes `crashed` journal
   records for claimed RALs whose worker ids are absent from the live worker set,

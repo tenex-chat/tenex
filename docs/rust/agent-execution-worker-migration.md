@@ -1010,7 +1010,8 @@ Current status:
   remains the `doctor` command surface plus the shared JSON fixtures, not the
   binary path itself.
 - The TypeScript bridge has focused unit coverage for the framed dispatch path:
-  spawn arguments, execute-frame construction, parent publish handling,
+  spawn arguments, execute-frame assembly from dispatch queue/RAL data plus
+  explicit caller context, parent publish handling,
   `publish_result` replies, RAL cleanup on completion, and parent RAL
   delegation mirroring on `waiting_for_delegation`.
 - Publish failure coverage verifies the bridge sends a failed `publish_result`
@@ -1176,6 +1177,10 @@ Work:
   claim record, and queued dispatch record as a single side-effect-free bundle.
   The caller supplies the claim token, and the planner validates RAL journal and
   dispatch queue sequence spaces independently.
+- Add a Rust worker execute-message assembler that accepts a leased dispatch
+  record plus explicit runtime context, validates the result through the shared
+  worker protocol contract, and checks that the triggering envelope native id
+  matches the queued triggering event id.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
   scope.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
