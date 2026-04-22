@@ -329,8 +329,9 @@ Current implementation status:
 - `crates/tenex-daemon/src/agent_inventory.rs` scans the TypeScript agent
   storage layout under `$TENEX_BASE_DIR/agents`, skips `index.json` and
   non-JSON entries, defaults missing status to active, and feeds active agents
-  into the installed-agent-list encoder with filename pubkeys as the canonical
-  disk identity.
+  into the installed-agent-list encoder by deriving pubkeys from stored
+  `nsec` values when present and otherwise falling back to the filename pubkey
+  as the disk identity.
 
 - `src/agents/execution/worker/agent-worker.ts` exists and speaks the framed
   worker protocol.
@@ -815,6 +816,10 @@ Landed slices:
   tests (event id equals `sha256(canonical_payload)`, signature verifies against
   the claimed xonly pubkey, ordered `p` tags, empty content, no self p-tag).
   Library-only; no daemon wiring.
+- `crates/tenex-daemon/src/backend_heartbeat_latch.rs` — pure planner that
+  replays owner-authored kind `14199` ProjectAgentSnapshot events and latches
+  backend heartbeating off once the backend pubkey appears in any owner `p`
+  tag. Library-only; no relay subscriptions or publish side effects.
 - `crates/tenex-daemon/src/backend_events/project_status.rs` — Rust encoder and
   signer for kind `24010` project status, preserving the TypeScript-compatible
   client-visible content and tag ordering. Library-only; no daemon wiring.
