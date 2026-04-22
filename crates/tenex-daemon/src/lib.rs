@@ -23,6 +23,7 @@ pub mod dispatch_queue;
 pub mod filesystem_state;
 pub mod inbound_envelope;
 pub mod nostr_event;
+pub mod nostr_inbound;
 pub mod operations_status_runtime;
 pub mod periodic_tick;
 pub mod periodic_tick_state;
