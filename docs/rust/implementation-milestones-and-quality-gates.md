@@ -587,6 +587,10 @@ Scope:
 - Keep daemon-to-worker control frames centralized in the worker protocol
   module: `shutdown`, `publish_result`, and `ack` builders must validate their
   output against the shared protocol schema before callers frame or send them.
+- Plan the lock-scoped worker launch seam without side effects: verify the
+  leased dispatch identity matches the expected RAL identity, derive allocation
+  and state lock scopes, and package the validated execute message without
+  acquiring locks or spawning a worker process.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.

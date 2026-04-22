@@ -1184,6 +1184,10 @@ Work:
 - Move daemon-to-worker `shutdown`, `publish_result`, and `ack` assembly behind
   Rust protocol helpers so process supervision and publishing code no longer
   hand-build compatible JSON frames.
+- Add a side-effect-free worker launch planner that verifies a leased dispatch
+  record against the expected RAL identity, derives allocation/state lock
+  scopes, and packages the validated execute message before any lock
+  acquisition or process spawn occurs.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
   scope.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
