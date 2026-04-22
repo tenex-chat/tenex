@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::backend_config::{BackendConfigSnapshot, read_backend_config};
@@ -18,7 +18,7 @@ pub const CHECK_IDENTITY_RELAYS: &str = "identity-relays";
 pub const CHECK_DAEMON_DIRECTORY: &str = "daemon-directory";
 pub const CHECK_LOCKFILE: &str = "lockfile";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadinessStatus {
     Ok,
@@ -33,15 +33,16 @@ impl ReadinessStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadinessCheck {
     pub name: String,
     pub status: ReadinessStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonReadinessReport {
     pub schema_version: u32,
@@ -64,12 +65,7 @@ pub fn inspect_daemon_readiness(
     let base_ok = check_base_directory(base_dir, &mut checks);
     let config = check_config_file(base_dir, base_ok, &mut checks);
     check_backend_signer(config.as_ref(), &mut checks);
-    check_relay_list(
-        config.as_ref(),
-        &mut checks,
-        CHECK_RELAYS,
-        relay_list_extractor,
-    );
+    check_relay_list(config.as_ref(), &mut checks, CHECK_RELAYS, relay_list_extractor);
     check_relay_list(
         config.as_ref(),
         &mut checks,
@@ -170,7 +166,10 @@ fn check_relay_list(
     extractor: fn(&BackendConfigSnapshot) -> Vec<String>,
 ) {
     let Some(config) = config else {
-        checks.push(missing_check(name, "depends on config-file".to_string()));
+        checks.push(missing_check(
+            name,
+            "depends on config-file".to_string(),
+        ));
         return;
     };
     let relays = extractor(config);
@@ -415,7 +414,10 @@ mod tests {
             );
         }
         assert!(report.ready);
-        assert_eq!(report.schema_version, DAEMON_READINESS_SCHEMA_VERSION);
+        assert_eq!(
+            report.schema_version,
+            DAEMON_READINESS_SCHEMA_VERSION
+        );
         cleanup(&dir);
     }
 
@@ -541,5 +543,53 @@ mod tests {
         assert!(names.contains(&CHECK_DAEMON_DIRECTORY));
         assert!(names.contains(&CHECK_LOCKFILE));
         cleanup(&dir);
+    }
+
+    #[test]
+    fn report_round_trips_through_json_with_stable_field_names() {
+        let dir = unique_temp_base_dir();
+        write_minimal_config(&dir, &["wss://a.example.com"], &["wss://b.example.com"]);
+        let original = inspect_daemon_readiness(&dir).unwrap();
+
+        let encoded = serde_json::to_string(&original).expect("serialize readiness report");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&encoded).expect("re-parse readiness report");
+
+        assert_eq!(parsed["schemaVersion"], DAEMON_READINESS_SCHEMA_VERSION);
+        assert_eq!(parsed["ready"], true);
+        let first_check = &parsed["checks"][0];
+        assert!(first_check["name"].is_string());
+        assert!(first_check["status"].is_string());
+
+        let decoded: DaemonReadinessReport =
+            serde_json::from_str(&encoded).expect("round-trip readiness report");
+        assert_eq!(decoded, original);
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn status_enum_serializes_as_lowercase_snake_case() {
+        let ok = serde_json::to_string(&ReadinessStatus::Ok).unwrap();
+        let missing = serde_json::to_string(&ReadinessStatus::Missing).unwrap();
+        let invalid = serde_json::to_string(&ReadinessStatus::Invalid).unwrap();
+        let blocked = serde_json::to_string(&ReadinessStatus::Blocked).unwrap();
+        assert_eq!(ok, "\"ok\"");
+        assert_eq!(missing, "\"missing\"");
+        assert_eq!(invalid, "\"invalid\"");
+        assert_eq!(blocked, "\"blocked\"");
+    }
+
+    #[test]
+    fn check_detail_is_omitted_when_none() {
+        let check = ReadinessCheck {
+            name: "x".to_string(),
+            status: ReadinessStatus::Ok,
+            detail: None,
+        };
+        let encoded = serde_json::to_string(&check).unwrap();
+        assert!(
+            !encoded.contains("detail"),
+            "detail None must be omitted, got {encoded}"
+        );
     }
 }
