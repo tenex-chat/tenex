@@ -4,7 +4,7 @@ This document describes the current system prompt architecture in TENEX. The key
 
 ## 1. High-Level Flow
 
-1. `ProjectRuntime.start()` creates a `ProjectContext` and a project-scoped `PromptCompilerRegistryService`.
+1. The project execution bootstrap creates a `ProjectContext` and a project-scoped `PromptCompilerRegistryService`.
 2. The registry registers every agent in that runtime and creates one `PromptCompilerService` per agent.
 3. Lesson and lesson-comment events are stored in `ProjectContext`.
 4. `ProjectContext` synchronizes the affected agent's lesson/comment snapshot into the registry.
@@ -16,7 +16,7 @@ The runtime never blocks an agent turn on compilation. If a recompile is in prog
 ## 2. Ownership Boundaries
 
 ### Runtime-owned compilation
-- **`src/daemon/ProjectRuntime.ts`** owns compiler lifecycle.
+- The project execution bootstrap owns compiler lifecycle.
 - **`src/services/prompt-compiler/PromptCompilerRegistryService.ts`** is the project-scoped coordinator.
 - **`src/services/prompt-compiler/prompt-compiler-service.ts`** is the per-agent worker that performs LLM synthesis, debouncing, disk caching, and kind:0 publishing.
 - **`src/services/projects/ProjectContext.ts`** is the source of truth for lessons and lesson comments and triggers registry synchronization after mutations.
@@ -68,7 +68,7 @@ When those inputs change:
 
 Lesson and lesson-comment ingestion happens outside the compiler:
 
-- **`src/daemon/Daemon.ts`** hydrates incoming lesson and lesson-comment events into active runtimes
+- The Rust control plane routes lesson and lesson-comment events into worker-visible project state.
 - **`src/event-handler/index.ts`** stores runtime-local lesson events in `ProjectContext`
 
 The compiler does not own NDK subscriptions, EOSE coordination, or comment-event parsing.

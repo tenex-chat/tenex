@@ -2,10 +2,9 @@
 
 ## Purpose
 
-This document describes a migration path from the current Bun/TypeScript daemon to
-a Rust control plane that starts Bun only when an agent execution actually needs
-to run. The target is not a full Rust rewrite of the AI execution stack. The
-target is:
+This document describes the Rust control plane that starts Bun only when an
+agent execution actually needs to run. The target is not a full Rust rewrite of
+the AI execution stack. The target is:
 
 ```text
 Rust daemon
@@ -30,23 +29,9 @@ see `docs/rust/implementation-milestones-and-quality-gates.md`.
 
 ## Current System Boundaries
 
-The current daemon is a single long-lived Bun process. Important current files:
+The active daemon is the Rust control plane in `crates/tenex-daemon`. Bun is
+used for bounded agent execution workers and TypeScript-owned execution support:
 
-- `src/commands/daemon.ts`: CLI entrypoint, background fork, daemon startup,
-  scheduler wiring, and shutdown handler registration.
-- `src/daemon/Daemon.ts`: top-level daemon orchestration, config loading,
-  lockfile, subscriptions, routing, project discovery, restart state, status,
-  agent definition monitoring, and service startup.
-- `src/daemon/SubscriptionManager.ts`: Nostr subscription groups and event
-  deduplication.
-- `src/daemon/routing/DaemonRouter.ts`: pure routing decisions based on event
-  kind, project `a` tags, agent `p` tags, known projects, and active runtimes.
-- `src/daemon/RuntimeLifecycle.ts`: lazy project runtime startup, shutdown, and
-  serialized boot queue.
-- `src/daemon/ProjectRuntime.ts`: per-project runtime bootstrap. This currently
-  loads agents, initializes project context, starts MCP, initializes
-  conversation stores, registers Telegram runtime bindings, starts status
-  publishers, and creates `AgentExecutor`.
 - `src/agents/execution/AgentExecutor.ts`: main agent execution entrypoint.
 - `src/agents/execution/StreamSetup.ts`: pre-stream setup for skills, tools,
   prompt compilation, MCP access, injections, RAL registration, and LLM config.
@@ -54,8 +39,9 @@ The current daemon is a single long-lived Bun process. Important current files:
   streaming deltas, tool events, stop checks, and cleanup.
 - `src/tools/registry.ts`: AI SDK tool assembly and permission filtering.
 
-The migration should preserve behavior by moving orchestration and process
-ownership first, then shrinking the TypeScript runtime surface over time.
+The control-plane boundary preserves the existing execution path while keeping
+long-lived orchestration, routing, scheduling, status, and worker supervision in
+Rust.
 
 Branch status: the `rust-agent-worker-publishing` branch currently carries the
 worker recovery, diagnostics, admission-start, and message-flow slices in the
@@ -69,8 +55,8 @@ outbox and launch planning.
 | CLI flags and service process | Rust | Keep existing Bun CLI as a launcher during migration if useful. |
 | Lockfile and status file | Rust | Preserve current file paths and JSON shape where possible. |
 | Restart state | Rust | Preserve `restart-state.json` semantics. |
-| Nostr relay subscriptions | Rust | Replace `SubscriptionManager` with Rust subscription tasks. |
-| Event classification and routing | Rust | Port `DaemonRouter` as pure Rust logic with golden tests. |
+| Nostr relay subscriptions | Rust | Rust owns subscription tasks. |
+| Event classification and routing | Rust | Rust owns routing decisions with golden tests. |
 | Known project index | Rust cache, filesystem snapshot | Built from kind:31933 project events. Durable snapshots are rebuildable caches. |
 | Agent pubkey to project index | Rust cache, filesystem snapshot | Updated from project metadata and worker reports. Durable snapshots are rebuildable caches. |
 | RAL claim/resume/abort state | Rust scheduler, filesystem state | Transitional adapters may still invoke TS `RALRegistry`, but only one authority may decide scheduling. Durable state lives in shared files. |
@@ -195,9 +181,9 @@ including `error`, and replay state consumed by the library scheduler.
 - Do not rewrite `AgentExecutor` in Rust in the first migration.
 - Do not rewrite AI SDK provider adapters in Rust in the first migration.
 - Do not rewrite all tools in Rust in the first migration.
-- Do not preserve the full `ProjectRuntime` as the worker entrypoint. It has
-  long-lived daemon responsibilities that are not appropriate for an ephemeral
-  process.
+- Do not preserve the former full project runtime as the worker entrypoint. It
+  had long-lived daemon responsibilities that are not appropriate for an
+  ephemeral process.
 - Do not allow both Rust and TypeScript to independently schedule the same RAL.
   During transition, one side must be authoritative for each scheduling decision.
 - Do not add a new SQLite or service database for daemon/RAL coordination as
@@ -299,9 +285,9 @@ event can be traced or routed:
   multiple active projects, the event is dropped unless an explicit project
   `a` tag disambiguates it.
 
-The Rust daemon must preserve this behavior even though `ProjectRuntime` is no
-longer a long-lived TypeScript object. Rust therefore owns a project activation
-table. A project is active when at least one of these is true:
+The Rust daemon must preserve this behavior without a long-lived TypeScript
+project runtime object. Rust therefore owns a project activation table. A
+project is active when at least one of these is true:
 
 - the operator explicitly booted it with `--boot`
 - the project was restored from restart state
@@ -720,8 +706,8 @@ parent agent delegates
   -> parent finishes or delegates again
 ```
 
-This flow cannot depend on a live TypeScript `ProjectRuntime` or a live parent
-worker. Rust needs enough filesystem state to decide:
+This flow cannot depend on live TypeScript project runtime state or a live
+parent worker. Rust needs enough filesystem state to decide:
 
 - which parent agent is waiting
 - which child delegation completed
@@ -746,8 +732,7 @@ in-memory state from the previous parent worker.
 
 ## Minimal Worker Bootstrap
 
-The worker should not call `ProjectRuntime.start()`. Instead, extract only the
-execution bootstrap it needs.
+The worker should use only the execution bootstrap it needs.
 
 Required bootstrap steps:
 
@@ -765,18 +750,14 @@ Required bootstrap steps:
 10. Initialize `ConversationCatalogService` only if the execution path or tools
     require catalog reads.
 11. Initialize `MCPManager` and start only servers allowed by the target agent.
-12. Create a publisher factory. In compatibility mode this wraps existing TS
-    publishers. In target mode this sends `publish_request` messages to Rust.
+12. Create a publisher factory that sends `publish_request` messages to Rust.
 13. Build `ExecutionContext`.
 14. Call `AgentExecutor.execute(...)`.
 15. Flush stores and shut down MCP before exit.
 
-Long-lived services currently started by `ProjectRuntime` should not be started
-inside an ephemeral worker unless required by execution:
+Long-lived control-plane services should not be started inside an ephemeral
+worker unless required by execution:
 
-- no project-wide status publisher loop
-- no operations status interval
-- no agent config watcher
 - no daemon-level skill whitelist subscription
 - no Telegram gateway registration loop
 - no conversation indexing job
@@ -823,10 +804,9 @@ Cache ownership should remain filesystem-first:
 - MCP process reuse is only allowed inside a warm compatible worker; an
   ephemeral worker must shut down its MCP children before exit
 
-Do not introduce a long-lived TypeScript cache daemon unless a benchmark shows
-the filesystem-only model cannot meet latency targets. If such a daemon becomes
-necessary, document it as a separate transport/cache adapter, not as a return to
-the monolithic TypeScript daemon.
+Do not introduce a long-lived TypeScript cache service unless a benchmark shows
+the filesystem-only model cannot meet latency targets. If such a service becomes
+necessary, document it as a separate transport/cache adapter.
 
 ## Rust Crate Layout
 
@@ -890,7 +870,7 @@ Goals:
 
 Work:
 
-- Add routing golden tests from current `DaemonRouter` behavior.
+- Add routing golden tests from the current routing behavior.
 - Add subscription filter golden tests from `SubscriptionFilterBuilder`.
 - Add status file and restart state JSON fixtures.
 - Add RAL transition fixtures:
@@ -917,29 +897,29 @@ Work:
 
 Exit criteria:
 
-- Current TypeScript daemon behavior is covered by fixtures.
-- The team can compare Rust daemon decisions to TypeScript decisions.
+- Existing routing, status, and RAL behavior is covered by fixtures.
+- The team can compare Rust daemon decisions to fixture expectations.
 
 ### Phase 1: Extract TypeScript Agent Worker
 
 Goals:
 
-- Create the Bun worker while still using the existing TypeScript daemon.
-- Prove that `AgentExecutor` can run without starting full `ProjectRuntime`.
+- Create the Bun worker boundary.
+- Prove that `AgentExecutor` can run without starting full project runtime state.
 
 Work:
 
 - Add `src/agents/execution/worker/agent-worker.ts`.
 - Add protocol types and runtime validation.
-- Extract a minimal execution bootstrap from `ProjectRuntime`.
+- Extract a minimal execution bootstrap.
 - Add a compatibility publisher factory.
 - Add a compatibility RAL bridge that still uses `RALRegistry`.
 - Keep Phase 1 RAL persistence unchanged. The worker reports transitions for
   observation, but Rust does not yet own or replay the RAL journal.
 - Add a TypeScript test harness that spawns the worker as a child process.
-- Keep any TypeScript-daemon worker route as a temporary developer gate until
-  Rust owns dispatch. The migration target should remove the parallel
-  in-process execution path instead of maintaining it indefinitely.
+- Keep the worker route behind a developer gate until Rust owns dispatch. The
+  migration target should remove the parallel in-process execution path instead
+  of maintaining it indefinitely.
 
 Exit criteria:
 
@@ -1025,12 +1005,12 @@ Work:
 - Port static, known-project, agent-mentions, and lesson subscription groups.
 - Port event deduplication.
 - Port project event parsing and known project index.
-- Port routing logic from `DaemonRouter`.
+- Port routing logic.
 - Add shadow mode:
-  - TypeScript daemon remains authoritative.
+  - Fixture expectations remain authoritative.
   - Rust receives the same events.
   - Rust logs what it would route, boot, or drop.
-  - Compare decisions against TypeScript logs.
+  - Compare decisions against fixture logs.
 
 Exit criteria:
 
@@ -1254,7 +1234,7 @@ Exit criteria:
 
 Goals:
 
-- Remove remaining assumptions that `ProjectRuntime` is always alive.
+- Remove remaining assumptions that project runtime state is always alive.
 
 Work:
 
@@ -1278,31 +1258,22 @@ Work:
 
 Exit criteria:
 
-- TypeScript `ProjectRuntime` is no longer needed for daemon behavior.
+- TypeScript project runtime state is no longer needed for daemon behavior.
 - External events can wake agents without any Bun daemon process alive.
 
-### Phase 9: Clean Cutover: Delete the TypeScript Daemon
+### Phase 9: Clean Cutover
 
 Goals:
 
-- Delete all TypeScript daemon code that is no longer needed.
+- Remove all Bun control-plane code that is no longer needed.
 - Rust is the only control plane. No fallback, no compatibility shims.
 
 Work:
 
-- Delete `src/commands/daemon.ts`, `src/daemon/Daemon.ts`,
-  `src/daemon/RuntimeLifecycle.ts`, `src/daemon/ProjectRuntime.ts`, and all
-  remaining TypeScript daemon infrastructure unreachable from execution workers.
 - Remove `dispatch-adapter.ts` and the in-process `AgentExecutor` dispatch
   route it guarded.
 - Remove the compatibility RAL bridge (`ral-bridge.ts`) and all remaining
   `RALRegistry` call sites kept only for transition.
-- Remove the compatibility publisher factory and `WorkerPublishRequestPublisher`
-  TypeScript path.
-- Delete dead TypeScript daemon services: `SubscriptionManager`, `DaemonRouter`,
-  `RuntimeLifecycle`, status publisher loops, operations status interval, agent
-  config watcher, skill whitelist subscription, conversation indexing job,
-  daemon-level agent definition monitor.
 - Remove all temporary migration env flags: `TENEX_RUST_DAEMON`,
   `TENEX_AGENT_WORKER`, and all related overrides from both TypeScript and Rust.
 - Update `MODULE_INVENTORY.md` and architecture docs to reflect the new
@@ -1310,21 +1281,18 @@ Work:
 
 Exit criteria:
 
-- TypeScript daemon code is gone, not deprecated or feature-flagged.
+- Bun control-plane code is gone, not deprecated or feature-flagged.
 - `bun test` passes with only the worker execution path.
 - Bun is started only for agent execution workers or transport adapters.
 - No migration shim, adapter, or compatibility wrapper remains in the codebase.
 
 ## Operational Controls
 
-Temporary development controls while the migration is incomplete:
+Temporary development controls while the worker boundary is incomplete:
 
-- `TENEX_RUST_DAEMON=1`: launch Rust daemon from existing CLI.
-- `TENEX_AGENT_WORKER=1`: use Bun worker execution from the TypeScript daemon.
-- `TENEX_AGENT_WORKER_BUN_BIN`: override the Bun binary used by the
-  TypeScript-daemon worker bridge.
-- `TENEX_AGENT_WORKER_ENTRYPOINT`: override the TypeScript worker entrypoint
-  used by the bridge.
+- `TENEX_AGENT_WORKER_BUN_BIN`: override the Bun binary used by the Rust worker
+  launcher.
+- `TENEX_AGENT_WORKER_ENTRYPOINT`: override the TypeScript worker entrypoint.
 - `TENEX_AGENT_WORKER_CWD`: override the working directory used when spawning
   the worker.
 - `TENEX_WORKER_IDLE_TTL_MS`: worker warm reuse timeout.
@@ -1489,8 +1457,7 @@ not add a new database for daemon/RAL coordination state.
 
 ### Shadow Tests
 
-- Run TypeScript daemon and Rust daemon in shadow mode against the same relay
-  traffic.
+- Run Rust shadow replay against captured relay traffic.
 - Compare:
   - route/drop decisions
   - target project
@@ -1501,16 +1468,15 @@ not add a new database for daemon/RAL coordination state.
 ## Rollback Strategy
 
 Before M10 (clean cutover), each phase should have a repair path. Rollback
-means fixing or disabling the Rust feature, not reverting to TypeScript code.
-There is no TypeScript daemon fallback after M10; fix blockers in M9 before
-cutting over.
+means fixing or disabling the Rust feature, not reverting to removed
+control-plane code. Fix blockers in M9 before cutting over.
 
 - If worker execution fails during M1–M4, fix the worker or disable the
   out-of-process route; the in-process executor remains until M5 is ready.
 - If Rust daemon shadow mode disagrees, treat it as a Rust bug to fix before
   enabling routing authority.
 - If Rust dispatch or RAL state fails pre-M10, fix the specific failure; do not
-  re-enable TypeScript daemon code that has already been removed.
+  re-enable removed control-plane code.
 - If filesystem journal recovery fails, Rust must refuse new dispatch until the
   operator repairs or rolls back state.
 - If Rust publishing fails, stop accepting new publish requests, drain or repair
@@ -1573,9 +1539,10 @@ can still be truncated or corrupted by process or machine failure. Mitigations:
 - fail closed on ambiguous corruption.
 - test replay from truncated and partially written files.
 
-### Hidden ProjectRuntime Dependencies
+### Hidden Project Runtime Dependencies
 
-Some execution code may assume `ProjectRuntime` started long-lived services.
+Some execution code may assume project runtime bootstrap started long-lived
+services.
 Mitigations:
 
 - extract bootstrap behind explicit interfaces

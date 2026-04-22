@@ -45,6 +45,7 @@ pub mod routing_shadow_replay;
 pub mod scheduler_wakeups;
 pub mod skill_whitelist;
 pub mod subscription_filters;
+pub mod telegram;
 pub mod telegram_outbox;
 pub mod worker_abort;
 pub mod worker_completion;

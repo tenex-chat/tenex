@@ -25,9 +25,9 @@ Rust must be wire-compatible before it is feature-complete.
 
 For every milestone, prefer proving compatibility against existing TypeScript
 behavior before adding new Rust-only behavior. If Rust cannot produce the same
-observable output as the TypeScript daemon for a supported scenario, that
-scenario is not enabled in the Rust path yet. The migration should avoid a
-long-lived matrix of compatibility flags.
+observable output as the captured compatibility fixtures for a supported
+scenario, that scenario is not enabled in the Rust path yet. The migration
+should avoid a long-lived matrix of compatibility flags.
 
 ## Interoperability Contracts
 
@@ -130,8 +130,7 @@ Rust and TypeScript share filesystem state. The compatibility contract includes:
   unsupported scheduler state.
 - `$TENEX_BASE_DIR/projects/<project-dTag>/`
 - `$TENEX_BASE_DIR/projects/<project-dTag>/project.json`, a shared project
-  descriptor written by the TypeScript `ProjectRuntime` on start/stop and read
-  by Rust project-status ticks. Schema version `1` carries `status`,
+  descriptor read by Rust project-status ticks. Schema version `1` carries `status`,
   `projectOwnerPubkey`, `projectDTag`, optional `projectManagerPubkey`,
   optional `projectAddress`, and `projectBasePath`; Rust only schedules
   descriptors with no status or `active` / `running` status.
@@ -256,7 +255,7 @@ Goal: make TypeScript behavior executable as a compatibility oracle.
 
 Scope:
 
-- Capture routing fixtures from `DaemonRouter`.
+- Capture routing fixtures from the established routing behavior.
 - Capture subscription filter fixtures.
 - Capture Nostr event encoding fixtures for all client-visible event kinds.
 - Capture NIP-01 canonical serialization bytes for every supported published
@@ -279,7 +278,8 @@ Scope:
 Quality gates:
 
 - `bun test` passes for existing tests.
-- New fixture tests pass against the TypeScript daemon/execution path.
+- New fixture tests pass against the TypeScript execution path and captured
+  control-plane fixtures.
 - Golden fixtures cover at least:
   - direct user message to PM
   - project boot via kind `24000`
@@ -302,7 +302,7 @@ Quality gates:
 Interoperability gate:
 
 - A fixture replay tool can tell whether a candidate Rust implementation routes,
-  publishes, and writes files equivalently to TypeScript for the covered cases.
+  publishes, and writes files equivalently to captured expectations.
 - Canonical serialization and signature fixtures can detect event-ID divergence
   before relay publishing is enabled.
 
@@ -313,17 +313,17 @@ Rollback:
 ### M1: TypeScript Agent Worker Extraction
 
 Goal: prove the existing agent execution path can run out of process without
-starting the full TypeScript daemon runtime.
+starting long-lived control-plane runtime.
 
 Scope:
 
 - Add a Bun worker entrypoint for one execution session.
-- Extract minimal bootstrap from `ProjectRuntime`.
+- Extract minimal execution bootstrap.
 - Add compatibility publisher that can still publish through current
   TypeScript event encoders.
 - Add compatibility RAL bridge around existing `RALRegistry`.
 - Add worker harness tests from TypeScript.
-- Keep TypeScript daemon authoritative for routing and scheduling.
+- Keep fixture expectations authoritative for routing and scheduling.
 - Developer-only milestone. The framed protocol harness must be
   guarded so operators cannot accidentally enable it as the production worker
   protocol.
@@ -402,11 +402,9 @@ Current implementation status:
   worker. Active RALs, resumption claims, delegation completions, kill signals,
   and non-initial conversations still fall back to the in-process
   `AgentExecutor`.
-- The TypeScript daemon can publish worker `publish_request` frames through
-  `src/nostr/WorkerPublishRequestPublisher.ts`. Worker publish frames now carry
-  complete agent-signed NIP-01 events. The parent bridge verifies the event
-  hash, signature, and target-agent pubkey, then publishes the exact signed
-  event without re-signing it.
+- Worker `publish_request` frames carry complete agent-signed NIP-01 events.
+  The Rust publish path verifies the event hash, signature, and target-agent
+  pubkey, then publishes the exact signed event without re-signing it.
 - The Rust crate now has `crates/tenex-daemon/src/publish_outbox.rs`, which
   durably accepts worker-signed publish requests into
   `publish-outbox/pending/<event-id>.json`, verifies NIP-01 hash/signature and
@@ -493,7 +491,7 @@ Quality gates:
 - `TENEX_AGENT_WORKER` defaults off, and enabled routing records explicit skip
   reasons before falling back to the current in-process executor.
 - Worker does not start project-wide daemon services such as project status
-  loops, agent config watchers, or daemon-level monitors.
+  loops or daemon-level monitors.
 - Worker protocol version is visible in `ready` and logged by the parent.
 
 Interoperability gate:
@@ -546,11 +544,11 @@ Quality gates:
 Interoperability gate:
 
 - A TypeScript worker built from the protocol can be driven by a mock Rust
-  daemon without importing TypeScript daemon internals.
+  daemon without importing removed control-plane internals.
 
 Rollback:
 
-- Keep TypeScript daemon in-process execution as fallback.
+- Keep the in-process executor path only until the worker path is authoritative.
 
 ### M3: Rust Daemon Skeleton
 
@@ -600,7 +598,7 @@ Interoperability gate:
 
 Rollback:
 
-- Launch TypeScript daemon instead of Rust daemon.
+- Stop Rust daemon, repair startup state, and rerun the Rust readiness gate.
 
 ### M4: Rust Routing in Shadow Mode
 
@@ -751,12 +749,13 @@ Quality gates:
 
 Interoperability gate:
 
-- Existing web/iOS/Nostr clients see the same published events as they would
-  from the TypeScript daemon for the enabled scenarios.
+- Existing web/iOS/Nostr clients see the same published events as the captured
+  compatibility fixtures for the enabled scenarios.
 
 Rollback:
 
-- Disable Rust dispatch and return to TypeScript daemon dispatch.
+- Disable Rust dispatch authority and keep events queued until the fault is
+  repaired.
 
 ### M6: Filesystem-Backed Rust RAL Authority
 
@@ -954,7 +953,7 @@ Landed slices:
 - `crates/tenex-daemon/src/operations_status_runtime.rs` — pure runtime
   projection from active worker heartbeat state into kind `24133`
   operations-status drafts, including transition-aware cleanup drafts with no
-  active-agent `p` tags. Library-only; no periodic status publisher wiring.
+  active-agent `p` tags. Library-only; no periodic status wiring.
 
 Planned next runtime boundaries:
 
@@ -1094,7 +1093,7 @@ Rollback:
 
 ### M8: Long-Lived Services and Transport Adapters
 
-Goal: remove reliance on TypeScript `ProjectRuntime` for always-on behavior.
+Goal: remove reliance on TypeScript project runtime state for always-on behavior.
 Telegram's target implementation is Rust-native: Rust owns inbound gateway
 lifecycle, outbound Bot API delivery, retries, native message diagnostics, and
 transport delivery outbox state. TypeScript Telegram services remain useful as a
@@ -1205,12 +1204,12 @@ Quality gates:
 Interoperability gate:
 
 - Existing clients can discover projects, observe backend availability, send
-  messages, receive replies, and observe status without a TypeScript daemon.
+  messages, receive replies, and observe status through the Rust daemon.
 
 Rollback:
 
-- Keep TypeScript daemon or specific TypeScript adapters for unsupported
-  long-lived services.
+- Keep only explicitly scoped transport adapters for unsupported long-lived
+  services.
 
 ### M9: Client Compatibility Canary
 
@@ -1254,37 +1253,27 @@ Quality gates:
 
 Interoperability gate:
 
-- The same clients can switch between TypeScript daemon and Rust daemon on the
-  same filesystem state after clean shutdown.
+- The same clients can resume against Rust on the same filesystem state after
+  clean shutdown.
 
 Rollback:
 
-- Stop Rust daemon, start TypeScript daemon, and verify clients recover without
-  state repair.
+- Stop Rust daemon, repair or replay queued state, and verify clients recover
+  without ad-hoc filesystem edits.
 
 ### M10: Clean Cutover
 
-Goal: delete the TypeScript daemon and all compatibility shims. Rust is the
-only control plane. No fallback path.
+Goal: delete obsolete Bun control-plane compatibility shims. Rust is the only
+control plane. No fallback path.
 
 Scope:
 
-- Delete `src/commands/daemon.ts`, `src/daemon/Daemon.ts`,
-  `src/daemon/RuntimeLifecycle.ts`, `src/daemon/ProjectRuntime.ts`, and all
-  remaining TypeScript daemon infrastructure that is no longer reachable from
-  agent execution workers.
 - Remove `TENEX_RUST_DAEMON`, `TENEX_AGENT_WORKER`, and all other temporary
   migration feature flags from both TypeScript and Rust.
-- Remove the `dispatch-adapter.ts` TypeScript-daemon worker bridge and the
-  in-process `AgentExecutor` dispatch route it guarded.
+- Remove the `dispatch-adapter.ts` worker bridge and the in-process
+  `AgentExecutor` dispatch route it guarded.
 - Remove the compatibility RAL bridge (`ral-bridge.ts`) and any remaining
   `RALRegistry` call sites that were kept for the transition.
-- Remove the compatibility publisher factory and `WorkerPublishRequestPublisher`
-  TypeScript path once Rust is the sole relay publisher.
-- Delete dead TypeScript daemon services: `SubscriptionManager`,
-  `DaemonRouter`, `RuntimeLifecycle`, status publisher loops, operations status
-  interval, agent config watcher, daemon-level skill whitelist subscription,
-  conversation indexing job, daemon-level agent definition monitor.
 - Delete or inline any TypeScript wrapper that exists only to bridge to Rust
   behavior; no shims, no adapters kept "just in case".
 - Update `MODULE_INVENTORY.md`, `docs/ARCHITECTURE.md`, and any operator docs
@@ -1295,15 +1284,15 @@ Scope:
 Quality gates:
 
 - All M0–M9 quality gates remain green.
-- Full test suite passes with TypeScript daemon code removed.
-- No reference to deleted TypeScript daemon files remains in live code paths.
+- Full test suite passes with obsolete Bun control-plane code removed.
+- No reference to deleted Bun control-plane files remains in live code paths.
 - Rust daemon has completed M9 canary without compatibility blockers.
 - NIP-01 self-conformance, schnorr signature, relay round-trip, and signer
   identity gates pass for every event kind Rust publishes.
 
 Interoperability gate:
 
-- Existing TENEX clients work against the Rust daemon with no TypeScript daemon
+- Existing TENEX clients work against the Rust daemon with no Bun control-plane
   process running at all.
 
 Rollback:
@@ -1457,7 +1446,7 @@ Landed slices:
 
 Build a replay harness that can feed captured relay events into:
 
-- TypeScript daemon
+- Captured compatibility fixtures
 - Rust daemon in shadow mode
 - Rust daemon in authoritative mode with mock workers
 
@@ -1542,8 +1531,8 @@ M10 (clean cutover) can proceed only when:
 - NIP-01 self-conformance, schnorr signature, relay round-trip, and signer
   identity gates pass for every event kind Rust publishes (encoded or
   pass-through)
-- TypeScript daemon code has been identified and is ready to delete — no
-  lingering references that would require a compatibility shim after deletion
+- Obsolete Bun control-plane code has been identified and is ready to delete —
+  no lingering references that would require a compatibility shim after deletion
 
 ## First Implementation Slice
 
@@ -1552,7 +1541,7 @@ The first practical slice should be small and compatibility-heavy:
 1. Add M0 fixtures and event normalizer.
 2. Add canonical serialization, signature, signer identity, and backend
    sharding fixtures.
-3. Extract the TypeScript worker and run it from the TypeScript daemon.
+3. Extract the TypeScript worker and run it under the Rust worker protocol.
 4. Define the worker protocol and conformance tests.
 5. Build the Rust daemon skeleton for lock/status/stop only.
 6. Add Rust routing shadow mode.

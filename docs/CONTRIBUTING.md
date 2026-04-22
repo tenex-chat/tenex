@@ -47,7 +47,7 @@ Look for similar code in the codebase and follow established patterns.
 - **TENEX helpers** → `src/utils/`
 - **Business logic** → `src/services/`
 - **Domain logic** → `src/agents/`, `src/conversations/`, `src/tools/`
-- **Entry points** → `src/commands/`, `src/daemon/`, `src/event-handler/`
+- **Entry points** → `src/commands/`, `src/event-handler/`, Rust daemon crates under `crates/`
 
 **Create subdirectories** when you have 3+ related files:
 ```

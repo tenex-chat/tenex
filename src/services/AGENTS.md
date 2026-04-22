@@ -9,7 +9,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `PubkeyService.ts` — Pubkey caching/lookup
 - `LLMOperationsRegistry.ts` — Request throttling
 - `CooldownRegistry.ts` — Cooldown tracking
-- `OwnerAgentListService.ts` — Owner-agent list management
 
 ## Subdirectories
 

@@ -6,5 +6,4 @@ export {
     normalizeProjectIdForRuntime,
     PROJECT_SCHEDULES_FILE,
 } from "./storage";
-export type { TargetResolution } from "./SchedulerService";
 export type { LegacyScheduledTask, ScheduledTask, ScheduledTaskType } from "./types";

@@ -11,7 +11,6 @@ When a utility needs data from services, accept it as a parameter — don't impo
 - `delegation-chain.ts` — Delegation chain tracking
 - `nostr-entity-parser.ts` — Nostr entity (npub, note, etc.) parsing
 - `lessonFormatter.ts` — Lesson content formatting
-- `lockfile.ts` — File locking (accepts path parameter)
 - `conversation-id.ts` — Conversation identifier helpers
 - `metadataKeys.ts` — Metadata key constants
 - `sqlEscaping.ts` — SQL escaping utilities

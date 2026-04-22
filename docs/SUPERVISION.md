@@ -55,7 +55,7 @@ This distinction is now explicit in code through `HeuristicEnforcementMode`.
 
 ## Startup and Fail-Closed Registration
 
-Default supervision is registered in `ProjectRuntime` through `registerDefaultHeuristics()`.
+Default supervision is registered during project execution bootstrap through `registerDefaultHeuristics()`.
 
 Current default heuristics:
 
