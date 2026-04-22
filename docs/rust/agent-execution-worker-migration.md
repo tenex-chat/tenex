@@ -1204,6 +1204,10 @@ Work:
   command with the validated execute message. The planner is the handoff shape
   for future process orchestration and intentionally performs no spawn,
   readiness wait, or stdin write.
+- Add a trait-backed execution handoff that validates the execute message before
+  spawning, then boots the worker and sends the execute frame through injected
+  spawn/session interfaces. Unit tests use fakes, while production wiring can
+  adapt the same path to `AgentWorkerProcess`.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet

@@ -605,6 +605,10 @@ Scope:
 - Add a pure dispatch-to-spawn planner before process orchestration. It carries
   the Bun worker command and validated execute message as an immutable intent
   without starting a child process, waiting for readiness, or writing stdin.
+- Add a trait-backed execution handoff that validates the planned execute
+  message before spawning, then boots a worker and sends the execute frame
+  through injected interfaces in unit tests and the real process adapter in
+  production wiring.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.
