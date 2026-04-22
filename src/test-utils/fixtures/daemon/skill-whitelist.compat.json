@@ -1,0 +1,74 @@
+{
+    "name": "skill-whitelist-basic",
+    "description": "Canonical Rust daemon skill-whitelist filesystem paths, record shapes, and diagnostics for Bun compatibility tests.",
+    "daemonDirName": "daemon",
+    "relativePaths": {
+        "file": "skill-whitelist.json",
+        "tmpDir": "tmp"
+    },
+    "writer": "rust-daemon",
+    "kind": 4202,
+    "schemaVersions": {
+        "snapshot": 1,
+        "diagnostics": 1
+    },
+    "snapshots": {
+        "populated": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000900,
+            "skills": [
+                {
+                    "eventId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "kind": 4202,
+                    "identifier": "catalog-reader",
+                    "shortId": "aaaaaa1",
+                    "name": "Catalog Reader",
+                    "description": "Reads catalog entries for a project.",
+                    "whitelistedBy": [
+                        "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+                        "4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
+                    ],
+                    "lastObservedAt": 1710001000500
+                },
+                {
+                    "eventId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "kind": 4202,
+                    "whitelistedBy": [
+                        "531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337"
+                    ],
+                    "lastObservedAt": 1710001000800
+                }
+            ]
+        }
+    },
+    "diagnostics": {
+        "empty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000000,
+            "present": false,
+            "totalSkills": 0,
+            "totalWhitelisters": 0,
+            "oldestObservedAt": null,
+            "latestObservedAt": null,
+            "snapshotSchemaVersion": null,
+            "writer": null,
+            "writerVersion": null,
+            "updatedAt": null
+        },
+        "populated": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001001200,
+            "present": true,
+            "totalSkills": 2,
+            "totalWhitelisters": 3,
+            "oldestObservedAt": 1710001000500,
+            "latestObservedAt": 1710001000800,
+            "snapshotSchemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710001000900
+        }
+    }
+}

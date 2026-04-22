@@ -863,4 +863,76 @@ mod tests {
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
     }
+
+    const COMPAT_FIXTURE: &str =
+        include_str!("../../../src/test-utils/fixtures/daemon/skill-whitelist.compat.json");
+
+    #[test]
+    fn compat_fixture_matches_rust_contract() {
+        let fixture: Value = serde_json::from_str(COMPAT_FIXTURE).expect("fixture must parse");
+
+        assert_eq!(fixture["writer"].as_str(), Some(SKILL_WHITELIST_WRITER));
+        assert_eq!(fixture["kind"].as_u64(), Some(SKILL_WHITELIST_KIND));
+        assert_eq!(
+            fixture["relativePaths"]["file"].as_str(),
+            Some(SKILL_WHITELIST_FILE_NAME)
+        );
+        assert_eq!(
+            fixture["relativePaths"]["tmpDir"].as_str(),
+            Some(SKILL_WHITELIST_TMP_DIR_NAME)
+        );
+        assert_eq!(
+            fixture["schemaVersions"]["snapshot"].as_u64(),
+            Some(u64::from(SKILL_WHITELIST_SCHEMA_VERSION))
+        );
+        assert_eq!(
+            fixture["schemaVersions"]["diagnostics"].as_u64(),
+            Some(u64::from(SKILL_WHITELIST_DIAGNOSTICS_SCHEMA_VERSION))
+        );
+
+        let snapshot: SkillWhitelistSnapshot =
+            serde_json::from_value(fixture["snapshots"]["populated"].clone())
+                .expect("populated snapshot fixture must deserialize");
+        assert_eq!(snapshot.schema_version, SKILL_WHITELIST_SCHEMA_VERSION);
+        assert_eq!(snapshot.writer, SKILL_WHITELIST_WRITER);
+        assert_eq!(snapshot.skills.len(), 2);
+        let with_optionals = snapshot
+            .skills
+            .iter()
+            .find(|entry| entry.identifier.is_some() && entry.name.is_some());
+        assert!(
+            with_optionals.is_some(),
+            "fixture must include an entry with identifier/name populated"
+        );
+        let bare = snapshot
+            .skills
+            .iter()
+            .find(|entry| entry.identifier.is_none() && entry.name.is_none());
+        assert!(
+            bare.is_some(),
+            "fixture must include an entry without optional fields"
+        );
+
+        let daemon_dir = unique_temp_daemon_dir();
+        write_skill_whitelist(&daemon_dir, &snapshot).expect("fixture snapshot must write");
+
+        let populated_diagnostics = inspect_skill_whitelist(&daemon_dir, 1_710_001_001_200)
+            .expect("populated inspect must succeed");
+        let expected_populated: SkillWhitelistDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["populated"].clone())
+                .expect("populated diagnostics fixture must deserialize");
+        assert_eq!(populated_diagnostics, expected_populated);
+
+        let empty_dir = unique_temp_daemon_dir();
+        let expected_empty: SkillWhitelistDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["empty"].clone())
+                .expect("empty diagnostics fixture must deserialize");
+        assert_eq!(
+            inspect_skill_whitelist(&empty_dir, 1_710_001_000_000).unwrap(),
+            expected_empty
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("populated daemon dir cleanup must succeed");
+        fs::remove_dir_all(empty_dir).expect("empty daemon dir cleanup must succeed");
+    }
 }
