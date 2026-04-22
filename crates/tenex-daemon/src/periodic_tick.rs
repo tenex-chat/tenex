@@ -239,18 +239,12 @@ mod tests {
         sched.register_task("heartbeat", 30, 100).unwrap();
         sched.register_task("status", 60, 100).unwrap();
         let due = sched.take_due(100);
-        assert_eq!(
-            due,
-            vec!["heartbeat".to_string(), "status".to_string()]
-        );
+        assert_eq!(due, vec!["heartbeat".to_string(), "status".to_string()]);
         assert!(sched.take_due(129).is_empty());
         let due = sched.take_due(130);
         assert_eq!(due, vec!["heartbeat".to_string()]);
         let due = sched.take_due(160);
-        assert_eq!(
-            due,
-            vec!["heartbeat".to_string(), "status".to_string()]
-        );
+        assert_eq!(due, vec!["heartbeat".to_string(), "status".to_string()]);
     }
 
     #[test]
