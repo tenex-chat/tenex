@@ -18,4 +18,5 @@ pub mod worker_launch;
 pub mod worker_launch_lock;
 pub mod worker_process;
 pub mod worker_protocol;
+pub mod worker_publish;
 pub mod worker_result;
