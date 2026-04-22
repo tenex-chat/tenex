@@ -575,6 +575,10 @@ Scope:
 - Implement dispatch queue with filesystem journal. The library contract stores
   typed records in `daemon/workers/dispatch-queue.jsonl` and replays the latest
   queued/leased/terminal state per dispatch id after sequence validation.
+- Plan dispatch queue lifecycle records without side effects: queued records can
+  be leased, leased records can complete, and queued or leased records can be
+  cancelled. The planner preserves the existing queue schema and does not infer
+  worker ownership.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.

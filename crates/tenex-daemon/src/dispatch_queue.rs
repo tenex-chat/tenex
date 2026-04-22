@@ -25,6 +25,20 @@ pub enum DispatchQueueError {
         sequence: u64,
         previous_sequence: u64,
     },
+    #[error("dispatch {dispatch_id} was not found")]
+    DispatchNotFound { dispatch_id: String },
+    #[error("dispatch {dispatch_id} is not queued; latest status is {status:?}")]
+    DispatchNotQueued {
+        dispatch_id: String,
+        status: DispatchQueueStatus,
+    },
+    #[error("dispatch {dispatch_id} is not leased; latest status is {status:?}")]
+    DispatchNotLeased {
+        dispatch_id: String,
+        status: DispatchQueueStatus,
+    },
+    #[error("dispatch terminal planner does not support status {status:?}")]
+    InvalidTerminalStatus { status: DispatchQueueStatus },
 }
 
 pub type DispatchQueueResult<T> = Result<T, DispatchQueueError>;
@@ -75,9 +89,28 @@ pub struct DispatchQueueRecordParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DispatchQueueState {
+    pub last_sequence: u64,
     pub queued: Vec<DispatchQueueRecord>,
     pub leased: Vec<DispatchQueueRecord>,
     pub terminal: Vec<DispatchQueueRecord>,
+}
+
+impl DispatchQueueState {
+    pub fn latest_record(&self, dispatch_id: &str) -> Option<&DispatchQueueRecord> {
+        self.queued
+            .iter()
+            .chain(self.leased.iter())
+            .chain(self.terminal.iter())
+            .find(|record| record.dispatch_id == dispatch_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchQueueLifecycleInput {
+    pub dispatch_id: String,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub correlation_id: String,
 }
 
 pub fn workers_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
@@ -205,8 +238,109 @@ pub fn replay_dispatch_queue_records(
             }
         }
     }
+    state.last_sequence = last_sequence.unwrap_or(0);
 
     Ok(state)
+}
+
+pub fn plan_dispatch_queue_lease(
+    state: &DispatchQueueState,
+    input: DispatchQueueLifecycleInput,
+) -> DispatchQueueResult<DispatchQueueRecord> {
+    ensure_next_sequence(state, input.sequence)?;
+    let latest = latest_record_or_error(state, &input.dispatch_id)?;
+
+    if latest.status != DispatchQueueStatus::Queued {
+        return Err(DispatchQueueError::DispatchNotQueued {
+            dispatch_id: input.dispatch_id,
+            status: latest.status,
+        });
+    }
+
+    Ok(build_lifecycle_record(
+        latest,
+        input,
+        DispatchQueueStatus::Leased,
+    ))
+}
+
+pub fn plan_dispatch_queue_terminal(
+    state: &DispatchQueueState,
+    input: DispatchQueueLifecycleInput,
+    status: DispatchQueueStatus,
+) -> DispatchQueueResult<DispatchQueueRecord> {
+    ensure_next_sequence(state, input.sequence)?;
+    if !matches!(
+        status,
+        DispatchQueueStatus::Completed | DispatchQueueStatus::Cancelled
+    ) {
+        return Err(DispatchQueueError::InvalidTerminalStatus { status });
+    }
+
+    let latest = latest_record_or_error(state, &input.dispatch_id)?;
+    match status {
+        DispatchQueueStatus::Completed if latest.status != DispatchQueueStatus::Leased => {
+            Err(DispatchQueueError::DispatchNotLeased {
+                dispatch_id: input.dispatch_id,
+                status: latest.status,
+            })
+        }
+        DispatchQueueStatus::Cancelled
+            if !matches!(
+                latest.status,
+                DispatchQueueStatus::Queued | DispatchQueueStatus::Leased
+            ) =>
+        {
+            Err(DispatchQueueError::DispatchNotQueued {
+                dispatch_id: input.dispatch_id,
+                status: latest.status,
+            })
+        }
+        DispatchQueueStatus::Completed | DispatchQueueStatus::Cancelled => {
+            Ok(build_lifecycle_record(latest, input, status))
+        }
+        DispatchQueueStatus::Queued | DispatchQueueStatus::Leased => {
+            Err(DispatchQueueError::InvalidTerminalStatus { status })
+        }
+    }
+}
+
+fn ensure_next_sequence(state: &DispatchQueueState, sequence: u64) -> DispatchQueueResult<()> {
+    if sequence <= state.last_sequence {
+        return Err(DispatchQueueError::NonIncreasingSequence {
+            sequence,
+            previous_sequence: state.last_sequence,
+        });
+    }
+    Ok(())
+}
+
+fn latest_record_or_error<'a>(
+    state: &'a DispatchQueueState,
+    dispatch_id: &str,
+) -> DispatchQueueResult<&'a DispatchQueueRecord> {
+    state
+        .latest_record(dispatch_id)
+        .ok_or_else(|| DispatchQueueError::DispatchNotFound {
+            dispatch_id: dispatch_id.to_string(),
+        })
+}
+
+fn build_lifecycle_record(
+    previous: &DispatchQueueRecord,
+    input: DispatchQueueLifecycleInput,
+    status: DispatchQueueStatus,
+) -> DispatchQueueRecord {
+    build_dispatch_queue_record(DispatchQueueRecordParams {
+        sequence: input.sequence,
+        timestamp: input.timestamp,
+        correlation_id: input.correlation_id,
+        dispatch_id: previous.dispatch_id.clone(),
+        ral: previous.ral.clone(),
+        triggering_event_id: previous.triggering_event_id.clone(),
+        claim_token: previous.claim_token.clone(),
+        status,
+    })
 }
 
 fn sync_parent_dir(path: &Path) -> DispatchQueueResult<()> {
@@ -275,6 +409,7 @@ mod tests {
 
         let state = replay_dispatch_queue_records(records).expect("replay must succeed");
 
+        assert_eq!(state.last_sequence, 3);
         assert_eq!(state.queued.len(), 1);
         assert_eq!(state.queued[0].dispatch_id, "dispatch-2");
         assert_eq!(state.leased.len(), 1);
@@ -292,6 +427,7 @@ mod tests {
 
         let state = replay_dispatch_queue_records(records).expect("replay must succeed");
 
+        assert_eq!(state.last_sequence, 3);
         assert!(state.queued.is_empty());
         assert!(state.leased.is_empty());
         assert_eq!(
@@ -385,6 +521,168 @@ mod tests {
         }
     }
 
+    #[test]
+    fn dispatch_queue_plans_lease_from_queued_record() {
+        let queued = build_record(1, "dispatch-1", DispatchQueueStatus::Queued);
+        let state = replay_dispatch_queue_records(vec![queued.clone()]).expect("replay succeeds");
+
+        let leased = plan_dispatch_queue_lease(
+            &state,
+            lifecycle_input("dispatch-1", 2, "lease-correlation"),
+        )
+        .expect("lease must plan");
+
+        assert_eq!(leased.sequence, 2);
+        assert_eq!(leased.timestamp, 1710001000002);
+        assert_eq!(leased.correlation_id, "lease-correlation");
+        assert_eq!(leased.dispatch_id, queued.dispatch_id);
+        assert_eq!(leased.ral, queued.ral);
+        assert_eq!(leased.triggering_event_id, queued.triggering_event_id);
+        assert_eq!(leased.claim_token, queued.claim_token);
+        assert_eq!(leased.status, DispatchQueueStatus::Leased);
+
+        let leased_state =
+            replay_dispatch_queue_records(vec![queued, leased]).expect("replay succeeds");
+        assert_eq!(leased_state.last_sequence, 2);
+        assert!(leased_state.queued.is_empty());
+        assert_eq!(leased_state.leased.len(), 1);
+        assert_eq!(leased_state.leased[0].status, DispatchQueueStatus::Leased);
+    }
+
+    #[test]
+    fn dispatch_queue_plans_completed_terminal_from_leased_record() {
+        let queued = build_record(1, "dispatch-1", DispatchQueueStatus::Queued);
+        let leased = build_record(2, "dispatch-1", DispatchQueueStatus::Leased);
+        let state =
+            replay_dispatch_queue_records(vec![queued.clone(), leased.clone()]).expect("replay");
+
+        let completed = plan_dispatch_queue_terminal(
+            &state,
+            lifecycle_input("dispatch-1", 3, "complete-correlation"),
+            DispatchQueueStatus::Completed,
+        )
+        .expect("completed terminal must plan");
+
+        assert_eq!(completed.sequence, 3);
+        assert_eq!(completed.dispatch_id, leased.dispatch_id);
+        assert_eq!(completed.claim_token, leased.claim_token);
+        assert_eq!(completed.status, DispatchQueueStatus::Completed);
+
+        let terminal_state =
+            replay_dispatch_queue_records(vec![queued, leased, completed]).expect("replay");
+        assert!(terminal_state.queued.is_empty());
+        assert!(terminal_state.leased.is_empty());
+        assert_eq!(terminal_state.terminal.len(), 1);
+        assert_eq!(
+            terminal_state.terminal[0].status,
+            DispatchQueueStatus::Completed
+        );
+    }
+
+    #[test]
+    fn dispatch_queue_plans_cancelled_terminal_from_queued_or_leased_record() {
+        let queued = build_record(1, "dispatch-1", DispatchQueueStatus::Queued);
+        let queued_state = replay_dispatch_queue_records(vec![queued.clone()]).expect("replay");
+        let cancelled_queued = plan_dispatch_queue_terminal(
+            &queued_state,
+            lifecycle_input("dispatch-1", 2, "cancel-correlation"),
+            DispatchQueueStatus::Cancelled,
+        )
+        .expect("queued dispatch cancellation must plan");
+        assert_eq!(cancelled_queued.status, DispatchQueueStatus::Cancelled);
+
+        let leased = build_record(3, "dispatch-2", DispatchQueueStatus::Leased);
+        let leased_state = replay_dispatch_queue_records(vec![leased.clone()]).expect("replay");
+        let cancelled_leased = plan_dispatch_queue_terminal(
+            &leased_state,
+            lifecycle_input("dispatch-2", 4, "cancel-correlation"),
+            DispatchQueueStatus::Cancelled,
+        )
+        .expect("leased dispatch cancellation must plan");
+        assert_eq!(cancelled_leased.status, DispatchQueueStatus::Cancelled);
+        assert_eq!(cancelled_leased.dispatch_id, leased.dispatch_id);
+    }
+
+    #[test]
+    fn dispatch_queue_lifecycle_planners_reject_invalid_state_and_sequence() {
+        let queued = build_record(2, "dispatch-1", DispatchQueueStatus::Queued);
+        let leased = build_record(3, "dispatch-2", DispatchQueueStatus::Leased);
+        let completed = build_record(4, "dispatch-3", DispatchQueueStatus::Completed);
+        let state =
+            replay_dispatch_queue_records(vec![queued.clone(), leased.clone(), completed.clone()])
+                .expect("replay");
+
+        match plan_dispatch_queue_lease(&state, lifecycle_input("dispatch-1", 4, "stale")) {
+            Err(DispatchQueueError::NonIncreasingSequence {
+                sequence,
+                previous_sequence,
+            }) => {
+                assert_eq!(sequence, 4);
+                assert_eq!(previous_sequence, 4);
+            }
+            other => panic!("expected stale sequence rejection, got {other:?}"),
+        }
+
+        match plan_dispatch_queue_lease(&state, lifecycle_input("missing", 5, "missing")) {
+            Err(DispatchQueueError::DispatchNotFound { dispatch_id }) => {
+                assert_eq!(dispatch_id, "missing");
+            }
+            other => panic!("expected missing dispatch rejection, got {other:?}"),
+        }
+
+        match plan_dispatch_queue_lease(&state, lifecycle_input("dispatch-2", 5, "leased")) {
+            Err(DispatchQueueError::DispatchNotQueued {
+                dispatch_id,
+                status,
+            }) => {
+                assert_eq!(dispatch_id, "dispatch-2");
+                assert_eq!(status, DispatchQueueStatus::Leased);
+            }
+            other => panic!("expected non-queued rejection, got {other:?}"),
+        }
+
+        match plan_dispatch_queue_terminal(
+            &state,
+            lifecycle_input("dispatch-1", 5, "complete"),
+            DispatchQueueStatus::Completed,
+        ) {
+            Err(DispatchQueueError::DispatchNotLeased {
+                dispatch_id,
+                status,
+            }) => {
+                assert_eq!(dispatch_id, "dispatch-1");
+                assert_eq!(status, DispatchQueueStatus::Queued);
+            }
+            other => panic!("expected non-leased completion rejection, got {other:?}"),
+        }
+
+        match plan_dispatch_queue_terminal(
+            &state,
+            lifecycle_input("dispatch-2", 5, "invalid"),
+            DispatchQueueStatus::Leased,
+        ) {
+            Err(DispatchQueueError::InvalidTerminalStatus { status }) => {
+                assert_eq!(status, DispatchQueueStatus::Leased);
+            }
+            other => panic!("expected invalid terminal status rejection, got {other:?}"),
+        }
+
+        match plan_dispatch_queue_terminal(
+            &state,
+            lifecycle_input("dispatch-3", 5, "cancel-terminal"),
+            DispatchQueueStatus::Cancelled,
+        ) {
+            Err(DispatchQueueError::DispatchNotQueued {
+                dispatch_id,
+                status,
+            }) => {
+                assert_eq!(dispatch_id, "dispatch-3");
+                assert_eq!(status, DispatchQueueStatus::Completed);
+            }
+            other => panic!("expected terminal cancellation rejection, got {other:?}"),
+        }
+    }
+
     fn build_record(
         sequence: u64,
         dispatch_id: &str,
@@ -408,6 +706,19 @@ mod tests {
             agent_pubkey: "agent-pubkey-1".to_string(),
             conversation_id: "conversation-1".to_string(),
             ral_number: 1,
+        }
+    }
+
+    fn lifecycle_input(
+        dispatch_id: &str,
+        sequence: u64,
+        correlation_id: &str,
+    ) -> DispatchQueueLifecycleInput {
+        DispatchQueueLifecycleInput {
+            dispatch_id: dispatch_id.to_string(),
+            sequence,
+            timestamp: 1710001000000 + sequence,
+            correlation_id: correlation_id.to_string(),
         }
     }
 

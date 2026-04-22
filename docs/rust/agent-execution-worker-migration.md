@@ -176,7 +176,9 @@ contains `schemaVersion`, `sequence`, `timestamp`, `correlationId`,
 queued/leased/terminal status. Appends flush the file and parent directory.
 Replay checks monotonic sequence order, uses the latest record per `dispatchId`,
 ignores only EOF-truncated final JSONL records, and fails closed on corrupt or
-malformed complete records.
+malformed complete records. The Rust library can plan queue lifecycle records
+without writing them: queued dispatches can be leased, leased dispatches can be
+completed, and queued or leased dispatches can be cancelled.
 
 `ral/journal.jsonl` is likewise append-only and synced before Rust can
 acknowledge scheduler-critical RAL transitions. It records the TS-compatible RAL
