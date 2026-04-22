@@ -622,7 +622,10 @@ Scope:
 - Bootstrap scheduler state from the on-disk journal and persist a versioned
   `ral/snapshot.json` compaction cache without letting a stale snapshot override
   journal replay.
-- Implement orphan reconciliation.
+- Implement orphan reconciliation planning and recovery classification. The
+  current Rust library planner is transient: it proposes `crashed` journal
+  records for claimed RALs whose worker ids are absent from the live worker set,
+  while leaving waiting and terminal RALs untouched.
 - Implement injection lease/ack.
 - Implement kill/abort/stop ownership.
 - Teach TypeScript worker to refuse unseeded RAL creation in Rust-seeded mode.

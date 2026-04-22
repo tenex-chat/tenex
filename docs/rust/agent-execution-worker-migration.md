@@ -1167,7 +1167,10 @@ Work:
   journal replay until freshness checks are implemented.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
   scope.
-- Add orphaned RAL reconciliation at daemon startup:
+- Add orphaned RAL reconciliation planning at daemon startup. The current Rust
+  library planner classifies claimed RALs whose worker ids are absent from the
+  live worker set and proposes `crashed` journal records, but it does not yet
+  write recovery records during daemon startup:
   - active RAL with no worker
   - leased injections with no terminal acknowledgement
   - worker marked active but PID missing
@@ -1354,9 +1357,10 @@ Initial defaults:
 - Requeue resumable executions only when the RAL journal proves the prior
   worker did not reach a terminal state.
 
-### Orphaned RAL At Daemon Startup
+### Orphaned RAL Reconciliation Planning At Daemon Startup
 
-Rust must reconcile RAL state before accepting new dispatch:
+Rust must compute a reconciliation plan for RAL state before accepting new
+dispatch:
 
 - If a RAL is `streaming` or `tool_active` but its worker PID is gone, mark it
   `crashed` and decide whether it is retryable.

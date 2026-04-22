@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -7,9 +7,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::ral_journal::{
-    RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalReplay,
-    RalJournalResult, RalJournalSnapshot, RalReplayEntry, RalReplayStatus, replay_ral_journal,
-    write_ral_snapshot,
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
+    RalJournalReplay, RalJournalResult, RalJournalSnapshot, RalReplayEntry, RalReplayStatus,
+    replay_ral_journal, write_ral_snapshot,
 };
 
 static CLAIM_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -353,6 +353,59 @@ impl RalScheduler {
         self.validate_claim_token(identity, claim_token).is_ok()
     }
 
+    pub fn plan_orphan_reconciliation(
+        &self,
+        input: RalOrphanReconciliationInput,
+    ) -> Result<RalOrphanReconciliationPlan, RalSchedulerError> {
+        let mut entries = self.state.entries.values().collect::<Vec<_>>();
+        entries.sort_by(|left, right| compare_identity(&left.identity, &right.identity));
+
+        let mut next_sequence = input.next_sequence;
+        let mut actions = Vec::new();
+
+        for entry in entries {
+            if entry.status != RalReplayStatus::Claimed {
+                continue;
+            }
+
+            let Some(worker_id) = &entry.worker_id else {
+                continue;
+            };
+
+            if input.live_worker_ids.contains(worker_id) {
+                continue;
+            }
+
+            let record = RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                input.writer_version.clone(),
+                next_sequence,
+                input.timestamp,
+                input.correlation_id.clone(),
+                RalJournalEvent::Crashed {
+                    identity: entry.identity.clone(),
+                    worker_id: worker_id.clone(),
+                    claim_token: entry.active_claim_token.clone(),
+                    crash_reason: format!(
+                        "worker {worker_id} was not live during RAL reconciliation"
+                    ),
+                    last_heartbeat_at: None,
+                },
+            );
+            actions.push(RalOrphanReconciliationAction {
+                reason: RalOrphanReconciliationReason::ClaimedWorkerMissing,
+                identity: entry.identity.clone(),
+                worker_id: worker_id.clone(),
+                record,
+            });
+            next_sequence = next_sequence
+                .checked_add(1)
+                .ok_or(RalSchedulerError::RalJournalSequenceExhausted)?;
+        }
+
+        Ok(RalOrphanReconciliationPlan { actions })
+    }
+
     fn entry_or_error(
         &self,
         identity: &RalJournalIdentity,
@@ -403,6 +456,33 @@ pub struct RalClaim {
     pub event: RalJournalEvent,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalOrphanReconciliationInput {
+    pub live_worker_ids: HashSet<String>,
+    pub next_sequence: u64,
+    pub timestamp: u64,
+    pub correlation_id: String,
+    pub writer_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalOrphanReconciliationPlan {
+    pub actions: Vec<RalOrphanReconciliationAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalOrphanReconciliationAction {
+    pub reason: RalOrphanReconciliationReason,
+    pub identity: RalJournalIdentity,
+    pub worker_id: String,
+    pub record: RalJournalRecord,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RalOrphanReconciliationReason {
+    ClaimedWorkerMissing,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RalSchedulerError {
     #[error("active RAL already exists for triggering event {triggering_event_id}")]
@@ -439,6 +519,8 @@ pub enum RalSchedulerError {
     },
     #[error("claim token does not match current RAL state")]
     InvalidClaimToken { identity: Box<RalJournalIdentity> },
+    #[error("RAL journal sequence space exhausted")]
+    RalJournalSequenceExhausted,
 }
 
 pub fn classify_ral_status(status: RalReplayStatus) -> RalStatusClass {
@@ -471,6 +553,14 @@ pub fn is_claimable_ral_status(status: RalReplayStatus) -> bool {
     )
 }
 
+fn compare_identity(left: &RalJournalIdentity, right: &RalJournalIdentity) -> std::cmp::Ordering {
+    left.project_id
+        .cmp(&right.project_id)
+        .then_with(|| left.agent_pubkey.cmp(&right.agent_pubkey))
+        .then_with(|| left.conversation_id.cmp(&right.conversation_id))
+        .then_with(|| left.ral_number.cmp(&right.ral_number))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,6 +569,7 @@ mod tests {
         RalTerminalSummary, append_ral_journal_record, read_ral_snapshot,
         replay_ral_journal_records,
     };
+    use std::collections::HashSet;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -892,6 +983,186 @@ mod tests {
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
 
+    #[test]
+    fn reconciliation_plans_crash_records_for_claimed_rals_without_live_workers() {
+        let missing_namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let live_namespace = make_namespace("project-a", "agent-b", "conversation-a");
+        let waiting_namespace = make_namespace("project-a", "agent-c", "conversation-a");
+        let completed_namespace = make_namespace("project-a", "agent-d", "conversation-a");
+        let missing_identity = missing_namespace.identity(1);
+        let live_identity = live_namespace.identity(1);
+        let waiting_identity = waiting_namespace.identity(1);
+        let completed_identity = completed_namespace.identity(1);
+        let records = vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: missing_identity.clone(),
+                    triggering_event_id: Some("trigger-missing".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: missing_identity.clone(),
+                    worker_id: "worker-missing".to_string(),
+                    claim_token: "claim-missing".to_string(),
+                },
+            ),
+            record(
+                3,
+                RalJournalEvent::Allocated {
+                    identity: live_identity,
+                    triggering_event_id: Some("trigger-live".to_string()),
+                },
+            ),
+            record(
+                4,
+                RalJournalEvent::Claimed {
+                    identity: live_namespace.identity(1),
+                    worker_id: "worker-live".to_string(),
+                    claim_token: "claim-live".to_string(),
+                },
+            ),
+            record(
+                5,
+                RalJournalEvent::Allocated {
+                    identity: waiting_identity.clone(),
+                    triggering_event_id: Some("trigger-waiting".to_string()),
+                },
+            ),
+            record(
+                6,
+                RalJournalEvent::Claimed {
+                    identity: waiting_identity.clone(),
+                    worker_id: "worker-missing".to_string(),
+                    claim_token: "claim-waiting".to_string(),
+                },
+            ),
+            record(
+                7,
+                RalJournalEvent::WaitingForDelegation {
+                    identity: waiting_identity,
+                    worker_id: "worker-missing".to_string(),
+                    claim_token: "claim-waiting".to_string(),
+                    pending_delegations: vec![pending_delegation(
+                        "delegation-a",
+                        RalDelegationType::Standard,
+                    )],
+                    terminal: terminal(),
+                },
+            ),
+            record(
+                8,
+                RalJournalEvent::Completed {
+                    identity: completed_identity,
+                    worker_id: "worker-missing".to_string(),
+                    claim_token: "claim-completed".to_string(),
+                    terminal: terminal(),
+                },
+            ),
+        ];
+        let scheduler = make_scheduler(records.clone());
+        let plan = scheduler
+            .plan_orphan_reconciliation(reconciliation_input(["worker-live"], 9, 1710000000000))
+            .expect("reconciliation plan must build");
+
+        assert_eq!(plan.actions.len(), 1);
+        let action = &plan.actions[0];
+        assert_eq!(
+            action.reason,
+            RalOrphanReconciliationReason::ClaimedWorkerMissing
+        );
+        assert_eq!(action.identity, missing_identity);
+        assert_eq!(action.worker_id, "worker-missing");
+        assert_eq!(action.record.sequence, 9);
+        assert_eq!(action.record.timestamp, 1710000000000);
+        assert_eq!(action.record.correlation_id, "reconcile-test");
+        match &action.record.event {
+            RalJournalEvent::Crashed {
+                identity,
+                worker_id,
+                claim_token,
+                crash_reason,
+                last_heartbeat_at,
+            } => {
+                assert_eq!(identity, &missing_namespace.identity(1));
+                assert_eq!(worker_id, "worker-missing");
+                assert_eq!(claim_token.as_deref(), Some("claim-missing"));
+                assert_eq!(
+                    crash_reason,
+                    "worker worker-missing was not live during RAL reconciliation"
+                );
+                assert_eq!(last_heartbeat_at, &None);
+            }
+            other => panic!("expected crashed journal event, got {other:?}"),
+        }
+
+        let mut replay_records = records;
+        replay_records.push(action.record.clone());
+        let replay = replay_ral_journal_records(replay_records).expect("replay must succeed");
+        let crashed = replay
+            .states
+            .get(&missing_namespace.identity(1))
+            .expect("missing RAL must still exist");
+        assert_eq!(crashed.status, RalReplayStatus::Crashed);
+        assert_eq!(crashed.active_claim_token, None);
+    }
+
+    #[test]
+    fn reconciliation_orders_planned_records_by_ral_identity() {
+        let namespace_b = make_namespace("project-b", "agent-b", "conversation-b");
+        let namespace_a = make_namespace("project-a", "agent-a", "conversation-a");
+        let records = vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: namespace_b.identity(1),
+                    triggering_event_id: Some("trigger-b".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: namespace_b.identity(1),
+                    worker_id: "worker-b".to_string(),
+                    claim_token: "claim-b".to_string(),
+                },
+            ),
+            record(
+                3,
+                RalJournalEvent::Allocated {
+                    identity: namespace_a.identity(1),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                4,
+                RalJournalEvent::Claimed {
+                    identity: namespace_a.identity(1),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+        ];
+        let scheduler = make_scheduler(records);
+        let plan = scheduler
+            .plan_orphan_reconciliation(reconciliation_input([], 5, 1710000001000))
+            .expect("reconciliation plan must build");
+
+        assert_eq!(
+            plan.actions
+                .iter()
+                .map(|action| (
+                    action.identity.project_id.as_str(),
+                    action.record.sequence,
+                    action.worker_id.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![("project-a", 5, "worker-a"), ("project-b", 6, "worker-b")]
+        );
+    }
+
     fn make_scheduler(records: Vec<RalJournalRecord>) -> RalScheduler {
         let replay = replay_ral_journal_records(records).expect("replay must succeed");
         RalScheduler::from_replay(&replay)
@@ -942,6 +1213,23 @@ mod tests {
             format!("corr-{sequence}"),
             event,
         )
+    }
+
+    fn reconciliation_input<const N: usize>(
+        live_worker_ids: [&str; N],
+        next_sequence: u64,
+        timestamp: u64,
+    ) -> RalOrphanReconciliationInput {
+        RalOrphanReconciliationInput {
+            live_worker_ids: live_worker_ids
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<HashSet<_>>(),
+            next_sequence,
+            timestamp,
+            correlation_id: "reconcile-test".to_string(),
+            writer_version: "test-version".to_string(),
+        }
     }
 
     fn unique_temp_daemon_dir() -> PathBuf {
