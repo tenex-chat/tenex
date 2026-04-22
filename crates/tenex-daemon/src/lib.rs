@@ -9,5 +9,6 @@ pub mod relay_publisher;
 pub mod routing;
 pub mod subscription_filters;
 pub mod worker_launch;
+pub mod worker_launch_lock;
 pub mod worker_process;
 pub mod worker_protocol;

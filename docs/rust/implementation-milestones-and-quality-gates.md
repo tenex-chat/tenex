@@ -596,6 +596,9 @@ Scope:
   `{ pid, hostname, startedAt }` JSON owner shape as `tenex.lock`, acquires via
   atomic create-new writes, fails closed on corrupt lock JSON, and treats stale
   replacement as an explicit PID-liveness decision rather than an age heuristic.
+- Compose launch plans with lock acquisition before worker-spawn wiring:
+  acquire allocation then state locks for a planned launch, and release the
+  allocation lock if the state lock is already held.
 - Implement concurrency limits.
 - Implement worker heartbeat and abort behavior.
 - Keep TypeScript worker publishing directly for compatibility.

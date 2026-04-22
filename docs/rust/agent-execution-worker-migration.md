@@ -1193,6 +1193,10 @@ Work:
   paths, writes daemon-compatible `{ pid, hostname, startedAt }` owner JSON,
   acquires with atomic create-new semantics, fails closed on corrupt lock JSON,
   and leaves stale replacement behind an explicit PID-liveness classification.
+- Compose launch plans with lock acquisition by taking the allocation lock
+  before the state lock and rolling back the allocation lock if state acquisition
+  fails. This remains separate from worker spawn so lock behavior is testable on
+  its own.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet
