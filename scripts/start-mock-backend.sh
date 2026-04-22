@@ -162,10 +162,6 @@ echo -e "${GREEN}Press Ctrl+C to stop the server${NC}"
 echo "----------------------------------------"
 echo ""
 
-# Start the daemon with mock provider
-if [ "$DEBUG" = "true" ]; then
-    echo -e "${YELLOW}Starting in DEBUG mode...${NC}"
-    bun run src/index.ts daemon --project "$TEST_PROJECT_DIR" --verbose
-else
-    bun run src/index.ts daemon --project "$TEST_PROJECT_DIR"
-fi
+echo -e "${RED}This script used the removed TypeScript daemon CLI.${NC}"
+echo "Use the Rust daemon and Rust/Bun worker fixtures for mock backend testing."
+exit 1

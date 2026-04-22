@@ -175,24 +175,25 @@ project, the migration must define a conversation write contract:
 
 ### CLI Contract
 
-Existing operator workflows must continue to work:
+The production daemon operator surface is now the Rust binary set. Existing
+TypeScript CLI daemon wrappers are removed rather than kept as a parallel
+launcher.
 
-- `tenex daemon --foreground`
-- `tenex daemon --boot <pattern>`
-- `tenex daemon --supervised`
-- `tenex daemon --only`
-- `tenex daemon --exclude-agents`
-- `tenex daemon --only-agents`
-- `tenex daemon status`
-- `tenex daemon stop`
-- `tenex daemon stop --force`
-- `tenex daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]`
+Supported Rust operator workflows:
+
+- `daemon --tenex-base-dir <path>`
+- `daemon --daemon-dir <path>`
+- `daemon --tenex-base-dir <path> --iterations <count>`
+- `daemon-control status --daemon-dir <path>`
+- `daemon-control start-plan --daemon-dir <path>`
+- `daemon-control stop-plan --daemon-dir <path>`
+- `daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]`
 - `daemon-control daemon-foreground [--daemon-dir <path> | --tenex-base-dir <path>] --iterations <count> [--sleep-ms <ms>]`
+- `daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]`
 
-During migration, the TypeScript CLI may keep temporary developer launch
-controls, but the production target is a single Rust daemon path. Status and
-stop commands must work against both daemon implementations until the TypeScript
-daemon path is removed.
+Status and stop semantics are Rust-owned. Any missing lifecycle behavior should
+be added to `crates/tenex-daemon`, not reintroduced as a TypeScript daemon
+command.
 
 ### Worker Protocol Contract
 
@@ -583,8 +584,8 @@ Scope:
 Quality gates:
 
 - Rust daemon starts and stops cleanly on macOS and Linux.
-- `tenex daemon status` can read Rust daemon status.
-- `tenex daemon stop` can stop Rust daemon.
+- `daemon-control status` can read Rust daemon status.
+- `daemon-control stop-plan` can identify the Rust daemon process to stop.
 - Lockfile prevents two daemon instances.
 - Stale lock behavior matches TypeScript semantics.
 - Restart state file round-trips with TypeScript.
@@ -1217,10 +1218,10 @@ No feature gates, no parallel legacy, no fallback. Full system functional.
 
 Scope:
 
-- Delete all TypeScript daemon code that Rust has replaced. This includes
-  `src/commands/daemon.ts`, `src/daemon/Daemon.ts`,
-  `src/daemon/RuntimeLifecycle.ts`, `src/daemon/ProjectRuntime.ts`,
-  `src/daemon/SubscriptionManager.ts`, `src/daemon/routing/DaemonRouter.ts`,
+- Delete all TypeScript daemon code that Rust has replaced. This includes the
+  former TypeScript daemon command wrapper and runtime modules:
+  `Daemon`, `RuntimeLifecycle`, `ProjectRuntime`, `SubscriptionManager`,
+  `DaemonRouter`,
   status publisher loops, operations status interval, agent config watcher,
   skill whitelist subscription, conversation indexing job, daemon-level agent
   definition monitor, Telegram gateway/delivery services, and any other

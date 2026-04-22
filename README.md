@@ -71,12 +71,7 @@ bun install
 
 ### Configuration
 
-Before you can start using TENEX, you need to set up your LLM provider credentials.
-From the repo, run:
-
-```bash
-bun run start -- setup
-```
+Configuration and operator commands are handled by the Rust TENEX binaries. The TypeScript package is internal runtime code invoked by Rust and does not expose a user-facing CLI.
 
 If you install the daemon launcher from npm, run:
 
@@ -113,9 +108,7 @@ TENEX: [System routes to Planner]
 ```
 src/
 ├── agents/         # Agent definitions and execution runtime
-├── commands/       # User-facing CLI commands
 ├── conversations/  # Conversation history and state management
-├── daemon/         # Long-running background processes and UI
 ├── events/         # Core event schemas and constants
 ├── lib/            # Pure, framework-agnostic utilities (zero TENEX dependencies)
 ├── llm/            # LLM provider abstractions and factories

@@ -42,18 +42,18 @@ export function parseAgentRuntimeSlugList(input: string | undefined): string[] {
 }
 
 export class AgentRuntimePolicyService {
-    private cliOverride?: AgentRuntimePolicy;
+    private runtimeOverride?: AgentRuntimePolicy;
 
-    setCliOverride(policy: AgentRuntimePolicy | undefined): void {
-        this.cliOverride = normalizePolicy(policy);
-        if (this.cliOverride) {
-            logger.info("[AgentRuntimePolicy] CLI override configured", this.cliOverride);
+    setRuntimeOverride(policy: AgentRuntimePolicy | undefined): void {
+        this.runtimeOverride = normalizePolicy(policy);
+        if (this.runtimeOverride) {
+            logger.info("[AgentRuntimePolicy] runtime override configured", this.runtimeOverride);
         }
     }
 
     getPolicy(): AgentRuntimePolicy {
-        if (this.cliOverride) {
-            return this.cliOverride;
+        if (this.runtimeOverride) {
+            return this.runtimeOverride;
         }
 
         try {

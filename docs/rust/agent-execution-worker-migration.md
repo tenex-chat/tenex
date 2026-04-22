@@ -990,8 +990,8 @@ Work:
 Exit criteria:
 
 - Rust daemon can run in foreground, write status, and stop cleanly.
-- Existing `tenex daemon status` and `tenex daemon stop` can inspect/stop it, or
-  equivalent Rust commands exist with matching behavior.
+- Rust `daemon-control status` and `daemon-control stop-plan` expose matching
+  inspect/stop planning behavior without a TypeScript daemon wrapper.
 
 ### Phase 4: Rust Nostr Subscriptions and Routing
 

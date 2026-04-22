@@ -23,7 +23,7 @@ Related architecture notes:
 Dependencies flow **downward only**, never upward:
 
 ```
-commands/daemon/event-handler → services/agents/conversations/tools
+rust binaries/event-handler → services/agents/conversations/tools
   ↓
 llm/nostr/prompts/events
   ↓
@@ -61,7 +61,7 @@ The `services/` layer contains stateful business logic and domain services:
 - Delegation/RAL state tracking
 - MCP integration
 
-**Rule:** Services can import from `utils/`, `lib/`, `nostr/`, `llm/`, but not from `commands/`, `daemon/`, or `event-handler/`.
+**Rule:** Services can import from `utils/`, `lib/`, `nostr/`, `llm/`, but not from application entrypoints such as `event-handler/` or Rust binaries.
 
 ---
 
@@ -138,9 +138,9 @@ Teams are a local-only service concern. `src/services/teams/` loads JSON definit
 ---
 
 ### Layer 4: Application Entry Points
-**Modules:** `commands/`, `daemon/`, `event-handler/`
+**Modules:** `event-handler/` and Rust binaries under `crates/`
 
-**Purpose:** CLI, runtime orchestration, event routing
+**Purpose:** Runtime orchestration and event routing
 
 **Dependencies:** Everything below (layers 0-3)
 
@@ -383,7 +383,7 @@ import { notificationService } from "@/services/notifications";
 
 **Adding to services/:**
 - Can import from `utils/`, `lib/`, `nostr/`, `llm/`, `prompts/`, `events/`
-- Cannot import from `commands/`, `daemon/`, `event-handler/`
+- Cannot import from application entrypoints such as `event-handler/` or Rust binaries
 
 ---
 

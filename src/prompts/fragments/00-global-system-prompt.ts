@@ -7,7 +7,7 @@ import type { PromptFragment } from "../core/types";
  * This fragment allows users to configure a system prompt that is added to ALL
  * projects. It is loaded from the global config ($TENEX_BASE_DIR/config.json).
  *
- * Users can configure this via: `tenex config system-prompt`
+ * Users can configure this in the global TENEX config file.
  *
  * Priority 3 places it after the core identity fragments (priorities 1 and 2),
  * so it is ordered like other fragments instead of being prepended.

@@ -1,10 +1,7 @@
 {
   "name": "@tenex-chat/backend",
   "version": "0.9.14",
-  "description": "TENEX Command Line Interface",
-  "bin": {
-    "tenex-backend": "./dist/index.js"
-  },
+  "description": "TENEX TypeScript runtime modules consumed by the Rust binaries",
   "files": [
     "dist/**/*.js",
     "dist/**/*.cjs",
@@ -21,7 +18,6 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "start": "bun run ./src/index.ts",
     "build": "bun scripts/build-bundled.js",
     "prepublishOnly": "bun run build",
     "test": "bun test",

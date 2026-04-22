@@ -1,8 +1,7 @@
 import { getRelayUrls } from "./relays";
 import { logger } from "@/utils/logger";
 /**
- * TENEX CLI: NDK Singleton
- * Manages a single NDK instance for the CLI
+ * Shared NDK singleton for TypeScript runtime helpers.
  */
 import NDK, { NDKRelayAuthPolicies } from "@nostr-dev-kit/ndk";
 

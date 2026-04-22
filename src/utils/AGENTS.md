@@ -1,6 +1,6 @@
 # utils/ — TENEX Utilities (Layer 1)
 
-TENEX-specific helpers that don't need service state. Can import from `lib/` and npm packages but NOT from `services/`, `agents/`, or `commands/`.
+TENEX-specific helpers that don't need service state. Can import from `lib/` and npm packages but NOT from `services/` or `agents/`.
 
 When a utility needs data from services, accept it as a parameter — don't import services directly.
 
@@ -14,7 +14,6 @@ When a utility needs data from services, accept it as a parameter — don't impo
 - `conversation-id.ts` — Conversation identifier helpers
 - `metadataKeys.ts` — Metadata key constants
 - `sqlEscaping.ts` — SQL escaping utilities
-- `cli-theme.ts`, `cli-error.ts` — CLI display helpers
 - `error-handler.ts` — Error handling utilities
 
 ## Boundary

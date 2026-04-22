@@ -650,16 +650,16 @@ export class ConfigService {
     }
 
     /**
-     * Get whitelisted pubkeys with CLI override support
-     * If CLI option is provided, it ONLY uses those pubkeys (doesn't merge with config)
+     * Get whitelisted pubkeys with caller-supplied override support.
+     * If an override is provided, it ONLY uses those pubkeys (doesn't merge with config)
      * Otherwise, returns pubkeys from the loaded configuration
      */
-    getWhitelistedPubkeys(cliOption?: string): string[] {
+    getWhitelistedPubkeys(overridePubkeys?: string): string[] {
         const pubkeys: Set<string> = new Set();
 
-        // If CLI option is provided, ONLY use those pubkeys (don't merge with config)
-        if (cliOption) {
-            for (const pk of cliOption.split(",")) {
+        // If an override is provided, ONLY use those pubkeys (don't merge with config)
+        if (overridePubkeys) {
+            for (const pk of overridePubkeys.split(",")) {
                 const trimmed = pk.trim();
                 if (trimmed) pubkeys.add(trimmed);
             }

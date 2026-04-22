@@ -141,7 +141,7 @@ Vector Store (LanceDB/Qdrant/SQLite-vec)
 
 3. Verify daemon is running:
    ```bash
-   tenex daemon-status
+   daemon-control status --daemon-dir "$TENEX_BASE_DIR/daemon"
    ```
 
 ### Search results are stale
@@ -156,9 +156,6 @@ tenex doctor conversations reindex --confirm
 ### Embedding provider errors
 
 Check your LLM provider configuration:
-```bash
-tenex config providers
-```
 
 Ensure you have:
 - Valid API keys
@@ -175,9 +172,8 @@ Indexing embeds full conversation transcripts. For large histories:
 ## Configuration
 
 Embedding settings are configured via:
-```bash
-tenex config embed
-```
+- TENEX provider/config files under the global TENEX config directory
+- the Rust setup/configuration surfaces when provisioning a new environment
 
 Supported providers:
 - OpenAI (text-embedding-3-small, text-embedding-3-large)

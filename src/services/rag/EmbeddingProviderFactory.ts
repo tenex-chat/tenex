@@ -138,7 +138,7 @@ export async function createEmbeddingProvider(
     // All other providers are treated as OpenAI-compatible
     if (!embeddingConfig.apiKey) {
         throw new Error(
-            `API key required for ${embeddingConfig.provider}. Configure with 'tenex config embed'.`
+            `API key required for ${embeddingConfig.provider}. Configure embeddings in the TENEX config files before indexing.`
         );
     }
 

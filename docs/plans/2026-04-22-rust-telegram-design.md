@@ -468,8 +468,8 @@ now. `process_telegram_update` returns an ignored outcome
 `unbound_channel` for un-bound `/start` flows) and the observer just
 records the reason. No Rust→TS bridge was built because:
 
-1. The TS daemon is already decommissioned (`src/commands/daemon.ts` only
-   launches the Rust binary); no process exists to host a bridge.
+1. The TS daemon entrypoint is decommissioned; no TypeScript process exists to
+   host a bridge.
 2. A temporary bridge would violate TENEX's "no temporary solutions"
    rule — Slice 5 is the clean landing spot for a Rust-native config
    command handler.

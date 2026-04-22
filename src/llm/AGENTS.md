@@ -9,7 +9,6 @@ Abstraction layer for LLM providers. Agents and services never talk to provider 
 - `ChunkHandler.ts` — Stream chunk processing
 - `FinishHandler.ts` — Stream completion handling
 - `MessageProcessor.ts` — Message pre-processing
-- `LLMConfigEditor.ts` — CLI config editing for LLM settings
 - `TracingUtils.ts` — LLM call tracing
 - `chunk-validators.ts` — Validates incoming stream chunks
 
@@ -21,7 +20,7 @@ Abstraction layer for LLM providers. Agents and services never talk to provider 
 - `providers/base/` — Base provider interfaces
 - `middleware/` — Request/response middleware pipeline
 - `meta/` — Provider metadata
-- `utils/` — ModelSelector and other utilities
+- `utils/` — Runtime model metadata and context-window utilities
 
 ## Rules
 
@@ -29,3 +28,4 @@ Abstraction layer for LLM providers. Agents and services never talk to provider 
 - Provider-specific code stays in this module — no `if (provider === "claude")` in agents/
 - Retries and middleware are handled by the middleware pipeline, not inline
 - Credentials come from environment variables or `~/.tenex/llms.json` via ConfigService
+- Interactive configuration UX belongs in Rust, not this TypeScript layer.

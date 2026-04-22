@@ -36,12 +36,12 @@ const commonBuildConfig = {
 
 async function buildAll() {
     try {
-        console.log("🏗️  Building TENEX CLI package...");
+        console.log("🏗️  Building TENEX TypeScript runtime package...");
 
         rmSync(distDir, { recursive: true, force: true });
         mkdirSync(distDir, { recursive: true });
 
-        console.log("📦 Bundling runtime entrypoints for Node...");
+        console.log("📦 Bundling internal runtime entrypoints for Node...");
         const cliEntrypoint = join(distDir, "index.js");
         await build({
             ...commonBuildConfig,
