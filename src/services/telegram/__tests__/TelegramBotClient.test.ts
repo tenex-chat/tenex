@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
-import { TELEGRAM_BOT_COMMANDS } from "@/services/telegram/TelegramConfigCommandService";
+
+const TELEGRAM_BOT_COMMANDS = [
+    { command: "model", description: "Change the agent model" },
+    { command: "config", description: "Change the agent tools" },
+    { command: "new", description: "Start a fresh conversation" },
+];
 
 describe("TelegramBotClient", () => {
     const tempDirs: string[] = [];

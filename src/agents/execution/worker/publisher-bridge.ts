@@ -334,7 +334,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             correlationId: this.options.execution.correlationId,
             ...this.identity(),
             requestId,
-            requiresEventId: true,
+            waitForRelayOk: true,
             timeoutMs: 30_000,
             runtimeEventClass: options.runtimeEventClass,
             ...(options.conversationVariant

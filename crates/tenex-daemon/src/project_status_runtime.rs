@@ -130,7 +130,7 @@ pub fn publish_project_status_from_filesystem(
             project_id: input.project_d_tag,
             conversation_id: input.project_d_tag,
             ral_number: PROJECT_STATUS_RAL_NUMBER,
-            requires_event_id: false,
+            wait_for_relay_ok: false,
             timeout_ms: PROJECT_STATUS_TIMEOUT_MS,
         },
         snapshot.as_inputs(),

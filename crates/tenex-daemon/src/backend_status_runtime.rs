@@ -178,7 +178,7 @@ fn backend_status_context<'a>(
         project_id: BACKEND_STATUS_PROJECT_ID,
         conversation_id: BACKEND_STATUS_CONVERSATION_ID,
         ral_number: BACKEND_STATUS_RAL_NUMBER,
-        requires_event_id: false,
+        wait_for_relay_ok: false,
         timeout_ms: input.timeout_ms,
     }
 }

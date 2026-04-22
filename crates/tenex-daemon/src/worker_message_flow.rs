@@ -865,7 +865,7 @@ mod tests {
             "conversationId": "conversation-alpha",
             "ralNumber": 3,
             "requestId": "publish-fixture-01",
-            "requiresEventId": true,
+            "waitForRelayOk": true,
             "timeoutMs": 30000,
             "runtimeEventClass": "complete",
             "event": fixture.signed,

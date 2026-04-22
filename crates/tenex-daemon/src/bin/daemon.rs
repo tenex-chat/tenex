@@ -218,9 +218,18 @@ fn start_gateway_supervisor_from_options(
     }
 
     let data_dir = telegram_data_dir(&tenex_base_dir);
+    let backend_config = read_backend_config(&tenex_base_dir)
+        .map_err(|error| runtime_error(error.to_string()))?;
+    let signer: std::sync::Arc<dyn tenex_daemon::backend_events::heartbeat::BackendSigner + Send + Sync> =
+        std::sync::Arc::new(
+            backend_config
+                .backend_signer()
+                .map_err(|error| runtime_error(error.to_string()))?,
+        );
     let mut config = GatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), data_dir);
     config.bots = bots;
     config.writer_version = daemon_writer_version();
+    config.signer = Some(signer);
 
     match start_telegram_gateway(config, NoopIngressObserver) {
         Ok(supervisor) => Ok(Some(supervisor)),

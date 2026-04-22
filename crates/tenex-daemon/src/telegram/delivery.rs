@@ -160,6 +160,7 @@ impl TelegramBotDeliveryPublisher {
             reply_to_message_id: record.reply_to_telegram_message_id,
             message_thread_id: record.channel_binding.message_thread_id,
             disable_link_preview: true,
+            reply_markup: None,
         })?;
         Ok(sent.message_id)
     }
@@ -176,6 +177,7 @@ impl TelegramBotDeliveryPublisher {
             reply_to_message_id: record.reply_to_telegram_message_id,
             message_thread_id: record.channel_binding.message_thread_id,
             disable_link_preview: true,
+            reply_markup: None,
         })?;
         Ok(sent.message_id)
     }

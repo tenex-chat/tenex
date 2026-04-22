@@ -1,24 +1,28 @@
-//! Read-only view of the shared transport/identity binding files.
+//! View of the shared transport/identity binding files.
 //!
-//! TypeScript writes two JSON arrays under
-//! `$TENEX_BASE_DIR/<data>/`:
+//! Two JSON arrays live under `$TENEX_BASE_DIR/<data>/`:
 //!
 //! - `transport-bindings.json`: per-agent channel bindings
 //!   (`{ transport, agentPubkey, channelId, projectId, createdAt, updatedAt }`).
 //! - `identity-bindings.json`: per-principal identity bindings
 //!   (`{ principalId, transport, linkedPubkey?, displayName?, username?, kind?, ... }`).
 //!
-//! Rust reads both without ever writing, matching the TS reader semantics for
-//! corrupt/missing files and unknown transport values.
+//! Identity bindings stay TS-owned (the worker writes them). Transport
+//! bindings are Rust-written (the `/start` command handler persists the
+//! chat→project link) and TS-read (the worker's `send_message` tool and
+//! the project-context system-prompt fragment read the file). The on-disk
+//! shape must therefore stay byte-compatible with the TS writer: a plain
+//! JSON array, no schema stamps.
 //!
 //! The path under the base directory is resolved by TypeScript's
 //! `ConfigService.getConfigPath("data")`. We take the directory as an
 //! explicit argument so callers can point us at it without re-implementing
 //! the config resolver in Rust.
 
-use std::fs;
-use std::io;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -28,6 +32,16 @@ pub const IDENTITY_BINDINGS_FILE_NAME: &str = "identity-bindings.json";
 
 #[derive(Debug, Error)]
 pub enum TransportBindingReadError {
+    #[error("transport bindings io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("transport bindings json error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum TransportBindingWriteError {
+    #[error("transport bindings read failed: {0}")]
+    Read(#[from] TransportBindingReadError),
     #[error("transport bindings io error: {0}")]
     Io(#[from] io::Error),
     #[error("transport bindings json error: {0}")]
@@ -114,6 +128,98 @@ pub fn find_binding<'a>(
 
 pub fn transport_bindings_path(data_dir: &Path) -> PathBuf {
     data_dir.join(TRANSPORT_BINDINGS_FILE_NAME)
+}
+
+/// Persist or update a single transport binding entry in
+/// `transport-bindings.json`. Matches the TS
+/// `TransportBindingStore.rememberBinding` semantics:
+///
+/// - entries are keyed by `(transport, agentPubkey, channelId)`
+/// - an existing entry keeps its `createdAt` and has `updatedAt` bumped
+/// - new entries stamp both timestamps with `now_ms`
+///
+/// The on-disk file is a plain JSON array (no schema stamps) so TS readers
+/// consuming the same file stay compatible. The write is atomic via a
+/// tempfile rename with fsync.
+pub fn write_transport_binding(
+    data_dir: &Path,
+    transport: RuntimeTransport,
+    agent_pubkey: &str,
+    channel_id: &str,
+    project_id: &str,
+    now_ms: u64,
+) -> Result<TransportBindingRecord, TransportBindingWriteError> {
+    if agent_pubkey.is_empty() || channel_id.is_empty() || project_id.is_empty() {
+        return Err(TransportBindingWriteError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "transport binding requires non-empty agentPubkey, channelId, projectId",
+        )));
+    }
+    let mut records = read_transport_bindings(data_dir)?;
+    let mut updated = false;
+    for record in records.iter_mut() {
+        if record.transport == transport
+            && record.agent_pubkey == agent_pubkey
+            && record.channel_id == channel_id
+        {
+            record.project_id = project_id.to_string();
+            record.updated_at = now_ms;
+            updated = true;
+            break;
+        }
+    }
+    if !updated {
+        records.push(TransportBindingRecord {
+            transport,
+            agent_pubkey: agent_pubkey.to_string(),
+            channel_id: channel_id.to_string(),
+            project_id: project_id.to_string(),
+            created_at: now_ms,
+            updated_at: now_ms,
+        });
+    }
+    atomic_write_array(data_dir, TRANSPORT_BINDINGS_FILE_NAME, &records)?;
+    let written = records
+        .into_iter()
+        .find(|record| {
+            record.transport == transport
+                && record.agent_pubkey == agent_pubkey
+                && record.channel_id == channel_id
+        })
+        .expect("just-written binding must be present");
+    Ok(written)
+}
+
+fn atomic_write_array<T: Serialize>(
+    data_dir: &Path,
+    file_name: &str,
+    records: &[T],
+) -> Result<(), TransportBindingWriteError> {
+    fs::create_dir_all(data_dir)?;
+    let target = data_dir.join(file_name);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let tmp = data_dir.join(format!("{file_name}.{}.{}.tmp", std::process::id(), nanos));
+    let write_result = (|| -> Result<(), TransportBindingWriteError> {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        // TS writer uses `JSON.stringify(value, null, 2)` + trailing newline.
+        // Match that exactly so file diffs stay noise-free across writers.
+        let body = serde_json::to_string_pretty(records)?;
+        file.write_all(body.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        fs::rename(&tmp, &target)?;
+        if let Some(parent) = target.parent() {
+            File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    write_result
 }
 
 pub fn identity_bindings_path(data_dir: &Path) -> PathBuf {
@@ -407,5 +513,147 @@ mod tests {
         );
         assert!(found.is_some());
         assert_eq!(found.unwrap().transport, RuntimeTransport::Telegram);
+    }
+
+    #[test]
+    fn write_transport_binding_creates_file_with_plain_array_shape() {
+        let dir = unique_temp_dir("bindings-write");
+        let agent = "a".repeat(64);
+        let record = write_transport_binding(
+            &dir,
+            RuntimeTransport::Telegram,
+            &agent,
+            "telegram:chat:100",
+            "project-alpha",
+            1_700_000_000_000,
+        )
+        .expect("write");
+        assert_eq!(record.created_at, 1_700_000_000_000);
+        assert_eq!(record.updated_at, 1_700_000_000_000);
+
+        // Confirm the on-disk format is a plain JSON array (no stamp
+        // wrapper). This is critical: the TS worker reads the same file.
+        let raw = fs::read_to_string(transport_bindings_path(&dir)).expect("read");
+        assert!(raw.starts_with('['), "expected leading '[' in {raw:?}");
+        assert!(raw.trim_end().ends_with(']'));
+        assert!(raw.ends_with('\n'));
+
+        let round = read_transport_bindings(&dir).expect("read");
+        assert_eq!(round.len(), 1);
+        assert_eq!(round[0].project_id, "project-alpha");
+        assert_eq!(round[0].transport, RuntimeTransport::Telegram);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn write_transport_binding_updates_existing_entry_in_place() {
+        let dir = unique_temp_dir("bindings-write-update");
+        let agent = "a".repeat(64);
+        write_transport_binding(
+            &dir,
+            RuntimeTransport::Telegram,
+            &agent,
+            "telegram:chat:100",
+            "project-alpha",
+            1_700_000_000_000,
+        )
+        .expect("first write");
+        let second = write_transport_binding(
+            &dir,
+            RuntimeTransport::Telegram,
+            &agent,
+            "telegram:chat:100",
+            "project-beta",
+            1_700_000_005_000,
+        )
+        .expect("second write");
+        assert_eq!(second.created_at, 1_700_000_000_000);
+        assert_eq!(second.updated_at, 1_700_000_005_000);
+        assert_eq!(second.project_id, "project-beta");
+
+        let round = read_transport_bindings(&dir).expect("read");
+        assert_eq!(round.len(), 1, "update must not duplicate");
+        assert_eq!(round[0].project_id, "project-beta");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn write_transport_binding_preserves_other_entries() {
+        let dir = unique_temp_dir("bindings-write-preserve");
+        let agent_a = "a".repeat(64);
+        let agent_b = "b".repeat(64);
+        write_transport_binding(
+            &dir,
+            RuntimeTransport::Telegram,
+            &agent_a,
+            "telegram:chat:100",
+            "project-alpha",
+            1_700_000_000_000,
+        )
+        .expect("a write");
+        write_transport_binding(
+            &dir,
+            RuntimeTransport::Telegram,
+            &agent_b,
+            "telegram:chat:200",
+            "project-beta",
+            1_700_000_000_500,
+        )
+        .expect("b write");
+
+        let round = read_transport_bindings(&dir).expect("read");
+        assert_eq!(round.len(), 2);
+        let by_agent: std::collections::HashMap<_, _> = round
+            .iter()
+            .map(|record| (record.agent_pubkey.clone(), record.project_id.clone()))
+            .collect();
+        assert_eq!(by_agent.get(&agent_a).map(String::as_str), Some("project-alpha"));
+        assert_eq!(by_agent.get(&agent_b).map(String::as_str), Some("project-beta"));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn write_transport_binding_rejects_empty_fields() {
+        let dir = unique_temp_dir("bindings-write-empty");
+        let agent = "a".repeat(64);
+        let err = write_transport_binding(
+            &dir,
+            RuntimeTransport::Telegram,
+            &agent,
+            "",
+            "project-alpha",
+            1_700_000_000_000,
+        )
+        .expect_err("empty channel id must error");
+        assert!(matches!(err, TransportBindingWriteError::Io(_)));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn write_leaves_no_stray_tmp_file_on_success() {
+        let dir = unique_temp_dir("bindings-write-tmp");
+        let agent = "a".repeat(64);
+        write_transport_binding(
+            &dir,
+            RuntimeTransport::Telegram,
+            &agent,
+            "telegram:chat:100",
+            "project-alpha",
+            1_700_000_000_000,
+        )
+        .expect("write");
+        let leftover: Vec<_> = fs::read_dir(&dir)
+            .expect("read_dir")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| name.ends_with(".tmp"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert!(leftover.is_empty(), "tmp files must not leak: {leftover:?}");
+        fs::remove_dir_all(dir).ok();
     }
 }

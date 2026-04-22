@@ -299,6 +299,7 @@ pub struct SendMessageParams {
     pub reply_to_message_id: Option<i64>,
     pub message_thread_id: Option<i64>,
     pub disable_link_preview: bool,
+    pub reply_markup: Option<InlineKeyboardMarkup>,
 }
 
 /// Input to [`TelegramBotClient::send_voice`]. The voice file must be a
@@ -312,6 +313,38 @@ pub struct SendVoiceParams {
     pub message_thread_id: Option<i64>,
     pub caption: Option<String>,
     pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline keyboard button used on sendMessage / editMessageText.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InlineKeyboardButton {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub callback_data: Option<String>,
+}
+
+/// Inline keyboard markup attached to `reply_markup`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InlineKeyboardMarkup {
+    pub inline_keyboard: Vec<Vec<InlineKeyboardButton>>,
+}
+
+/// Input to [`TelegramBotClient::edit_message_text`].
+#[derive(Debug, Clone)]
+pub struct EditMessageTextParams {
+    pub chat_id: ChatId,
+    pub message_id: i64,
+    pub text: String,
+    pub parse_mode: Option<ParseMode>,
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+}
+
+/// Input to [`TelegramBotClient::answer_callback_query`].
+#[derive(Debug, Clone)]
+pub struct AnswerCallbackQueryParams {
+    pub callback_query_id: String,
+    pub text: Option<String>,
+    pub show_alert: bool,
 }
 
 /// Input to [`TelegramBotClient::get_updates`].
@@ -552,6 +585,12 @@ impl TelegramBotClient {
                 serde_json::json!({ "is_disabled": true }),
             );
         }
+        if let Some(reply_markup) = &params.reply_markup {
+            body.insert(
+                "reply_markup".to_string(),
+                serde_json::to_value(reply_markup)?,
+            );
+        }
 
         let envelope: serde_json::Value = body.into();
         match self.post_json::<SentMessage>("sendMessage", &envelope) {
@@ -606,6 +645,62 @@ impl TelegramBotClient {
         }
 
         self.post_multipart::<SentMessage>("sendVoice", form)
+    }
+
+    pub fn edit_message_text(
+        &self,
+        params: EditMessageTextParams,
+    ) -> Result<SentMessage, TelegramClientError> {
+        let mut body = serde_json::Map::new();
+        body.insert("chat_id".to_string(), params.chat_id.serialize_value());
+        body.insert("message_id".to_string(), params.message_id.into());
+        body.insert(
+            "text".to_string(),
+            serde_json::Value::String(params.text.clone()),
+        );
+        if let Some(parse_mode) = params.parse_mode {
+            body.insert("parse_mode".to_string(), parse_mode.as_str().into());
+        }
+        if let Some(reply_markup) = &params.reply_markup {
+            body.insert(
+                "reply_markup".to_string(),
+                serde_json::to_value(reply_markup)?,
+            );
+        }
+        let envelope: serde_json::Value = body.into();
+        match self.post_json::<SentMessage>("editMessageText", &envelope) {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if params.parse_mode == Some(ParseMode::Html)
+                    && let TelegramClientError::ApiError { description, .. } = &error
+                    && is_html_parse_description(description)
+                {
+                    return Err(TelegramClientError::HtmlParseError(description.clone()));
+                }
+                Err(error)
+            }
+        }
+    }
+
+    pub fn answer_callback_query(
+        &self,
+        params: AnswerCallbackQueryParams,
+    ) -> Result<(), TelegramClientError> {
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "callback_query_id".to_string(),
+            serde_json::Value::String(params.callback_query_id.clone()),
+        );
+        if let Some(text) = params.text {
+            body.insert("text".to_string(), serde_json::Value::String(text));
+        }
+        if params.show_alert {
+            body.insert("show_alert".to_string(), true.into());
+        }
+        let envelope: serde_json::Value = body.into();
+        // Bot API returns `true` on success; we discard the body.
+        let _: serde_json::Value = self.post_json("answerCallbackQuery", &envelope)?;
+        Ok(())
     }
 
     pub fn get_updates(
@@ -992,6 +1087,7 @@ mod tests {
                 reply_to_message_id: Some(42),
                 message_thread_id: Some(7),
                 disable_link_preview: true,
+                reply_markup: None,
             })
             .expect("send_message succeeds");
 
@@ -1032,6 +1128,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect("plain send_message");
         let body_str = String::from_utf8(server.captured().body).unwrap();
@@ -1059,6 +1156,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect_err("html parse rejection");
         assert!(
@@ -1087,6 +1185,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect_err("rate limited");
         match error {
@@ -1125,6 +1224,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect_err("unauthorized");
         assert!(matches!(error, TelegramClientError::InvalidToken));
@@ -1152,6 +1252,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect_err("chat not found");
         let classified = error.classify();
@@ -1178,6 +1279,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect_err("bot blocked");
         let classified = error.classify();
@@ -1204,6 +1306,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect_err("server error");
         let classified = error.classify();
@@ -1328,6 +1431,83 @@ mod tests {
     }
 
     #[test]
+    fn edit_message_text_serializes_inline_keyboard_and_chat_id() {
+        let body = serde_json::json!({
+            "ok": true,
+            "result": {
+                "message_id": 4242,
+                "chat": { "id": -1001, "type": "supergroup" }
+            }
+        })
+        .to_string();
+        let server = MockHttpServer::start(200, body);
+        let client = client_for(&server.url);
+
+        let markup = InlineKeyboardMarkup {
+            inline_keyboard: vec![vec![InlineKeyboardButton {
+                text: "Cancel".to_string(),
+                callback_data: Some("tgcfg:abc:cancel".to_string()),
+            }]],
+        };
+        client
+            .edit_message_text(EditMessageTextParams {
+                chat_id: ChatId::Numeric(-1001),
+                message_id: 77,
+                text: "new text".to_string(),
+                parse_mode: None,
+                reply_markup: Some(markup),
+            })
+            .expect("edit_message_text ok");
+
+        let captured = server.captured();
+        assert!(captured.path.contains("/botTESTTOKEN/editMessageText"));
+        let body = String::from_utf8(captured.body).expect("utf8");
+        assert!(body.contains("\"chat_id\":-1001"));
+        assert!(body.contains("\"message_id\":77"));
+        assert!(body.contains("\"text\":\"new text\""));
+        assert!(body.contains("\"callback_data\":\"tgcfg:abc:cancel\""));
+        assert!(body.contains("\"inline_keyboard\""));
+    }
+
+    #[test]
+    fn answer_callback_query_includes_show_alert_when_set() {
+        let body = serde_json::json!({ "ok": true, "result": true }).to_string();
+        let server = MockHttpServer::start(200, body);
+        let client = client_for(&server.url);
+        client
+            .answer_callback_query(AnswerCallbackQueryParams {
+                callback_query_id: "cb_1".to_string(),
+                text: Some("hi".to_string()),
+                show_alert: true,
+            })
+            .expect("answer ok");
+        let captured = server.captured();
+        assert!(captured.path.contains("/botTESTTOKEN/answerCallbackQuery"));
+        let body = String::from_utf8(captured.body).expect("utf8");
+        assert!(body.contains("\"callback_query_id\":\"cb_1\""));
+        assert!(body.contains("\"text\":\"hi\""));
+        assert!(body.contains("\"show_alert\":true"));
+    }
+
+    #[test]
+    fn answer_callback_query_omits_show_alert_when_false() {
+        let body = serde_json::json!({ "ok": true, "result": true }).to_string();
+        let server = MockHttpServer::start(200, body);
+        let client = client_for(&server.url);
+        client
+            .answer_callback_query(AnswerCallbackQueryParams {
+                callback_query_id: "cb_2".to_string(),
+                text: None,
+                show_alert: false,
+            })
+            .expect("answer ok");
+        let captured = server.captured();
+        let body = String::from_utf8(captured.body).expect("utf8");
+        assert!(!body.contains("show_alert"));
+        assert!(!body.contains("\"text\""));
+    }
+
+    #[test]
     fn network_timeout_maps_to_retryable_timeout() {
         // Bind to a port that we never answer on. A short timeout triggers
         // a reqwest timeout, which classifies as a retryable Timeout.
@@ -1347,6 +1527,7 @@ mod tests {
                 reply_to_message_id: None,
                 message_thread_id: None,
                 disable_link_preview: false,
+                reply_markup: None,
             })
             .expect_err("should time out");
         let classified = err.classify();

@@ -702,7 +702,7 @@ fn validate_waiting_for_delegation(object: &Map<String, Value>) -> WorkerProtoco
 fn validate_publish_request(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     validate_execution_identity(object)?;
     require_string(object, "requestId")?;
-    require_bool(object, "requiresEventId")?;
+    require_bool(object, "waitForRelayOk")?;
     require_positive_u64(object, "timeoutMs")?;
     validate_publish_event(object, "event")?;
     validate_runtime_event_class(object)?;

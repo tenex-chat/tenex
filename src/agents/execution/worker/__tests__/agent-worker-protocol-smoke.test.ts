@@ -288,7 +288,7 @@ describe("agent worker protocol process smoke test", () => {
                     agentPubkey: fixture.agentPubkey,
                     conversationId: fixture.conversationId,
                     ralNumber: 1,
-                    requiresEventId: true,
+                    waitForRelayOk: true,
                     event: {
                         kind: 1,
                     },

@@ -78,9 +78,9 @@ fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
         DaemonNostrEventClass::Project
         | DaemonNostrEventClass::Lesson
         | DaemonNostrEventClass::LessonComment
-        | DaemonNostrEventClass::Boot
         | DaemonNostrEventClass::AgentCreate
         | DaemonNostrEventClass::ConfigUpdate => "daemon_control_event",
+        DaemonNostrEventClass::Boot => "conversation_not_ignored",
         DaemonNostrEventClass::Other => "unsupported_nostr_event_class",
         DaemonNostrEventClass::Conversation => "conversation_not_ignored",
     }

@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { AgentEventEncoder } from "./AgentEventEncoder";
+import { enqueueSignedEventForRustPublish } from "./RustPublishOutbox";
 import { injectTraceContext } from "./trace-context";
 import type { InterventionReviewIntent } from "./types";
 
@@ -93,40 +94,28 @@ export class InterventionPublisher {
         const shortConversationId = shortenConversationId(conversationId);
 
         try {
-            const relaySet = await event.publish();
-            const successRelays: string[] = [];
-            for (const relay of relaySet) {
-                successRelays.push(relay.url);
-            }
-
-            if (successRelays.length === 0) {
-                logger.warn("Intervention review request published to 0 relays", {
-                    eventId: shortenOptionalEventId(event.id),
-                    conversationId: shortConversationId,
-                });
-            } else {
-                logger.info("Published intervention review request", {
-                    eventId: shortenOptionalEventId(event.id),
-                    conversationId: shortConversationId,
-                    targetAgent: humanReplicaPubkey.substring(0, 8),
-                    relayCount: successRelays.length,
-                });
-            }
-
-            if (!event.id) {
-                throw new Error("[InterventionPublisher] Missing event id after publish.");
-            }
-
-            trace.getActiveSpan()?.addEvent("intervention.review_request_published", {
-                "event.id": event.id,
-                "conversation.id": conversationId,
-                "target.pubkey": humanReplicaPubkey.substring(0, 8),
-                "relay.count": successRelays.length,
+            const signedEvent = await enqueueSignedEventForRustPublish(event, {
+                correlationId: "intervention_review_request",
+                projectId: "intervention",
+                conversationId,
+                requestId: `intervention-review:${conversationId}:${event.id}`,
             });
 
-            return event.id;
+            trace.getActiveSpan()?.addEvent("intervention.review_request_published", {
+                "event.id": signedEvent.id,
+                "conversation.id": conversationId,
+                "target.pubkey": humanReplicaPubkey.substring(0, 8),
+            });
+
+            logger.info("Enqueued intervention review request for Rust publish", {
+                eventId: shortenOptionalEventId(signedEvent.id),
+                conversationId: shortConversationId,
+                targetAgent: humanReplicaPubkey.substring(0, 8),
+            });
+
+            return signedEvent.id;
         } catch (error) {
-            logger.error("Failed to publish intervention review request", {
+            logger.error("Failed to enqueue intervention review request", {
                 error,
                 conversationId: shortConversationId,
             });

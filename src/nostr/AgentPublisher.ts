@@ -8,11 +8,12 @@ import { getNDK } from "@/nostr/ndkClient";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import { shortenConversationId, shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKPublishError } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { AgentPublishError } from "./AgentPublishError";
 import { AgentEventEncoder } from "./AgentEventEncoder";
 import { NostrInboundAdapter } from "./NostrInboundAdapter";
+import { enqueueSignedEventForRustPublish } from "./RustPublishOutbox";
 import { injectTraceContext } from "./trace-context";
 import type {
     AskConfig,
@@ -105,8 +106,13 @@ export class AgentPublisher implements AgentRuntimePublisher {
                     ["failed-event", failedEvent.inspect],
                 ];
                 await this.agent.sign(notification);
-                await notification.publish();
-                logger.warn("[PUBLISHERROR] Published failure notification for failed event", {
+                await enqueueSignedEventForRustPublish(notification, {
+                    correlationId: "agent_publish_failure_notification",
+                    projectId: "agent-publish-failure",
+                    conversationId: failedEvent.id ?? notification.id ?? "unknown",
+                    requestId: `agent-publish-failure:${notification.id}`,
+                });
+                logger.warn("[PUBLISHERROR] Enqueued failure notification for failed event", {
                     failedEventId: shortenOptionalEventId(failedEvent.id),
                     failedEventType: eventType,
                     notificationId: notification.id,
@@ -124,175 +130,53 @@ export class AgentPublisher implements AgentRuntimePublisher {
     }
 
     /**
-     * Safely publish an event with error handling, retries, and comprehensive logging.
-     * Assumes the event is already signed. Retries only the publishing step.
-     * Throws an error if no relays accept the event after all retries.
+     * Hand a signed event to Rust for relay publishing.
+     * Assumes the event is already signed.
      */
     private async safePublish(event: NDKEvent, eventType: string): Promise<void> {
-        const maxRetries = 3;
-        const retryDelayMs = 1000;
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                if (attempt > 1) {
-                    logger.info(`Retry attempt ${attempt}/${maxRetries} for ${eventType} event`, {
-                        eventId: shortenOptionalEventId(event.id),
-                        eventType,
-                        agent: this.agent.slug,
-                        attempt,
-                    });
-                    await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt - 1)));
-                }
-
-                const relaySet = await event.publish();
-
-                // Log relay responses with connectivity information
-                const successRelays: string[] = [];
-                for (const relay of relaySet) {
-                    successRelays.push(relay.url);
-                    const stats = relay.connectivity?.connectionStats;
-                    const status = relay.connectivity?.connected;
-                    logger.debug(`Relay accepted ${eventType} event`, {
-                        eventId: shortenOptionalEventId(event.id),
-                        eventType,
-                        relayUrl: relay.url,
-                        agent: this.agent.slug,
-                        connected: status,
-                        attempts: stats?.attempts,
-                        successCount: stats?.success,
-                    });
-
-                    // Listen for per-relay publish failures
-                    const publishFailHandler = (failedEvent: NDKEvent, error: Error): void => {
-                        if (failedEvent.id === event.id) {
-                            logger.error(`Relay rejected ${eventType} event`, {
-                                eventId: shortenOptionalEventId(event.id),
-                                eventType,
-                                relayUrl: relay.url,
-                                agent: this.agent.slug,
-                                error: error.message,
-                            });
-                            relay.off("publish:failed", publishFailHandler);
-                        }
-                    };
-                    relay.once("publish:failed", publishFailHandler);
-
-                    // Listen for successful publish confirmation
-                    const publishedHandler = (publishedEvent: NDKEvent): void => {
-                        if (publishedEvent.id === event.id) {
-                            logger.debug(`Relay confirmed publish of ${eventType} event`, {
-                                eventId: shortenOptionalEventId(event.id),
-                                eventType,
-                                relayUrl: relay.url,
-                                agent: this.agent.slug,
-                            });
-                            relay.off("published", publishedHandler);
-                        }
-                    };
-                    relay.once("published", publishedHandler);
-                }
-
-                // Fail explicitly when no relays accept the event
-                if (successRelays.length === 0) {
-                    const error = new Error(
-                        `Event published to 0 relays - all relays rejected the ${eventType} event`
-                    );
-                    logger.error("Event published to 0 relays", {
-                        eventId: shortenOptionalEventId(event.id),
-                        eventType,
-                        agent: this.agent.slug,
-                        kind: event.kind,
-                        contentLength: event.content?.length || 0,
-                        tagCount: event.tags?.length || 0,
-                        rawEvent: JSON.stringify(event.rawEvent()),
-                        attempt,
-                    });
-
-                    if (attempt < maxRetries) {
-                        logger.warn(`Will retry publishing ${eventType} event (attempt ${attempt}/${maxRetries})`, {
-                            eventId: shortenOptionalEventId(event.id),
-                            agent: this.agent.slug,
-                        });
-                        continue;
-                    }
-
-                    this.publishFailureNotification(event, eventType);
-                    throw error;
-                }
-
-                logger.info(`Published ${eventType} event to ${successRelays.length} relay(s)`, {
+        try {
+            await enqueueSignedEventForRustPublish(event, {
+                correlationId: `agent_${eventType}`,
+                projectId: event.tags.find((tag) => tag[0] === "a")?.[1] ?? "agent-event",
+                conversationId: event.tags.find((tag) => tag[0] === "e")?.[1] ?? event.id ?? "agent-event",
+                requestId: `agent:${eventType}:${event.id}`,
+            });
+            logger.info(`Enqueued ${eventType} event for Rust publish`, {
+                eventId: shortenOptionalEventId(event.id),
+                eventType,
+                agent: this.agent.slug,
+            });
+        } catch (error) {
+            logger.error(`Failed to enqueue ${eventType} for Rust publish`, {
+                eventId: shortenOptionalEventId(event.id),
+                agent: this.agent.slug,
+                kind: event.kind,
+                contentLength: event.content?.length || 0,
+                tagCount: event.tags?.length || 0,
+                rawEvent: JSON.stringify(event.rawEvent()),
+            });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "AgentPublisher",
+                message: `Failed to enqueue ${eventType} for Rust publish`,
+                context: {
                     eventId: shortenOptionalEventId(event.id),
+                    agent: this.agent.slug,
+                    rawEvent: JSON.stringify(event.rawEvent()),
+                },
+                error: error instanceof Error ? error.message : String(error),
+            });
+            this.publishFailureNotification(event, eventType);
+            const message = error instanceof Error ? error.message : String(error);
+            throw new AgentPublishError(
+                `Failed to enqueue ${eventType} for Rust publish: ${message}`,
+                {
+                    cause: error,
+                    event: this.toPublishedMessageRef(event),
                     eventType,
-                    agent: this.agent.slug,
-                    relays: successRelays,
-                    attempt: attempt > 1 ? attempt : undefined,
-                });
-
-                return;
-            } catch (error) {
-                const isLastAttempt = attempt === maxRetries;
-                const relayErrors = error instanceof NDKPublishError ? error.relayErrors : undefined;
-                const rawEvent = JSON.stringify(event.rawEvent());
-
-                // Collect relay connectivity information for diagnostics
-                const ndk = getNDK();
-                const relayStatus = Array.from(ndk.pool?.relays.values() || []).map(relay => ({
-                    url: relay.url,
-                    connected: relay.connectivity?.connected,
-                    attempts: relay.connectivity?.connectionStats?.attempts,
-                    successCount: relay.connectivity?.connectionStats?.success,
-                }));
-
-                if (!isLastAttempt) {
-                    logger.warn(`Failed to publish ${eventType} (attempt ${attempt}/${maxRetries}), will retry`, {
-                        eventId: shortenOptionalEventId(event.id),
-                        agent: this.agent.slug,
-                        kind: event.kind,
-                        contentLength: event.content?.length || 0,
-                        tagCount: event.tags?.length || 0,
-                        relayErrors,
-                        relayStatus,
-                        attempt,
-                    });
-                    continue;
                 }
-
-                logger.error(`Failed to publish ${eventType} after ${maxRetries} attempts`, {
-                    eventId: shortenOptionalEventId(event.id),
-                    agent: this.agent.slug,
-                    kind: event.kind,
-                    contentLength: event.content?.length || 0,
-                    tagCount: event.tags?.length || 0,
-                    relayErrors,
-                    relayStatus,
-                    rawEvent,
-                    attempts: maxRetries,
-                });
-                logger.writeToWarnLog({
-                    timestamp: new Date().toISOString(),
-                    level: "error",
-                    component: "AgentPublisher",
-                    message: `Failed to publish ${eventType} after ${maxRetries} attempts`,
-                    context: {
-                        eventId: shortenOptionalEventId(event.id),
-                        agent: this.agent.slug,
-                        relayErrors,
-                        rawEvent,
-                        attempts: maxRetries,
-                    },
-                    error: error instanceof Error ? error.message : String(error),
-                });
-                this.publishFailureNotification(event, eventType);
-                const message = error instanceof Error ? error.message : String(error);
-                throw new AgentPublishError(
-                    `Failed to publish ${eventType} after ${maxRetries} attempts: ${message}`,
-                    {
-                        cause: error,
-                        event: this.toPublishedMessageRef(event),
-                        eventType,
-                    }
-                );
-            }
+            );
         }
     }
 
@@ -634,7 +518,13 @@ export class AgentPublisher implements AgentRuntimePublisher {
             const event = this.encoder.encodeStreamTextDelta(intent, context);
             injectTraceContext(event);
             await this.agent.sign(event);
-            await event.publish();
+            await enqueueSignedEventForRustPublish(event, {
+                correlationId: "agent_stream_delta",
+                projectId: event.tags.find((tag) => tag[0] === "a")?.[1] ?? "agent-stream-delta",
+                conversationId: context.conversationId,
+                requestId: `agent-stream-delta:${context.conversationId}:${intent.sequence}:${event.id}`,
+                waitForRelayOk: false,
+            });
         } catch (error) {
             logger.warn("[AgentPublisher.streamTextDelta] Failed to publish stream delta (best-effort)", {
                 error: error instanceof Error ? error.message : String(error),

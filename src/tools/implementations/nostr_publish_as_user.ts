@@ -16,6 +16,7 @@ import { shortenPubkey } from "@/utils/conversation-id";
 
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { getNDK } from "@/nostr/ndkClient";
+import { enqueueSignedEventForRustPublish } from "@/nostr/RustPublishOutbox";
 import { Nip46SigningService } from "@/services/nip46";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -160,7 +161,7 @@ async function connectNip46Signer(
  * 3. Send NIP-46 signing request to the project owner
  * 4. Strip `tenex_explanation` property after signing (harmless — never part of hash)
  * 5. Verify the signature is valid
- * 6. Publish the signed event to relays
+ * 6. Enqueue the signed event for Rust relay publishing
  */
 async function executeNostrPublishAsUser(
     input: NostrPublishAsUserInput,
@@ -287,14 +288,19 @@ async function executeNostrPublishAsUser(
         );
     }
 
-    // Publish the signed event
+    // Hand the signed event to Rust for relay publishing
     try {
-        await ndkEvent.publish();
+        await enqueueSignedEventForRustPublish(ndkEvent, {
+            correlationId: "nostr_publish_as_user",
+            projectId: projectCtx?.project?.dTag ?? "nostr-publish-as-user",
+            conversationId: context.conversationId,
+            requestId: `nostr-publish-as-user:${context.conversationId}:${ndkEvent.id}`,
+        });
     } finally {
         try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
     }
 
-    logger.info("[nostr_publish_as_user] Event published successfully", {
+    logger.info("[nostr_publish_as_user] Event enqueued for Rust publish successfully", {
         eventId: ndkEvent.id,
         kind: ndkEvent.kind,
         ownerPubkey: shortenPubkey(ownerPubkey),

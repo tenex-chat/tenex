@@ -31,7 +31,6 @@ import {
 } from "@/llm/system-reminder-context";
 import { shortenConversationId, shortenOptionalConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { InterventionService } from "@/services/intervention";
 import { getProjectContext } from "@/services/projects";
@@ -87,9 +86,12 @@ export class AgentExecutor {
         // Centralized supervision health check - ensures both total registry size AND
         // post-completion heuristic count are validated (fail-closed semantics)
         assertSupervisionHealth("AgentExecutor");
-        const defaultPublisherFactory: AgentRuntimePublisherFactory = (agent) =>
-            new AgentPublisher(agent);
-        this.publisherFactory = options.publisherFactory ?? defaultPublisherFactory;
+        if (!options.publisherFactory) {
+            throw new Error(
+                "AgentExecutor requires a publisherFactory. Direct TypeScript Nostr publishing is disabled; Rust must inject the publish bridge."
+            );
+        }
+        this.publisherFactory = options.publisherFactory;
     }
 
     /**

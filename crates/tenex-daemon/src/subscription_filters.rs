@@ -93,7 +93,7 @@ pub fn build_static_filters(authors: &[String], since: Option<u64>) -> Vec<Nostr
             ..NostrFilter::default()
         },
         NostrFilter {
-            kinds: vec![24001, 24020, 24030],
+            kinds: vec![24000, 24001, 24020, 24030],
             authors: authors.to_vec(),
             since,
             ..NostrFilter::default()

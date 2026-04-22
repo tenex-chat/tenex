@@ -40,12 +40,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::backend_events::heartbeat::BackendSigner;
 use crate::telegram::chat_context::{
     ChatContextError, ChatContextSnapshot, DEFAULT_API_SYNC_TTL_MS, RefreshChatContextInput,
     SeenUser, record_seen_participant, refresh_chat_context,
 };
 use crate::telegram::client::{
     GetUpdatesParams, TelegramBotClient, TelegramBotClientConfig, TelegramClientError, Update,
+};
+use crate::telegram::commands::{
+    CommandBotClient, CommandContext, CommandDispatchResult, dispatch_callback_query,
+    dispatch_command,
 };
 use crate::telegram::inbound::{InboundMediaInfo, InboundMediaType};
 use crate::telegram::ingress_runtime::{
@@ -84,7 +89,6 @@ pub struct GatewayBot {
 }
 
 /// Whole-supervisor configuration.
-#[derive(Debug, Clone)]
 pub struct GatewayConfig {
     pub tenex_base_dir: PathBuf,
     pub daemon_dir: PathBuf,
@@ -98,6 +102,32 @@ pub struct GatewayConfig {
     pub long_poll_timeout_seconds: u64,
     pub poll_limit: u32,
     pub chat_context_api_sync_ttl_ms: u64,
+    /// Backend signer used to publish agent-config updates from
+    /// `/model`/`/config` callback flows. `None` disables Nostr publishing
+    /// for callbacks — the menus themselves still render but save/select
+    /// operations return an alert instead of emitting an event. Production
+    /// wiring always provides a signer; the `None` case keeps tests that
+    /// don't exercise Nostr publishing terse.
+    pub signer: Option<Arc<dyn BackendSigner + Send + Sync>>,
+}
+
+impl std::fmt::Debug for GatewayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GatewayConfig")
+            .field("tenex_base_dir", &self.tenex_base_dir)
+            .field("daemon_dir", &self.daemon_dir)
+            .field("data_dir", &self.data_dir)
+            .field("writer_version", &self.writer_version)
+            .field("bots", &self.bots)
+            .field("long_poll_timeout_seconds", &self.long_poll_timeout_seconds)
+            .field("poll_limit", &self.poll_limit)
+            .field(
+                "chat_context_api_sync_ttl_ms",
+                &self.chat_context_api_sync_ttl_ms,
+            )
+            .field("signer_present", &self.signer.is_some())
+            .finish()
+    }
 }
 
 impl GatewayConfig {
@@ -111,11 +141,17 @@ impl GatewayConfig {
             long_poll_timeout_seconds: DEFAULT_LONG_POLL_TIMEOUT_SECONDS,
             poll_limit: DEFAULT_POLL_LIMIT,
             chat_context_api_sync_ttl_ms: DEFAULT_API_SYNC_TTL_MS,
+            signer: None,
         }
     }
 
     pub fn with_bot(mut self, bot: GatewayBot) -> Self {
         self.bots.push(bot);
+        self
+    }
+
+    pub fn with_signer(mut self, signer: Arc<dyn BackendSigner + Send + Sync>) -> Self {
+        self.signer = Some(signer);
         self
     }
 }
@@ -135,6 +171,11 @@ pub trait GatewayBotApi: Send + Sync {
         daemon_dir: &Path,
         input: &RefreshChatContextInput<'_>,
     ) -> Result<ChatContextSnapshot, ChatContextError>;
+    /// Command/callback handlers send Bot API messages (the chat reply to
+    /// `/start`, the inline-keyboard menu for `/model`, `editMessageText`
+    /// on a callback). Exposing a typed command-client view keeps the
+    /// command module independent of the long-poll trait shape.
+    fn command_client(&self) -> &dyn CommandBotClient;
 }
 
 /// The piece of `getMe` the gateway cares about — used to drop the bot's
@@ -194,6 +235,10 @@ impl GatewayBotApi for TelegramClientGatewayApi {
         input: &RefreshChatContextInput<'_>,
     ) -> Result<ChatContextSnapshot, ChatContextError> {
         refresh_chat_context(daemon_dir, &self.client, input)
+    }
+
+    fn command_client(&self) -> &dyn CommandBotClient {
+        &self.client
     }
 }
 
@@ -299,6 +344,7 @@ where
                 long_poll_timeout_seconds: config.long_poll_timeout_seconds,
                 poll_limit: config.poll_limit,
                 chat_context_api_sync_ttl_ms: config.chat_context_api_sync_ttl_ms,
+                signer: config.signer.clone(),
             },
         );
         handles.push(handle);
@@ -306,7 +352,7 @@ where
     Ok(TelegramGatewaySupervisor { handles, stop_flag })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct GatewayThreadConfig {
     tenex_base_dir: PathBuf,
     daemon_dir: PathBuf,
@@ -315,6 +361,7 @@ struct GatewayThreadConfig {
     long_poll_timeout_seconds: u64,
     poll_limit: u32,
     chat_context_api_sync_ttl_ms: u64,
+    signer: Option<Arc<dyn BackendSigner + Send + Sync>>,
 }
 
 fn spawn_gateway_thread<A>(
@@ -524,6 +571,13 @@ fn process_one<A>(
 {
     let update_json = update_to_json(update);
 
+    // Commands and callback queries are meta-UI: they never become
+    // envelopes. Dispatch them first and short-circuit the rest of the
+    // pipeline when recognised.
+    if try_dispatch_meta(bot, identity, &update_json, api, config) {
+        return;
+    }
+
     // Refresh chat context + record sender when the update carries a
     // routable message. These are best-effort: the main dispatch still
     // runs if these fail.
@@ -626,6 +680,96 @@ fn process_one<A>(
             observer.on_error(&bot.label, &error);
         }
     }
+}
+
+/// Try to dispatch a command (`/...`) or callback query via
+/// [`crate::telegram::commands`]. Returns `true` when the pipeline should
+/// stop (the update was handled as meta-UI, or attempting to handle it
+/// produced an error that still means "don't feed this to the normalizer").
+fn try_dispatch_meta<A>(
+    bot: &GatewayBot,
+    identity: &BotIdentity,
+    update: &Value,
+    api: &Arc<A>,
+    config: &GatewayThreadConfig,
+) -> bool
+where
+    A: GatewayBotApi,
+{
+    // Shortcut: quickly decide whether this update is a command or callback
+    // query. Non-commands get the fast path out; the command module does
+    // its own stricter parsing below.
+    let is_callback_query = update
+        .as_object()
+        .map(|obj| obj.contains_key("callback_query"))
+        .unwrap_or(false);
+    let starts_with_slash = update_starts_with_slash(update);
+    if !is_callback_query && !starts_with_slash {
+        return false;
+    }
+
+    let Some(signer) = config.signer.clone() else {
+        log_bot_warning(
+            &bot.label,
+            "received a command/callback update but no backend signer is configured — ignoring",
+        );
+        return true;
+    };
+
+    let ctx = CommandContext {
+        daemon_dir: &config.daemon_dir,
+        tenex_base_dir: &config.tenex_base_dir,
+        data_dir: &config.data_dir,
+        agent_pubkey: &bot.agent_pubkey,
+        agent_name: &bot.agent_name,
+        bot_username: identity.username.as_deref(),
+        client: api.command_client(),
+        signer: signer.as_ref(),
+        writer_version: &config.writer_version,
+        now_ms: now_ms(),
+        now_seconds: now_ms() / 1_000,
+    };
+
+    let result = if is_callback_query {
+        dispatch_callback_query(&ctx, update)
+    } else {
+        dispatch_command(&ctx, update)
+    };
+
+    match result {
+        CommandDispatchResult::Handled => true,
+        CommandDispatchResult::NotACommand => false,
+        CommandDispatchResult::Error(error) => {
+            log_bot_warning(
+                &bot.label,
+                &format!("command dispatch failed: {error}"),
+            );
+            // Treat the error as "meta-UI handled" so the normalizer
+            // doesn't re-process a `/model` typed into an agent chat.
+            true
+        }
+    }
+}
+
+fn update_starts_with_slash(update: &Value) -> bool {
+    let Some(obj) = update.as_object() else {
+        return false;
+    };
+    let message = obj
+        .get("message")
+        .filter(|value| !value.is_null())
+        .or_else(|| obj.get("edited_message").filter(|value| !value.is_null()))
+        .and_then(Value::as_object);
+    let Some(message) = message else {
+        return false;
+    };
+    let text = message
+        .get("text")
+        .and_then(Value::as_str)
+        .or_else(|| message.get("caption").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim_start();
+    text.starts_with('/')
 }
 
 fn update_to_json(update: &Update) -> Value {
@@ -1001,6 +1145,10 @@ mod tests {
                 last_api_sync_at: Some(input.now_ms),
             })
         }
+
+        fn command_client(&self) -> &dyn CommandBotClient {
+            noop_command_client()
+        }
     }
 
     fn private_text_update(update_id: i64, message_id: i64, text: &str) -> Update {
@@ -1037,7 +1185,43 @@ mod tests {
             long_poll_timeout_seconds: 0,
             poll_limit: 100,
             chat_context_api_sync_ttl_ms: 0,
+            signer: None,
         }
+    }
+
+    struct NoopCommandClient;
+    impl CommandBotClient for NoopCommandClient {
+        fn send_message(
+            &self,
+            _params: crate::telegram::client::SendMessageParams,
+        ) -> Result<crate::telegram::client::SentMessage, TelegramClientError> {
+            Err(TelegramClientError::Http {
+                status: 500,
+                description: "test stub: send_message not implemented".to_string(),
+            })
+        }
+        fn edit_message_text(
+            &self,
+            _params: crate::telegram::client::EditMessageTextParams,
+        ) -> Result<crate::telegram::client::SentMessage, TelegramClientError> {
+            Err(TelegramClientError::Http {
+                status: 500,
+                description: "test stub: edit_message_text not implemented".to_string(),
+            })
+        }
+        fn answer_callback_query(
+            &self,
+            _params: crate::telegram::client::AnswerCallbackQueryParams,
+        ) -> Result<(), TelegramClientError> {
+            Err(TelegramClientError::Http {
+                status: 500,
+                description: "test stub: answer_callback_query not implemented".to_string(),
+            })
+        }
+    }
+    fn noop_command_client() -> &'static dyn CommandBotClient {
+        static NOOP: NoopCommandClient = NoopCommandClient;
+        &NOOP
     }
 
     #[derive(Default)]
@@ -1105,12 +1289,17 @@ mod tests {
     }
 
     #[test]
-    fn process_one_skips_chat_refresh_for_callback_query() {
+    fn process_one_absorbs_callback_queries_as_meta_ui_before_ingress() {
+        // Slice 5: the gateway now dispatches callback queries through the
+        // command handler, not the ingress runtime. With no signer
+        // configured the command handler logs a warning and short-circuits;
+        // crucially the ingress observer is never called, because callback
+        // queries are meta-UI and never become envelopes.
         let tmp = tempfile::tempdir().expect("tempdir");
         let callback = json!({
             "id": "cb1",
             "from": { "id": 42, "is_bot": false, "first_name": "Alice" },
-            "data": "action"
+            "data": "tgcfg:session:save"
         });
         let update = Update {
             update_id: 2,
@@ -1134,18 +1323,12 @@ mod tests {
             &observer,
             &test_config(tmp.path(), tmp.path(), tmp.path()),
         );
-        // Callback queries carry no chat metadata our extractor recognises,
-        // so no chat-context refresh happens; the ingress runtime logs the
-        // callback ignored reason.
         assert_eq!(*api.refresh_calls.lock().unwrap(), 0);
         let processed = observer_concrete.processed.lock().unwrap();
-        assert_eq!(processed.len(), 1);
-        match &processed[0] {
-            TelegramIngressRuntimeOutcome::Ignored { reason } => {
-                assert_eq!(reason.code, "unsupported_callback_query");
-            }
-            _ => panic!("expected ignored outcome for callback query"),
-        }
+        assert!(
+            processed.is_empty(),
+            "callback queries must not reach the ingress runtime: {processed:?}"
+        );
     }
 
     #[test]
@@ -1189,6 +1372,9 @@ mod tests {
             ) -> Result<ChatContextSnapshot, ChatContextError> {
                 unreachable!()
             }
+            fn command_client(&self) -> &dyn CommandBotClient {
+                noop_command_client()
+            }
         }
         let api = DrainBotApi {
             calls: Mutex::new(0),
@@ -1225,6 +1411,9 @@ mod tests {
                 _: &RefreshChatContextInput<'_>,
             ) -> Result<ChatContextSnapshot, ChatContextError> {
                 unreachable!()
+            }
+            fn command_client(&self) -> &dyn CommandBotClient {
+                noop_command_client()
             }
         }
         let api = InvalidApi;

@@ -44,7 +44,7 @@ pub struct BackendPublishRuntimeInput<'a> {
     pub conversation_id: &'a str,
     pub expected_publisher_pubkey: &'a str,
     pub ral_number: u64,
-    pub requires_event_id: bool,
+    pub wait_for_relay_ok: bool,
     pub timeout_ms: u64,
 }
 
@@ -88,7 +88,7 @@ pub fn enqueue_backend_event_for_publish(
             conversation_id: input.conversation_id.to_string(),
             publisher_pubkey: input.expected_publisher_pubkey.to_string(),
             ral_number: input.ral_number,
-            requires_event_id: input.requires_event_id,
+            wait_for_relay_ok: input.wait_for_relay_ok,
             timeout_ms: input.timeout_ms,
             event: input.event,
         },
@@ -215,7 +215,7 @@ mod tests {
             conversation_id: "conversation-alpha",
             expected_publisher_pubkey: &fixture.pubkey,
             ral_number: 0,
-            requires_event_id: false,
+            wait_for_relay_ok: false,
             timeout_ms: 0,
         })
         .expect("backend event must enqueue");
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(outcome.record.request.request_id, "backend-status-01");
         assert_eq!(outcome.record.request.agent_pubkey, fixture.pubkey);
         assert_eq!(outcome.record.request.ral_number, 0);
-        assert!(!outcome.record.request.requires_event_id);
+        assert!(!outcome.record.request.wait_for_relay_ok);
         assert_eq!(outcome.record.request.timeout_ms, 0);
 
         let persisted = read_pending_publish_outbox_record(&daemon_dir, &outcome.record.event.id)
@@ -253,7 +253,7 @@ mod tests {
             conversation_id: "conversation-alpha",
             expected_publisher_pubkey: &unexpected_pubkey,
             ral_number: 0,
-            requires_event_id: false,
+            wait_for_relay_ok: false,
             timeout_ms: 0,
         })
         .expect_err("unexpected backend publisher must be rejected");
@@ -287,7 +287,7 @@ mod tests {
             conversation_id: "conversation-alpha",
             expected_publisher_pubkey: &fixture.pubkey,
             ral_number: 0,
-            requires_event_id: false,
+            wait_for_relay_ok: false,
             timeout_ms: 0,
         })
         .expect("backend event must enqueue");
@@ -361,7 +361,7 @@ mod tests {
             "conversationId": "conversation-alpha",
             "ralNumber": 7,
             "requestId": "publish-fixture-01",
-            "requiresEventId": true,
+            "waitForRelayOk": true,
             "timeoutMs": 30_000,
             "runtimeEventClass": "complete",
             "event": fixture.signed.clone(),

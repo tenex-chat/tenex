@@ -2,16 +2,15 @@ import * as crypto from "node:crypto";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { getIdentityRelayUrls, getRelayUrls } from "@/nostr/relays";
 import { config } from "@/services/ConfigService";
 import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { getSystemPubkeyListService } from "@/services/trust-pubkeys/SystemPubkeyListService";
 import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
+import { enqueueSignedEventForRustPublish } from "./RustPublishOutbox";
 import {
     NDKEvent,
     NDKPrivateKeySigner,
-    NDKRelaySet,
     type NDKProject,
 } from "@nostr-dev-kit/ndk";
 
@@ -156,7 +155,12 @@ async function publishSnapshotForOwner(
 
     if (result.outcome === "signed") {
         try {
-            await ev.publish();
+            await enqueueSignedEventForRustPublish(ev, {
+                correlationId: "project_agent_snapshot",
+                projectId: "project-agent-snapshot",
+                conversationId: ownerPubkey,
+                requestId: `project-agent-snapshot:${ownerPubkey}:${ev.id}`,
+            });
             signingLog.log({
                 op: "event_published",
                 ownerPubkey: Nip46SigningLog.truncatePubkey(ownerPubkey),
@@ -165,7 +169,7 @@ async function publishSnapshotForOwner(
                 pTagCount: ev.tags.filter((t) => t[0] === "p").length,
                 eventId: ev.id,
             });
-            logger.info("[NIP-46] Published owner-signed 14199", {
+            logger.info("[NIP-46] Enqueued owner-signed 14199 for Rust publish", {
                 ownerPubkey: shortenPubkey(ownerPubkey),
                 eventId: shortenOptionalEventId(ev.id),
                 existingPTags: existingPTags.length,
@@ -173,7 +177,7 @@ async function publishSnapshotForOwner(
                 totalPTags: mergedPubkeys.length,
             });
         } catch (error) {
-            logger.warn("[NIP-46] Failed to publish owner-signed 14199", {
+            logger.warn("[NIP-46] Failed to enqueue owner-signed 14199", {
                 ownerPubkey: shortenPubkey(ownerPubkey),
                 error: error instanceof Error ? error.message : String(error),
             });
@@ -382,16 +386,15 @@ export async function publishAgentProfile(
 
         await profileEvent.sign(signer, { pTags: false });
 
-        const ndk = getNDK();
-        const profileRelaySet = NDKRelaySet.fromRelayUrls(
-            [...new Set([...getRelayUrls(), ...getIdentityRelayUrls()])],
-            ndk
-        );
-
-        // Don't await
-        profileEvent.publish(profileRelaySet)
+        // Don't await; Rust drains the durable publish outbox.
+        enqueueSignedEventForRustPublish(profileEvent, {
+            correlationId: "agent_profile",
+            projectId: projectDTag ?? "agent-profile",
+            conversationId: signer.pubkey,
+            requestId: `agent-profile:${signer.pubkey}:${profileEvent.id}`,
+        })
             .catch((publishError) => {
-            logger.warn("Failed to publish agent profile (may already exist)", {
+            logger.warn("Failed to enqueue agent profile", {
                 error: publishError,
                 agentName,
                 pubkey: signer.pubkey.substring(0, 8),
@@ -466,24 +469,19 @@ export async function publishBackendProfile(
         await profileEvent.sign(signer, { pTags: false });
 
         try {
-            const ndk = getNDK();
-            const profileRelaySet = NDKRelaySet.fromRelayUrls(
-                [...new Set([...getRelayUrls(), ...getIdentityRelayUrls()])],
-                ndk
-            );
-            // Publish with timeout - don't block daemon startup if relays are slow
-            await Promise.race([
-                profileEvent.publish(profileRelaySet),
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Publish timeout")), PUBLISH_TIMEOUT_MS)
-                ),
-            ]);
-            logger.info("Published TENEX backend profile", {
+            await enqueueSignedEventForRustPublish(profileEvent, {
+                correlationId: "backend_profile",
+                projectId: "backend-profile",
+                conversationId: signer.pubkey,
+                requestId: `backend-profile:${signer.pubkey}:${profileEvent.id}`,
+                timeoutMs: PUBLISH_TIMEOUT_MS,
+            });
+            logger.info("Enqueued TENEX backend profile for Rust publish", {
                 pubkey: signer.pubkey.substring(0, 8),
                 name: backendName,
             });
         } catch (publishError) {
-            logger.warn("Failed to publish backend profile (relay timeout or error)", {
+            logger.warn("Failed to enqueue backend profile", {
                 error: publishError,
                 pubkey: signer.pubkey.substring(0, 8),
             });
@@ -563,29 +561,24 @@ export async function publishCompiledInstructions(
         await profileEvent.sign(signer, { pTags: false });
 
         try {
-            const ndk = getNDK();
-            const profileRelaySet = NDKRelaySet.fromRelayUrls(
-                [...new Set([...getRelayUrls(), ...getIdentityRelayUrls()])],
-                ndk
-            );
-            // Publish with timeout to prevent blocking
-            await Promise.race([
-                profileEvent.publish(profileRelaySet),
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Publish timeout")), PUBLISH_TIMEOUT_MS)
-                ),
-            ]);
+            await enqueueSignedEventForRustPublish(profileEvent, {
+                correlationId: "compiled_instructions",
+                projectId: "compiled-instructions",
+                conversationId: signer.pubkey,
+                requestId: `compiled-instructions:${signer.pubkey}:${profileEvent.id}`,
+                timeoutMs: PUBLISH_TIMEOUT_MS,
+            });
 
             // Update deduplication cache on successful publish
             lastPublishedInstructionHash.set(signer.pubkey, instructionHash);
 
-            logger.info("Published kind:0 with compiled instructions", {
+            logger.info("Enqueued kind:0 with compiled instructions for Rust publish", {
                 agentPubkey: signer.pubkey.substring(0, 8),
                 agentName,
                 instructionsLength: compiledInstructions.length,
             });
         } catch (publishError) {
-            logger.warn("Failed to publish kind:0 with compiled instructions (relay timeout or error)", {
+            logger.warn("Failed to enqueue kind:0 with compiled instructions", {
                 error: publishError,
                 agentPubkey: signer.pubkey.substring(0, 8),
             });

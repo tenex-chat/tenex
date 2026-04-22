@@ -6,6 +6,7 @@ import { llmServiceFactory } from "@/llm";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { enqueueSignedEventForRustPublish } from "@/nostr/RustPublishOutbox";
 import { config } from "@/services/ConfigService";
 import { getIdentityService } from "@/services/identity";
 import type { ProjectContext } from "@/services/projects";
@@ -221,10 +222,16 @@ export class ConversationSummarizer {
 
                     const backendSigner = await config.getBackendSigner();
                     await event.sign(backendSigner);
-                    await event.publish();
-                    console.log(
-                        `Published metadata for conversation ${conversation.id}: ${result.title}`
-                    );
+                    await enqueueSignedEventForRustPublish(event, {
+                        correlationId: "conversation_metadata",
+                        projectId: this.context.project.dTag ?? this.context.project.tagId(),
+                        conversationId: conversation.id,
+                        requestId: `conversation-metadata:${conversation.id}:${event.id}`,
+                    });
+                    logger.info("[ConversationSummarizer] Enqueued metadata", {
+                        conversationId: conversation.id,
+                        title: result.title,
+                    });
                 } catch (publishError) {
                     logger.debug("[ConversationSummarizer] Skipping metadata publish", {
                         conversationId: conversation.id,

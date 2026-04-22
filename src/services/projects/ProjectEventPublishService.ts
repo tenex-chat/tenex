@@ -1,6 +1,7 @@
 import { collectEvents } from "@/nostr/collectEvents";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
+import { enqueueSignedEventForRustPublish } from "@/nostr/RustPublishOutbox";
 import { Nip46SigningLog, Nip46SigningService } from "@/services/nip46";
 import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
@@ -195,7 +196,12 @@ export class ProjectEventPublishService {
         }
 
         try {
-            await updatedEvent.publish();
+            await enqueueSignedEventForRustPublish(updatedEvent, {
+                correlationId: params.trigger,
+                projectId: params.projectDTag,
+                conversationId: params.projectDTag,
+                requestId: `${params.trigger}:${params.projectDTag}:${updatedEvent.id}`,
+            });
             Nip46SigningLog.getInstance().log({
                 op: "event_published",
                 ownerPubkey: Nip46SigningLog.truncatePubkey(params.ownerPubkey),
@@ -203,7 +209,7 @@ export class ProjectEventPublishService {
                 signerType: "nip46",
                 eventId: updatedEvent.id,
             });
-            logger.info("[ProjectEventPublishService] Published owner-signed 31933 update", {
+            logger.info("[ProjectEventPublishService] Enqueued owner-signed 31933 update for Rust publish", {
                 ownerPubkey: shortenPubkey(params.ownerPubkey),
                 projectDTag: params.projectDTag,
                 eventId: shortenOptionalEventId(updatedEvent.id),
@@ -222,7 +228,7 @@ export class ProjectEventPublishService {
             };
         } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
-            logger.warn("[ProjectEventPublishService] Failed to publish 31933 update", {
+            logger.warn("[ProjectEventPublishService] Failed to enqueue 31933 update", {
                 ownerPubkey: shortenPubkey(params.ownerPubkey),
                 projectDTag: params.projectDTag,
                 error: reason,

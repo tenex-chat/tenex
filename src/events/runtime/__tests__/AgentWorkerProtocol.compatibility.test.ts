@@ -105,7 +105,7 @@ describe("AgentWorkerProtocol compatibility fixture", () => {
             conversationId: "conversation-alpha",
             ralNumber: 3,
             requestId: "pub_class_semantics",
-            requiresEventId: true,
+            waitForRelayOk: true,
             timeoutMs: 10000,
             event: {
                 id: "5195cbc7477f80ea8717d058f80b14ec6c0d53f149375d245965f22e8a8f86fc",

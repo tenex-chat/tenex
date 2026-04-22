@@ -1402,7 +1402,7 @@ mod tests {
             "conversationId": "conversation-alpha",
             "ralNumber": 1_u64,
             "requestId": "publish-fixture-01",
-            "requiresEventId": true,
+            "waitForRelayOk": true,
             "timeoutMs": 30_000_u64,
             "runtimeEventClass": "complete",
             "event": &fixture.signed,

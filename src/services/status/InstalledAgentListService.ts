@@ -1,6 +1,7 @@
 import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { enqueueSignedEventForRustPublish } from "@/nostr/RustPublishOutbox";
 import { config } from "@/services/ConfigService";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -11,7 +12,12 @@ export class InstalledAgentListService {
         const event = await this.createInventoryEvent();
         const backendSigner = await config.getBackendSigner();
         await event.sign(backendSigner, { pTags: false });
-        await event.publish();
+        await enqueueSignedEventForRustPublish(event, {
+            correlationId: "installed_agent_list",
+            projectId: "installed-agent-list",
+            conversationId: "installed-agent-list",
+            requestId: `installed-agent-list:${event.id}`,
+        });
     }
 
     private async createInventoryEvent(): Promise<NDKEvent> {

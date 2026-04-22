@@ -1855,7 +1855,7 @@ mod tests {
             "conversationId": identity.conversation_id,
             "ralNumber": identity.ral_number,
             "requestId": "publish-fixture-01",
-            "requiresEventId": true,
+            "waitForRelayOk": true,
             "timeoutMs": 30_000_u64,
             "runtimeEventClass": "complete",
             "event": fixture.signed,

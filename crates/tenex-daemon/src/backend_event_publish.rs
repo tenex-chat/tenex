@@ -31,7 +31,7 @@ pub struct BackendEventPublishContext<'a> {
     pub project_id: &'a str,
     pub conversation_id: &'a str,
     pub ral_number: u64,
-    pub requires_event_id: bool,
+    pub wait_for_relay_ok: bool,
     pub timeout_ms: u64,
 }
 
@@ -103,7 +103,7 @@ fn enqueue_backend_signed_event<S: BackendSigner>(
         conversation_id: context.conversation_id,
         expected_publisher_pubkey: &expected_publisher_pubkey,
         ral_number: context.ral_number,
-        requires_event_id: context.requires_event_id,
+        wait_for_relay_ok: context.wait_for_relay_ok,
         timeout_ms: context.timeout_ms,
     })
 }
@@ -203,7 +203,7 @@ mod tests {
             project_id: "project-alpha",
             conversation_id: "conversation-alpha",
             ral_number: 12,
-            requires_event_id: false,
+            wait_for_relay_ok: false,
             timeout_ms: 0,
         }
     }

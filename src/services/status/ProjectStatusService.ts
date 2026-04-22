@@ -1,6 +1,7 @@
 import type { ScheduledTaskInfo, StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { enqueueSignedEventForRustPublish } from "@/nostr/RustPublishOutbox";
 import { config } from "@/services/ConfigService";
 import { type ProjectContext, projectContextStore } from "@/services/projects";
 import { SchedulerService } from "@/services/scheduling/SchedulerService";
@@ -221,15 +222,21 @@ export class ProjectStatusService {
             // Create and publish the status event directly
             const event = this.createStatusEvent(intent);
 
-            // Sign and publish with TENEX backend private key
+            // Sign and hand to Rust for relay publishing
             try {
                 const backendPrivateKey = await config.ensureBackendPrivateKey();
                 const backendSigner = new NDKPrivateKeySigner(backendPrivateKey);
 
                 await event.sign(backendSigner, { pTags: false });
-                await event.publish();
+                await enqueueSignedEventForRustPublish(event, {
+                    correlationId: "project_status",
+                    projectId: projectCtx.project.dTag ?? projectCtx.project.tagId(),
+                    conversationId: projectCtx.project.dTag ?? projectCtx.project.tagId(),
+                    requestId: `project-status:${projectCtx.project.dTag ?? projectCtx.project.tagId()}:${event.id}`,
+                    waitForRelayOk: false,
+                });
             } catch (error) {
-                logger.error("Failed to sign and publish status event", {
+                logger.error("Failed to sign and enqueue status event", {
                     error: formatAnyError(error),
                 });
             }

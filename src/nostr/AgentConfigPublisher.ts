@@ -3,6 +3,7 @@ import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "./kinds";
 import { getNDK } from "./ndkClient";
+import { enqueueSignedEventForRustPublish } from "./RustPublishOutbox";
 
 export interface ProjectScopedAgentConfigUpdate {
     projectBinding: string;
@@ -27,9 +28,14 @@ export class AgentConfigPublisher {
 
         const backendSigner = await config.getBackendSigner();
         await event.sign(backendSigner, { pTags: false });
-        await event.publish();
+        await enqueueSignedEventForRustPublish(event, {
+            correlationId: "agent_config_update",
+            projectId: params.projectBinding,
+            conversationId: params.projectBinding,
+            requestId: `agent-config:${params.projectBinding}:${params.agentPubkey}:${event.id}`,
+        });
 
-        logger.info("[AgentConfigPublisher] Published project-scoped agent config update", {
+        logger.info("[AgentConfigPublisher] Enqueued project-scoped agent config update for Rust publish", {
             eventId: event.id,
             projectBinding: params.projectBinding,
             agentPubkey: params.agentPubkey,

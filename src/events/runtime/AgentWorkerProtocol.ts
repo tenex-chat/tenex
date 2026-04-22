@@ -348,7 +348,7 @@ const conversationVariantSchema = z.enum(CONVERSATION_VARIANTS);
 const publishRequestMessageSchema = frameSchema("publish_request", {
     ...executionIdentityShape,
     requestId: z.string().min(1),
-    requiresEventId: z.boolean(),
+    waitForRelayOk: z.boolean(),
     timeoutMs: positiveIntegerSchema,
     runtimeEventClass: runtimeEventClassSchema,
     conversationVariant: conversationVariantSchema.optional(),
