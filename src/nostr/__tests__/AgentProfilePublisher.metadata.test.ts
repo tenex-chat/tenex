@@ -4,6 +4,7 @@ import { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import * as AgentProfilePublisherModule from "../AgentProfilePublisher";
 import * as ndkClientModule from "../ndkClient";
 import { getNDK } from "../ndkClient";
+import * as rustPublishOutbox from "../RustPublishOutbox";
 import { config } from "@/services/ConfigService";
 import * as systemPubkeyListModule from "@/services/trust-pubkeys/SystemPubkeyListService";
 import { logger } from "@/utils/logger";
@@ -11,30 +12,49 @@ import { logger } from "@/utils/logger";
 const mockSyncWhitelistFile = mock(() => Promise.resolve());
 
 describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
-    let mockPublish: any;
     let mockSign: any;
-    let publishSpy: ReturnType<typeof spyOn>;
+    let enqueueSpy: ReturnType<typeof spyOn>;
+    let directPublishSpy: ReturnType<typeof spyOn>;
     let signSpy: ReturnType<typeof spyOn>;
     let getConfigSpy: ReturnType<typeof spyOn>;
     let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
     let ensureBackendPrivateKeySpy: ReturnType<typeof spyOn>;
     let getProjectAgentsSpy: ReturnType<typeof spyOn>;
-    let capturedEvents: NDKEvent[] = [];
+    let capturedEnqueues: Array<{
+        event: NDKEvent;
+        context: rustPublishOutbox.RustPublishOutboxContext;
+    }> = [];
 
     beforeEach(() => {
-        capturedEvents = [];
+        capturedEnqueues = [];
         mockSyncWhitelistFile.mockClear();
 
-        // Mock NDKEvent to capture all published events
-        mockPublish = mock(() => Promise.resolve(undefined));
-        mockSign = mock();
+        // Capture the Rust outbox boundary while ensuring direct NDK relay publish is unused.
+        mockSign = mock(() => Promise.resolve());
 
-        publishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
-            capturedEvents.push(this);
-            return mockPublish();
+        directPublishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(() => {
+            return Promise.resolve(new Set());
         });
 
-        signSpy = spyOn(NDKEvent.prototype, "sign").mockImplementation(mockSign);
+        signSpy = spyOn(NDKEvent.prototype, "sign").mockImplementation(function (this: NDKEvent) {
+            (this as unknown as { id: string }).id = "signed-profile-event-id";
+            return mockSign();
+        });
+
+        enqueueSpy = spyOn(rustPublishOutbox, "enqueueSignedEventForRustPublish").mockImplementation(
+            async (event: NDKEvent, context: rustPublishOutbox.RustPublishOutboxContext = {}) => {
+                capturedEnqueues.push({ event, context });
+                return {
+                    id: event.id ?? "signed-profile-event-id",
+                    pubkey: event.pubkey ?? "agent-pubkey",
+                    created_at: event.created_at ?? 1,
+                    kind: event.kind ?? 0,
+                    tags: event.tags.map((tag) => [...tag]),
+                    content: event.content ?? "",
+                    sig: "test-signature",
+                };
+            }
+        );
 
         getConfigSpy = spyOn(config, "getConfig").mockReturnValue({});
         getWhitelistedPubkeysSpy = spyOn(config, "getWhitelistedPubkeys").mockReturnValue([]);
@@ -55,7 +75,8 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     });
 
     afterEach(() => {
-        publishSpy.mockRestore();
+        enqueueSpy.mockRestore();
+        directPublishSpy.mockRestore();
         signSpy.mockRestore();
         getConfigSpy.mockRestore();
         getWhitelistedPubkeysSpy.mockRestore();
@@ -64,7 +85,13 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     });
 
     // Helper to get the kind:0 event from captured events
-    const getKind0Event = (): NDKEvent | undefined => capturedEvents.find(e => e.kind === 0);
+    const getKind0Event = (): NDKEvent | undefined => capturedEnqueues.map(({ event }) => event).find(e => e.kind === 0);
+
+    const expectRustProfileEnqueue = (): void => {
+        expect(mockSign).toHaveBeenCalled();
+        expect(enqueueSpy).toHaveBeenCalled();
+        expect(directPublishSpy).not.toHaveBeenCalled();
+    };
 
     describe("publishProjectAgentSnapshot", () => {
         it("skips kind:14199 publishing entirely when NIP-46 is disabled", async () => {
@@ -93,8 +120,9 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             }
 
             expect(mockSign).not.toHaveBeenCalled();
-            expect(mockPublish).not.toHaveBeenCalled();
-            expect(capturedEvents).toHaveLength(0);
+            expect(enqueueSpy).not.toHaveBeenCalled();
+            expect(directPublishSpy).not.toHaveBeenCalled();
+            expect(capturedEnqueues).toHaveLength(0);
         });
     });
 
@@ -145,8 +173,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 [] // No whitelisted pubkeys for this test
             );
 
-            expect(mockSign).toHaveBeenCalled();
-            expect(mockPublish).toHaveBeenCalled();
+            expectRustProfileEnqueue();
 
             const capturedEvent = getKind0Event();
             expect(capturedEvent).toBeDefined();
@@ -212,8 +239,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 [] // No whitelisted pubkeys for this test
             );
 
-            expect(mockSign).toHaveBeenCalled();
-            expect(mockPublish).toHaveBeenCalled();
+            expectRustProfileEnqueue();
 
             const capturedEvent = getKind0Event();
             expect(capturedEvent).toBeDefined();
@@ -559,8 +585,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 [] // No whitelisted pubkeys for this test
             );
 
-            expect(mockSign).toHaveBeenCalled();
-            expect(mockPublish).toHaveBeenCalled();
+            expectRustProfileEnqueue();
 
             const capturedEvent = getKind0Event();
             expect(capturedEvent).toBeDefined();
@@ -609,8 +634,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             whitelistedPubkeys
         );
 
-        expect(mockSign).toHaveBeenCalled();
-        expect(mockPublish).toHaveBeenCalled();
+        expectRustProfileEnqueue();
 
         const capturedEvent = getKind0Event();
         expect(capturedEvent).toBeDefined();

@@ -8,6 +8,7 @@ import { AgentEventEncoder } from "../AgentEventEncoder";
 import { InterventionPublisher } from "../InterventionPublisher";
 import type { InterventionReviewIntent } from "../types";
 import * as ndkClientModule from "../ndkClient";
+import * as rustPublishOutbox from "../RustPublishOutbox";
 import * as traceContextModule from "../trace-context";
 
 /**
@@ -234,21 +235,22 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
 
 describe("InterventionPublisher", () => {
     let publisher: InterventionPublisher;
-    let mockPublish: ReturnType<typeof mock>;
     let mockSign: ReturnType<typeof mock>;
-    let capturedEvents: NDKEvent[] = [];
+    let enqueueSpy: ReturnType<typeof spyOn>;
+    let directPublishSpy: ReturnType<typeof spyOn>;
+    let capturedEnqueues: Array<{
+        event: NDKEvent;
+        context: rustPublishOutbox.RustPublishOutboxContext;
+    }> = [];
 
     beforeEach(async () => {
-        capturedEvents = [];
+        capturedEnqueues = [];
         installSharedSpies();
 
-        // Mock NDKEvent.publish and sign
-        mockPublish = mock(() => Promise.resolve(new Set()));
         mockSign = mock(() => Promise.resolve());
 
-        spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
-            capturedEvents.push(this);
-            return mockPublish();
+        directPublishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(() => {
+            return Promise.resolve(new Set());
         });
 
         spyOn(NDKEvent.prototype, "sign").mockImplementation(function (this: NDKEvent) {
@@ -257,16 +259,43 @@ describe("InterventionPublisher", () => {
             return mockSign();
         });
 
+        enqueueSpy = spyOn(rustPublishOutbox, "enqueueSignedEventForRustPublish").mockImplementation(
+            async (event: NDKEvent, context: rustPublishOutbox.RustPublishOutboxContext = {}) => {
+                capturedEnqueues.push({ event, context });
+                return {
+                    id: event.id ?? "signed-event-id-12345",
+                    pubkey: event.pubkey ?? "backend-signer-pubkey-123456789012345678901234567890123456",
+                    created_at: event.created_at ?? 1,
+                    kind: event.kind ?? 1,
+                    tags: event.tags.map((tag) => [...tag]),
+                    content: event.content ?? "",
+                    sig: "test-signature",
+                };
+            }
+        );
+
         publisher = new InterventionPublisher();
         await publisher.initialize();
     });
 
     afterEach(() => {
-        capturedEvents = [];
+        capturedEnqueues = [];
         mock.restore();
     });
 
-    it("should publish event with all required tags", async () => {
+    const expectSingleEnqueuedEvent = (): NDKEvent => {
+        expect(mockSign).toHaveBeenCalled();
+        expect(enqueueSpy).toHaveBeenCalledTimes(1);
+        expect(directPublishSpy).not.toHaveBeenCalled();
+        expect(capturedEnqueues).toHaveLength(1);
+        expect(capturedEnqueues[0].context.correlationId).toBe("intervention_review_request");
+        expect(capturedEnqueues[0].context.requestId).toStartWith(
+            "intervention-review:conv-id-123456789012345678901234567890123456789012:signed-event-id-12345"
+        );
+        return capturedEnqueues[0].event;
+    };
+
+    it("should enqueue event with all required tags for Rust publishing", async () => {
         await withProjectContextAsync(() =>
             publisher.publishReviewRequest(
                 "target-pubkey-123456789012345678901234567890123456",
@@ -276,8 +305,7 @@ describe("InterventionPublisher", () => {
             )
         );
 
-        expect(capturedEvents.length).toBe(1);
-        const event = capturedEvents[0];
+        const event = expectSingleEnqueuedEvent();
 
         // Verify all required tags are present
         const tags = event.tags;
@@ -302,8 +330,7 @@ describe("InterventionPublisher", () => {
             )
         );
 
-        expect(capturedEvents.length).toBe(1);
-        const event = capturedEvents[0];
+        const event = expectSingleEnqueuedEvent();
 
         // Verify trace context tags are present
         const traceTag = event.tags.find((t) => t[0] === "trace_context");
@@ -325,6 +352,8 @@ describe("InterventionPublisher", () => {
         );
 
         expect(eventId).toBe("signed-event-id-12345");
+        expect(enqueueSpy).toHaveBeenCalledTimes(1);
+        expect(directPublishSpy).not.toHaveBeenCalled();
     });
 
     it("should throw error if not initialized", async () => {
@@ -355,8 +384,7 @@ describe("InterventionPublisher", () => {
         );
 
         // Verify the event content uses the pre-resolved names passed as parameters
-        expect(capturedEvents.length).toBe(1);
-        const event = capturedEvents[0];
+        const event = expectSingleEnqueuedEvent();
         expect(event.content).toContain("Pablo"); // Pre-resolved user name
         expect(event.content).toContain("Architect-Orchestrator"); // Pre-resolved agent name
         expect(event.content).toContain(shortenConversationId("conv-id-123456789012345678901234567890123456789012"));

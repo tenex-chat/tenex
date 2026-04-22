@@ -1,12 +1,10 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-const repoRoot = process.cwd();
-const srcRoot = join(repoRoot, "src");
-
 const concreteImportNeedle = `@/nostr/AgentPublisher`;
 const interfaceImportNeedle = `@/events/runtime/AgentRuntimePublisher`;
 const dispatchImportNeedle = `@/services/dispatch/AgentDispatchService`;
+const directPublishPattern = /(?:\bNDKEvent\s*\.\s*prototype\s*\.\s*publish\b|\.\s*publish\s*\()/;
 
 const allowedConcreteImports = new Set([
     "src/agents/execution/AgentExecutor.ts",
@@ -15,16 +13,52 @@ const allowedConcreteImports = new Set([
 const allowedDispatchImports = new Set([
     "src/tools/implementations/kill.ts",
 ]);
+const allowedDirectPublishFiles = new Set([
+    "src/skills/built-in/report/scripts/publish.js",
+]);
+
+type DirectPublishCall = {
+    file: string;
+    line: number;
+    text: string;
+};
 
 type AuditSummary = {
     concreteImports: string[];
     interfaceImports: string[];
     dispatchImports: string[];
+    directPublishCalls: DirectPublishCall[];
     unexpectedConcreteImports: string[];
     unexpectedDispatchImports: string[];
+    unexpectedDirectPublishCalls: DirectPublishCall[];
 };
 
-function walk(dir: string): string[] {
+type AuditOptions = {
+    repoRoot?: string;
+    srcRoot?: string;
+};
+
+function normalizePath(path: string): string {
+    return path.replaceAll("\\", "/");
+}
+
+function isAuditedSourceFile(fullPath: string): boolean {
+    return (
+        (fullPath.endsWith(".ts") || fullPath.endsWith(".js")) &&
+        !fullPath.endsWith(".d.ts") &&
+        !fullPath.endsWith(".test.ts") &&
+        !fullPath.endsWith(".spec.ts") &&
+        !fullPath.includes(`${join("src", "test-utils")}`) &&
+        !fullPath.includes(`${join("__tests__")}`) &&
+        !fullPath.endsWith("AGENTS.md")
+    );
+}
+
+function isRuntimeTypescriptFile(fullPath: string): boolean {
+    return fullPath.endsWith(".ts") && isAuditedSourceFile(fullPath);
+}
+
+function walk(dir: string, includeFile: (fullPath: string) => boolean): string[] {
     const entries = readdirSync(dir);
     const files: string[] = [];
 
@@ -32,16 +66,11 @@ function walk(dir: string): string[] {
         const fullPath = join(dir, entry);
         const stats = statSync(fullPath);
         if (stats.isDirectory()) {
-            files.push(...walk(fullPath));
+            files.push(...walk(fullPath, includeFile));
             continue;
         }
 
-        if (
-            fullPath.endsWith(".ts") &&
-            !fullPath.endsWith(".test.ts") &&
-            !fullPath.includes(`${join("src", "test-utils")}`) &&
-            !fullPath.endsWith("AGENTS.md")
-        ) {
+        if (includeFile(fullPath)) {
             files.push(fullPath);
         }
     }
@@ -49,15 +78,37 @@ function walk(dir: string): string[] {
     return files;
 }
 
-function buildSummary(): AuditSummary {
-    const files = walk(srcRoot);
+function findDirectPublishCalls(repoRoot: string, file: string): DirectPublishCall[] {
+    const relPath = normalizePath(relative(repoRoot, file));
+    const content = readFileSync(file, "utf8");
+    const calls: DirectPublishCall[] = [];
+
+    content.split(/\r?\n/).forEach((line, index) => {
+        if (directPublishPattern.test(line)) {
+            calls.push({
+                file: relPath,
+                line: index + 1,
+                text: line.trim(),
+            });
+        }
+    });
+
+    return calls;
+}
+
+export function buildSummary(options: AuditOptions = {}): AuditSummary {
+    const repoRoot = options.repoRoot ?? process.cwd();
+    const srcRoot = options.srcRoot ?? join(repoRoot, "src");
+    const runtimeTypescriptFiles = walk(srcRoot, isRuntimeTypescriptFile);
+    const sourceFiles = walk(srcRoot, isAuditedSourceFile);
     const concreteImports: string[] = [];
     const interfaceImports: string[] = [];
     const dispatchImports: string[] = [];
+    const directPublishCalls = sourceFiles.flatMap((file) => findDirectPublishCalls(repoRoot, file));
 
-    for (const file of files) {
+    for (const file of runtimeTypescriptFiles) {
         const content = readFileSync(file, "utf8");
-        const relPath = relative(repoRoot, file);
+        const relPath = normalizePath(relative(repoRoot, file));
 
         if (content.includes(concreteImportNeedle)) {
             concreteImports.push(relPath);
@@ -70,7 +121,6 @@ function buildSummary(): AuditSummary {
         if (content.includes(dispatchImportNeedle)) {
             dispatchImports.push(relPath);
         }
-
     }
 
     const unexpectedConcreteImports = concreteImports.filter(
@@ -79,19 +129,36 @@ function buildSummary(): AuditSummary {
     const unexpectedDispatchImports = dispatchImports.filter(
         (file) => !allowedDispatchImports.has(file) && file !== "src/services/dispatch/AgentDispatchService.ts"
     );
+    const unexpectedDirectPublishCalls = directPublishCalls.filter(
+        (call) => !allowedDirectPublishFiles.has(call.file)
+    );
+
     return {
         concreteImports: concreteImports.sort(),
         interfaceImports: interfaceImports.sort(),
         dispatchImports: dispatchImports.sort(),
+        directPublishCalls: directPublishCalls.sort((a, b) =>
+            `${a.file}:${a.line}`.localeCompare(`${b.file}:${b.line}`)
+        ),
         unexpectedConcreteImports: unexpectedConcreteImports.sort(),
         unexpectedDispatchImports: unexpectedDispatchImports.sort(),
+        unexpectedDirectPublishCalls: unexpectedDirectPublishCalls.sort((a, b) =>
+            `${a.file}:${a.line}`.localeCompare(`${b.file}:${b.line}`)
+        ),
     };
 }
 
-function printSummary(summary: AuditSummary): void {
+export function hasAuditFailures(summary: AuditSummary): boolean {
+    return (
+        summary.unexpectedConcreteImports.length > 0 ||
+        summary.unexpectedDispatchImports.length > 0 ||
+        summary.unexpectedDirectPublishCalls.length > 0
+    );
+}
+
+export function printSummary(summary: AuditSummary): void {
     const status =
-        summary.unexpectedConcreteImports.length === 0 &&
-        summary.unexpectedDispatchImports.length === 0
+        !hasAuditFailures(summary)
             ? "PASS"
             : "FAIL";
 
@@ -101,6 +168,7 @@ function printSummary(summary: AuditSummary): void {
     console.log(`Concrete AgentPublisher imports: ${summary.concreteImports.length}`);
     console.log(`AgentRuntimePublisher imports: ${summary.interfaceImports.length}`);
     console.log(`AgentDispatchService imports: ${summary.dispatchImports.length}`);
+    console.log(`Direct NDK publish calls: ${summary.directPublishCalls.length}`);
     console.log("");
 
     if (summary.concreteImports.length > 0) {
@@ -131,19 +199,24 @@ function printSummary(summary: AuditSummary): void {
         console.log("");
     }
 
+    if (summary.directPublishCalls.length > 0) {
+        console.log("Direct NDK publish calls:");
+        for (const call of summary.directPublishCalls) {
+            const marker = allowedDirectPublishFiles.has(call.file) ? "allowed" : "unexpected";
+            console.log(`- ${call.file}:${call.line} (${marker}) ${call.text}`);
+        }
+        console.log("");
+    }
+
     console.log("JSON Summary:");
     console.log(JSON.stringify(summary, null, 2));
 }
 
-const summary = buildSummary();
-printSummary(summary);
+if (import.meta.main) {
+    const summary = buildSummary();
+    printSummary(summary);
 
-if (
-    process.argv.includes("--strict") &&
-    (
-        summary.unexpectedConcreteImports.length > 0 ||
-        summary.unexpectedDispatchImports.length > 0
-    )
-) {
-    process.exit(1);
+    if (process.argv.includes("--strict") && hasAuditFailures(summary)) {
+        process.exit(1);
+    }
 }
