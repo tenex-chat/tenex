@@ -1,3 +1,4 @@
+pub mod backend_events;
 pub mod daemon_control;
 pub mod daemon_diagnostics;
 pub mod daemon_shell;
