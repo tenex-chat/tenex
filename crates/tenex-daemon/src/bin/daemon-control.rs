@@ -46,6 +46,9 @@ use tenex_daemon::publish_outbox::{
 };
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
 use tenex_daemon::scheduler_wakeups::{inspect_scheduler_wakeups, run_scheduler_maintenance};
+use tenex_daemon::subscription_runtime::{
+    NostrSubscriptionPlan, NostrSubscriptionPlanInput, build_nostr_subscription_plan,
+};
 
 const CACHES_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
@@ -63,6 +66,7 @@ enum DaemonControlCommand {
     BackendEventsPeriodicTick,
     DaemonMaintenance,
     DaemonForeground,
+    NostrSubscriptionPlan,
     Readiness,
     SchedulerWakeups,
     SchedulerWakeupsMaintain,
@@ -89,6 +93,8 @@ struct DaemonControlCliOptions {
     project_manager_pubkey: Option<String>,
     worktrees: Vec<String>,
     discover_projects: bool,
+    since: Option<u64>,
+    lesson_definition_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -211,6 +217,15 @@ struct DaemonForegroundTickDiagnostics {
     publish_outbox: PublishOutboxMaintenanceReport,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NostrSubscriptionPlanDiagnostics {
+    schema_version: u32,
+    inspected_at: u64,
+    tenex_base_dir: PathBuf,
+    plan: NostrSubscriptionPlan,
+}
+
 #[derive(Debug)]
 struct CliError {
     message: String,
@@ -289,6 +304,11 @@ where
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
+        DaemonControlCommand::NostrSubscriptionPlan => {
+            let diagnostics = inspect_nostr_subscription_plan(&options)?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
         DaemonControlCommand::Readiness => serde_json::to_string_pretty(
             &inspect_daemon_readiness(&options.tenex_base_dir)
                 .map_err(|error| runtime_error(error.to_string()))?,
@@ -343,6 +363,24 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
             .map_err(|error| runtime_error(error.to_string()))?,
         profile_names: inspect_profile_names(&options.daemon_dir, options.inspected_at)
             .map_err(|error| runtime_error(error.to_string()))?,
+    })
+}
+
+fn inspect_nostr_subscription_plan(
+    options: &DaemonControlCliOptions,
+) -> Result<NostrSubscriptionPlanDiagnostics, CliError> {
+    let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
+        tenex_base_dir: &options.tenex_base_dir,
+        since: options.since,
+        lesson_definition_ids: &options.lesson_definition_ids,
+    })
+    .map_err(|error| runtime_error(error.to_string()))?;
+
+    Ok(NostrSubscriptionPlanDiagnostics {
+        schema_version: 1,
+        inspected_at: options.inspected_at,
+        tenex_base_dir: options.tenex_base_dir.clone(),
+        plan,
     })
 }
 
@@ -732,6 +770,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         Some("backend-events-periodic-tick") => DaemonControlCommand::BackendEventsPeriodicTick,
         Some("daemon-maintenance") => DaemonControlCommand::DaemonMaintenance,
         Some("daemon-foreground") => DaemonControlCommand::DaemonForeground,
+        Some("nostr-subscription-plan") => DaemonControlCommand::NostrSubscriptionPlan,
         Some("readiness") => DaemonControlCommand::Readiness,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
         Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
@@ -762,6 +801,8 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let mut project_manager_pubkey = None;
     let mut worktrees = Vec::new();
     let mut discover_projects = false;
+    let mut since = None;
+    let mut lesson_definition_ids = Vec::new();
     let mut index = 1;
 
     while index < args.len() {
@@ -860,6 +901,20 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
             "--discover-projects" => {
                 discover_projects = true;
             }
+            "--since" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--since requires a value"))?;
+                since = Some(parse_u64_arg("--since", value)?);
+            }
+            "--lesson-definition-id" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--lesson-definition-id requires a value"))?;
+                lesson_definition_ids.push(value.clone());
+            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -875,7 +930,8 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         Some(daemon_dir) => daemon_dir,
         None if command == DaemonControlCommand::Readiness
             || command == DaemonControlCommand::DaemonMaintenance
-            || command == DaemonControlCommand::DaemonForeground =>
+            || command == DaemonControlCommand::DaemonForeground
+            || command == DaemonControlCommand::NostrSubscriptionPlan =>
         {
             tenex_base_dir
                 .as_ref()
@@ -902,6 +958,8 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         project_manager_pubkey,
         worktrees,
         discover_projects,
+        since,
+        lesson_definition_ids,
     })
 }
 
@@ -941,6 +999,7 @@ fn usage() -> String {
         "  daemon-control backend-events-periodic-tick --daemon-dir <path> [--tenex-base-dir <path>] [--discover-projects | --project-owner-pubkey <hex> --project-d-tag <d>] [--project-manager-pubkey <hex>] [--worktree <branch>] [--first-due-at <s>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]",
         "  daemon-control daemon-foreground [--daemon-dir <path> | --tenex-base-dir <path>] --iterations <count> [--sleep-ms <ms>]",
+        "  daemon-control nostr-subscription-plan [--daemon-dir <path> | --tenex-base-dir <path>] [--since <s>] [--lesson-definition-id <event-id>]...",
         "  daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
@@ -1213,6 +1272,31 @@ mod tests {
     }
 
     #[test]
+    fn parses_nostr_subscription_plan_args_with_tenex_base_dir_only() {
+        let options = parse_daemon_control_args(&[
+            "nostr-subscription-plan".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--since".to_string(),
+            "1710001000".to_string(),
+            "--lesson-definition-id".to_string(),
+            "lesson-alpha".to_string(),
+            "--lesson-definition-id".to_string(),
+            "lesson-beta".to_string(),
+        ])
+        .expect("nostr-subscription-plan args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::NostrSubscriptionPlan);
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex/daemon"));
+        assert_eq!(options.since, Some(1_710_001_000));
+        assert_eq!(
+            options.lesson_definition_ids,
+            vec!["lesson-alpha".to_string(), "lesson-beta".to_string()]
+        );
+    }
+
+    #[test]
     fn parses_readiness_args_with_tenex_base_dir_only() {
         let options = parse_daemon_control_args(&[
             "readiness".to_string(),
@@ -1327,6 +1411,11 @@ mod tests {
             error
                 .to_string()
                 .contains("daemon-control daemon-foreground")
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("daemon-control nostr-subscription-plan")
         );
         assert_eq!(error.exit_code, USAGE_EXIT_CODE);
     }
@@ -1749,6 +1838,92 @@ mod tests {
         assert_eq!(readiness["relayUrlCount"], json!(1));
         assert_eq!(readiness["activeAgentCount"], json!(1));
         assert_eq!(readiness["skippedAgentFileCount"], json!(0));
+
+        fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
+    }
+
+    #[test]
+    fn nostr_subscription_plan_outputs_filesystem_derived_filters_json() {
+        let tenex_base_dir = unique_temp_base_dir();
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        let project_dir = tenex_base_dir.join("projects").join("demo-project");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        fs::create_dir_all(&project_dir).expect("project dir must create");
+
+        let owner = xonly_pubkey_hex(0x20);
+        let agent = xonly_pubkey_hex(0x21);
+        let lesson = "e".repeat(64);
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "relays": ["wss://relay.one", "https://not-a-relay"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+        fs::write(
+            project_dir.join("project.json"),
+            format!(
+                r#"{{
+                    "status": "running",
+                    "projectOwnerPubkey": "{owner}",
+                    "projectDTag": "demo-project",
+                    "projectBasePath": "/repo/demo"
+                }}"#
+            ),
+        )
+        .expect("project descriptor must write");
+        fs::write(
+            agents_dir.join("index.json"),
+            serde_json::to_string_pretty(&json!({
+                "byProject": {
+                    "demo-project": [agent]
+                }
+            }))
+            .expect("agent index must serialize"),
+        )
+        .expect("agent index must write");
+        fs::write(
+            agents_dir.join(format!("{agent}.json")),
+            r#"{"slug":"worker","status":"active","default":{}}"#,
+        )
+        .expect("agent file must write");
+
+        let output = run_cli([
+            "nostr-subscription-plan",
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+            "--inspected-at",
+            "1710001000000",
+            "--since",
+            "1710001000",
+            "--lesson-definition-id",
+            &lesson,
+        ])
+        .expect("nostr-subscription-plan command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["inspectedAt"], json!(1_710_001_000_000u64));
+        assert_eq!(value["plan"]["relayUrls"], json!(["wss://relay.one"]));
+        assert_eq!(value["plan"]["whitelistedPubkeys"], json!([owner]));
+        assert_eq!(
+            value["plan"]["projectAddresses"],
+            json!([format!("31933:{owner}:demo-project")])
+        );
+        assert_eq!(value["plan"]["agentPubkeys"], json!([agent]));
+        assert_eq!(value["plan"]["staticFilters"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            value["plan"]["projectTaggedFilter"]["#a"],
+            json!([format!("31933:{owner}:demo-project")])
+        );
+        assert_eq!(value["plan"]["agentMentionsFilter"]["#p"], json!([agent]));
+        assert_eq!(value["plan"]["lessonFilters"][0]["#e"], json!([lesson]));
+        assert_eq!(value["plan"]["filters"].as_array().unwrap().len(), 6);
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }
