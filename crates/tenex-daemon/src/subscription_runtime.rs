@@ -6,8 +6,8 @@ use thiserror::Error;
 use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::inbound_routing::{InboundRoutingCatalogError, build_inbound_routing_catalog};
 use crate::subscription_filters::{
-    NostrFilter, build_agent_mentions_filter, build_lesson_filter, build_project_tagged_filter,
-    build_static_filters,
+    NostrFilter, build_agent_mentions_filter, build_lesson_filter, build_nip46_reply_filter,
+    build_project_agent_snapshot_filter, build_project_tagged_filter, build_static_filters,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +30,10 @@ pub struct NostrSubscriptionPlan {
     pub project_tagged_filter: Option<NostrFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mentions_filter: Option<NostrFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_agent_snapshot_filter: Option<NostrFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nip46_reply_filter: Option<NostrFilter>,
     pub lesson_filters: Vec<NostrFilter>,
 }
 
@@ -61,11 +65,14 @@ pub fn build_nostr_subscription_plan(
             .collect(),
     );
     let relay_urls = config.effective_relay_urls();
+    let backend_pubkey = config.backend_signer()?.pubkey_hex().to_string();
     let whitelisted_pubkeys = sorted_deduped(config.whitelisted_pubkeys);
 
     let static_filters = build_static_filters(&whitelisted_pubkeys, input.since);
     let project_tagged_filter = build_project_tagged_filter(&project_addresses, input.since);
     let agent_mentions_filter = build_agent_mentions_filter(&agent_pubkeys, input.since);
+    let project_agent_snapshot_filter = build_project_agent_snapshot_filter(&whitelisted_pubkeys);
+    let nip46_reply_filter = build_nip46_reply_filter(&backend_pubkey, &whitelisted_pubkeys);
     let lesson_filters = sorted_deduped(input.lesson_definition_ids.to_vec())
         .into_iter()
         .map(|definition_id| build_lesson_filter(&definition_id))
@@ -74,6 +81,8 @@ pub fn build_nostr_subscription_plan(
     let mut filters = static_filters.clone();
     filters.extend(project_tagged_filter.clone());
     filters.extend(agent_mentions_filter.clone());
+    filters.extend(project_agent_snapshot_filter.clone());
+    filters.extend(nip46_reply_filter.clone());
     filters.extend(lesson_filters.clone());
 
     Ok(NostrSubscriptionPlan {
@@ -85,6 +94,8 @@ pub fn build_nostr_subscription_plan(
         static_filters,
         project_tagged_filter,
         agent_mentions_filter,
+        project_agent_snapshot_filter,
+        nip46_reply_filter,
         lesson_filters,
     })
 }
@@ -150,11 +161,29 @@ mod tests {
                 .pubkeys,
             plan.agent_pubkeys
         );
+        let snapshot_filter = plan
+            .project_agent_snapshot_filter
+            .as_ref()
+            .expect("project agent snapshot filter must exist");
+        assert_eq!(snapshot_filter.kinds, vec![14199]);
+        assert_eq!(snapshot_filter.authors, plan.whitelisted_pubkeys);
+        let nip46_filter = plan
+            .nip46_reply_filter
+            .as_ref()
+            .expect("nip46 reply filter must exist");
+        assert_eq!(nip46_filter.kinds, vec![24133]);
+        assert_eq!(nip46_filter.authors, plan.whitelisted_pubkeys);
+        assert_eq!(
+            nip46_filter.pubkeys,
+            vec![TEST_BACKEND_PUBKEY_HEX.to_string()]
+        );
         assert_eq!(plan.lesson_filters, vec![build_lesson_filter(&lesson_id)]);
         assert_eq!(
             plan.filters.len(),
-            plan.static_filters.len() + 1 + 1 + plan.lesson_filters.len()
+            plan.static_filters.len() + 1 + 1 + 1 + 1 + plan.lesson_filters.len()
         );
+        assert!(plan.filters.contains(snapshot_filter));
+        assert!(plan.filters.contains(nip46_filter));
     }
 
     #[test]
@@ -174,9 +203,16 @@ mod tests {
         assert!(plan.static_filters.is_empty());
         assert_eq!(plan.project_tagged_filter, None);
         assert_eq!(plan.agent_mentions_filter, None);
+        assert_eq!(plan.project_agent_snapshot_filter, None);
+        assert_eq!(plan.nip46_reply_filter, None);
         assert!(plan.lesson_filters.is_empty());
         assert!(plan.filters.is_empty());
     }
+
+    const TEST_SECRET_KEY_HEX: &str =
+        "0101010101010101010101010101010101010101010101010101010101010101";
+    const TEST_BACKEND_PUBKEY_HEX: &str =
+        "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f";
 
     fn write_config(base_dir: &Path, whitelisted: &[&str], relays: &[&str]) {
         fs::write(
@@ -184,6 +220,7 @@ mod tests {
             serde_json::to_vec_pretty(&serde_json::json!({
                 "whitelistedPubkeys": whitelisted,
                 "relays": relays,
+                "tenexPrivateKey": TEST_SECRET_KEY_HEX,
             }))
             .expect("config json must serialize"),
         )

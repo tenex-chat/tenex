@@ -148,6 +148,34 @@ pub fn build_lesson_filter(definition_id: &str) -> NostrFilter {
     }
 }
 
+pub fn build_project_agent_snapshot_filter(owner_pubkeys: &[String]) -> Option<NostrFilter> {
+    if owner_pubkeys.is_empty() {
+        return None;
+    }
+
+    Some(NostrFilter {
+        kinds: vec![14199],
+        authors: owner_pubkeys.to_vec(),
+        ..NostrFilter::default()
+    })
+}
+
+pub fn build_nip46_reply_filter(
+    backend_pubkey: &str,
+    owner_pubkeys: &[String],
+) -> Option<NostrFilter> {
+    if owner_pubkeys.is_empty() || backend_pubkey.is_empty() {
+        return None;
+    }
+
+    Some(NostrFilter {
+        kinds: vec![24133],
+        authors: owner_pubkeys.to_vec(),
+        pubkeys: vec![backend_pubkey.to_string()],
+        ..NostrFilter::default()
+    })
+}
+
 pub fn build_req_message(
     subscription_id: &str,
     filters: &[NostrFilter],
@@ -348,6 +376,54 @@ mod tests {
             .expect_err("tampered EVENT frame must fail verification");
 
         assert!(matches!(error, SubscriptionMessageError::Nostr(_)));
+    }
+
+    #[test]
+    fn project_agent_snapshot_filter_returns_none_for_empty_owners() {
+        assert_eq!(build_project_agent_snapshot_filter(&[]), None);
+    }
+
+    #[test]
+    fn project_agent_snapshot_filter_carries_kind_14199_and_authors() {
+        let owners = vec!["owner-a".to_string(), "owner-b".to_string()];
+        let filter =
+            build_project_agent_snapshot_filter(&owners).expect("filter must build for owners");
+
+        assert_eq!(filter.kinds, vec![14199]);
+        assert_eq!(filter.authors, owners);
+        assert!(filter.project_addresses.is_empty());
+        assert!(filter.pubkeys.is_empty());
+        assert!(filter.event_ids.is_empty());
+        assert!(filter.referenced_kinds.is_empty());
+        assert_eq!(filter.limit, None);
+        assert_eq!(filter.since, None);
+    }
+
+    #[test]
+    fn nip46_reply_filter_returns_none_for_empty_owners() {
+        assert_eq!(build_nip46_reply_filter("backend", &[]), None);
+    }
+
+    #[test]
+    fn nip46_reply_filter_returns_none_for_empty_backend_pubkey() {
+        let owners = vec!["owner-a".to_string()];
+        assert_eq!(build_nip46_reply_filter("", &owners), None);
+    }
+
+    #[test]
+    fn nip46_reply_filter_carries_kind_24133_authors_and_p_tag() {
+        let owners = vec!["owner-a".to_string(), "owner-b".to_string()];
+        let filter = build_nip46_reply_filter("backend-pubkey", &owners)
+            .expect("filter must build for owners and backend pubkey");
+
+        assert_eq!(filter.kinds, vec![24133]);
+        assert_eq!(filter.authors, owners);
+        assert_eq!(filter.pubkeys, vec!["backend-pubkey".to_string()]);
+        assert!(filter.project_addresses.is_empty());
+        assert!(filter.event_ids.is_empty());
+        assert!(filter.referenced_kinds.is_empty());
+        assert_eq!(filter.limit, None);
+        assert_eq!(filter.since, None);
     }
 
     #[test]
