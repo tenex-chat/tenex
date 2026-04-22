@@ -856,6 +856,10 @@ Landed slices:
   orchestration slice that reads global config and installed-agent inventory,
   signs backend heartbeat and installed-agent-list events, and enqueues them
   into the durable Rust publish outbox without publishing directly to relays.
+- `crates/tenex-daemon/src/project_status_sources.rs` — filesystem readers for
+  global `llms.json` model config keys and per-project `schedules.json`
+  records, with deterministic ordering and TS-aligned cron/one-off task
+  projection for the project-status snapshot pipeline.
 - `daemon-control backend-events-plan` — read-only diagnostics over publish
   outbox state plus backend status publisher readiness, including config,
   signer, relay, and installed-agent inventory availability without mutating
