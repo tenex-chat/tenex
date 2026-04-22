@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6,7 +7,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::ral_journal::{
-    RalJournalEvent, RalJournalIdentity, RalJournalReplay, RalReplayEntry, RalReplayStatus,
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalReplay,
+    RalJournalResult, RalJournalSnapshot, RalReplayEntry, RalReplayStatus, replay_ral_journal,
+    write_ral_snapshot,
 };
 
 static CLAIM_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -154,6 +157,11 @@ pub struct RalScheduler {
 }
 
 impl RalScheduler {
+    pub fn from_daemon_dir(daemon_dir: impl AsRef<Path>) -> RalJournalResult<Self> {
+        let replay = replay_ral_journal(daemon_dir)?;
+        Ok(Self::from_replay(&replay))
+    }
+
     pub fn new(replay: &RalJournalReplay) -> Self {
         Self::from_replay(replay)
     }
@@ -166,6 +174,32 @@ impl RalScheduler {
 
     pub fn state(&self) -> &RalSchedulerState {
         &self.state
+    }
+
+    pub fn to_snapshot(
+        &self,
+        writer_version: impl Into<String>,
+        created_at: u64,
+    ) -> RalJournalSnapshot {
+        RalJournalSnapshot::from_replay(
+            RAL_JOURNAL_WRITER_RUST_DAEMON,
+            writer_version,
+            created_at,
+            &RalJournalReplay {
+                last_sequence: self.state.last_sequence,
+                states: self.state.entries.clone(),
+            },
+        )
+    }
+
+    pub fn persist_snapshot(
+        &self,
+        daemon_dir: impl AsRef<Path>,
+        writer_version: impl Into<String>,
+        created_at: u64,
+    ) -> RalJournalResult<()> {
+        let snapshot = self.to_snapshot(writer_version, created_at);
+        write_ral_snapshot(daemon_dir, &snapshot)
     }
 
     pub fn next_ral_number(&self, namespace: &RalNamespace) -> u64 {
@@ -442,8 +476,15 @@ mod tests {
     use super::*;
     use crate::ral_journal::{
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalRecord, RalPendingDelegation,
-        RalTerminalSummary, replay_ral_journal_records,
+        RalTerminalSummary, append_ral_journal_record, read_ral_snapshot,
+        replay_ral_journal_records,
     };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn classifies_active_and_terminal_statuses() {
@@ -761,6 +802,96 @@ mod tests {
         );
     }
 
+    #[test]
+    fn scheduler_bootstraps_from_authoritative_daemon_journal() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let identity = namespace.identity(1);
+        let records = vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+        ];
+        for record in &records {
+            append_ral_journal_record(&daemon_dir, record).expect("journal append must succeed");
+        }
+
+        let scheduler =
+            RalScheduler::from_daemon_dir(&daemon_dir).expect("scheduler must bootstrap");
+
+        assert_eq!(scheduler.next_ral_number(&namespace), 2);
+        assert!(scheduler.has_valid_claim_token(&identity, "claim-a"));
+        assert_eq!(
+            scheduler.active_triggering_event(&namespace, "trigger-a"),
+            Some(&identity)
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn scheduler_persists_snapshot_cache_without_using_it_as_authority() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let records = vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: namespace.identity(1),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Completed {
+                    identity: namespace.identity(1),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                    terminal: terminal(),
+                },
+            ),
+            record(
+                3,
+                RalJournalEvent::Allocated {
+                    identity: namespace.identity(3),
+                    triggering_event_id: Some("trigger-c".to_string()),
+                },
+            ),
+        ];
+        let scheduler = make_scheduler(records);
+
+        scheduler
+            .persist_snapshot(&daemon_dir, "test-version", 1710000000000)
+            .expect("snapshot persist must succeed");
+
+        let snapshot = read_ral_snapshot(&daemon_dir)
+            .expect("snapshot read must succeed")
+            .expect("snapshot must exist");
+        assert_eq!(snapshot.writer, RAL_JOURNAL_WRITER_RUST_DAEMON);
+        assert_eq!(snapshot.writer_version, "test-version");
+        assert_eq!(snapshot.created_at, 1710000000000);
+        assert_eq!(snapshot.last_sequence, 3);
+        assert_eq!(snapshot.states.len(), 2);
+
+        let journal_scheduler =
+            RalScheduler::from_daemon_dir(&daemon_dir).expect("missing journal is empty authority");
+        assert_eq!(journal_scheduler.next_ral_number(&namespace), 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
     fn make_scheduler(records: Vec<RalJournalRecord>) -> RalScheduler {
         let replay = replay_ral_journal_records(records).expect("replay must succeed");
         RalScheduler::from_replay(&replay)
@@ -811,5 +942,17 @@ mod tests {
             format!("corr-{sequence}"),
             event,
         )
+    }
+
+    fn unique_temp_daemon_dir() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after epoch")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "tenex-daemon-ral-scheduler-test-{}-{nanos}-{counter}",
+            std::process::id()
+        ))
     }
 }

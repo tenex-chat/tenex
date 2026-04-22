@@ -8,7 +8,9 @@ use thiserror::Error;
 
 pub const RAL_DIR_NAME: &str = "ral";
 pub const RAL_JOURNAL_FILE_NAME: &str = "journal.jsonl";
+pub const RAL_SNAPSHOT_FILE_NAME: &str = "snapshot.json";
 pub const RAL_JOURNAL_RECORD_SCHEMA_VERSION: u32 = 1;
+pub const RAL_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 pub const RAL_JOURNAL_WRITER_RUST_DAEMON: &str = "rust-daemon";
 
 #[derive(Debug, Error)]
@@ -30,6 +32,13 @@ pub enum RalJournalError {
     NonIncreasingSequence {
         sequence: u64,
         previous_sequence: u64,
+    },
+    #[error(
+        "RAL snapshot schema version {schema_version} is unsupported; supported version is {supported_schema_version}"
+    )]
+    UnsupportedSnapshotSchema {
+        schema_version: u32,
+        supported_schema_version: u32,
     },
 }
 
@@ -295,7 +304,7 @@ pub enum RalReplayStatus {
     Crashed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RalReplayEntry {
     pub identity: RalJournalIdentity,
     pub status: RalReplayStatus,
@@ -319,12 +328,70 @@ pub struct RalJournalReplay {
     pub states: HashMap<RalJournalIdentity, RalReplayEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RalJournalSnapshot {
+    pub schema_version: u32,
+    pub writer: String,
+    pub writer_version: String,
+    pub created_at: u64,
+    pub last_sequence: u64,
+    pub states: Vec<RalReplayEntry>,
+}
+
+impl RalJournalSnapshot {
+    pub fn from_replay(
+        writer: impl Into<String>,
+        writer_version: impl Into<String>,
+        created_at: u64,
+        replay: &RalJournalReplay,
+    ) -> Self {
+        let mut states = replay.states.values().cloned().collect::<Vec<_>>();
+        states.sort_by(|left, right| {
+            left.identity
+                .project_id
+                .cmp(&right.identity.project_id)
+                .then_with(|| left.identity.agent_pubkey.cmp(&right.identity.agent_pubkey))
+                .then_with(|| {
+                    left.identity
+                        .conversation_id
+                        .cmp(&right.identity.conversation_id)
+                })
+                .then_with(|| left.identity.ral_number.cmp(&right.identity.ral_number))
+        });
+
+        Self {
+            schema_version: RAL_SNAPSHOT_SCHEMA_VERSION,
+            writer: writer.into(),
+            writer_version: writer_version.into(),
+            created_at,
+            last_sequence: replay.last_sequence,
+            states,
+        }
+    }
+
+    pub fn into_replay(self) -> RalJournalReplay {
+        RalJournalReplay {
+            last_sequence: self.last_sequence,
+            states: self
+                .states
+                .into_iter()
+                .map(|entry| (entry.identity.clone(), entry))
+                .collect(),
+        }
+    }
+}
+
 pub fn ral_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
     daemon_dir.as_ref().join(RAL_DIR_NAME)
 }
 
 pub fn ral_journal_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
     ral_dir(daemon_dir).join(RAL_JOURNAL_FILE_NAME)
+}
+
+pub fn ral_snapshot_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
+    ral_dir(daemon_dir).join(RAL_SNAPSHOT_FILE_NAME)
 }
 
 pub fn append_ral_journal_record(
@@ -390,6 +457,56 @@ pub fn read_ral_journal_records_from_path(
 
 pub fn replay_ral_journal(daemon_dir: impl AsRef<Path>) -> RalJournalResult<RalJournalReplay> {
     replay_ral_journal_records(read_ral_journal_records(daemon_dir)?)
+}
+
+pub fn read_ral_snapshot(
+    daemon_dir: impl AsRef<Path>,
+) -> RalJournalResult<Option<RalJournalSnapshot>> {
+    let path = ral_snapshot_path(daemon_dir);
+    match fs::read_to_string(&path) {
+        Ok(content) => {
+            let snapshot = serde_json::from_str::<RalJournalSnapshot>(&content)?;
+            if snapshot.schema_version != RAL_SNAPSHOT_SCHEMA_VERSION {
+                return Err(RalJournalError::UnsupportedSnapshotSchema {
+                    schema_version: snapshot.schema_version,
+                    supported_schema_version: RAL_SNAPSHOT_SCHEMA_VERSION,
+                });
+            }
+            Ok(Some(snapshot))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn write_ral_snapshot(
+    daemon_dir: impl AsRef<Path>,
+    snapshot: &RalJournalSnapshot,
+) -> RalJournalResult<()> {
+    let snapshot_path = ral_snapshot_path(daemon_dir);
+    let snapshot_dir = snapshot_path
+        .parent()
+        .expect("RAL snapshot path must have a parent directory");
+    fs::create_dir_all(snapshot_dir)?;
+
+    let tmp_path = snapshot_path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        snapshot.last_sequence
+    ));
+    {
+        let mut tmp_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)?;
+        serde_json::to_writer_pretty(&mut tmp_file, snapshot)?;
+        tmp_file.write_all(b"\n")?;
+        tmp_file.sync_all()?;
+    }
+
+    fs::rename(&tmp_path, &snapshot_path)?;
+    sync_parent_dir(&snapshot_path)?;
+    Ok(())
 }
 
 pub fn replay_ral_journal_records<I>(records: I) -> RalJournalResult<RalJournalReplay>
@@ -611,6 +728,10 @@ mod tests {
             ral_journal_path(daemon_dir),
             daemon_dir.join(RAL_DIR_NAME).join(RAL_JOURNAL_FILE_NAME)
         );
+        assert_eq!(
+            ral_snapshot_path(daemon_dir),
+            daemon_dir.join(RAL_DIR_NAME).join(RAL_SNAPSHOT_FILE_NAME)
+        );
     }
 
     #[test]
@@ -830,6 +951,107 @@ mod tests {
         );
         assert_eq!(replay_entry.accumulated_runtime_ms, 42);
         assert_eq!(replay_entry.last_correlation_id, "corr-5");
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn snapshot_round_trips_replayed_ral_state_without_becoming_journal_authority() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let first = sample_identity();
+        let mut second = sample_identity();
+        second.project_id = "project-b".to_string();
+        second.ral_number = 2;
+
+        let replay = replay_ral_journal_records(vec![
+            record(
+                1,
+                "corr-1",
+                RalJournalEvent::Allocated {
+                    identity: first.clone(),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                "corr-2",
+                RalJournalEvent::Claimed {
+                    identity: first,
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+            record(
+                3,
+                "corr-3",
+                RalJournalEvent::Completed {
+                    identity: second,
+                    worker_id: "worker-b".to_string(),
+                    claim_token: "claim-b".to_string(),
+                    terminal: terminal(vec!["event-b".to_string()], 17),
+                },
+            ),
+        ])
+        .expect("replay must build");
+        let snapshot =
+            RalJournalSnapshot::from_replay("rust-daemon", "test-version", 1710000000000, &replay);
+
+        assert_eq!(snapshot.schema_version, RAL_SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(snapshot.last_sequence, 3);
+        assert_eq!(
+            snapshot
+                .states
+                .iter()
+                .map(|entry| entry.identity.project_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project-b", "project-d-tag"]
+        );
+
+        write_ral_snapshot(&daemon_dir, &snapshot).expect("snapshot write must succeed");
+        let read = read_ral_snapshot(&daemon_dir)
+            .expect("snapshot read must succeed")
+            .expect("snapshot must exist");
+
+        assert_eq!(read, snapshot);
+        assert_eq!(read.into_replay(), replay);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn snapshot_read_rejects_unsupported_schema_version() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let snapshot_path = ral_snapshot_path(&daemon_dir);
+        fs::create_dir_all(
+            snapshot_path
+                .parent()
+                .expect("snapshot path must have parent directory"),
+        )
+        .expect("snapshot directory must be created");
+        fs::write(
+            &snapshot_path,
+            serde_json::json!({
+                "schemaVersion": RAL_SNAPSHOT_SCHEMA_VERSION + 1,
+                "writer": "rust-daemon",
+                "writerVersion": "future-version",
+                "createdAt": 1710000000000_u64,
+                "lastSequence": 0,
+                "states": []
+            })
+            .to_string(),
+        )
+        .expect("snapshot write must succeed");
+
+        match read_ral_snapshot(&daemon_dir) {
+            Err(RalJournalError::UnsupportedSnapshotSchema {
+                schema_version,
+                supported_schema_version,
+            }) => {
+                assert_eq!(schema_version, RAL_SNAPSHOT_SCHEMA_VERSION + 1);
+                assert_eq!(supported_schema_version, RAL_SNAPSHOT_SCHEMA_VERSION);
+            }
+            other => panic!("expected unsupported snapshot schema error, got {other:?}"),
+        }
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

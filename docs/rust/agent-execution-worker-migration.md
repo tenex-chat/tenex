@@ -653,11 +653,13 @@ ral/
 }
 ```
 
-`snapshot.json` is a compacted view of current RAL state. Rust can recover by
-loading the snapshot and replaying journal entries after the snapshot sequence.
-TypeScript workers should not edit these files directly unless they use the same
-lock and append contract. The preferred path is still worker-to-Rust protocol
-messages, with Rust performing the filesystem write.
+`snapshot.json` is a compacted view of current RAL state. The Rust library can
+write and read the versioned cache, but scheduler bootstrap currently treats
+the journal as authoritative and ignores the snapshot unless a future recovery
+path proves the snapshot is fresh. TypeScript workers should not edit these
+files directly unless they use the same lock and append contract. The preferred
+path is still worker-to-Rust protocol messages, with Rust performing the
+filesystem write.
 
 ### Claim Token Lifecycle
 
@@ -1158,8 +1160,11 @@ Work:
   - kill
   - release stale claims
 - Persist scheduler state through `ral/journal.jsonl` plus compacted
-  `ral/snapshot.json`.
-- Add journal replay and snapshot compaction.
+  `ral/snapshot.json`. The current Rust library can bootstrap scheduler state
+  from the journal and persist/read a versioned snapshot cache.
+- Add journal replay and snapshot compaction. Snapshot loading must stay
+  fail-closed on unsupported schema versions and must not override authoritative
+  journal replay until freshness checks are implemented.
 - Add lock handling for each `(projectId, agentPubkey, conversationId)` RAL
   scope.
 - Add orphaned RAL reconciliation at daemon startup:

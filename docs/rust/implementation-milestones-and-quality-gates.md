@@ -619,6 +619,9 @@ Scope:
   dispatch. The library scheduler rejects duplicate active triggering events,
   validates active claim tokens, and treats completed/no-response/error/aborted/
   crashed RAL states as terminal.
+- Bootstrap scheduler state from the on-disk journal and persist a versioned
+  `ral/snapshot.json` compaction cache without letting a stale snapshot override
+  journal replay.
 - Implement orphan reconciliation.
 - Implement injection lease/ack.
 - Implement kill/abort/stop ownership.
