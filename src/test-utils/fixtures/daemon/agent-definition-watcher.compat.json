@@ -1,0 +1,83 @@
+{
+    "name": "agent-definition-watcher-basic",
+    "description": "Canonical Rust daemon agent-definition watcher snapshot, entry shape, and diagnostics used by Bun compatibility tests.",
+    "daemonDirName": "daemon",
+    "relativePaths": {
+        "agentDefinitions": "agent-definitions.json"
+    },
+    "writer": "rust-daemon",
+    "schemaVersions": {
+        "agentDefinitions": 1,
+        "agentDefinitionsDiagnostics": 1
+    },
+    "snapshot": {
+        "schemaVersion": 1,
+        "writer": "rust-daemon",
+        "writerVersion": "test-version",
+        "updatedAt": 1710002000500,
+        "definitions": [
+            {
+                "eventId": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authorPubkey": "b95c249d84f417e3e395a127425428b540671cc15881eb828c17b722a53fc599",
+                "agentPubkey": "466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27",
+                "slug": "helper",
+                "tools": [],
+                "skills": [],
+                "mcpServers": [],
+                "createdAt": 1710002000100,
+                "lastObservedAt": 1710002000200
+            },
+            {
+                "eventId": "2222222222222222222222222222222222222222222222222222222222222222",
+                "authorPubkey": "b95c249d84f417e3e395a127425428b540671cc15881eb828c17b722a53fc599",
+                "agentPubkey": "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+                "slug": "planner",
+                "name": "Planner",
+                "description": "Plans work before acting.",
+                "instructions": "Break tasks into small steps and confirm before executing.",
+                "tools": ["shell", "web_search"],
+                "skills": [
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                ],
+                "mcpServers": ["filesystem", "memory"],
+                "createdAt": 1710002000300,
+                "lastObservedAt": 1710002000400
+            }
+        ]
+    },
+    "diagnostics": {
+        "empty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710002000000,
+            "present": false,
+            "totalDefinitions": 0,
+            "totalAgentPubkeys": 0,
+            "totalAuthorPubkeys": 0,
+            "oldestObservedAt": null,
+            "latestObservedAt": null,
+            "oldestCreatedAt": null,
+            "latestCreatedAt": null,
+            "snapshotSchemaVersion": null,
+            "writer": null,
+            "writerVersion": null,
+            "updatedAt": null
+        },
+        "populated": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710002001000,
+            "present": true,
+            "totalDefinitions": 2,
+            "totalAgentPubkeys": 2,
+            "totalAuthorPubkeys": 1,
+            "oldestObservedAt": 1710002000200,
+            "latestObservedAt": 1710002000400,
+            "oldestCreatedAt": 1710002000100,
+            "latestCreatedAt": 1710002000300,
+            "snapshotSchemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "updatedAt": 1710002000500
+        }
+    }
+}

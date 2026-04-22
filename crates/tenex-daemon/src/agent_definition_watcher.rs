@@ -939,3 +939,108 @@ mod tests {
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
     }
 }
+
+#[cfg(test)]
+mod compat_tests {
+    use super::*;
+    use serde_json::Value;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    const FIXTURE: &str = include_str!(
+        "../../../src/test-utils/fixtures/daemon/agent-definition-watcher.compat.json"
+    );
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_temp_daemon_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must be after UNIX_EPOCH")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let daemon_dir = std::env::temp_dir().join(format!(
+            "tenex-agent-definition-watcher-compat-{}-{counter}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&daemon_dir).expect("temp daemon dir must be created");
+        daemon_dir
+    }
+
+    #[test]
+    fn fixture_matches_rust_contract() {
+        let fixture: Value = serde_json::from_str(FIXTURE).expect("fixture must parse");
+        let daemon_dir = Path::new("/var/lib/tenex").join(
+            fixture["daemonDirName"]
+                .as_str()
+                .expect("fixture must include daemonDirName"),
+        );
+
+        assert_eq!(
+            fixture["relativePaths"]["agentDefinitions"].as_str(),
+            Some(AGENT_DEFINITIONS_FILE_NAME)
+        );
+        assert_eq!(
+            fixture["writer"].as_str(),
+            Some(AGENT_DEFINITION_WATCHER_WRITER)
+        );
+        assert_eq!(
+            agent_definitions_path(&daemon_dir),
+            daemon_dir.join(AGENT_DEFINITIONS_FILE_NAME)
+        );
+
+        assert_eq!(
+            fixture["schemaVersions"]["agentDefinitions"].as_u64(),
+            Some(u64::from(AGENT_DEFINITION_WATCHER_SCHEMA_VERSION))
+        );
+        assert_eq!(
+            fixture["schemaVersions"]["agentDefinitionsDiagnostics"].as_u64(),
+            Some(u64::from(AGENT_DEFINITION_WATCHER_DIAGNOSTICS_SCHEMA_VERSION))
+        );
+
+        let snapshot: AgentDefinitionSnapshot =
+            serde_json::from_value(fixture["snapshot"].clone())
+                .expect("snapshot fixture must deserialize");
+        assert_eq!(snapshot.schema_version, AGENT_DEFINITION_WATCHER_SCHEMA_VERSION);
+        assert_eq!(snapshot.writer, AGENT_DEFINITION_WATCHER_WRITER);
+        assert_eq!(snapshot.definitions.len(), 2);
+
+        let with_optionals = snapshot
+            .definitions
+            .iter()
+            .find(|entry| entry.name.is_some() && !entry.tools.is_empty());
+        assert!(
+            with_optionals.is_some(),
+            "fixture must include an entry with optional metadata and non-empty sublists"
+        );
+        let without_optionals = snapshot
+            .definitions
+            .iter()
+            .find(|entry| entry.name.is_none() && entry.tools.is_empty() && entry.skills.is_empty());
+        assert!(
+            without_optionals.is_some(),
+            "fixture must include an entry without optional metadata and empty sublists"
+        );
+
+        let live_daemon_dir = unique_temp_daemon_dir();
+        write_agent_definitions(&live_daemon_dir, &snapshot)
+            .expect("fixture snapshot must write successfully");
+        let diagnostics =
+            inspect_agent_definitions(&live_daemon_dir, 1_710_002_001_000)
+                .expect("inspect must succeed");
+        let expected_populated: AgentDefinitionWatcherDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["populated"].clone())
+                .expect("populated diagnostics fixture must deserialize");
+        assert_eq!(diagnostics, expected_populated);
+
+        let empty_daemon_dir = unique_temp_daemon_dir();
+        let expected_empty: AgentDefinitionWatcherDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["empty"].clone())
+                .expect("empty diagnostics fixture must deserialize");
+        assert_eq!(
+            inspect_agent_definitions(&empty_daemon_dir, 1_710_002_000_000).unwrap(),
+            expected_empty
+        );
+
+        fs::remove_dir_all(live_daemon_dir).expect("populated daemon dir cleanup must succeed");
+        fs::remove_dir_all(empty_daemon_dir).expect("empty daemon dir cleanup must succeed");
+    }
+}
