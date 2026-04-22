@@ -8,6 +8,7 @@ import * as conversationEmbeddingServiceModule from "../ConversationEmbeddingSer
 import { RAGService } from "@/services/rag/RAGService";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 
 const mockInitialize = vi.fn().mockResolvedValue(undefined);
 const mockBuildDocument = vi.fn().mockReturnValue({ kind: "ok", document: { id: "doc-1", content: "test" } });
@@ -20,6 +21,8 @@ describe("ConversationIndexingJob", () => {
     const testBasePath = "/tmp/tenex-test-indexing/projects";
 
     beforeEach(() => {
+        ConversationCatalogService.resetAll();
+
         // Clean up test directory
         if (existsSync(testBasePath)) {
             rmSync(testBasePath, { recursive: true, force: true });
@@ -50,6 +53,8 @@ describe("ConversationIndexingJob", () => {
     });
 
     afterEach(() => {
+        ConversationCatalogService.resetAll();
+
         // Clean up
         if (existsSync(testBasePath)) {
             rmSync(testBasePath, { recursive: true, force: true });
@@ -112,14 +117,8 @@ describe("ConversationIndexingJob", () => {
                 return { kind: "ok", document: { id: `doc-${docCounter}`, content: "test" } };
             });
 
-            // Create job and run batch
-            const job = ConversationIndexingJob.getInstance(100);
-            job.start();
-
-            // Wait for initial batch
-            await new Promise((resolve) => setTimeout(resolve, 200));
-
-            job.stop();
+            const job = ConversationIndexingJob.getInstance();
+            await job.indexPendingConversations();
 
             // Verify all conversations were built and flushed via bulkUpsert
             expect(mockBuildDocument).toHaveBeenCalledTimes(3);
@@ -161,11 +160,8 @@ describe("ConversationIndexingJob", () => {
                 },
             } as any);
 
-            const job = ConversationIndexingJob.getInstance(100);
-            job.start();
-
-            await new Promise((resolve) => setTimeout(resolve, 200));
-            job.stop();
+            const job = ConversationIndexingJob.getInstance();
+            await job.indexPendingConversations();
 
             // Only one conversation should be built
             expect(mockBuildDocument).toHaveBeenCalledTimes(1);
@@ -196,24 +192,19 @@ describe("ConversationIndexingJob", () => {
                 },
             })) as any;
 
-            // First run - initial indexing
-            const job = ConversationIndexingJob.getInstance(100);
-            job.start();
-
-            await new Promise((resolve) => setTimeout(resolve, 200));
+            const job = ConversationIndexingJob.getInstance();
+            await job.indexPendingConversations();
 
             expect(mockBuildDocument).toHaveBeenCalledTimes(1);
 
             // Change metadata
             metadataVersion = 2;
+            writeConversationFile(projectPath, conversationId, "Updated Title");
 
-            // Trigger another batch manually
-            await job.forceFullReindex();
+            await job.indexPendingConversations();
 
             // Should be called again (once more) because metadata changed
             expect(mockBuildDocument).toHaveBeenCalledTimes(2);
-
-            job.stop();
         });
 
         it("should skip conversations with unchanged metadata", async () => {
@@ -242,21 +233,16 @@ describe("ConversationIndexingJob", () => {
                 metadata as any
             );
 
-            const job = ConversationIndexingJob.getInstance(100);
-            job.start();
-
-            await new Promise((resolve) => setTimeout(resolve, 200));
+            const job = ConversationIndexingJob.getInstance();
+            await job.indexPendingConversations();
 
             // Indexed once
             expect(mockBuildDocument).toHaveBeenCalledTimes(1);
 
-            // Wait for next batch
-            await new Promise((resolve) => setTimeout(resolve, 150));
+            await job.indexPendingConversations();
 
             // Should NOT be indexed again (skipped due to unchanged metadata)
             expect(mockBuildDocument).toHaveBeenCalledTimes(1);
-
-            job.stop();
         });
     });
 
@@ -266,6 +252,9 @@ describe("ConversationIndexingJob", () => {
             const projectPath = join(testBasePath, projectId);
 
             mkdirSync(join(projectPath, "conversations"), { recursive: true });
+            writeConversationFile(projectPath, "conv1", "Conversation 1");
+            writeConversationFile(projectPath, "conv2", "Conversation 2");
+            writeConversationFile(projectPath, "conv3", "Conversation 3");
 
             vi.spyOn(conversationDiskReader, "listProjectIdsFromDisk").mockReturnValue([projectId]);
             vi.spyOn(
@@ -286,13 +275,10 @@ describe("ConversationIndexingJob", () => {
                 () => new Promise((resolve) => setTimeout(() => resolve({ upsertedCount: 3, failedIndices: [] }), 100))
             );
 
-            const job = ConversationIndexingJob.getInstance(50); // Very short interval
-            job.start();
-
-            // Wait for multiple intervals to pass
-            await new Promise((resolve) => setTimeout(resolve, 250));
-
-            job.stop();
+            const job = ConversationIndexingJob.getInstance();
+            const firstBatch = job.indexPendingConversations();
+            await job.indexPendingConversations();
+            await firstBatch;
 
             const status = job.getStatus();
 
@@ -302,11 +288,12 @@ describe("ConversationIndexingJob", () => {
     });
 
     describe("Error handling", () => {
-        it("should continue job after batch errors via scheduleNextBatch catch", async () => {
+        it("should clear batch-running state after batch errors", async () => {
             const projectId = "test-project";
             const projectPath = join(testBasePath, projectId);
 
             mkdirSync(join(projectPath, "conversations"), { recursive: true });
+            writeConversationFile(projectPath, "conv1", "Conversation 1");
 
             vi.spyOn(conversationDiskReader, "listProjectIdsFromDisk").mockReturnValue([projectId]);
             vi.spyOn(
@@ -322,61 +309,38 @@ describe("ConversationIndexingJob", () => {
                 },
             } as any);
 
-            // First batch: bulkUpsert fails
-            mockBulkUpsert
-                .mockRejectedValueOnce(new Error("RAG write failed"))
-                .mockResolvedValue({ upsertedCount: 1, failedIndices: [] });
+            mockBulkUpsert.mockRejectedValueOnce(new Error("RAG write failed"));
 
-            const job = ConversationIndexingJob.getInstance(100);
-            job.start();
+            const job = ConversationIndexingJob.getInstance();
 
-            // Wait for first batch to fail and second to start
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            await expect(job.indexPendingConversations()).rejects.toThrow("RAG write failed");
 
-            job.stop();
-
-            // Job should still be in good state (scheduleNextBatch caught the error)
             const status = job.getStatus();
-            expect(status.isRunning).toBe(false);
             expect(status.isBatchRunning).toBe(false);
         });
 
-        it("should handle project discovery errors gracefully", async () => {
-            vi.spyOn(conversationDiskReader, "listProjectIdsFromDisk").mockImplementation(() => {
+        it("should clear batch-running state after project discovery errors", async () => {
+            const listProjectsSpy = vi.spyOn(conversationDiskReader, "listProjectIdsFromDisk").mockImplementation(() => {
                 throw new Error("Disk read error");
             });
 
-            const job = ConversationIndexingJob.getInstance(100);
-            job.start();
+            const job = ConversationIndexingJob.getInstance();
 
-            await new Promise((resolve) => setTimeout(resolve, 200));
-
-            job.stop();
-
-            // Should not crash — scheduleNextBatch catches and reschedules
+            await expect(job.indexPendingConversations()).rejects.toThrow("Disk read error");
             expect(mockBuildDocument).not.toHaveBeenCalled();
+
+            listProjectsSpy.mockRestore();
+            expect(job.getStatus().isBatchRunning).toBe(false);
         });
     });
 
     describe("State management", () => {
         it("should provide accurate status information", () => {
-            const job = ConversationIndexingJob.getInstance(5000);
+            const job = ConversationIndexingJob.getInstance();
 
             const statusBefore = job.getStatus();
-            expect(statusBefore.isRunning).toBe(false);
             expect(statusBefore.isBatchRunning).toBe(false);
-            expect(statusBefore.intervalMs).toBe(5000);
             expect(statusBefore.stateStats.totalEntries).toBe(0);
-
-            job.start();
-
-            const statusRunning = job.getStatus();
-            expect(statusRunning.isRunning).toBe(true);
-
-            job.stop();
-
-            const statusAfter = job.getStatus();
-            expect(statusAfter.isRunning).toBe(false);
         });
     });
 });

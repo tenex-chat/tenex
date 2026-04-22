@@ -274,10 +274,8 @@ async function checkConversationIndexingStatus(): Promise<void> {
         console.log(chalk.gray(`  Has content: ${hasIndexed ? "yes" : "no"}`));
         console.log(chalk.gray(`  Embedding provider: ${embeddingInfo}`));
 
-        console.log(chalk.bold("\nIndexing Job:"));
-        console.log(chalk.gray(`  Running: ${jobStatus.isRunning ? "yes" : "no"}`));
+        console.log(chalk.bold("\nIndexing:"));
         console.log(chalk.gray(`  Batch in progress: ${jobStatus.isBatchRunning ? "yes" : "no"}`));
-        console.log(chalk.gray(`  Interval: ${jobStatus.intervalMs / 60000} minutes`));
 
         console.log(chalk.bold("\nIndexing State:"));
         console.log(chalk.gray(`  Tracked conversations: ${jobStatus.stateStats.totalEntries}`));
@@ -302,7 +300,7 @@ async function checkConversationIndexingStatus(): Promise<void> {
         if (!hasIndexed) {
             console.log(chalk.yellow("\n⚠ No conversations indexed yet. Run 'tenex doctor conversations reindex' to backfill."));
         } else {
-            console.log(chalk.green("\n✓ Conversation indexing is active"));
+            console.log(chalk.green("\n✓ Conversation index has content"));
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

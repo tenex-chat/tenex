@@ -1,17 +1,15 @@
 /**
- * ConversationIndexingJob - Automatic batch indexing service
+ * ConversationIndexingJob - Explicit batch indexing service
  *
- * This service runs periodically (every 5 minutes) to automatically index
- * conversations that need embedding updates. It tracks which conversations
- * have been indexed and ensures new/updated conversations are processed
- * without requiring manual agent intervention.
+ * This service indexes conversations that need embedding updates when called
+ * by explicit operator commands. It tracks which conversations have been
+ * indexed and ensures new/updated conversations are processed without
+ * redundant embedding writes.
  *
  * Key features:
- * - Runs every 5 minutes as a background job
  * - Indexes conversations across all projects
  * - Tracks indexing state durably to avoid redundant work
  * - Re-indexes when conversation metadata changes
- * - Errors propagate to scheduleNextBatch which catches and reschedules
  * - Prevents overlapping batches
  * - Decoupled from ConversationRegistry for multi-project support
  */
@@ -27,23 +25,16 @@ import { listProjectIdsFromDisk, listConversationIdsFromDiskForProject } from "@
 import { RAGService, type RAGDocument } from "@/services/rag/RAGService";
 import type { ProjectDTag } from "@/types/project-ids";
 
-/** Default interval: 5 minutes (in milliseconds) */
-const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
-
 /**
- * Automatic conversation indexing job service
+ * Explicit conversation indexing job service
  */
 export class ConversationIndexingJob {
     private static instance: ConversationIndexingJob | null = null;
-    private timer: NodeJS.Timeout | null = null;
-    private isRunning = false;
     private isBatchRunning = false; // Prevent overlapping batches
-    private intervalMs: number;
     private projectsBasePath: string;
     private stateManager: IndexingStateManager;
 
-    private constructor(intervalMs: number = DEFAULT_INTERVAL_MS) {
-        this.intervalMs = intervalMs;
+    private constructor() {
         // Use stable projects root from config, not mutable registry
         this.projectsBasePath = join(getTenexBasePath(), "projects");
         this.stateManager = new IndexingStateManager(this.projectsBasePath);
@@ -52,73 +43,11 @@ export class ConversationIndexingJob {
     /**
      * Get singleton instance
      */
-    public static getInstance(intervalMs?: number): ConversationIndexingJob {
+    public static getInstance(): ConversationIndexingJob {
         if (!ConversationIndexingJob.instance) {
-            ConversationIndexingJob.instance = new ConversationIndexingJob(intervalMs);
+            ConversationIndexingJob.instance = new ConversationIndexingJob();
         }
         return ConversationIndexingJob.instance;
-    }
-
-    /**
-     * Start the periodic indexing job
-     */
-    public start(): void {
-        if (this.isRunning) {
-            logger.warn("ConversationIndexingJob is already running");
-            return;
-        }
-
-        this.isRunning = true;
-        logger.info("Starting ConversationIndexingJob", {
-            intervalMs: this.intervalMs,
-            intervalMinutes: this.intervalMs / 60000,
-            projectsBasePath: this.projectsBasePath,
-        });
-
-        // Defer first batch to avoid loading LanceDB + embedding model during
-        // the startup burst. Concurrent heavy allocations cause JSC to
-        // pre-allocate massive memory pools that are never released.
-        this.scheduleNextBatch(this.intervalMs);
-    }
-
-    /**
-     * Schedule the next batch run (self-scheduling to prevent overlaps)
-     */
-    private scheduleNextBatch(delayMs: number): void {
-        if (!this.isRunning) return;
-
-        this.timer = setTimeout(async () => {
-            try {
-                await this.runIndexingBatch();
-            } catch (error) {
-                logger.error("Indexing batch failed", { error });
-            } finally {
-                // Schedule next run only after this one completes
-                this.scheduleNextBatch(this.intervalMs);
-            }
-        }, delayMs);
-    }
-
-    /**
-     * Stop the periodic indexing job
-     */
-    public stop(): void {
-        if (!this.isRunning) {
-            logger.warn("ConversationIndexingJob is not running");
-            return;
-        }
-
-        if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
-        }
-
-        this.isRunning = false;
-
-        // Save state before stopping
-        this.stateManager.dispose();
-
-        logger.info("ConversationIndexingJob stopped");
     }
 
     /**
@@ -133,7 +62,7 @@ export class ConversationIndexingJob {
      * marked indexed even when other chunks fail. Only truly failed
      * documents are retried next cycle.
      */
-    private async runIndexingBatch(): Promise<void> {
+    public async indexPendingConversations(): Promise<void> {
         // Prevent overlapping batches
         if (this.isBatchRunning) {
             logger.warn("Skipping indexing batch - previous batch still running");
@@ -280,22 +209,18 @@ export class ConversationIndexingJob {
     public async forceFullReindex(): Promise<void> {
         logger.info("Forcing full conversation re-index");
         this.stateManager.clearAllState();
-        await this.runIndexingBatch();
+        await this.indexPendingConversations();
     }
 
     /**
      * Get current job status
      */
     public getStatus(): {
-        isRunning: boolean;
         isBatchRunning: boolean;
-        intervalMs: number;
         stateStats: ReturnType<IndexingStateManager["getStats"]>;
     } {
         return {
-            isRunning: this.isRunning,
             isBatchRunning: this.isBatchRunning,
-            intervalMs: this.intervalMs,
             stateStats: this.stateManager.getStats(),
         };
     }
@@ -305,7 +230,7 @@ export class ConversationIndexingJob {
      */
     public static resetInstance(): void {
         if (ConversationIndexingJob.instance) {
-            ConversationIndexingJob.instance.stop();
+            ConversationIndexingJob.instance.stateManager.dispose();
             ConversationIndexingJob.instance = null;
         }
     }
