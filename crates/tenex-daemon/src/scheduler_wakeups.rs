@@ -1761,4 +1761,246 @@ mod tests {
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
+
+    #[test]
+    fn inspect_returns_empty_diagnostics_for_missing_dirs() {
+        let daemon_dir = unique_temp_daemon_dir();
+
+        let diagnostics = inspect_scheduler_wakeups(&daemon_dir, 1_710_001_000)
+            .expect("diagnostics must inspect");
+
+        assert_eq!(
+            diagnostics.schema_version,
+            SCHEDULER_WAKEUPS_DIAGNOSTICS_SCHEMA_VERSION
+        );
+        assert_eq!(diagnostics.inspected_at, 1_710_001_000);
+        assert_eq!(diagnostics.pending_count, 0);
+        assert_eq!(diagnostics.fired_count, 0);
+        assert_eq!(diagnostics.failed_count, 0);
+        assert_eq!(diagnostics.due_pending_count, 0);
+        assert_eq!(diagnostics.due_retry_count, 0);
+        assert_eq!(diagnostics.retryable_failed_count, 0);
+        assert_eq!(diagnostics.permanent_failed_count, 0);
+        assert_eq!(diagnostics.tmp_file_count, 0);
+        assert!(diagnostics.oldest_pending.is_none());
+        assert!(diagnostics.next_retry_at.is_none());
+        assert!(diagnostics.latest_failure.is_none());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn inspect_counts_pending_fired_failed_records() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let future_record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_002_000, "project-alpha", "future"),
+            1_710_001_000,
+        )
+        .expect("future enqueue");
+        let fire_record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "to-fire"),
+            1_710_001_000,
+        )
+        .expect("fire enqueue");
+        let retryable_record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "retryable"),
+            1_710_001_000,
+        )
+        .expect("retryable enqueue");
+        let permanent_record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "permanent"),
+            1_710_001_000,
+        )
+        .expect("permanent enqueue");
+
+        mark_wakeup_fired(
+            &daemon_dir,
+            &fire_record.wakeup_id,
+            1_710_001_200,
+            "dispatched",
+        )
+        .expect("fire");
+        mark_wakeup_failed(
+            &daemon_dir,
+            &retryable_record.wakeup_id,
+            1_710_001_200,
+            WakeupFailureClassification::Retryable,
+            Some("boom".to_string()),
+            Some(100),
+            WakeupRetryPolicy::default(),
+        )
+        .expect("fail retryable");
+        mark_wakeup_failed(
+            &daemon_dir,
+            &permanent_record.wakeup_id,
+            1_710_001_200,
+            WakeupFailureClassification::Permanent,
+            Some("blocked".to_string()),
+            None,
+            WakeupRetryPolicy::default(),
+        )
+        .expect("fail permanent");
+
+        let diagnostics = inspect_scheduler_wakeups(&daemon_dir, 1_710_001_500).expect("inspect");
+
+        assert_eq!(diagnostics.pending_count, 1);
+        assert_eq!(diagnostics.fired_count, 1);
+        assert_eq!(diagnostics.failed_count, 2);
+        assert_eq!(diagnostics.retryable_failed_count, 1);
+        assert_eq!(diagnostics.permanent_failed_count, 1);
+        assert_eq!(diagnostics.due_pending_count, 0);
+        assert_eq!(diagnostics.due_retry_count, 1);
+        assert_eq!(diagnostics.next_retry_at, Some(1_710_001_300));
+
+        let oldest = diagnostics
+            .oldest_pending
+            .expect("oldest pending must exist");
+        assert_eq!(oldest.wakeup_id, future_record.wakeup_id);
+
+        let failure = diagnostics
+            .latest_failure
+            .expect("latest failure must exist");
+        assert_eq!(failure.attempt_count, 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn read_fails_closed_on_truncated_record() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+        let path = pending_scheduler_wakeup_record_path(&daemon_dir, &record.wakeup_id);
+        fs::write(&path, "{ not-json").expect("truncate");
+
+        let error =
+            read_pending_wakeup_record(&daemon_dir, &record.wakeup_id).expect_err("must fail");
+        assert!(matches!(error, SchedulerWakeupError::Json(_)));
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn read_fails_closed_on_schema_version_mismatch() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+        let path = pending_scheduler_wakeup_record_path(&daemon_dir, &record.wakeup_id);
+        let content = fs::read_to_string(&path).expect("read");
+        let replaced = content.replace(
+            &format!(
+                "\"schemaVersion\": {}",
+                SCHEDULER_WAKEUPS_RECORD_SCHEMA_VERSION
+            ),
+            "\"schemaVersion\": 999",
+        );
+        fs::write(&path, replaced).expect("rewrite");
+
+        let error =
+            read_pending_wakeup_record(&daemon_dir, &record.wakeup_id).expect_err("must fail");
+        assert!(matches!(
+            error,
+            SchedulerWakeupError::UnsupportedSchemaVersion {
+                found: 999,
+                expected: SCHEDULER_WAKEUPS_RECORD_SCHEMA_VERSION,
+            }
+        ));
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn atomic_write_leaves_no_tmp_file_on_success() {
+        let daemon_dir = unique_temp_daemon_dir();
+        enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+
+        let tmp_dir = tmp_scheduler_wakeup_dir(&daemon_dir);
+        let tmp_entries: Vec<_> = fs::read_dir(&tmp_dir)
+            .expect("tmp dir readable")
+            .collect::<Result<_, _>>()
+            .expect("tmp entries");
+        assert!(
+            tmp_entries.is_empty(),
+            "tmp dir must be empty after successful enqueue"
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn transition_fails_closed_on_destination_collision() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+
+        let fired_path = fired_scheduler_wakeup_record_path(&daemon_dir, &record.wakeup_id);
+        fs::create_dir_all(fired_path.parent().expect("parent")).expect("mkdir");
+        fs::write(&fired_path, "{}").expect("write stray fired record");
+
+        let error = mark_wakeup_fired(&daemon_dir, &record.wakeup_id, 1_710_001_150, "dispatched")
+            .expect_err("fire must fail when fired destination exists");
+        assert!(matches!(error, SchedulerWakeupError::Json(_)));
+        assert!(
+            read_pending_wakeup_record(&daemon_dir, &record.wakeup_id)
+                .expect("pending read")
+                .is_some(),
+            "pending record must remain after failed transition"
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn transition_fails_closed_when_destination_record_already_present() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let record = enqueue_wakeup(
+            &daemon_dir,
+            project_wakeup_request(1_710_001_100, "project-alpha", "trace-01"),
+            1_710_001_000,
+        )
+        .expect("enqueue");
+
+        let fired_path = fired_scheduler_wakeup_record_path(&daemon_dir, &record.wakeup_id);
+        fs::create_dir_all(fired_path.parent().expect("parent")).expect("mkdir");
+        let mut fake = record.clone();
+        fake.status = WakeupStatus::Fired;
+        fs::write(&fired_path, serde_json::to_string(&fake).expect("json"))
+            .expect("write valid fired record");
+
+        let error = mark_wakeup_fired(&daemon_dir, &record.wakeup_id, 1_710_001_150, "dispatched")
+            .expect_err("fire must fail closed when destination record exists");
+        assert!(matches!(
+            error,
+            SchedulerWakeupError::WakeupIdConflict { .. }
+        ));
+        assert!(
+            read_pending_wakeup_record(&daemon_dir, &record.wakeup_id)
+                .expect("pending read")
+                .is_some(),
+            "pending record must remain after failed transition"
+        );
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
 }
