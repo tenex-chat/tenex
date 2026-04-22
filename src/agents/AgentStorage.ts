@@ -364,15 +364,12 @@ export class AgentStorage {
                         rawIndex as unknown as Record<string, unknown>
                     );
 
-                    // Verify byProject is populated after migration
                     const hasValidByProject = this.index.byProject &&
                         Object.keys(this.index.byProject).length > 0;
 
                     if (!hasValidByProject) {
                         logger.warn("Migration produced empty byProject index, rebuilding from agent files");
                         await this.rebuildIndex();
-                    } else {
-                        await this.saveIndex();
                     }
 
                     logger.info("Agent index migration complete", {
@@ -392,11 +389,18 @@ export class AgentStorage {
     }
 
     /**
-     * Save the index file
+     * Read byProject from the Rust-maintained index.json without touching bySlug/byEventId.
+     * Returns empty object if the file doesn't exist or can't be parsed.
      */
-    private async saveIndex(): Promise<void> {
-        if (!this.index) return;
-        await fs.writeFile(this.indexPath, JSON.stringify(this.index, null, 2));
+    private async readByProjectFromDisk(): Promise<Record<string, string[]>> {
+        if (!(await fileExists(this.indexPath))) return {};
+        try {
+            const content = await fs.readFile(this.indexPath, "utf-8");
+            const raw = JSON.parse(content);
+            return (raw?.byProject as Record<string, string[]>) ?? {};
+        } catch {
+            return {};
+        }
     }
 
     /**
@@ -453,40 +457,33 @@ export class AgentStorage {
      * If all agents with a slug are inactive, one is chosen arbitrarily.
      */
     async rebuildIndex(): Promise<void> {
-        const index: AgentIndex = { bySlug: {}, byEventId: {}, byProject: {} };
-        // Track which slugs are owned by active agents
+        // Preserve byProject from disk — it is owned by Rust (project_nostr_ingress).
+        const byProject = await this.readByProjectFromDisk();
+        const index: AgentIndex = { bySlug: {}, byEventId: {}, byProject };
         const activeSlugOwners = new Set<string>();
 
         const files = await fs.readdir(this.agentsDir);
         for (const file of files) {
             if (!file.endsWith(".json") || file === "index.json") continue;
 
-            const pubkey = file.slice(0, -5); // Remove .json
+            const pubkey = file.slice(0, -5);
             try {
                 const agent = await this.loadAgent(pubkey);
                 if (!agent) continue;
 
                 const active = isAgentActive(agent);
 
-                // Update slug index - active agents take precedence
                 const existingEntry = index.bySlug[agent.slug];
                 if (existingEntry) {
-                    if (existingEntry.pubkey !== pubkey) {
-                        // Different agent with same slug - active takes precedence
-                        if (active && !activeSlugOwners.has(agent.slug)) {
-                            index.bySlug[agent.slug] = { pubkey, projectIds: [] };
-                            activeSlugOwners.add(agent.slug);
-                        }
-                    }
-                    // Same agent already indexed - no merge needed (no projects in agent files)
-                } else {
-                    index.bySlug[agent.slug] = { pubkey, projectIds: [] };
-                    if (active) {
+                    if (existingEntry.pubkey !== pubkey && active && !activeSlugOwners.has(agent.slug)) {
+                        index.bySlug[agent.slug] = { pubkey, projectIds: [] };
                         activeSlugOwners.add(agent.slug);
                     }
+                } else {
+                    index.bySlug[agent.slug] = { pubkey, projectIds: [] };
+                    if (active) activeSlugOwners.add(agent.slug);
                 }
 
-                // Update eventId index
                 if (agent.eventId) {
                     index.byEventId[agent.eventId] = pubkey;
                 }
@@ -496,7 +493,6 @@ export class AgentStorage {
         }
 
         this.index = index;
-        await this.saveIndex();
         logger.info("Rebuilt agent index", {
             agents: Object.keys(index.bySlug).length,
         });
@@ -705,7 +701,6 @@ export class AgentStorage {
             this.index.byEventId[agent.eventId] = pubkey;
         }
 
-        await this.saveIndex();
         logger.debug(`Saved agent ${agent.slug} (${pubkey})`);
     }
 
@@ -768,7 +763,6 @@ export class AgentStorage {
             }
         }
 
-        await this.saveIndex();
         if (!options?.quiet) {
             logger.info(`Deleted agent ${agent.slug} (${pubkey})`);
         }

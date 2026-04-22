@@ -280,15 +280,26 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
 
     async streamTextDelta(
         intent: StreamTextDeltaIntent,
-        _context: EventContext
+        context: EventContext
     ): Promise<void> {
-        await this.options.emit({
-            type: "stream_delta",
-            correlationId: this.options.execution.correlationId,
-            ...this.identity(),
-            batchSequence: intent.sequence,
-            delta: intent.delta,
-        });
+        try {
+            await this.publishTextEvent(intent.delta, {
+                context,
+                runtimeEventClass: "stream_text_delta",
+                kind: NDKKind.TenexStreamTextDelta,
+                tags: [
+                    ["llm-ral", context.ralNumber.toString()],
+                    ["stream-seq", intent.sequence.toString()],
+                    ...(context.model ? [["llm-model", context.model]] : []),
+                    ...(context.triggeringEnvelope.metadata.branchName
+                        ? [["branch", String(context.triggeringEnvelope.metadata.branchName)]]
+                        : []),
+                ],
+                waitForRelayOk: false,
+            });
+        } catch {
+            // Stream deltas are best-effort live updates; final kind:1 snapshots carry the durable result.
+        }
     }
 
     private consumeAndEnhanceContext(context: EventContext): EventContext {
@@ -322,6 +333,8 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             usage?: unknown;
             metadata?: Partial<InboundEnvelope["metadata"]>;
             outputTransport?: PublishedMessageRef["transport"];
+            waitForRelayOk?: boolean;
+            timeoutMs?: number;
         }
     ): Promise<PublishedMessageRef> {
         const kind = options.kind ?? NDKKind.Text;
@@ -353,8 +366,8 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             correlationId: this.options.execution.correlationId,
             ...this.identity(),
             requestId,
-            waitForRelayOk: true,
-            timeoutMs: 30_000,
+            waitForRelayOk: options.waitForRelayOk ?? true,
+            timeoutMs: options.timeoutMs ?? 30_000,
             runtimeEventClass: options.runtimeEventClass,
             ...(options.conversationVariant
                 ? { conversationVariant: options.conversationVariant }
@@ -400,13 +413,17 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
 
     private buildTags(options: {
         context: EventContext;
+        runtimeEventClass: PublishRequestMessage["runtimeEventClass"];
         status?: string;
         recipientPubkey?: string;
         tags?: string[][];
     }): string[][] {
         const tags: string[][] = [];
 
-        if (options.context.rootEvent.id) {
+        const startsNewConversation =
+            options.runtimeEventClass === "delegation" ||
+            options.runtimeEventClass === "ask";
+        if (!startsNewConversation && options.context.rootEvent.id) {
             tags.push(["e", options.context.rootEvent.id, "", "root"]);
         }
 
