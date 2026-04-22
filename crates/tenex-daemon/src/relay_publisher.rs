@@ -1,5 +1,6 @@
+use std::collections::HashSet;
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -7,7 +8,10 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, connect};
 use url::Url;
 
-use crate::nostr_event::SignedNostrEvent;
+use crate::backend_events::heartbeat::BackendSigner;
+use crate::nostr_event::{
+    NormalizedNostrEvent, NostrEventError, SignedNostrEvent, canonical_payload, event_hash_hex,
+};
 use crate::publish_outbox::{
     PublishOutboxRelayPublisher, PublishRelayError, PublishRelayReport, PublishRelayResult,
 };
@@ -39,6 +43,18 @@ pub enum RelayPublishError {
     },
     #[error("relay OK frame is invalid: {0}")]
     InvalidOkFrame(String),
+    #[error("relay AUTH frame is invalid: {0}")]
+    InvalidAuthFrame(String),
+    #[error("relay AUTH event id digest is invalid: expected 32 bytes, got {actual}")]
+    InvalidAuthEventIdDigest { actual: usize },
+    #[error("relay AUTH signing error: {0}")]
+    AuthSigning(#[from] secp256k1::Error),
+    #[error("relay AUTH event encode error: {0}")]
+    AuthEvent(#[from] NostrEventError),
+    #[error("relay rejected AUTH event {event_id}: {message}")]
+    AuthRejected { event_id: String, message: String },
+    #[error("relay requires AUTH but no relay auth signer is configured")]
+    AuthRequiredWithoutSigner,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,15 +103,44 @@ impl RelayPublisherConfig {
 
 pub struct NostrRelayPublisher {
     config: RelayPublisherConfig,
+    auth_signer: Option<Box<dyn RelayAuthSigner + Send + Sync>>,
 }
 
 impl NostrRelayPublisher {
     pub fn new(config: RelayPublisherConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            auth_signer: None,
+        }
+    }
+
+    pub fn with_auth_signer<S>(config: RelayPublisherConfig, auth_signer: S) -> Self
+    where
+        S: RelayAuthSigner + Send + Sync + 'static,
+    {
+        Self {
+            config,
+            auth_signer: Some(Box::new(auth_signer)),
+        }
     }
 
     pub fn config(&self) -> &RelayPublisherConfig {
         &self.config
+    }
+}
+
+pub trait RelayAuthSigner {
+    fn xonly_pubkey_hex(&self) -> String;
+    fn sign_schnorr(&self, digest: &[u8; 32]) -> Result<String, secp256k1::Error>;
+}
+
+impl<T: BackendSigner> RelayAuthSigner for T {
+    fn xonly_pubkey_hex(&self) -> String {
+        BackendSigner::xonly_pubkey_hex(self)
+    }
+
+    fn sign_schnorr(&self, digest: &[u8; 32]) -> Result<String, secp256k1::Error> {
+        BackendSigner::sign_schnorr(self, digest)
     }
 }
 
@@ -107,16 +152,23 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
         let mut relay_results = Vec::with_capacity(self.config.relay_urls.len());
 
         for relay_url in &self.config.relay_urls {
-            let result =
-                match publish_signed_event_to_relay(relay_url, event, self.config.response_timeout)
-                {
-                    Ok(result) => result,
-                    Err(error) => PublishRelayResult {
-                        relay_url: relay_url.clone(),
-                        accepted: false,
-                        message: Some(error.to_string()),
-                    },
-                };
+            let auth_signer = self
+                .auth_signer
+                .as_ref()
+                .map(|signer| signer.as_ref() as &dyn RelayAuthSigner);
+            let result = match publish_signed_event_to_relay_with_auth_signer(
+                relay_url,
+                event,
+                self.config.response_timeout,
+                auth_signer,
+            ) {
+                Ok(result) => result,
+                Err(error) => PublishRelayResult {
+                    relay_url: relay_url.clone(),
+                    accepted: false,
+                    message: Some(error.to_string()),
+                },
+            };
             relay_results.push(result);
         }
 
@@ -129,6 +181,15 @@ pub fn publish_signed_event_to_relay(
     event: &SignedNostrEvent,
     response_timeout: Duration,
 ) -> Result<PublishRelayResult, RelayPublishError> {
+    publish_signed_event_to_relay_with_auth_signer(relay_url, event, response_timeout, None)
+}
+
+pub fn publish_signed_event_to_relay_with_auth_signer(
+    relay_url: &str,
+    event: &SignedNostrEvent,
+    response_timeout: Duration,
+    auth_signer: Option<&dyn RelayAuthSigner>,
+) -> Result<PublishRelayResult, RelayPublishError> {
     validate_relay_url(relay_url).map_err(|_| RelayPublishError::InvalidRelayUrl {
         url: relay_url.to_string(),
     })?;
@@ -137,14 +198,60 @@ pub fn publish_signed_event_to_relay(
     set_stream_timeouts(socket.get_mut(), response_timeout);
 
     socket.send(Message::text(build_event_message(event)?))?;
+    let mut pending_auth_event_ids = HashSet::new();
+    let mut resend_event_after_auth = false;
 
     loop {
         let message = socket.read()?;
         match message {
             Message::Text(text) => {
                 let value: Value = serde_json::from_str(text.as_str())?;
-                if let Some(result) = parse_ok_message(relay_url, &event.id, &value)? {
-                    return Ok(result);
+                if let Some(challenge) = parse_auth_challenge(&value)? {
+                    let auth_signer =
+                        auth_signer.ok_or(RelayPublishError::AuthRequiredWithoutSigner)?;
+                    let auth_event =
+                        build_auth_event(relay_url, &challenge, auth_signer, now_unix_secs())?;
+                    pending_auth_event_ids.insert(auth_event.id.clone());
+                    socket.send(Message::text(build_auth_message(&auth_event)?))?;
+                    resend_event_after_auth = true;
+                    continue;
+                }
+
+                if let Some(ok_frame) = parse_ok_frame(&value)? {
+                    if ok_frame.event_id == event.id {
+                        if ok_frame.accepted
+                            || !is_auth_required_message(ok_frame.message.as_deref())
+                        {
+                            return Ok(PublishRelayResult {
+                                relay_url: relay_url.to_string(),
+                                accepted: ok_frame.accepted,
+                                message: ok_frame.message,
+                            });
+                        }
+                        if auth_signer.is_none() {
+                            return Err(RelayPublishError::AuthRequiredWithoutSigner);
+                        }
+                        continue;
+                    }
+
+                    if pending_auth_event_ids.remove(&ok_frame.event_id) {
+                        if !ok_frame.accepted {
+                            return Err(RelayPublishError::AuthRejected {
+                                event_id: ok_frame.event_id,
+                                message: ok_frame.message.unwrap_or_default(),
+                            });
+                        }
+                        if resend_event_after_auth {
+                            socket.send(Message::text(build_event_message(event)?))?;
+                            resend_event_after_auth = false;
+                        }
+                        continue;
+                    }
+
+                    return Err(RelayPublishError::MismatchedOkEventId {
+                        expected_event_id: event.id.clone(),
+                        actual_event_id: ok_frame.event_id,
+                    });
                 }
             }
             Message::Close(_) => {
@@ -161,6 +268,10 @@ pub fn build_event_message(event: &SignedNostrEvent) -> Result<String, serde_jso
     serde_json::to_string(&json!(["EVENT", event]))
 }
 
+pub fn build_auth_message(event: &SignedNostrEvent) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&json!(["AUTH", event]))
+}
+
 pub fn parse_relay_url_list(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -170,11 +281,14 @@ pub fn parse_relay_url_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn parse_ok_message(
-    relay_url: &str,
-    expected_event_id: &str,
-    value: &Value,
-) -> Result<Option<PublishRelayResult>, RelayPublishError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RelayOkFrame {
+    event_id: String,
+    accepted: bool,
+    message: Option<String>,
+}
+
+fn parse_ok_frame(value: &Value) -> Result<Option<RelayOkFrame>, RelayPublishError> {
     let frame = match value.as_array() {
         Some(frame) => frame,
         None => return Ok(None),
@@ -188,24 +302,89 @@ fn parse_ok_message(
         .get(1)
         .and_then(Value::as_str)
         .ok_or_else(|| RelayPublishError::InvalidOkFrame("missing event id".to_string()))?;
-    if event_id != expected_event_id {
-        return Err(RelayPublishError::MismatchedOkEventId {
-            expected_event_id: expected_event_id.to_string(),
-            actual_event_id: event_id.to_string(),
-        });
-    }
-
     let accepted = frame
         .get(2)
         .and_then(Value::as_bool)
         .ok_or_else(|| RelayPublishError::InvalidOkFrame("missing accepted flag".to_string()))?;
     let message = frame.get(3).and_then(Value::as_str).map(str::to_string);
 
-    Ok(Some(PublishRelayResult {
-        relay_url: relay_url.to_string(),
+    Ok(Some(RelayOkFrame {
+        event_id: event_id.to_string(),
         accepted,
         message,
     }))
+}
+
+fn parse_auth_challenge(value: &Value) -> Result<Option<String>, RelayPublishError> {
+    let frame = match value.as_array() {
+        Some(frame) => frame,
+        None => return Ok(None),
+    };
+
+    if frame.first().and_then(Value::as_str) != Some("AUTH") {
+        return Ok(None);
+    }
+
+    frame
+        .get(1)
+        .and_then(Value::as_str)
+        .map(|challenge| Some(challenge.to_string()))
+        .ok_or_else(|| RelayPublishError::InvalidAuthFrame("missing challenge".to_string()))
+}
+
+fn build_auth_event(
+    relay_url: &str,
+    challenge: &str,
+    signer: &dyn RelayAuthSigner,
+    created_at: u64,
+) -> Result<SignedNostrEvent, RelayPublishError> {
+    let pubkey = signer.xonly_pubkey_hex();
+    let event = NormalizedNostrEvent {
+        kind: 22242,
+        content: String::new(),
+        tags: vec![
+            vec!["relay".to_string(), relay_url.to_string()],
+            vec!["challenge".to_string(), challenge.to_string()],
+        ],
+        pubkey: Some(pubkey.clone()),
+        created_at: Some(created_at),
+    };
+    let canonical = canonical_payload(&event)?;
+    let id = event_hash_hex(&canonical);
+    let digest = decode_auth_event_id_digest(&id)?;
+    let sig = signer.sign_schnorr(&digest)?;
+
+    Ok(SignedNostrEvent {
+        id,
+        pubkey,
+        created_at,
+        kind: event.kind,
+        tags: event.tags,
+        content: event.content,
+        sig,
+    })
+}
+
+fn decode_auth_event_id_digest(value: &str) -> Result<[u8; 32], RelayPublishError> {
+    let bytes = hex::decode(value).map_err(|err| {
+        RelayPublishError::InvalidAuthFrame(format!("event id is not hex: {err}"))
+    })?;
+    bytes.try_into().map_err(
+        |bytes: Vec<u8>| RelayPublishError::InvalidAuthEventIdDigest {
+            actual: bytes.len(),
+        },
+    )
+}
+
+fn is_auth_required_message(message: Option<&str>) -> bool {
+    matches!(message, Some(message) if message.starts_with("auth-required"))
+}
+
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 fn validate_relay_url(relay_url: &str) -> Result<(), RelayPublisherConfigError> {
@@ -237,7 +416,9 @@ fn set_stream_timeouts(stream: &mut MaybeTlsStream<TcpStream>, timeout: Duration
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend_signer::HexBackendSigner;
     use crate::nostr_event::Nip01EventFixture;
+    use crate::nostr_event::verify_signed_event;
     use crate::publish_outbox::{
         accept_worker_publish_request, drain_pending_publish_outbox,
         read_published_publish_outbox_record,
@@ -253,6 +434,7 @@ mod tests {
 
     const STREAM_TEXT_DELTA_FIXTURE: &str =
         include_str!("../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
+    const AUTH_CHALLENGE: &str = "relay-auth-challenge-01";
 
     #[test]
     fn parses_env_relay_list_like_typescript_relay_config() {
@@ -334,6 +516,90 @@ mod tests {
             result.message.as_deref(),
             Some("duplicate: already have this")
         );
+
+        mock_relay.join();
+    }
+
+    #[test]
+    fn publishes_after_nip42_auth_challenge_with_configured_signer() {
+        let fixture = signed_event_fixture();
+        let signer = HexBackendSigner::from_private_key_hex(&fixture.secret_key_hex)
+            .expect("fixture private key must create relay auth signer");
+        let mock_relay = AuthRequiredMockRelay::start(fixture.signed.id.clone());
+        let config =
+            RelayPublisherConfig::new(vec![mock_relay.url.clone()], Duration::from_secs(2))
+                .expect("mock relay config must be valid");
+        let relay_url = mock_relay.url.clone();
+        let mut publisher = NostrRelayPublisher::with_auth_signer(config, signer);
+
+        let report = publisher
+            .publish_signed_event(&fixture.signed)
+            .expect("publish report must be returned");
+
+        assert_eq!(report.relay_results.len(), 1);
+        assert_eq!(
+            report.relay_results[0],
+            PublishRelayResult {
+                relay_url: relay_url.clone(),
+                accepted: true,
+                message: Some("stored after auth".to_string()),
+            }
+        );
+        let published_frames = mock_relay
+            .published_frames
+            .recv()
+            .expect("mock relay must capture auth flow frames");
+        assert_eq!(published_frames.initial_event_frame[0], "EVENT");
+        assert_eq!(
+            published_frames.initial_event_frame[1],
+            json!(fixture.signed)
+        );
+        assert_eq!(published_frames.auth_frame[0], "AUTH");
+        let auth_event: SignedNostrEvent =
+            serde_json::from_value(published_frames.auth_frame[1].clone())
+                .expect("auth frame must carry a signed event");
+        assert_eq!(auth_event.pubkey, fixture.pubkey);
+        assert_eq!(auth_event.kind, 22242);
+        assert_eq!(auth_event.content, "");
+        assert!(
+            auth_event
+                .tags
+                .contains(&vec!["relay".to_string(), relay_url.clone()])
+        );
+        assert!(
+            auth_event
+                .tags
+                .contains(&vec!["challenge".to_string(), AUTH_CHALLENGE.to_string()])
+        );
+        verify_signed_event(&auth_event).expect("AUTH event signature must verify");
+        assert_eq!(published_frames.retried_event_frame[0], "EVENT");
+        assert_eq!(
+            published_frames.retried_event_frame[1],
+            json!(fixture.signed)
+        );
+
+        mock_relay.join();
+    }
+
+    #[test]
+    fn rejects_auth_challenge_without_configured_signer() {
+        let fixture = signed_event_fixture();
+        let mock_relay = AuthChallengeOnlyMockRelay::start();
+
+        let error =
+            publish_signed_event_to_relay(&mock_relay.url, &fixture.signed, Duration::from_secs(2))
+                .expect_err("AUTH challenge without signer must fail explicitly");
+
+        assert!(matches!(
+            error,
+            RelayPublishError::AuthRequiredWithoutSigner
+        ));
+        let initial_frame = mock_relay
+            .initial_event_frame
+            .recv()
+            .expect("mock relay must capture initial EVENT frame");
+        assert_eq!(initial_frame[0], "EVENT");
+        assert_eq!(initial_frame[1], json!(fixture.signed));
 
         mock_relay.join();
     }
@@ -442,6 +708,138 @@ mod tests {
         fn join(self) {
             self.handle.join().expect("mock relay thread must join");
         }
+    }
+
+    struct AuthRequiredMockRelay {
+        url: String,
+        published_frames: mpsc::Receiver<AuthRelayFrames>,
+        handle: thread::JoinHandle<()>,
+    }
+
+    struct AuthRelayFrames {
+        initial_event_frame: Value,
+        auth_frame: Value,
+        retried_event_frame: Value,
+    }
+
+    struct AuthChallengeOnlyMockRelay {
+        url: String,
+        initial_event_frame: mpsc::Receiver<Value>,
+        handle: thread::JoinHandle<()>,
+    }
+
+    impl AuthRequiredMockRelay {
+        fn start(event_id: String) -> Self {
+            let listener =
+                TcpListener::bind("127.0.0.1:0").expect("mock relay must bind local port");
+            let url = format!(
+                "ws://{}",
+                listener
+                    .local_addr()
+                    .expect("mock relay must expose local addr")
+            );
+            let (sender, published_frames) = mpsc::channel();
+
+            let handle = thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("mock relay must accept client");
+                let mut websocket =
+                    tungstenite::accept(stream).expect("mock relay handshake must succeed");
+
+                let initial_event_frame = read_mock_relay_json_message(&mut websocket);
+                websocket
+                    .send(Message::text(
+                        serde_json::to_string(&json!(["AUTH", AUTH_CHALLENGE]))
+                            .expect("AUTH challenge must serialize"),
+                    ))
+                    .expect("mock relay must send AUTH challenge");
+
+                let auth_frame = read_mock_relay_json_message(&mut websocket);
+                let auth_event: SignedNostrEvent = serde_json::from_value(
+                    auth_frame
+                        .get(1)
+                        .expect("AUTH frame must include signed event")
+                        .clone(),
+                )
+                .expect("AUTH frame event must deserialize");
+                websocket
+                    .send(Message::text(
+                        serde_json::to_string(&json!(["OK", auth_event.id, true, ""]))
+                            .expect("AUTH OK must serialize"),
+                    ))
+                    .expect("mock relay must send AUTH OK");
+
+                let retried_event_frame = read_mock_relay_json_message(&mut websocket);
+                websocket
+                    .send(Message::text(
+                        serde_json::to_string(&json!(["OK", event_id, true, "stored after auth"]))
+                            .expect("event OK must serialize"),
+                    ))
+                    .expect("mock relay must send event OK");
+                sender
+                    .send(AuthRelayFrames {
+                        initial_event_frame,
+                        auth_frame,
+                        retried_event_frame,
+                    })
+                    .expect("mock relay must send captured frames");
+            });
+
+            Self {
+                url,
+                published_frames,
+                handle,
+            }
+        }
+
+        fn join(self) {
+            self.handle.join().expect("mock relay thread must join");
+        }
+    }
+
+    impl AuthChallengeOnlyMockRelay {
+        fn start() -> Self {
+            let listener =
+                TcpListener::bind("127.0.0.1:0").expect("mock relay must bind local port");
+            let url = format!(
+                "ws://{}",
+                listener
+                    .local_addr()
+                    .expect("mock relay must expose local addr")
+            );
+            let (sender, initial_event_frame) = mpsc::channel();
+
+            let handle = thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("mock relay must accept client");
+                let mut websocket =
+                    tungstenite::accept(stream).expect("mock relay handshake must succeed");
+                let event_frame = read_mock_relay_json_message(&mut websocket);
+                websocket
+                    .send(Message::text(
+                        serde_json::to_string(&json!(["AUTH", AUTH_CHALLENGE]))
+                            .expect("AUTH challenge must serialize"),
+                    ))
+                    .expect("mock relay must send AUTH challenge");
+                sender
+                    .send(event_frame)
+                    .expect("mock relay must send captured frame");
+            });
+
+            Self {
+                url,
+                initial_event_frame,
+                handle,
+            }
+        }
+
+        fn join(self) {
+            self.handle.join().expect("mock relay thread must join");
+        }
+    }
+
+    fn read_mock_relay_json_message(websocket: &mut tungstenite::WebSocket<TcpStream>) -> Value {
+        let message = websocket.read().expect("mock relay must read message");
+        serde_json::from_str(message.to_text().expect("mock relay message must be text"))
+            .expect("mock relay message must be json")
     }
 
     fn unique_temp_daemon_dir() -> PathBuf {

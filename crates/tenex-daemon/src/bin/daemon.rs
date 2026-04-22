@@ -182,7 +182,13 @@ fn actual_relay_publisher(options: &DaemonCliOptions) -> Result<NostrRelayPublis
         Duration::from_millis(DEFAULT_RELAY_TIMEOUT_MS),
     )
     .map_err(|error| runtime_error(error.to_string()))?;
-    Ok(NostrRelayPublisher::new(relay_config))
+    let auth_signer = backend_config
+        .backend_signer()
+        .map_err(|error| runtime_error(error.to_string()))?;
+    Ok(NostrRelayPublisher::with_auth_signer(
+        relay_config,
+        auth_signer,
+    ))
 }
 
 fn validate_iterations(options: &DaemonCliOptions) -> Result<(), CliError> {
