@@ -2,6 +2,7 @@ pub mod daemon_control;
 pub mod daemon_diagnostics;
 pub mod daemon_shell;
 pub mod daemon_status;
+pub mod daemon_worker_runtime;
 pub mod dispatch_queue;
 pub mod filesystem_state;
 pub mod nostr_event;
