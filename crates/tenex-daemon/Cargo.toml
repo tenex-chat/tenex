@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+bech32 = "0.9"
 hex = "0.4"
 libc = "0.2"
 secp256k1 = "0.31"

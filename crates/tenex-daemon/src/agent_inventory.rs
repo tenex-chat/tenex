@@ -3,7 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use secp256k1::XOnlyPublicKey;
+use bech32::{self, FromBase32, Variant};
+use secp256k1::{Keypair, Secp256k1, SecretKey, XOnlyPublicKey};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -122,12 +123,13 @@ fn parse_agent_inventory_file(path: &Path) -> Result<ParsedAgentInventoryFile, S
         .and_then(|name| name.to_str())
         .ok_or_else(|| "agent file name is not valid UTF-8".to_string())?;
 
-    let pubkey = path
+    let filename_pubkey = path
         .file_stem()
         .and_then(|stem| stem.to_str())
         .ok_or_else(|| format!("{file_name} has no valid pubkey stem"))?;
-    validate_filename_pubkey(pubkey)
-        .map_err(|reason| format!("{file_name} has invalid pubkey stem {pubkey:?}: {reason}"))?;
+    validate_filename_pubkey(filename_pubkey).map_err(|reason| {
+        format!("{file_name} has invalid pubkey stem {filename_pubkey:?}: {reason}")
+    })?;
 
     let content = fs::read_to_string(path)
         .map_err(|source| format!("failed to read {file_name}: {source}"))?;
@@ -140,14 +142,18 @@ fn parse_agent_inventory_file(path: &Path) -> Result<ParsedAgentInventoryFile, S
         return Err(format!("{file_name} has an empty slug"));
     }
 
-    let nsec = read_optional_string_field(&value, "nsec")
-        .map_err(|reason| format!("{file_name} has invalid nsec: {reason}"))?;
-    drop(nsec);
+    let pubkey = match read_optional_string_field(&value, "nsec")
+        .map_err(|reason| format!("{file_name} has invalid nsec: {reason}"))?
+    {
+        Some(nsec) => derive_pubkey_from_agent_nsec(&nsec)
+            .map_err(|reason| format!("{file_name} has invalid nsec: {reason}"))?,
+        None => filename_pubkey.to_string(),
+    };
     let status = read_status_field(&value)
         .map_err(|reason| format!("{file_name} has invalid status: {reason}"))?;
 
     Ok(ParsedAgentInventoryFile {
-        pubkey: pubkey.to_string(),
+        pubkey,
         slug,
         status,
     })
@@ -187,6 +193,50 @@ fn validate_filename_pubkey(pubkey: &str) -> Result<(), secp256k1::Error> {
     Ok(())
 }
 
+fn derive_pubkey_from_agent_nsec(nsec: &str) -> Result<String, String> {
+    let trimmed = nsec.trim();
+    if trimmed.is_empty() {
+        return Err("nsec is empty".to_string());
+    }
+
+    if let Ok(bytes) = hex::decode(trimmed) {
+        let actual_len = bytes.len();
+        let secret_bytes: [u8; 32] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("raw hex secret key must be 32 bytes, found {actual_len}"))?;
+        let secret = SecretKey::from_byte_array(secret_bytes)
+            .map_err(|reason| format!("invalid raw hex secret key: {reason}"))?;
+        return Ok(pubkey_from_secret_key(secret));
+    }
+
+    let (hrp, data, variant) =
+        bech32::decode(trimmed).map_err(|reason| format!("failed to decode bech32: {reason}"))?;
+    if hrp != "nsec" {
+        return Err(format!("expected nsec hrp, found {hrp:?}"));
+    }
+    if variant != Variant::Bech32 {
+        return Err(format!("expected bech32 variant, found {variant:?}"));
+    }
+
+    let bytes = Vec::<u8>::from_base32(&data)
+        .map_err(|reason| format!("invalid bech32 payload: {reason}"))?;
+    let actual_len = bytes.len();
+    let fixed: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| format!("expected 32 secret-key bytes, got {actual_len}"))?;
+    let secret = SecretKey::from_byte_array(fixed)
+        .map_err(|reason| format!("invalid secret key bytes: {reason}"))?;
+    Ok(pubkey_from_secret_key(secret))
+}
+
+fn pubkey_from_secret_key(secret: SecretKey) -> String {
+    let secp = Secp256k1::new();
+    let keypair = Keypair::from_secret_key(&secp, &secret);
+    let (xonly, _) = keypair.x_only_public_key();
+    hex::encode(xonly.serialize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +245,7 @@ mod tests {
         encode_installed_agent_list,
     };
     use crate::nostr_event::verify_signed_event;
+    use bech32::{ToBase32, Variant};
     use secp256k1::{Keypair, Secp256k1, SecretKey, Signing};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -251,6 +302,17 @@ mod tests {
         hex::encode(xonly.serialize())
     }
 
+    fn raw_secret_hex(fill_byte: u8) -> String {
+        hex::encode([fill_byte; 32])
+    }
+
+    fn nsec_bech32(fill_byte: u8) -> String {
+        let secret_bytes = [fill_byte; 32];
+        let secret = SecretKey::from_byte_array(secret_bytes).expect("valid secret");
+        bech32::encode("nsec", secret.secret_bytes().to_base32(), Variant::Bech32)
+            .expect("valid secret must encode as nsec")
+    }
+
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -278,14 +340,16 @@ mod tests {
 
         let owner = pubkey_hex(0x11);
         let alpha_left = pubkey_hex(0x21);
-        let alpha_right = pubkey_hex(0x31);
+        let alpha_right_filename = pubkey_hex(0x31);
+        let alpha_right_derived = pubkey_hex(0x32);
         let beta = pubkey_hex(0x41);
         let inactive = pubkey_hex(0x51);
+        let invalid_nsec_filename = pubkey_hex(0x52);
 
         write_json(
-            &temp_dir.join(format!("{alpha_right}.json")),
+            &temp_dir.join(format!("{alpha_right_filename}.json")),
             serde_json::json!({
-                "nsec": "nsec-alpha-right",
+                "nsec": raw_secret_hex(0x32),
                 "slug": "alpha",
                 "status": "active",
             }),
@@ -327,6 +391,14 @@ mod tests {
                 "status": "active",
             }),
         );
+        write_json(
+            &temp_dir.join(format!("{invalid_nsec_filename}.json")),
+            serde_json::json!({
+                "nsec": "nsec1invalid",
+                "slug": "broken-nsec",
+                "status": "active",
+            }),
+        );
 
         let report = read_installed_agent_inventory(&temp_dir).expect("inventory scan must work");
 
@@ -336,7 +408,7 @@ mod tests {
                 slug: "alpha".to_string(),
             },
             InstalledAgentListAgent {
-                pubkey: alpha_right.clone(),
+                pubkey: alpha_right_derived.clone(),
                 slug: "alpha".to_string(),
             },
             InstalledAgentListAgent {
@@ -357,6 +429,12 @@ mod tests {
                 .iter()
                 .any(|entry| entry.path.ends_with("broken.json"))
         );
+        assert!(report.skipped_files.iter().any(|entry| {
+            entry
+                .path
+                .ends_with(format!("{invalid_nsec_filename}.json"))
+                && entry.reason.contains("invalid nsec")
+        }));
         assert!(
             report
                 .skipped_files
@@ -416,7 +494,6 @@ mod tests {
             &temp_dir.join(format!("{pubkey}.json")),
             serde_json::json!({
                 "slug": "default-active",
-                "nsec": "nsec-default-active",
             }),
         );
 
@@ -426,6 +503,32 @@ mod tests {
             vec![InstalledAgentListAgent {
                 pubkey,
                 slug: "default-active".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn derives_pubkey_from_bech32_nsec_and_uses_it_over_filename() {
+        let temp_dir = unique_temp_dir("bech32");
+        fs::create_dir_all(&temp_dir).expect("temp dir must create");
+
+        let filename_pubkey = pubkey_hex(0x61);
+        let derived_pubkey = pubkey_hex(0x62);
+        write_json(
+            &temp_dir.join(format!("{filename_pubkey}.json")),
+            serde_json::json!({
+                "nsec": nsec_bech32(0x62),
+                "slug": "bech32-agent",
+            }),
+        );
+
+        let report = read_installed_agent_inventory(&temp_dir).expect("inventory scan must work");
+
+        assert_eq!(
+            report.active_agents,
+            vec![InstalledAgentListAgent {
+                pubkey: derived_pubkey,
+                slug: "bech32-agent".to_string(),
             }],
         );
     }
