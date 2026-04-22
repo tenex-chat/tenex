@@ -23,6 +23,7 @@
 //! | [`TelegramBotClient::get_chat`]               | Slice 3        |
 //! | [`TelegramBotClient::get_chat_administrators`]| Slice 3        |
 //! | [`TelegramBotClient::get_chat_member_count`]  | Slice 3        |
+//! | [`TelegramBotClient::get_forum_topic`]        | Slice 3        |
 //! | [`TelegramBotClient::get_forum_topic_icon_stickers`] | Slice 3 |
 //!
 //! The methods are implemented here so later slices do not have to widen the
@@ -403,6 +404,19 @@ pub struct ChatAdministrator {
     pub custom_title: Option<String>,
 }
 
+/// Result of `getForumTopic`. Slice 3 consumes `name` to populate
+/// `TelegramTransportMetadata.topicTitle`; the other fields are surfaced for
+/// completeness.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ForumTopic {
+    pub message_thread_id: i64,
+    pub name: String,
+    #[serde(default)]
+    pub icon_color: i64,
+    #[serde(default)]
+    pub icon_custom_emoji_id: Option<String>,
+}
+
 /// One entry of `getUpdates`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Update {
@@ -623,6 +637,21 @@ impl TelegramBotClient {
         &self,
     ) -> Result<Vec<serde_json::Value>, TelegramClientError> {
         self.get_query("getForumTopicIconStickers", &[])
+    }
+
+    /// Fetch the metadata of a single forum topic (supergroup + topic id).
+    pub fn get_forum_topic(
+        &self,
+        chat_id: ChatId,
+        message_thread_id: i64,
+    ) -> Result<ForumTopic, TelegramClientError> {
+        self.get_query(
+            "getForumTopic",
+            &[
+                ("chat_id", chat_id.as_query_param()),
+                ("message_thread_id", message_thread_id.to_string()),
+            ],
+        )
     }
 }
 

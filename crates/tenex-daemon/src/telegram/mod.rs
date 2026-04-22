@@ -11,6 +11,7 @@
 //! ongoing worker-publishing branch does not need to rewrite paths.
 
 pub mod bindings;
+pub mod chat_context;
 pub mod client;
 pub mod delivery;
 pub mod delivery_plan;
