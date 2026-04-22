@@ -24,7 +24,10 @@ use tenex_daemon::daemon_control::{
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
-use tenex_daemon::periodic_tick::PeriodicScheduler;
+use tenex_daemon::periodic_tick::PeriodicSchedulerSnapshot;
+use tenex_daemon::periodic_tick_state::{
+    periodic_scheduler_state_path, read_periodic_scheduler_state, write_periodic_scheduler_state,
+};
 use tenex_daemon::project_status_descriptors::{
     ProjectStatusDescriptorReport, read_project_status_descriptors,
 };
@@ -155,8 +158,10 @@ struct BackendEventsPeriodicTickDiagnostics {
     first_due_at: u64,
     accepted_at: u64,
     request_timestamp: u64,
+    scheduler_state_path: PathBuf,
     registered: BackendEventsTaskRegistration,
     tick: BackendEventsTickOutcome,
+    persisted_scheduler_snapshot: PeriodicSchedulerSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_descriptor_report: Option<ProjectStatusDescriptorReport>,
     publish_outbox_after: PublishOutboxDiagnostics,
@@ -362,7 +367,8 @@ fn run_backend_events_periodic_tick(
     } else {
         explicit_project.as_slice()
     };
-    let mut scheduler = PeriodicScheduler::new();
+    let mut scheduler = read_periodic_scheduler_state(&options.daemon_dir)
+        .map_err(|error| runtime_error(error.to_string()))?;
     let registered = ensure_backend_events_tasks(&mut scheduler, first_due_at, projects)
         .map_err(|error| runtime_error(error.to_string()))?;
     let tick = tick_backend_events(BackendEventsTickInput {
@@ -375,6 +381,9 @@ fn run_backend_events_periodic_tick(
         projects,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
+    let persisted_scheduler_snapshot =
+        write_periodic_scheduler_state(&options.daemon_dir, &scheduler)
+            .map_err(|error| runtime_error(error.to_string()))?;
     let publish_outbox_after = inspect_publish_outbox(&options.daemon_dir, accepted_at)
         .map_err(|error| runtime_error(error.to_string()))?;
 
@@ -386,8 +395,10 @@ fn run_backend_events_periodic_tick(
         first_due_at,
         accepted_at,
         request_timestamp,
+        scheduler_state_path: periodic_scheduler_state_path(&options.daemon_dir),
         registered,
         tick,
+        persisted_scheduler_snapshot,
         project_descriptor_report,
         publish_outbox_after,
     })
@@ -1721,6 +1732,45 @@ mod tests {
         assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(3));
         assert_eq!(value["publishOutboxAfter"]["publishedCount"], json!(0));
         assert_eq!(value["publishOutboxAfter"]["failedCount"], json!(0));
+        assert_eq!(
+            value["persistedSchedulerSnapshot"]["tasks"][0]["nextDueAt"],
+            json!(1_710_001_330u64)
+        );
+
+        let second_output = run_cli([
+            "backend-events-periodic-tick",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("daemon path must be utf-8"),
+            "--tenex-base-dir",
+            tenex_base_dir.to_str().expect("base path must be utf-8"),
+            "--project-owner-pubkey",
+            &owner,
+            "--project-d-tag",
+            "demo-project",
+            "--project-manager-pubkey",
+            &agent,
+            "--worktree",
+            "main",
+            "--first-due-at",
+            "1710001300",
+            "--created-at",
+            "1710001310",
+            "--accepted-at",
+            "1710001310100",
+            "--request-timestamp",
+            "1710001310050",
+        ])
+        .expect("second backend-events-periodic-tick command must succeed");
+
+        let second: Value = serde_json::from_str(&second_output).expect("output must be json");
+        assert_eq!(second["registered"]["registeredTaskNames"], json!([]));
+        assert_eq!(second["tick"]["dueTaskNames"], json!([]));
+        assert_eq!(second["tick"]["projectStatuses"], json!([]));
+        assert_eq!(
+            second["persistedSchedulerSnapshot"]["tasks"][0]["nextDueAt"],
+            json!(1_710_001_330u64)
+        );
+        assert_eq!(second["publishOutboxAfter"]["pendingCount"], json!(3));
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }

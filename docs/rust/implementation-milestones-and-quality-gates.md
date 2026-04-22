@@ -125,6 +125,9 @@ Rust and TypeScript share filesystem state. The compatibility contract includes:
 - `$TENEX_BASE_DIR/daemon/tenex.lock`
 - `$TENEX_BASE_DIR/daemon/status.json`
 - `$TENEX_BASE_DIR/daemon/restart-state.json`
+- `$TENEX_BASE_DIR/daemon/periodic-scheduler.json`, the durable scheduler
+  snapshot for stateless backend-events ticks. Rust fail-closes on corrupt or
+  unsupported scheduler state.
 - `$TENEX_BASE_DIR/projects/<project-dTag>/`
 - `$TENEX_BASE_DIR/projects/<project-dTag>/project.json`, a shared project
   descriptor written by the TypeScript `ProjectRuntime` on start/stop and read
@@ -876,6 +879,9 @@ Landed slices:
   orchestration slice that reads global config and installed-agent inventory,
   signs backend heartbeat and installed-agent-list events, and enqueues them
   into the durable Rust publish outbox without publishing directly to relays.
+- `crates/tenex-daemon/src/periodic_tick_state.rs` — filesystem persistence for
+  `periodic_tick` snapshots under `$TENEX_BASE_DIR/daemon/periodic-scheduler.json`.
+  Repeated one-shot ticks now preserve next deadlines across Rust process exits.
 - `crates/tenex-daemon/src/bin/daemon-control.rs` —
   `backend-events-enqueue-status`,
   `backend-events-enqueue-project-status`, `backend-events-periodic-tick`, and
@@ -928,10 +934,9 @@ Planned next runtime boundaries:
   `daemon-control backend-events-enqueue-status`. Project-status uses the
   separate `project_status_runtime` boundary and
   `daemon-control backend-events-enqueue-project-status`.
-- The remaining project-status work is daemon wiring: persisting scheduler
-  state across ticks, deriving runtime agent/tool/skill/MCP/worktree detail
-  from filesystem state, and invoking the central backend-events tick from the
-  long-running Rust daemon loop.
+- The remaining project-status work is daemon wiring: deriving runtime
+  agent/tool/skill/MCP/worktree detail from filesystem state and invoking the
+  central backend-events tick from the long-running Rust daemon loop.
 
 Scope:
 
@@ -1092,6 +1097,10 @@ Landed slices:
   timers: callers pass `now` in seconds and sleep themselves. Targets the
   heartbeat / project-status / installed-agent-list / publish-outbox-drain
   / scheduler-wakeups tick loops.
+- `crates/tenex-daemon/src/periodic_tick_state.rs` — durable filesystem layer
+  for the periodic scheduler. It reads missing state as an empty scheduler,
+  fail-closes on corrupt JSON or unsupported schema versions, and atomically
+  writes scheduler snapshots to `daemon/periodic-scheduler.json`.
 - `crates/tenex-daemon/src/backend_events_tick.rs` — first consumer of the
   periodic scheduler that takes due backend-authored status work once and
   dispatches backend heartbeat, installed-agent-list, and project-status
