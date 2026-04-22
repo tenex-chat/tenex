@@ -1,4 +1,5 @@
 pub mod agent_definition_watcher;
+pub mod agent_inventory;
 pub mod backend_event_publish;
 pub mod backend_events;
 pub mod backend_signer;
@@ -13,6 +14,7 @@ pub mod filesystem_state;
 pub mod nostr_event;
 pub mod operations_status_runtime;
 pub mod process_liveness;
+pub mod project_status_snapshot;
 pub mod publish_outbox;
 pub mod publish_runtime;
 pub mod ral_journal;

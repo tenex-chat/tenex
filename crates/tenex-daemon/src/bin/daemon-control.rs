@@ -14,6 +14,7 @@ use tenex_daemon::daemon_control::{
 };
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
 use tenex_daemon::daemon_shell::DaemonShell;
+use tenex_daemon::publish_outbox::{PublishOutboxDiagnostics, inspect_publish_outbox};
 use tenex_daemon::scheduler_wakeups::{inspect_scheduler_wakeups, run_scheduler_maintenance};
 
 const CACHES_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
@@ -24,6 +25,7 @@ const RUNTIME_EXIT_CODE: i32 = 1;
 enum DaemonControlCommand {
     Caches,
     Diagnostics,
+    BackendEventsPlan,
     SchedulerWakeups,
     SchedulerWakeupsMaintain,
     Status,
@@ -47,6 +49,23 @@ struct CachesDiagnostics {
     trust_pubkeys: TrustPubkeysDiagnostics,
     prefix_lookup: PrefixLookupDiagnostics,
     profile_names: ProfileNamesDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendEventsPlanDiagnostics {
+    schema_version: u32,
+    inspected_at: u64,
+    publish_outbox: PublishOutboxDiagnostics,
+    status_publisher_readiness: BackendEventsStatusPublisherReadiness,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendEventsStatusPublisherReadiness {
+    kind: &'static str,
+    ready: bool,
+    reason: &'static str,
 }
 
 #[derive(Debug)]
@@ -94,6 +113,11 @@ where
                 worker_runtime_state: None,
             })
             .map_err(|error| runtime_error(error.to_string()))?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
+        DaemonControlCommand::BackendEventsPlan => {
+            let diagnostics = inspect_backend_events_plan(&options)?;
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
@@ -149,10 +173,29 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
     })
 }
 
+fn inspect_backend_events_plan(
+    options: &DaemonControlCliOptions,
+) -> Result<BackendEventsPlanDiagnostics, CliError> {
+    let publish_outbox = inspect_publish_outbox(&options.daemon_dir, options.inspected_at)
+        .map_err(|error| runtime_error(error.to_string()))?;
+
+    Ok(BackendEventsPlanDiagnostics {
+        schema_version: 1,
+        inspected_at: options.inspected_at,
+        publish_outbox,
+        status_publisher_readiness: BackendEventsStatusPublisherReadiness {
+            kind: "unavailable",
+            ready: false,
+            reason: "backend_config module not wired into daemon-control yet",
+        },
+    })
+}
+
 fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions, CliError> {
     let command = match args.first().map(String::as_str) {
         Some("caches") => DaemonControlCommand::Caches,
         Some("diagnostics") => DaemonControlCommand::Diagnostics,
+        Some("backend-events-plan") => DaemonControlCommand::BackendEventsPlan,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
         Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
         Some("status") => DaemonControlCommand::Status,
@@ -227,6 +270,7 @@ fn usage() -> String {
         "usage:",
         "  daemon-control caches --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control diagnostics --daemon-dir <path> [--inspected-at <ms>]",
+        "  daemon-control backend-events-plan --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control status --daemon-dir <path>",
@@ -304,6 +348,22 @@ mod tests {
         .expect("diagnostics args must parse");
 
         assert_eq!(options.command, DaemonControlCommand::Diagnostics);
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
+        assert_eq!(options.inspected_at, 1710001000000);
+    }
+
+    #[test]
+    fn parses_backend_events_plan_args() {
+        let options = parse_daemon_control_args(&[
+            "backend-events-plan".to_string(),
+            "--daemon-dir".to_string(),
+            "/tmp/tenex-daemon".to_string(),
+            "--inspected-at".to_string(),
+            "1710001000000".to_string(),
+        ])
+        .expect("backend-events-plan args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::BackendEventsPlan);
         assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex-daemon"));
         assert_eq!(options.inspected_at, 1710001000000);
     }
@@ -639,6 +699,42 @@ mod tests {
             json!(1_710_001_000_000u64)
         );
         assert!(value["workerRuntime"].is_null());
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn backend_events_plan_empty_daemon_outputs_inspection_json() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let output = run_cli([
+            "backend-events-plan",
+            "--daemon-dir",
+            daemon_dir.to_str().expect("temp path must be utf-8"),
+            "--inspected-at",
+            "1710001000000",
+        ])
+        .expect("backend-events-plan command must succeed");
+
+        let value: Value = serde_json::from_str(&output).expect("output must be json");
+        assert_eq!(value["schemaVersion"], json!(1));
+        assert_eq!(value["inspectedAt"], json!(1_710_001_000_000u64));
+        assert_eq!(value["publishOutbox"]["schemaVersion"], json!(1));
+        assert_eq!(
+            value["publishOutbox"]["inspectedAt"],
+            json!(1_710_001_000_000u64)
+        );
+        assert_eq!(value["publishOutbox"]["pendingCount"], json!(0));
+        assert_eq!(value["publishOutbox"]["publishedCount"], json!(0));
+        assert_eq!(value["publishOutbox"]["failedCount"], json!(0));
+        assert_eq!(
+            value["statusPublisherReadiness"]["kind"],
+            json!("unavailable")
+        );
+        assert_eq!(value["statusPublisherReadiness"]["ready"], json!(false));
+        assert_eq!(
+            value["statusPublisherReadiness"]["reason"],
+            json!("backend_config module not wired into daemon-control yet")
+        );
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

@@ -23,7 +23,9 @@ pub enum SkillWhitelistError {
     Io(#[from] io::Error),
     #[error("skill whitelist json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("skill whitelist snapshot schema version {found} is not supported (expected {expected})")]
+    #[error(
+        "skill whitelist snapshot schema version {found} is not supported (expected {expected})"
+    )]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
     #[error("skill whitelist entry has invalid eventId {event_id:?}")]
     InvalidEventId { event_id: String },
@@ -320,10 +322,7 @@ fn is_valid_lowercase_hex_event_id(candidate: &str) -> bool {
             .all(|character| matches!(character, '0'..='9' | 'a'..='f'))
 }
 
-fn write_snapshot_file(
-    path: &Path,
-    snapshot: &SkillWhitelistSnapshot,
-) -> SkillWhitelistResult<()> {
+fn write_snapshot_file(path: &Path, snapshot: &SkillWhitelistSnapshot) -> SkillWhitelistResult<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     serde_json::to_writer_pretty(&mut file, snapshot)?;
     file.write_all(b"\n")?;
@@ -446,7 +445,11 @@ mod tests {
         bad.replace_range(0..1, "Z");
         let snapshot = sample_snapshot(
             1_710_000_000_100,
-            vec![sample_entry(bad.clone(), vec![secp_pubkey(0x01)], 1_710_000_000_050)],
+            vec![sample_entry(
+                bad.clone(),
+                vec![secp_pubkey(0x01)],
+                1_710_000_000_050,
+            )],
         );
 
         let error = write_skill_whitelist(&daemon_dir, &snapshot).expect_err("bad hex must fail");
@@ -475,7 +478,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            SkillWhitelistError::UnsupportedKind { kind: 4201, expected: 4202, .. }
+            SkillWhitelistError::UnsupportedKind {
+                kind: 4201,
+                expected: 4202,
+                ..
+            }
         ));
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
@@ -509,7 +516,11 @@ mod tests {
         let daemon_dir = unique_temp_daemon_dir();
         let snapshot = sample_snapshot(
             1_710_000_000_100,
-            vec![sample_entry(event_id_hex(0xaa), Vec::new(), 1_710_000_000_050)],
+            vec![sample_entry(
+                event_id_hex(0xaa),
+                Vec::new(),
+                1_710_000_000_050,
+            )],
         );
 
         let error = write_skill_whitelist(&daemon_dir, &snapshot)
@@ -598,8 +609,8 @@ mod tests {
         );
         let snapshot = sample_snapshot(1_710_000_000_100, vec![entry_a, entry_b]);
 
-        let error = write_skill_whitelist(&daemon_dir, &snapshot)
-            .expect_err("duplicate eventId must fail");
+        let error =
+            write_skill_whitelist(&daemon_dir, &snapshot).expect_err("duplicate eventId must fail");
 
         assert!(matches!(error, SkillWhitelistError::DuplicateEntry { .. }));
 
@@ -644,10 +655,12 @@ mod tests {
 
         write_skill_whitelist(&daemon_dir, &snapshot).expect("write must succeed");
 
-        let raw =
-            fs::read_to_string(skill_whitelist_path(&daemon_dir)).expect("read must succeed");
+        let raw = fs::read_to_string(skill_whitelist_path(&daemon_dir)).expect("read must succeed");
         let value: Value = serde_json::from_str(&raw).expect("JSON must parse");
-        assert_eq!(value["schemaVersion"], json!(SKILL_WHITELIST_SCHEMA_VERSION));
+        assert_eq!(
+            value["schemaVersion"],
+            json!(SKILL_WHITELIST_SCHEMA_VERSION)
+        );
         assert_eq!(value["writer"], json!(SKILL_WHITELIST_WRITER));
         assert_eq!(value["writerVersion"], json!("test-version"));
         assert_eq!(value["updatedAt"], json!(1_710_000_000_100u64));

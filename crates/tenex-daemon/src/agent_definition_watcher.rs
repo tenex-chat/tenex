@@ -246,9 +246,7 @@ pub fn inspect_agent_definitions(
     })
 }
 
-fn validate_writer_fields(
-    snapshot: &AgentDefinitionSnapshot,
-) -> AgentDefinitionWatcherResult<()> {
+fn validate_writer_fields(snapshot: &AgentDefinitionSnapshot) -> AgentDefinitionWatcherResult<()> {
     if snapshot.writer.is_empty() {
         return Err(AgentDefinitionWatcherError::MissingWriter);
     }
@@ -261,9 +259,7 @@ fn validate_writer_fields(
     Ok(())
 }
 
-fn normalize_entries(
-    entries: &mut [AgentDefinitionEntry],
-) -> AgentDefinitionWatcherResult<()> {
+fn normalize_entries(entries: &mut [AgentDefinitionEntry]) -> AgentDefinitionWatcherResult<()> {
     let mut seen_event_ids: HashSet<String> = HashSet::with_capacity(entries.len());
     let mut seen_agent_slugs: HashSet<(String, String)> = HashSet::with_capacity(entries.len());
 
@@ -439,8 +435,8 @@ mod tests {
         entry.event_id = "ZZ".to_string();
         let snapshot = sample_snapshot(1_710_000_000_100, vec![entry.clone()]);
 
-        let error = write_agent_definitions(&daemon_dir, &snapshot)
-            .expect_err("invalid eventId must fail");
+        let error =
+            write_agent_definitions(&daemon_dir, &snapshot).expect_err("invalid eventId must fail");
 
         assert!(matches!(
             error,
@@ -494,10 +490,13 @@ mod tests {
         entry.slug = String::new();
         let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
 
-        let error = write_agent_definitions(&daemon_dir, &snapshot)
-            .expect_err("empty slug must fail");
+        let error =
+            write_agent_definitions(&daemon_dir, &snapshot).expect_err("empty slug must fail");
 
-        assert!(matches!(error, AgentDefinitionWatcherError::EmptySlug { .. }));
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::EmptySlug { .. }
+        ));
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
     }
@@ -509,8 +508,8 @@ mod tests {
         entry.created_at = 0;
         let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
 
-        let error = write_agent_definitions(&daemon_dir, &snapshot)
-            .expect_err("zero createdAt must fail");
+        let error =
+            write_agent_definitions(&daemon_dir, &snapshot).expect_err("zero createdAt must fail");
 
         assert!(matches!(
             error,
@@ -547,7 +546,10 @@ mod tests {
         let error =
             write_agent_definitions(&daemon_dir, &snapshot).expect_err("zero updatedAt must fail");
 
-        assert!(matches!(error, AgentDefinitionWatcherError::InvalidUpdatedAt));
+        assert!(matches!(
+            error,
+            AgentDefinitionWatcherError::InvalidUpdatedAt
+        ));
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
     }
@@ -631,17 +633,12 @@ mod tests {
     fn write_sorts_entry_sublists_and_dedupes() {
         let daemon_dir = unique_temp_daemon_dir();
         let mut entry = sample_entry(0x11, "primary", 1_710_000_000_010);
-        entry.tools = vec![
-            "zeta".to_string(),
-            "alpha".to_string(),
-            "alpha".to_string(),
-        ];
+        entry.tools = vec!["zeta".to_string(), "alpha".to_string(), "alpha".to_string()];
         entry.skills = vec![full_hex(0xbb), full_hex(0xaa), full_hex(0xbb)];
         entry.mcp_servers = vec!["mcp-b".to_string(), "mcp-a".to_string()];
         let snapshot = sample_snapshot(1_710_000_000_100, vec![entry]);
 
-        let written =
-            write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+        let written = write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
 
         assert_eq!(written.definitions[0].tools, vec!["alpha", "zeta"]);
         assert_eq!(
@@ -666,8 +663,7 @@ mod tests {
         middle.event_id = full_hex(0xbb);
         let snapshot = sample_snapshot(1_710_000_000_100, vec![left, middle, right]);
 
-        let written =
-            write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+        let written = write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
 
         let observed: Vec<(String, String)> = written
             .definitions
@@ -724,8 +720,7 @@ mod tests {
         entry_beta.skills = vec![full_hex(0xbb), full_hex(0xaa)];
         let snapshot = sample_snapshot(1_710_000_000_100, vec![entry_alpha, entry_beta]);
 
-        let written =
-            write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
+        let written = write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
         let read_back = read_agent_definitions(&daemon_dir)
             .expect("read must succeed")
             .expect("snapshot must exist");
@@ -761,8 +756,7 @@ mod tests {
         value["schemaVersion"] = serde_json::json!(999);
         fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
 
-        let error =
-            read_agent_definitions(&daemon_dir).expect_err("bad schema must fail read");
+        let error = read_agent_definitions(&daemon_dir).expect_err("bad schema must fail read");
 
         assert!(matches!(
             error,
@@ -787,8 +781,7 @@ mod tests {
         let path = agent_definitions_path(&daemon_dir);
         fs::write(&path, b"{\"schemaVersion\":1,\"writer\":").unwrap();
 
-        let error = read_agent_definitions(&daemon_dir)
-            .expect_err("truncated JSON must fail read");
+        let error = read_agent_definitions(&daemon_dir).expect_err("truncated JSON must fail read");
 
         assert!(matches!(error, AgentDefinitionWatcherError::Json(_)));
 
@@ -881,10 +874,7 @@ mod tests {
         other_author.author_pubkey = xonly_hex_from_seed(0xcc);
         shared_author.last_observed_at = 1_710_000_000_020;
         other_author.last_observed_at = 1_710_000_000_060;
-        let snapshot = sample_snapshot(
-            1_710_000_000_500,
-            vec![shared_author, other_author],
-        );
+        let snapshot = sample_snapshot(1_710_000_000_500, vec![shared_author, other_author]);
         write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
 
         let diagnostics = inspect_agent_definitions(&daemon_dir, 1_710_000_001_000)
@@ -922,8 +912,8 @@ mod tests {
 
         write_agent_definitions(&daemon_dir, &snapshot).expect("write must succeed");
 
-        let raw = fs::read_to_string(agent_definitions_path(&daemon_dir))
-            .expect("read must succeed");
+        let raw =
+            fs::read_to_string(agent_definitions_path(&daemon_dir)).expect("read must succeed");
         let value: serde_json::Value = serde_json::from_str(&raw).expect("JSON must parse");
         assert_eq!(
             value["schemaVersion"],
@@ -993,13 +983,17 @@ mod compat_tests {
         );
         assert_eq!(
             fixture["schemaVersions"]["agentDefinitionsDiagnostics"].as_u64(),
-            Some(u64::from(AGENT_DEFINITION_WATCHER_DIAGNOSTICS_SCHEMA_VERSION))
+            Some(u64::from(
+                AGENT_DEFINITION_WATCHER_DIAGNOSTICS_SCHEMA_VERSION
+            ))
         );
 
-        let snapshot: AgentDefinitionSnapshot =
-            serde_json::from_value(fixture["snapshot"].clone())
-                .expect("snapshot fixture must deserialize");
-        assert_eq!(snapshot.schema_version, AGENT_DEFINITION_WATCHER_SCHEMA_VERSION);
+        let snapshot: AgentDefinitionSnapshot = serde_json::from_value(fixture["snapshot"].clone())
+            .expect("snapshot fixture must deserialize");
+        assert_eq!(
+            snapshot.schema_version,
+            AGENT_DEFINITION_WATCHER_SCHEMA_VERSION
+        );
         assert_eq!(snapshot.writer, AGENT_DEFINITION_WATCHER_WRITER);
         assert_eq!(snapshot.definitions.len(), 2);
 
@@ -1011,10 +1005,9 @@ mod compat_tests {
             with_optionals.is_some(),
             "fixture must include an entry with optional metadata and non-empty sublists"
         );
-        let without_optionals = snapshot
-            .definitions
-            .iter()
-            .find(|entry| entry.name.is_none() && entry.tools.is_empty() && entry.skills.is_empty());
+        let without_optionals = snapshot.definitions.iter().find(|entry| {
+            entry.name.is_none() && entry.tools.is_empty() && entry.skills.is_empty()
+        });
         assert!(
             without_optionals.is_some(),
             "fixture must include an entry without optional metadata and empty sublists"
@@ -1023,9 +1016,8 @@ mod compat_tests {
         let live_daemon_dir = unique_temp_daemon_dir();
         write_agent_definitions(&live_daemon_dir, &snapshot)
             .expect("fixture snapshot must write successfully");
-        let diagnostics =
-            inspect_agent_definitions(&live_daemon_dir, 1_710_002_001_000)
-                .expect("inspect must succeed");
+        let diagnostics = inspect_agent_definitions(&live_daemon_dir, 1_710_002_001_000)
+            .expect("inspect must succeed");
         let expected_populated: AgentDefinitionWatcherDiagnostics =
             serde_json::from_value(fixture["diagnostics"]["populated"].clone())
                 .expect("populated diagnostics fixture must deserialize");

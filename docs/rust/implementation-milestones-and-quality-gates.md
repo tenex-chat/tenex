@@ -322,6 +322,15 @@ Current implementation status:
 - Branch `rust-agent-worker-publishing` currently carries the worker recovery,
   diagnostics, admission-start, and message-flow slices that round out the
   worker supervision stack below the publish-outbox work.
+- `crates/tenex-daemon/src/project_status_snapshot.rs` provides an owned
+  project-status projection that can turn filesystem- or runtime-derived
+  metadata into `ProjectStatusInputs` without a live TypeScript
+  `ProjectContext`, while preserving backend encoder tag order in tests.
+- `crates/tenex-daemon/src/agent_inventory.rs` scans the TypeScript agent
+  storage layout under `$TENEX_BASE_DIR/agents`, skips `index.json` and
+  non-JSON entries, defaults missing status to active, and feeds active agents
+  into the installed-agent-list encoder with filename pubkeys as the canonical
+  disk identity.
 
 - `src/agents/execution/worker/agent-worker.ts` exists and speaks the framed
   worker protocol.
