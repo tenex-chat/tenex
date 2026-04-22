@@ -1,6 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
-import { resolvePath } from "@/lib/fs";
 import chalk from "chalk";
 
 const levels: Record<string, number> = {
@@ -116,26 +114,8 @@ function writeToWarnLog(entry: WarnLogEntry): void {
     }
 }
 
-// Initialize daemon logging
-async function initDaemonLogging(): Promise<void> {
-    // Lazy-load config to avoid circular dependency
-    const { config } = await import("@/services/ConfigService");
-
-    const tenexConfig = config.getConfig();
-    const defaultLogPath = path.join(config.getConfigPath("daemon"), "daemon.log");
-    logFilePath = resolvePath(tenexConfig.logging?.logFile || defaultLogPath);
-
-    // Ensure directory exists
-    const logDir = path.dirname(logFilePath);
-    fs.mkdirSync(logDir, { recursive: true });
-
-    // Initialize warn.log in the same directory
-    warnLogFilePath = path.join(logDir, "warn.log");
-}
-
 // Main logger object
 export const logger = {
-    initDaemonLogging,
     writeToWarnLog,
 
     /**

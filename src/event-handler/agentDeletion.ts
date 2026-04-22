@@ -289,7 +289,7 @@ function scheduleProjectEventUpdate(
 /**
  * Publish an updated kind 31933 project event with deleted agent pubkeys removed.
  *
- * Follows the NIP-46 signing pattern from OwnerAgentListService:
+ * Follows the standard NIP-46 project-event signing flow:
  * 1. Build updated event from current project state
  * 2. Sign via NIP-46 if enabled
  * 3. Publish to relays
