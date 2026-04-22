@@ -18,7 +18,9 @@ pub struct BackendStatusTickInput<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendStatusTickPublishedOutcome {
-    pub heartbeat_event_id: String,
+    /// `None` when the heartbeat latch observed a matching kind 14199 and
+    /// gated the heartbeat for this tick.
+    pub heartbeat_event_id: Option<String>,
     pub installed_agent_list_event_id: String,
     pub enqueued_event_count: usize,
 }
@@ -81,10 +83,15 @@ pub fn tick_backend_status(
 fn published_backend_status(
     outcome: &BackendStatusRuntimeOutcome,
 ) -> BackendStatusTickPublishedOutcome {
+    let heartbeat_event_id = outcome
+        .heartbeat
+        .as_ref()
+        .map(|heartbeat| heartbeat.record.event.id.clone());
+    let enqueued_event_count = usize::from(heartbeat_event_id.is_some()) + 1;
     BackendStatusTickPublishedOutcome {
-        heartbeat_event_id: outcome.heartbeat.record.event.id.clone(),
+        heartbeat_event_id,
         installed_agent_list_event_id: outcome.installed_agent_list.record.event.id.clone(),
-        enqueued_event_count: 2,
+        enqueued_event_count,
     }
 }
 
@@ -160,14 +167,17 @@ mod tests {
         );
         let backend_status = outcome.backend_status.expect("backend status must publish");
         assert_eq!(backend_status.enqueued_event_count, 2);
-        assert!(!backend_status.heartbeat_event_id.is_empty());
+        let heartbeat_event_id = backend_status
+            .heartbeat_event_id
+            .as_ref()
+            .expect("heartbeat must publish when no latch is configured");
+        assert!(!heartbeat_event_id.is_empty());
         assert!(!backend_status.installed_agent_list_event_id.is_empty());
         assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 130);
 
-        let heartbeat_record =
-            read_pending_publish_outbox_record(&daemon_dir, &backend_status.heartbeat_event_id)
-                .expect("heartbeat record read must succeed")
-                .expect("heartbeat record must exist");
+        let heartbeat_record = read_pending_publish_outbox_record(&daemon_dir, heartbeat_event_id)
+            .expect("heartbeat record read must succeed")
+            .expect("heartbeat record must exist");
         let installed_record = read_pending_publish_outbox_record(
             &daemon_dir,
             &backend_status.installed_agent_list_event_id,
@@ -175,7 +185,7 @@ mod tests {
         .expect("installed-agent-list record read must succeed")
         .expect("installed-agent-list record must exist");
 
-        assert_eq!(heartbeat_record.event.id, backend_status.heartbeat_event_id);
+        assert_eq!(&heartbeat_record.event.id, heartbeat_event_id);
         assert_eq!(
             installed_record.event.id,
             backend_status.installed_agent_list_event_id

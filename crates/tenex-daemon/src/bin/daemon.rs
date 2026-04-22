@@ -3,10 +3,14 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Sender, channel};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
+use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use tenex_daemon::daemon_foreground::{
     DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
     run_daemon_foreground_until_stopped_from_filesystem_with_worker,
@@ -18,10 +22,18 @@ use tenex_daemon::daemon_loop::{
 use tenex_daemon::daemon_maintenance::DaemonMaintenanceOutcome;
 use tenex_daemon::daemon_maintenance::{NoTelegramPublisher, WithTelegramPublisher};
 use tenex_daemon::daemon_shell::DaemonShell;
+use tenex_daemon::nip46::client::PublishOutboxHandle;
+use tenex_daemon::nip46::outbox_adapter::PublishOutboxAdapter;
+use tenex_daemon::nip46::pending::PendingNip46Requests;
+use tenex_daemon::nip46::registry::NIP46Registry;
 use tenex_daemon::nostr_subscription_gateway::{
     NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
     NostrSubscriptionGatewaySupervisor, start_nostr_subscription_gateway,
 };
+use tenex_daemon::project_agent_whitelist::ingress::WhitelistIngress;
+use tenex_daemon::project_agent_whitelist::reconciler::{ReconcilerDeps, run_reconciler_loop};
+use tenex_daemon::project_agent_whitelist::snapshot_state::SnapshotState;
+use tenex_daemon::project_agent_whitelist::trigger_source::AgentInventoryPoller;
 use tenex_daemon::publish_outbox::PublishOutboxMaintenanceReport;
 use tenex_daemon::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
@@ -49,6 +61,9 @@ const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
 const WORKER_ENGINE_ENV: &str = "TENEX_AGENT_WORKER_ENGINE";
 const AGENT_WORKER_ENGINE: &str = "agent";
+const WHITELIST_RECONCILER_DEBOUNCE: Duration = Duration::from_secs(5);
+const WHITELIST_RECONCILER_IDLE_RETRY: Duration = Duration::from_secs(300);
+const WHITELIST_POLLER_INTERVAL: Duration = Duration::from_secs(2);
 static DAEMON_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,7 +136,7 @@ where
     let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
     let options = parse_daemon_args(&args)?;
     validate_iterations(&options)?;
-    let (_, daemon_dir) = resolve_daemon_paths(&options)?;
+    let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(&options)?;
     let _telemetry = telemetry::init(&daemon_dir);
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "tenex-daemon starting");
     install_signal_handlers()?;
@@ -130,17 +145,28 @@ where
     let mut stop_signal = ProcessSignalStopSignal;
     let mut publisher = actual_relay_publisher(&options)?;
 
+    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)?;
+
     // Start the Nostr and Telegram gateway supervisors before the foreground
     // worker loop so relay messages can enqueue filesystem dispatches while
     // the loop admits and executes queued work.
-    let nostr_supervisor = start_nostr_subscription_supervisor_from_options(&options)?;
+    let nostr_supervisor = start_nostr_subscription_supervisor_from_options(
+        &options,
+        whitelist_wiring
+            .as_ref()
+            .map(|wiring| Arc::clone(&wiring.ingress)),
+    )?;
     let gateway_supervisor = start_gateway_supervisor_from_options(&options)?;
 
     let mut telegram_registry = build_telegram_publisher_registry_from_options(&options)?;
+    let heartbeat_latch = whitelist_wiring
+        .as_ref()
+        .map(|wiring| Arc::clone(&wiring.heartbeat_latch));
     let diagnostics_result = if telegram_registry.is_empty() {
         let mut telegram_publisher = NoTelegramPublisher;
         run_daemon_foreground(
             &options,
+            heartbeat_latch.clone(),
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -151,6 +177,7 @@ where
         let mut telegram_publisher = WithTelegramPublisher(&mut telegram_registry);
         run_daemon_foreground(
             &options,
+            heartbeat_latch,
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -167,14 +194,125 @@ where
         supervisor.request_stop();
         supervisor.join();
     }
+    // Dropping the whitelist wiring closes the reconciler trigger channel,
+    // which causes `run_reconciler_loop` to exit. The supervisor threads
+    // detach here; on a clean shutdown the main thread exits immediately
+    // after and the OS reaps them.
+    drop(whitelist_wiring);
 
     let diagnostics = diagnostics_result?;
     tracing::info!("tenex-daemon stopped");
     serde_json::to_string_pretty(&diagnostics).map_err(|error| runtime_error(error.to_string()))
 }
 
+/// Wiring for the NIP-46 + kind-14199 whitelist reconciler.
+///
+/// Holds the shared `Arc<_>` handles used by the subscription gateway
+/// ingress, the heartbeat latch gate on the backend-events tick, and the
+/// background supervisor threads (reconciler + agent-inventory poller)
+/// that drive the outbound 14199 publishes.
+struct WhitelistWiring {
+    ingress: Arc<WhitelistIngress>,
+    heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
+    /// Kept alive so that dropping the wiring closes the channel and exits
+    /// the reconciler loop on shutdown.
+    _trigger_tx: Sender<String>,
+    _reconciler_thread: JoinHandle<()>,
+    _poller_thread: JoinHandle<()>,
+}
+
+fn build_whitelist_wiring(
+    tenex_base_dir: &Path,
+    daemon_dir: &Path,
+) -> Result<Option<WhitelistWiring>, CliError> {
+    let config =
+        read_backend_config(tenex_base_dir).map_err(|error| runtime_error(error.to_string()))?;
+    if config.whitelisted_pubkeys.is_empty() {
+        tracing::info!(
+            "no whitelisted pubkeys configured; skipping NIP-46 + 14199 reconciler wiring"
+        );
+        return Ok(None);
+    }
+
+    let backend_signer = Arc::new(
+        config
+            .backend_signer()
+            .map_err(|error| runtime_error(error.to_string()))?,
+    );
+    let backend_pubkey = backend_signer.pubkey_hex().to_string();
+
+    let pending = PendingNip46Requests::default();
+    let outbox_adapter = Arc::new(PublishOutboxAdapter::new(
+        daemon_dir.to_path_buf(),
+        backend_pubkey.clone(),
+    ));
+    let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = outbox_adapter;
+
+    let nip46_registry = Arc::new(NIP46Registry::new(
+        Arc::clone(&backend_signer),
+        pending,
+        Arc::clone(&outbox_handle),
+    ));
+
+    let snapshot_state = Arc::new(SnapshotState::default());
+    let heartbeat_latch = Arc::new(Mutex::new(BackendHeartbeatLatchPlanner::new(
+        backend_pubkey,
+        config.whitelisted_pubkeys.clone(),
+    )));
+
+    let (trigger_tx, trigger_rx) = channel::<String>();
+    let ingress = Arc::new(WhitelistIngress {
+        snapshot_state: Arc::clone(&snapshot_state),
+        heartbeat_latch: Arc::clone(&heartbeat_latch),
+        reconciler_trigger: trigger_tx.clone(),
+        nip46_registry: Arc::clone(&nip46_registry),
+    });
+
+    let default_relay = config
+        .effective_relay_urls()
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let reconciler_deps = ReconcilerDeps {
+        tenex_base_dir: tenex_base_dir.to_path_buf(),
+        owners: config.whitelisted_pubkeys.clone(),
+        snapshot_state,
+        nip46_registry,
+        nip46_config: config.nip46.clone(),
+        default_relay,
+        outbox: outbox_handle,
+        debounce: WHITELIST_RECONCILER_DEBOUNCE,
+        idle_retry: WHITELIST_RECONCILER_IDLE_RETRY,
+    };
+
+    let reconciler_thread = thread::Builder::new()
+        .name("whitelist-reconciler".to_string())
+        .spawn(move || run_reconciler_loop(reconciler_deps, trigger_rx))
+        .map_err(|error| runtime_error(format!("reconciler thread spawn failed: {error}")))?;
+
+    let poller = AgentInventoryPoller {
+        tenex_base_dir: tenex_base_dir.to_path_buf(),
+        owners: config.whitelisted_pubkeys.clone(),
+        interval: WHITELIST_POLLER_INTERVAL,
+        trigger_tx: trigger_tx.clone(),
+    };
+    let poller_thread = thread::Builder::new()
+        .name("whitelist-poller".to_string())
+        .spawn(move || poller.run_forever())
+        .map_err(|error| runtime_error(format!("poller thread spawn failed: {error}")))?;
+
+    Ok(Some(WhitelistWiring {
+        ingress,
+        heartbeat_latch,
+        _trigger_tx: trigger_tx,
+        _reconciler_thread: reconciler_thread,
+        _poller_thread: poller_thread,
+    }))
+}
+
 fn start_nostr_subscription_supervisor_from_options(
     options: &DaemonCliOptions,
+    whitelist_ingress: Option<Arc<WhitelistIngress>>,
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
@@ -195,6 +333,9 @@ fn start_nostr_subscription_supervisor_from_options(
     let mut config =
         NostrSubscriptionGatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), plan)
             .with_auth_signer(auth_signer);
+    if let Some(ingress) = whitelist_ingress {
+        config = config.with_whitelist_ingress(ingress);
+    }
     config.writer_version = daemon_writer_version();
     let supervisor = start_nostr_subscription_gateway(config, NoopNostrSubscriptionObserver)
         .map_err(|error| runtime_error(format!("failed to start nostr subscription: {error}")))?;
@@ -255,6 +396,7 @@ fn telegram_data_dir(tenex_base_dir: &Path) -> PathBuf {
 
 fn run_daemon_foreground<C, S, Stop, P>(
     options: &DaemonCliOptions,
+    heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
@@ -282,6 +424,7 @@ where
             max_iterations: options.iterations,
             sleep_ms: options.sleep_ms,
             retry_policy: PublishOutboxRetryPolicy::default(),
+            heartbeat_latch,
         },
         DaemonForegroundWorkerInput {
             runtime_state: &mut worker_runtime_state,
@@ -702,6 +845,7 @@ mod tests {
 
         let diagnostics = run_daemon_foreground(
             &options,
+            None,
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -778,5 +922,117 @@ mod tests {
         let keypair = Keypair::from_secret_key(&secp, &secret);
         let (xonly, _) = keypair.x_only_public_key();
         hex::encode(xonly.serialize())
+    }
+
+    #[test]
+    fn build_whitelist_wiring_returns_none_when_no_whitelisted_pubkeys() {
+        let tenex_base_dir = unique_temp_dir("whitelist-wiring-empty");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::write(
+            backend_config_path(&tenex_base_dir),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": [],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+            .expect("wiring construction must succeed");
+        assert!(wiring.is_none());
+
+        fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn build_whitelist_wiring_constructs_ingress_and_latch_for_whitelisted_owner() {
+        use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchState;
+
+        let tenex_base_dir = unique_temp_dir("whitelist-wiring-full");
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        let owner = pubkey_hex(0x02);
+        fs::write(
+            backend_config_path(&tenex_base_dir),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+            .expect("wiring construction must succeed")
+            .expect("non-empty whitelist must produce wiring");
+
+        // The heartbeat latch starts Active because the owner set is
+        // non-empty. It only flips to Stopped once a 14199 with a
+        // backend-p-tag arrives through the ingress.
+        assert_eq!(
+            wiring.heartbeat_latch.lock().unwrap().state(),
+            BackendHeartbeatLatchState::Active
+        );
+        // Ingress is an Arc; confirm we can clone it to share with the
+        // subscription gateway config.
+        let _cloned_ingress = Arc::clone(&wiring.ingress);
+
+        // Dropping the wiring closes the trigger channel and exits the
+        // supervisor threads; no assertions required, but we verify the
+        // destructor runs cleanly without blocking on tests.
+        drop(wiring);
+
+        fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
+    }
+
+    #[test]
+    fn subscription_plan_includes_14199_and_nip46_filters_when_owner_is_whitelisted() {
+        use tenex_daemon::subscription_runtime::{
+            NostrSubscriptionPlanInput, build_nostr_subscription_plan,
+        };
+
+        let tenex_base_dir = unique_temp_dir("whitelist-plan");
+        let owner = pubkey_hex(0x03);
+        fs::create_dir_all(&tenex_base_dir).expect("base dir must create");
+        fs::write(
+            backend_config_path(&tenex_base_dir),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": ["{owner}"],
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+
+        let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
+            tenex_base_dir: &tenex_base_dir,
+            since: Some(1_710_001_000),
+            lesson_definition_ids: &[],
+        })
+        .expect("subscription plan must build");
+
+        let snapshot = plan
+            .project_agent_snapshot_filter
+            .expect("project-agent-snapshot filter must be present when owners exist");
+        assert_eq!(snapshot.kinds, vec![14199]);
+        assert!(snapshot.authors.contains(&owner));
+
+        let nip46_filter = plan
+            .nip46_reply_filter
+            .expect("nip46 reply filter must be present when owners exist");
+        assert_eq!(nip46_filter.kinds, vec![24133]);
+        assert!(nip46_filter.authors.contains(&owner));
+
+        fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
 }

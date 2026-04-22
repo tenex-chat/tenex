@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
@@ -12,6 +13,7 @@ use crate::backend_event_publish::{
 };
 use crate::backend_events::heartbeat::HeartbeatInputs;
 use crate::backend_events::installed_agent_list::InstalledAgentListInputs;
+use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::backend_profile::BackendProfileInputs;
 use crate::publish_runtime::BackendPublishRuntimeOutcome;
 
@@ -21,7 +23,7 @@ pub const BACKEND_STATUS_CORRELATION_ID: &str = "backend-status";
 pub const BACKEND_STATUS_TIMEOUT_MS: u64 = 30_000;
 pub const BACKEND_STATUS_RAL_NUMBER: u64 = 0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BackendStatusRuntimeInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
@@ -29,6 +31,10 @@ pub struct BackendStatusRuntimeInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub timeout_ms: u64,
+    /// Optional latch that, when present and in the `Stopped` state, causes
+    /// the runtime to skip the kind 24012 heartbeat publish. Installed
+    /// agent list and backend profile still publish.
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 impl<'a> BackendStatusRuntimeInput<'a> {
@@ -46,14 +52,25 @@ impl<'a> BackendStatusRuntimeInput<'a> {
             accepted_at,
             request_timestamp,
             timeout_ms: BACKEND_STATUS_TIMEOUT_MS,
+            heartbeat_latch: None,
         }
+    }
+
+    pub fn with_heartbeat_latch(
+        mut self,
+        heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
+    ) -> Self {
+        self.heartbeat_latch = Some(heartbeat_latch);
+        self
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendStatusRuntimeOutcome {
     pub config: BackendConfigSnapshot,
-    pub heartbeat: BackendPublishRuntimeOutcome,
+    /// `None` when the heartbeat latch gated this tick. The installed agent
+    /// list and backend profile publishes are independent of the latch.
+    pub heartbeat: Option<BackendPublishRuntimeOutcome>,
     pub installed_agent_list: BackendPublishRuntimeOutcome,
     pub backend_profile: Option<BackendPublishRuntimeOutcome>,
     pub agent_inventory: AgentInventoryReport,
@@ -101,16 +118,20 @@ pub fn publish_backend_status_from_filesystem(
     } else {
         None
     };
-    let heartbeat_request_id = backend_status_request_id("heartbeat", input.created_at);
 
-    let heartbeat = publish_backend_heartbeat(
-        backend_status_context(&input, &heartbeat_request_id, 1),
-        HeartbeatInputs {
-            created_at: input.created_at,
-            owner_pubkeys: &config.whitelisted_pubkeys,
-        },
-        &signer,
-    )?;
+    let heartbeat = if heartbeat_latch_allows_publish(input.heartbeat_latch.as_ref()) {
+        let heartbeat_request_id = backend_status_request_id("heartbeat", input.created_at);
+        Some(publish_backend_heartbeat(
+            backend_status_context(&input, &heartbeat_request_id, 1),
+            HeartbeatInputs {
+                created_at: input.created_at,
+                owner_pubkeys: &config.whitelisted_pubkeys,
+            },
+            &signer,
+        )?)
+    } else {
+        None
+    };
 
     let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
     let installed_agent_list_request_id =
@@ -132,6 +153,18 @@ pub fn publish_backend_status_from_filesystem(
         backend_profile,
         agent_inventory,
     })
+}
+
+fn heartbeat_latch_allows_publish(
+    latch: Option<&Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
+) -> bool {
+    match latch {
+        None => true,
+        Some(latch) => latch
+            .lock()
+            .expect("backend heartbeat latch must not be poisoned")
+            .should_heartbeat(),
+    }
 }
 
 pub fn publish_backend_heartbeat_from_filesystem(
@@ -251,9 +284,13 @@ mod tests {
 
         assert_eq!(outcome.config.whitelisted_pubkeys, vec![owner.clone()]);
         assert_eq!(outcome.agent_inventory.active_agents.len(), 2);
-        assert_eq!(outcome.heartbeat.record.event.kind, BACKEND_HEARTBEAT_KIND);
+        let heartbeat = outcome
+            .heartbeat
+            .as_ref()
+            .expect("heartbeat must publish without a latch configured");
+        assert_eq!(heartbeat.record.event.kind, BACKEND_HEARTBEAT_KIND);
         assert_eq!(
-            outcome.heartbeat.record.event.tags,
+            heartbeat.record.event.tags,
             vec![vec!["p".to_string(), owner.clone()]]
         );
         assert_eq!(
@@ -268,27 +305,27 @@ mod tests {
                 vec!["agent".to_string(), beta, "beta".to_string()],
             ]
         );
-        assert_eq!(outcome.heartbeat.record.event.pubkey, TEST_PUBKEY_HEX);
+        assert_eq!(heartbeat.record.event.pubkey, TEST_PUBKEY_HEX);
         assert_eq!(
             outcome.installed_agent_list.record.event.pubkey,
             TEST_PUBKEY_HEX
         );
         assert_eq!(
-            outcome.heartbeat.record.request.request_id,
+            heartbeat.record.request.request_id,
             "backend-status:heartbeat:1710001000"
         );
         assert_eq!(
             outcome.installed_agent_list.record.request.request_id,
             "backend-status:installed-agent-list:1710001000"
         );
-        assert_eq!(outcome.heartbeat.record.request.request_sequence, 1);
+        assert_eq!(heartbeat.record.request.request_sequence, 1);
         assert_eq!(
             outcome.installed_agent_list.record.request.request_sequence,
             2
         );
 
         let heartbeat_record =
-            read_pending_publish_outbox_record(&daemon_dir, &outcome.heartbeat.record.event.id)
+            read_pending_publish_outbox_record(&daemon_dir, &heartbeat.record.event.id)
                 .expect("pending heartbeat read must succeed")
                 .expect("pending heartbeat must exist");
         let installed_record = read_pending_publish_outbox_record(
@@ -298,7 +335,7 @@ mod tests {
         .expect("pending installed-agent-list read must succeed")
         .expect("pending installed-agent-list must exist");
 
-        assert_eq!(heartbeat_record, outcome.heartbeat.record);
+        assert_eq!(heartbeat_record, heartbeat.record);
         assert_eq!(installed_record, outcome.installed_agent_list.record);
     }
 

@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -8,6 +9,7 @@ use tracing;
 use thiserror::Error;
 
 use crate::backend_config::read_backend_config;
+use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::daemon_maintenance::{
     DaemonMaintenanceError, DaemonMaintenanceInput, DaemonMaintenanceOutcome,
     TelegramMaintenancePublisher, run_daemon_maintenance_once_from_filesystem,
@@ -350,20 +352,25 @@ fn worker_telegram_egress_runtime_input(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct DaemonMaintenanceLoopInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
     pub max_iterations: u64,
     pub sleep_ms: u64,
+    /// Optional latch shared with the whitelist ingress; when present, a
+    /// `Stopped` state gates the kind 24012 heartbeat publish.
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct DaemonMaintenanceStoppableLoopInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
     pub max_iterations: Option<u64>,
     pub sleep_ms: u64,
+    /// See [`DaemonMaintenanceLoopInput::heartbeat_latch`].
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 pub fn run_daemon_tick_loop_from_filesystem<C, S, P>(
@@ -381,6 +388,7 @@ where
     S: DaemonMaintenanceLoopSleeper,
     P: PublishOutboxRelayPublisher,
 {
+    let heartbeat_latch = input.heartbeat_latch.clone();
     run_daemon_maintenance_loop(
         clock,
         sleeper,
@@ -392,6 +400,7 @@ where
                     tenex_base_dir: input.tenex_base_dir,
                     daemon_dir: input.daemon_dir,
                     now_ms,
+                    heartbeat_latch: heartbeat_latch.clone(),
                 },
                 publisher,
                 retry_policy,
@@ -417,6 +426,7 @@ where
     Stop: DaemonMaintenanceLoopStopSignal,
     P: PublishOutboxRelayPublisher,
 {
+    let heartbeat_latch = input.heartbeat_latch.clone();
     run_daemon_maintenance_loop_until_stopped(
         clock,
         sleeper,
@@ -429,6 +439,7 @@ where
                     tenex_base_dir: input.tenex_base_dir,
                     daemon_dir: input.daemon_dir,
                     now_ms,
+                    heartbeat_latch: heartbeat_latch.clone(),
                 },
                 publisher,
                 retry_policy,
@@ -474,6 +485,7 @@ where
         max_frames,
     } = worker;
     let mut next_publish_result_sequence = first_publish_result_sequence;
+    let heartbeat_latch = input.heartbeat_latch.clone();
 
     run_daemon_maintenance_loop_until_stopped(
         clock,
@@ -498,6 +510,7 @@ where
                     tenex_base_dir: input.tenex_base_dir,
                     daemon_dir: input.daemon_dir,
                     now_ms,
+                    heartbeat_latch: heartbeat_latch.clone(),
                 },
                 DaemonWorkerTickInput {
                     runtime_state: &mut *runtime_state,
@@ -814,6 +827,7 @@ mod tests {
                 daemon_dir: &fixture.daemon_dir,
                 max_iterations: 1,
                 sleep_ms: 30_000,
+                heartbeat_latch: None,
             },
             &mut clock,
             &mut sleeper,
@@ -860,6 +874,7 @@ mod tests {
                 daemon_dir: &fixture.daemon_dir,
                 max_iterations: 1,
                 sleep_ms: 30_000,
+                heartbeat_latch: None,
             },
             &mut clock,
             &mut sleeper,
@@ -915,6 +930,7 @@ mod tests {
                 tenex_base_dir: &fixture.tenex_base_dir,
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
+                heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
                 runtime_state: &mut runtime_state,
@@ -972,6 +988,7 @@ mod tests {
                 tenex_base_dir: &fixture.tenex_base_dir,
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
+                heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
                 runtime_state: &mut runtime_state,

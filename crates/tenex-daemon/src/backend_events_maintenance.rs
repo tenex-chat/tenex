@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -8,6 +9,7 @@ use crate::backend_events_tick::{
     BackendEventsTickInput, BackendEventsTickOutcome, BackendEventsTickProject,
     ensure_backend_events_tasks, tick_backend_events, tick_backend_events_for_due_tasks,
 };
+use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::periodic_tick::PeriodicSchedulerSnapshot;
 use crate::periodic_tick_state::{
     PeriodicTickStateError, periodic_scheduler_state_path, read_periodic_scheduler_state,
@@ -15,7 +17,7 @@ use crate::periodic_tick_state::{
 };
 use crate::publish_outbox::{PublishOutboxDiagnostics, PublishOutboxError, inspect_publish_outbox};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BackendEventsMaintenanceInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
@@ -24,9 +26,12 @@ pub struct BackendEventsMaintenanceInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub projects: &'a [BackendEventsTickProject<'a>],
+    /// When present, a `Stopped` latch gates the kind 24012 heartbeat for
+    /// this maintenance pass.
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BackendEventsMaintenanceSharedSchedulerInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
@@ -38,6 +43,8 @@ pub struct BackendEventsMaintenanceSharedSchedulerInput<'a> {
     pub registered: BackendEventsTaskRegistration,
     pub due_task_names: Vec<String>,
     pub scheduler_snapshot: PeriodicSchedulerSnapshot,
+    /// See [`BackendEventsMaintenanceInput::heartbeat_latch`].
+    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -81,6 +88,7 @@ pub fn maintain_backend_events_from_filesystem(
         accepted_at: input.accepted_at,
         request_timestamp: input.request_timestamp,
         projects: input.projects,
+        heartbeat_latch: input.heartbeat_latch,
     })?;
     let persisted_scheduler_snapshot =
         write_periodic_scheduler_state(input.daemon_dir, &scheduler)?;
@@ -113,6 +121,7 @@ pub fn maintain_backend_events_from_shared_scheduler(
         accepted_at: input.accepted_at,
         request_timestamp: input.request_timestamp,
         projects: input.projects,
+        heartbeat_latch: input.heartbeat_latch,
     })?;
     let publish_outbox_after = inspect_publish_outbox(input.daemon_dir, input.accepted_at)?;
 
@@ -173,6 +182,7 @@ mod tests {
             accepted_at: 1_710_001_000_100,
             request_timestamp: 1_710_001_000_050,
             projects: &[],
+            heartbeat_latch: None,
         })
         .expect("first maintenance run must succeed");
 
@@ -195,6 +205,7 @@ mod tests {
             accepted_at: 1_710_001_010_100,
             request_timestamp: 1_710_001_010_050,
             projects: &[],
+            heartbeat_latch: None,
         })
         .expect("second maintenance run must succeed");
 
