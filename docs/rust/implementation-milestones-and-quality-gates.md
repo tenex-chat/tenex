@@ -904,14 +904,21 @@ Landed slices:
   carries `projectBasePath` but no explicit `worktrees`, Rust runs the same
   `git worktree list --porcelain` style discovery as TypeScript and orders the
   default/current branch first.
+- `crates/tenex-daemon/src/project_status_agent_sources.rs` — filesystem
+  projection of project-scoped agent status detail. It reads
+  `$TENEX_BASE_DIR/agents/index.json`, per-agent storage JSON, and merged
+  global/project `mcp.json` server slugs to derive project agents plus
+  model/tool/skill/MCP agent mappings without a live TypeScript
+  `ProjectContext`.
 - `crates/tenex-daemon/src/project_status_sources.rs` — filesystem readers for
   global `llms.json` model config keys and per-project `schedules.json`
   records, with deterministic ordering and TS-aligned cron/one-off task
   projection for the project-status snapshot pipeline.
 - `crates/tenex-daemon/src/project_status_runtime.rs` — filesystem-backed
   project-status enqueue runtime that reads config, active agent inventory,
-  global LLM model keys, and per-project scheduled tasks, then signs and
-  enqueues kind `24010` through the Rust publish outbox. The
+  project-scoped agent/detail sources, global LLM model keys, worktrees, and
+  per-project scheduled tasks, then signs and enqueues kind `24010` through
+  the Rust publish outbox. The
   `daemon-control backend-events-enqueue-project-status` command exercises
   this boundary with explicit project owner/tag inputs.
 - `crates/tenex-daemon/src/backend_events_tick.rs` — central periodic backend
@@ -945,9 +952,10 @@ Planned next runtime boundaries:
   `daemon-control backend-events-enqueue-status`. Project-status uses the
   separate `project_status_runtime` boundary and
   `daemon-control backend-events-enqueue-project-status`.
-- The remaining project-status work is daemon wiring: deriving runtime
-  agent/tool/skill/MCP detail from filesystem state and invoking the central
-  backend-events tick from the long-running Rust daemon loop.
+- The remaining project-status work is daemon wiring and final parity polish:
+  invoking the central backend-events tick from the long-running Rust daemon
+  loop, then tightening any client-visible differences such as unassigned
+  configurable tool tags or skill visibility edge cases.
 
 Scope:
 

@@ -10,6 +10,10 @@ use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_project_status,
 };
 use crate::backend_events::project_status::{ProjectStatusAgent, ProjectStatusModel};
+use crate::project_status_agent_sources::{
+    ProjectStatusAgentSourceError, ProjectStatusAgentSourceReport,
+    read_project_status_agent_sources,
+};
 use crate::project_status_snapshot::ProjectStatusSnapshot;
 use crate::project_status_sources::{
     ProjectStatusSourceError, read_global_llm_model_keys, read_project_scheduled_tasks,
@@ -40,6 +44,7 @@ pub struct ProjectStatusRuntimeInput<'a> {
 pub struct ProjectStatusRuntimeOutcome {
     pub config: BackendConfigSnapshot,
     pub agent_inventory: AgentInventoryReport,
+    pub project_agent_sources: ProjectStatusAgentSourceReport,
     pub llm_model_keys: Vec<String>,
     pub scheduled_tasks: Vec<crate::backend_events::project_status::ProjectStatusScheduledTask>,
     pub snapshot: ProjectStatusSnapshot,
@@ -54,6 +59,8 @@ pub enum ProjectStatusRuntimeError {
     AgentInventory(#[from] AgentInventoryError),
     #[error("project-status source failed: {0}")]
     Sources(#[from] ProjectStatusSourceError),
+    #[error("project-status agent source failed: {0}")]
+    AgentSources(#[from] ProjectStatusAgentSourceError),
     #[error("backend event publish failed: {0}")]
     EventPublish(#[from] BackendEventPublishError),
 }
@@ -64,20 +71,26 @@ pub fn publish_project_status_from_filesystem(
     let config = read_backend_config(input.tenex_base_dir)?;
     let signer = config.backend_signer()?;
     let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
+    let project_agent_sources =
+        read_project_status_agent_sources(input.tenex_base_dir, input.project_d_tag)?;
     let llm_model_keys = read_global_llm_model_keys(input.tenex_base_dir)?;
     let scheduled_tasks = read_project_scheduled_tasks(input.tenex_base_dir, input.project_d_tag)?;
     let project_tag =
         ProjectStatusSnapshot::project_a_tag(input.project_owner_pubkey, input.project_d_tag);
     let agents = input.agents.map_or_else(
         || {
-            agent_inventory
-                .active_agents
-                .iter()
-                .map(|agent| ProjectStatusAgent {
-                    pubkey: agent.pubkey.clone(),
-                    slug: agent.slug.clone(),
-                })
-                .collect()
+            if project_agent_sources.agents.is_empty() {
+                agent_inventory
+                    .active_agents
+                    .iter()
+                    .map(|agent| ProjectStatusAgent {
+                        pubkey: agent.pubkey.clone(),
+                        slug: agent.slug.clone(),
+                    })
+                    .collect()
+            } else {
+                project_agent_sources.agents.clone()
+            }
         },
         |agents| agents.to_vec(),
     );
@@ -96,17 +109,10 @@ pub fn publish_project_status_from_filesystem(
         config.whitelisted_pubkeys.clone(),
         input.project_manager_pubkey.map(str::to_string),
         agents,
-        llm_model_keys
-            .iter()
-            .cloned()
-            .map(|slug| ProjectStatusModel {
-                slug,
-                agents: Vec::new(),
-            })
-            .collect(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
+        project_status_models(&llm_model_keys, &project_agent_sources),
+        project_agent_sources.tools.clone(),
+        project_agent_sources.skills.clone(),
+        project_agent_sources.mcp_servers.clone(),
         worktrees,
         scheduled_tasks.clone(),
     );
@@ -134,6 +140,7 @@ pub fn publish_project_status_from_filesystem(
     Ok(ProjectStatusRuntimeOutcome {
         config,
         agent_inventory,
+        project_agent_sources,
         llm_model_keys,
         scheduled_tasks,
         snapshot,
@@ -151,6 +158,23 @@ fn project_status_request_id(project_d_tag: &str, created_at: u64) -> String {
 
 fn project_status_correlation_id(project_d_tag: &str) -> String {
     format!("project-status:{project_d_tag}")
+}
+
+fn project_status_models(
+    llm_model_keys: &[String],
+    project_agent_sources: &ProjectStatusAgentSourceReport,
+) -> Vec<ProjectStatusModel> {
+    llm_model_keys
+        .iter()
+        .map(|slug| ProjectStatusModel {
+            slug: slug.clone(),
+            agents: project_agent_sources
+                .models
+                .iter()
+                .find(|model| model.slug == *slug)
+                .map_or_else(Vec::new, |model| model.agents.clone()),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -375,6 +399,149 @@ mod tests {
             .expect("pending record read must succeed")
             .expect("pending project status record must exist");
         assert_eq!(persisted, outcome.project_status.record);
+
+        let _ = fs::remove_dir_all(tenex_base_dir);
+        let _ = fs::remove_dir_all(daemon_dir);
+    }
+
+    #[test]
+    fn publishes_project_status_with_project_scoped_agent_details_from_filesystem() {
+        let tenex_base_dir = unique_temp_dir("project-status-runtime-agent-sources-base");
+        let daemon_dir = unique_temp_dir("project-status-runtime-agent-sources-daemon");
+        let agents_dir = agents_dir(&tenex_base_dir);
+        let project_dir = tenex_base_dir.join("projects").join("demo-project");
+
+        fs::create_dir_all(&agents_dir).expect("create agents dir");
+        fs::create_dir_all(&daemon_dir).expect("create daemon dir");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        let owner = pubkey_hex(0x02);
+        let worker = pubkey_hex(0x05);
+        let outside = pubkey_hex(0x06);
+
+        write_config(&tenex_base_dir, &[&owner]);
+        fs::write(
+            agents_dir.join("index.json"),
+            format!(
+                r#"{{
+                    "byProject": {{
+                        "demo-project": ["{worker}"],
+                        "other-project": ["{outside}"]
+                    }}
+                }}"#
+            ),
+        )
+        .expect("write agent index");
+        fs::write(
+            agents_dir.join(format!("{worker}.json")),
+            r#"{
+                "slug": "worker",
+                "default": {
+                    "model": "alpha",
+                    "tools": ["shell", "ask", "todo_write"],
+                    "skills": ["skill-a", "skill-blocked"],
+                    "blockedSkills": ["skill-blocked"],
+                    "mcpAccess": ["github"]
+                }
+            }"#,
+        )
+        .expect("write worker agent");
+        write_agent(&agents_dir, &outside, "outside");
+        fs::write(
+            tenex_base_dir.join("llms.json"),
+            r#"{
+                "configurations": {
+                    "alpha": { "provider": "anthropic", "model": "claude-3.5-sonnet" },
+                    "beta": { "provider": "openai", "model": "gpt-4o" }
+                },
+                "default": "alpha"
+            }"#,
+        )
+        .expect("write llms");
+        fs::write(
+            tenex_base_dir.join("mcp.json"),
+            r#"{"enabled": true, "servers": {"github": {"command": "npx", "args": []}}}"#,
+        )
+        .expect("write mcp");
+
+        let empty_worktrees: Vec<String> = Vec::new();
+        let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
+            tenex_base_dir: &tenex_base_dir,
+            daemon_dir: &daemon_dir,
+            created_at: 1_710_001_300,
+            accepted_at: 1_710_001_300_100,
+            request_timestamp: 1_710_001_300_050,
+            project_owner_pubkey: &owner,
+            project_d_tag: "demo-project",
+            project_manager_pubkey: None,
+            project_base_path: None,
+            agents: None,
+            worktrees: Some(&empty_worktrees),
+        })
+        .expect("project status publish must succeed");
+
+        assert!(outcome.project_agent_sources.skipped_files.is_empty());
+        assert_eq!(outcome.agent_inventory.active_agents.len(), 2);
+        assert_eq!(
+            outcome.snapshot.agents,
+            vec![ProjectStatusAgent {
+                pubkey: worker.clone(),
+                slug: "worker".to_string(),
+            }]
+        );
+        assert_eq!(
+            outcome.snapshot.models,
+            vec![
+                ProjectStatusModel {
+                    slug: "alpha".to_string(),
+                    agents: vec!["worker".to_string()],
+                },
+                ProjectStatusModel {
+                    slug: "beta".to_string(),
+                    agents: Vec::new(),
+                },
+            ]
+        );
+        assert_eq!(outcome.snapshot.tools[0].name, "shell");
+        assert_eq!(outcome.snapshot.tools[0].agents, vec!["worker".to_string()]);
+        assert_eq!(outcome.snapshot.skills[0].id, "skill-a");
+        assert_eq!(
+            outcome.snapshot.skills[0].agents,
+            vec!["worker".to_string()]
+        );
+        assert_eq!(outcome.snapshot.mcp_servers[0].slug, "github");
+        assert_eq!(
+            outcome.snapshot.mcp_servers[0].agents,
+            vec!["worker".to_string()]
+        );
+
+        let event_tags = &outcome.project_status.record.event.tags;
+        assert!(event_tags.contains(&vec!["agent".to_string(), worker, "worker".to_string()]));
+        assert!(
+            !event_tags
+                .iter()
+                .any(|tag| tag.get(2) == Some(&"outside".to_string()))
+        );
+        assert!(event_tags.contains(&vec![
+            "model".to_string(),
+            "alpha".to_string(),
+            "worker".to_string()
+        ]));
+        assert!(event_tags.contains(&vec![
+            "tool".to_string(),
+            "shell".to_string(),
+            "worker".to_string()
+        ]));
+        assert!(event_tags.contains(&vec![
+            "skill".to_string(),
+            "skill-a".to_string(),
+            "worker".to_string()
+        ]));
+        assert!(event_tags.contains(&vec![
+            "mcp".to_string(),
+            "github".to_string(),
+            "worker".to_string()
+        ]));
 
         let _ = fs::remove_dir_all(tenex_base_dir);
         let _ = fs::remove_dir_all(daemon_dir);
