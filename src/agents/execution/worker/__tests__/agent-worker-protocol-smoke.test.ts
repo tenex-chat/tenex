@@ -105,6 +105,7 @@ describe("agent worker protocol process smoke test", () => {
             env: {
                 ...process.env,
                 TENEX_AGENT_WORKER_ENGINE: "mock",
+                TENEX_AGENT_WORKER_ID: "rust-assigned-worker-01",
             },
             stdio: ["pipe", "pipe", "pipe"],
         });
@@ -121,6 +122,7 @@ describe("agent worker protocol process smoke test", () => {
                 version: AGENT_WORKER_PROTOCOL_VERSION,
                 type: "ready",
                 correlationId: "worker_boot",
+                workerId: "rust-assigned-worker-01",
             });
 
             worker.stdin.write(encodeAgentWorkerProtocolFrame(executeMessage));

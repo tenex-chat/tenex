@@ -833,46 +833,4 @@ mod tests {
         assert_eq!(outcomes[0].status, TelegramOutboxStatus::Failed);
         std::fs::remove_dir_all(&daemon_dir).ok();
     }
-
-    /// Live canary: opt-in smoke test against the real Bot API. Skipped
-    /// unless `TENEX_RUN_TELEGRAM_LIVE_CANARY=1` and both
-    /// `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CANARY_CHAT_ID` are set.
-    ///
-    /// Run with:
-    ///
-    /// ```text
-    /// TENEX_RUN_TELEGRAM_LIVE_CANARY=1 \
-    /// TELEGRAM_BOT_TOKEN=xxx \
-    /// TELEGRAM_CANARY_CHAT_ID=-100xxxx \
-    /// cargo test -p tenex-daemon --lib telegram::delivery::tests::live_canary_sends_a_message -- --ignored --nocapture
-    /// ```
-    #[test]
-    #[ignore]
-    fn live_canary_sends_a_message() {
-        if std::env::var("TENEX_RUN_TELEGRAM_LIVE_CANARY")
-            .ok()
-            .as_deref()
-            != Some("1")
-        {
-            eprintln!("TENEX_RUN_TELEGRAM_LIVE_CANARY not set; skipping");
-            return;
-        }
-        let token = std::env::var("TELEGRAM_BOT_TOKEN").expect("TELEGRAM_BOT_TOKEN required");
-        let chat_id: i64 = std::env::var("TELEGRAM_CANARY_CHAT_ID")
-            .expect("TELEGRAM_CANARY_CHAT_ID required")
-            .parse()
-            .expect("chat id must be integer");
-        let client = TelegramBotClient::from_bot_token(token).expect("client");
-        let sent = client
-            .send_message(SendMessageParams {
-                chat_id: ChatId::Numeric(chat_id),
-                text: "<b>tenex-daemon</b> canary".to_string(),
-                parse_mode: Some(ParseMode::Html),
-                reply_to_message_id: None,
-                message_thread_id: None,
-                disable_link_preview: true,
-            })
-            .expect("canary send_message succeeds");
-        eprintln!("live canary message_id={}", sent.message_id);
-    }
 }

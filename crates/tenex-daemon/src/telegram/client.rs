@@ -45,8 +45,8 @@ use thiserror::Error;
 
 use crate::telegram_outbox::TelegramErrorClass;
 
-/// Default base URL for the public Bot API. Tests and canary runs may
-/// override this to point at a local mock or `api.telegram.org` respectively.
+/// Default base URL for the public Bot API. Tests may override this to point
+/// at a local mock.
 pub const DEFAULT_TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
 /// Default request timeout: matches the TS client's default tolerance for
 /// interactive Bot API calls (Telegram rarely exceeds 10 s) while keeping

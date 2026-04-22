@@ -15,6 +15,7 @@ use crate::worker_dispatch_admission::{
 };
 use crate::worker_dispatch_admission_start::{
     StartedWorkerDispatchAdmission, WorkerDispatchAdmissionStartOutcome,
+    WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputSource,
 };
 use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_dispatch_tick::{
@@ -154,10 +155,15 @@ where
             lease_correlation_id,
             execute_sequence,
             execute_timestamp,
-            project_base_path,
-            metadata_path,
-            triggering_envelope,
-            execution_flags,
+            launch_input: WorkerDispatchLaunchInputSource::FilesystemSidecarWithExplicitFallback(
+                WorkerDispatchExplicitLaunchInput {
+                    worker_id: None,
+                    project_base_path,
+                    metadata_path,
+                    triggering_envelope,
+                    execution_flags,
+                },
+            ),
             lock_owner,
             command,
             worker_config,
@@ -1034,6 +1040,9 @@ mod tests {
         match error {
             WorkerDispatchAdmissionStartError::Admission { source } => {
                 format!("admission planning: {source}")
+            }
+            WorkerDispatchAdmissionStartError::LaunchInput { source, .. } => {
+                format!("launch input: {source}")
             }
             WorkerDispatchAdmissionStartError::LaunchPlan { source, .. } => {
                 format!("launch planning: {source}")

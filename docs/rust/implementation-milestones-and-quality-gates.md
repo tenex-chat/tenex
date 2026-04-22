@@ -742,7 +742,6 @@ Quality gates:
 - Queue overflow is operator-visible and never silently drops trusted events.
 - Warm worker reuse passes compatibility checks.
 - Cold and warm startup benchmarks are recorded.
-- Cold and warm startup benchmarks are compared against pre-canary thresholds.
 - Memory is reclaimed after worker exit.
 - The Rust daemon can run with routing authority enabled while RAL and
   publishing authority remain disabled.
@@ -1211,94 +1210,64 @@ Rollback:
 - Keep only explicitly scoped transport adapters for unsupported long-lived
   services.
 
-### M9: Client Compatibility Canary
+### M9: Complete Migration
 
-Goal: prove Rust mode with real clients before default cutover.
-
-Scope:
-
-- Run Rust daemon in a canary environment with existing web/iOS/Nostr clients.
-- Use a test relay or controlled project set first.
-- Enable increasingly broad scenarios:
-  - project discovery
-  - boot
-  - direct PM reply
-  - delegation
-  - tools
-  - stop command
-  - scheduled task
-  - restart during idle
-  - restart during waiting delegation
-- Record client-visible event streams.
-
-Quality gates:
-
-- No client code changes required.
-- No unexplained missing replies.
-- No duplicate completions.
-- No duplicate stream deltas beyond current best-effort tolerance.
-- No project status regressions.
-- No stuck active RALs after canary restarts.
-- Operator rollback tested at least once.
-- Rollback is tested from non-idle states:
-  - active streaming
-  - waiting for delegation
-  - leased injection
-  - queued dispatch
-- Cold/warm time-to-first-token is within the agreed threshold for:
-  - no MCP
-  - common MCP
-  - expensive MCP marked as supported
-- Cross-backend or sharded scenarios in the supported matrix pass canary checks.
-
-Interoperability gate:
-
-- The same clients can resume against Rust on the same filesystem state after
-  clean shutdown.
-
-Rollback:
-
-- Stop Rust daemon, repair or replay queued state, and verify clients recover
-  without ad-hoc filesystem edits.
-
-### M10: Clean Cutover
-
-Goal: delete obsolete Bun control-plane compatibility shims. Rust is the only
-control plane. No fallback path.
+Goal: Rust is the only control plane. All TypeScript daemon code is deleted.
+No feature gates, no parallel legacy, no fallback. Full system functional.
 
 Scope:
 
-- Remove `TENEX_RUST_DAEMON`, `TENEX_AGENT_WORKER`, and all other temporary
-  migration feature flags from both TypeScript and Rust.
-- Remove the `dispatch-adapter.ts` worker bridge and the in-process
-  `AgentExecutor` dispatch route it guarded.
-- Remove the compatibility RAL bridge (`ral-bridge.ts`) and any remaining
-  `RALRegistry` call sites that were kept for the transition.
-- Delete or inline any TypeScript wrapper that exists only to bridge to Rust
-  behavior; no shims, no adapters kept "just in case".
-- Update `MODULE_INVENTORY.md`, `docs/ARCHITECTURE.md`, and any operator docs
-  to reflect the new boundary: Rust is the daemon, Bun is execution-only.
+- Delete all TypeScript daemon code that Rust has replaced. This includes
+  `src/commands/daemon.ts`, `src/daemon/Daemon.ts`,
+  `src/daemon/RuntimeLifecycle.ts`, `src/daemon/ProjectRuntime.ts`,
+  `src/daemon/SubscriptionManager.ts`, `src/daemon/routing/DaemonRouter.ts`,
+  status publisher loops, operations status interval, agent config watcher,
+  skill whitelist subscription, conversation indexing job, daemon-level agent
+  definition monitor, Telegram gateway/delivery services, and any other
+  TypeScript service whose Rust replacement has landed.
+- Remove every migration feature flag: `TENEX_RUST_DAEMON`,
+  `TENEX_AGENT_WORKER`, and every other env var that toggled between old and
+  new paths.
+- Remove `dispatch-adapter.ts` and the in-process `AgentExecutor` dispatch
+  route it guarded.
+- Remove the compatibility RAL bridge (`ral-bridge.ts`) and all
+  `RALRegistry` call sites kept for the transition.
+- Delete or inline any TypeScript wrapper that exists only to bridge to Rust.
+  No shims. No adapters "just in case."
+- Update `MODULE_INVENTORY.md`, `docs/ARCHITECTURE.md`, and operator docs to
+  reflect the new boundary: Rust is the daemon, Bun is execution-only.
 - Add repair tools for RAL journal and worker state if not already present.
 - Ensure `bun test` passes with only the worker-execution path wired.
 
 Quality gates:
 
-- All M0–M9 quality gates remain green.
-- Full test suite passes with obsolete Bun control-plane code removed.
-- No reference to deleted Bun control-plane files remains in live code paths.
-- Rust daemon has completed M9 canary without compatibility blockers.
+- All M0–M8 quality gates remain green.
+- Full test suite passes with TypeScript daemon code removed.
+- No reference to deleted TypeScript daemon files remains in live code paths.
+- Rust daemon boots, runs, and stops cleanly against real projects, real
+  relays, real Telegram, and real clients.
+- Every feature the TypeScript daemon supported works against the Rust daemon:
+  project discovery, boot, direct PM reply, delegation, tools, stop command,
+  scheduled tasks, restart during idle and during waiting delegation, MCP
+  subscriptions, Telegram inbound and outbound, no-response path.
+- Cold/warm time-to-first-token is acceptable for interactive use with and
+  without MCP.
+- No stuck active RALs after restarts.
+- No duplicate completions, no duplicate stream deltas beyond current
+  best-effort tolerance, no missing replies.
 - NIP-01 self-conformance, schnorr signature, relay round-trip, and signer
   identity gates pass for every event kind Rust publishes.
 
 Interoperability gate:
 
-- Existing TENEX clients work against the Rust daemon with no Bun control-plane
-  process running at all.
+- Existing TENEX clients work against the Rust daemon with no TypeScript
+  daemon process running at all.
 
 Rollback:
 
-- None. M10 is a one-way deletion. If M9 reveals a blocker, fix it before
-  cutting over rather than carrying a fallback.
+- None. M9 is a one-way migration. Slices that land between M1 and M8 can be
+  fixed forward. If a slice reveals a blocker that requires rethinking, fix
+  the blocker and ship the fix — do not re-enable TypeScript daemon code.
 
 ## Global Quality Gates
 
@@ -1462,16 +1431,10 @@ The harness should compare:
 - backend owner/shard decision
 - canonical event bytes for Rust-published events
 
-### Real Client Canary
+### Real Client Verification
 
-Before default cutover, run at least one canary with existing TENEX clients:
-
-- web client
-- iOS client if available
-- CLI/operator flows
-- Telegram if enabled in Rust mode or adapter mode
-
-Canary success criteria:
+Each slice that lands must keep the following working against the Rust
+daemon with real TENEX clients (web, iOS, CLI, Telegram):
 
 - clients discover the Rust backend normally
 - clients can boot a project
@@ -1480,59 +1443,42 @@ Canary success criteria:
 - clients can stop active work
 - clients recover after daemon restart
 
-### Mixed Backend Compatibility
-
-Rust and TypeScript backends may coexist during rollout. The compatibility plan
-must prevent duplicate handling:
-
-- backend identity and heartbeat behavior must remain clear
-- project activation and owner whitelist semantics must match
-- only one backend should claim a local execution for the same RAL
-- direct worker relay publishing must not coexist with Rust relay publishing for
-  the same event type in the same execution
-- cross-backend delegation must be in the supported matrix before it is allowed
-- stop commands must be scoped so one backend does not kill another backend's
-  local execution accidentally
+This is a development-time gate, not a rollout phase. There is no parallel
+TypeScript daemon and no fallback: if a slice breaks one of these, fix the
+slice before shipping the next.
 
 ## Deferred Scope
 
-The following surfaces are explicitly **out of scope** for M0–M10. They are
-tracked as follow-up work to begin only after the Rust daemon has reached
-default cutover and the M0–M10 gates are green. Until then, these capabilities
-remain TypeScript-owned and are not part of any compatibility, fixture, or
-rollback gate in this plan. Adding them earlier is a scope change that requires
-re-opening the milestone plan.
+The following surfaces are out of scope for M0–M9. They remain to be built in
+Rust after the migration completes. Until then they stay on whatever
+implementation exists today (TypeScript or none) and are not part of any
+compatibility, fixture, or rollback gate in this plan. Adding them earlier is
+a scope change that requires re-opening the milestone plan.
 
-- **Encrypted config update — kind `25000` (NIP-44 v2).** Rust does not decrypt,
-  route, re-emit, or store kind `25000` payloads. No NIP-44 v2 decryption
-  vector is required by any milestone in this plan. If Rust observes a kind
-  `25000` event in shadow or authoritative mode, it must treat the event as
-  pass-through and leave handling to the TypeScript path.
+- **Encrypted config update — kind `25000` (NIP-44 v2).** No NIP-44 v2
+  decryption path is required by any milestone in this plan.
 - **Push notification transports (APNs, FCM, or equivalent).** No Rust-owned
-  push delivery, push outbox, or device-token state is in scope. Any existing
-  TypeScript push integration continues to run unchanged during the migration
-  and is not considered part of the Rust compatibility surface.
+  push delivery, push outbox, or device-token state is in scope.
 
 Follow-up work, when opened, should reuse the same contract-and-fixture
 discipline this plan uses for Nostr event kinds and transport outboxes:
-canonical payload fixtures, decryption/delivery vectors, durable outbox
-records, and rollback paths before authority transfers.
+canonical payload fixtures, decryption/delivery vectors, and durable outbox
+records.
 
 ## Release Criteria
 
-M10 (clean cutover) can proceed only when:
+M9 (complete migration) is done when:
 
-- all M0–M9 quality gates are green for the supported feature set
+- all M0–M8 quality gates are green
 - no client-visible schema change is required
 - RAL journal repair or fail-closed tooling exists
 - operator docs describe startup, status, stop, and known limitations
-- unsupported transports or services are explicitly handled before cutover, not
+- unsupported transports or services are explicitly handled — not
   feature-flagged and deferred
 - NIP-01 self-conformance, schnorr signature, relay round-trip, and signer
   identity gates pass for every event kind Rust publishes (encoded or
   pass-through)
-- Obsolete Bun control-plane code has been identified and is ready to delete —
-  no lingering references that would require a compatibility shim after deletion
+- all TypeScript daemon code that Rust has replaced is deleted from the tree
 
 ## First Implementation Slice
 

@@ -9,6 +9,10 @@ use crate::dispatch_queue::{
 };
 use crate::ral_journal::RalJournalIdentity;
 use crate::ral_lock::RalLockInfo;
+use crate::scheduled_task_dispatch_input::{
+    ScheduledTaskDispatchInput, ScheduledTaskDispatchInputError,
+    read_optional as read_optional_scheduled_task_dispatch_input,
+};
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch_admission::{
     AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
@@ -40,14 +44,26 @@ pub struct WorkerDispatchAdmissionStartInput<'a> {
     pub lease_correlation_id: String,
     pub execute_sequence: u64,
     pub execute_timestamp: u64,
-    pub project_base_path: String,
-    pub metadata_path: String,
-    pub triggering_envelope: Value,
-    pub execution_flags: AgentWorkerExecutionFlags,
+    pub launch_input: WorkerDispatchLaunchInputSource,
     pub lock_owner: RalLockInfo,
     pub command: AgentWorkerCommand,
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub started_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerDispatchExplicitLaunchInput {
+    pub worker_id: Option<String>,
+    pub project_base_path: String,
+    pub metadata_path: String,
+    pub triggering_envelope: Value,
+    pub execution_flags: AgentWorkerExecutionFlags,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkerDispatchLaunchInputSource {
+    FilesystemSidecarRequired,
+    FilesystemSidecarWithExplicitFallback(WorkerDispatchExplicitLaunchInput),
 }
 
 #[derive(Debug)]
@@ -72,9 +88,40 @@ pub struct WorkerDispatchAdmissionLaunchContext {
     pub launch_plan: WorkerLaunchPlan,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum WorkerDispatchLaunchInputError {
+    #[error("filesystem dispatch input is required for dispatch {dispatch_id}")]
+    MissingFilesystemDispatchInput { dispatch_id: String },
+    #[error(
+        "filesystem dispatch input dispatch id {actual_dispatch_id} does not match queued dispatch {expected_dispatch_id}"
+    )]
+    DispatchIdMismatch {
+        expected_dispatch_id: String,
+        actual_dispatch_id: String,
+    },
+    #[error(
+        "filesystem dispatch input triggering event {actual_triggering_event_id} does not match queued dispatch {expected_triggering_event_id} for dispatch {dispatch_id}"
+    )]
+    TriggeringEventMismatch {
+        dispatch_id: String,
+        expected_triggering_event_id: String,
+        actual_triggering_event_id: String,
+    },
+    #[error("filesystem dispatch input read failed for dispatch {dispatch_id}: {source}")]
+    Read {
+        dispatch_id: String,
+        #[source]
+        source: ScheduledTaskDispatchInputError,
+    },
+}
+
 pub enum WorkerDispatchAdmissionStartError<S> {
     Admission {
         source: Box<WorkerDispatchAdmissionError>,
+    },
+    LaunchInput {
+        admission: Box<AdmittedWorkerDispatch>,
+        source: Box<WorkerDispatchLaunchInputError>,
     },
     LaunchPlan {
         admission: Box<AdmittedWorkerDispatch>,
@@ -114,10 +161,7 @@ where
         lease_correlation_id,
         execute_sequence,
         execute_timestamp,
-        project_base_path,
-        metadata_path,
-        triggering_envelope,
-        execution_flags,
+        launch_input,
         lock_owner,
         command,
         worker_config,
@@ -152,14 +196,19 @@ where
         }
     };
 
+    let resolved_launch_input =
+        resolve_launch_input(daemon_dir, &admitted.leased_record, launch_input).map_err(
+            |source| WorkerDispatchAdmissionStartError::LaunchInput {
+                admission: Box::new(admitted.clone()),
+                source: Box::new(source),
+            },
+        )?;
+
     let launch_plan = plan_launch_for_admitted_dispatch(
         &admitted,
         execute_sequence,
         execute_timestamp,
-        project_base_path,
-        metadata_path,
-        triggering_envelope,
-        execution_flags,
+        resolved_launch_input.clone(),
     )
     .map_err(|source| WorkerDispatchAdmissionStartError::LaunchPlan {
         admission: Box::new(admitted.clone()),
@@ -184,7 +233,11 @@ where
             daemon_dir,
             launch_plan: &context.launch_plan,
             lock_owner: &lock_owner,
-            command,
+            command: if let Some(worker_id) = resolved_launch_input.worker_id.as_deref() {
+                command.env("TENEX_AGENT_WORKER_ID", worker_id)
+            } else {
+                command
+            },
             worker_config,
         },
     )
@@ -225,17 +278,85 @@ fn plan_launch_for_admitted_dispatch(
     admitted: &AdmittedWorkerDispatch,
     sequence: u64,
     timestamp: u64,
-    project_base_path: String,
-    metadata_path: String,
-    triggering_envelope: Value,
-    execution_flags: AgentWorkerExecutionFlags,
+    launch_input: WorkerDispatchExplicitLaunchInput,
 ) -> Result<WorkerLaunchPlan, WorkerLaunchError> {
+    let WorkerDispatchExplicitLaunchInput {
+        worker_id: _,
+        project_base_path,
+        metadata_path,
+        triggering_envelope,
+        execution_flags,
+    } = launch_input;
     let identity = ral_identity_from_dispatch(&admitted.leased_record);
     plan_worker_launch(WorkerLaunchPlanInput {
         dispatch: &admitted.leased_record,
         identity: &identity,
         sequence,
         timestamp,
+        project_base_path,
+        metadata_path,
+        triggering_envelope,
+        execution_flags,
+    })
+}
+
+fn resolve_launch_input(
+    daemon_dir: &Path,
+    dispatch: &DispatchQueueRecord,
+    source: WorkerDispatchLaunchInputSource,
+) -> Result<WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputError> {
+    match read_optional_scheduled_task_dispatch_input(daemon_dir, &dispatch.dispatch_id).map_err(
+        |source| WorkerDispatchLaunchInputError::Read {
+            dispatch_id: dispatch.dispatch_id.clone(),
+            source,
+        },
+    )? {
+        Some(input) => launch_input_from_filesystem_sidecar(dispatch, input),
+        None => match source {
+            WorkerDispatchLaunchInputSource::FilesystemSidecarRequired => Err(
+                WorkerDispatchLaunchInputError::MissingFilesystemDispatchInput {
+                    dispatch_id: dispatch.dispatch_id.clone(),
+                },
+            ),
+            WorkerDispatchLaunchInputSource::FilesystemSidecarWithExplicitFallback(fallback) => {
+                Ok(fallback)
+            }
+        },
+    }
+}
+
+fn launch_input_from_filesystem_sidecar(
+    dispatch: &DispatchQueueRecord,
+    input: ScheduledTaskDispatchInput,
+) -> Result<WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputError> {
+    let ScheduledTaskDispatchInput {
+        dispatch_id,
+        triggering_event_id,
+        worker_id,
+        project_base_path,
+        metadata_path,
+        triggering_envelope,
+        execution_flags,
+        task_diagnostic_metadata: _,
+    } = input;
+
+    if dispatch_id.as_str() != dispatch.dispatch_id.as_str() {
+        return Err(WorkerDispatchLaunchInputError::DispatchIdMismatch {
+            expected_dispatch_id: dispatch.dispatch_id.clone(),
+            actual_dispatch_id: dispatch_id,
+        });
+    }
+
+    if triggering_event_id.as_str() != dispatch.triggering_event_id.as_str() {
+        return Err(WorkerDispatchLaunchInputError::TriggeringEventMismatch {
+            dispatch_id,
+            expected_triggering_event_id: dispatch.triggering_event_id.clone(),
+            actual_triggering_event_id: triggering_event_id,
+        });
+    }
+
+    Ok(WorkerDispatchExplicitLaunchInput {
+        worker_id: Some(worker_id),
         project_base_path,
         metadata_path,
         triggering_envelope,
@@ -257,6 +378,11 @@ impl<S> fmt::Debug for WorkerDispatchAdmissionStartError<S> {
         match self {
             Self::Admission { source } => formatter
                 .debug_struct("Admission")
+                .field("source", source)
+                .finish(),
+            Self::LaunchInput { admission, source } => formatter
+                .debug_struct("LaunchInput")
+                .field("admission", admission)
                 .field("source", source)
                 .finish(),
             Self::LaunchPlan { admission, source } => formatter
@@ -289,6 +415,9 @@ impl<S> fmt::Display for WorkerDispatchAdmissionStartError<S> {
             Self::Admission { .. } => {
                 formatter.write_str("worker dispatch admission planning failed")
             }
+            Self::LaunchInput { .. } => {
+                formatter.write_str("worker dispatch launch input resolution failed")
+            }
             Self::LaunchPlan { .. } => {
                 formatter.write_str("worker dispatch launch planning failed")
             }
@@ -310,6 +439,7 @@ where
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Admission { source } => Some(source.as_ref()),
+            Self::LaunchInput { source, .. } => Some(source.as_ref()),
             Self::LaunchPlan { source, .. } => Some(source.as_ref()),
             Self::LeaseAppend { source, .. } => Some(source.as_ref()),
             Self::DispatchStart { source, .. } => Some(source.as_ref()),
@@ -340,6 +470,10 @@ mod tests {
         replay_dispatch_queue, replay_dispatch_queue_records,
     };
     use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
+    use crate::scheduled_task_dispatch_input::{
+        ScheduledTaskDispatchInput, ScheduledTaskDispatchTaskDiagnosticMetadata,
+        ScheduledTaskDispatchTaskKind, write_create_or_compare_equal,
+    };
     use crate::worker_dispatch_execution::{
         BootedWorkerDispatch, WorkerDispatchSession, WorkerDispatchSpawner,
     };
@@ -477,6 +611,162 @@ mod tests {
     }
 
     #[test]
+    fn filesystem_sidecar_input_drives_execute_message_fields() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let queued = dispatch_record(1, DispatchQueueStatus::Queued);
+        append_dispatch_queue_record(&daemon_dir, &queued).expect("queued record must append");
+        let dispatch_state =
+            replay_dispatch_queue_records(vec![queued]).expect("queue state must replay");
+        write_create_or_compare_equal(
+            &daemon_dir,
+            &scheduled_task_dispatch_input("dispatch-a", "event-a"),
+        )
+        .expect("sidecar input must write");
+        let mut runtime_state = WorkerRuntimeState::default();
+        let config = AgentWorkerProcessConfig::default();
+        let mut spawner = recording_spawner(ready_message("sidecar-worker-a"), None, None);
+
+        let outcome = apply_worker_dispatch_admission_start(
+            &mut spawner,
+            input(
+                &daemon_dir,
+                &dispatch_state,
+                &mut runtime_state,
+                worker_command(),
+                &config,
+            ),
+        )
+        .expect("sidecar-backed dispatch admission start must succeed");
+
+        let started = match outcome {
+            WorkerDispatchAdmissionStartOutcome::Started(started) => *started,
+            other => panic!("expected started dispatch, got {other:?}"),
+        };
+        let execute = &started.context.launch_plan.execute_message;
+        assert_eq!(execute["projectBasePath"], json!("/sidecar/repo"));
+        assert_eq!(
+            execute["metadataPath"],
+            json!("/sidecar/repo/.tenex/project.json")
+        );
+        assert_eq!(
+            execute["triggeringEnvelope"]["content"],
+            json!("from sidecar")
+        );
+        assert_eq!(
+            execute["executionFlags"],
+            json!({
+                "isDelegationCompletion": true,
+                "hasPendingDelegations": true,
+                "debug": true,
+            })
+        );
+        assert_eq!(
+            started.started.dispatch.session.messages,
+            vec![execute.clone()]
+        );
+        assert_eq!(
+            spawner.spawn_calls[0].0.env.get("TENEX_AGENT_WORKER_ID"),
+            Some(&"sidecar-worker-a".to_string())
+        );
+
+        release_worker_launch_locks(started.started.locks).expect("locks must release");
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn required_filesystem_sidecar_missing_fails_before_lease_or_spawn() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let queued = dispatch_record(1, DispatchQueueStatus::Queued);
+        append_dispatch_queue_record(&daemon_dir, &queued).expect("queued record must append");
+        let dispatch_state =
+            replay_dispatch_queue_records(vec![queued]).expect("queue state must replay");
+        let mut runtime_state = WorkerRuntimeState::default();
+        let config = AgentWorkerProcessConfig::default();
+        let mut spawner = recording_spawner(ready_message("worker-a"), None, None);
+        let mut input = input(
+            &daemon_dir,
+            &dispatch_state,
+            &mut runtime_state,
+            worker_command(),
+            &config,
+        );
+        input.launch_input = WorkerDispatchLaunchInputSource::FilesystemSidecarRequired;
+
+        let error = apply_worker_dispatch_admission_start(&mut spawner, input)
+            .expect_err("missing required sidecar must fail before spawn");
+
+        match error {
+            WorkerDispatchAdmissionStartError::LaunchInput { admission, source } => {
+                assert_eq!(admission.leased_record.dispatch_id, "dispatch-a");
+                assert!(matches!(
+                    *source,
+                    WorkerDispatchLaunchInputError::MissingFilesystemDispatchInput { dispatch_id }
+                    if dispatch_id == "dispatch-a"
+                ));
+            }
+            other => panic!("expected launch input error, got {other:?}"),
+        }
+        assert!(spawner.spawn_calls.is_empty());
+        assert!(runtime_state.is_empty());
+        let queue = replay_dispatch_queue(&daemon_dir).expect("queue must replay");
+        assert_eq!(queue.queued.len(), 1);
+        assert!(queue.leased.is_empty());
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn conflicting_filesystem_sidecar_fails_before_lease_or_spawn() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let queued = dispatch_record(1, DispatchQueueStatus::Queued);
+        append_dispatch_queue_record(&daemon_dir, &queued).expect("queued record must append");
+        let dispatch_state =
+            replay_dispatch_queue_records(vec![queued]).expect("queue state must replay");
+        write_create_or_compare_equal(
+            &daemon_dir,
+            &scheduled_task_dispatch_input("dispatch-a", "event-other"),
+        )
+        .expect("conflicting sidecar input must write");
+        let mut runtime_state = WorkerRuntimeState::default();
+        let config = AgentWorkerProcessConfig::default();
+        let mut spawner = recording_spawner(ready_message("worker-a"), None, None);
+
+        let error = apply_worker_dispatch_admission_start(
+            &mut spawner,
+            input(
+                &daemon_dir,
+                &dispatch_state,
+                &mut runtime_state,
+                worker_command(),
+                &config,
+            ),
+        )
+        .expect_err("conflicting sidecar must fail before spawn");
+
+        match error {
+            WorkerDispatchAdmissionStartError::LaunchInput { admission, source } => {
+                assert_eq!(admission.leased_record.dispatch_id, "dispatch-a");
+                assert!(matches!(
+                    *source,
+                    WorkerDispatchLaunchInputError::TriggeringEventMismatch {
+                        dispatch_id,
+                        expected_triggering_event_id,
+                        actual_triggering_event_id,
+                    } if dispatch_id == "dispatch-a"
+                        && expected_triggering_event_id == "event-a"
+                        && actual_triggering_event_id == "event-other"
+                ));
+            }
+            other => panic!("expected launch input error, got {other:?}"),
+        }
+        assert!(spawner.spawn_calls.is_empty());
+        assert!(runtime_state.is_empty());
+        let queue = replay_dispatch_queue(&daemon_dir).expect("queue must replay");
+        assert_eq!(queue.queued.len(), 1);
+        assert!(queue.leased.is_empty());
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     fn returns_not_admitted_without_appending_or_spawning() {
         let daemon_dir = unique_temp_daemon_dir();
         let dispatch_state = DispatchQueueState::default();
@@ -531,7 +821,8 @@ mod tests {
             worker_command(),
             &config,
         );
-        input.triggering_envelope = triggering_envelope("event-other");
+        explicit_launch_input_mut(&mut input).triggering_envelope =
+            triggering_envelope("event-other");
 
         let error = apply_worker_dispatch_admission_start(&mut spawner, input)
             .expect_err("launch mismatch must fail before lease append");
@@ -720,14 +1011,9 @@ mod tests {
             lease_correlation_id: "lease-correlation".to_string(),
             execute_sequence: 3,
             execute_timestamp: 1_710_000_700_002,
-            project_base_path: "/repo".to_string(),
-            metadata_path: "/metadata.json".to_string(),
-            triggering_envelope: triggering_envelope("event-a"),
-            execution_flags: AgentWorkerExecutionFlags {
-                is_delegation_completion: false,
-                has_pending_delegations: false,
-                debug: false,
-            },
+            launch_input: WorkerDispatchLaunchInputSource::FilesystemSidecarWithExplicitFallback(
+                explicit_launch_input("event-a"),
+            ),
             lock_owner: build_ral_lock_info(100, "host-a", 1_000),
             command,
             worker_config: config,
@@ -751,6 +1037,69 @@ mod tests {
             claim_token: "claim-a".to_string(),
             status,
         })
+    }
+
+    fn explicit_launch_input(triggering_event_id: &str) -> WorkerDispatchExplicitLaunchInput {
+        WorkerDispatchExplicitLaunchInput {
+            worker_id: None,
+            project_base_path: "/repo".to_string(),
+            metadata_path: "/metadata.json".to_string(),
+            triggering_envelope: triggering_envelope(triggering_event_id),
+            execution_flags: AgentWorkerExecutionFlags {
+                is_delegation_completion: false,
+                has_pending_delegations: false,
+                debug: false,
+            },
+        }
+    }
+
+    fn explicit_launch_input_mut<'input>(
+        input: &'input mut WorkerDispatchAdmissionStartInput<'_>,
+    ) -> &'input mut WorkerDispatchExplicitLaunchInput {
+        match &mut input.launch_input {
+            WorkerDispatchLaunchInputSource::FilesystemSidecarWithExplicitFallback(fallback) => {
+                fallback
+            }
+            WorkerDispatchLaunchInputSource::FilesystemSidecarRequired => {
+                panic!("test input must include explicit fallback")
+            }
+        }
+    }
+
+    fn scheduled_task_dispatch_input(
+        dispatch_id: &str,
+        triggering_event_id: &str,
+    ) -> ScheduledTaskDispatchInput {
+        ScheduledTaskDispatchInput {
+            dispatch_id: dispatch_id.to_string(),
+            triggering_event_id: triggering_event_id.to_string(),
+            worker_id: "sidecar-worker-a".to_string(),
+            project_base_path: "/sidecar/repo".to_string(),
+            metadata_path: "/sidecar/repo/.tenex/project.json".to_string(),
+            triggering_envelope: {
+                let mut envelope = triggering_envelope(triggering_event_id);
+                envelope["content"] = json!("from sidecar");
+                envelope
+            },
+            execution_flags: AgentWorkerExecutionFlags {
+                is_delegation_completion: true,
+                has_pending_delegations: true,
+                debug: true,
+            },
+            task_diagnostic_metadata: ScheduledTaskDispatchTaskDiagnosticMetadata {
+                project_d_tag: "project-a".to_string(),
+                project_ref: "project-a".to_string(),
+                task_id: "task-a".to_string(),
+                title: "Nightly task".to_string(),
+                from_pubkey: "owner-a".to_string(),
+                target_agent: "agent-a".to_string(),
+                target_channel: None,
+                schedule: "0 0 * * *".to_string(),
+                kind: ScheduledTaskDispatchTaskKind::Cron,
+                due_at: 1_710_000_700,
+                last_run: Some(1_710_000_600),
+            },
+        }
     }
 
     fn worker_command() -> AgentWorkerCommand {

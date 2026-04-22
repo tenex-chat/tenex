@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use serde_json::Value;
 use thiserror::Error;
 
 use crate::dispatch_queue::{DispatchQueueError, replay_dispatch_queue};
@@ -8,11 +7,11 @@ use crate::ral_lock::RalLockInfo;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch_admission_start::{
     WorkerDispatchAdmissionStartError, WorkerDispatchAdmissionStartInput,
-    WorkerDispatchAdmissionStartOutcome, apply_worker_dispatch_admission_start,
+    WorkerDispatchAdmissionStartOutcome, WorkerDispatchLaunchInputSource,
+    apply_worker_dispatch_admission_start,
 };
 use crate::worker_dispatch_execution::WorkerDispatchSpawner;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
-use crate::worker_protocol::AgentWorkerExecutionFlags;
 use crate::worker_runtime_state::WorkerRuntimeState;
 
 #[derive(Debug)]
@@ -25,10 +24,7 @@ pub struct WorkerDispatchTickInput<'a> {
     pub lease_correlation_id: String,
     pub execute_sequence: u64,
     pub execute_timestamp: u64,
-    pub project_base_path: String,
-    pub metadata_path: String,
-    pub triggering_envelope: Value,
-    pub execution_flags: AgentWorkerExecutionFlags,
+    pub launch_input: WorkerDispatchLaunchInputSource,
     pub lock_owner: RalLockInfo,
     pub command: AgentWorkerCommand,
     pub worker_config: &'a AgentWorkerProcessConfig,
@@ -66,10 +62,7 @@ where
             lease_correlation_id: input.lease_correlation_id,
             execute_sequence: input.execute_sequence,
             execute_timestamp: input.execute_timestamp,
-            project_base_path: input.project_base_path,
-            metadata_path: input.metadata_path,
-            triggering_envelope: input.triggering_envelope,
-            execution_flags: input.execution_flags,
+            launch_input: input.launch_input,
             lock_owner: input.lock_owner,
             command: input.command,
             worker_config: input.worker_config,
@@ -102,6 +95,11 @@ mod tests {
         DispatchQueueRecord, DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
         append_dispatch_queue_record, build_dispatch_queue_record, replay_dispatch_queue,
     };
+    use crate::scheduled_task_dispatch_input::{
+        ScheduledTaskDispatchInput, ScheduledTaskDispatchTaskDiagnosticMetadata,
+        ScheduledTaskDispatchTaskKind, write_create_or_compare_equal,
+    };
+    use crate::worker_dispatch_admission_start::WorkerDispatchExplicitLaunchInput;
     use crate::worker_dispatch_execution::{
         BootedWorkerDispatch, WorkerDispatchSession, WorkerDispatchSpawner,
     };
@@ -222,6 +220,56 @@ mod tests {
     }
 
     #[test]
+    fn worker_dispatch_tick_uses_filesystem_sidecar_launch_input() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let queued = dispatch_record(1, DispatchQueueStatus::Queued);
+        append_dispatch_queue_record(&daemon_dir, &queued).expect("queued record must append");
+        write_create_or_compare_equal(
+            &daemon_dir,
+            &scheduled_task_dispatch_input("dispatch-a", "event-a"),
+        )
+        .expect("sidecar input must write");
+        let mut runtime_state = WorkerRuntimeState::default();
+        let mut spawner = recording_spawner(ready_message("tick-sidecar-worker-a"), None, None);
+
+        let outcome = apply_worker_dispatch_tick(
+            &mut spawner,
+            tick_input(
+                &daemon_dir,
+                &mut runtime_state,
+                worker_command(),
+                &worker_config(),
+            ),
+        )
+        .expect("tick must admit and start from sidecar input");
+
+        let started = match outcome {
+            WorkerDispatchAdmissionStartOutcome::Started(started) => *started,
+            other => panic!("expected started dispatch, got {other:?}"),
+        };
+        let execute = &started.context.launch_plan.execute_message;
+        assert_eq!(execute["projectBasePath"], json!("/tick-sidecar/repo"));
+        assert_eq!(
+            execute["metadataPath"],
+            json!("/tick-sidecar/repo/.tenex/project.json")
+        );
+        assert_eq!(
+            execute["triggeringEnvelope"]["content"],
+            json!("tick sidecar")
+        );
+        assert_eq!(execute["executionFlags"]["debug"], json!(true));
+        assert_eq!(
+            started.started.dispatch.session.messages,
+            vec![execute.clone()]
+        );
+        assert_eq!(
+            spawner.spawn_calls[0].0.env.get("TENEX_AGENT_WORKER_ID"),
+            Some(&"tick-sidecar-worker-a".to_string())
+        );
+        cleanup_temp_dir(&daemon_dir);
+    }
+
+    #[test]
     fn worker_dispatch_tick_returns_not_admitted_when_no_dispatch_is_queued() {
         let daemon_dir = unique_temp_daemon_dir();
         let mut runtime_state = WorkerRuntimeState::default();
@@ -322,18 +370,63 @@ mod tests {
             lease_correlation_id: "lease-correlation".to_string(),
             execute_sequence: 3,
             execute_timestamp: 1_710_000_700_002,
+            launch_input: WorkerDispatchLaunchInputSource::FilesystemSidecarWithExplicitFallback(
+                explicit_launch_input("event-a"),
+            ),
+            lock_owner: crate::ral_lock::build_ral_lock_info(100, "host-a", 1_000),
+            command,
+            worker_config,
+            started_at: 1_710_000_700_003,
+        }
+    }
+
+    fn explicit_launch_input(triggering_event_id: &str) -> WorkerDispatchExplicitLaunchInput {
+        WorkerDispatchExplicitLaunchInput {
+            worker_id: None,
             project_base_path: "/repo".to_string(),
             metadata_path: "/metadata.json".to_string(),
-            triggering_envelope: triggering_envelope("event-a"),
+            triggering_envelope: triggering_envelope(triggering_event_id),
             execution_flags: crate::worker_protocol::AgentWorkerExecutionFlags {
                 is_delegation_completion: false,
                 has_pending_delegations: false,
                 debug: false,
             },
-            lock_owner: crate::ral_lock::build_ral_lock_info(100, "host-a", 1_000),
-            command,
-            worker_config,
-            started_at: 1_710_000_700_003,
+        }
+    }
+
+    fn scheduled_task_dispatch_input(
+        dispatch_id: &str,
+        triggering_event_id: &str,
+    ) -> ScheduledTaskDispatchInput {
+        ScheduledTaskDispatchInput {
+            dispatch_id: dispatch_id.to_string(),
+            triggering_event_id: triggering_event_id.to_string(),
+            worker_id: "tick-sidecar-worker-a".to_string(),
+            project_base_path: "/tick-sidecar/repo".to_string(),
+            metadata_path: "/tick-sidecar/repo/.tenex/project.json".to_string(),
+            triggering_envelope: {
+                let mut envelope = triggering_envelope(triggering_event_id);
+                envelope["content"] = json!("tick sidecar");
+                envelope
+            },
+            execution_flags: crate::worker_protocol::AgentWorkerExecutionFlags {
+                is_delegation_completion: false,
+                has_pending_delegations: true,
+                debug: true,
+            },
+            task_diagnostic_metadata: ScheduledTaskDispatchTaskDiagnosticMetadata {
+                project_d_tag: "project-a".to_string(),
+                project_ref: "project-a".to_string(),
+                task_id: "task-a".to_string(),
+                title: "Nightly task".to_string(),
+                from_pubkey: "owner-a".to_string(),
+                target_agent: "agent-a".to_string(),
+                target_channel: None,
+                schedule: "0 0 * * *".to_string(),
+                kind: ScheduledTaskDispatchTaskKind::Cron,
+                due_at: 1_710_000_700,
+                last_run: None,
+            },
         }
     }
 

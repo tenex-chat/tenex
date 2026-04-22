@@ -42,10 +42,11 @@ class AgentWorkerSession {
     }
 
     async run(): Promise<void> {
+        const configuredWorkerId = process.env.TENEX_AGENT_WORKER_ID?.trim();
         await this.emit({
             type: "ready",
             correlationId: "worker_boot",
-            workerId: `agent-worker-${process.pid}`,
+            workerId: configuredWorkerId || `agent-worker-${process.pid}`,
             pid: process.pid,
             protocol: {
                 version: AGENT_WORKER_PROTOCOL_VERSION,
