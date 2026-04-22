@@ -24,8 +24,9 @@ use crate::ral_scheduler::{
 };
 use crate::scheduled_task_dispatch_input::{
     ScheduledTaskDispatchInput, ScheduledTaskDispatchInputError,
-    ScheduledTaskDispatchTaskDiagnosticMetadata, ScheduledTaskDispatchTaskKind,
-    scheduled_task_dispatch_input_path, write_create_or_compare_equal,
+    ScheduledTaskDispatchInputWriteMetadata, ScheduledTaskDispatchTaskDiagnosticMetadata,
+    ScheduledTaskDispatchTaskKind, scheduled_task_dispatch_input_path,
+    write_create_or_compare_equal_with_metadata,
 };
 use crate::scheduled_task_due_planner::ScheduledTaskTriggerPlan;
 use crate::worker_protocol::AgentWorkerExecutionFlags;
@@ -161,7 +162,15 @@ pub fn enqueue_scheduled_task_dispatch(
             last_run: input.plan.last_run,
         },
     };
-    write_create_or_compare_equal(input.daemon_dir, &sidecar_input)?;
+    write_create_or_compare_equal_with_metadata(
+        input.daemon_dir,
+        &sidecar_input,
+        ScheduledTaskDispatchInputWriteMetadata {
+            writer: "scheduled_task_enqueue".to_string(),
+            writer_version: input.writer_version.clone(),
+            timestamp: input.timestamp,
+        },
+    )?;
 
     let dispatch_state = replay_dispatch_queue(input.daemon_dir)?;
     if let Some(existing) = dispatch_state.latest_record(&ids.dispatch_id) {

@@ -1,15 +1,21 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::dispatch_queue::workers_dir;
+use crate::worker_dispatch_input::{
+    WORKER_DISPATCH_INPUTS_DIR_NAME, WorkerDispatchExecuteFields, WorkerDispatchInput,
+    WorkerDispatchInputError, WorkerDispatchInputFromExecuteFields, WorkerDispatchInputSourceType,
+    WorkerDispatchInputValidationError, WorkerDispatchInputWriterMetadata,
+    read_optional as read_optional_worker_dispatch_input, worker_dispatch_input_path,
+    worker_dispatch_inputs_dir, write_create_or_compare_equal as write_worker_dispatch_input,
+};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
 
-pub const SCHEDULED_TASK_DISPATCH_INPUTS_DIR_NAME: &str = "dispatch-inputs";
+pub const SCHEDULED_TASK_DISPATCH_INPUTS_DIR_NAME: &str = WORKER_DISPATCH_INPUTS_DIR_NAME;
+pub const SCHEDULED_TASK_DISPATCH_INPUT_WRITER: &str = "scheduled_task_dispatch_input";
+pub const SCHEDULED_TASK_DISPATCH_INPUT_WRITER_VERSION: &str = "1";
 
 #[derive(Debug, Error)]
 pub enum ScheduledTaskDispatchInputError {
@@ -19,6 +25,25 @@ pub enum ScheduledTaskDispatchInputError {
     Json(#[from] serde_json::Error),
     #[error("scheduled task dispatch input conflict at {path}")]
     DispatchInputConflict { path: PathBuf },
+    #[error("scheduled task dispatch input worker dispatch input error: {0}")]
+    WorkerDispatchInput(WorkerDispatchInputError),
+    #[error(
+        "scheduled task dispatch input {dispatch_id} has source type {source_type:?}, expected scheduled_task"
+    )]
+    UnexpectedSourceType {
+        dispatch_id: String,
+        source_type: WorkerDispatchInputSourceType,
+    },
+    #[error("scheduled task dispatch input {dispatch_id} is missing task diagnostic metadata")]
+    MissingTaskDiagnosticMetadata { dispatch_id: String },
+    #[error("scheduled task dispatch input {dispatch_id} is missing worker id")]
+    MissingWorkerId { dispatch_id: String },
+    #[error("scheduled task dispatch input {dispatch_id} is invalid: {source}")]
+    InvalidWorkerDispatchInput {
+        dispatch_id: String,
+        #[source]
+        source: WorkerDispatchInputValidationError,
+    },
 }
 
 pub type ScheduledTaskDispatchInputResult<T> = Result<T, ScheduledTaskDispatchInputError>;
@@ -61,6 +86,13 @@ pub struct ScheduledTaskDispatchInput {
     pub task_diagnostic_metadata: ScheduledTaskDispatchTaskDiagnosticMetadata,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledTaskDispatchInputWriteMetadata {
+    pub writer: String,
+    pub writer_version: String,
+    pub timestamp: u64,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ScheduledTaskDispatchInputRaw {
@@ -80,6 +112,16 @@ struct AgentWorkerExecutionFlagsRaw {
     is_delegation_completion: bool,
     has_pending_delegations: bool,
     debug: bool,
+}
+
+impl Default for ScheduledTaskDispatchInputWriteMetadata {
+    fn default() -> Self {
+        Self {
+            writer: SCHEDULED_TASK_DISPATCH_INPUT_WRITER.to_string(),
+            writer_version: SCHEDULED_TASK_DISPATCH_INPUT_WRITER_VERSION.to_string(),
+            timestamp: 0,
+        }
+    }
 }
 
 impl From<AgentWorkerExecutionFlagsRaw> for AgentWorkerExecutionFlags {
@@ -112,129 +154,134 @@ impl<'de> Deserialize<'de> for ScheduledTaskDispatchInput {
 }
 
 pub fn scheduled_task_dispatch_inputs_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
-    workers_dir(daemon_dir).join(SCHEDULED_TASK_DISPATCH_INPUTS_DIR_NAME)
+    worker_dispatch_inputs_dir(daemon_dir)
 }
 
 pub fn scheduled_task_dispatch_input_path(
     daemon_dir: impl AsRef<Path>,
     dispatch_id: &str,
 ) -> PathBuf {
-    scheduled_task_dispatch_inputs_dir(daemon_dir).join(format!("{dispatch_id}.json"))
+    worker_dispatch_input_path(daemon_dir, dispatch_id)
 }
 
 pub fn read_optional(
     daemon_dir: impl AsRef<Path>,
     dispatch_id: &str,
 ) -> ScheduledTaskDispatchInputResult<Option<ScheduledTaskDispatchInput>> {
-    let path = scheduled_task_dispatch_input_path(daemon_dir, dispatch_id);
-    read_optional_path(path)
+    read_optional_worker_dispatch_input(daemon_dir, dispatch_id)
+        .map_err(map_worker_dispatch_input_error)?
+        .map(scheduled_task_input_from_worker_dispatch_input)
+        .transpose()
 }
 
 pub fn write_create_or_compare_equal(
     daemon_dir: impl AsRef<Path>,
     input: &ScheduledTaskDispatchInput,
 ) -> ScheduledTaskDispatchInputResult<ScheduledTaskDispatchInput> {
-    let daemon_dir = daemon_dir.as_ref();
-    let inputs_dir = scheduled_task_dispatch_inputs_dir(daemon_dir);
-    fs::create_dir_all(&inputs_dir)?;
-    let target_path = scheduled_task_dispatch_input_path(daemon_dir, &input.dispatch_id);
-
-    if let Some(existing) = read_optional_path(&target_path)? {
-        return existing_input_or_conflict(target_path, existing, input);
-    }
-
-    let tmp_path = inputs_dir.join(format!(
-        "{}.{}.{}.tmp",
-        input.dispatch_id,
-        std::process::id(),
-        now_nanos()
-    ));
-    let write_result = (|| {
-        write_input_file(&tmp_path, input)?;
-        match fs::hard_link(&tmp_path, &target_path) {
-            Ok(()) => {
-                remove_optional_file(&tmp_path)?;
-                sync_parent_dir(&target_path)?;
-                Ok(input.clone())
-            }
-            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                remove_optional_file(&tmp_path)?;
-                let Some(existing) = read_optional_path(&target_path)? else {
-                    return Err(ScheduledTaskDispatchInputError::DispatchInputConflict {
-                        path: target_path,
-                    });
-                };
-                existing_input_or_conflict(target_path, existing, input)
-            }
-            Err(source) => Err(source.into()),
-        }
-    })();
-
-    if write_result.is_err() {
-        let _ = fs::remove_file(&tmp_path);
-    }
-    write_result
+    write_create_or_compare_equal_with_metadata(
+        daemon_dir,
+        input,
+        ScheduledTaskDispatchInputWriteMetadata::default(),
+    )
 }
 
-fn existing_input_or_conflict(
-    path: PathBuf,
-    existing: ScheduledTaskDispatchInput,
-    requested: &ScheduledTaskDispatchInput,
-) -> ScheduledTaskDispatchInputResult<ScheduledTaskDispatchInput> {
-    if existing == *requested {
-        return Ok(existing);
-    }
-    Err(ScheduledTaskDispatchInputError::DispatchInputConflict { path })
-}
-
-fn read_optional_path(
-    path: impl AsRef<Path>,
-) -> ScheduledTaskDispatchInputResult<Option<ScheduledTaskDispatchInput>> {
-    match fs::read_to_string(path) {
-        Ok(content) => Ok(Some(serde_json::from_str(&content)?)),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(source) => Err(source.into()),
-    }
-}
-
-fn write_input_file(
-    path: &Path,
+pub fn write_create_or_compare_equal_with_metadata(
+    daemon_dir: impl AsRef<Path>,
     input: &ScheduledTaskDispatchInput,
-) -> ScheduledTaskDispatchInputResult<()> {
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    serde_json::to_writer_pretty(&mut file, input)?;
-    file.write_all(b"\n")?;
-    file.sync_all()?;
-    Ok(())
+    metadata: ScheduledTaskDispatchInputWriteMetadata,
+) -> ScheduledTaskDispatchInputResult<ScheduledTaskDispatchInput> {
+    let worker_input = worker_dispatch_input_from_scheduled_task_input(input, metadata)?;
+    let written = write_worker_dispatch_input(daemon_dir, &worker_input)
+        .map_err(map_worker_dispatch_input_error)?;
+    scheduled_task_input_from_worker_dispatch_input(written)
 }
 
-fn remove_optional_file(path: impl AsRef<Path>) -> ScheduledTaskDispatchInputResult<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(source.into()),
+fn worker_dispatch_input_from_scheduled_task_input(
+    input: &ScheduledTaskDispatchInput,
+    metadata: ScheduledTaskDispatchInputWriteMetadata,
+) -> ScheduledTaskDispatchInputResult<WorkerDispatchInput> {
+    Ok(WorkerDispatchInput::from_execute_fields(
+        WorkerDispatchInputFromExecuteFields {
+            dispatch_id: input.dispatch_id.clone(),
+            source_type: WorkerDispatchInputSourceType::ScheduledTask,
+            writer: WorkerDispatchInputWriterMetadata {
+                writer: metadata.writer,
+                writer_version: metadata.writer_version,
+                timestamp: metadata.timestamp,
+            },
+            execute_fields: WorkerDispatchExecuteFields {
+                worker_id: Some(input.worker_id.clone()),
+                triggering_event_id: input.triggering_event_id.clone(),
+                project_base_path: input.project_base_path.clone(),
+                metadata_path: input.metadata_path.clone(),
+                triggering_envelope: input.triggering_envelope.clone(),
+                execution_flags: input.execution_flags.clone(),
+            },
+            source_metadata: Some(serde_json::to_value(&input.task_diagnostic_metadata)?),
+        },
+    ))
+}
+
+fn scheduled_task_input_from_worker_dispatch_input(
+    input: WorkerDispatchInput,
+) -> ScheduledTaskDispatchInputResult<ScheduledTaskDispatchInput> {
+    if input.source_type != WorkerDispatchInputSourceType::ScheduledTask {
+        return Err(ScheduledTaskDispatchInputError::UnexpectedSourceType {
+            dispatch_id: input.dispatch_id,
+            source_type: input.source_type,
+        });
     }
+
+    let fields = input.resolved_execute_fields().map_err(|source| {
+        ScheduledTaskDispatchInputError::InvalidWorkerDispatchInput {
+            dispatch_id: input.dispatch_id.clone(),
+            source,
+        }
+    })?;
+    let worker_id =
+        fields
+            .worker_id
+            .ok_or_else(|| ScheduledTaskDispatchInputError::MissingWorkerId {
+                dispatch_id: input.dispatch_id.clone(),
+            })?;
+    let source_metadata = input.source_metadata.ok_or_else(|| {
+        ScheduledTaskDispatchInputError::MissingTaskDiagnosticMetadata {
+            dispatch_id: input.dispatch_id.clone(),
+        }
+    })?;
+    let task_diagnostic_metadata = serde_json::from_value(source_metadata)?;
+
+    Ok(ScheduledTaskDispatchInput {
+        dispatch_id: input.dispatch_id,
+        triggering_event_id: fields.triggering_event_id,
+        worker_id,
+        project_base_path: fields.project_base_path,
+        metadata_path: fields.metadata_path,
+        triggering_envelope: fields.triggering_envelope,
+        execution_flags: fields.execution_flags,
+        task_diagnostic_metadata,
+    })
 }
 
-fn sync_parent_dir(path: &Path) -> ScheduledTaskDispatchInputResult<()> {
-    if let Some(parent) = path.parent() {
-        File::open(parent)?.sync_all()?;
+fn map_worker_dispatch_input_error(
+    error: WorkerDispatchInputError,
+) -> ScheduledTaskDispatchInputError {
+    match error {
+        WorkerDispatchInputError::Io(source) => ScheduledTaskDispatchInputError::Io(source),
+        WorkerDispatchInputError::DispatchInputConflict { path } => {
+            ScheduledTaskDispatchInputError::DispatchInputConflict { path }
+        }
+        other => ScheduledTaskDispatchInputError::WorkerDispatchInput(other),
     }
-    Ok(())
-}
-
-fn now_nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -259,6 +306,21 @@ mod tests {
                 .join("dispatch-a.json")
         );
 
+        let raw: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(scheduled_task_dispatch_input_path(
+                &daemon_dir,
+                "dispatch-a",
+            ))
+            .expect("dispatch input file must read"),
+        )
+        .expect("dispatch input json must parse");
+        assert_eq!(raw["schemaVersion"], json!(1));
+        assert_eq!(raw["sourceType"], json!("scheduled_task"));
+        assert_eq!(
+            raw["writer"]["writer"],
+            json!(SCHEDULED_TASK_DISPATCH_INPUT_WRITER)
+        );
+
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
 
@@ -269,8 +331,16 @@ mod tests {
 
         write_create_or_compare_equal(&daemon_dir, &input)
             .expect("initial dispatch input write must succeed");
-        let rewritten = write_create_or_compare_equal(&daemon_dir, &input)
-            .expect("equal dispatch input rewrite must succeed");
+        let rewritten = write_create_or_compare_equal_with_metadata(
+            &daemon_dir,
+            &input,
+            ScheduledTaskDispatchInputWriteMetadata {
+                writer: SCHEDULED_TASK_DISPATCH_INPUT_WRITER.to_string(),
+                writer_version: "newer-writer".to_string(),
+                timestamp: 1_710_001_500,
+            },
+        )
+        .expect("equal dispatch input rewrite must succeed");
 
         assert_eq!(rewritten, input);
         assert_eq!(
@@ -320,10 +390,33 @@ mod tests {
             project_base_path: "/projects/example".to_string(),
             metadata_path: "/projects/example/.tenex/metadata.json".to_string(),
             triggering_envelope: json!({
-                "id": "event-scheduled-task-a",
-                "kind": 24100,
+                "transport": "nostr",
+                "principal": {
+                    "id": "nostr:owner-a",
+                    "transport": "nostr",
+                    "kind": "human"
+                },
+                "channel": {
+                    "id": "conversation:conversation-a",
+                    "transport": "nostr",
+                    "kind": "conversation"
+                },
+                "message": {
+                    "id": "event-scheduled-task-a",
+                    "transport": "nostr",
+                    "nativeId": "event-scheduled-task-a"
+                },
+                "recipients": [
+                    {
+                        "id": "nostr:agent-pubkey-a",
+                        "transport": "nostr",
+                        "kind": "agent"
+                    }
+                ],
                 "content": "Run scheduled task",
-                "tags": [["p", "agent-pubkey-a"]]
+                "occurredAt": 1_710_001_000_000u64,
+                "capabilities": ["reply"],
+                "metadata": {}
             }),
             execution_flags: AgentWorkerExecutionFlags {
                 is_delegation_completion: false,

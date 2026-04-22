@@ -9,10 +9,6 @@ use crate::dispatch_queue::{
 };
 use crate::ral_journal::RalJournalIdentity;
 use crate::ral_lock::RalLockInfo;
-use crate::scheduled_task_dispatch_input::{
-    ScheduledTaskDispatchInput, ScheduledTaskDispatchInputError,
-    read_optional as read_optional_scheduled_task_dispatch_input,
-};
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch_admission::{
     AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
@@ -20,6 +16,10 @@ use crate::worker_dispatch_admission::{
     WorkerDispatchAdmissionInput, WorkerDispatchAdmissionPlan, plan_worker_dispatch_admission,
 };
 use crate::worker_dispatch_execution::WorkerDispatchSpawner;
+use crate::worker_dispatch_input::{
+    WorkerDispatchInput, WorkerDispatchInputError, WorkerDispatchInputValidationError,
+    read_optional as read_optional_worker_dispatch_input,
+};
 use crate::worker_dispatch_start::{
     LockScopedStartedWorkerDispatch, WorkerDispatchStartError, WorkerDispatchStartInput,
     start_lock_scoped_worker_dispatch,
@@ -111,7 +111,13 @@ pub enum WorkerDispatchLaunchInputError {
     Read {
         dispatch_id: String,
         #[source]
-        source: ScheduledTaskDispatchInputError,
+        source: WorkerDispatchInputError,
+    },
+    #[error("filesystem dispatch input is invalid for dispatch {dispatch_id}: {source}")]
+    Invalid {
+        dispatch_id: String,
+        #[source]
+        source: WorkerDispatchInputValidationError,
     },
 }
 
@@ -305,7 +311,7 @@ fn resolve_launch_input(
     dispatch: &DispatchQueueRecord,
     source: WorkerDispatchLaunchInputSource,
 ) -> Result<WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputError> {
-    match read_optional_scheduled_task_dispatch_input(daemon_dir, &dispatch.dispatch_id).map_err(
+    match read_optional_worker_dispatch_input(daemon_dir, &dispatch.dispatch_id).map_err(
         |source| WorkerDispatchLaunchInputError::Read {
             dispatch_id: dispatch.dispatch_id.clone(),
             source,
@@ -327,18 +333,16 @@ fn resolve_launch_input(
 
 fn launch_input_from_filesystem_sidecar(
     dispatch: &DispatchQueueRecord,
-    input: ScheduledTaskDispatchInput,
+    input: WorkerDispatchInput,
 ) -> Result<WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputError> {
-    let ScheduledTaskDispatchInput {
-        dispatch_id,
-        triggering_event_id,
-        worker_id,
-        project_base_path,
-        metadata_path,
-        triggering_envelope,
-        execution_flags,
-        task_diagnostic_metadata: _,
-    } = input;
+    let dispatch_id = input.dispatch_id.clone();
+    let fields = input.resolved_execute_fields().map_err(|source| {
+        WorkerDispatchLaunchInputError::Invalid {
+            dispatch_id: dispatch_id.clone(),
+            source,
+        }
+    })?;
+    let triggering_event_id = fields.triggering_event_id;
 
     if dispatch_id.as_str() != dispatch.dispatch_id.as_str() {
         return Err(WorkerDispatchLaunchInputError::DispatchIdMismatch {
@@ -356,11 +360,11 @@ fn launch_input_from_filesystem_sidecar(
     }
 
     Ok(WorkerDispatchExplicitLaunchInput {
-        worker_id: Some(worker_id),
-        project_base_path,
-        metadata_path,
-        triggering_envelope,
-        execution_flags,
+        worker_id: fields.worker_id,
+        project_base_path: fields.project_base_path,
+        metadata_path: fields.metadata_path,
+        triggering_envelope: fields.triggering_envelope,
+        execution_flags: fields.execution_flags,
     })
 }
 
