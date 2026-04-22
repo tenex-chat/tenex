@@ -31,13 +31,11 @@ mod compat_tests {
     };
     use super::profile_names::{
         PROFILE_NAMES_DIAGNOSTICS_SCHEMA_VERSION, PROFILE_NAMES_SCHEMA_VERSION,
-        ProfileNamesDiagnostics, ProfileNamesSnapshot, inspect_profile_names,
-        write_profile_names,
+        ProfileNamesDiagnostics, ProfileNamesSnapshot, inspect_profile_names, write_profile_names,
     };
     use super::trust_pubkeys::{
         TRUST_PUBKEYS_DIAGNOSTICS_SCHEMA_VERSION, TRUST_PUBKEYS_SCHEMA_VERSION,
-        TrustPubkeysDiagnostics, TrustPubkeysSnapshot, inspect_trust_pubkeys,
-        write_trust_pubkeys,
+        TrustPubkeysDiagnostics, TrustPubkeysSnapshot, inspect_trust_pubkeys, write_trust_pubkeys,
     };
     use super::{CACHES_DIR_NAME, CACHES_TMP_DIR_NAME, CACHES_WRITER, caches_dir, caches_tmp_dir};
     use serde_json::Value;
@@ -66,8 +64,7 @@ mod compat_tests {
 
     #[test]
     fn caches_fixture_matches_rust_contract() {
-        let fixture: Value =
-            serde_json::from_str(CACHES_FIXTURE).expect("fixture must parse");
+        let fixture: Value = serde_json::from_str(CACHES_FIXTURE).expect("fixture must parse");
         let daemon_dir = Path::new("/var/lib/tenex").join(
             fixture["daemonDirName"]
                 .as_str()
@@ -138,7 +135,10 @@ mod compat_tests {
             .entries
             .values()
             .find(|entry| entry.display_name.is_none() && entry.nip05.is_some());
-        assert!(nip05_only.is_some(), "fixture must include a nip05-only profile entry");
+        assert!(
+            nip05_only.is_some(),
+            "fixture must include a nip05-only profile entry"
+        );
         let display_only = profiles
             .entries
             .values()
@@ -153,28 +153,25 @@ mod compat_tests {
         write_trust_pubkeys(&live_daemon_dir, &trust).expect("trust pubkeys write must succeed");
         let trust_diagnostics =
             inspect_trust_pubkeys(&live_daemon_dir, 1_710_001_000_500).expect("trust inspect");
-        let expected_trust_diagnostics: TrustPubkeysDiagnostics = serde_json::from_value(
-            fixture["diagnostics"]["trustPubkeysPopulated"].clone(),
-        )
-        .expect("trust populated diagnostics fixture must deserialize");
+        let expected_trust_diagnostics: TrustPubkeysDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["trustPubkeysPopulated"].clone())
+                .expect("trust populated diagnostics fixture must deserialize");
         assert_eq!(trust_diagnostics, expected_trust_diagnostics);
 
         write_prefix_lookup(&live_daemon_dir, &prefix).expect("prefix lookup write must succeed");
         let prefix_diagnostics =
             inspect_prefix_lookup(&live_daemon_dir, 1_710_001_000_500).expect("prefix inspect");
-        let expected_prefix_diagnostics: PrefixLookupDiagnostics = serde_json::from_value(
-            fixture["diagnostics"]["prefixLookupPopulated"].clone(),
-        )
-        .expect("prefix populated diagnostics fixture must deserialize");
+        let expected_prefix_diagnostics: PrefixLookupDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["prefixLookupPopulated"].clone())
+                .expect("prefix populated diagnostics fixture must deserialize");
         assert_eq!(prefix_diagnostics, expected_prefix_diagnostics);
 
         write_profile_names(&live_daemon_dir, &profiles).expect("profile names write must succeed");
         let profile_diagnostics =
             inspect_profile_names(&live_daemon_dir, 1_710_001_000_500).expect("profile inspect");
-        let expected_profile_diagnostics: ProfileNamesDiagnostics = serde_json::from_value(
-            fixture["diagnostics"]["profileNamesPopulated"].clone(),
-        )
-        .expect("profile populated diagnostics fixture must deserialize");
+        let expected_profile_diagnostics: ProfileNamesDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["profileNamesPopulated"].clone())
+                .expect("profile populated diagnostics fixture must deserialize");
         assert_eq!(profile_diagnostics, expected_profile_diagnostics);
 
         let empty_daemon_dir = unique_temp_daemon_dir();

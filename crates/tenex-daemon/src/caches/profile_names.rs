@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{CACHES_WRITER, caches_dir, caches_tmp_dir};
 use super::trust_pubkeys::is_valid_xonly_pubkey;
+use super::{CACHES_WRITER, caches_dir, caches_tmp_dir};
 
 pub const PROFILE_NAMES_FILE_NAME: &str = "profile-names.json";
 pub const PROFILE_NAMES_WRITER: &str = CACHES_WRITER;
@@ -21,15 +21,11 @@ pub enum ProfileNamesError {
     Io(#[from] io::Error),
     #[error("profile names json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error(
-        "profile names snapshot schema version {found} is not supported (expected {expected})"
-    )]
+    #[error("profile names snapshot schema version {found} is not supported (expected {expected})")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
     #[error("profile names snapshot has invalid pubkey key: {pubkey:?}")]
     InvalidPubkey { pubkey: String },
-    #[error(
-        "profile names snapshot entry for pubkey {pubkey:?} has neither displayName nor nip05"
-    )]
+    #[error("profile names snapshot entry for pubkey {pubkey:?} has neither displayName nor nip05")]
     EmptyEntry { pubkey: String },
     #[error("profile names snapshot entry for pubkey {pubkey:?} has observedAt == 0")]
     InvalidObservedAt { pubkey: String },
@@ -199,9 +195,7 @@ fn validate_writer_fields(snapshot: &ProfileNamesSnapshot) -> ProfileNamesResult
     Ok(())
 }
 
-fn validate_entries(
-    entries: &BTreeMap<String, ProfileNameEntry>,
-) -> ProfileNamesResult<()> {
+fn validate_entries(entries: &BTreeMap<String, ProfileNameEntry>) -> ProfileNamesResult<()> {
     for (pubkey, entry) in entries {
         if !is_valid_xonly_pubkey(pubkey) {
             return Err(ProfileNamesError::InvalidPubkey {
@@ -346,11 +340,13 @@ mod tests {
         let daemon_dir = unique_temp_daemon_dir();
         let snapshot = sample_snapshot(
             1_710_000_000_100,
-            vec![("not-a-hex-pubkey".to_string(), entry_display_only(1_710_000_000_000))],
+            vec![(
+                "not-a-hex-pubkey".to_string(),
+                entry_display_only(1_710_000_000_000),
+            )],
         );
 
-        let error =
-            write_profile_names(&daemon_dir, &snapshot).expect_err("bad pubkey must fail");
+        let error = write_profile_names(&daemon_dir, &snapshot).expect_err("bad pubkey must fail");
 
         assert!(matches!(error, ProfileNamesError::InvalidPubkey { .. }));
 
@@ -372,8 +368,7 @@ mod tests {
             )],
         );
 
-        let error =
-            write_profile_names(&daemon_dir, &snapshot).expect_err("empty entry must fail");
+        let error = write_profile_names(&daemon_dir, &snapshot).expect_err("empty entry must fail");
 
         assert!(matches!(error, ProfileNamesError::EmptyEntry { .. }));
 
@@ -388,8 +383,8 @@ mod tests {
             vec![(full_pubkey(0x11), entry_display_only(0))],
         );
 
-        let error = write_profile_names(&daemon_dir, &snapshot)
-            .expect_err("observedAt == 0 must fail");
+        let error =
+            write_profile_names(&daemon_dir, &snapshot).expect_err("observedAt == 0 must fail");
 
         assert!(matches!(error, ProfileNamesError::InvalidObservedAt { .. }));
 
@@ -517,8 +512,9 @@ mod tests {
         assert_eq!(persisted.updated_at, 1_710_000_000_500);
         assert_eq!(persisted.entries.len(), 2);
 
-        let read_back =
-            read_profile_names(&daemon_dir).expect("read must succeed").unwrap();
+        let read_back = read_profile_names(&daemon_dir)
+            .expect("read must succeed")
+            .unwrap();
         assert_eq!(read_back, persisted);
         assert!(read_back.entries[&full_pubkey(0x11)].nip05.is_some());
         assert!(read_back.entries[&full_pubkey(0x11)].display_name.is_none());
@@ -591,8 +587,7 @@ mod tests {
 
         write_profile_names(&daemon_dir, &snapshot).expect("write must succeed");
 
-        let raw =
-            fs::read_to_string(profile_names_path(&daemon_dir)).expect("read must succeed");
+        let raw = fs::read_to_string(profile_names_path(&daemon_dir)).expect("read must succeed");
         let value: Value = serde_json::from_str(&raw).expect("JSON must parse");
         assert_eq!(value["schemaVersion"], json!(PROFILE_NAMES_SCHEMA_VERSION));
         assert_eq!(value["writer"], json!(PROFILE_NAMES_WRITER));

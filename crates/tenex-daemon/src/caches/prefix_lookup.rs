@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{CACHES_WRITER, caches_dir, caches_tmp_dir};
 use super::trust_pubkeys::{PUBKEY_HEX_LENGTH, is_valid_xonly_pubkey};
+use super::{CACHES_WRITER, caches_dir, caches_tmp_dir};
 
 pub const PREFIX_LOOKUP_FILE_NAME: &str = "prefix-lookup.json";
 pub const PREFIX_LOOKUP_WRITER: &str = CACHES_WRITER;
@@ -22,13 +22,9 @@ pub enum PrefixLookupError {
     Io(#[from] io::Error),
     #[error("prefix lookup json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error(
-        "prefix lookup snapshot schema version {found} is not supported (expected {expected})"
-    )]
+    #[error("prefix lookup snapshot schema version {found} is not supported (expected {expected})")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
-    #[error(
-        "prefix lookup snapshot has prefix {prefix:?} shorter than minimum length {minimum}"
-    )]
+    #[error("prefix lookup snapshot has prefix {prefix:?} shorter than minimum length {minimum}")]
     PrefixTooShort { prefix: String, minimum: usize },
     #[error(
         "prefix lookup snapshot has prefix {prefix:?} longer than the full pubkey length {maximum}"
@@ -38,9 +34,7 @@ pub enum PrefixLookupError {
     InvalidPrefix { prefix: String },
     #[error("prefix lookup snapshot has invalid pubkey {pubkey:?} for prefix {prefix:?}")]
     InvalidPubkey { prefix: String, pubkey: String },
-    #[error(
-        "prefix lookup snapshot pubkey {pubkey:?} does not start with prefix {prefix:?}"
-    )]
+    #[error("prefix lookup snapshot pubkey {pubkey:?} does not start with prefix {prefix:?}")]
     PrefixPubkeyMismatch { prefix: String, pubkey: String },
     #[error("prefix lookup snapshot writer must not be empty")]
     MissingWriter,
@@ -270,10 +264,7 @@ mod tests {
         format!("{byte:02x}").repeat(PUBKEY_HEX_LENGTH / 2)
     }
 
-    fn sample_snapshot(
-        updated_at: u64,
-        prefixes: Vec<(&str, String)>,
-    ) -> PrefixLookupSnapshot {
+    fn sample_snapshot(updated_at: u64, prefixes: Vec<(&str, String)>) -> PrefixLookupSnapshot {
         PrefixLookupSnapshot {
             schema_version: PREFIX_LOOKUP_SCHEMA_VERSION,
             writer: PREFIX_LOOKUP_WRITER.to_string(),
@@ -382,8 +373,8 @@ mod tests {
         let pubkey = full_pubkey(0xaa);
         let snapshot = sample_snapshot(1_710_000_000_100, vec![("ZZaaaa", pubkey)]);
 
-        let error = write_prefix_lookup(&daemon_dir, &snapshot)
-            .expect_err("non-hex prefix must fail");
+        let error =
+            write_prefix_lookup(&daemon_dir, &snapshot).expect_err("non-hex prefix must fail");
 
         assert!(matches!(error, PrefixLookupError::InvalidPrefix { .. }));
 
@@ -491,10 +482,7 @@ mod tests {
         let pubkey_two = full_pubkey(0xbb);
         let prefix_one = pubkey_one[..8].to_string();
         let prefix_two = pubkey_two[..8].to_string();
-        let first = sample_snapshot(
-            1_710_000_000_100,
-            vec![(&prefix_one, pubkey_one.clone())],
-        );
+        let first = sample_snapshot(1_710_000_000_100, vec![(&prefix_one, pubkey_one.clone())]);
         let second = sample_snapshot(
             1_710_000_000_500,
             vec![
@@ -510,8 +498,9 @@ mod tests {
         assert_eq!(persisted.updated_at, 1_710_000_000_500);
         assert_eq!(persisted.prefixes.len(), 2);
 
-        let read_back =
-            read_prefix_lookup(&daemon_dir).expect("read must succeed").unwrap();
+        let read_back = read_prefix_lookup(&daemon_dir)
+            .expect("read must succeed")
+            .unwrap();
         assert_eq!(read_back, persisted);
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
@@ -572,8 +561,7 @@ mod tests {
 
         write_prefix_lookup(&daemon_dir, &snapshot).expect("write must succeed");
 
-        let raw =
-            fs::read_to_string(prefix_lookup_path(&daemon_dir)).expect("read must succeed");
+        let raw = fs::read_to_string(prefix_lookup_path(&daemon_dir)).expect("read must succeed");
         let value: Value = serde_json::from_str(&raw).expect("JSON must parse");
         assert_eq!(value["schemaVersion"], json!(PREFIX_LOOKUP_SCHEMA_VERSION));
         assert_eq!(value["writer"], json!(PREFIX_LOOKUP_WRITER));

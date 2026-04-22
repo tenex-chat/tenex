@@ -20,9 +20,7 @@ pub enum TrustPubkeysError {
     Io(#[from] io::Error),
     #[error("trust pubkeys json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error(
-        "trust pubkeys snapshot schema version {found} is not supported (expected {expected})"
-    )]
+    #[error("trust pubkeys snapshot schema version {found} is not supported (expected {expected})")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
     #[error("trust pubkeys snapshot has invalid pubkey: {pubkey:?}")]
     InvalidPubkey { pubkey: String },
@@ -261,15 +259,16 @@ mod tests {
             ],
         );
 
-        let written =
-            write_trust_pubkeys(&daemon_dir, &snapshot).expect("write must succeed");
+        let written = write_trust_pubkeys(&daemon_dir, &snapshot).expect("write must succeed");
 
-        assert_eq!(written.pubkeys, vec![sample_pubkey(0x11), sample_pubkey(0x22)]);
+        assert_eq!(
+            written.pubkeys,
+            vec![sample_pubkey(0x11), sample_pubkey(0x22)]
+        );
         assert_eq!(written.schema_version, TRUST_PUBKEYS_SCHEMA_VERSION);
         assert_eq!(written.writer, TRUST_PUBKEYS_WRITER);
 
-        let read_back =
-            read_trust_pubkeys(&daemon_dir).expect("read must succeed");
+        let read_back = read_trust_pubkeys(&daemon_dir).expect("read must succeed");
         assert_eq!(read_back, Some(written));
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
@@ -293,8 +292,7 @@ mod tests {
         bad_hex.replace_range(0..1, "Z");
         let snapshot = sample_snapshot(1_710_000_000_100, vec![bad_hex.clone()]);
 
-        let error =
-            write_trust_pubkeys(&daemon_dir, &snapshot).expect_err("invalid hex must fail");
+        let error = write_trust_pubkeys(&daemon_dir, &snapshot).expect_err("invalid hex must fail");
 
         assert!(matches!(
             error,
@@ -309,8 +307,7 @@ mod tests {
         let daemon_dir = unique_temp_daemon_dir();
         let snapshot = sample_snapshot(1_710_000_000_100, vec!["ab".to_string()]);
 
-        let error =
-            write_trust_pubkeys(&daemon_dir, &snapshot).expect_err("short hex must fail");
+        let error = write_trust_pubkeys(&daemon_dir, &snapshot).expect_err("short hex must fail");
 
         assert!(matches!(error, TrustPubkeysError::InvalidPubkey { .. }));
 
@@ -429,7 +426,8 @@ mod tests {
         );
 
         write_trust_pubkeys(&daemon_dir, &first).expect("first write must succeed");
-        let persisted = write_trust_pubkeys(&daemon_dir, &second).expect("second write must succeed");
+        let persisted =
+            write_trust_pubkeys(&daemon_dir, &second).expect("second write must succeed");
 
         assert_eq!(persisted.updated_at, 1_710_000_000_500);
         assert_eq!(
@@ -437,8 +435,9 @@ mod tests {
             vec![sample_pubkey(0x22), sample_pubkey(0x33)]
         );
 
-        let read_back =
-            read_trust_pubkeys(&daemon_dir).expect("read must succeed").unwrap();
+        let read_back = read_trust_pubkeys(&daemon_dir)
+            .expect("read must succeed")
+            .unwrap();
         assert_eq!(read_back, persisted);
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
