@@ -5,9 +5,13 @@ edition = "2024"
 publish = false
 
 [dependencies]
+base64 = "0.22"
 bech32 = "0.9"
+chacha20 = "0.9"
 hex = "0.4"
 getrandom = "0.3"
+hkdf = "0.12"
+hmac = "0.12"
 libc = "0.2"
 opentelemetry = "0.28"
 opentelemetry-otlp = { version = "0.28", features = ["http-proto", "reqwest-blocking-client"] }
