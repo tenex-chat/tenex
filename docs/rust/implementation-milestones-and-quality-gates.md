@@ -1003,6 +1003,22 @@ Landed slices:
 - `daemon-control scheduler-wakeups` and `daemon-control
   scheduler-wakeups-maintain` — read-only diagnostics and maintenance report
   JSON over the scheduler wakeup filesystem state.
+- `crates/tenex-daemon/src/skill_whitelist.rs` — filesystem-backed durable
+  state for kind `4202` AgentSkill whitelist entries. Atomic snapshot write,
+  fail-closed reads on schema mismatch / truncation, diagnostics. Adapter
+  persistence only; no relay subscription or debounce loop.
+- `crates/tenex-daemon/src/agent_definition_watcher.rs` — filesystem-backed
+  durable state for observed kind `4199` agent-definition metadata (slug,
+  tools, skills, mcp servers, created_at, last_observed_at). Atomic
+  snapshot write, fail-closed reads, diagnostics. Observer state only; the
+  orchestrator builds snapshots from verified signed events.
+- `crates/tenex-daemon/src/periodic_tick.rs` — in-memory periodic scheduler
+  primitive for the upcoming daemon main loop. `register_task` / `take_due`
+  / `next_deadline_in`, catch-up collapsed so a single overdue task fires
+  once with the next deadline anchored to `now`. No async runtime, no
+  timers: callers pass `now` in seconds and sleep themselves. Targets the
+  heartbeat / project-status / installed-agent-list / publish-outbox-drain
+  / scheduler-wakeups tick loops.
 
 Scope:
 
