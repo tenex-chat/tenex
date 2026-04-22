@@ -7,6 +7,7 @@ import * as constantsModule from "@/constants";
 import * as fsLibModule from "@/lib/fs";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
+import { shortenEventId } from "@/utils/conversation-id";
 import { SkillService } from "../SkillService";
 
 const mockFetchEvents = mock(() => Promise.resolve(new Set<NDKEvent>()));
@@ -800,7 +801,7 @@ describe("SkillService", () => {
         const result = await SkillService.getInstance().fetchSkills(["d".repeat(64)]);
 
         expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].identifier).toBe("dddddddddddddddddd");
+        expect(result.skills[0].identifier).toBe(shortenEventId("d".repeat(64)));
     });
 
     it("fetchSkill returns only kind:4202 skill events", async () => {
