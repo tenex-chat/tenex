@@ -1,3 +1,4 @@
+pub mod agent_definition_watcher;
 pub mod backend_event_publish;
 pub mod backend_events;
 pub mod backend_signer;
