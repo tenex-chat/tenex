@@ -157,7 +157,7 @@ impl NIP46Client {
         let total_attempts = (self.config.max_retries as usize) + 1;
         for attempt in 0..total_attempts {
             let rx = self.pending.register(id.clone());
-            match self.send_request(&id, &request) {
+            match self.send_request(&request) {
                 Ok(()) => {}
                 Err(err) => {
                     self.pending.cancel(&id);
@@ -204,7 +204,7 @@ impl NIP46Client {
         Err(SignError::Timeout)
     }
 
-    fn send_request(&self, _id: &str, request: &Nip46Request) -> Result<(), SignError> {
+    fn send_request(&self, request: &Nip46Request) -> Result<(), SignError> {
         let request_json = serde_json::to_string(request)
             .map_err(|err| SignError::Protocol(Nip46ProtocolError::Json(err)))?;
         let encrypted = nip44::encrypt(&self.conversation_key, request_json.as_bytes())?;
