@@ -39,6 +39,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use thiserror::Error;
+use tracing;
 
 use crate::backend_events::heartbeat::BackendSigner;
 use crate::telegram::chat_context::{
@@ -389,6 +390,8 @@ fn run_gateway_loop<A>(
 ) where
     A: GatewayBotApi,
 {
+    tracing::info!(bot = %bot.label, agent_pubkey = %bot.agent_pubkey, "telegram gateway thread started");
+
     let identity = match api.get_me() {
         Ok(identity) => identity,
         Err(TelegramClientError::InvalidToken) => {
@@ -437,11 +440,22 @@ fn run_gateway_loop<A>(
                 "callback_query".to_string(),
             ]),
         };
+        let _poll_span = tracing::debug_span!(
+            "telegram.poll",
+            bot = %bot.label,
+            offset = ?next_offset
+        )
+        .entered();
         match api.get_updates(params) {
             Ok(updates) => {
                 backoff = INITIAL_ERROR_BACKOFF;
+                let count = updates.len();
+                if count > 0 {
+                    tracing::debug!(bot = %bot.label, update_count = count, "telegram updates received");
+                }
                 for update in updates {
                     let update_id = update.update_id;
+                    tracing::debug!(bot = %bot.label, update_id = update_id, "processing telegram update");
                     process_one(&bot, &identity, &update, &api, &observer, &config);
                     next_offset = Some(update_id.saturating_add(1));
                     if stop_flag.load(Ordering::SeqCst) {
@@ -455,12 +469,11 @@ fn run_gateway_loop<A>(
             }
             Err(error) => {
                 if !stop_flag.load(Ordering::SeqCst) {
-                    log_bot_warning(
-                        &bot.label,
-                        &format!(
-                            "getUpdates failed (backoff {}s): {error}",
-                            backoff.as_secs()
-                        ),
+                    tracing::warn!(
+                        bot = %bot.label,
+                        backoff_secs = backoff.as_secs(),
+                        error = %error,
+                        "telegram getUpdates failed, backing off"
                     );
                 }
                 if !sleep_with_stop(&stop_flag, backoff) {
@@ -469,7 +482,9 @@ fn run_gateway_loop<A>(
                 backoff = next_backoff(backoff);
             }
         }
+        drop(_poll_span);
     }
+    tracing::info!(bot = %bot.label, "telegram gateway thread stopped");
 }
 
 #[derive(Debug)]
@@ -994,16 +1009,17 @@ fn now_ms() -> u64 {
 }
 
 fn log_bot_info(label: &str, message: &str) {
-    eprintln!("[telegram-gateway:{label}] {message}");
+    tracing::info!(bot = %label, "{message}");
 }
 
 fn log_bot_warning(label: &str, message: &str) {
-    eprintln!("[telegram-gateway:{label}] WARN: {message}");
+    tracing::warn!(bot = %label, "{message}");
 }
 
 fn log_invalid_token(label: &str) {
-    eprintln!(
-        "[telegram-gateway:{label}] ERROR: Bot API rejected the token (401). Stopping this bot; other bots continue."
+    tracing::error!(
+        bot = %label,
+        "bot API rejected token (401), stopping this bot; other bots continue"
     );
 }
 

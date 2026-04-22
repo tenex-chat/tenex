@@ -1,6 +1,8 @@
 use std::error::Error;
 use std::path::Path;
 
+use tracing;
+
 use serde_json::Value;
 use thiserror::Error;
 
@@ -202,6 +204,7 @@ where
     })?;
 
     if dispatch_state.queued.is_empty() {
+        tracing::debug!("worker runtime: no queued dispatches");
         return Ok(DaemonWorkerRuntimeOutcome::NotAdmitted {
             reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
             blocked_candidates: Vec::new(),
@@ -230,12 +233,18 @@ where
             reason,
             blocked_candidates,
         } => {
+            tracing::debug!(reason = ?reason, "worker dispatch not admitted");
             return Ok(DaemonWorkerRuntimeOutcome::NotAdmitted {
                 reason,
                 blocked_candidates,
             });
         }
     };
+    tracing::info!(
+        dispatch_id = %admitted.selected_dispatch.dispatch_id,
+        agent_pubkey = %admitted.selected_dispatch.ral.agent_pubkey,
+        "worker dispatch admitted, spawning"
+    );
     let launch_input = read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
 
     let started = start_admitted_worker_dispatch(
@@ -651,6 +660,14 @@ where
     let claim_token = started.context.admission.leased_record.claim_token.clone();
     let mut session = started.started.dispatch.session;
 
+    let _session_span = tracing::info_span!(
+        "worker.session",
+        dispatch_id = %dispatch_id,
+        worker_id = %worker_id,
+    )
+    .entered();
+    tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
+
     let session = run_worker_session_loop(
         &mut session,
         WorkerSessionLoopInput {
@@ -685,6 +702,7 @@ where
         source: Box::new(source),
     })?;
 
+    tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session completed");
     Ok(DaemonWorkerRuntimeOutcome::SessionCompleted {
         dispatch_id,
         worker_id,

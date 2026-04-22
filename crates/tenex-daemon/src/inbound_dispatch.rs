@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use tracing;
+
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -160,6 +162,15 @@ pub fn enqueue_inbound_dispatch(
         writer_version: input.writer_version.to_string(),
     })?;
     append_dispatch_preparation(input.daemon_dir, &preparation)?;
+
+    tracing::info!(
+        dispatch_id = %ids.dispatch_id,
+        agent_pubkey = %input.route.agent_pubkey,
+        project_id = %input.project.project_id,
+        conversation_id = %input.route.conversation_id,
+        triggering_event_id = %triggering_event_id,
+        "inbound dispatch queued"
+    );
 
     Ok(InboundDispatchEnqueueOutcome {
         dispatch_id: ids.dispatch_id,

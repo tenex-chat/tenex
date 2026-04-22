@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tracing;
+
 use thiserror::Error;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, connect};
@@ -184,7 +186,9 @@ fn run_relay_loop(
     observer: Arc<dyn NostrSubscriptionObserver>,
     stop_flag: Arc<AtomicBool>,
 ) {
+    tracing::info!(relay_url = %relay_url, "nostr relay thread started");
     while !stop_flag.load(Ordering::SeqCst) {
+        let _span = tracing::info_span!("relay.connect", relay_url = %relay_url).entered();
         let result = run_nostr_subscription_relay_once(NostrSubscriptionRelayInput {
             tenex_base_dir: &config.tenex_base_dir,
             daemon_dir: &config.daemon_dir,
@@ -201,14 +205,32 @@ fn run_relay_loop(
                 .map(|signer| signer.as_ref() as &dyn RelayAuthSigner),
             stop_flag: &stop_flag,
         });
+        drop(_span);
 
         match result {
-            Ok(diagnostics) => observer.on_batch(&relay_url, diagnostics),
-            Err(error) => observer.on_error(&relay_url, &error),
+            Ok(diagnostics) => {
+                tracing::debug!(
+                    relay_url = %relay_url,
+                    raw_message_count = diagnostics.raw_message_count,
+                    processed_events = diagnostics.processed_events.len(),
+                    "relay session ended cleanly"
+                );
+                observer.on_batch(&relay_url, diagnostics);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    relay_url = %relay_url,
+                    backoff_ms = config.reconnect_backoff.as_millis(),
+                    error = %error,
+                    "relay disconnected, reconnecting after backoff"
+                );
+                observer.on_error(&relay_url, &error);
+            }
         }
 
         sleep_with_stop(&stop_flag, config.reconnect_backoff);
     }
+    tracing::info!(relay_url = %relay_url, "nostr relay thread stopped");
 }
 
 #[derive(Clone, Copy)]
@@ -274,6 +296,7 @@ pub fn run_nostr_subscription_relay_once(
         return Err(NostrSubscriptionRelayError::EmptyFilters);
     }
 
+    tracing::debug!(relay_url = %input.relay_url, subscription_id = %input.subscription_id, "connecting to relay");
     let (mut socket, _) = connect(input.relay_url)?;
     set_stream_timeouts(socket.get_mut(), input.read_timeout);
     socket.send(Message::text(build_req_message(
@@ -317,8 +340,33 @@ pub fn run_nostr_subscription_relay_once(
                     timestamp: current_unix_time_ms(),
                     writer_version: input.writer_version,
                 })?;
+                for event in &tick.processed_events {
+                    tracing::debug!(
+                        relay_url = %input.relay_url,
+                        event_id = %event.event_id,
+                        "nostr event received"
+                    );
+                }
+                for dispatch in &tick.dispatches {
+                    if let crate::nostr_subscription_tick::NostrSubscriptionTickDispatch::Queued {
+                        event_id,
+                        dispatch_id,
+                        agent_pubkey,
+                        ..
+                    } = dispatch
+                    {
+                        tracing::info!(
+                            relay_url = %input.relay_url,
+                            event_id = %event_id,
+                            dispatch_id = %dispatch_id,
+                            agent_pubkey = %agent_pubkey,
+                            "inbound nostr event dispatched"
+                        );
+                    }
+                }
                 append_tick_diagnostics(&mut diagnostics, tick, frame_index);
                 if let Some(challenge) = auth_challenge {
+                    tracing::debug!(relay_url = %input.relay_url, "relay sent AUTH challenge, authenticating");
                     let auth_signer = input
                         .auth_signer
                         .ok_or(NostrSubscriptionRelayError::AuthRequiredWithoutSigner)?;
@@ -333,6 +381,7 @@ pub fn run_nostr_subscription_relay_once(
                         input.subscription_id,
                         input.filters,
                     )?))?;
+                    tracing::info!(relay_url = %input.relay_url, "relay authenticated, resubscribed");
                 }
                 if stop_after_this_frame {
                     break;

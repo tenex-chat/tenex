@@ -3,6 +3,8 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tracing;
+
 use thiserror::Error;
 
 use crate::daemon_maintenance::{
@@ -200,6 +202,9 @@ where
 
     while max_iterations.is_none_or(|limit| iteration_index < limit) && !stop_signal.should_stop() {
         let now_ms = clock.now_ms();
+        let _tick_span =
+            tracing::debug_span!("daemon.tick", iteration = iteration_index, now_ms = now_ms)
+                .entered();
         let maintenance_outcome =
             run_once(now_ms).map_err(|source| DaemonMaintenanceLoopError::Maintenance {
                 completed_iterations: iteration_index,
@@ -207,6 +212,9 @@ where
                 now_ms,
                 source,
             })?;
+
+        drop(_tick_span);
+        tracing::debug!(iteration = iteration_index, "daemon tick complete");
 
         let next_iteration_index = iteration_index.saturating_add(1);
         let stop_requested = stop_signal.should_stop();

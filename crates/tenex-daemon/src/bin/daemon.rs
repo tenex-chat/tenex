@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
+use tenex_daemon::telemetry;
 use tenex_daemon::daemon_foreground::{
     DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
     run_daemon_foreground_until_stopped_from_filesystem_with_worker,
@@ -120,6 +121,9 @@ where
     let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
     let options = parse_daemon_args(&args)?;
     validate_iterations(&options)?;
+    let (_, daemon_dir) = resolve_daemon_paths(&options)?;
+    let _telemetry = telemetry::init(&daemon_dir);
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "tenex-daemon starting");
     install_signal_handlers()?;
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
@@ -165,6 +169,7 @@ where
     }
 
     let diagnostics = diagnostics_result?;
+    tracing::info!("tenex-daemon stopped");
     serde_json::to_string_pretty(&diagnostics).map_err(|error| runtime_error(error.to_string()))
 }
 
@@ -218,14 +223,15 @@ fn start_gateway_supervisor_from_options(
     }
 
     let data_dir = telegram_data_dir(&tenex_base_dir);
-    let backend_config = read_backend_config(&tenex_base_dir)
-        .map_err(|error| runtime_error(error.to_string()))?;
-    let signer: std::sync::Arc<dyn tenex_daemon::backend_events::heartbeat::BackendSigner + Send + Sync> =
-        std::sync::Arc::new(
-            backend_config
-                .backend_signer()
-                .map_err(|error| runtime_error(error.to_string()))?,
-        );
+    let backend_config =
+        read_backend_config(&tenex_base_dir).map_err(|error| runtime_error(error.to_string()))?;
+    let signer: std::sync::Arc<
+        dyn tenex_daemon::backend_events::heartbeat::BackendSigner + Send + Sync,
+    > = std::sync::Arc::new(
+        backend_config
+            .backend_signer()
+            .map_err(|error| runtime_error(error.to_string()))?,
+    );
     let mut config = GatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), data_dir);
     config.bots = bots;
     config.writer_version = daemon_writer_version();

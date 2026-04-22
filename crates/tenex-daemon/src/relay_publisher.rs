@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::net::TcpStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tracing;
+
 use serde_json::{Value, json};
 use thiserror::Error;
 use tungstenite::stream::MaybeTlsStream;
@@ -152,6 +154,13 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
         let mut relay_results = Vec::with_capacity(self.config.relay_urls.len());
 
         for relay_url in &self.config.relay_urls {
+            let _span = tracing::debug_span!(
+                "nostr.publish",
+                relay_url = %relay_url,
+                event_id = %event.id,
+                event_kind = event.kind,
+            )
+            .entered();
             let auth_signer = self
                 .auth_signer
                 .as_ref()
@@ -162,12 +171,27 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
                 self.config.response_timeout,
                 auth_signer,
             ) {
-                Ok(result) => result,
-                Err(error) => PublishRelayResult {
-                    relay_url: relay_url.clone(),
-                    accepted: false,
-                    message: Some(error.to_string()),
-                },
+                Ok(result) => {
+                    if result.accepted {
+                        tracing::debug!(relay_url = %relay_url, event_id = %event.id, "nostr event published");
+                    } else {
+                        tracing::warn!(
+                            relay_url = %relay_url,
+                            event_id = %event.id,
+                            message = ?result.message,
+                            "nostr event rejected by relay"
+                        );
+                    }
+                    result
+                }
+                Err(error) => {
+                    tracing::warn!(relay_url = %relay_url, event_id = %event.id, error = %error, "nostr publish failed");
+                    PublishRelayResult {
+                        relay_url: relay_url.clone(),
+                        accepted: false,
+                        message: Some(error.to_string()),
+                    }
+                }
             };
             relay_results.push(result);
         }
