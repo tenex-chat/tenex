@@ -987,8 +987,12 @@ fn now_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const SCHEDULER_WAKEUPS_FIXTURE: &str =
+        include_str!("../../../src/test-utils/fixtures/daemon/scheduler-wakeups.compat.json");
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1054,6 +1058,170 @@ mod tests {
             writer_version: "test-version".to_string(),
             allow_backdated: false,
         }
+    }
+
+    #[test]
+    fn scheduler_wakeups_fixture_matches_rust_contract() {
+        let fixture: Value =
+            serde_json::from_str(SCHEDULER_WAKEUPS_FIXTURE).expect("fixture must parse");
+        let daemon_dir = Path::new("/var/lib/tenex").join(
+            fixture["daemonDirName"]
+                .as_str()
+                .expect("fixture must include daemonDirName"),
+        );
+
+        assert_eq!(
+            fixture["relativePaths"]["wakeups"].as_str(),
+            Some(SCHEDULER_WAKEUPS_DIR_NAME)
+        );
+        assert_eq!(
+            fixture["relativePaths"]["pending"].as_str(),
+            Some("scheduler-wakeups/pending")
+        );
+        assert_eq!(
+            fixture["relativePaths"]["fired"].as_str(),
+            Some("scheduler-wakeups/fired")
+        );
+        assert_eq!(
+            fixture["relativePaths"]["failed"].as_str(),
+            Some("scheduler-wakeups/failed")
+        );
+        assert_eq!(
+            fixture["relativePaths"]["tmp"].as_str(),
+            Some("scheduler-wakeups/tmp")
+        );
+        assert_eq!(
+            scheduler_wakeups_dir(&daemon_dir),
+            daemon_dir.join(SCHEDULER_WAKEUPS_DIR_NAME)
+        );
+        assert_eq!(
+            pending_scheduler_wakeup_dir(&daemon_dir),
+            daemon_dir.join("scheduler-wakeups").join("pending")
+        );
+        assert_eq!(
+            fired_scheduler_wakeup_dir(&daemon_dir),
+            daemon_dir.join("scheduler-wakeups").join("fired")
+        );
+        assert_eq!(
+            failed_scheduler_wakeup_dir(&daemon_dir),
+            daemon_dir.join("scheduler-wakeups").join("failed")
+        );
+        assert_eq!(
+            tmp_scheduler_wakeup_dir(&daemon_dir),
+            daemon_dir.join("scheduler-wakeups").join("tmp")
+        );
+        assert_eq!(
+            fixture["schemaVersion"].as_u64(),
+            Some(u64::from(SCHEDULER_WAKEUPS_RECORD_SCHEMA_VERSION))
+        );
+        assert_eq!(
+            fixture["targetDiscriminators"]["projectWakeup"].as_str(),
+            Some("project_wakeup")
+        );
+        assert_eq!(
+            fixture["targetDiscriminators"]["agentWakeup"].as_str(),
+            Some("agent_wakeup")
+        );
+        assert_eq!(
+            fixture["targetDiscriminators"]["delegationTimeout"].as_str(),
+            Some("delegation_timeout")
+        );
+
+        for variant in ["pendingProject", "pendingAgent", "pendingDelegation"] {
+            let record: WakeupRecord = serde_json::from_value(fixture["records"][variant].clone())
+                .unwrap_or_else(|_| panic!("{variant} record must deserialize"));
+            assert_eq!(record.status, WakeupStatus::Pending);
+            assert!(record.fire_attempts.is_empty());
+            assert_eq!(record.writer, SCHEDULER_WAKEUPS_WRITER);
+            assert_eq!(
+                record.schema_version,
+                SCHEDULER_WAKEUPS_RECORD_SCHEMA_VERSION
+            );
+
+            let derived = derive_wakeup_id(
+                record.scheduled_for,
+                &record.target,
+                &record.requester_context,
+            )
+            .expect("derivation must succeed");
+            assert_eq!(
+                record.wakeup_id, derived,
+                "fixture {variant} wakeupId must match current derivation"
+            );
+        }
+
+        let fired: WakeupRecord = serde_json::from_value(fixture["records"]["fired"].clone())
+            .expect("fired record must deserialize");
+        assert_eq!(fired.status, WakeupStatus::Fired);
+        assert_eq!(fired.fire_attempts[0].status, WakeupAttemptStatus::Fired);
+        assert_eq!(
+            fired.fire_attempts[0].outcome.as_deref(),
+            Some("dispatched")
+        );
+
+        let failed_retryable: WakeupRecord =
+            serde_json::from_value(fixture["records"]["failedRetryable"].clone())
+                .expect("failed retryable record must deserialize");
+        assert_eq!(failed_retryable.status, WakeupStatus::Failed);
+        assert_eq!(
+            failed_retryable.fire_attempts[0].classification,
+            Some(WakeupFailureClassification::Retryable)
+        );
+        assert_eq!(
+            failed_retryable.fire_attempts[0].next_attempt_at,
+            Some(1_710_001_960)
+        );
+        assert_eq!(failed_retryable.next_attempt_at, Some(1_710_001_960));
+
+        let failed_permanent: WakeupRecord =
+            serde_json::from_value(fixture["records"]["failedPermanent"].clone())
+                .expect("failed permanent record must deserialize");
+        assert_eq!(
+            failed_permanent.fire_attempts[0].classification,
+            Some(WakeupFailureClassification::Permanent)
+        );
+        assert!(failed_permanent.fire_attempts[0].next_attempt_at.is_none());
+        assert!(failed_permanent.next_attempt_at.is_none());
+
+        let empty_diagnostics: SchedulerWakeupsDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["empty"].clone())
+                .expect("empty diagnostics must deserialize");
+        assert_eq!(
+            empty_diagnostics.schema_version,
+            SCHEDULER_WAKEUPS_DIAGNOSTICS_SCHEMA_VERSION
+        );
+        assert_eq!(empty_diagnostics.pending_count, 0);
+
+        let populated: SchedulerWakeupsDiagnostics =
+            serde_json::from_value(fixture["diagnostics"]["fixtureRecordsBeforeRetry"].clone())
+                .expect("populated diagnostics must deserialize");
+        assert_eq!(populated.pending_count, 3);
+        assert_eq!(populated.failed_count, 2);
+        assert_eq!(populated.retryable_failed_count, 1);
+        assert_eq!(populated.permanent_failed_count, 1);
+        assert_eq!(populated.fired_count, 1);
+        assert_eq!(populated.next_retry_at, Some(1_710_001_960));
+
+        let maintenance: SchedulerWakeupsMaintenanceReport =
+            serde_json::from_value(fixture["maintenanceReports"]["dueRetryRequeued"].clone())
+                .expect("maintenance report must deserialize");
+        assert_eq!(maintenance.diagnostics_before.due_retry_count, 1);
+        assert_eq!(maintenance.requeued.len(), 1);
+        assert_eq!(maintenance.diagnostics_after.pending_count, 1);
+        assert_eq!(maintenance.diagnostics_after.failed_count, 0);
+
+        let requeue_sample: WakeupRequeueOutcome =
+            serde_json::from_value(fixture["requeueOutcomes"]["sample"].clone())
+                .expect("requeue outcome must deserialize");
+        assert_eq!(requeue_sample.wakeup_id.len(), 64);
+
+        let derivation = fixture["recordIdDerivation"]
+            .as_str()
+            .expect("fixture must pin record id derivation rule");
+        assert!(derivation.contains("sha256"));
+        assert!(derivation.contains("scheduler-wakeups/v1"));
+        assert!(derivation.contains("scheduledFor"));
+        assert!(derivation.contains("requesterContext"));
     }
 
     #[test]

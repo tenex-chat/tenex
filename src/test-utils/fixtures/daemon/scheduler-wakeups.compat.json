@@ -1,0 +1,266 @@
+{
+    "name": "scheduler-wakeups-basic",
+    "description": "Canonical Rust scheduler wakeups filesystem paths, record shapes, diagnostics, and maintenance-report shapes for Bun compatibility tests.",
+    "daemonDirName": "daemon",
+    "relativePaths": {
+        "wakeups": "scheduler-wakeups",
+        "pending": "scheduler-wakeups/pending",
+        "fired": "scheduler-wakeups/fired",
+        "failed": "scheduler-wakeups/failed",
+        "tmp": "scheduler-wakeups/tmp"
+    },
+    "recordFileNames": {
+        "pending": "<wakeup-id>.json",
+        "fired": "<wakeup-id>.json",
+        "failed": "<wakeup-id>.json"
+    },
+    "recordIdDerivation": "wakeupId = sha256(\"scheduler-wakeups/v1\\n\" + scheduledFor + \"\\n\" + targetDiscriminator + \"\\n\" + targetPayloadJson + \"\\n\" + requesterContext)",
+    "writer": "rust-daemon",
+    "schemaVersion": 1,
+    "targetDiscriminators": {
+        "projectWakeup": "project_wakeup",
+        "agentWakeup": "agent_wakeup",
+        "delegationTimeout": "delegation_timeout"
+    },
+    "records": {
+        "pendingProject": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "wakeupId": "5faf2e78bcd08da1b81e3b78b122a56f9f45b0b685b842cb1f14d472143edf95",
+            "status": "pending",
+            "createdAt": 1710001900,
+            "updatedAt": 1710001900,
+            "scheduledFor": 1710002000,
+            "target": {
+                "kind": "project_wakeup",
+                "project_d_tag": "project-alpha"
+            },
+            "requesterContext": "scheduled-boot-01",
+            "fireAttempts": []
+        },
+        "pendingAgent": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "wakeupId": "5d6dd5dd5c2617fc8b22a44cce69472073cf3edd7c96247a7347d26776fa22e3",
+            "status": "pending",
+            "createdAt": 1710001900,
+            "updatedAt": 1710001900,
+            "scheduledFor": 1710002100,
+            "target": {
+                "kind": "agent_wakeup",
+                "project_d_tag": "project-alpha",
+                "agent_pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "requesterContext": "scheduled-agent-01",
+            "fireAttempts": []
+        },
+        "pendingDelegation": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "wakeupId": "0d338eb141e9755e2b73bd86c7256b6948cc83b6bc106c182aaef4a29e227148",
+            "status": "pending",
+            "createdAt": 1710001900,
+            "updatedAt": 1710001900,
+            "scheduledFor": 1710002200,
+            "target": {
+                "kind": "delegation_timeout",
+                "ral_id": "ral-42"
+            },
+            "requesterContext": "delegation-timeout-01",
+            "fireAttempts": []
+        },
+        "fired": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "wakeupId": "417627c342869b4cdea78d6d43b9518374b917b1c511deb85a27e7ffbd652f28",
+            "status": "fired",
+            "createdAt": 1710001800,
+            "updatedAt": 1710001910,
+            "scheduledFor": 1710001900,
+            "target": {
+                "kind": "project_wakeup",
+                "project_d_tag": "project-alpha"
+            },
+            "requesterContext": "scheduled-fired-01",
+            "fireAttempts": [
+                {
+                    "attemptedAt": 1710001910,
+                    "status": "fired",
+                    "outcome": "dispatched"
+                }
+            ]
+        },
+        "failedRetryable": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "wakeupId": "a42445425dc3efb55ab4333a4a50e8fd5f8052e634b3e366a82b473951b6ed9c",
+            "status": "failed",
+            "createdAt": 1710001800,
+            "updatedAt": 1710001910,
+            "scheduledFor": 1710001900,
+            "target": {
+                "kind": "project_wakeup",
+                "project_d_tag": "project-alpha"
+            },
+            "requesterContext": "scheduled-retry-01",
+            "fireAttempts": [
+                {
+                    "attemptedAt": 1710001910,
+                    "status": "failed",
+                    "classification": "retryable",
+                    "errorDetail": "dispatch worker unavailable",
+                    "nextAttemptAt": 1710001960
+                }
+            ],
+            "nextAttemptAt": 1710001960
+        },
+        "failedPermanent": {
+            "schemaVersion": 1,
+            "writer": "rust-daemon",
+            "writerVersion": "test-version",
+            "wakeupId": "e3d1d7e725c21b1e827e114a2b35abc1c101fcbc2cc3198df5cd27dd8e84f62e",
+            "status": "failed",
+            "createdAt": 1710001800,
+            "updatedAt": 1710001910,
+            "scheduledFor": 1710001900,
+            "target": {
+                "kind": "project_wakeup",
+                "project_d_tag": "project-alpha"
+            },
+            "requesterContext": "scheduled-permanent-01",
+            "fireAttempts": [
+                {
+                    "attemptedAt": 1710001910,
+                    "status": "failed",
+                    "classification": "permanent",
+                    "errorDetail": "target project no longer exists"
+                }
+            ]
+        }
+    },
+    "diagnostics": {
+        "empty": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001000,
+            "pendingCount": 0,
+            "firedCount": 0,
+            "failedCount": 0,
+            "retryableFailedCount": 0,
+            "permanentFailedCount": 0,
+            "duePendingCount": 0,
+            "dueRetryCount": 0,
+            "tmpFileCount": 0,
+            "oldestPending": null,
+            "nextRetryAt": null,
+            "latestFailure": null
+        },
+        "fixtureRecordsBeforeRetry": {
+            "schemaVersion": 1,
+            "inspectedAt": 1710001950,
+            "pendingCount": 3,
+            "firedCount": 1,
+            "failedCount": 2,
+            "retryableFailedCount": 1,
+            "permanentFailedCount": 1,
+            "duePendingCount": 0,
+            "dueRetryCount": 0,
+            "tmpFileCount": 0,
+            "oldestPending": {
+                "wakeupId": "5faf2e78bcd08da1b81e3b78b122a56f9f45b0b685b842cb1f14d472143edf95",
+                "scheduledFor": 1710002000,
+                "target": {
+                    "kind": "project_wakeup",
+                    "project_d_tag": "project-alpha"
+                },
+                "requesterContext": "scheduled-boot-01",
+                "createdAt": 1710001900
+            },
+            "nextRetryAt": 1710001960,
+            "latestFailure": {
+                "wakeupId": "a42445425dc3efb55ab4333a4a50e8fd5f8052e634b3e366a82b473951b6ed9c",
+                "target": {
+                    "kind": "project_wakeup",
+                    "project_d_tag": "project-alpha"
+                },
+                "attemptCount": 1,
+                "attemptedAt": 1710001910,
+                "classification": "retryable",
+                "errorDetail": "dispatch worker unavailable",
+                "nextAttemptAt": 1710001960
+            }
+        }
+    },
+    "requeueOutcomes": {
+        "sample": {
+            "wakeupId": "9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2",
+            "sourcePath": "/var/lib/tenex/daemon/scheduler-wakeups/failed/9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2.json",
+            "targetPath": "/var/lib/tenex/daemon/scheduler-wakeups/pending/9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2.json"
+        }
+    },
+    "maintenanceReports": {
+        "dueRetryRequeued": {
+            "diagnosticsBefore": {
+                "schemaVersion": 1,
+                "inspectedAt": 1710002000,
+                "pendingCount": 0,
+                "firedCount": 0,
+                "failedCount": 1,
+                "retryableFailedCount": 1,
+                "permanentFailedCount": 0,
+                "duePendingCount": 0,
+                "dueRetryCount": 1,
+                "tmpFileCount": 0,
+                "oldestPending": null,
+                "nextRetryAt": 1710001960,
+                "latestFailure": {
+                    "wakeupId": "9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2",
+                    "target": {
+                        "kind": "project_wakeup",
+                        "project_d_tag": "project-alpha"
+                    },
+                    "attemptCount": 1,
+                    "attemptedAt": 1710001910,
+                    "classification": "retryable",
+                    "errorDetail": "dispatch worker unavailable",
+                    "nextAttemptAt": 1710001960
+                }
+            },
+            "requeued": [
+                {
+                    "wakeupId": "9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2",
+                    "sourcePath": "/var/lib/tenex/daemon/scheduler-wakeups/failed/9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2.json",
+                    "targetPath": "/var/lib/tenex/daemon/scheduler-wakeups/pending/9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2.json"
+                }
+            ],
+            "diagnosticsAfter": {
+                "schemaVersion": 1,
+                "inspectedAt": 1710002000,
+                "pendingCount": 1,
+                "firedCount": 0,
+                "failedCount": 0,
+                "retryableFailedCount": 0,
+                "permanentFailedCount": 0,
+                "duePendingCount": 0,
+                "dueRetryCount": 0,
+                "tmpFileCount": 0,
+                "oldestPending": {
+                    "wakeupId": "9de3bf2a07685b564a0a61ed4b23dc53c8b3e04bf9ed8734f7e4c3cce4b98ae2",
+                    "scheduledFor": 1710002100,
+                    "target": {
+                        "kind": "project_wakeup",
+                        "project_d_tag": "project-alpha"
+                    },
+                    "requesterContext": "maintenance-fixture-01",
+                    "createdAt": 1710001800
+                },
+                "nextRetryAt": null,
+                "latestFailure": null
+            }
+        }
+    }
+}
