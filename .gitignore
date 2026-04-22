@@ -86,4 +86,5 @@ typecheck.cjs
 
 # Git worktrees
 .worktrees/
+.claude/worktrees/
 .devtools
