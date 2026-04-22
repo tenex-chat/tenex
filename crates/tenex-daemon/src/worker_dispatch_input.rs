@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::dispatch_queue::workers_dir;
 use crate::worker_protocol::{
-    validate_agent_worker_protocol_message, AgentWorkerExecutionFlags, WorkerProtocolError,
+    AgentWorkerExecutionFlags, WorkerProtocolError, validate_agent_worker_protocol_message,
 };
 
 pub const WORKER_DISPATCH_INPUT_SCHEMA_VERSION: u32 = 1;

@@ -24,6 +24,8 @@ pub mod filesystem_state;
 pub mod inbound_dispatch;
 pub mod inbound_envelope;
 pub mod inbound_routing;
+pub mod inbound_runtime;
+pub mod nostr_classification;
 pub mod nostr_event;
 pub mod nostr_inbound;
 pub mod operations_status_runtime;
