@@ -755,8 +755,11 @@ mod tests {
     use std::fmt;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[derive(Debug, Clone)]
     struct RecordingSpawner {
@@ -1725,6 +1728,7 @@ mod tests {
     }
 
     fn seed_allocated_ral(daemon_dir: &Path) {
+        fs::create_dir_all(daemon_dir).expect("daemon dir must create");
         append_ral_journal_record(
             daemon_dir,
             &RalJournalRecord::new(
@@ -2015,10 +2019,12 @@ mod tests {
     }
 
     fn unique_temp_daemon_dir() -> std::path::PathBuf {
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
-            "tenex-daemon-worker-runtime-{}-{}",
+            "tenex-daemon-worker-runtime-{}-{}-{}",
             std::process::id(),
-            unique_suffix()
+            unique_suffix(),
+            counter
         ))
     }
 

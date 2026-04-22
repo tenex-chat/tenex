@@ -292,10 +292,7 @@ where
             publish: worker.publish,
             max_frames: worker.max_frames,
         },
-    )
-    .map_err(|source| DaemonTickWithWorkerError::WorkerRuntime {
-        message: source.to_string(),
-    })?;
+    );
     let publish_outbox = maintain_publish_runtime(PublishRuntimeMaintainInput {
         daemon_dir,
         publisher,
@@ -303,6 +300,10 @@ where
         retry_policy,
     })?
     .maintenance_report;
+    let worker_runtime =
+        worker_runtime.map_err(|source| DaemonTickWithWorkerError::WorkerRuntime {
+            message: source.to_string(),
+        })?;
 
     Ok(DaemonTickWithWorkerOutcome {
         maintenance,
@@ -492,6 +493,10 @@ mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
     use crate::daemon_maintenance::NoTelegramPublisher;
+    use crate::dispatch_queue::{
+        DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
+        append_dispatch_queue_record, build_dispatch_queue_record,
+    };
     use crate::nostr_event::SignedNostrEvent;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
@@ -499,18 +504,32 @@ mod tests {
     use crate::ral_lock::build_ral_lock_info;
     use crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason;
     use crate::worker_dispatch_execution::BootedWorkerDispatch;
+    use crate::worker_dispatch_input::{
+        WorkerDispatchExecuteFields, WorkerDispatchInput, WorkerDispatchInputFromExecuteFields,
+        WorkerDispatchInputSourceType, WorkerDispatchInputWriterMetadata,
+        write_create_or_compare_equal,
+    };
+    use crate::worker_process::AgentWorkerReady;
+    use crate::worker_protocol::{
+        AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,
+        AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
+        AGENT_WORKER_STREAM_BATCH_MS, AgentWorkerExecutionFlags, WorkerProtocolConfig,
+    };
     use secp256k1::{Keypair, Secp256k1, SecretKey};
+    use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::error::Error as StdError;
     use std::fmt;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     const TEST_SECRET_KEY_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";
+    const TEST_AGENT_PUBKEY: &str =
+        "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f";
 
     #[derive(Debug, Default)]
     struct RecordingClock {
@@ -898,6 +917,54 @@ mod tests {
         assert_eq!(publisher.event_ids.len(), 3);
     }
 
+    #[test]
+    fn filesystem_tick_with_worker_drains_publish_outbox_after_worker_runtime_error() {
+        let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
+        seed_queued_dispatch(&fixture.daemon_dir);
+        seed_dispatch_input(&fixture.daemon_dir);
+        let mut publisher = RecordingPublisher::default();
+        let mut telegram_publisher = NoTelegramPublisher;
+        let mut spawner = ProtocolErrorSpawner::default();
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = AgentWorkerProcessConfig::default();
+
+        let error = run_daemon_tick_once_from_filesystem_with_worker(
+            DaemonMaintenanceInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                now_ms: 1_710_001_000_000,
+            },
+            DaemonWorkerTickInput {
+                runtime_state: &mut runtime_state,
+                limits: WorkerConcurrencyLimits::default(),
+                correlation_id: "daemon-loop-worker-error-drain".to_string(),
+                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                command: AgentWorkerCommand::new("bun"),
+                worker_config: &worker_config,
+                writer_version: "daemon-loop-test@0".to_string(),
+                resolved_pending_delegations: Vec::new(),
+                publish: None,
+                max_frames: 1,
+            },
+            &mut spawner,
+            &mut publisher,
+            PublishOutboxRetryPolicy::default(),
+            &mut telegram_publisher,
+        )
+        .expect_err("worker protocol error must fail the tick");
+
+        assert!(matches!(
+            error,
+            DaemonTickWithWorkerError::WorkerRuntime { .. }
+        ));
+        assert_eq!(spawner.spawn_calls, 1);
+        assert_eq!(publisher.event_ids.len(), 3);
+        let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
+            .expect("publish outbox diagnostics must read");
+        assert_eq!(publish_outbox.pending_count, 0);
+        assert_eq!(publish_outbox.published_count, 3);
+    }
+
     #[derive(Debug)]
     struct TickFilesystemFixture {
         tenex_base_dir: PathBuf,
@@ -1042,6 +1109,188 @@ mod tests {
     }
 
     impl StdError for EmptyQueueWorkerError {}
+
+    #[derive(Debug, Default)]
+    struct ProtocolErrorSpawner {
+        spawn_calls: usize,
+    }
+
+    impl WorkerDispatchSpawner for ProtocolErrorSpawner {
+        type Session = ProtocolErrorSession;
+        type Error = ProtocolErrorWorkerError;
+
+        fn spawn_worker(
+            &mut self,
+            _command: &AgentWorkerCommand,
+            _config: &AgentWorkerProcessConfig,
+        ) -> Result<BootedWorkerDispatch<Self::Session>, Self::Error> {
+            self.spawn_calls += 1;
+            Ok(BootedWorkerDispatch {
+                ready: ready_message("worker-alpha"),
+                session: ProtocolErrorSession {
+                    frames: VecDeque::from([malformed_worker_frame()]),
+                },
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct ProtocolErrorSession {
+        frames: VecDeque<Vec<u8>>,
+    }
+
+    impl WorkerDispatchSession for ProtocolErrorSession {
+        type Error = ProtocolErrorWorkerError;
+
+        fn send_worker_message(&mut self, _message: &Value) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl WorkerFrameReceiver for ProtocolErrorSession {
+        type Error = ProtocolErrorWorkerError;
+
+        fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
+            self.frames
+                .pop_front()
+                .ok_or(ProtocolErrorWorkerError("missing worker frame"))
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ProtocolErrorWorkerError(&'static str);
+
+    impl fmt::Display for ProtocolErrorWorkerError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
+    impl StdError for ProtocolErrorWorkerError {}
+
+    fn malformed_worker_frame() -> Vec<u8> {
+        vec![0, 0, 0, 1, b'{']
+    }
+
+    fn ready_message(worker_id: &str) -> AgentWorkerReady {
+        AgentWorkerReady {
+            worker_id: worker_id.to_string(),
+            pid: 123,
+            protocol: worker_protocol_config(),
+            message: json!({
+                "version": AGENT_WORKER_PROTOCOL_VERSION,
+                "type": "ready",
+                "correlationId": worker_id,
+                "sequence": 1,
+                "timestamp": 1_710_000_700_000_u64,
+                "workerId": worker_id,
+                "pid": 123_u64,
+                "protocol": {
+                    "version": AGENT_WORKER_PROTOCOL_VERSION,
+                    "encoding": AGENT_WORKER_PROTOCOL_ENCODING
+                },
+            }),
+        }
+    }
+
+    fn worker_protocol_config() -> WorkerProtocolConfig {
+        WorkerProtocolConfig {
+            version: AGENT_WORKER_PROTOCOL_VERSION,
+            encoding: AGENT_WORKER_PROTOCOL_ENCODING.to_string(),
+            max_frame_bytes: AGENT_WORKER_MAX_FRAME_BYTES,
+            stream_batch_ms: AGENT_WORKER_STREAM_BATCH_MS,
+            stream_batch_max_bytes: AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
+            heartbeat_interval_ms: None,
+            missed_heartbeat_threshold: None,
+            worker_boot_timeout_ms: None,
+            graceful_abort_timeout_ms: None,
+            force_kill_timeout_ms: None,
+            idle_ttl_ms: None,
+        }
+    }
+
+    fn seed_queued_dispatch(daemon_dir: &Path) {
+        append_dispatch_queue_record(
+            daemon_dir,
+            &build_dispatch_queue_record(DispatchQueueRecordParams {
+                sequence: 1,
+                timestamp: 1_710_000_700_001,
+                correlation_id: "queue-dispatch-alpha".to_string(),
+                dispatch_id: "dispatch-alpha".to_string(),
+                ral: DispatchRalIdentity {
+                    project_id: "project-alpha".to_string(),
+                    agent_pubkey: TEST_AGENT_PUBKEY.to_string(),
+                    conversation_id: "conversation-alpha".to_string(),
+                    ral_number: 7,
+                },
+                triggering_event_id: "event-alpha".to_string(),
+                claim_token: "claim-alpha".to_string(),
+                status: DispatchQueueStatus::Queued,
+            }),
+        )
+        .expect("queued dispatch must append");
+    }
+
+    fn seed_dispatch_input(daemon_dir: &Path) {
+        write_create_or_compare_equal(
+            daemon_dir,
+            &WorkerDispatchInput::from_execute_fields(WorkerDispatchInputFromExecuteFields {
+                dispatch_id: "dispatch-alpha".to_string(),
+                source_type: WorkerDispatchInputSourceType::Nostr,
+                writer: WorkerDispatchInputWriterMetadata {
+                    writer: "daemon_loop_test".to_string(),
+                    writer_version: "daemon-loop-test@0".to_string(),
+                    timestamp: 1_710_000_700_030,
+                },
+                execute_fields: WorkerDispatchExecuteFields {
+                    worker_id: Some("worker-alpha".to_string()),
+                    triggering_event_id: "event-alpha".to_string(),
+                    project_base_path: "/sidecar/repo".to_string(),
+                    metadata_path: "/sidecar/repo/.tenex/project.json".to_string(),
+                    triggering_envelope: triggering_envelope("event-alpha"),
+                    execution_flags: AgentWorkerExecutionFlags {
+                        is_delegation_completion: false,
+                        has_pending_delegations: false,
+                        debug: false,
+                    },
+                },
+                source_metadata: Some(json!({ "eventId": "event-alpha" })),
+            }),
+        )
+        .expect("dispatch input sidecar must write");
+    }
+
+    fn triggering_envelope(event_id: &str) -> Value {
+        json!({
+            "transport": "nostr",
+            "principal": {
+                "id": "nostr:owner-a",
+                "transport": "nostr",
+                "kind": "human"
+            },
+            "channel": {
+                "id": "conversation:conversation-alpha",
+                "transport": "nostr",
+                "kind": "conversation"
+            },
+            "message": {
+                "id": event_id,
+                "transport": "nostr",
+                "nativeId": event_id
+            },
+            "recipients": [
+                {
+                    "id": "nostr:agent-a",
+                    "transport": "nostr",
+                    "kind": "agent"
+                }
+            ],
+            "content": "hello",
+            "occurredAt": 1_710_001_000_000u64,
+            "capabilities": ["reply"],
+            "metadata": {}
+        })
+    }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
