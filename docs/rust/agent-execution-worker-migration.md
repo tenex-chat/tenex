@@ -1225,6 +1225,21 @@ Work:
   transition, asks the scheduler to validate claim/worker ownership, and returns
   the RAL journal record plus an optional dispatch queue completion record. The
   planner remains side-effect-free and keeps both sequence spaces explicit.
+- Add a worker-completion apply boundary that appends the planned RAL journal
+  and optional dispatch queue records, then releases held launch locks after the
+  planned filesystem writes succeed.
+- Add worker-message routing so the future dispatch loop can classify validated
+  worker-to-daemon frames into heartbeat, terminal result, publish, stream,
+  control, or boot-error handling without invoking the downstream handlers yet.
+- Add side-effect-free worker concurrency admission planning over explicit
+  active worker and dispatch snapshots for global, per-project, and
+  per-project-agent limits.
+- Add abort/timeout planning that consumes daemon-observed heartbeat freshness
+  and process status, returning graceful signal, wait, force-kill, or
+  reconciliation actions without killing real processes.
+- Add a worker publish acceptor that persists a worker-signed `publish_request`
+  into the Rust outbox and builds the accepted `publish_result` frame. Relay
+  publication remains the outbox drainer's responsibility.
 - Add orphaned RAL reconciliation planning at daemon startup. The current Rust
   library planner classifies claimed RALs whose worker ids are absent from the
   live worker set and proposes `crashed` journal records, but it does not yet

@@ -622,8 +622,21 @@ Scope:
   transition, uses scheduler state to validate claim/worker ownership, and
   returns the RAL journal record plus optional dispatch completion record
   without writing either file.
-- Implement concurrency limits.
-- Implement worker heartbeat and abort behavior.
+- Add a worker-completion apply boundary that appends the planned RAL journal
+  and optional dispatch terminal records, then releases held launch locks after
+  the planned filesystem side effects succeed.
+- Add worker-message routing that validates worker-to-daemon frames and
+  classifies them into heartbeat, terminal result, publish, stream, control, or
+  boot-error handling actions without invoking downstream effects.
+- Implement concurrency limits as side-effect-free admission planning over
+  explicit active worker and dispatch snapshots.
+- Implement worker heartbeat and abort behavior as planning layers first:
+  heartbeat snapshots/freshness are daemon-observed, and abort planning returns
+  graceful signal, wait, force-kill, or reconciliation actions without killing
+  real processes.
+- Add a worker publish acceptor that durably accepts a worker-signed
+  `publish_request` into the Rust outbox and builds the accepted
+  `publish_result` frame without relay publishing.
 - Keep TypeScript worker publishing directly for compatibility.
 - Rust observes published event IDs and terminal state.
 - Add JSONL truncation/replay tests for the dispatch queue immediately. The
