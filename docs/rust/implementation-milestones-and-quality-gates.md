@@ -188,6 +188,7 @@ Existing operator workflows must continue to work:
 - `tenex daemon stop`
 - `tenex daemon stop --force`
 - `tenex daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]`
+- `daemon-control daemon-foreground [--daemon-dir <path> | --tenex-base-dir <path>] --iterations <count> [--sleep-ms <ms>]`
 
 During migration, the TypeScript CLI may keep temporary developer launch
 controls, but the production target is a single Rust daemon path. Status and
@@ -899,6 +900,10 @@ Landed slices:
   provides the filesystem tick that runs daemon maintenance first and
   publish-outbox relay draining last through the shared
   `PublishOutboxRelayPublisher` interface.
+- `crates/tenex-daemon/src/daemon_foreground.rs` — library-first foreground
+  runner that starts the daemon shell, runs the bounded publish-draining tick
+  loop with injected clock/sleeper/publisher, and always attempts shutdown
+  cleanup so lock/status files do not leak on loop failures.
 - `crates/tenex-daemon/src/bin/daemon-control.rs` —
   `backend-events-enqueue-status`,
   `backend-events-enqueue-project-status`, `backend-events-periodic-tick`, and
@@ -958,9 +963,11 @@ Planned next runtime boundaries:
   `crates/tenex-daemon/src/daemon_maintenance.rs`, and
   `crates/tenex-daemon/src/daemon_loop.rs` now provide the timerless scheduler,
   backend-events tick runner, one-pass daemon maintenance caller, and bounded
-  loop composition. The remaining boundary is the actual foreground process
-  that owns lock/status lifecycle, real clock/sleeping, relay configuration,
-  and `NostrRelayPublisher` construction.
+  loop composition. `crates/tenex-daemon/src/daemon_foreground.rs` now owns the
+  library foreground lifecycle around that loop, and `daemon-control
+  daemon-foreground` is the bounded operator surface that drives a finite
+  iteration count through it. The remaining boundary is the dedicated
+  production foreground binary and signal-aware stop token.
 - `crates/tenex-daemon/src/backend_status_runtime.rs` remains backend-status
   only: heartbeat and installed-agent-list enqueueing through
   `daemon-control backend-events-enqueue-status`. Project-status uses the

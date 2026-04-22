@@ -2,7 +2,7 @@ use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tenex_daemon::agent_inventory::read_installed_agent_inventory;
@@ -23,6 +23,12 @@ use tenex_daemon::daemon_control::{
     read_daemon_restart_state_compatibility,
 };
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
+use tenex_daemon::daemon_foreground::{
+    DaemonForegroundInput, run_daemon_foreground_from_filesystem,
+};
+use tenex_daemon::daemon_loop::{
+    SystemDaemonMaintenanceLoopClock, ThreadDaemonMaintenanceLoopSleeper,
+};
 use tenex_daemon::daemon_maintenance::{
     DaemonMaintenanceInput, DaemonMaintenanceOutcome, run_daemon_maintenance_once_from_filesystem,
 };
@@ -34,10 +40,16 @@ use tenex_daemon::project_status_descriptors::{
 use tenex_daemon::project_status_runtime::{
     ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
-use tenex_daemon::publish_outbox::{PublishOutboxDiagnostics, inspect_publish_outbox};
+use tenex_daemon::publish_outbox::{
+    PublishOutboxDiagnostics, PublishOutboxMaintenanceReport, PublishOutboxRetryPolicy,
+    inspect_publish_outbox,
+};
+use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
 use tenex_daemon::scheduler_wakeups::{inspect_scheduler_wakeups, run_scheduler_maintenance};
 
 const CACHES_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
+const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
+const DEFAULT_FOREGROUND_RELAY_TIMEOUT_MS: u64 = 10_000;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
 
@@ -50,6 +62,7 @@ enum DaemonControlCommand {
     BackendEventsEnqueueProjectStatus,
     BackendEventsPeriodicTick,
     DaemonMaintenance,
+    DaemonForeground,
     Readiness,
     SchedulerWakeups,
     SchedulerWakeupsMaintain,
@@ -69,6 +82,8 @@ struct DaemonControlCliOptions {
     accepted_at: Option<u64>,
     request_timestamp: Option<u64>,
     first_due_at: Option<u64>,
+    iterations: Option<u64>,
+    sleep_ms: u64,
     project_owner_pubkey: Option<String>,
     project_d_tag: Option<String>,
     project_manager_pubkey: Option<String>,
@@ -167,6 +182,35 @@ struct DaemonMaintenanceDiagnostics {
     maintenance: DaemonMaintenanceOutcome,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonForegroundDiagnostics {
+    schema_version: u32,
+    tenex_base_dir: PathBuf,
+    daemon_dir: PathBuf,
+    started_at: u64,
+    stopped_at: u64,
+    iterations: u64,
+    sleep_ms: u64,
+    steps: Vec<DaemonForegroundStepDiagnostics>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonForegroundStepDiagnostics {
+    iteration_index: u64,
+    now_ms: u64,
+    tick: DaemonForegroundTickDiagnostics,
+    sleep_after_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonForegroundTickDiagnostics {
+    maintenance: DaemonMaintenanceOutcome,
+    publish_outbox: PublishOutboxMaintenanceReport,
+}
+
 #[derive(Debug)]
 struct CliError {
     message: String,
@@ -237,6 +281,11 @@ where
         }
         DaemonControlCommand::DaemonMaintenance => {
             let diagnostics = run_daemon_maintenance(&options)?;
+            serde_json::to_string_pretty(&diagnostics)
+                .map_err(|error| runtime_error(error.to_string()))
+        }
+        DaemonControlCommand::DaemonForeground => {
+            let diagnostics = run_daemon_foreground(&options)?;
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
@@ -409,6 +458,68 @@ fn run_daemon_maintenance(
     Ok(DaemonMaintenanceDiagnostics {
         schema_version: 1,
         maintenance: diagnostics,
+    })
+}
+
+fn run_daemon_foreground(
+    options: &DaemonControlCliOptions,
+) -> Result<DaemonForegroundDiagnostics, CliError> {
+    let iterations = options
+        .iterations
+        .ok_or_else(|| usage_error("--iterations is required"))?;
+    if iterations == 0 {
+        return Err(usage_error("--iterations must be greater than 0"));
+    }
+
+    let config = read_backend_config(&options.tenex_base_dir)
+        .map_err(|error| runtime_error(error.to_string()))?;
+    let relay_config = RelayPublisherConfig::new(
+        config.effective_relay_urls(),
+        Duration::from_millis(DEFAULT_FOREGROUND_RELAY_TIMEOUT_MS),
+    )
+    .map_err(|error| runtime_error(error.to_string()))?;
+    let mut publisher = NostrRelayPublisher::new(relay_config);
+    let shell = DaemonShell::new(&options.daemon_dir);
+    let mut clock = SystemDaemonMaintenanceLoopClock;
+    let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
+    let report = run_daemon_foreground_from_filesystem(
+        &shell,
+        DaemonForegroundInput {
+            tenex_base_dir: &options.tenex_base_dir,
+            max_iterations: iterations,
+            sleep_ms: options.sleep_ms,
+            retry_policy: PublishOutboxRetryPolicy::default(),
+        },
+        &mut clock,
+        &mut sleeper,
+        &mut publisher,
+    )
+    .map_err(|error| runtime_error(error.to_string()))?;
+    let stopped_at = current_unix_time_ms();
+    let steps = report
+        .tick_loop
+        .steps
+        .into_iter()
+        .map(|step| DaemonForegroundStepDiagnostics {
+            iteration_index: step.iteration_index,
+            now_ms: step.now_ms,
+            tick: DaemonForegroundTickDiagnostics {
+                maintenance: step.maintenance_outcome.maintenance,
+                publish_outbox: step.maintenance_outcome.publish_outbox,
+            },
+            sleep_after_ms: step.sleep_after_ms,
+        })
+        .collect();
+
+    Ok(DaemonForegroundDiagnostics {
+        schema_version: DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION,
+        tenex_base_dir: report.tenex_base_dir,
+        daemon_dir: report.daemon_dir,
+        started_at: report.started_at_ms,
+        stopped_at,
+        iterations,
+        sleep_ms: options.sleep_ms,
+        steps,
     })
 }
 
@@ -620,6 +731,7 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         }
         Some("backend-events-periodic-tick") => DaemonControlCommand::BackendEventsPeriodicTick,
         Some("daemon-maintenance") => DaemonControlCommand::DaemonMaintenance,
+        Some("daemon-foreground") => DaemonControlCommand::DaemonForeground,
         Some("readiness") => DaemonControlCommand::Readiness,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
         Some("scheduler-wakeups-maintain") => DaemonControlCommand::SchedulerWakeupsMaintain,
@@ -643,6 +755,8 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let mut accepted_at = None;
     let mut request_timestamp = None;
     let mut first_due_at = None;
+    let mut iterations = None;
+    let mut sleep_ms = 0;
     let mut project_owner_pubkey = None;
     let mut project_d_tag = None;
     let mut project_manager_pubkey = None;
@@ -701,6 +815,20 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .ok_or_else(|| usage_error("--first-due-at requires a value"))?;
                 first_due_at = Some(parse_u64_arg("--first-due-at", value)?);
             }
+            "--iterations" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--iterations requires a value"))?;
+                iterations = Some(parse_u64_arg("--iterations", value)?);
+            }
+            "--sleep-ms" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--sleep-ms requires a value"))?;
+                sleep_ms = parse_u64_arg("--sleep-ms", value)?;
+            }
             "--project-owner-pubkey" => {
                 index += 1;
                 let value = args
@@ -746,7 +874,8 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let daemon_dir = match daemon_dir {
         Some(daemon_dir) => daemon_dir,
         None if command == DaemonControlCommand::Readiness
-            || command == DaemonControlCommand::DaemonMaintenance =>
+            || command == DaemonControlCommand::DaemonMaintenance
+            || command == DaemonControlCommand::DaemonForeground =>
         {
             tenex_base_dir
                 .as_ref()
@@ -766,6 +895,8 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         accepted_at,
         request_timestamp,
         first_due_at,
+        iterations,
+        sleep_ms,
         project_owner_pubkey,
         project_d_tag,
         project_manager_pubkey,
@@ -809,6 +940,7 @@ fn usage() -> String {
         "  daemon-control backend-events-enqueue-project-status --daemon-dir <path> [--tenex-base-dir <path>] --project-owner-pubkey <hex> --project-d-tag <d> [--project-manager-pubkey <hex>] [--worktree <branch>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control backend-events-periodic-tick --daemon-dir <path> [--tenex-base-dir <path>] [--discover-projects | --project-owner-pubkey <hex> --project-d-tag <d>] [--project-manager-pubkey <hex>] [--worktree <branch>] [--first-due-at <s>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]",
+        "  daemon-control daemon-foreground [--daemon-dir <path> | --tenex-base-dir <path>] --iterations <count> [--sleep-ms <ms>]",
         "  daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
         "  daemon-control scheduler-wakeups-maintain --daemon-dir <path> [--inspected-at <ms>]",
@@ -1061,6 +1193,26 @@ mod tests {
     }
 
     #[test]
+    fn parses_daemon_foreground_args_with_tenex_base_dir_only() {
+        let options = parse_daemon_control_args(&[
+            "daemon-foreground".to_string(),
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--iterations".to_string(),
+            "2".to_string(),
+            "--sleep-ms".to_string(),
+            "50".to_string(),
+        ])
+        .expect("daemon-foreground args must parse");
+
+        assert_eq!(options.command, DaemonControlCommand::DaemonForeground);
+        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
+        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex/daemon"));
+        assert_eq!(options.iterations, Some(2));
+        assert_eq!(options.sleep_ms, 50);
+    }
+
+    #[test]
     fn parses_readiness_args_with_tenex_base_dir_only() {
         let options = parse_daemon_control_args(&[
             "readiness".to_string(),
@@ -1156,6 +1308,27 @@ mod tests {
         .expect("restart-state args must parse");
 
         assert_eq!(options.command, DaemonControlCommand::RestartState);
+    }
+
+    #[test]
+    fn foreground_command_rejects_missing_iterations() {
+        let error = run_cli(["daemon-foreground", "--daemon-dir", "/tmp/tenex-daemon"])
+            .expect_err("daemon-foreground without iterations must fail");
+
+        assert_eq!(error.to_string(), "--iterations is required");
+        assert_eq!(error.exit_code, USAGE_EXIT_CODE);
+    }
+
+    #[test]
+    fn help_usage_includes_daemon_foreground_command() {
+        let error = run_cli(["help"]).expect_err("help must return usage");
+
+        assert!(
+            error
+                .to_string()
+                .contains("daemon-control daemon-foreground")
+        );
+        assert_eq!(error.exit_code, USAGE_EXIT_CODE);
     }
 
     #[test]
