@@ -3,3 +3,4 @@ pub mod client;
 pub mod outbox_adapter;
 pub mod pending;
 pub mod protocol;
+pub mod registry;

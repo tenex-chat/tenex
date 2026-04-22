@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -54,6 +55,29 @@ pub struct BackendConfigSnapshot {
     pub identity_relays: Vec<String>,
     pub blossom_server_url: Option<String>,
     pub generated_tenex_private_key: bool,
+    pub nip46: Nip46Config,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Nip46Config {
+    pub signing_timeout_ms: u64,
+    pub max_retries: u8,
+    pub owners: HashMap<String, OwnerNip46Config>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnerNip46Config {
+    pub bunker_uri: Option<String>,
+}
+
+impl Default for Nip46Config {
+    fn default() -> Self {
+        Self {
+            signing_timeout_ms: 30_000,
+            max_retries: 2,
+            owners: HashMap::new(),
+        }
+    }
 }
 
 impl fmt::Debug for BackendConfigSnapshot {
@@ -76,6 +100,7 @@ impl fmt::Debug for BackendConfigSnapshot {
                 "generated_tenex_private_key",
                 &self.generated_tenex_private_key,
             )
+            .field("nip46", &self.nip46)
             .finish()
     }
 }
@@ -126,6 +151,48 @@ struct RawTenexConfig {
     identity_relays: Vec<String>,
     #[serde(default)]
     blossom_server_url: Option<String>,
+    #[serde(default)]
+    nip46: Option<RawNip46Config>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawNip46Config {
+    #[serde(default)]
+    signing_timeout_ms: Option<u64>,
+    #[serde(default)]
+    max_retries: Option<u8>,
+    #[serde(default)]
+    owners: HashMap<String, RawOwnerNip46Config>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawOwnerNip46Config {
+    #[serde(default)]
+    bunker_uri: Option<String>,
+}
+
+impl RawNip46Config {
+    fn into_config(self) -> Nip46Config {
+        let defaults = Nip46Config::default();
+        Nip46Config {
+            signing_timeout_ms: self.signing_timeout_ms.unwrap_or(defaults.signing_timeout_ms),
+            max_retries: self.max_retries.unwrap_or(defaults.max_retries),
+            owners: self
+                .owners
+                .into_iter()
+                .map(|(owner, entry)| {
+                    (
+                        owner,
+                        OwnerNip46Config {
+                            bunker_uri: entry.bunker_uri,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 pub fn backend_config_path(base_dir: impl AsRef<Path>) -> PathBuf {
@@ -163,6 +230,10 @@ pub fn read_backend_config(
         identity_relays: raw.identity_relays,
         blossom_server_url: raw.blossom_server_url,
         generated_tenex_private_key,
+        nip46: raw
+            .nip46
+            .map(RawNip46Config::into_config)
+            .unwrap_or_default(),
     })
 }
 
@@ -372,6 +443,7 @@ mod tests {
             identity_relays: Vec::new(),
             blossom_server_url: None,
             generated_tenex_private_key: false,
+            nip46: Nip46Config::default(),
         };
 
         assert!(matches!(
@@ -426,12 +498,112 @@ mod tests {
             identity_relays: Vec::new(),
             blossom_server_url: None,
             generated_tenex_private_key: false,
+            nip46: Nip46Config::default(),
         };
 
         let debug = format!("{snapshot:?}");
 
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains(TEST_SECRET_KEY_HEX));
+    }
+
+    #[test]
+    fn nip46_defaults_apply_when_block_is_missing() {
+        let base_dir = temp_dir("nip46_defaults_apply_when_block_is_missing");
+        fs::create_dir_all(&base_dir).expect("create temp config dir");
+        fs::write(backend_config_path(&base_dir), "{}").expect("write config");
+
+        let snapshot = read_backend_config(&base_dir).expect("read config");
+
+        assert_eq!(snapshot.nip46, Nip46Config::default());
+        assert_eq!(snapshot.nip46.signing_timeout_ms, 30_000);
+        assert_eq!(snapshot.nip46.max_retries, 2);
+        assert!(snapshot.nip46.owners.is_empty());
+    }
+
+    #[test]
+    fn nip46_partial_overrides_fill_remaining_defaults() {
+        let base_dir = temp_dir("nip46_partial_overrides_fill_remaining_defaults");
+        fs::create_dir_all(&base_dir).expect("create temp config dir");
+        fs::write(
+            backend_config_path(&base_dir),
+            r#"{ "nip46": { "signingTimeoutMs": 12345 } }"#,
+        )
+        .expect("write config");
+
+        let snapshot = read_backend_config(&base_dir).expect("read config");
+
+        assert_eq!(snapshot.nip46.signing_timeout_ms, 12_345);
+        assert_eq!(snapshot.nip46.max_retries, 2);
+        assert!(snapshot.nip46.owners.is_empty());
+    }
+
+    #[test]
+    fn nip46_owners_map_is_preserved_as_parsed() {
+        let base_dir = temp_dir("nip46_owners_map_is_preserved_as_parsed");
+        fs::create_dir_all(&base_dir).expect("create temp config dir");
+        fs::write(
+            backend_config_path(&base_dir),
+            r#"{
+                "nip46": {
+                    "maxRetries": 5,
+                    "owners": {
+                        "owner-a": { "bunkerUri": "bunker://pk-a?relay=wss://a/" },
+                        "owner-b": {}
+                    }
+                }
+            }"#,
+        )
+        .expect("write config");
+
+        let snapshot = read_backend_config(&base_dir).expect("read config");
+
+        assert_eq!(snapshot.nip46.signing_timeout_ms, 30_000);
+        assert_eq!(snapshot.nip46.max_retries, 5);
+        assert_eq!(snapshot.nip46.owners.len(), 2);
+        assert_eq!(
+            snapshot.nip46.owners.get("owner-a"),
+            Some(&OwnerNip46Config {
+                bunker_uri: Some("bunker://pk-a?relay=wss://a/".to_string()),
+            })
+        );
+        assert_eq!(
+            snapshot.nip46.owners.get("owner-b"),
+            Some(&OwnerNip46Config { bunker_uri: None })
+        );
+    }
+
+    #[test]
+    fn nip46_unknown_keys_inside_block_are_tolerated() {
+        let base_dir = temp_dir("nip46_unknown_keys_inside_block_are_tolerated");
+        fs::create_dir_all(&base_dir).expect("create temp config dir");
+        fs::write(
+            backend_config_path(&base_dir),
+            r#"{
+                "nip46": {
+                    "signingTimeoutMs": 40000,
+                    "someFutureOption": true,
+                    "owners": {
+                        "owner-a": {
+                            "bunkerUri": "bunker://pk-a?relay=wss://a/",
+                            "somethingElse": 7
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("write config");
+
+        let snapshot = read_backend_config(&base_dir).expect("read config");
+
+        assert_eq!(snapshot.nip46.signing_timeout_ms, 40_000);
+        assert_eq!(snapshot.nip46.max_retries, 2);
+        assert_eq!(
+            snapshot.nip46.owners.get("owner-a"),
+            Some(&OwnerNip46Config {
+                bunker_uri: Some("bunker://pk-a?relay=wss://a/".to_string()),
+            })
+        );
     }
 
     fn temp_dir(name: &str) -> PathBuf {
