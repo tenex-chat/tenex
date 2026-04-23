@@ -72,7 +72,6 @@ pub struct RuntimeStatusEntry {
 #[serde(rename_all = "camelCase")]
 pub struct RestartStateData {
     pub requested_at: u64,
-    pub booted_projects: Vec<String>,
     pub pid: u32,
     pub hostname: String,
 }
@@ -99,13 +98,11 @@ pub fn build_lock_info(pid: u32, hostname: impl Into<String>, started_at: u64) -
 
 pub fn build_restart_state(
     requested_at: u64,
-    booted_projects: Vec<String>,
     pid: u32,
     hostname: impl Into<String>,
 ) -> RestartStateData {
     RestartStateData {
         requested_at,
-        booted_projects,
         pid,
         hostname: hostname.into(),
     }
@@ -234,7 +231,6 @@ mod tests {
         assert_eq!(
             build_restart_state(
                 fixture.restart_state.requested_at,
-                fixture.restart_state.booted_projects.clone(),
                 fixture.restart_state.pid,
                 fixture.restart_state.hostname.clone()
             ),

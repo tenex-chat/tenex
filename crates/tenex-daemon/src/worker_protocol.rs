@@ -575,6 +575,15 @@ fn validate_inject(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     require_string(object, "leaseToken")?;
     require_one_of(object, "role", &["user", "system"])?;
     require_string(object, "content")?;
+    if let Some(value) = object.get("delegationCompletion") {
+        let completion = value
+            .as_object()
+            .ok_or(WorkerProtocolError::InvalidField("delegationCompletion"))?;
+        require_string(completion, "delegationConversationId")?;
+        require_hex_pubkey(completion, "recipientPubkey")?;
+        require_u64(completion, "completedAt")?;
+        require_string(completion, "completionEventId")?;
+    }
     Ok(())
 }
 
@@ -1207,6 +1216,28 @@ mod tests {
             })
             .expect("ack must build"),
             ack,
+        );
+    }
+
+    #[test]
+    fn inject_message_validates_delegation_completion_payload() {
+        let mut inject = fixture_valid_message("inject");
+        inject["delegationCompletion"] = json!({
+            "delegationConversationId": "delegation-conversation",
+            "recipientPubkey": "b".repeat(64),
+            "completedAt": 1_710_001_100_000_u64,
+            "completionEventId": "completion-event-id",
+        });
+
+        assert_eq!(
+            validate_agent_worker_protocol_message(&inject),
+            Ok(WorkerProtocolDirection::DaemonToWorker)
+        );
+
+        inject["delegationCompletion"]["recipientPubkey"] = json!("not-a-pubkey");
+        assert_eq!(
+            validate_agent_worker_protocol_message(&inject),
+            Err(WorkerProtocolError::InvalidField("recipientPubkey"))
         );
     }
 

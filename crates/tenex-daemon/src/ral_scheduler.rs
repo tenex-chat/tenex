@@ -277,6 +277,8 @@ impl RalScheduler {
                     RalDelegationCompletionTarget {
                         identity: entry.identity.clone(),
                         status: entry.status,
+                        worker_id: entry.worker_id.clone(),
+                        active_claim_token: entry.active_claim_token.clone(),
                         triggering_event_id: entry.triggering_event_id.clone(),
                         pending_delegation: pending.clone(),
                         remaining_pending_delegations,
@@ -808,6 +810,8 @@ pub enum RalDelegationCompletionLookup {
 pub struct RalDelegationCompletionTarget {
     pub identity: RalJournalIdentity,
     pub status: RalReplayStatus,
+    pub worker_id: Option<String>,
+    pub active_claim_token: Option<String>,
     pub triggering_event_id: Option<String>,
     pub pending_delegation: RalPendingDelegation,
     pub remaining_pending_delegations: Vec<RalPendingDelegation>,

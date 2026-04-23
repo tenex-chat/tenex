@@ -490,6 +490,7 @@ mod tests {
             match self {
                 RalJournalEvent::Allocated { .. } => "allocated",
                 RalJournalEvent::Claimed { .. } => "claimed",
+                RalJournalEvent::DelegationRegistered { .. } => "delegation_registered",
                 RalJournalEvent::WaitingForDelegation { .. } => "waiting_for_delegation",
                 RalJournalEvent::DelegationCompleted { .. } => "delegation_completed",
                 RalJournalEvent::Completed { .. } => "completed",

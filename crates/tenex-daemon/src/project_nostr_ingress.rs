@@ -19,6 +19,8 @@ pub struct ProjectNostrIngressOutcome {
     pub owner_pubkey: String,
     pub is_new_project: bool,
     pub agent_pubkeys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_url: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -78,6 +80,7 @@ pub fn handle_project_nostr_event(
         .into_iter()
         .map(str::to_string)
         .collect();
+    let repo_url = optional_tag_value(event, "repo");
     let project_base_path = format!("{}/{}", projects_base.trim_end_matches('/'), d_tag);
 
     let descriptor_path = project_descriptor_path(tenex_base_dir, d_tag);
@@ -86,12 +89,15 @@ pub fn handle_project_nostr_event(
     let project_dir = tenex_base_dir.join(PROJECTS_DIR_NAME).join(d_tag);
     fs::create_dir_all(&project_dir).map_err(ProjectNostrIngressError::CreateDir)?;
 
-    let descriptor = json!({
+    let mut descriptor = json!({
         "projectOwnerPubkey": owner_pubkey,
         "projectDTag": d_tag,
         "projectBasePath": project_base_path,
         "status": "active"
     });
+    if let Some(repo_url) = &repo_url {
+        descriptor["repo"] = json!(repo_url);
+    }
     fs::write(
         project_dir.join(PROJECT_DESCRIPTOR_FILE_NAME),
         serde_json::to_string_pretty(&descriptor).expect("descriptor serializes"),
@@ -125,6 +131,7 @@ pub fn handle_project_nostr_event(
         owner_pubkey,
         is_new_project,
         agent_pubkeys,
+        repo_url,
     })
 }
 
@@ -145,6 +152,13 @@ fn tag_values<'a>(event: &'a SignedNostrEvent, name: &str) -> Vec<&'a str> {
         .filter_map(|tag| tag.get(1))
         .map(String::as_str)
         .collect()
+}
+
+fn optional_tag_value(event: &SignedNostrEvent, name: &str) -> Option<String> {
+    tag_value(event, name)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -189,6 +203,7 @@ mod tests {
         assert_eq!(outcome.owner_pubkey, owner);
         assert!(outcome.is_new_project);
         assert_eq!(outcome.agent_pubkeys, vec![agent1.clone(), agent2.clone()]);
+        assert_eq!(outcome.repo_url, None);
 
         let descriptor_path = base
             .join("projects")
@@ -213,6 +228,28 @@ mod tests {
         let by_project = &index["byProject"]["my-project"];
         assert_eq!(by_project[0], agent1.as_str());
         assert_eq!(by_project[1], agent2.as_str());
+    }
+
+    #[test]
+    fn stores_repo_tag_in_project_descriptor() {
+        let tmp = tempdir().expect("temp dir");
+        let base = tmp.path();
+        let owner = "a".repeat(64);
+        let repo = "https://example.com/project.git";
+        let mut event = project_event(&owner, "repo-project", &[]);
+        event.tags.push(vec!["repo".to_string(), repo.to_string()]);
+
+        let outcome =
+            handle_project_nostr_event(base, &event, "/workspace/projects").expect("handle");
+
+        assert_eq!(outcome.repo_url.as_deref(), Some(repo));
+        let descriptor_path = base
+            .join("projects")
+            .join("repo-project")
+            .join("project.json");
+        let descriptor: Value =
+            serde_json::from_str(&fs::read_to_string(&descriptor_path).unwrap()).unwrap();
+        assert_eq!(descriptor["repo"], repo);
     }
 
     #[test]

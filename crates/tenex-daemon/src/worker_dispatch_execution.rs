@@ -14,6 +14,10 @@ pub trait WorkerDispatchSession {
     type Error: Error + Send + Sync + 'static;
 
     fn send_worker_message(&mut self, message: &Value) -> Result<(), Self::Error>;
+
+    fn is_worker_pipe_closed_error(_error: &Self::Error) -> bool {
+        false
+    }
 }
 
 pub trait WorkerDispatchSpawner {
@@ -79,6 +83,10 @@ impl WorkerDispatchSession for AgentWorkerProcess {
 
     fn send_worker_message(&mut self, message: &Value) -> Result<(), Self::Error> {
         self.send_message(message)
+    }
+
+    fn is_worker_pipe_closed_error(error: &Self::Error) -> bool {
+        error.is_worker_input_closed()
     }
 }
 

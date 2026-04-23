@@ -4,7 +4,10 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::dispatch_queue::DispatchQueueState;
-use crate::ral_journal::RalJournalIdentity;
+use crate::ral_journal::{
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalError, RalJournalEvent,
+    RalJournalIdentity, RalJournalRecord, RalPendingDelegation, append_ral_journal_record,
+};
 use crate::ral_scheduler::RalScheduler;
 use crate::worker_completion::WorkerCompletionDispatchInput;
 use crate::worker_dispatch_execution::WorkerDispatchSession;
@@ -152,6 +155,13 @@ pub enum WorkerMessageFlowError {
         #[source]
         source: Box<WorkerTerminalFlowError>,
     },
+    #[error("worker delegation registration journal failed: {source}")]
+    RalJournal {
+        #[source]
+        source: Box<RalJournalError>,
+    },
+    #[error("worker delegation registration journal sequence exhausted after {last_sequence}")]
+    RalJournalSequenceExhausted { last_sequence: u64 },
 }
 
 pub fn handle_worker_message_flow<S>(
@@ -210,14 +220,31 @@ where
                 &message_plan,
             )?;
             ensure_terminal_context_matches_worker(&active_worker, &terminal.result_context)?;
+            let terminal_scheduler =
+                RalScheduler::from_daemon_dir(input.daemon_dir).map_err(|source| {
+                    WorkerMessageFlowError::RalJournal {
+                        source: Box::new(source),
+                    }
+                })?;
+            let mut result_context = terminal.result_context;
+            result_context.journal_sequence = terminal_scheduler
+                .state()
+                .last_sequence
+                .checked_add(1)
+                .ok_or(WorkerMessageFlowError::RalJournalSequenceExhausted {
+                    last_sequence: terminal_scheduler.state().last_sequence,
+                })?;
+            if let Some(entry) = terminal_scheduler.entry(&active_worker.identity) {
+                result_context.resolved_pending_delegations = entry.pending_delegations.clone();
+            }
 
             let outcome = handle_worker_terminal_result(
-                terminal.scheduler,
+                &terminal_scheduler,
                 terminal.dispatch_state,
                 WorkerTerminalFlowInput {
                     daemon_dir: input.daemon_dir,
                     message: &message_plan.message,
-                    result_context: terminal.result_context,
+                    result_context,
                     dispatch: terminal.dispatch,
                     locks: terminal.locks,
                 },
@@ -234,6 +261,9 @@ where
             })
         }
         WorkerMessageAction::ControlTelemetry { kind } => {
+            if kind == WorkerControlTelemetryKind::DelegationRegistered {
+                handle_delegation_registered(runtime_state, &input, &message_plan)?;
+            }
             Ok(WorkerMessageFlowOutcome::ControlTelemetry {
                 message: message_plan,
                 kind,
@@ -333,6 +363,93 @@ fn ensure_terminal_context_matches_worker(
     Ok(())
 }
 
+fn handle_delegation_registered(
+    runtime_state: &WorkerRuntimeState,
+    input: &WorkerMessageFlowInput<'_>,
+    message_plan: &WorkerMessagePlan,
+) -> Result<(), WorkerMessageFlowError> {
+    let active_worker =
+        ensure_active_worker_matches_message(runtime_state, input.worker_id, message_plan)?;
+    let pending_delegation =
+        pending_delegation_from_message(&message_plan.message, &active_worker.identity)?;
+    let scheduler = RalScheduler::from_daemon_dir(input.daemon_dir).map_err(|source| {
+        WorkerMessageFlowError::RalJournal {
+            source: Box::new(source),
+        }
+    })?;
+    let sequence = scheduler.state().last_sequence.checked_add(1).ok_or(
+        WorkerMessageFlowError::RalJournalSequenceExhausted {
+            last_sequence: scheduler.state().last_sequence,
+        },
+    )?;
+    let record = RalJournalRecord::new(
+        RAL_JOURNAL_WRITER_RUST_DAEMON,
+        env!("CARGO_PKG_VERSION"),
+        sequence,
+        input.observed_at,
+        format!(
+            "{}:delegation_registered",
+            message_plan.metadata.correlation_id
+        ),
+        RalJournalEvent::DelegationRegistered {
+            identity: active_worker.identity,
+            worker_id: active_worker.worker_id,
+            claim_token: active_worker.claim_token,
+            pending_delegation,
+        },
+    );
+    append_ral_journal_record(input.daemon_dir, &record).map_err(|source| {
+        WorkerMessageFlowError::RalJournal {
+            source: Box::new(source),
+        }
+    })?;
+
+    Ok(())
+}
+
+fn pending_delegation_from_message(
+    message: &Value,
+    identity: &RalJournalIdentity,
+) -> Result<RalPendingDelegation, WorkerMessageFlowError> {
+    Ok(RalPendingDelegation {
+        delegation_conversation_id: required_string(message, "delegationConversationId")?
+            .to_string(),
+        recipient_pubkey: required_string(message, "recipientPubkey")?.to_string(),
+        sender_pubkey: optional_string(message, "senderPubkey")
+            .unwrap_or(identity.agent_pubkey.as_str())
+            .to_string(),
+        prompt: optional_string(message, "prompt")
+            .unwrap_or_default()
+            .to_string(),
+        delegation_type: delegation_type_from_message(message)?,
+        ral_number: identity.ral_number,
+        parent_delegation_conversation_id: optional_string(
+            message,
+            "parentDelegationConversationId",
+        )
+        .map(str::to_string),
+        pending_sub_delegations: None,
+        deferred_completion: None,
+        followup_event_id: optional_string(message, "followupEventId").map(str::to_string),
+        project_id: optional_string(message, "delegationProjectId").map(str::to_string),
+        suggestions: optional_string_array(message, "suggestions"),
+        killed: None,
+        killed_at: None,
+    })
+}
+
+fn delegation_type_from_message(
+    message: &Value,
+) -> Result<RalDelegationType, WorkerMessageFlowError> {
+    match required_string(message, "delegationType")? {
+        "standard" => Ok(RalDelegationType::Standard),
+        "followup" => Ok(RalDelegationType::Followup),
+        "external" => Ok(RalDelegationType::External),
+        "ask" => Ok(RalDelegationType::Ask),
+        _ => Err(WorkerMessageFlowError::InvalidField("delegationType")),
+    }
+}
+
 fn ral_identity_from_message(
     message: &Value,
 ) -> Result<RalJournalIdentity, WorkerMessageFlowError> {
@@ -386,6 +503,19 @@ fn required_bool(value: &Value, field: &'static str) -> Result<bool, WorkerMessa
         .get(field)
         .and_then(Value::as_bool)
         .ok_or(WorkerMessageFlowError::InvalidField(field))
+}
+
+fn optional_string<'a>(value: &'a Value, field: &'static str) -> Option<&'a str> {
+    value.get(field).and_then(Value::as_str)
+}
+
+fn optional_string_array(value: &Value, field: &'static str) -> Option<Vec<String>> {
+    let array = value.get(field)?.as_array()?;
+    let mut strings = Vec::with_capacity(array.len());
+    for item in array {
+        strings.push(item.as_str()?.to_string());
+    }
+    Some(strings)
 }
 
 impl From<WorkerMessageError> for WorkerMessageFlowError {
@@ -446,6 +576,7 @@ mod tests {
     use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
     use crate::worker_launch_lock::acquire_worker_launch_locks;
     use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
+    use crate::worker_publish_flow::WorkerPublishResultDelivery;
     use crate::worker_runtime_state::{WorkerRuntimeStartedDispatch, WorkerRuntimeState};
     use serde_json::json;
     use std::error::Error;
@@ -529,6 +660,67 @@ mod tests {
     }
 
     #[test]
+    fn delegation_registered_records_pending_delegation_for_claimed_ral() {
+        let daemon_dir = unique_temp_daemon_dir();
+        append_initial_ral_records(&daemon_dir);
+        let mut runtime_state = runtime_state_for(identity());
+        let mut session = RecordingSession::default();
+        let message = json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "delegation_registered",
+            "correlationId": "worker-message-flow-test",
+            "sequence": 42,
+            "timestamp": 1_710_000_404_000_u64,
+            "projectId": "project-alpha",
+            "agentPubkey": "a".repeat(64),
+            "conversationId": "conversation-alpha",
+            "ralNumber": 3,
+            "delegationConversationId": "delegation-a",
+            "recipientPubkey": "b".repeat(64),
+            "senderPubkey": "a".repeat(64),
+            "prompt": "please handle this",
+            "delegationType": "standard",
+        });
+
+        let outcome = handle_worker_message_flow(
+            &mut session,
+            &mut runtime_state,
+            WorkerMessageFlowInput {
+                daemon_dir: &daemon_dir,
+                worker_id: "worker-alpha",
+                message: &message,
+                observed_at: 1_710_000_404_050,
+                publish: None,
+                terminal: None,
+            },
+        )
+        .expect("delegation registration must be recorded");
+
+        match outcome {
+            WorkerMessageFlowOutcome::ControlTelemetry { message, kind } => {
+                assert_eq!(message.metadata.message_type, "delegation_registered");
+                assert_eq!(kind, WorkerControlTelemetryKind::DelegationRegistered);
+            }
+            other => panic!("expected control telemetry outcome, got {other:?}"),
+        }
+
+        let scheduler = RalScheduler::from_daemon_dir(&daemon_dir).expect("journal must replay");
+        let entry = scheduler
+            .entry(&identity())
+            .expect("claimed RAL entry must remain present");
+        assert_eq!(entry.status, crate::ral_journal::RalReplayStatus::Claimed);
+        assert_eq!(entry.pending_delegations.len(), 1);
+        assert_eq!(
+            entry.pending_delegations[0].delegation_conversation_id,
+            "delegation-a"
+        );
+        assert_eq!(entry.pending_delegations[0].prompt, "please handle this");
+        assert!(session.sent_messages.is_empty());
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     fn handles_publish_request_through_publish_flow() {
         let daemon_dir = unique_temp_daemon_dir();
         let fixture = signed_event_fixture();
@@ -571,6 +763,7 @@ mod tests {
                     session.sent_messages,
                     vec![outcome.acceptance.publish_result]
                 );
+                assert_eq!(outcome.result_delivery, WorkerPublishResultDelivery::Sent);
             }
             other => panic!("expected publish outcome, got {other:?}"),
         }

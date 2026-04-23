@@ -15,6 +15,7 @@ use crate::daemon_loop::{
 use crate::daemon_maintenance::TelegramMaintenancePublisher;
 use crate::daemon_shell::{DaemonShell, DaemonShellError, DaemonShellStopMode};
 use crate::process_liveness::ProcessLivenessProbe;
+use crate::project_boot_state::ProjectBootState;
 use crate::publish_outbox::PublishOutboxRelayPublisher;
 use crate::publish_outbox::PublishOutboxRetryPolicy;
 use crate::ral_journal::RalPendingDelegation;
@@ -30,6 +31,7 @@ pub struct DaemonForegroundInput<'a> {
     pub max_iterations: u64,
     pub sleep_ms: u64,
     pub retry_policy: PublishOutboxRetryPolicy,
+    pub project_boot_state: Arc<Mutex<ProjectBootState>>,
     /// Optional latch shared with the whitelist ingress; when present, the
     /// inner maintenance loop gates the kind 24012 heartbeat on it.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
@@ -41,6 +43,7 @@ pub struct DaemonForegroundStoppableInput<'a> {
     pub max_iterations: Option<u64>,
     pub sleep_ms: u64,
     pub retry_policy: PublishOutboxRetryPolicy,
+    pub project_boot_state: Arc<Mutex<ProjectBootState>>,
     /// See [`DaemonForegroundInput::heartbeat_latch`].
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
@@ -150,6 +153,7 @@ where
             daemon_dir: shell.daemon_dir(),
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
+            project_boot_state: input.project_boot_state.clone(),
             heartbeat_latch: input.heartbeat_latch.clone(),
         },
         clock,
@@ -212,6 +216,7 @@ where
             daemon_dir: shell.daemon_dir(),
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
+            project_boot_state: input.project_boot_state.clone(),
             heartbeat_latch: input.heartbeat_latch.clone(),
         },
         clock,
@@ -290,6 +295,7 @@ where
             daemon_dir: shell.daemon_dir(),
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
+            project_boot_state: input.project_boot_state.clone(),
             heartbeat_latch: input.heartbeat_latch.clone(),
         },
         DaemonWorkerLoopInput {
@@ -605,6 +611,7 @@ mod tests {
                 max_iterations: 2,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
             },
             &mut clock,
@@ -664,6 +671,7 @@ mod tests {
                 max_iterations: None,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
             },
             &mut clock,
@@ -717,6 +725,7 @@ mod tests {
                 max_iterations: None,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
@@ -798,6 +807,7 @@ mod tests {
                 max_iterations: None,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
@@ -886,6 +896,7 @@ mod tests {
                 max_iterations: 1,
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
+                project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
             },
             &mut clock,
@@ -1050,6 +1061,10 @@ mod tests {
             tenex_base_dir,
             daemon_dir,
         }
+    }
+
+    fn empty_project_boot_state() -> Arc<Mutex<ProjectBootState>> {
+        Arc::new(Mutex::new(ProjectBootState::new()))
     }
 
     fn test_shell(daemon_dir: &Path) -> DaemonShell<FixedProbe> {

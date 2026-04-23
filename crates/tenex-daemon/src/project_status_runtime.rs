@@ -11,8 +11,8 @@ use crate::backend_event_publish::{
 };
 use crate::backend_events::project_status::{ProjectStatusAgent, ProjectStatusModel};
 use crate::project_status_agent_sources::{
-    ProjectStatusAgentSourceError, ProjectStatusAgentSourceReport,
-    read_project_status_agent_sources,
+    ProjectStatusAgentSourceError, ProjectStatusAgentSourceOptions, ProjectStatusAgentSourceReport,
+    read_project_status_agent_sources_with_options,
 };
 use crate::project_status_snapshot::ProjectStatusSnapshot;
 use crate::project_status_sources::{
@@ -72,8 +72,14 @@ pub fn publish_project_status_from_filesystem(
     let config = read_backend_config(input.tenex_base_dir)?;
     let signer = config.backend_signer()?;
     let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
-    let project_agent_sources =
-        read_project_status_agent_sources(input.tenex_base_dir, input.project_d_tag)?;
+    let project_agent_sources = read_project_status_agent_sources_with_options(
+        input.tenex_base_dir,
+        input.project_d_tag,
+        ProjectStatusAgentSourceOptions {
+            project_base_path: input.project_base_path,
+            ..ProjectStatusAgentSourceOptions::default()
+        },
+    )?;
     let GlobalLlmConfig {
         model_keys: llm_model_keys,
         default_model: global_default_model,

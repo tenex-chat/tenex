@@ -17,7 +17,7 @@ use tenex_daemon::daemon_foreground::{
 };
 use tenex_daemon::daemon_loop::{
     DaemonMaintenanceLoopClock, DaemonMaintenanceLoopSleeper, DaemonMaintenanceLoopStopSignal,
-    SystemDaemonMaintenanceLoopClock, ThreadDaemonMaintenanceLoopSleeper,
+    SystemDaemonMaintenanceLoopClock,
 };
 use tenex_daemon::daemon_maintenance::DaemonMaintenanceOutcome;
 use tenex_daemon::daemon_maintenance::{NoTelegramPublisher, WithTelegramPublisher};
@@ -28,13 +28,19 @@ use tenex_daemon::nip46::pending::PendingNip46Requests;
 use tenex_daemon::nip46::protocol::NIP46_KIND;
 use tenex_daemon::nip46::registry::NIP46Registry;
 use tenex_daemon::nostr_subscription_gateway::{
-    NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
-    NostrSubscriptionGatewaySupervisor, start_nostr_subscription_gateway,
+    DEFAULT_RELAY_READ_TIMEOUT, NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
+    NostrSubscriptionGatewaySupervisor, NostrSubscriptionObserver, NostrSubscriptionRelayError,
+    start_nostr_subscription_gateway,
+};
+use tenex_daemon::nostr_subscription_tick::{
+    NostrSubscriptionTickDiagnostics, NostrSubscriptionTickDispatch,
 };
 use tenex_daemon::project_agent_whitelist::ingress::WhitelistIngress;
 use tenex_daemon::project_agent_whitelist::reconciler::{ReconcilerDeps, run_reconciler_loop};
+use tenex_daemon::project_agent_whitelist::snapshot_state::PROJECT_AGENT_SNAPSHOT_KIND;
 use tenex_daemon::project_agent_whitelist::snapshot_state::SnapshotState;
 use tenex_daemon::project_agent_whitelist::trigger_source::AgentInventoryPoller;
+use tenex_daemon::project_boot_state::ProjectBootState;
 use tenex_daemon::publish_outbox::{
     PublishOutboxMaintenanceReport, cancel_pending_publish_outbox_records_matching,
 };
@@ -45,7 +51,8 @@ use tenex_daemon::subscription_runtime::{
 };
 use tenex_daemon::telegram::agent_config::read_agent_gateway_bots;
 use tenex_daemon::telegram::gateway::{
-    GatewayConfig, NoopIngressObserver, TelegramGatewaySupervisor, start_telegram_gateway,
+    DEFAULT_LONG_POLL_TIMEOUT_SECONDS, GatewayConfig, NoopIngressObserver,
+    TelegramGatewaySupervisor, start_telegram_gateway,
 };
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::telemetry;
@@ -67,6 +74,9 @@ const AGENT_WORKER_ENGINE: &str = "agent";
 const WHITELIST_RECONCILER_DEBOUNCE: Duration = Duration::from_secs(5);
 const WHITELIST_RECONCILER_IDLE_RETRY: Duration = Duration::from_secs(300);
 const WHITELIST_POLLER_INTERVAL: Duration = Duration::from_secs(2);
+const SHUTDOWN_SLEEP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const SHUTDOWN_REQUESTED_MESSAGE: &[u8] =
+    b"\nTENEX daemon: shutdown requested; finishing current work and stopping gateways.\n";
 static DAEMON_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static DAEMON_RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -76,6 +86,7 @@ struct DaemonCliOptions {
     tenex_base_dir: Option<PathBuf>,
     iterations: Option<u64>,
     sleep_ms: u64,
+    debug: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -145,11 +156,12 @@ where
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "tenex-daemon starting");
     install_signal_handlers()?;
     let mut clock = SystemDaemonMaintenanceLoopClock;
-    let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
+    let mut sleeper = ProcessSignalAwareSleeper;
     let mut stop_signal = ProcessSignalStopSignal;
     let mut publisher = actual_relay_publisher(&options)?;
 
     let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)?;
+    let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
 
     // While the daemon is running, a dedicated thread watches for SIGHUP
     // (via the global reload flag set by `request_daemon_reload`) and
@@ -168,6 +180,7 @@ where
         whitelist_wiring
             .as_ref()
             .map(|wiring| Arc::clone(&wiring.ingress)),
+        Arc::clone(&project_boot_state),
     )?;
     let gateway_supervisor = start_gateway_supervisor_from_options(&options)?;
 
@@ -180,6 +193,7 @@ where
         run_daemon_foreground(
             &options,
             heartbeat_latch.clone(),
+            Arc::clone(&project_boot_state),
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -191,6 +205,7 @@ where
         run_daemon_foreground(
             &options,
             heartbeat_latch,
+            project_boot_state,
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -199,17 +214,28 @@ where
         )
     };
 
+    emit_shutdown_status("foreground loop stopped; shutting down gateway threads");
     if let Some(supervisor) = gateway_supervisor {
+        emit_shutdown_status(format_args!(
+            "stopping Telegram gateway; waiting for active long-poll requests, up to {DEFAULT_LONG_POLL_TIMEOUT_SECONDS}s"
+        ));
         supervisor.request_stop();
         supervisor.join();
+        emit_shutdown_status("Telegram gateway stopped");
     }
     if let Some(supervisor) = nostr_supervisor {
+        emit_shutdown_status(format_args!(
+            "stopping Nostr subscription gateway; waiting for relay reads, up to {}s",
+            DEFAULT_RELAY_READ_TIMEOUT.as_secs()
+        ));
         supervisor.request_stop();
         supervisor.join();
+        emit_shutdown_status("Nostr subscription gateway stopped");
     }
     if let Some(watcher) = reload_watcher {
         // The foreground loop has exited, so `DAEMON_STOP_REQUESTED` is set
         // and the watcher will exit on its next poll.
+        emit_shutdown_status("stopping reload watcher");
         let _ = watcher.join();
     }
     // Dropping the whitelist wiring closes the reconciler trigger channel,
@@ -219,6 +245,7 @@ where
     drop(whitelist_wiring);
 
     let diagnostics = diagnostics_result?;
+    emit_shutdown_status("shutdown complete");
     tracing::info!("tenex-daemon stopped");
     serde_json::to_string_pretty(&diagnostics).map_err(|error| runtime_error(error.to_string()))
 }
@@ -511,6 +538,7 @@ fn cancel_stale_nip46_publish_requests(
 fn start_nostr_subscription_supervisor_from_options(
     options: &DaemonCliOptions,
     whitelist_ingress: Option<Arc<WhitelistIngress>>,
+    project_boot_state: Arc<Mutex<ProjectBootState>>,
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
@@ -531,13 +559,120 @@ fn start_nostr_subscription_supervisor_from_options(
     let mut config =
         NostrSubscriptionGatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), plan)
             .with_auth_signer(auth_signer);
+    config.project_boot_state = project_boot_state;
     if let Some(ingress) = whitelist_ingress {
         config = config.with_whitelist_ingress(ingress);
     }
     config.writer_version = daemon_writer_version();
-    let supervisor = start_nostr_subscription_gateway(config, NoopNostrSubscriptionObserver)
-        .map_err(|error| runtime_error(format!("failed to start nostr subscription: {error}")))?;
+    let supervisor = if options.debug {
+        start_nostr_subscription_gateway(config, StdoutNostrDebugObserver)
+    } else {
+        start_nostr_subscription_gateway(config, NoopNostrSubscriptionObserver)
+    }
+    .map_err(|error| runtime_error(format!("failed to start nostr subscription: {error}")))?;
     Ok(Some(supervisor))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StdoutNostrDebugObserver;
+
+impl NostrSubscriptionObserver for StdoutNostrDebugObserver {
+    fn on_tick(&self, _relay_url: &str, diagnostics: &NostrSubscriptionTickDiagnostics) {
+        for event in &diagnostics.processed_events {
+            let dispatch = diagnostics
+                .dispatches
+                .iter()
+                .find(|dispatch| debug_dispatch_event_id(dispatch) == event.event_id);
+            println!(
+                "{}",
+                format_debug_event_line(event.kind, &event.pubkey, dispatch)
+            );
+        }
+    }
+
+    fn on_batch(&self, _relay_url: &str, _diagnostics: NostrSubscriptionTickDiagnostics) {}
+
+    fn on_error(&self, _relay_url: &str, _error: &NostrSubscriptionRelayError) {}
+}
+
+fn format_debug_event_line(
+    kind: u64,
+    sender_pubkey: &str,
+    dispatch: Option<&NostrSubscriptionTickDispatch>,
+) -> String {
+    let project_id = dispatch
+        .and_then(debug_dispatch_project_id)
+        .unwrap_or("unknown");
+    let action = dispatch
+        .map(|dispatch| debug_dispatch_action(kind, dispatch))
+        .unwrap_or_else(|| "received".to_string());
+
+    format!(
+        "[EVENT] {kind} from {} for {project_id} -> {action}",
+        short_pubkey(sender_pubkey)
+    )
+}
+
+fn debug_dispatch_event_id(dispatch: &NostrSubscriptionTickDispatch) -> &str {
+    match dispatch {
+        NostrSubscriptionTickDispatch::Queued { event_id, .. }
+        | NostrSubscriptionTickDispatch::Ignored { event_id, .. } => event_id,
+    }
+}
+
+fn debug_dispatch_project_id(dispatch: &NostrSubscriptionTickDispatch) -> Option<&str> {
+    match dispatch {
+        NostrSubscriptionTickDispatch::Queued { project_id, .. } => Some(project_id),
+        NostrSubscriptionTickDispatch::Ignored { project_id, .. } => project_id.as_deref(),
+    }
+}
+
+fn debug_dispatch_action(kind: u64, dispatch: &NostrSubscriptionTickDispatch) -> String {
+    match dispatch {
+        NostrSubscriptionTickDispatch::Queued {
+            agent_pubkey,
+            already_existed,
+            ..
+        } => {
+            if *already_existed {
+                format!("routing to {} (already queued)", short_pubkey(agent_pubkey))
+            } else {
+                format!("routing to {}", short_pubkey(agent_pubkey))
+            }
+        }
+        NostrSubscriptionTickDispatch::Ignored { code, pubkeys, .. } => match code.as_str() {
+            "project_booted" => "Booting project".to_string(),
+            "project_updated" => "Updating project".to_string(),
+            "agent_config_updated" => format!(
+                "Updating agent config{}",
+                pubkeys
+                    .first()
+                    .map(|pubkey| format!(" {}", short_pubkey(pubkey)))
+                    .unwrap_or_default()
+            ),
+            "agent_config_update_noop" => format!(
+                "Agent config unchanged{}",
+                pubkeys
+                    .first()
+                    .map(|pubkey| format!(" {}", short_pubkey(pubkey)))
+                    .unwrap_or_default()
+            ),
+            "delegation_completion_recorded" => "recording delegation completion".to_string(),
+            "dispatch_not_queued" | "delegation_resume_not_queued" => {
+                "dispatch already exists".to_string()
+            }
+            "never_route" if kind == PROJECT_AGENT_SNAPSHOT_KIND => {
+                "updating project-agent snapshot".to_string()
+            }
+            "never_route" if kind == NIP46_KIND => "handling NIP-46 response".to_string(),
+            "never_route" => "ignoring never-route event".to_string(),
+            other => format!("ignoring ({other})"),
+        },
+    }
+}
+
+fn short_pubkey(pubkey: &str) -> String {
+    pubkey.chars().take(4).collect()
 }
 
 fn build_telegram_publisher_registry_from_options(
@@ -595,6 +730,7 @@ fn telegram_data_dir(tenex_base_dir: &Path) -> PathBuf {
 fn run_daemon_foreground<C, S, Stop, P>(
     options: &DaemonCliOptions,
     heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
+    project_boot_state: Arc<Mutex<ProjectBootState>>,
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
@@ -622,6 +758,7 @@ where
             max_iterations: options.iterations,
             sleep_ms: options.sleep_ms,
             retry_policy: PublishOutboxRetryPolicy::default(),
+            project_boot_state,
             heartbeat_latch,
         },
         DaemonForegroundWorkerInput {
@@ -734,6 +871,7 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
     let mut tenex_base_dir = None;
     let mut iterations = None;
     let mut sleep_ms = DEFAULT_SLEEP_MS;
+    let mut debug = false;
     let mut index = 0;
 
     while index < args.len() {
@@ -766,6 +904,9 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
                     .ok_or_else(|| usage_error("--sleep-ms requires a value"))?;
                 sleep_ms = parse_u64_arg("--sleep-ms", value)?;
             }
+            "--debug" => {
+                debug = true;
+            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -786,6 +927,7 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
         tenex_base_dir,
         iterations,
         sleep_ms,
+        debug,
     })
 }
 
@@ -835,8 +977,8 @@ fn current_unix_time_ms() -> u64 {
 fn usage() -> String {
     [
         "usage:",
-        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>]",
-        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>]",
+        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
+        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
     ]
     .join("\n")
 }
@@ -850,8 +992,31 @@ impl DaemonMaintenanceLoopStopSignal for ProcessSignalStopSignal {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ProcessSignalAwareSleeper;
+
+impl DaemonMaintenanceLoopSleeper for ProcessSignalAwareSleeper {
+    fn sleep_ms(&mut self, sleep_ms: u64) {
+        let mut remaining = Duration::from_millis(sleep_ms);
+        while remaining > Duration::ZERO && !DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
+            let step = remaining.min(SHUTDOWN_SLEEP_POLL_INTERVAL);
+            thread::sleep(step);
+            remaining = remaining.saturating_sub(step);
+        }
+    }
+}
+
 extern "C" fn request_daemon_stop(_signal: libc::c_int) {
-    DAEMON_STOP_REQUESTED.store(true, Ordering::SeqCst);
+    let already_requested = DAEMON_STOP_REQUESTED.swap(true, Ordering::SeqCst);
+    if !already_requested {
+        unsafe {
+            let _ = libc::write(
+                libc::STDERR_FILENO,
+                SHUTDOWN_REQUESTED_MESSAGE.as_ptr() as *const libc::c_void,
+                SHUTDOWN_REQUESTED_MESSAGE.len(),
+            );
+        }
+    }
 }
 
 extern "C" fn request_daemon_reload(_signal: libc::c_int) {
@@ -885,6 +1050,12 @@ fn install_signal_handler(
         )));
     }
     Ok(())
+}
+
+fn emit_shutdown_status(message: impl fmt::Display) {
+    if DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
+        eprintln!("TENEX daemon: {message}");
+    }
 }
 
 fn usage_error(message: impl Into<String>) -> CliError {
@@ -983,6 +1154,7 @@ mod tests {
         assert!(options.daemon_dir.is_none());
         assert_eq!(options.iterations, Some(2));
         assert_eq!(options.sleep_ms, 25);
+        assert!(!options.debug);
     }
 
     #[test]
@@ -994,6 +1166,19 @@ mod tests {
         assert_eq!(options.tenex_base_dir, Some(PathBuf::from("/tmp/tenex")));
         assert_eq!(options.iterations, None);
         assert_eq!(options.sleep_ms, DEFAULT_SLEEP_MS);
+        assert!(!options.debug);
+    }
+
+    #[test]
+    fn parses_daemon_args_with_debug() {
+        let options = parse_daemon_args(&[
+            "--tenex-base-dir".to_string(),
+            "/tmp/tenex".to_string(),
+            "--debug".to_string(),
+        ])
+        .expect("daemon args must parse");
+
+        assert!(options.debug);
     }
 
     #[test]
@@ -1003,6 +1188,7 @@ mod tests {
             tenex_base_dir: Some(PathBuf::from("/tmp/tenex")),
             iterations: Some(1),
             sleep_ms: 0,
+            debug: false,
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1019,6 +1205,7 @@ mod tests {
             tenex_base_dir: None,
             iterations: Some(1),
             sleep_ms: 0,
+            debug: false,
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1036,6 +1223,7 @@ mod tests {
             tenex_base_dir: Some(fixture.tenex_base_dir.clone()),
             iterations: Some(2),
             sleep_ms: 25,
+            debug: false,
         };
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![
@@ -1053,6 +1241,7 @@ mod tests {
         let diagnostics = run_daemon_foreground(
             &options,
             None,
+            Arc::new(Mutex::new(ProjectBootState::new())),
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -1081,6 +1270,58 @@ mod tests {
         assert_eq!(json["schemaVersion"], Value::from(1));
         assert_eq!(json["completedIterations"], Value::from(2));
         assert_eq!(json["maxIterations"], Value::from(2));
+    }
+
+    #[test]
+    fn formats_debug_event_lines_for_routes_and_boots() {
+        let route = NostrSubscriptionTickDispatch::Queued {
+            frame_index: 0,
+            event_id: "event-alpha".to_string(),
+            dispatch_id: "dispatch-alpha".to_string(),
+            project_id: "project-alpha".to_string(),
+            agent_pubkey: "abcdef0123456789".to_string(),
+            conversation_id: "conversation-alpha".to_string(),
+            queued: true,
+            already_existed: false,
+        };
+        assert_eq!(
+            format_debug_event_line(1, "1234567890abcdef", Some(&route)),
+            "[EVENT] 1 from 1234 for project-alpha -> routing to abcd"
+        );
+
+        let boot = NostrSubscriptionTickDispatch::Ignored {
+            frame_index: 0,
+            event_id: "event-boot".to_string(),
+            code: "project_booted".to_string(),
+            detail: "project project-alpha boot state recorded in session state".to_string(),
+            class: None,
+            project_id: Some("project-alpha".to_string()),
+            pubkeys: Vec::new(),
+            dispatch_id: None,
+        };
+        assert_eq!(
+            format_debug_event_line(24000, "1234567890abcdef", Some(&boot)),
+            "[EVENT] 24000 from 1234 for project-alpha -> Booting project"
+        );
+
+        let owner_snapshot = NostrSubscriptionTickDispatch::Ignored {
+            frame_index: 0,
+            event_id: "event-snapshot".to_string(),
+            code: "never_route".to_string(),
+            detail: "nostr event class NeverRoute is not a worker conversation".to_string(),
+            class: None,
+            project_id: None,
+            pubkeys: Vec::new(),
+            dispatch_id: None,
+        };
+        assert_eq!(
+            format_debug_event_line(
+                PROJECT_AGENT_SNAPSHOT_KIND,
+                "1234567890abcdef",
+                Some(&owner_snapshot)
+            ),
+            "[EVENT] 14199 from 1234 for unknown -> updating project-agent snapshot"
+        );
     }
 
     fn foreground_fixture(prefix: &str) -> ForegroundFixture {

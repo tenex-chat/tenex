@@ -1,8 +1,8 @@
 use std::fmt;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -13,12 +13,14 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, connect};
 use url::Url;
 
+use crate::nostr_classification::DaemonNostrEventClass;
 use crate::nostr_subscription_tick::{
     NostrSubscriptionTickDiagnostics, NostrSubscriptionTickDispatch, NostrSubscriptionTickError,
     NostrSubscriptionTickIgnoredFrame, NostrSubscriptionTickInput,
     NostrSubscriptionTickProcessedEvent, run_nostr_subscription_intake_tick,
 };
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
+use crate::project_boot_state::ProjectBootState;
 use crate::relay_publisher::{
     RelayAuthSigner, RelayPublishError, build_auth_message, build_relay_auth_event,
 };
@@ -26,7 +28,10 @@ use crate::subscription_filters::{
     NostrFilter, RelaySubscriptionFrame, build_close_message, build_req_message,
     parse_relay_subscription_message,
 };
-use crate::subscription_runtime::NostrSubscriptionPlan;
+use crate::subscription_runtime::{
+    NostrSubscriptionPlan, NostrSubscriptionPlanError, NostrSubscriptionPlanInput,
+    build_nostr_subscription_plan,
+};
 
 pub const DEFAULT_SUBSCRIPTION_ID: &str = "tenex-main";
 pub const DEFAULT_RELAY_READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -43,6 +48,7 @@ pub struct NostrSubscriptionGatewayConfig {
     pub reconnect_backoff: Duration,
     pub auth_signer: Option<Arc<dyn RelayAuthSigner + Send + Sync>>,
     pub whitelist_ingress: Option<Arc<WhitelistIngress>>,
+    pub project_boot_state: Arc<Mutex<ProjectBootState>>,
 }
 
 impl NostrSubscriptionGatewayConfig {
@@ -57,6 +63,7 @@ impl NostrSubscriptionGatewayConfig {
             reconnect_backoff: DEFAULT_RECONNECT_BACKOFF,
             auth_signer: None,
             whitelist_ingress: None,
+            project_boot_state: Arc::new(Mutex::new(ProjectBootState::new())),
         }
     }
 
@@ -70,6 +77,14 @@ impl NostrSubscriptionGatewayConfig {
 
     pub fn with_whitelist_ingress(mut self, whitelist_ingress: Arc<WhitelistIngress>) -> Self {
         self.whitelist_ingress = Some(whitelist_ingress);
+        self
+    }
+
+    pub fn with_project_boot_state(
+        mut self,
+        project_boot_state: Arc<Mutex<ProjectBootState>>,
+    ) -> Self {
+        self.project_boot_state = project_boot_state;
         self
     }
 }
@@ -95,6 +110,7 @@ impl fmt::Debug for NostrSubscriptionGatewayConfig {
 }
 
 pub trait NostrSubscriptionObserver: Send + Sync {
+    fn on_tick(&self, _relay_url: &str, _diagnostics: &NostrSubscriptionTickDiagnostics) {}
     fn on_batch(&self, relay_url: &str, diagnostics: NostrSubscriptionTickDiagnostics);
     fn on_error(&self, relay_url: &str, error: &NostrSubscriptionRelayError);
 }
@@ -217,6 +233,8 @@ fn run_relay_loop(
                 .map(|signer| signer.as_ref() as &dyn RelayAuthSigner),
             stop_flag: &stop_flag,
             whitelist_ingress: config.whitelist_ingress.as_deref(),
+            project_boot_state: Some(&config.project_boot_state),
+            observer: Some(observer.as_ref()),
         });
         drop(_span);
 
@@ -260,6 +278,8 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub auth_signer: Option<&'a dyn RelayAuthSigner>,
     pub stop_flag: &'a AtomicBool,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
+    pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
+    pub observer: Option<&'a dyn NostrSubscriptionObserver>,
 }
 
 impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
@@ -280,6 +300,7 @@ impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
                 "whitelist_ingress_configured",
                 &self.whitelist_ingress.is_some(),
             )
+            .field("observer_configured", &self.observer.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -296,6 +317,8 @@ pub enum NostrSubscriptionRelayError {
     Json(#[from] serde_json::Error),
     #[error("nostr subscription tick failed: {0}")]
     Tick(#[from] NostrSubscriptionTickError),
+    #[error("nostr subscription plan refresh failed: {0}")]
+    Plan(#[from] NostrSubscriptionPlanError),
     #[error("relay requires AUTH but no relay auth signer is configured")]
     AuthRequiredWithoutSigner,
     #[error("relay AUTH failed: {0}")]
@@ -317,9 +340,11 @@ pub fn run_nostr_subscription_relay_once(
     tracing::debug!(relay_url = %input.relay_url, subscription_id = %input.subscription_id, "connecting to relay");
     let (mut socket, _) = connect(input.relay_url)?;
     set_stream_timeouts(socket.get_mut(), input.read_timeout);
+    let mut active_filters = input.filters.to_vec();
+    let refresh_since = subscription_refresh_since(&active_filters);
     socket.send(Message::text(build_req_message(
         input.subscription_id,
-        input.filters,
+        &active_filters,
     )?))?;
 
     let mut diagnostics = empty_diagnostics(input.subscription_id, input.relay_url);
@@ -358,12 +383,17 @@ pub fn run_nostr_subscription_relay_once(
                     timestamp: current_unix_time_ms(),
                     writer_version: input.writer_version,
                     whitelist_ingress: input.whitelist_ingress,
+                    project_boot_state: input.project_boot_state,
                 })?;
+                if let Some(observer) = input.observer {
+                    observer.on_tick(input.relay_url, &tick);
+                }
                 for event in &tick.processed_events {
                     tracing::debug!(
                         relay_url = %input.relay_url,
                         event_id = %event.event_id,
                         event_kind = event.kind,
+                        event_pubkey = %event.pubkey,
                         class = ?event.class,
                         "nostr event received"
                     );
@@ -416,7 +446,6 @@ pub fn run_nostr_subscription_relay_once(
                         }
                     }
                 }
-                append_tick_diagnostics(&mut diagnostics, tick, frame_index);
                 if let Some(challenge) = auth_challenge {
                     tracing::debug!(relay_url = %input.relay_url, "relay sent AUTH challenge, authenticating");
                     let auth_signer = input
@@ -431,10 +460,19 @@ pub fn run_nostr_subscription_relay_once(
                     socket.send(Message::text(build_auth_message(&auth_event)?))?;
                     socket.send(Message::text(build_req_message(
                         input.subscription_id,
-                        input.filters,
+                        &active_filters,
                     )?))?;
                     tracing::info!(relay_url = %input.relay_url, "relay authenticated, resubscribed");
                 }
+                if should_refresh_subscription_filters(&tick) {
+                    refresh_subscription_filters(
+                        &mut socket,
+                        input,
+                        &mut active_filters,
+                        refresh_since,
+                    )?;
+                }
+                append_tick_diagnostics(&mut diagnostics, tick, frame_index);
                 if stop_after_this_frame {
                     break;
                 }
@@ -451,6 +489,56 @@ pub fn run_nostr_subscription_relay_once(
     let _ = socket.close(None);
 
     Ok(diagnostics)
+}
+
+fn refresh_subscription_filters(
+    socket: &mut tungstenite::WebSocket<MaybeTlsStream<TcpStream>>,
+    input: NostrSubscriptionRelayInput<'_>,
+    active_filters: &mut Vec<NostrFilter>,
+    since: Option<u64>,
+) -> Result<(), NostrSubscriptionRelayError> {
+    let refreshed = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
+        tenex_base_dir: input.tenex_base_dir,
+        since,
+        lesson_definition_ids: &[],
+    })?;
+    if refreshed.filters.is_empty() || refreshed.filters == *active_filters {
+        return Ok(());
+    }
+
+    socket.send(Message::text(build_close_message(input.subscription_id)?))?;
+    socket.send(Message::text(build_req_message(
+        input.subscription_id,
+        &refreshed.filters,
+    )?))?;
+
+    tracing::info!(
+        relay_url = %input.relay_url,
+        subscription_id = %input.subscription_id,
+        old_filter_count = active_filters.len(),
+        new_filter_count = refreshed.filters.len(),
+        project_address_count = refreshed.project_addresses.len(),
+        agent_pubkey_count = refreshed.agent_pubkeys.len(),
+        "nostr subscription filters refreshed"
+    );
+
+    *active_filters = refreshed.filters;
+    Ok(())
+}
+
+fn should_refresh_subscription_filters(tick: &NostrSubscriptionTickDiagnostics) -> bool {
+    tick.processed_events.iter().any(|event| {
+        matches!(
+            event.class,
+            DaemonNostrEventClass::Project
+                | DaemonNostrEventClass::AgentCreate
+                | DaemonNostrEventClass::ConfigUpdate
+        )
+    })
+}
+
+fn subscription_refresh_since(filters: &[NostrFilter]) -> Option<u64> {
+    filters.iter().filter_map(|filter| filter.since).min()
 }
 
 fn auth_challenge_from_text_frame(message: &str) -> Option<String> {
@@ -690,6 +778,8 @@ mod tests {
             auth_signer: None,
             stop_flag: &stop_flag,
             whitelist_ingress: None,
+            project_boot_state: None,
+            observer: None,
         })
         .expect("relay subscription must drain");
 
@@ -755,6 +845,8 @@ mod tests {
             auth_signer: Some(&signer),
             stop_flag: &stop_flag,
             whitelist_ingress: None,
+            project_boot_state: None,
+            observer: None,
         })
         .expect("relay subscription must authenticate and drain");
 

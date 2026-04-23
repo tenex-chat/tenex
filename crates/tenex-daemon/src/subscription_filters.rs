@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::nostr_classification::{
+    KIND_AGENT_LESSON, KIND_COMMENT, KIND_PROJECT, KIND_TENEX_AGENT_CONFIG_UPDATE,
+    KIND_TENEX_AGENT_CREATE, KIND_TENEX_AGENT_DELETE, KIND_TENEX_BOOT_PROJECT,
+};
 use crate::nostr_event::{NostrEventError, SignedNostrEvent, verify_signed_event};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -88,20 +92,26 @@ pub fn build_static_filters(authors: &[String], since: Option<u64>) -> Vec<Nostr
 
     vec![
         NostrFilter {
-            kinds: vec![31933],
+            kinds: vec![KIND_PROJECT],
             authors: authors.to_vec(),
             ..NostrFilter::default()
         },
         NostrFilter {
-            kinds: vec![24000, 24001, 24020, 24030],
+            kinds: vec![
+                KIND_TENEX_BOOT_PROJECT,
+                KIND_TENEX_AGENT_CREATE,
+                KIND_TENEX_AGENT_CONFIG_UPDATE,
+                KIND_TENEX_AGENT_DELETE,
+            ],
             authors: authors.to_vec(),
+            limit: Some(0),
             since,
             ..NostrFilter::default()
         },
         NostrFilter {
-            kinds: vec![1111],
+            kinds: vec![KIND_COMMENT],
             authors: authors.to_vec(),
-            referenced_kinds: vec!["4129".to_string()],
+            referenced_kinds: vec![KIND_AGENT_LESSON.to_string()],
             since,
             ..NostrFilter::default()
         },
@@ -172,6 +182,7 @@ pub fn build_nip46_reply_filter(
         kinds: vec![24133],
         authors: owner_pubkeys.to_vec(),
         pubkeys: vec![backend_pubkey.to_string()],
+        limit: Some(0),
         ..NostrFilter::default()
     })
 }
@@ -308,7 +319,7 @@ mod tests {
     fn req_and_close_messages_use_nip01_wire_shape() {
         let filters = vec![
             NostrFilter {
-                kinds: vec![31933],
+                kinds: vec![KIND_PROJECT],
                 authors: vec!["owner".to_string()],
                 since: Some(1_710_001_000),
                 ..NostrFilter::default()
@@ -342,6 +353,29 @@ mod tests {
             build_close_message("tenex-main").expect("CLOSE must serialize"),
             r#"["CLOSE","tenex-main"]"#
         );
+    }
+
+    #[test]
+    fn tenex_control_static_filter_uses_zero_limit() {
+        let authors = vec!["owner".to_string()];
+        let filters = build_static_filters(&authors, Some(1_710_001_000));
+
+        let control_filter = filters
+            .iter()
+            .find(|filter| filter.kinds.contains(&KIND_TENEX_BOOT_PROJECT))
+            .expect("TENEX control filter must be present");
+        assert_eq!(
+            control_filter.kinds,
+            vec![
+                KIND_TENEX_BOOT_PROJECT,
+                KIND_TENEX_AGENT_CREATE,
+                KIND_TENEX_AGENT_CONFIG_UPDATE,
+                KIND_TENEX_AGENT_DELETE
+            ]
+        );
+        assert_eq!(control_filter.authors, authors);
+        assert_eq!(control_filter.limit, Some(0));
+        assert_eq!(control_filter.since, Some(1_710_001_000));
     }
 
     #[test]
@@ -422,7 +456,7 @@ mod tests {
         assert!(filter.project_addresses.is_empty());
         assert!(filter.event_ids.is_empty());
         assert!(filter.referenced_kinds.is_empty());
-        assert_eq!(filter.limit, None);
+        assert_eq!(filter.limit, Some(0));
         assert_eq!(filter.since, None);
     }
 

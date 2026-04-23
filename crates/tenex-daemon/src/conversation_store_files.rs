@@ -259,6 +259,9 @@ fn envelope_message_record(envelope: &InboundEnvelope) -> Value {
         record.insert("senderPubkey".to_string(), Value::String(sender_pubkey));
     }
     record.insert("senderPrincipal".to_string(), sender_principal);
+    record.insert("channel".to_string(), json!(envelope.channel));
+    record.insert("capabilities".to_string(), json!(envelope.capabilities));
+    record.insert("inboundMetadata".to_string(), json!(envelope.metadata));
     Value::Object(record)
 }
 
@@ -325,16 +328,37 @@ fn envelope_from_record(conversation_id: &str, record: &Value) -> Option<Inbound
                 })
         })
         .unwrap_or_default();
-
-    Some(InboundEnvelope {
-        transport: principal.transport,
-        principal,
-        channel: ChannelRef {
+    let channel = record
+        .get("channel")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<ChannelRef>(value).ok())
+        .unwrap_or_else(|| ChannelRef {
             id: format!("nostr:conversation:{conversation_id}"),
             transport: RuntimeTransport::Nostr,
             kind: ChannelKind::Conversation,
             project_binding: None,
-        },
+        });
+    let capabilities = record
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let metadata = record
+        .get("inboundMetadata")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<InboundMetadata>(value).ok())
+        .unwrap_or_default();
+
+    Some(InboundEnvelope {
+        transport: principal.transport,
+        principal,
+        channel,
         message: ExternalMessageRef {
             id: format!("nostr:{event_id}"),
             transport: RuntimeTransport::Nostr,
@@ -344,8 +368,8 @@ fn envelope_from_record(conversation_id: &str, record: &Value) -> Option<Inbound
         recipients,
         content,
         occurred_at,
-        capabilities: Vec::new(),
-        metadata: InboundMetadata::default(),
+        capabilities,
+        metadata,
     })
 }
 

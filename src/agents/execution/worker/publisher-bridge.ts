@@ -137,6 +137,8 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
                 delegationConversationId: ref.id,
                 recipientPubkey: config.recipient,
                 delegationType: "standard",
+                senderPubkey: this.options.agent.pubkey,
+                prompt: config.content,
             });
         }
 
@@ -423,7 +425,10 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         const startsNewConversation =
             options.runtimeEventClass === "delegation" ||
             options.runtimeEventClass === "ask";
-        if (!startsNewConversation && options.context.rootEvent.id) {
+        const hasExplicitRootTag = options.tags?.some(
+            (tag) => tag[0] === "e" && tag[3] === "root"
+        );
+        if (!startsNewConversation && !hasExplicitRootTag && options.context.rootEvent.id) {
             tags.push(["e", options.context.rootEvent.id, "", "root"]);
         }
 

@@ -198,6 +198,19 @@ const injectMessageSchema = frameSchema("inject", {
     leaseToken: z.string().min(1),
     role: z.enum(["user", "system"]),
     content: z.string().min(1),
+    eventId: z.string().min(1).optional(),
+    senderPubkey: hexPubkeySchema.optional(),
+    senderPrincipal: principalRefSchema.optional(),
+    targetedPrincipals: z.array(principalRefSchema).optional(),
+    delegationCompletion: z
+        .object({
+            delegationConversationId: z.string().min(1),
+            recipientPubkey: hexPubkeySchema,
+            completedAt: nonNegativeIntegerSchema,
+            completionEventId: z.string().min(1),
+        })
+        .passthrough()
+        .optional(),
 });
 
 const abortMessageSchema = frameSchema("abort", {
@@ -318,6 +331,12 @@ const delegationRegisteredMessageSchema = frameSchema("delegation_registered", {
     delegationConversationId: z.string().min(1),
     recipientPubkey: hexPubkeySchema,
     delegationType: z.enum(["standard", "followup", "external", "ask"]),
+    senderPubkey: hexPubkeySchema.optional(),
+    prompt: z.string().optional(),
+    parentDelegationConversationId: z.string().min(1).optional(),
+    followupEventId: z.string().min(1).optional(),
+    delegationProjectId: z.string().min(1).optional(),
+    suggestions: z.array(z.string()).optional(),
 });
 
 const waitingForDelegationMessageSchema = frameSchema("waiting_for_delegation", {

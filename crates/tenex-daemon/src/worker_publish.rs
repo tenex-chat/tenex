@@ -49,6 +49,13 @@ impl WorkerPublishAcceptedEgress {
             Self::Telegram(_) => None,
         }
     }
+
+    pub fn event_id(&self) -> &str {
+        match self {
+            Self::Nostr(record) => &record.event.id,
+            Self::Telegram(record) => &record.nostr_event_id,
+        }
+    }
 }
 
 #[derive(Debug, Error)]

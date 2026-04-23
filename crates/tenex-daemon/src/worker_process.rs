@@ -290,6 +290,21 @@ impl AgentWorkerProcess {
     }
 }
 
+impl WorkerProcessError {
+    pub fn is_worker_input_closed(&self) -> bool {
+        match self {
+            Self::Io(error) => matches!(
+                error.kind(),
+                io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::NotConnected
+            ),
+            Self::StdinClosed => true,
+            _ => false,
+        }
+    }
+}
+
 impl WorkerFrameReceiver for AgentWorkerProcess {
     type Error = WorkerProcessError;
 

@@ -246,19 +246,10 @@ pub fn replay_dispatch_queue_records(
     records: Vec<DispatchQueueRecord>,
 ) -> DispatchQueueResult<DispatchQueueState> {
     let mut latest_by_dispatch_id: BTreeMap<String, DispatchQueueRecord> = BTreeMap::new();
-    let mut last_sequence: Option<u64> = None;
+    let mut last_sequence = 0;
 
     for record in records {
-        if let Some(previous_sequence) = last_sequence
-            && record.sequence <= previous_sequence
-        {
-            return Err(DispatchQueueError::NonIncreasingSequence {
-                sequence: record.sequence,
-                previous_sequence,
-            });
-        }
-
-        last_sequence = Some(record.sequence);
+        last_sequence = last_sequence.max(record.sequence);
         latest_by_dispatch_id.insert(record.dispatch_id.clone(), record);
     }
 
@@ -272,7 +263,7 @@ pub fn replay_dispatch_queue_records(
             }
         }
     }
-    state.last_sequence = last_sequence.unwrap_or(0);
+    state.last_sequence = last_sequence;
 
     Ok(state)
 }
@@ -537,22 +528,20 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_queue_replay_rejects_non_increasing_sequences() {
+    fn dispatch_queue_replay_tolerates_non_increasing_sequences() {
         let records = vec![
             build_record(2, "dispatch-1", DispatchQueueStatus::Queued),
             build_record(2, "dispatch-1", DispatchQueueStatus::Completed),
         ];
 
-        match replay_dispatch_queue_records(records) {
-            Err(DispatchQueueError::NonIncreasingSequence {
-                sequence,
-                previous_sequence,
-            }) => {
-                assert_eq!(sequence, 2);
-                assert_eq!(previous_sequence, 2);
-            }
-            other => panic!("expected non-increasing sequence error, got {other:?}"),
-        }
+        let state = replay_dispatch_queue_records(records).expect("replay must recover");
+
+        assert_eq!(state.last_sequence, 2);
+        assert!(state.queued.is_empty());
+        assert!(state.leased.is_empty());
+        assert_eq!(state.terminal.len(), 1);
+        assert_eq!(state.terminal[0].dispatch_id, "dispatch-1");
+        assert_eq!(state.terminal[0].status, DispatchQueueStatus::Completed);
     }
 
     #[test]

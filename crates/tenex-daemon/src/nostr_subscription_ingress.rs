@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -8,6 +9,7 @@ use crate::nostr_ingress::{
     NostrIngressError, NostrIngressInput, NostrIngressOutcome, process_verified_nostr_event,
 };
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
+use crate::project_boot_state::ProjectBootState;
 use crate::subscription_filters::{RelaySubscriptionFrame, SubscriptionMessageError};
 
 #[derive(Debug, Clone, Copy)]
@@ -18,6 +20,7 @@ pub struct NostrSubscriptionIngressInput<'a> {
     pub timestamp: u64,
     pub writer_version: &'a str,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
+    pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -102,6 +105,7 @@ fn process_event_frame(
         event,
         timestamp: input.timestamp,
         writer_version: input.writer_version,
+        project_boot_state: input.project_boot_state,
     })?;
 
     Ok(NostrSubscriptionIngressOutcome::Event {
@@ -159,6 +163,7 @@ mod tests {
             timestamp: 1_710_000_900_000,
             writer_version: "nostr-subscription-ingress-test@0",
             whitelist_ingress: None,
+            project_boot_state: None,
         })
         .expect("subscription frame must process");
 
@@ -231,6 +236,7 @@ mod tests {
                 timestamp: 1_710_000_900_001,
                 writer_version: "nostr-subscription-ingress-test@0",
                 whitelist_ingress: None,
+                project_boot_state: None,
             })
             .expect("lifecycle frame must process");
 

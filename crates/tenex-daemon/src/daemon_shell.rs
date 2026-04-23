@@ -30,10 +30,7 @@ pub enum DaemonLockState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DaemonShellStopMode {
     Shutdown,
-    Restart {
-        requested_at_ms: u64,
-        booted_projects: Vec<String>,
-    },
+    Restart { requested_at_ms: u64 },
 }
 
 #[derive(Debug, Error)]
@@ -139,17 +136,8 @@ impl<P: ProcessLivenessProbe + Clone> DaemonShell<P> {
         Ok(())
     }
 
-    pub fn write_restart_state(
-        &self,
-        requested_at_ms: u64,
-        booted_projects: Vec<String>,
-    ) -> DaemonShellResult<RestartStateData> {
-        let restart_state = build_restart_state(
-            requested_at_ms,
-            booted_projects,
-            self.pid,
-            self.hostname.clone(),
-        );
+    pub fn write_restart_state(&self, requested_at_ms: u64) -> DaemonShellResult<RestartStateData> {
+        let restart_state = build_restart_state(requested_at_ms, self.pid, self.hostname.clone());
         write_json_atomic(&restart_state_file_path(&self.daemon_dir), &restart_state)?;
         Ok(restart_state)
     }
@@ -261,10 +249,7 @@ impl<P: ProcessLivenessProbe + Clone> DaemonShellSession<P> {
     pub fn stop(self, mode: DaemonShellStopMode) -> DaemonShellResult<()> {
         match mode {
             DaemonShellStopMode::Shutdown => self.stop_shutdown(),
-            DaemonShellStopMode::Restart {
-                requested_at_ms,
-                booted_projects,
-            } => self.stop_restart(requested_at_ms, booted_projects),
+            DaemonShellStopMode::Restart { requested_at_ms } => self.stop_restart(requested_at_ms),
         }
     }
 
@@ -291,13 +276,8 @@ impl<P: ProcessLivenessProbe + Clone> DaemonShellSession<P> {
         }
     }
 
-    fn stop_restart(
-        self,
-        requested_at_ms: u64,
-        booted_projects: Vec<String>,
-    ) -> DaemonShellResult<()> {
-        self.shell
-            .write_restart_state(requested_at_ms, booted_projects)?;
+    fn stop_restart(self, requested_at_ms: u64) -> DaemonShellResult<()> {
+        self.shell.write_restart_state(requested_at_ms)?;
 
         let mut first_error = None;
         if let Err(error) = remove_status_file(&self.shell.daemon_dir) {
@@ -550,7 +530,6 @@ mod tests {
         session
             .stop(DaemonShellStopMode::Restart {
                 requested_at_ms: fixture.restart_state.requested_at,
-                booted_projects: fixture.restart_state.booted_projects.clone(),
             })
             .expect("restart stop must succeed");
 
@@ -583,10 +562,7 @@ mod tests {
             .start_foreground(1_710_000_000_000)
             .expect("foreground start must succeed");
         shell
-            .write_restart_state(
-                fixture.restart_state.requested_at,
-                fixture.restart_state.booted_projects.clone(),
-            )
+            .write_restart_state(fixture.restart_state.requested_at)
             .expect("restart state write must succeed");
 
         session

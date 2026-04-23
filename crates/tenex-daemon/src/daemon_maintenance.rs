@@ -14,9 +14,7 @@ use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::periodic_tick_state::{
     PeriodicTickStateError, read_periodic_scheduler_state, write_periodic_scheduler_state,
 };
-use crate::project_boot_state::{
-    BootedProjectsState, ProjectBootStateError, is_project_booted, read_booted_projects_state,
-};
+use crate::project_boot_state::{BootedProjectsState, is_project_booted};
 use crate::project_status_descriptors::{
     ProjectStatusDescriptor, ProjectStatusDescriptorError, ProjectStatusDescriptorReport,
     read_project_status_descriptors,
@@ -45,6 +43,7 @@ pub struct DaemonMaintenanceInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
     pub now_ms: u64,
+    pub project_boot_state: BootedProjectsState,
     /// When present, the backend-events maintenance pass gates the kind
     /// 24012 heartbeat on the latch state.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
@@ -71,8 +70,6 @@ pub struct DaemonMaintenanceOutcome {
 pub enum DaemonMaintenanceError {
     #[error("project descriptor discovery failed: {0}")]
     ProjectDescriptors(#[from] ProjectStatusDescriptorError),
-    #[error("project boot state failed: {0}")]
-    ProjectBootState(#[from] ProjectBootStateError),
     #[error("publish outbox maintenance failed: {0}")]
     PublishOutbox(#[from] PublishOutboxError),
     #[error("backend-events maintenance failed: {0}")]
@@ -109,7 +106,7 @@ where
 {
     let now_seconds = input.now_ms / 1_000;
     let project_descriptor_report = read_project_status_descriptors(input.tenex_base_dir)?;
-    let project_boot_state = read_booted_projects_state(input.daemon_dir)?;
+    let project_boot_state = input.project_boot_state;
     let booted_project_descriptor_report =
         filter_booted_project_descriptors(&project_descriptor_report, &project_boot_state);
     let projects = backend_events_projects_from_descriptors(&booted_project_descriptor_report);
@@ -330,7 +327,7 @@ mod tests {
     use crate::periodic_tick_state::{
         read_periodic_scheduler_state, write_periodic_scheduler_state,
     };
-    use crate::project_boot_state::record_project_boot_event;
+    use crate::project_boot_state::{ProjectBootState, empty_booted_projects_state};
     use crate::publish_outbox::inspect_publish_outbox;
     use crate::scheduled_task_dispatch_input::read_optional as read_scheduled_task_dispatch_input;
     use crate::scheduled_task_due_planner::{
@@ -381,17 +378,16 @@ mod tests {
             ),
         )
         .expect("project descriptor must write");
-        record_project_boot_event(
-            &daemon_dir,
+        let project_boot_state = booted_state(
             &boot_event("boot-event", &owner, "demo-project"),
             1_710_000_999_000,
-        )
-        .expect("project boot state must write");
+        );
 
         let outcome = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
+            project_boot_state,
             heartbeat_latch: None,
         })
         .expect("daemon maintenance must run");
@@ -509,12 +505,10 @@ mod tests {
             ),
         )
         .expect("project descriptor must write");
-        record_project_boot_event(
-            &daemon_dir,
+        let project_boot_state = booted_state(
             &boot_event("boot-event", &owner, "demo-project"),
             1_710_000_999_000,
-        )
-        .expect("project boot state must write");
+        );
         fs::write(
             project_dir.join("schedules.json"),
             format!(
@@ -562,6 +556,7 @@ mod tests {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
+            project_boot_state,
             heartbeat_latch: None,
         })
         .expect("daemon maintenance must run");
@@ -646,6 +641,7 @@ mod tests {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
+            project_boot_state: empty_booted_projects_state(),
             heartbeat_latch: None,
         })
         .expect("daemon maintenance must run");
@@ -715,5 +711,16 @@ mod tests {
             content: String::new(),
             sig: "0".repeat(128),
         }
+    }
+
+    fn booted_state(
+        event: &crate::nostr_event::SignedNostrEvent,
+        timestamp_ms: u64,
+    ) -> BootedProjectsState {
+        let mut state = ProjectBootState::new();
+        state
+            .record_boot_event(event, timestamp_ms)
+            .expect("project boot state must record");
+        state.snapshot()
     }
 }

@@ -6,6 +6,9 @@ import {
     AGENT_WORKER_STREAM_BATCH_MS,
     type AgentWorkerProtocolMessage,
 } from "@/events/runtime/AgentWorkerProtocol";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import { RALRegistry } from "@/services/ral";
+import { logger } from "@/utils/logger";
 import {
     decodeAgentWorkerProtocolChunks,
     type AgentWorkerProtocolFrameSink,
@@ -19,6 +22,7 @@ import type {
 
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type PingMessage = Extract<AgentWorkerProtocolMessage, { type: "ping" }>;
+type InjectMessage = Extract<AgentWorkerProtocolMessage, { type: "inject" }>;
 type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_result" }>;
 
 class AgentWorkerSession {
@@ -132,6 +136,11 @@ class AgentWorkerSession {
             return undefined;
         }
 
+        if (message.type === "inject") {
+            this.handleInject(message);
+            return undefined;
+        }
+
         if (message.type === "execute") {
             return this.handleExecute(message);
         }
@@ -149,6 +158,86 @@ class AgentWorkerSession {
             correlationId: message.correlationId,
             replyingToSequence: message.sequence,
         });
+    }
+
+    private handleInject(message: InjectMessage): void {
+        const ralRegistry = RALRegistry.getInstance();
+        const delegationCompletion = message.delegationCompletion;
+        if (delegationCompletion) {
+            const location = ralRegistry.recordCompletion({
+                delegationConversationId: delegationCompletion.delegationConversationId,
+                recipientPubkey: delegationCompletion.recipientPubkey,
+                response: message.content,
+                completedAt: delegationCompletion.completedAt,
+            });
+
+            if (location) {
+                const parentStore = ConversationStore.get(location.conversationId);
+                if (parentStore) {
+                    const updated = parentStore.updateDelegationMarker(
+                        delegationCompletion.delegationConversationId,
+                        {
+                            status: "completed",
+                            completedAt: delegationCompletion.completedAt,
+                        }
+                    );
+
+                    if (!updated) {
+                        parentStore.addDelegationMarker(
+                            {
+                                delegationConversationId:
+                                    delegationCompletion.delegationConversationId,
+                                recipientPubkey: delegationCompletion.recipientPubkey,
+                                parentConversationId: location.conversationId,
+                                completedAt: delegationCompletion.completedAt,
+                                status: "completed",
+                            },
+                            location.agentPubkey,
+                            location.ralNumber
+                        );
+                    }
+
+                    void parentStore.save().catch((error: unknown) => {
+                        logger.warn("[AgentWorker] Failed to persist injected delegation marker", {
+                            delegationConversationId:
+                                delegationCompletion.delegationConversationId,
+                            error: error instanceof Error ? error.message : String(error),
+                        });
+                    });
+                }
+                return;
+            }
+
+            logger.warn("[AgentWorker] Delegation completion inject did not match a pending RAL", {
+                delegationConversationId: delegationCompletion.delegationConversationId,
+                agentPubkey: message.agentPubkey.substring(0, 8),
+                conversationId: message.conversationId.substring(0, 8),
+                ralNumber: message.ralNumber,
+            });
+        }
+
+        if (message.role === "system") {
+            ralRegistry.queueSystemMessage(
+                message.agentPubkey,
+                message.conversationId,
+                message.ralNumber,
+                message.content
+            );
+            return;
+        }
+
+        ralRegistry.queueUserMessage(
+            message.agentPubkey,
+            message.conversationId,
+            message.ralNumber,
+            message.content,
+            {
+                senderPubkey: message.senderPubkey,
+                senderPrincipal: message.senderPrincipal,
+                targetedPrincipals: message.targetedPrincipals,
+                eventId: message.eventId,
+            }
+        );
     }
 
     private async handleExecute(message: ExecuteMessage): Promise<boolean> {

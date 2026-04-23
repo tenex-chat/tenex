@@ -71,6 +71,13 @@ pub struct ProjectStatusAgentSourceSkippedFile {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProjectStatusAgentSourceOptions<'a> {
+    pub project_base_path: Option<&'a Path>,
+    pub built_in_skills_dir: Option<&'a Path>,
+    pub shared_skills_dir: Option<&'a Path>,
+}
+
 #[derive(Debug, Error)]
 pub enum ProjectStatusAgentSourceError {
     #[error("failed to read project-status agent source file {path}: {source}")]
@@ -137,28 +144,48 @@ pub fn read_project_status_agent_sources(
     tenex_base_dir: impl AsRef<Path>,
     project_d_tag: &str,
 ) -> Result<ProjectStatusAgentSourceReport, ProjectStatusAgentSourceError> {
+    read_project_status_agent_sources_with_options(
+        tenex_base_dir,
+        project_d_tag,
+        ProjectStatusAgentSourceOptions::default(),
+    )
+}
+
+pub fn read_project_status_agent_sources_with_options(
+    tenex_base_dir: impl AsRef<Path>,
+    project_d_tag: &str,
+    options: ProjectStatusAgentSourceOptions<'_>,
+) -> Result<ProjectStatusAgentSourceReport, ProjectStatusAgentSourceError> {
     let tenex_base_dir = tenex_base_dir.as_ref();
     let agent_index_path = agent_index_path(tenex_base_dir);
-    let Some(agent_index_content) = read_optional_text_file(&agent_index_path)? else {
+    let project_pubkeys =
+        if let Some(agent_index_content) = read_optional_text_file(&agent_index_path)? {
+            let agent_index: RawAgentIndex =
+                serde_json::from_str(&agent_index_content).map_err(|source| {
+                    ProjectStatusAgentSourceError::Parse {
+                        path: agent_index_path.clone(),
+                        source,
+                    }
+                })?;
+            agent_index
+                .by_project
+                .get(project_d_tag)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+    if project_pubkeys.is_empty() && options.project_base_path.is_none() {
         return Ok(ProjectStatusAgentSourceReport::empty());
-    };
-    let agent_index: RawAgentIndex =
-        serde_json::from_str(&agent_index_content).map_err(|source| {
-            ProjectStatusAgentSourceError::Parse {
-                path: agent_index_path.clone(),
-                source,
-            }
-        })?;
-    let Some(project_pubkeys) = agent_index.by_project.get(project_d_tag) else {
-        return Ok(ProjectStatusAgentSourceReport::empty());
-    };
+    }
 
     let configured_mcp_servers = read_configured_mcp_server_slugs(tenex_base_dir, project_d_tag)?;
     let mut skipped_files = Vec::new();
     let mut resolved_agents = Vec::new();
     let mut seen_pubkeys = BTreeSet::new();
 
-    for pubkey in project_pubkeys {
+    for pubkey in &project_pubkeys {
         if !seen_pubkeys.insert(pubkey.clone()) {
             continue;
         }
@@ -186,7 +213,12 @@ pub fn read_project_status_agent_sources(
 
     let mut model_agents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut tool_agents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut skill_agents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let skill_agents = build_skill_agent_map(
+        tenex_base_dir,
+        options,
+        &resolved_agents,
+        &mut skipped_files,
+    );
     let mut mcp_agents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
     for agent in &resolved_agents {
@@ -203,12 +235,6 @@ pub fn read_project_status_agent_sources(
                     .or_default()
                     .insert(agent.slug.clone());
             }
-        }
-        for skill in &agent.skills {
-            skill_agents
-                .entry(skill.clone())
-                .or_default()
-                .insert(agent.slug.clone());
         }
         for server in &agent.mcp_access {
             if configured_mcp_servers.contains(server) {
@@ -258,6 +284,188 @@ pub fn read_project_status_agent_sources(
             .collect(),
         skipped_files,
     })
+}
+
+fn build_skill_agent_map(
+    tenex_base_dir: &Path,
+    options: ProjectStatusAgentSourceOptions<'_>,
+    resolved_agents: &[ResolvedProjectAgent],
+    skipped_files: &mut Vec<ProjectStatusAgentSourceSkippedFile>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut skill_agents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    let Some(project_base_path) = options.project_base_path else {
+        for agent in resolved_agents {
+            for skill in &agent.skills {
+                skill_agents
+                    .entry(skill.clone())
+                    .or_default()
+                    .insert(agent.slug.clone());
+            }
+        }
+        return skill_agents;
+    };
+
+    for skill in list_visible_skill_ids(
+        project_visible_skill_directories(project_base_path, options),
+        skipped_files,
+    ) {
+        skill_agents.entry(skill).or_default();
+    }
+
+    for agent in resolved_agents {
+        let visible_agent_skills = list_visible_skill_ids(
+            agent_visible_skill_directories(tenex_base_dir, project_base_path, agent, options),
+            skipped_files,
+        );
+        for skill in &agent.skills {
+            if visible_agent_skills.contains(skill) {
+                skill_agents
+                    .entry(skill.clone())
+                    .or_default()
+                    .insert(agent.slug.clone());
+            }
+        }
+    }
+
+    skill_agents
+}
+
+fn project_visible_skill_directories(
+    project_base_path: &Path,
+    options: ProjectStatusAgentSourceOptions<'_>,
+) -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    directories.push(built_in_skills_dir(options));
+    directories.push(project_base_path.join(".agents").join("skills"));
+    if let Some(shared) = shared_skills_dir(options) {
+        directories.push(shared);
+    }
+    directories
+}
+
+fn agent_visible_skill_directories(
+    tenex_base_dir: &Path,
+    project_base_path: &Path,
+    agent: &ResolvedProjectAgent,
+    options: ProjectStatusAgentSourceOptions<'_>,
+) -> Vec<PathBuf> {
+    let short_pubkey = short_pubkey(&agent.pubkey);
+    let mut directories = Vec::new();
+    directories.push(built_in_skills_dir(options));
+    directories.push(
+        tenex_base_dir
+            .join("home")
+            .join(short_pubkey)
+            .join("skills"),
+    );
+    directories.push(
+        project_base_path
+            .join(".agents")
+            .join(short_pubkey)
+            .join("skills"),
+    );
+    directories.push(project_base_path.join(".agents").join("skills"));
+    if let Some(shared) = shared_skills_dir(options) {
+        directories.push(shared);
+    }
+    directories
+}
+
+fn list_visible_skill_ids(
+    directories: Vec<PathBuf>,
+    skipped_files: &mut Vec<ProjectStatusAgentSourceSkippedFile>,
+) -> BTreeSet<String> {
+    let mut visible = BTreeSet::new();
+
+    for directory in directories {
+        let mut entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries.filter_map(Result::ok).collect::<Vec<_>>(),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                skipped_files.push(ProjectStatusAgentSourceSkippedFile {
+                    path: directory,
+                    reason: format!("failed to read skill directory: {source}"),
+                });
+                continue;
+            }
+        };
+
+        entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+
+        for entry in entries {
+            let path = entry.path();
+            let Some(skill_id) = entry
+                .file_name()
+                .to_str()
+                .and_then(nonempty_ref)
+                .map(str::to_string)
+            else {
+                skipped_files.push(ProjectStatusAgentSourceSkippedFile {
+                    path,
+                    reason: "skill directory name is not valid UTF-8 or is empty".to_string(),
+                });
+                continue;
+            };
+
+            if visible.contains(&skill_id) {
+                continue;
+            }
+            if !is_skill_directory(&entry) {
+                continue;
+            }
+            if path.join("SKILL.md").is_file() {
+                visible.insert(skill_id);
+            }
+        }
+    }
+
+    visible
+}
+
+fn is_skill_directory(entry: &fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(file_type) if file_type.is_dir() => true,
+        Ok(file_type) if file_type.is_symlink() => fs::metadata(entry.path())
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn built_in_skills_dir(options: ProjectStatusAgentSourceOptions<'_>) -> PathBuf {
+    options
+        .built_in_skills_dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_built_in_skills_dir)
+}
+
+fn default_built_in_skills_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("src")
+        .join("skills")
+        .join("built-in")
+}
+
+fn shared_skills_dir(options: ProjectStatusAgentSourceOptions<'_>) -> Option<PathBuf> {
+    options
+        .shared_skills_dir
+        .map(Path::to_path_buf)
+        .or_else(default_shared_skills_dir)
+}
+
+fn default_shared_skills_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".agents").join("skills"))
+}
+
+fn short_pubkey(pubkey: &str) -> &str {
+    &pubkey[..pubkey.len().min(8)]
 }
 
 fn agent_index_path(tenex_base_dir: &Path) -> PathBuf {
@@ -664,6 +872,127 @@ mod tests {
     }
 
     #[test]
+    fn reads_skill_catalog_from_typescript_visible_skill_roots() {
+        let base_dir = unique_temp_dir("project-status-agent-sources-skill-catalog");
+        let project_base_path = unique_temp_dir("project-status-agent-sources-project-path");
+        let built_in_skills_dir = unique_temp_dir("project-status-agent-sources-built-ins");
+        let shared_skills_dir = unique_temp_dir("project-status-agent-sources-shared");
+        let worker = pubkey_hex(0x05);
+        let reviewer = pubkey_hex(0x06);
+
+        fs::create_dir_all(base_dir.join("agents")).expect("agents dir must create");
+        fs::write(
+            agent_index_path(&base_dir),
+            format!(r#"{{ "byProject": {{ "demo-project": ["{worker}", "{reviewer}"] }} }}"#),
+        )
+        .expect("agent index must write");
+        fs::write(
+            agent_file_path(&base_dir, &worker),
+            r#"{
+                "slug": "worker",
+                "default": {
+                    "skills": [
+                        "agent-home-skill",
+                        "built-in-skill",
+                        "missing-skill",
+                        "project-skill",
+                        "shared-skill"
+                    ]
+                }
+            }"#,
+        )
+        .expect("worker file must write");
+        fs::write(
+            agent_file_path(&base_dir, &reviewer),
+            r#"{
+                "slug": "reviewer",
+                "default": {
+                    "skills": ["agent-project-skill", "project-skill"]
+                }
+            }"#,
+        )
+        .expect("reviewer file must write");
+
+        write_skill(&built_in_skills_dir, "built-in-skill");
+        write_skill(
+            &base_dir
+                .join("home")
+                .join(short_pubkey(&worker))
+                .join("skills"),
+            "agent-home-skill",
+        );
+        write_skill(
+            &project_base_path
+                .join(".agents")
+                .join(short_pubkey(&reviewer))
+                .join("skills"),
+            "agent-project-skill",
+        );
+        write_skill(
+            &project_base_path.join(".agents").join("skills"),
+            "project-skill",
+        );
+        write_skill(
+            &project_base_path.join(".agents").join("skills"),
+            "project-unassigned",
+        );
+        write_skill(&shared_skills_dir, "shared-skill");
+
+        let report = read_project_status_agent_sources_with_options(
+            &base_dir,
+            "demo-project",
+            ProjectStatusAgentSourceOptions {
+                project_base_path: Some(&project_base_path),
+                built_in_skills_dir: Some(&built_in_skills_dir),
+                shared_skills_dir: Some(&shared_skills_dir),
+            },
+        )
+        .expect("report must read");
+
+        assert_eq!(
+            report.skills,
+            vec![
+                ProjectStatusSkill {
+                    id: "agent-home-skill".to_string(),
+                    agents: vec!["worker".to_string()],
+                },
+                ProjectStatusSkill {
+                    id: "agent-project-skill".to_string(),
+                    agents: vec!["reviewer".to_string()],
+                },
+                ProjectStatusSkill {
+                    id: "built-in-skill".to_string(),
+                    agents: vec!["worker".to_string()],
+                },
+                ProjectStatusSkill {
+                    id: "project-skill".to_string(),
+                    agents: vec!["reviewer".to_string(), "worker".to_string()],
+                },
+                ProjectStatusSkill {
+                    id: "project-unassigned".to_string(),
+                    agents: Vec::new(),
+                },
+                ProjectStatusSkill {
+                    id: "shared-skill".to_string(),
+                    agents: vec!["worker".to_string()],
+                },
+            ]
+        );
+        assert!(
+            report
+                .skills
+                .iter()
+                .all(|skill| skill.id != "missing-skill"),
+            "configured skills that are not visible to the agent are not advertised"
+        );
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(project_base_path);
+        let _ = fs::remove_dir_all(built_in_skills_dir);
+        let _ = fs::remove_dir_all(shared_skills_dir);
+    }
+
+    #[test]
     fn missing_agent_index_returns_empty_report() {
         let base_dir = unique_temp_dir("project-status-agent-sources-missing");
 
@@ -681,6 +1010,12 @@ mod tests {
             .as_nanos();
         let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("{prefix}-{unique}-{counter}"))
+    }
+
+    fn write_skill(root: &Path, skill_id: &str) {
+        let skill_dir = root.join(skill_id);
+        fs::create_dir_all(&skill_dir).expect("skill dir must create");
+        fs::write(skill_dir.join("SKILL.md"), "# Test Skill\n").expect("skill file must write");
     }
 
     fn pubkey_hex(fill_byte: u8) -> String {

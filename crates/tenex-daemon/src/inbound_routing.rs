@@ -202,13 +202,31 @@ pub fn resolve_inbound_route(
         ));
     };
 
+    let sender_pubkey = input.envelope.principal.linked_pubkey.as_deref();
     let mut target_agents = recipient_pubkeys
         .iter()
         .filter(|pubkey| project_has_agent(project, pubkey))
+        .filter(|pubkey| Some(pubkey.as_str()) != sender_pubkey)
         .cloned()
         .collect::<Vec<_>>();
     target_agents.dedup();
     let Some(agent_pubkey) = target_agents.first().cloned() else {
+        if let Some(sender_pubkey) = sender_pubkey {
+            if project_has_agent(project, sender_pubkey)
+                && recipient_pubkeys
+                    .iter()
+                    .any(|pubkey| pubkey == sender_pubkey)
+            {
+                return Ok(ignored(
+                    "self_authored_agent_echo",
+                    Some(project.project_id.clone()),
+                    vec![sender_pubkey.to_string()],
+                    "agent-authored event targets the same agent and is treated as a publish echo"
+                        .to_string(),
+                ));
+            }
+        }
+
         return Ok(ignored(
             "no_project_agent_recipient",
             Some(project.project_id.clone()),
@@ -501,6 +519,36 @@ mod tests {
         assert_eq!(route.project_id, "project-beta");
         assert_eq!(route.agent_pubkey, agent);
         assert_eq!(route.method, "recipient_agent");
+
+        fs::remove_dir_all(temp_dir).expect("temp dir cleanup must succeed");
+    }
+
+    #[test]
+    fn ignores_agent_authored_self_addressed_project_echo() {
+        let temp_dir = unique_temp_dir("self-addressed-agent-echo");
+        let owner = pubkey_hex(0x17);
+        let agent = pubkey_hex(0x27);
+        write_project(&temp_dir, "project-echo", &owner, "/repo/echo");
+        write_agent_index(&temp_dir, "project-echo", &[&agent]);
+        write_agent(&temp_dir, &agent, "echo-agent");
+
+        let catalog = build_inbound_routing_catalog(&temp_dir).expect("catalog must build");
+        let mut envelope = nostr_envelope(&agent, "event-self");
+        envelope.principal = nostr_recipient(&agent);
+        envelope.channel.project_binding = Some(format!("31933:{owner}:project-echo"));
+
+        let resolution = resolve_inbound_route(InboundRoutingInput {
+            catalog: &catalog,
+            envelope: &envelope,
+        })
+        .expect("route resolution must not fail");
+
+        let InboundRouteResolution::Ignored { reason } = resolution else {
+            panic!("expected ignored resolution");
+        };
+        assert_eq!(reason.code, "self_authored_agent_echo");
+        assert_eq!(reason.project_id.as_deref(), Some("project-echo"));
+        assert_eq!(reason.pubkeys, vec![agent]);
 
         fs::remove_dir_all(temp_dir).expect("temp dir cleanup must succeed");
     }

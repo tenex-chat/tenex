@@ -491,6 +491,7 @@ fn run_daemon_maintenance(
         tenex_base_dir: &options.tenex_base_dir,
         daemon_dir: &options.daemon_dir,
         now_ms: options.inspected_at,
+        project_boot_state: tenex_daemon::project_boot_state::empty_booted_projects_state(),
         heartbeat_latch: None,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
@@ -529,6 +530,9 @@ fn run_daemon_foreground(
             max_iterations: iterations,
             sleep_ms: options.sleep_ms,
             retry_policy: PublishOutboxRetryPolicy::default(),
+            project_boot_state: std::sync::Arc::new(std::sync::Mutex::new(
+                tenex_daemon::project_boot_state::ProjectBootState::new(),
+            )),
             heartbeat_latch: None,
         },
         &mut clock,
@@ -1050,8 +1054,6 @@ mod tests {
     use tenex_daemon::filesystem_state::{
         build_lock_info, build_restart_state, save_restart_state_file, write_lock_info_file,
     };
-    use tenex_daemon::nostr_event::SignedNostrEvent;
-    use tenex_daemon::project_boot_state::record_project_boot_event;
     use tenex_daemon::scheduler_wakeups::{
         WakeupEnqueueRequest, WakeupFailureClassification, WakeupRetryPolicy, WakeupTarget,
         enqueue_wakeup, mark_wakeup_failed,
@@ -1684,21 +1686,6 @@ mod tests {
             ),
         )
         .expect("project descriptor must write");
-        record_project_boot_event(
-            &daemon_dir,
-            &SignedNostrEvent {
-                id: "boot-event-demo-project".to_string(),
-                pubkey: owner.clone(),
-                created_at: 1_710_000_999,
-                kind: 24000,
-                tags: vec![vec!["a".to_string(), format!("31933:{owner}:demo-project")]],
-                content: String::new(),
-                sig: "0".repeat(128),
-            },
-            1_710_000_999_000,
-        )
-        .expect("project boot state must write");
-
         let output = run_cli([
             "daemon-maintenance",
             "--daemon-dir",
@@ -1719,15 +1706,16 @@ mod tests {
             json!("demo-project")
         );
         assert_eq!(
+            value["bootedProjectDescriptorReport"]["descriptors"],
+            json!([])
+        );
+        assert_eq!(
             value["backendEvents"]["tick"]["dueTaskNames"],
-            json!([
-                "backend-status",
-                format!("project-status:{owner}:demo-project")
-            ])
+            json!(["backend-status"])
         );
         assert_eq!(
             value["backendEvents"]["publishOutboxAfter"]["pendingCount"],
-            json!(3)
+            json!(2)
         );
         assert_eq!(
             value["schedulerWakeups"]["diagnosticsAfter"]["pendingCount"],
@@ -1959,6 +1947,7 @@ mod tests {
             value["plan"]["nip46ReplyFilter"]["#p"],
             json!([TEST_BACKEND_PUBKEY_HEX])
         );
+        assert_eq!(value["plan"]["nip46ReplyFilter"]["limit"], json!(0));
         assert_eq!(value["plan"]["lessonFilters"][0]["#e"], json!([lesson]));
         assert_eq!(value["plan"]["filters"].as_array().unwrap().len(), 8);
 
@@ -2493,12 +2482,7 @@ mod tests {
         let daemon_dir = unique_temp_daemon_dir();
         save_restart_state_file(
             &daemon_dir,
-            &build_restart_state(
-                1_710_000_000_000,
-                vec!["project-alpha".to_string()],
-                std::process::id(),
-                "tenex-host",
-            ),
+            &build_restart_state(1_710_000_000_000, std::process::id(), "tenex-host"),
         )
         .expect("restart state write must succeed");
 

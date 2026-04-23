@@ -1381,6 +1381,55 @@ mod tests {
     }
 
     #[test]
+    fn waits_for_delegation_registered_during_same_worker_session() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::from([
+                frame_for(&delegation_registered_message()),
+                frame_for(&waiting_for_delegation_message()),
+            ]),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let mut runtime_state = WorkerRuntimeState::default();
+        let worker_config = worker_config();
+
+        let outcome = run_daemon_worker_runtime_once(
+            &mut spawner,
+            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+        )
+        .expect("worker must transition to waiting for a same-session delegation");
+
+        assert_eq!(
+            outcome,
+            DaemonWorkerRuntimeOutcome::SessionCompleted {
+                dispatch_id: "dispatch-alpha".to_string(),
+                worker_id: "worker-alpha".to_string(),
+                session: WorkerSessionLoopOutcome {
+                    frame_count: 2,
+                    final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                },
+            }
+        );
+        assert!(runtime_state.is_empty());
+
+        let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
+        let entry = ral.states.get(&identity()).expect("RAL state must exist");
+        assert_eq!(entry.status, RalReplayStatus::WaitingForDelegation);
+        assert_eq!(entry.active_claim_token, None);
+        assert_eq!(entry.pending_delegations.len(), 1);
+        assert_eq!(
+            entry.pending_delegations[0].delegation_conversation_id,
+            "delegation-conversation-1"
+        );
+        assert_no_ral_locks_remaining(&daemon_dir);
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     fn returns_receive_failure_before_terminal_after_dispatch_start() {
         let daemon_dir = unique_temp_daemon_dir();
         seed_claimed_ral(&daemon_dir);
@@ -2088,6 +2137,27 @@ mod tests {
             "timeoutMs": 30_000_u64,
             "runtimeEventClass": "complete",
             "event": fixture.signed,
+        })
+    }
+
+    fn delegation_registered_message() -> Value {
+        let identity = identity();
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "delegation_registered",
+            "correlationId": "runtime-alpha-delegation",
+            "sequence": 21,
+            "timestamp": 1_710_000_700_200_u64,
+            "projectId": identity.project_id,
+            "agentPubkey": identity.agent_pubkey,
+            "conversationId": identity.conversation_id,
+            "ralNumber": identity.ral_number,
+            "delegationConversationId": "delegation-conversation-1",
+            "recipientPubkey": "8c637847e0bf7a57aba35b2f0683c443f3f990d50d0b0b032bcdd330d40d03d0",
+            "senderPubkey": identity.agent_pubkey,
+            "prompt": "What is your agent name? Reply with only your name.",
+            "delegationType": "standard",
+            "delegationProjectId": identity.project_id,
         })
     }
 

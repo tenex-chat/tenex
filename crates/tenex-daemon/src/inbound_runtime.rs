@@ -12,16 +12,20 @@ use crate::inbound_dispatch::{
     InboundDispatchEnqueueError, InboundDispatchEnqueueInput, InboundDispatchEnqueueOutcome,
     enqueue_delegation_completion_dispatch, enqueue_inbound_dispatch,
 };
-use crate::inbound_envelope::InboundEnvelope;
+use crate::inbound_envelope::{ChannelKind, InboundEnvelope, RuntimeTransport};
 use crate::inbound_routing::{
     InboundRoute, InboundRouteIgnoredReason, InboundRouteResolution, InboundRoutingCatalog,
     InboundRoutingCatalogError, InboundRoutingInput, build_inbound_routing_catalog,
     resolve_inbound_route,
 };
-use crate::ral_journal::{RalCompletedDelegation, RalJournalError};
+use crate::ral_journal::{RalCompletedDelegation, RalJournalError, RalReplayStatus};
 use crate::ral_scheduler::{
     RalDelegationCompletionLookup, RalDelegationCompletionLookupInput, RalScheduler,
     RalSchedulerError,
+};
+use crate::worker_injection_queue::{
+    WorkerDelegationCompletionInjection, WorkerInjectionEnqueueInput, WorkerInjectionQueueError,
+    WorkerInjectionRole, enqueue_worker_injection,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -70,6 +74,8 @@ pub enum InboundRuntimeError {
     RalJournal(#[from] RalJournalError),
     #[error("inbound conversation store update failed: {0}")]
     ConversationStore(#[from] ConversationStoreFilesError),
+    #[error("inbound worker injection queue failed: {0}")]
+    WorkerInjectionQueue(#[from] WorkerInjectionQueueError),
 }
 
 pub fn resolve_and_enqueue_inbound_dispatch(
@@ -188,10 +194,11 @@ fn try_handle_delegation_completion(
         completion_envelope: input.envelope,
         parent_triggering_event_id: target.triggering_event_id.as_deref(),
     })?;
-    let triggering_envelope = store
+    let mut triggering_envelope = store
         .parent_triggering_envelope
-        .as_ref()
-        .unwrap_or(input.envelope);
+        .clone()
+        .unwrap_or_else(|| input.envelope.clone());
+    bind_resume_trigger_to_project(&mut triggering_envelope, &project.address);
     let remaining_pending_delegation_ids = target
         .remaining_pending_delegations
         .iter()
@@ -207,12 +214,52 @@ fn try_handle_delegation_completion(
         identity: &target.identity,
         parent_status: target.status,
         completion: &completion,
-        triggering_envelope,
+        triggering_envelope: &triggering_envelope,
         remaining_pending_delegation_ids: &remaining_pending_delegation_ids,
         resume_if_waiting: !target.deferred,
         timestamp: input.timestamp,
         writer_version: input.writer_version,
     })?;
+    if target.status == RalReplayStatus::Claimed
+        && !target.deferred
+        && let (Some(worker_id), Some(lease_token)) = (
+            target.worker_id.as_deref(),
+            target.active_claim_token.as_deref(),
+        )
+    {
+        let injection = enqueue_worker_injection(WorkerInjectionEnqueueInput {
+            daemon_dir: input.daemon_dir.to_path_buf(),
+            timestamp: input.timestamp,
+            correlation_id: format!(
+                "delegation-completion-inject:{}",
+                completion.completion_event_id
+            ),
+            worker_id: worker_id.to_string(),
+            identity: target.identity.clone(),
+            injection_id: format!("delegation-completion:{}", completion.completion_event_id),
+            lease_token: lease_token.to_string(),
+            role: WorkerInjectionRole::System,
+            content: completion.response.clone(),
+            delegation_completion: Some(WorkerDelegationCompletionInjection {
+                delegation_conversation_id: completion.delegation_conversation_id.clone(),
+                recipient_pubkey: completion.sender_pubkey.clone(),
+                completed_at: completion.completed_at,
+                completion_event_id: completion.completion_event_id.clone(),
+            }),
+        })?;
+
+        tracing::info!(
+            worker_id = %worker_id,
+            agent_pubkey = %target.identity.agent_pubkey,
+            project_id = %target.identity.project_id,
+            conversation_id = %target.identity.conversation_id,
+            ral_number = target.identity.ral_number,
+            injection_id = %injection.injection_id,
+            queued = injection.queued,
+            already_existed = injection.already_existed,
+            "delegation completion injection queued for active worker"
+        );
+    }
 
     Ok(Some(InboundRuntimeOutcome::DelegationCompletion {
         project_id: target.identity.project_id,
@@ -225,6 +272,15 @@ fn try_handle_delegation_completion(
         parent_marker_appended: store.parent_marker_appended,
         dispatch,
     }))
+}
+
+fn bind_resume_trigger_to_project(envelope: &mut InboundEnvelope, project_address: &str) {
+    envelope.channel.project_binding = Some(project_address.to_string());
+
+    if envelope.transport == RuntimeTransport::Nostr {
+        envelope.channel.id = format!("nostr:project:{project_address}");
+        envelope.channel.kind = ChannelKind::Project;
+    }
 }
 
 #[cfg(test)]
@@ -240,6 +296,7 @@ mod tests {
         RalJournalRecord, RalPendingDelegation, RalTerminalSummary, append_ral_journal_record,
     };
     use crate::worker_dispatch_input::read_optional as read_worker_dispatch_input;
+    use crate::worker_injection_queue::replay_worker_injection_queue;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
     use tempfile::tempdir;
@@ -424,6 +481,11 @@ mod tests {
             fields.triggering_envelope["message"]["nativeId"],
             "root-event"
         );
+        assert_eq!(
+            fields.triggering_envelope["channel"]["projectBinding"],
+            format!("31933:{owner}:project-gamma")
+        );
+        assert_eq!(fields.triggering_envelope["channel"]["kind"], "project");
         assert!(fields.execution_flags.is_delegation_completion);
         assert!(!fields.execution_flags.has_pending_delegations);
 
@@ -456,6 +518,87 @@ mod tests {
                     message["eventId"] == "completion-event"
                         && message["senderPubkey"] == delegatee_agent
                 })
+        );
+    }
+
+    #[test]
+    fn delegation_completion_queues_injection_for_claimed_parent_ral() {
+        let temp_dir = tempdir().expect("temp dir must create");
+        let base_dir = temp_dir.path();
+        let daemon_dir = base_dir.join("daemon");
+        let owner = pubkey_hex(0x14);
+        let parent_agent = pubkey_hex(0x24);
+        let delegatee_agent = pubkey_hex(0x34);
+
+        write_project(base_dir, "project-delta", &owner, "/repo/delta");
+        write_agent_index(
+            base_dir,
+            "project-delta",
+            &[&parent_agent, &delegatee_agent],
+        );
+        write_agent(base_dir, &parent_agent, "parent-agent");
+        write_agent(base_dir, &delegatee_agent, "delegatee-agent");
+        seed_claimed_parent_ral_with_registered_delegation(
+            &daemon_dir,
+            "project-delta",
+            &parent_agent,
+            &delegatee_agent,
+            "parent-conversation",
+            "root-event",
+            "delegation-conversation",
+        );
+        write_parent_conversation(
+            base_dir,
+            "project-delta",
+            &owner,
+            &parent_agent,
+            "parent-conversation",
+            "root-event",
+            "delegation-conversation",
+        );
+
+        let envelope = delegation_completion_envelope(
+            &parent_agent,
+            &delegatee_agent,
+            "completion-event",
+            "delegation-conversation",
+        );
+        let outcome = resolve_and_enqueue_inbound_dispatch(InboundRuntimeInput {
+            daemon_dir: &daemon_dir,
+            tenex_base_dir: base_dir,
+            envelope: &envelope,
+            timestamp: 1_710_000_901_000,
+            writer_version: "inbound-runtime-test@0",
+        })
+        .expect("delegation completion must route");
+
+        let InboundRuntimeOutcome::DelegationCompletion { dispatch, .. } = outcome else {
+            panic!("expected delegation completion outcome");
+        };
+        assert!(matches!(
+            dispatch,
+            crate::inbound_dispatch::DelegationCompletionDispatchOutcome::Recorded { .. }
+        ));
+
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert!(queue.queued.is_empty());
+
+        let injections =
+            replay_worker_injection_queue(&daemon_dir).expect("injection queue must replay");
+        assert_eq!(injections.queued.len(), 1);
+        assert_eq!(injections.queued[0].worker_id, "worker-parent");
+        assert_eq!(injections.queued[0].lease_token, "claim-parent");
+        assert_eq!(
+            injections.queued[0].injection_id,
+            "delegation-completion:completion-event"
+        );
+        assert_eq!(
+            injections.queued[0]
+                .delegation_completion
+                .as_ref()
+                .expect("delegation completion payload must be present")
+                .delegation_conversation_id,
+            "delegation-conversation"
         );
     }
 
@@ -589,6 +732,78 @@ mod tests {
                         accumulated_runtime_ms: 0,
                         final_event_ids: Vec::new(),
                         keep_worker_warm: false,
+                    },
+                },
+            ),
+        ] {
+            append_ral_journal_record(daemon_dir, &record).expect("seed RAL record must append");
+        }
+    }
+
+    fn seed_claimed_parent_ral_with_registered_delegation(
+        daemon_dir: &Path,
+        project_id: &str,
+        parent_agent_pubkey: &str,
+        delegatee_agent_pubkey: &str,
+        conversation_id: &str,
+        triggering_event_id: &str,
+        delegation_conversation_id: &str,
+    ) {
+        let identity = RalJournalIdentity {
+            project_id: project_id.to_string(),
+            agent_pubkey: parent_agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
+            ral_number: 1,
+        };
+        for record in [
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-runtime-test@0",
+                1,
+                1_710_000_700_000,
+                "seed",
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some(triggering_event_id.to_string()),
+                },
+            ),
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-runtime-test@0",
+                2,
+                1_710_000_700_001,
+                "seed",
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-parent".to_string(),
+                    claim_token: "claim-parent".to_string(),
+                },
+            ),
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-runtime-test@0",
+                3,
+                1_710_000_700_002,
+                "seed",
+                RalJournalEvent::DelegationRegistered {
+                    identity,
+                    worker_id: "worker-parent".to_string(),
+                    claim_token: "claim-parent".to_string(),
+                    pending_delegation: RalPendingDelegation {
+                        delegation_conversation_id: delegation_conversation_id.to_string(),
+                        recipient_pubkey: delegatee_agent_pubkey.to_string(),
+                        sender_pubkey: parent_agent_pubkey.to_string(),
+                        prompt: "please handle this".to_string(),
+                        delegation_type: RalDelegationType::Standard,
+                        ral_number: 1,
+                        parent_delegation_conversation_id: None,
+                        pending_sub_delegations: None,
+                        deferred_completion: None,
+                        followup_event_id: None,
+                        project_id: None,
+                        suggestions: None,
+                        killed: None,
+                        killed_at: None,
                     },
                 },
             ),

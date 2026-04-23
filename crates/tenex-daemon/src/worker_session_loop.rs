@@ -7,11 +7,19 @@ use thiserror::Error;
 
 use crate::worker_dispatch_execution::WorkerDispatchSession;
 use crate::worker_frame_pump::WorkerFrameReceiver;
+use crate::worker_injection_queue::{
+    WorkerInjectionMarkSentInput, WorkerInjectionQueueError, WorkerInjectionQueueRecord,
+    WorkerInjectionRole, mark_worker_injection_sent, pending_worker_injections_for,
+};
 use crate::worker_message_flow::{
     WorkerMessageFlowError, WorkerMessageFlowInput, WorkerMessageFlowOutcome,
     WorkerMessagePublishContext, WorkerMessageTerminalContext, handle_worker_message_flow,
 };
-use crate::worker_protocol::{WorkerProtocolError, decode_agent_worker_protocol_frame};
+use crate::worker_protocol::{
+    AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolError, decode_agent_worker_protocol_frame,
+    validate_agent_worker_protocol_message,
+};
+use crate::worker_publish_flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
 use crate::worker_runtime_state::WorkerRuntimeState;
 
 pub struct WorkerSessionLoopInput<'a> {
@@ -30,6 +38,7 @@ pub struct WorkerSessionLoopInput<'a> {
 pub enum WorkerSessionLoopFinalReason {
     TerminalResultHandled,
     BootFailureCandidate,
+    PublishAcceptedWorkerPipeClosed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +72,28 @@ where
     MaxFrameLimitExceeded { frame_count: u64, max_frames: u64 },
     #[error("worker session publish maintenance failed: {message}")]
     PublishMaintenance { message: String },
+    #[error("worker session injection queue failed: {source}")]
+    InjectionQueue {
+        #[source]
+        source: WorkerInjectionQueueError,
+    },
+    #[error("worker session injection protocol failed: {source}")]
+    InjectionProtocol {
+        #[source]
+        source: WorkerProtocolError,
+    },
+    #[error("worker session injection send failed: {source}")]
+    SendInjection {
+        #[source]
+        source: E,
+    },
+    #[error(
+        "worker pipe closed after accepted non-terminal publish_request with runtimeEventClass {runtime_event_class}: {error}"
+    )]
+    PublishResultPipeClosedAfterNonTerminalAcceptance {
+        runtime_event_class: String,
+        error: String,
+    },
 }
 
 pub fn run_worker_session_loop<S>(
@@ -81,6 +112,8 @@ where
                 max_frames: input.max_frames,
             });
         }
+
+        send_pending_worker_injections(worker, &input)?;
 
         let frame = worker
             .receive_worker_frame()
@@ -122,15 +155,130 @@ where
                     final_reason: WorkerSessionLoopFinalReason::BootFailureCandidate,
                 });
             }
-            WorkerMessageFlowOutcome::PublishRequestHandled { .. } => {
+            WorkerMessageFlowOutcome::PublishRequestHandled { outcome } => {
                 run_live_publish_maintenance(&mut input)?;
+                if let WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error } =
+                    &outcome.result_delivery
+                {
+                    return finish_terminal_publish_after_closed_worker_pipe(
+                        worker,
+                        &mut input,
+                        frame_count,
+                        &outcome,
+                        error,
+                    );
+                }
+                send_pending_worker_injections(worker, &input)?;
             }
             WorkerMessageFlowOutcome::HeartbeatUpdated { .. }
             | WorkerMessageFlowOutcome::ControlTelemetry { .. }
             | WorkerMessageFlowOutcome::StreamTelemetry { .. }
-            | WorkerMessageFlowOutcome::PublishedNotification { .. } => {}
+            | WorkerMessageFlowOutcome::PublishedNotification { .. } => {
+                send_pending_worker_injections(worker, &input)?;
+            }
         }
     }
+}
+
+fn finish_terminal_publish_after_closed_worker_pipe<S>(
+    worker: &mut S,
+    input: &mut WorkerSessionLoopInput<'_>,
+    frame_count: u64,
+    publish_outcome: &WorkerPublishFlowOutcome,
+    pipe_error: &str,
+) -> Result<WorkerSessionLoopOutcome, WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
+where
+    S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
+{
+    let runtime_event_class = publish_outcome
+        .message_plan
+        .message
+        .get("runtimeEventClass")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>")
+        .to_string();
+    if runtime_event_class != "complete" {
+        return Err(
+            WorkerSessionLoopError::PublishResultPipeClosedAfterNonTerminalAcceptance {
+                runtime_event_class,
+                error: pipe_error.to_string(),
+            },
+        );
+    }
+
+    let Some(terminal) = input.terminal.take() else {
+        return Err(WorkerSessionLoopError::MessageFlow {
+            source: WorkerMessageFlowError::MissingTerminalContext {
+                message_type: "complete".to_string(),
+            },
+        });
+    };
+    let terminal_message = terminal_complete_message_from_publish(publish_outcome);
+    let event_ids = terminal_message
+        .get("finalEventIds")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+
+    tracing::warn!(
+        worker_id = %input.worker_id,
+        event_ids = %event_ids,
+        error = %pipe_error,
+        "completing worker session from accepted publish because worker pipe closed before publish_result delivery"
+    );
+
+    let outcome = handle_worker_message_flow(
+        worker,
+        input.runtime_state,
+        WorkerMessageFlowInput {
+            daemon_dir: input.daemon_dir,
+            worker_id: input.worker_id,
+            message: &terminal_message,
+            observed_at: input.observed_at,
+            publish: input.publish,
+            terminal: Some(terminal),
+        },
+    )
+    .map_err(|source| WorkerSessionLoopError::MessageFlow { source })?;
+
+    match outcome {
+        WorkerMessageFlowOutcome::TerminalResultHandled { .. } => Ok(WorkerSessionLoopOutcome {
+            frame_count,
+            final_reason: WorkerSessionLoopFinalReason::PublishAcceptedWorkerPipeClosed,
+        }),
+        other => Err(WorkerSessionLoopError::MessageFlow {
+            source: WorkerMessageFlowError::MissingTerminalContext {
+                message_type: format!("synthetic complete produced {other:?}"),
+            },
+        }),
+    }
+}
+
+fn terminal_complete_message_from_publish(publish_outcome: &WorkerPublishFlowOutcome) -> Value {
+    let publish_request = &publish_outcome.message_plan.message;
+    serde_json::json!({
+        "version": publish_request["version"].clone(),
+        "type": "complete",
+        "correlationId": publish_request["correlationId"].clone(),
+        "sequence": publish_request["sequence"].clone(),
+        "timestamp": publish_request["timestamp"].clone(),
+        "projectId": publish_request["projectId"].clone(),
+        "agentPubkey": publish_request["agentPubkey"].clone(),
+        "conversationId": publish_request["conversationId"].clone(),
+        "ralNumber": publish_request["ralNumber"].clone(),
+        "finalRalState": "completed",
+        "publishedUserVisibleEvent": true,
+        "pendingDelegationsRemain": false,
+        "accumulatedRuntimeMs": 0_u64,
+        "finalEventIds": publish_outcome.acceptance.publish_result["eventIds"].clone(),
+        "keepWorkerWarm": false,
+    })
 }
 
 fn run_live_publish_maintenance<E>(
@@ -153,21 +301,102 @@ fn is_terminal_message(message: &Value) -> bool {
     )
 }
 
+fn send_pending_worker_injections<S>(
+    worker: &mut S,
+    input: &WorkerSessionLoopInput<'_>,
+) -> Result<(), WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
+where
+    S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
+{
+    let Some(active_worker) = input.runtime_state.get_worker(input.worker_id).cloned() else {
+        return Ok(());
+    };
+    let pending =
+        pending_worker_injections_for(input.daemon_dir, input.worker_id, &active_worker.identity)
+            .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
+
+    for record in pending {
+        if record.lease_token != active_worker.claim_token {
+            tracing::warn!(
+                worker_id = %record.worker_id,
+                injection_id = %record.injection_id,
+                "skipping worker injection with stale lease token"
+            );
+            continue;
+        }
+
+        let message = worker_injection_protocol_message(&record, input.observed_at);
+        validate_agent_worker_protocol_message(&message)
+            .map_err(|source| WorkerSessionLoopError::InjectionProtocol { source })?;
+        worker
+            .send_worker_message(&message)
+            .map_err(|source| WorkerSessionLoopError::SendInjection { source })?;
+        mark_worker_injection_sent(WorkerInjectionMarkSentInput {
+            daemon_dir: input.daemon_dir.to_path_buf(),
+            timestamp: input.observed_at,
+            correlation_id: format!("{}:sent", record.correlation_id),
+            worker_id: record.worker_id,
+            injection_id: record.injection_id,
+        })
+        .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
+    }
+
+    Ok(())
+}
+
+fn worker_injection_protocol_message(record: &WorkerInjectionQueueRecord, timestamp: u64) -> Value {
+    let role = match record.role {
+        WorkerInjectionRole::User => "user",
+        WorkerInjectionRole::System => "system",
+    };
+    let mut message = serde_json::json!({
+        "version": AGENT_WORKER_PROTOCOL_VERSION,
+        "type": "inject",
+        "correlationId": record.correlation_id,
+        "sequence": record.sequence,
+        "timestamp": timestamp,
+        "projectId": record.identity.project_id,
+        "agentPubkey": record.identity.agent_pubkey,
+        "conversationId": record.identity.conversation_id,
+        "ralNumber": record.identity.ral_number,
+        "injectionId": record.injection_id,
+        "leaseToken": record.lease_token,
+        "role": role,
+        "content": record.content,
+    });
+    if let Some(delegation_completion) = &record.delegation_completion {
+        message["delegationCompletion"] = serde_json::json!({
+            "delegationConversationId": delegation_completion.delegation_conversation_id,
+            "recipientPubkey": delegation_completion.recipient_pubkey,
+            "completedAt": delegation_completion.completed_at,
+            "completionEventId": delegation_completion.completion_event_id,
+        });
+    }
+    message
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::dispatch_queue::{
         DispatchQueueRecord, DispatchQueueRecordParams, DispatchQueueState, DispatchQueueStatus,
-        DispatchRalIdentity, build_dispatch_queue_record, replay_dispatch_queue_records,
+        DispatchRalIdentity, append_dispatch_queue_record, build_dispatch_queue_record,
+        replay_dispatch_queue, replay_dispatch_queue_records,
     };
     use crate::nostr_event::Nip01EventFixture;
+    use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::ral_journal::{
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
-        RalJournalReplay, replay_ral_journal_records,
+        RalJournalReplay, RalReplayStatus, append_ral_journal_record, replay_ral_journal,
+        replay_ral_journal_records,
     };
-    use crate::ral_lock::build_ral_lock_info;
+    use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
     use crate::ral_scheduler::RalScheduler;
     use crate::worker_completion::WorkerCompletionDispatchInput;
+    use crate::worker_injection_queue::{
+        WorkerDelegationCompletionInjection, WorkerInjectionEnqueueInput, WorkerInjectionRole,
+        enqueue_worker_injection, replay_worker_injection_queue,
+    };
     use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
     use crate::worker_launch_lock::acquire_worker_launch_locks;
     use crate::worker_process::{
@@ -234,6 +463,10 @@ mod tests {
 
             Ok(())
         }
+
+        fn is_worker_pipe_closed_error(error: &Self::Error) -> bool {
+            error.0 == "broken pipe"
+        }
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,6 +483,8 @@ mod tests {
     #[test]
     fn heartbeat_then_terminal_result_stops_the_session_loop() {
         let daemon_dir = unique_temp_daemon_dir();
+        append_initial_ral_records_for(&daemon_dir, "worker-alpha", identity());
+        append_initial_dispatch_records_for(&daemon_dir, identity());
         let scheduler = scheduler_from_records();
         let dispatch_state = dispatch_state_from_records();
         let owner = build_ral_lock_info(100, "host-a", 1_000);
@@ -355,6 +590,92 @@ mod tests {
     }
 
     #[test]
+    fn accepted_terminal_publish_with_closed_worker_pipe_completes_session() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let fixture = signed_event_fixture();
+        let identity = identity_with_agent(&fixture.pubkey);
+        append_initial_ral_records_for(&daemon_dir, "worker-alpha", identity.clone());
+        append_initial_dispatch_records_for(&daemon_dir, identity.clone());
+        let scheduler = scheduler_from_records_for_identity("worker-alpha", identity.clone());
+        let dispatch_state = dispatch_state_from_records_for_identity(identity.clone());
+        let owner = build_ral_lock_info(100, "host-a", 1_000);
+        let locks = acquire_worker_launch_locks(&daemon_dir, &launch_plan_for(&identity), &owner)
+            .expect("launch locks must acquire");
+        let allocation_lock_path = locks.allocation.path.clone();
+        let state_lock_path = locks.state.path.clone();
+        let publish_request = publish_request_message(&fixture, 41, 1_710_001_000_000);
+        let mut worker = RecordingWorker {
+            incoming_frames: VecDeque::from([frame_for(&publish_request)]),
+            send_error: Some(FakeWorkerError("broken pipe")),
+            ..Default::default()
+        };
+        let mut runtime_state = runtime_state_for("worker-alpha", identity.clone());
+
+        let outcome = run_worker_session_loop(
+            &mut worker,
+            WorkerSessionLoopInput {
+                daemon_dir: &daemon_dir,
+                runtime_state: &mut runtime_state,
+                worker_id: "worker-alpha",
+                observed_at: 1_710_000_403_000,
+                publish: Some(WorkerMessagePublishContext {
+                    accepted_at: 1_710_001_000_100,
+                    result_sequence: 900,
+                    result_timestamp: 1_710_001_000_200,
+                    telegram_egress: None,
+                }),
+                live_publish_maintenance: None,
+                terminal: Some(WorkerMessageTerminalContext {
+                    scheduler: &scheduler,
+                    dispatch_state: &dispatch_state,
+                    result_context: result_context(),
+                    dispatch: Some(dispatch_input()),
+                    locks,
+                }),
+                max_frames: 4,
+            },
+        )
+        .expect("closed worker pipe after accepted terminal publish must complete");
+
+        assert_eq!(outcome.frame_count, 1);
+        assert_eq!(
+            outcome.final_reason,
+            WorkerSessionLoopFinalReason::PublishAcceptedWorkerPipeClosed
+        );
+        assert_eq!(worker.sent_messages.len(), 1);
+        assert_eq!(worker.sent_messages[0]["type"], "publish_result");
+        assert_eq!(worker.sent_messages[0]["status"], "accepted");
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending outbox must read")
+                .is_some()
+        );
+        assert!(runtime_state.get_worker("worker-alpha").is_none());
+
+        let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
+        let entry = ral
+            .states
+            .get(&identity)
+            .expect("completed RAL must replay");
+        assert_eq!(entry.status, RalReplayStatus::Completed);
+        assert_eq!(entry.final_event_ids, vec![fixture.signed.id.clone()]);
+        let dispatch = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert!(dispatch.leased.is_empty());
+        assert_eq!(dispatch.terminal.len(), 1);
+        assert_eq!(dispatch.terminal[0].status, DispatchQueueStatus::Completed);
+        assert_eq!(
+            read_ral_lock_info(&allocation_lock_path).expect("allocation lock must read"),
+            None
+        );
+        assert_eq!(
+            read_ral_lock_info(&state_lock_path).expect("state lock must read"),
+            None
+        );
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     fn boot_failure_candidate_stops_the_session_loop() {
         let daemon_dir = unique_temp_daemon_dir();
         let mut worker = RecordingWorker {
@@ -448,6 +769,74 @@ mod tests {
                 max_frames: 1,
             }
         ));
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn pending_worker_injection_is_sent_and_marked_sent() {
+        let daemon_dir = unique_temp_daemon_dir();
+        enqueue_worker_injection(WorkerInjectionEnqueueInput {
+            daemon_dir: daemon_dir.clone(),
+            timestamp: 1_710_000_402_000,
+            correlation_id: "delegation-completion-inject:event-a".to_string(),
+            worker_id: "worker-alpha".to_string(),
+            identity: identity(),
+            injection_id: "delegation-completion:event-a".to_string(),
+            lease_token: "claim-alpha".to_string(),
+            role: WorkerInjectionRole::System,
+            content: "delegation done".to_string(),
+            delegation_completion: Some(WorkerDelegationCompletionInjection {
+                delegation_conversation_id: "delegation-a".to_string(),
+                recipient_pubkey: "b".repeat(64),
+                completed_at: 1_710_000_002,
+                completion_event_id: "event-a".to_string(),
+            }),
+        })
+        .expect("injection must queue");
+        let mut worker = RecordingWorker {
+            incoming_frames: VecDeque::from([
+                frame_for(&fixture_valid_message("heartbeat")),
+                frame_for(&fixture_valid_message("boot-error")),
+            ]),
+            ..Default::default()
+        };
+        let mut runtime_state = runtime_state_for("worker-alpha", identity());
+
+        let outcome = run_worker_session_loop(
+            &mut worker,
+            WorkerSessionLoopInput {
+                daemon_dir: &daemon_dir,
+                runtime_state: &mut runtime_state,
+                worker_id: "worker-alpha",
+                observed_at: 1_710_000_403_000,
+                publish: None,
+                live_publish_maintenance: None,
+                terminal: None,
+                max_frames: 4,
+            },
+        )
+        .expect("session loop must continue through injected message");
+
+        assert_eq!(
+            outcome.final_reason,
+            WorkerSessionLoopFinalReason::BootFailureCandidate
+        );
+        assert_eq!(worker.sent_messages.len(), 1);
+        assert_eq!(worker.sent_messages[0]["type"], "inject");
+        assert_eq!(
+            worker.sent_messages[0]["injectionId"],
+            "delegation-completion:event-a"
+        );
+        assert_eq!(
+            worker.sent_messages[0]["delegationCompletion"]["delegationConversationId"],
+            "delegation-a"
+        );
+
+        let replayed =
+            replay_worker_injection_queue(&daemon_dir).expect("injection queue must replay");
+        assert!(replayed.queued.is_empty());
+        assert_eq!(replayed.sent.len(), 1);
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -568,8 +957,16 @@ mod tests {
     }
 
     fn scheduler_from_records_for(worker_id: &str) -> RalScheduler {
-        let replay = replay_ral_journal_records(initial_ral_records_for(worker_id))
-            .expect("journal replay must succeed");
+        scheduler_from_records_for_identity(worker_id, identity())
+    }
+
+    fn scheduler_from_records_for_identity(
+        worker_id: &str,
+        identity: RalJournalIdentity,
+    ) -> RalScheduler {
+        let replay =
+            replay_ral_journal_records(initial_ral_records_for_identity(worker_id, identity))
+                .expect("journal replay must succeed");
         RalScheduler::new(&RalJournalReplay {
             last_sequence: replay.last_sequence,
             states: replay.states,
@@ -577,23 +974,32 @@ mod tests {
     }
 
     fn dispatch_state_from_records() -> DispatchQueueState {
-        replay_dispatch_queue_records(initial_dispatch_records())
+        dispatch_state_from_records_for_identity(identity())
+    }
+
+    fn dispatch_state_from_records_for_identity(
+        identity: RalJournalIdentity,
+    ) -> DispatchQueueState {
+        replay_dispatch_queue_records(initial_dispatch_records_for_identity(identity))
             .expect("dispatch replay must succeed")
     }
 
-    fn initial_ral_records_for(worker_id: &str) -> Vec<RalJournalRecord> {
+    fn initial_ral_records_for_identity(
+        worker_id: &str,
+        identity: RalJournalIdentity,
+    ) -> Vec<RalJournalRecord> {
         vec![
             journal_record(
                 198,
                 RalJournalEvent::Allocated {
-                    identity: identity(),
+                    identity: identity.clone(),
                     triggering_event_id: Some("trigger-alpha".to_string()),
                 },
             ),
             journal_record(
                 199,
                 RalJournalEvent::Claimed {
-                    identity: identity(),
+                    identity,
                     worker_id: worker_id.to_string(),
                     claim_token: "claim-alpha".to_string(),
                 },
@@ -601,11 +1007,29 @@ mod tests {
         ]
     }
 
-    fn initial_dispatch_records() -> Vec<DispatchQueueRecord> {
+    fn initial_dispatch_records_for_identity(
+        identity: RalJournalIdentity,
+    ) -> Vec<DispatchQueueRecord> {
         vec![
-            dispatch_record(300, DispatchQueueStatus::Queued),
-            dispatch_record(301, DispatchQueueStatus::Leased),
+            dispatch_record_for_identity(300, DispatchQueueStatus::Queued, identity.clone()),
+            dispatch_record_for_identity(301, DispatchQueueStatus::Leased, identity),
         ]
+    }
+
+    fn append_initial_ral_records_for(
+        daemon_dir: &Path,
+        worker_id: &str,
+        identity: RalJournalIdentity,
+    ) {
+        for record in initial_ral_records_for_identity(worker_id, identity) {
+            append_ral_journal_record(daemon_dir, &record).expect("RAL record must append");
+        }
+    }
+
+    fn append_initial_dispatch_records_for(daemon_dir: &Path, identity: RalJournalIdentity) {
+        for record in initial_dispatch_records_for_identity(identity) {
+            append_dispatch_queue_record(daemon_dir, &record).expect("dispatch record must append");
+        }
     }
 
     fn result_context() -> crate::worker_result::WorkerResultTransitionContext {
@@ -633,17 +1057,21 @@ mod tests {
     }
 
     fn launch_plan() -> WorkerLaunchPlan {
+        launch_plan_for(&identity())
+    }
+
+    fn launch_plan_for(identity: &RalJournalIdentity) -> WorkerLaunchPlan {
         WorkerLaunchPlan {
             allocation_lock_scope: RalAllocationLockScope {
-                project_id: "project-alpha".to_string(),
-                agent_pubkey: "a".repeat(64),
-                conversation_id: "conversation-alpha".to_string(),
+                project_id: identity.project_id.clone(),
+                agent_pubkey: identity.agent_pubkey.clone(),
+                conversation_id: identity.conversation_id.clone(),
             },
             state_lock_scope: RalStateLockScope {
-                project_id: "project-alpha".to_string(),
-                agent_pubkey: "a".repeat(64),
-                conversation_id: "conversation-alpha".to_string(),
-                ral_number: 3,
+                project_id: identity.project_id.clone(),
+                agent_pubkey: identity.agent_pubkey.clone(),
+                conversation_id: identity.conversation_id.clone(),
+                ral_number: identity.ral_number,
             },
             execute_message: json!({ "type": "execute" }),
         }
@@ -660,17 +1088,21 @@ mod tests {
         )
     }
 
-    fn dispatch_record(sequence: u64, status: DispatchQueueStatus) -> DispatchQueueRecord {
+    fn dispatch_record_for_identity(
+        sequence: u64,
+        status: DispatchQueueStatus,
+        identity: RalJournalIdentity,
+    ) -> DispatchQueueRecord {
         build_dispatch_queue_record(DispatchQueueRecordParams {
             sequence,
             timestamp: 1_710_000_450_000 + sequence,
             correlation_id: format!("correlation-dispatch-{sequence}"),
             dispatch_id: "dispatch-alpha".to_string(),
             ral: DispatchRalIdentity {
-                project_id: "project-alpha".to_string(),
-                agent_pubkey: "a".repeat(64),
-                conversation_id: "conversation-alpha".to_string(),
-                ral_number: 3,
+                project_id: identity.project_id,
+                agent_pubkey: identity.agent_pubkey,
+                conversation_id: identity.conversation_id,
+                ral_number: identity.ral_number,
             },
             triggering_event_id: "trigger-alpha".to_string(),
             claim_token: "claim-alpha".to_string(),

@@ -43,7 +43,6 @@
     },
     "restartState": {
         "requestedAt": 1710000300000,
-        "bootedProjects": ["project-alpha", "project-beta"],
         "pid": 4242,
         "hostname": "tenex-host"
     }

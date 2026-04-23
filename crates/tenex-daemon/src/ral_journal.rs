@@ -1,17 +1,22 @@
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const RAL_DIR_NAME: &str = "ral";
 pub const RAL_JOURNAL_FILE_NAME: &str = "journal.jsonl";
+pub const RAL_JOURNAL_LOCK_FILE_NAME: &str = "journal.lock";
 pub const RAL_SNAPSHOT_FILE_NAME: &str = "snapshot.json";
 pub const RAL_JOURNAL_RECORD_SCHEMA_VERSION: u32 = 1;
 pub const RAL_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 pub const RAL_JOURNAL_WRITER_RUST_DAEMON: &str = "rust-daemon";
+
+static RAL_JOURNAL_APPEND_MUTEX: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Error)]
 pub enum RalJournalError {
@@ -173,6 +178,16 @@ pub enum RalJournalEvent {
         #[serde(rename = "claimToken")]
         claim_token: String,
     },
+    DelegationRegistered {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "workerId")]
+        worker_id: String,
+        #[serde(rename = "claimToken")]
+        claim_token: String,
+        #[serde(rename = "pendingDelegation")]
+        pending_delegation: RalPendingDelegation,
+    },
     WaitingForDelegation {
         #[serde(flatten)]
         identity: RalJournalIdentity,
@@ -265,6 +280,7 @@ impl RalJournalEvent {
         match self {
             Self::Allocated { identity, .. }
             | Self::Claimed { identity, .. }
+            | Self::DelegationRegistered { identity, .. }
             | Self::WaitingForDelegation { identity, .. }
             | Self::DelegationCompleted { identity, .. }
             | Self::Completed { identity, .. }
@@ -412,26 +428,68 @@ pub fn ral_journal_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
     ral_dir(daemon_dir).join(RAL_JOURNAL_FILE_NAME)
 }
 
+fn ral_journal_lock_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
+    ral_dir(daemon_dir).join(RAL_JOURNAL_LOCK_FILE_NAME)
+}
+
 pub fn ral_snapshot_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
     ral_dir(daemon_dir).join(RAL_SNAPSHOT_FILE_NAME)
+}
+
+struct RalJournalAppendLock {
+    _process_guard: MutexGuard<'static, ()>,
+    _lock_file: File,
+}
+
+fn acquire_ral_journal_append_lock(
+    daemon_dir: impl AsRef<Path>,
+) -> RalJournalResult<RalJournalAppendLock> {
+    let process_guard = RAL_JOURNAL_APPEND_MUTEX
+        .lock()
+        .map_err(|_| io::Error::other("RAL journal append mutex poisoned"))?;
+
+    let lock_path = ral_journal_lock_path(daemon_dir);
+    let lock_dir = lock_path
+        .parent()
+        .expect("RAL journal lock path must have a parent directory");
+    fs::create_dir_all(lock_dir)?;
+
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let ret = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+    if ret != 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+
+    Ok(RalJournalAppendLock {
+        _process_guard: process_guard,
+        _lock_file: lock_file,
+    })
 }
 
 pub fn append_ral_journal_record(
     daemon_dir: impl AsRef<Path>,
     record: &RalJournalRecord,
 ) -> RalJournalResult<()> {
+    let daemon_dir = daemon_dir.as_ref();
+    let _append_lock = acquire_ral_journal_append_lock(daemon_dir)?;
     let journal_path = ral_journal_path(daemon_dir);
     let journal_dir = journal_path
         .parent()
         .expect("RAL journal path must have a parent directory");
     fs::create_dir_all(journal_dir)?;
 
+    let mut line = serde_json::to_vec(record)?;
+    line.push(b'\n');
+
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&journal_path)?;
-    serde_json::to_writer(&mut file, record)?;
-    file.write_all(b"\n")?;
+    file.write_all(&line)?;
     file.sync_all()?;
     sync_parent_dir(&journal_path)?;
 
@@ -535,25 +593,16 @@ pub fn replay_ral_journal_records<I>(records: I) -> RalJournalResult<RalJournalR
 where
     I: IntoIterator<Item = RalJournalRecord>,
 {
-    let mut last_sequence: Option<u64> = None;
+    let mut last_sequence = 0;
     let mut states = HashMap::new();
 
     for record in records {
-        if let Some(previous_sequence) = last_sequence
-            && record.sequence <= previous_sequence
-        {
-            return Err(RalJournalError::NonIncreasingSequence {
-                sequence: record.sequence,
-                previous_sequence,
-            });
-        }
-
         apply_record(&mut states, &record);
-        last_sequence = Some(record.sequence);
+        last_sequence = last_sequence.max(record.sequence);
     }
 
     Ok(RalJournalReplay {
-        last_sequence: last_sequence.unwrap_or(0),
+        last_sequence,
         states,
     })
 }
@@ -603,6 +652,19 @@ fn apply_record(
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = Some(claim_token.clone());
             entry.final_event_ids.clear();
+            entry.error = None;
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::DelegationRegistered {
+            worker_id,
+            claim_token,
+            pending_delegation,
+            ..
+        } => {
+            entry.worker_id = Some(worker_id.clone());
+            entry.active_claim_token = Some(claim_token.clone());
+            upsert_pending_delegation(entry, pending_delegation.clone());
             entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = None;
@@ -764,6 +826,17 @@ fn apply_delegation_completion(entry: &mut RalReplayEntry, completion: &RalCompl
     entry.completed_delegations.push(completion.clone());
 }
 
+fn upsert_pending_delegation(entry: &mut RalReplayEntry, pending_delegation: RalPendingDelegation) {
+    if let Some(existing) = entry.pending_delegations.iter_mut().find(|existing| {
+        existing.delegation_conversation_id == pending_delegation.delegation_conversation_id
+    }) {
+        *existing = pending_delegation;
+        return;
+    }
+
+    entry.pending_delegations.push(pending_delegation);
+}
+
 fn apply_terminal_summary(entry: &mut RalReplayEntry, terminal: &RalTerminalSummary) {
     entry.final_event_ids = terminal.final_event_ids.clone();
     entry.accumulated_runtime_ms = terminal.accumulated_runtime_ms;
@@ -781,6 +854,8 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Barrier};
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const RAL_LIFECYCLE_FIXTURE: &str =
@@ -1027,6 +1102,64 @@ mod tests {
         );
         assert_eq!(replay_entry.accumulated_runtime_ms, 42);
         assert_eq!(replay_entry.last_correlation_id, "corr-5");
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn concurrent_appends_do_not_interleave_jsonl_records() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let thread_count = 6;
+        let records_per_thread = 8;
+        let barrier = Arc::new(Barrier::new(thread_count));
+        let mut handles = Vec::new();
+
+        for thread_index in 0..thread_count {
+            let daemon_dir = daemon_dir.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                for record_index in 0..records_per_thread {
+                    let sequence = (thread_index * records_per_thread + record_index + 1) as u64;
+                    let identity = RalJournalIdentity {
+                        project_id: format!("project-{thread_index}"),
+                        agent_pubkey: format!("{:064x}", thread_index + 1),
+                        conversation_id: format!("conversation-{record_index}"),
+                        ral_number: 1,
+                    };
+                    let record = RalJournalRecord::new(
+                        RAL_JOURNAL_WRITER_RUST_DAEMON,
+                        "test-version",
+                        sequence,
+                        sequence * 1_000,
+                        format!("corr-{thread_index}-{record_index}-{}", "x".repeat(16_384)),
+                        RalJournalEvent::Allocated {
+                            identity,
+                            triggering_event_id: None,
+                        },
+                    );
+
+                    append_ral_journal_record(&daemon_dir, &record)
+                        .expect("concurrent journal append must succeed");
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("append thread must not panic");
+        }
+
+        let content =
+            fs::read_to_string(ral_journal_path(&daemon_dir)).expect("journal file must read");
+        assert!(content.ends_with('\n'));
+        assert_eq!(content.lines().count(), thread_count * records_per_thread);
+        for line in content.lines() {
+            serde_json::from_str::<RalJournalRecord>(line)
+                .expect("each journal line must remain a complete JSON record");
+        }
+
+        let records = read_ral_journal_records(&daemon_dir).expect("journal read must succeed");
+        assert_eq!(records.len(), thread_count * records_per_thread);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }
@@ -1435,7 +1568,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_rejects_non_increasing_sequences() {
+    fn replay_tolerates_non_increasing_sequences() {
         let identity = sample_identity();
         let records = vec![
             record(
@@ -1450,23 +1583,23 @@ mod tests {
                 2,
                 "corr-2-duplicate",
                 RalJournalEvent::Claimed {
-                    identity,
+                    identity: identity.clone(),
                     worker_id: "worker-1".to_string(),
                     claim_token: "claim-1".to_string(),
                 },
             ),
         ];
 
-        match replay_ral_journal_records(records) {
-            Err(RalJournalError::NonIncreasingSequence {
-                sequence,
-                previous_sequence,
-            }) => {
-                assert_eq!(sequence, 2);
-                assert_eq!(previous_sequence, 2);
-            }
-            other => panic!("expected non-increasing sequence error, got {other:?}"),
-        }
+        let replay = replay_ral_journal_records(records).expect("replay must recover");
+        let entry = replay
+            .states
+            .get(&identity)
+            .expect("identity must remain in replay state");
+
+        assert_eq!(replay.last_sequence, 2);
+        assert_eq!(entry.status, RalReplayStatus::Claimed);
+        assert_eq!(entry.worker_id.as_deref(), Some("worker-1"));
+        assert_eq!(entry.active_claim_token.as_deref(), Some("claim-1"));
     }
 
     fn sample_identity() -> RalJournalIdentity {

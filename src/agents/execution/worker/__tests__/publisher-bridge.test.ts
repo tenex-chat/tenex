@@ -246,6 +246,29 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
         expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
         expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
     });
+
+    it("anchors delegate followups to the delegated conversation root", async () => {
+        const harness = createHarness();
+        const delegationEventId = "a".repeat(64);
+
+        await harness.publisher.delegateFollowup(
+            {
+                recipient: RECIPIENT_PUBKEY,
+                content: "Follow up in delegated thread.",
+                delegationEventId,
+                replyToEventId: "9".repeat(64),
+            },
+            harness.context
+        );
+
+        const publishRequest = harness.emitted.find(isPublishRequest);
+        expect(publishRequest).toBeDefined();
+        const rootTags = publishRequest!.event.tags.filter(
+            (tag) => tag[0] === "e" && tag[3] === "root"
+        );
+        expect(rootTags).toEqual([["e", delegationEventId, "", "root"]]);
+        expect(rootTags).not.toContainEqual(["e", ROOT_EVENT_ID, "", "root"]);
+    });
 });
 
 function createHarness(): {

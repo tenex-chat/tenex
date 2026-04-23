@@ -5,7 +5,9 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::dispatch_queue::{
-    DispatchQueueError, DispatchQueueRecord, DispatchQueueState, append_dispatch_queue_record,
+    DispatchQueueError, DispatchQueueLifecycleInput, DispatchQueueRecord, DispatchQueueState,
+    acquire_dispatch_queue_lock, append_dispatch_queue_record, plan_dispatch_queue_lease,
+    replay_dispatch_queue,
 };
 use crate::ral_journal::RalJournalIdentity;
 use crate::ral_lock::RalLockInfo;
@@ -183,7 +185,7 @@ where
         limits,
         sequence: lease_sequence,
         timestamp: lease_timestamp,
-        correlation_id: lease_correlation_id,
+        correlation_id: lease_correlation_id.clone(),
     })
     .map_err(|source| WorkerDispatchAdmissionStartError::Admission {
         source: Box::new(source),
@@ -221,11 +223,36 @@ where
         source: Box::new(source),
     })?;
 
-    let context = WorkerDispatchAdmissionLaunchContext {
+    let mut context = WorkerDispatchAdmissionLaunchContext {
         admission: admitted,
         launch_plan,
     };
 
+    let _dispatch_lock = acquire_dispatch_queue_lock(daemon_dir).map_err(|source| {
+        WorkerDispatchAdmissionStartError::LeaseAppend {
+            context: Box::new(context.clone()),
+            source: Box::new(source),
+        }
+    })?;
+    let current_dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
+        WorkerDispatchAdmissionStartError::LeaseAppend {
+            context: Box::new(context.clone()),
+            source: Box::new(source),
+        }
+    })?;
+    context.admission.leased_record = plan_dispatch_queue_lease(
+        &current_dispatch_state,
+        DispatchQueueLifecycleInput {
+            dispatch_id: context.admission.selected_dispatch.dispatch_id.clone(),
+            sequence: current_dispatch_state.last_sequence + 1,
+            timestamp: lease_timestamp,
+            correlation_id: lease_correlation_id,
+        },
+    )
+    .map_err(|source| WorkerDispatchAdmissionStartError::LeaseAppend {
+        context: Box::new(context.clone()),
+        source: Box::new(source),
+    })?;
     append_dispatch_queue_record(daemon_dir, &context.admission.leased_record).map_err(
         |source| WorkerDispatchAdmissionStartError::LeaseAppend {
             context: Box::new(context.clone()),
@@ -608,6 +635,62 @@ mod tests {
             read_ral_lock_info(&started.started.locks.allocation.path)
                 .expect("allocation lock must read"),
             Some(build_ral_lock_info(100, "host-a", 1_000))
+        );
+
+        release_worker_launch_locks(started.started.locks).expect("locks must release");
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn refreshes_lease_sequence_against_current_dispatch_queue_tail() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let queued = dispatch_record(1, DispatchQueueStatus::Queued);
+        append_dispatch_queue_record(&daemon_dir, &queued).expect("queued record must append");
+        let dispatch_state =
+            replay_dispatch_queue_records(vec![queued]).expect("queue state must replay");
+        let mut concurrent = dispatch_record(2, DispatchQueueStatus::Queued);
+        concurrent.dispatch_id = "dispatch-b".to_string();
+        concurrent.triggering_event_id = "event-b".to_string();
+        concurrent.claim_token = "claim-b".to_string();
+        append_dispatch_queue_record(&daemon_dir, &concurrent)
+            .expect("concurrent queued record must append");
+        let mut runtime_state = WorkerRuntimeState::default();
+        let command = worker_command();
+        let config = AgentWorkerProcessConfig::default();
+        let mut spawner = recording_spawner(ready_message("worker-a"), None, None);
+
+        let outcome = apply_worker_dispatch_admission_start(
+            &mut spawner,
+            input(
+                &daemon_dir,
+                &dispatch_state,
+                &mut runtime_state,
+                command,
+                &config,
+            ),
+        )
+        .expect("dispatch admission start must succeed");
+
+        let started = match outcome {
+            WorkerDispatchAdmissionStartOutcome::Started(started) => *started,
+            other => panic!("expected started dispatch, got {other:?}"),
+        };
+        assert_eq!(started.context.admission.leased_record.sequence, 3);
+        let queue = replay_dispatch_queue(&daemon_dir).expect("queue must replay");
+        assert_eq!(queue.last_sequence, 3);
+        assert_eq!(
+            queue
+                .latest_record("dispatch-a")
+                .expect("dispatch-a must remain tracked")
+                .status,
+            DispatchQueueStatus::Leased
+        );
+        assert_eq!(
+            queue
+                .latest_record("dispatch-b")
+                .expect("dispatch-b must remain tracked")
+                .status,
+            DispatchQueueStatus::Queued
         );
 
         release_worker_launch_locks(started.started.locks).expect("locks must release");

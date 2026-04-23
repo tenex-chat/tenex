@@ -28,6 +28,22 @@ pub struct WorkerPublishFlowInput<'a> {
 pub struct WorkerPublishFlowOutcome {
     pub message_plan: WorkerMessagePlan,
     pub acceptance: WorkerPublishAcceptance,
+    pub result_delivery: WorkerPublishResultDelivery,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkerPublishResultDelivery {
+    Sent,
+    WorkerPipeClosedAfterAcceptance { error: String },
+}
+
+impl WorkerPublishResultDelivery {
+    pub fn worker_pipe_closed_after_acceptance(&self) -> Option<&str> {
+        match self {
+            Self::Sent => None,
+            Self::WorkerPipeClosedAfterAcceptance { error } => Some(error),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -82,16 +98,31 @@ where
     })
     .map_err(WorkerPublishFlowError::from)?;
 
-    if let Err(source) = session.send_worker_message(&acceptance.publish_result) {
-        return Err(WorkerPublishFlowError::SendPublishResult {
-            acceptance: Box::new(acceptance),
-            source: Box::new(source),
-        });
-    }
+    let result_delivery = if let Err(source) =
+        session.send_worker_message(&acceptance.publish_result)
+    {
+        if S::is_worker_pipe_closed_error(&source) {
+            let error = source.to_string();
+            tracing::warn!(
+                event_id = %acceptance.egress.event_id(),
+                error = %error,
+                "publish_result could not be delivered because worker pipe closed after publish acceptance"
+            );
+            WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error }
+        } else {
+            return Err(WorkerPublishFlowError::SendPublishResult {
+                acceptance: Box::new(acceptance),
+                source: Box::new(source),
+            });
+        }
+    } else {
+        WorkerPublishResultDelivery::Sent
+    };
 
     Ok(WorkerPublishFlowOutcome {
         message_plan,
         acceptance,
+        result_delivery,
     })
 }
 
@@ -137,7 +168,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct RecordingSession {
         sent_messages: Vec<Value>,
-        fail_send: bool,
+        send_error: Option<FakeSendError>,
     }
 
     impl WorkerDispatchSession for RecordingSession {
@@ -146,11 +177,15 @@ mod tests {
         fn send_worker_message(&mut self, message: &Value) -> Result<(), Self::Error> {
             self.sent_messages.push(message.clone());
 
-            if self.fail_send {
-                return Err(FakeSendError("send failed"));
+            if let Some(error) = self.send_error.clone() {
+                return Err(error);
             }
 
             Ok(())
+        }
+
+        fn is_worker_pipe_closed_error(error: &Self::Error) -> bool {
+            error.0 == "broken pipe"
         }
     }
 
@@ -203,6 +238,7 @@ mod tests {
             session.sent_messages,
             vec![outcome.acceptance.publish_result.clone()]
         );
+        assert_eq!(outcome.result_delivery, WorkerPublishResultDelivery::Sent);
         assert_eq!(session.sent_messages[0]["type"], "publish_result");
         assert_eq!(session.sent_messages[0]["status"], "accepted");
         assert_eq!(session.sent_messages[0]["requestSequence"], 41);
@@ -292,7 +328,7 @@ mod tests {
         let message = publish_request_message(&fixture, 41, 1_710_001_000_000);
         let mut session = RecordingSession {
             sent_messages: Vec::new(),
-            fail_send: true,
+            send_error: Some(FakeSendError("send failed")),
         };
 
         let error = handle_worker_publish_request(
@@ -323,6 +359,45 @@ mod tests {
             }
             other => panic!("expected send failure, got {other:?}"),
         }
+        assert_eq!(session.sent_messages.len(), 1);
+        assert!(
+            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
+                .expect("pending record read must succeed")
+                .is_some()
+        );
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn treats_closed_worker_pipe_after_acceptance_as_delivered_terminal_diagnostic() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let fixture = signed_event_fixture();
+        let message = publish_request_message(&fixture, 41, 1_710_001_000_000);
+        let mut session = RecordingSession {
+            sent_messages: Vec::new(),
+            send_error: Some(FakeSendError("broken pipe")),
+        };
+
+        let outcome = handle_worker_publish_request(
+            &mut session,
+            WorkerPublishFlowInput {
+                daemon_dir: &daemon_dir,
+                message: &message,
+                accepted_at: 1_710_001_000_100,
+                result_sequence: 900,
+                result_timestamp: 1_710_001_000_200,
+                telegram_egress: None,
+            },
+        )
+        .expect("closed worker pipe after acceptance must not fail publish flow");
+
+        assert_eq!(
+            outcome.result_delivery,
+            WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance {
+                error: "broken pipe".to_string(),
+            }
+        );
         assert_eq!(session.sent_messages.len(), 1);
         assert!(
             read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)

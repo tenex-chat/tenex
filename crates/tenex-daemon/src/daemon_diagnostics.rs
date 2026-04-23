@@ -483,12 +483,7 @@ mod tests {
         .expect("status write must succeed");
         save_restart_state_file(
             &daemon_dir,
-            &build_restart_state(
-                1_710_001_000_500,
-                vec!["project-alpha".to_string()],
-                4_242,
-                "tenex-host",
-            ),
+            &build_restart_state(1_710_001_000_500, 4_242, "tenex-host"),
         )
         .expect("restart state write must succeed");
         write_operations_status_active_snapshot(
@@ -947,12 +942,7 @@ mod tests {
         );
         assert_eq!(
             snapshot.daemon.restart_state,
-            Some(build_restart_state(
-                1_710_001_000_500,
-                vec!["project-alpha".to_string()],
-                4_242,
-                "tenex-host",
-            ))
+            Some(build_restart_state(1_710_001_000_500, 4_242, "tenex-host"))
         );
         assert_eq!(snapshot.dispatch_queue.queued_count, 1);
         assert_eq!(snapshot.dispatch_queue.leased_count, 1);

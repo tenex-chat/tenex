@@ -1,7 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -9,7 +6,6 @@ use thiserror::Error;
 use crate::nostr_classification::KIND_PROJECT;
 use crate::nostr_event::SignedNostrEvent;
 
-pub const BOOTED_PROJECTS_FILE_NAME: &str = "booted-projects.json";
 pub const BOOTED_PROJECTS_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -48,6 +44,59 @@ pub struct ProjectBootReference {
     pub project_reference: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectBootState {
+    updated_at: u64,
+    projects: BTreeMap<(String, String), BootedProject>,
+}
+
+impl ProjectBootState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn snapshot(&self) -> BootedProjectsState {
+        BootedProjectsState {
+            schema_version: BOOTED_PROJECTS_SCHEMA_VERSION,
+            updated_at: self.updated_at,
+            projects: self.projects.values().cloned().collect(),
+        }
+    }
+
+    pub fn record_boot_event(
+        &mut self,
+        event: &SignedNostrEvent,
+        timestamp_ms: u64,
+    ) -> ProjectBootStateResult<ProjectBootOutcome> {
+        let reference = extract_project_boot_reference(event)?;
+        let key = (
+            reference.project_owner_pubkey.clone(),
+            reference.project_d_tag.clone(),
+        );
+        let already_booted = self.projects.contains_key(&key);
+        self.projects.insert(
+            key,
+            BootedProject {
+                project_owner_pubkey: reference.project_owner_pubkey.clone(),
+                project_d_tag: reference.project_d_tag.clone(),
+                project_reference: reference.project_reference.clone(),
+                boot_event_id: event.id.clone(),
+                booted_at: timestamp_ms,
+            },
+        );
+        self.updated_at = timestamp_ms;
+
+        Ok(ProjectBootOutcome {
+            project_owner_pubkey: reference.project_owner_pubkey,
+            project_d_tag: reference.project_d_tag,
+            project_reference: reference.project_reference,
+            boot_event_id: event.id.clone(),
+            already_booted,
+            booted_project_count: self.projects.len(),
+        })
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ProjectBootStateError {
     #[error("project boot event missing project a-tag")]
@@ -56,84 +105,16 @@ pub enum ProjectBootStateError {
     MalformedProjectATag { reference: String },
     #[error("project boot a-tag `{reference}` references unsupported kind `{kind}`")]
     UnsupportedProjectKind { reference: String, kind: String },
-    #[error("project boot state io error: {0}")]
-    Io(#[from] io::Error),
-    #[error("project boot state json error: {0}")]
-    Json(#[from] serde_json::Error),
 }
 
 pub type ProjectBootStateResult<T> = Result<T, ProjectBootStateError>;
 
-pub fn booted_projects_state_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
-    daemon_dir.as_ref().join(BOOTED_PROJECTS_FILE_NAME)
-}
-
-pub fn read_booted_projects_state(
-    daemon_dir: impl AsRef<Path>,
-) -> ProjectBootStateResult<BootedProjectsState> {
-    let path = booted_projects_state_path(daemon_dir);
-    match fs::read_to_string(path) {
-        Ok(content) => normalize_state(serde_json::from_str(&content)?),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(BootedProjectsState {
-            schema_version: BOOTED_PROJECTS_SCHEMA_VERSION,
-            updated_at: 0,
-            projects: Vec::new(),
-        }),
-        Err(error) => Err(error.into()),
-    }
-}
-
-pub fn record_project_boot_event(
-    daemon_dir: impl AsRef<Path>,
-    event: &SignedNostrEvent,
-    timestamp_ms: u64,
-) -> ProjectBootStateResult<ProjectBootOutcome> {
-    let daemon_dir = daemon_dir.as_ref();
-    let reference = extract_project_boot_reference(event)?;
-    let mut state = read_booted_projects_state(daemon_dir)?;
-    let mut by_project = state
-        .projects
-        .into_iter()
-        .map(|project| {
-            (
-                (
-                    project.project_owner_pubkey.clone(),
-                    project.project_d_tag.clone(),
-                ),
-                project,
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let key = (
-        reference.project_owner_pubkey.clone(),
-        reference.project_d_tag.clone(),
-    );
-    let already_booted = by_project.contains_key(&key);
-    by_project.insert(
-        key,
-        BootedProject {
-            project_owner_pubkey: reference.project_owner_pubkey.clone(),
-            project_d_tag: reference.project_d_tag.clone(),
-            project_reference: reference.project_reference.clone(),
-            boot_event_id: event.id.clone(),
-            booted_at: timestamp_ms,
-        },
-    );
-    state = BootedProjectsState {
+pub fn empty_booted_projects_state() -> BootedProjectsState {
+    BootedProjectsState {
         schema_version: BOOTED_PROJECTS_SCHEMA_VERSION,
-        updated_at: timestamp_ms,
-        projects: by_project.into_values().collect(),
-    };
-    write_booted_projects_state(daemon_dir, &state)?;
-
-    Ok(ProjectBootOutcome {
-        project_owner_pubkey: reference.project_owner_pubkey,
-        project_d_tag: reference.project_d_tag,
-        project_reference: reference.project_reference,
-        boot_event_id: event.id.clone(),
-        already_booted,
-        booted_project_count: state.projects.len(),
-    })
+        updated_at: 0,
+        projects: Vec::new(),
+    }
 }
 
 pub fn extract_project_boot_reference(
@@ -201,46 +182,13 @@ fn parse_project_reference(reference: &str) -> ProjectBootStateResult<ProjectBoo
     })
 }
 
-fn normalize_state(state: BootedProjectsState) -> ProjectBootStateResult<BootedProjectsState> {
-    let mut by_project = BTreeMap::new();
-    for project in state.projects {
-        by_project.insert(
-            (
-                project.project_owner_pubkey.clone(),
-                project.project_d_tag.clone(),
-            ),
-            project,
-        );
-    }
-    Ok(BootedProjectsState {
-        schema_version: BOOTED_PROJECTS_SCHEMA_VERSION,
-        updated_at: state.updated_at,
-        projects: by_project.into_values().collect(),
-    })
-}
-
-fn write_booted_projects_state(
-    daemon_dir: &Path,
-    state: &BootedProjectsState,
-) -> ProjectBootStateResult<()> {
-    fs::create_dir_all(daemon_dir)?;
-    let path = booted_projects_state_path(daemon_dir);
-    let tmp_path = path.with_extension(format!("json.tmp.{}", std::process::id()));
-    fs::write(&tmp_path, serde_json::to_string_pretty(state)?)?;
-    fs::rename(tmp_path, path)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
 
     #[test]
-    fn missing_state_reads_as_empty() {
-        let tmp = tempdir().expect("temp dir");
-
-        let state = read_booted_projects_state(tmp.path()).expect("state must read");
+    fn new_state_starts_empty() {
+        let state = ProjectBootState::new().snapshot();
 
         assert_eq!(state.schema_version, BOOTED_PROJECTS_SCHEMA_VERSION);
         assert_eq!(state.updated_at, 0);
@@ -249,26 +197,27 @@ mod tests {
 
     #[test]
     fn boot_event_records_project_reference() {
-        let tmp = tempdir().expect("temp dir");
+        let mut state = ProjectBootState::new();
         let event = boot_event(
             "event-one",
             vec![vec!["a", "31933:owner-pubkey:demo-project"]],
         );
 
-        let outcome =
-            record_project_boot_event(tmp.path(), &event, 1_710_001_000_000).expect("record boot");
+        let outcome = state
+            .record_boot_event(&event, 1_710_001_000_000)
+            .expect("record boot");
 
         assert_eq!(outcome.project_owner_pubkey, "owner-pubkey");
         assert_eq!(outcome.project_d_tag, "demo-project");
         assert!(!outcome.already_booted);
-        let state = read_booted_projects_state(tmp.path()).expect("state must read");
-        assert!(is_project_booted(&state, "owner-pubkey", "demo-project"));
-        assert_eq!(state.projects[0].boot_event_id, "event-one");
+        let snapshot = state.snapshot();
+        assert!(is_project_booted(&snapshot, "owner-pubkey", "demo-project"));
+        assert_eq!(snapshot.projects[0].boot_event_id, "event-one");
     }
 
     #[test]
     fn repeated_boot_updates_existing_project_without_duplicate() {
-        let tmp = tempdir().expect("temp dir");
+        let mut state = ProjectBootState::new();
         let first = boot_event(
             "event-one",
             vec![vec!["a", "31933:owner-pubkey:demo-project"]],
@@ -278,15 +227,18 @@ mod tests {
             vec![vec!["a", "31933:owner-pubkey:demo-project"]],
         );
 
-        record_project_boot_event(tmp.path(), &first, 1_710_001_000_000).expect("first boot");
-        let outcome =
-            record_project_boot_event(tmp.path(), &second, 1_710_001_030_000).expect("second boot");
+        state
+            .record_boot_event(&first, 1_710_001_000_000)
+            .expect("first boot");
+        let outcome = state
+            .record_boot_event(&second, 1_710_001_030_000)
+            .expect("second boot");
 
         assert!(outcome.already_booted);
-        let state = read_booted_projects_state(tmp.path()).expect("state must read");
-        assert_eq!(state.projects.len(), 1);
-        assert_eq!(state.projects[0].boot_event_id, "event-two");
-        assert_eq!(state.projects[0].booted_at, 1_710_001_030_000);
+        let snapshot = state.snapshot();
+        assert_eq!(snapshot.projects.len(), 1);
+        assert_eq!(snapshot.projects[0].boot_event_id, "event-two");
+        assert_eq!(snapshot.projects[0].booted_at, 1_710_001_030_000);
     }
 
     #[test]

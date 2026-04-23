@@ -323,6 +323,7 @@ fn dispatch_diagnostic(
         NostrIngressOutcome::AgentConfigUpdated {
             class,
             config_update,
+            republished_projects,
         } => NostrSubscriptionTickDispatch::Ignored {
             frame_index,
             event_id,
@@ -332,8 +333,10 @@ fn dispatch_diagnostic(
                 "agent_config_update_noop".to_string()
             },
             detail: format!(
-                "agent {} config update applied (changed={})",
-                config_update.agent_pubkey, config_update.file_changed
+                "agent {} config update applied (changed={}, republished_projects={})",
+                config_update.agent_pubkey,
+                config_update.file_changed,
+                republished_projects.len()
             ),
             class: Some(class),
             project_id: None,

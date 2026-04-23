@@ -177,6 +177,7 @@ mod tests {
             nip46_filter.pubkeys,
             vec![TEST_BACKEND_PUBKEY_HEX.to_string()]
         );
+        assert_eq!(nip46_filter.limit, Some(0));
         assert_eq!(plan.lesson_filters, vec![build_lesson_filter(&lesson_id)]);
         assert_eq!(
             plan.filters.len(),

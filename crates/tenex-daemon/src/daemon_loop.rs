@@ -30,6 +30,7 @@ use crate::operations_status_state::{
     OperationsStatusStateError, operations_status_active_snapshot_from_projects,
     read_operations_status_active_snapshot, write_operations_status_active_snapshot,
 };
+use crate::project_boot_state::{BootedProjectsState, ProjectBootState};
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
     PublishOutboxRetryPolicy,
@@ -759,6 +760,7 @@ pub struct DaemonMaintenanceLoopInput<'a> {
     pub daemon_dir: &'a Path,
     pub max_iterations: u64,
     pub sleep_ms: u64,
+    pub project_boot_state: Arc<Mutex<ProjectBootState>>,
     /// Optional latch shared with the whitelist ingress; when present, a
     /// `Stopped` state gates the kind 24012 heartbeat publish.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
@@ -770,6 +772,7 @@ pub struct DaemonMaintenanceStoppableLoopInput<'a> {
     pub daemon_dir: &'a Path,
     pub max_iterations: Option<u64>,
     pub sleep_ms: u64,
+    pub project_boot_state: Arc<Mutex<ProjectBootState>>,
     /// See [`DaemonMaintenanceLoopInput::heartbeat_latch`].
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
@@ -790,6 +793,7 @@ where
     P: PublishOutboxRelayPublisher,
 {
     let heartbeat_latch = input.heartbeat_latch.clone();
+    let project_boot_state = input.project_boot_state.clone();
     run_daemon_maintenance_loop(
         clock,
         sleeper,
@@ -801,6 +805,7 @@ where
                     tenex_base_dir: input.tenex_base_dir,
                     daemon_dir: input.daemon_dir,
                     now_ms,
+                    project_boot_state: project_boot_state_snapshot(&project_boot_state),
                     heartbeat_latch: heartbeat_latch.clone(),
                 },
                 publisher,
@@ -828,6 +833,7 @@ where
     P: PublishOutboxRelayPublisher,
 {
     let heartbeat_latch = input.heartbeat_latch.clone();
+    let project_boot_state = input.project_boot_state.clone();
     if input.max_iterations.is_some() {
         run_daemon_maintenance_loop_until_stopped(
             clock,
@@ -841,6 +847,7 @@ where
                         tenex_base_dir: input.tenex_base_dir,
                         daemon_dir: input.daemon_dir,
                         now_ms,
+                        project_boot_state: project_boot_state_snapshot(&project_boot_state),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     publisher,
@@ -861,6 +868,7 @@ where
                         tenex_base_dir: input.tenex_base_dir,
                         daemon_dir: input.daemon_dir,
                         now_ms,
+                        project_boot_state: project_boot_state_snapshot(&project_boot_state),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     publisher,
@@ -909,6 +917,7 @@ where
     } = worker;
     let mut next_publish_result_sequence = first_publish_result_sequence;
     let heartbeat_latch = input.heartbeat_latch.clone();
+    let project_boot_state = input.project_boot_state.clone();
 
     if input.max_iterations.is_some() {
         run_daemon_maintenance_loop_until_stopped(
@@ -935,6 +944,7 @@ where
                         tenex_base_dir: input.tenex_base_dir,
                         daemon_dir: input.daemon_dir,
                         now_ms,
+                        project_boot_state: project_boot_state_snapshot(&project_boot_state),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     DaemonWorkerTickInput {
@@ -981,6 +991,7 @@ where
                         tenex_base_dir: input.tenex_base_dir,
                         daemon_dir: input.daemon_dir,
                         now_ms,
+                        project_boot_state: project_boot_state_snapshot(&project_boot_state),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     DaemonWorkerTickInput {
@@ -1012,6 +1023,15 @@ pub fn current_unix_time_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn project_boot_state_snapshot(
+    project_boot_state: &Arc<Mutex<ProjectBootState>>,
+) -> BootedProjectsState {
+    project_boot_state
+        .lock()
+        .expect("project boot state mutex must not be poisoned")
+        .snapshot()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,7 +1044,6 @@ mod tests {
     };
     use crate::nostr_event::SignedNostrEvent;
     use crate::operations_status_state::read_operations_status_active_snapshot;
-    use crate::project_boot_state::record_project_boot_event;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
         read_published_publish_outbox_record,
@@ -1345,6 +1364,7 @@ mod tests {
                 daemon_dir: &fixture.daemon_dir,
                 max_iterations: 1,
                 sleep_ms: 30_000,
+                project_boot_state: Arc::clone(&fixture.project_boot_state),
                 heartbeat_latch: None,
             },
             &mut clock,
@@ -1392,6 +1412,7 @@ mod tests {
                 daemon_dir: &fixture.daemon_dir,
                 max_iterations: 1,
                 sleep_ms: 30_000,
+                project_boot_state: Arc::clone(&fixture.project_boot_state),
                 heartbeat_latch: None,
             },
             &mut clock,
@@ -1448,6 +1469,7 @@ mod tests {
                 tenex_base_dir: &fixture.tenex_base_dir,
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
+                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
                 heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
@@ -1514,6 +1536,7 @@ mod tests {
                 tenex_base_dir: &fixture.tenex_base_dir,
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
+                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
                 heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
@@ -1582,6 +1605,7 @@ mod tests {
                 tenex_base_dir: &fixture.tenex_base_dir,
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
+                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
                 heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
@@ -1619,6 +1643,7 @@ mod tests {
                 tenex_base_dir: &fixture.tenex_base_dir,
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_001_000,
+                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
                 heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
@@ -1679,6 +1704,7 @@ mod tests {
                 tenex_base_dir: &fixture.tenex_base_dir,
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
+                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
                 heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
@@ -1717,6 +1743,7 @@ mod tests {
         tenex_base_dir: PathBuf,
         daemon_dir: PathBuf,
         owner_pubkey: String,
+        project_boot_state: Arc<Mutex<ProjectBootState>>,
     }
 
     impl TickFilesystemFixture {
@@ -1754,28 +1781,32 @@ mod tests {
                 ),
             )
             .expect("project descriptor must write");
-            record_project_boot_event(
-                &daemon_dir,
-                &SignedNostrEvent {
-                    id: format!("boot-event-{prefix}"),
-                    pubkey: owner_pubkey.clone(),
-                    created_at: 1_710_000_999,
-                    kind: 24000,
-                    tags: vec![vec![
-                        "a".to_string(),
-                        format!("31933:{owner_pubkey}:demo-project"),
-                    ]],
-                    content: String::new(),
-                    sig: "0".repeat(128),
-                },
-                1_710_000_999_000,
-            )
-            .expect("project boot state must write");
+            let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
+            project_boot_state
+                .lock()
+                .expect("project boot state lock must not poison")
+                .record_boot_event(
+                    &SignedNostrEvent {
+                        id: format!("boot-event-{prefix}"),
+                        pubkey: owner_pubkey.clone(),
+                        created_at: 1_710_000_999,
+                        kind: 24000,
+                        tags: vec![vec![
+                            "a".to_string(),
+                            format!("31933:{owner_pubkey}:demo-project"),
+                        ]],
+                        content: String::new(),
+                        sig: "0".repeat(128),
+                    },
+                    1_710_000_999_000,
+                )
+                .expect("project boot state must record");
 
             Self {
                 tenex_base_dir,
                 daemon_dir,
                 owner_pubkey,
+                project_boot_state,
             }
         }
     }
