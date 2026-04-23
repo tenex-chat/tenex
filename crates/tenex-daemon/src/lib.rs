@@ -20,6 +20,7 @@ pub mod backend_status_runtime;
 pub mod backend_status_tick;
 pub mod caches;
 pub mod cli;
+pub mod conversation_store_files;
 pub mod daemon_control;
 pub mod daemon_diagnostics;
 pub mod daemon_foreground;

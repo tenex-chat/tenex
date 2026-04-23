@@ -491,6 +491,7 @@ mod tests {
                 RalJournalEvent::Allocated { .. } => "allocated",
                 RalJournalEvent::Claimed { .. } => "claimed",
                 RalJournalEvent::WaitingForDelegation { .. } => "waiting_for_delegation",
+                RalJournalEvent::DelegationCompleted { .. } => "delegation_completed",
                 RalJournalEvent::Completed { .. } => "completed",
                 RalJournalEvent::NoResponse { .. } => "no_response",
                 RalJournalEvent::Error { .. } => "error",

@@ -163,6 +163,7 @@ fn ral_journal_event_type(event: &RalJournalEvent) -> &'static str {
         RalJournalEvent::Allocated { .. } => "allocated",
         RalJournalEvent::Claimed { .. } => "claimed",
         RalJournalEvent::WaitingForDelegation { .. } => "waiting_for_delegation",
+        RalJournalEvent::DelegationCompleted { .. } => "delegation_completed",
         RalJournalEvent::Completed { .. } => "completed",
         RalJournalEvent::NoResponse { .. } => "no_response",
         RalJournalEvent::Error { .. } => "error",
