@@ -1,8 +1,6 @@
 import type { ConversationToolContext, AISdkTool } from "@/tools/types";
 import { config as configService } from "@/services/ConfigService";
 import { createEventContext } from "@/services/event-context";
-import { RALRegistry } from "@/services/ral/RALRegistry";
-import type { PendingDelegation } from "@/services/ral/types";
 import { SkillIdentifierResolver } from "@/services/skill";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
@@ -135,22 +133,6 @@ async function executeSelfDelegate(
             skills: uniqueSkills.length > 0 ? uniqueSkills : undefined,
         },
         eventContext
-    );
-
-    const pendingDelegation: PendingDelegation = {
-        delegationConversationId: eventId,
-        recipientPubkey: context.agent.pubkey,
-        senderPubkey: context.agent.pubkey,
-        prompt: input.prompt,
-        ralNumber: context.ralNumber,
-    };
-
-    // Same pending-delegation registration pattern as delegate.ts.
-    RALRegistry.getInstance().mergePendingDelegations(
-        context.agent.pubkey,
-        context.conversationId,
-        context.ralNumber,
-        [pendingDelegation]
     );
 
     const delegationConversationId = shortenConversationId(eventId);

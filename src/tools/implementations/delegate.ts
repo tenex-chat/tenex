@@ -14,8 +14,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { getProjectContext } from "@/services/projects";
-import { RALRegistry } from "@/services/ral/RALRegistry";
-import type { PendingDelegation } from "@/services/ral/types";
 import { SkillIdentifierResolver } from "@/services/skill";
 import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
@@ -84,8 +82,6 @@ async function executeDelegate(
     throw new Error("Delegation prompt is required");
   }
 
-  const ralRegistry = RALRegistry.getInstance();
-  const pendingDelegations: PendingDelegation[] = [];
   const circularWarnings: CircularDelegationWarning[] = [];
 
   // Get the delegation chain from the current conversation for cycle detection
@@ -221,29 +217,7 @@ async function executeDelegate(
       team: resolvedTeamName,
     }, eventContext);
 
-    const pendingDelegation: PendingDelegation = {
-      delegationConversationId: eventId,
-      recipientPubkey: pubkey,
-      senderPubkey: context.agent.pubkey,
-      prompt: delegation.prompt,
-      ralNumber: context.ralNumber,
-    };
-    pendingDelegations.push(pendingDelegation);
-
-    // Register immediately after publishing to prevent orphans
-    ralRegistry.mergePendingDelegations(
-      context.agent.pubkey,
-      context.conversationId,
-      context.ralNumber,
-      [pendingDelegation]
-    );
-
-  // Should never happen with single delegation (error thrown earlier), but keep as safety
-  if (pendingDelegations.length === 0) {
-    throw new Error("No delegations were published.");
-  }
-
-  const delegationConversationId = shortenConversationId(pendingDelegations[0].delegationConversationId);
+  const delegationConversationId = shortenConversationId(eventId);
 
   logger.info("[delegate] Published delegation, agent continues without blocking", {
     delegationConversationId,

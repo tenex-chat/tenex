@@ -181,36 +181,15 @@ async function executeDelegateFollowup(
   });
 
   const eventContext = createEventContext(context);
-  const followupEventId = await context.agentPublisher.delegateFollowup({
+  await context.agentPublisher.delegateFollowup({
     recipient: recipientPubkey,
     content: message,
     delegationEventId: delegation_conversation_id,
-  }, eventContext);
-
-  // Register the followup as a pending delegation for response routing
-  // Use atomic merge to safely handle concurrent delegation calls
-  // Note: followup delegations use the same delegationConversationId as the original,
-  // but include the followupEventId for routing responses to the new event
-  const newDelegation = {
-    type: "followup" as const,
-    delegationConversationId: delegation_conversation_id,
-    recipientPubkey,
-    senderPubkey: context.agent.pubkey,
-    prompt: message,
-    followupEventId,
+  }, {
+    ...eventContext,
     ralNumber: effectiveRalNumber,
-  };
+  });
 
-  // Use atomic merge - this handles concurrent updates safely and merges
-  // the followupEventId into existing entries instead of dropping them
-  ralRegistry.mergePendingDelegations(
-    context.agent.pubkey,
-    context.conversationId,
-    effectiveRalNumber,
-    [newDelegation]
-  );
-
-  // Return normal result - agent continues without blocking
   return {
     success: true,
     message: "Follow-up sent. The agent will respond when ready.",

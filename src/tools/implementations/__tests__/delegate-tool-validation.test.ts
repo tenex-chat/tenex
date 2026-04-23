@@ -405,26 +405,42 @@ describe("Delegation tools - RALRegistry state verification", () => {
     // Default todo item to satisfy delegation requirement
     const defaultTodo = { id: "test-todo", title: "Test Todo", description: "Test", status: "pending" as const, createdAt: Date.now(), updatedAt: Date.now() };
 
-    const createMockContext = (ralNumber: number, hasTodos = true): ToolExecutionContext => ({
-        agent: {
-            slug: "self-agent",
-            name: "Self Agent",
-            pubkey: "agent-pubkey-123",
-        } as AgentInstance,
-        conversationId,
-        triggeringEnvelope: createTriggeringEnvelope(),
-        agentPublisher: {
-            delegate: async () => `mock-delegation-id-${Math.random().toString(36).substring(7)}`,
-        } as any,
-        ralNumber,
-        projectBasePath: "/tmp/test",
-        workingDirectory: "/tmp/test",
-        currentBranch: "main",
-        getConversation: () => ({
-            getRootEventId: () => conversationId,
-            getTodos: () => hasTodos ? [defaultTodo] : [],
-        }) as any,
-    });
+    const createMockContext = (ralNumber: number, hasTodos = true): ToolExecutionContext => {
+        const agentPubkey = "agent-pubkey-123";
+        return {
+            agent: {
+                slug: "self-agent",
+                name: "Self Agent",
+                pubkey: agentPubkey,
+            } as AgentInstance,
+            conversationId,
+            triggeringEnvelope: createTriggeringEnvelope(),
+            agentPublisher: {
+                delegate: async (config: { recipient: string; content: string }) => {
+                    const delegationId = `mock-delegation-id-${Math.random().toString(36).substring(7)}`;
+                    registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
+                        {
+                            type: "standard",
+                            delegationConversationId: delegationId,
+                            recipientPubkey: config.recipient,
+                            senderPubkey: agentPubkey,
+                            prompt: config.content,
+                            ralNumber,
+                        },
+                    ]);
+                    return delegationId;
+                },
+            } as any,
+            ralNumber,
+            projectBasePath: "/tmp/test",
+            workingDirectory: "/tmp/test",
+            currentBranch: "main",
+            getConversation: () => ({
+                getRootEventId: () => conversationId,
+                getTodos: () => hasTodos ? [defaultTodo] : [],
+            }) as any,
+        };
+    };
 
     beforeEach(() => {
         // Reset singleton for testing

@@ -17,6 +17,7 @@ import type {
     ToolUseIntent,
 } from "@/nostr/types";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import type { PendingDelegation } from "@/services/ral/types";
 import type { AgentWorkerProtocolMessage } from "@/events/runtime/AgentWorkerProtocol";
 import type { InboundEnvelope, PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
@@ -129,21 +130,14 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             ref.id
         );
 
-        if (isHexPubkey(config.recipient)) {
-            await this.options.emit({
-                type: "delegation_registered",
-                correlationId: this.options.execution.correlationId,
-                ...this.identity(),
-                delegationConversationId: ref.id,
-                recipientPubkey: config.recipient,
-                delegationType: "standard",
-                senderPubkey: this.options.agent.pubkey,
-                prompt: config.content,
-                ...(config.parentDelegationConversationId
-                    ? { parentDelegationConversationId: config.parentDelegationConversationId }
-                    : {}),
-            });
-        }
+        await this.registerPendingDelegation({
+            context,
+            delegationConversationId: ref.id,
+            recipientPubkey: config.recipient,
+            delegationType: "standard",
+            prompt: config.content,
+            parentDelegationConversationId: config.parentDelegationConversationId,
+        });
 
         return ref.id;
     }
@@ -185,24 +179,15 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             ref.id
         );
 
-        if (isHexPubkey(config.recipient)) {
-            await this.options.emit({
-                type: "delegation_registered",
-                correlationId: this.options.execution.correlationId,
-                ...this.identity(),
-                delegationConversationId: ref.id,
-                recipientPubkey: config.recipient,
-                delegationType: "ask",
-                senderPubkey: this.options.agent.pubkey,
-                prompt: buildAskPrompt(config),
-                ...(config.parentDelegationConversationId
-                    ? { parentDelegationConversationId: config.parentDelegationConversationId }
-                    : {}),
-                ...(config.suggestions && config.suggestions.length > 0
-                    ? { suggestions: config.suggestions }
-                    : {}),
-            });
-        }
+        await this.registerPendingDelegation({
+            context,
+            delegationConversationId: ref.id,
+            recipientPubkey: config.recipient,
+            delegationType: "ask",
+            prompt: buildAskPrompt(config),
+            parentDelegationConversationId: config.parentDelegationConversationId,
+            suggestions: config.suggestions,
+        });
 
         return ref;
     }
@@ -229,22 +214,15 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             ],
         });
 
-        if (isHexPubkey(params.recipient)) {
-            await this.options.emit({
-                type: "delegation_registered",
-                correlationId: this.options.execution.correlationId,
-                ...this.identity(),
-                delegationConversationId: params.delegationEventId,
-                recipientPubkey: params.recipient,
-                delegationType: "followup",
-                senderPubkey: this.options.agent.pubkey,
-                prompt: params.content,
-                followupEventId: ref.id,
-                ...(params.parentDelegationConversationId
-                    ? { parentDelegationConversationId: params.parentDelegationConversationId }
-                    : {}),
-            });
-        }
+        await this.registerPendingDelegation({
+            context,
+            delegationConversationId: params.delegationEventId,
+            recipientPubkey: params.recipient,
+            delegationType: "followup",
+            prompt: params.content,
+            followupEventId: ref.id,
+            parentDelegationConversationId: params.parentDelegationConversationId,
+        });
 
         return ref.id;
     }
@@ -368,6 +346,79 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             ...context,
             llmRuntime: unreportedRuntime > 0 ? unreportedRuntime : undefined,
         };
+    }
+
+    private async registerPendingDelegation(params: {
+        context: EventContext;
+        delegationConversationId: string;
+        recipientPubkey: string;
+        delegationType: "standard" | "ask" | "followup";
+        prompt: string;
+        parentDelegationConversationId?: string;
+        followupEventId?: string;
+        suggestions?: string[];
+    }): Promise<void> {
+        if (!isHexPubkey(params.recipientPubkey)) {
+            return;
+        }
+
+        const ralRegistry = RALRegistry.getInstance();
+        const basePending = {
+            delegationConversationId: params.delegationConversationId,
+            recipientPubkey: params.recipientPubkey,
+            senderPubkey: this.options.agent.pubkey,
+            prompt: params.prompt,
+            ralNumber: params.context.ralNumber,
+            ...(params.parentDelegationConversationId
+                ? { parentDelegationConversationId: params.parentDelegationConversationId }
+                : {}),
+        };
+        const pending: PendingDelegation =
+            params.delegationType === "followup"
+                ? {
+                      ...basePending,
+                      type: "followup",
+                      ...(params.followupEventId ? { followupEventId: params.followupEventId } : {}),
+                  }
+                : params.delegationType === "ask"
+                  ? {
+                        ...basePending,
+                        type: "ask",
+                        ...(params.suggestions && params.suggestions.length > 0
+                            ? { suggestions: params.suggestions }
+                            : {}),
+                    }
+                  : { ...basePending, type: "standard" };
+        ralRegistry.mergePendingDelegations(
+            this.options.agent.pubkey,
+            params.context.conversationId,
+            params.context.ralNumber,
+            [pending]
+        );
+        if (params.parentDelegationConversationId) {
+            ralRegistry.registerPendingSubDelegation(
+                params.parentDelegationConversationId,
+                pending
+            );
+        }
+
+        await this.options.emit({
+            type: "delegation_registered",
+            correlationId: this.options.execution.correlationId,
+            ...this.identity(),
+            delegationConversationId: params.delegationConversationId,
+            recipientPubkey: params.recipientPubkey,
+            delegationType: params.delegationType,
+            senderPubkey: this.options.agent.pubkey,
+            prompt: params.prompt,
+            ...(params.parentDelegationConversationId
+                ? { parentDelegationConversationId: params.parentDelegationConversationId }
+                : {}),
+            ...(params.followupEventId ? { followupEventId: params.followupEventId } : {}),
+            ...(params.suggestions && params.suggestions.length > 0
+                ? { suggestions: params.suggestions }
+                : {}),
+        });
     }
 
     private async publishTextEvent(

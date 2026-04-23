@@ -9,8 +9,6 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { tool } from "ai";
 import { z } from "zod";
-import { RALRegistry } from "@/services/ral";
-import type { PendingDelegation } from "@/services/ral/types";
 import { shortenEventId } from "@/utils/conversation-id";
 
 /**
@@ -132,15 +130,6 @@ When responding, provide your answers in a clear format that addresses each ques
 }
 
 /**
- * Helper: Build prompt summary for delegation tracking
- */
-function buildPromptSummary(input: AskInput): string {
-  const { title, context: askContext, questions } = input;
-  const questionSummary = questions.map(q => `[${q.title}] ${q.question}`).join("\n");
-  return `${title}\n\n${askContext}\n\n---\n\n${questionSummary}`;
-}
-
-/**
  * Helper: Get escalation target (agent slug) from config, with validation and auto-add
  *
  * Delegates to EscalationService which handles:
@@ -244,43 +233,6 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
             parentDelegationConversationId,
           }, eventContext);
 
-          // Build prompt summary for delegation tracking using helper
-          const promptSummary = buildPromptSummary(input);
-
-          // Register delegation immediately (like delegate() does)
-          const pendingDelegations: PendingDelegation[] = [
-            {
-              type: "ask" as const,
-              delegationConversationId: eventId,
-              recipientPubkey: escalationAgentPubkey,
-              senderPubkey: context.agent.pubkey,
-              prompt: promptSummary,
-              ralNumber: context.ralNumber,
-              parentDelegationConversationId,
-            },
-          ];
-
-          const ralRegistry = RALRegistry.getInstance();
-          ralRegistry.mergePendingDelegations(
-            context.agent.pubkey,
-            context.conversationId,
-            context.ralNumber,
-            pendingDelegations
-          );
-
-          if (parentDelegationConversationId) {
-            const registered = ralRegistry.registerPendingSubDelegation(
-              parentDelegationConversationId,
-              pendingDelegations[0]
-            );
-            if (!registered) {
-              logger.debug("[ask] Could not register escalation ask as parent sub-delegation", {
-                parentDelegationConversationId: shortenEventId(parentDelegationConversationId),
-                eventId: shortenEventId(eventId),
-              });
-            }
-          }
-
           const conversationRecord = ConversationStore.get(context.conversationId);
           if (conversationRecord) {
             conversationRecord.save();
@@ -337,43 +289,6 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
       eventId: shortenEventId(eventId),
       error: error instanceof Error ? error.message : String(error),
     });
-  }
-
-  // Build prompt summary for delegation tracking using helper
-  const promptSummary = buildPromptSummary(input);
-
-  // Register delegation immediately (like delegate() does)
-  const pendingDelegations: PendingDelegation[] = [
-    {
-      type: "ask" as const,
-      delegationConversationId: eventId,
-      recipientPubkey: ownerPubkey,
-      senderPubkey: context.agent.pubkey,
-      prompt: promptSummary,
-      ralNumber: context.ralNumber,
-      parentDelegationConversationId,
-    },
-  ];
-
-  const ralRegistry = RALRegistry.getInstance();
-  ralRegistry.mergePendingDelegations(
-    context.agent.pubkey,
-    context.conversationId,
-    context.ralNumber,
-    pendingDelegations
-  );
-
-  if (parentDelegationConversationId) {
-    const registered = ralRegistry.registerPendingSubDelegation(
-      parentDelegationConversationId,
-      pendingDelegations[0]
-    );
-    if (!registered) {
-      logger.debug("[ask] Could not register ask as parent sub-delegation", {
-        parentDelegationConversationId: shortenEventId(parentDelegationConversationId),
-        eventId: shortenEventId(eventId),
-      });
-    }
   }
 
   const conversationRecord = ConversationStore.get(context.conversationId);
