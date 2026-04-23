@@ -135,7 +135,7 @@ pub fn run_daemon_foreground_from_filesystem<C, S, P, Probe>(
     input: DaemonForegroundInput<'_>,
     clock: &mut C,
     sleeper: &mut S,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
 ) -> Result<DaemonForegroundReport, DaemonForegroundError>
 where
     Probe: ProcessLivenessProbe + Clone,
@@ -197,7 +197,7 @@ pub fn run_daemon_foreground_until_stopped_from_filesystem<C, S, Stop, P, Probe>
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
 ) -> Result<DaemonForegroundReport, DaemonForegroundError>
 where
     Probe: ProcessLivenessProbe + Clone,
@@ -270,7 +270,7 @@ pub fn run_daemon_foreground_until_stopped_from_filesystem_with_worker<
     sleeper: &mut Sleep,
     stop_signal: &mut Stop,
     spawner: &mut Spawner,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<DaemonForegroundWithWorkerReport, DaemonForegroundWithWorkerError>
 where
@@ -604,7 +604,7 @@ mod tests {
             observed_now_ms_values: Vec::new(),
         };
         let mut sleeper = RecordingSleeper::default();
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
 
         let report = run_daemon_foreground_from_filesystem(
             &shell,
@@ -618,7 +618,7 @@ mod tests {
             },
             &mut clock,
             &mut sleeper,
-            &mut publisher,
+            &publisher,
         )
         .expect("foreground runner must succeed");
 
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(report.tick_loop.steps[1].iteration_index, 1);
         assert_eq!(report.tick_loop.steps[0].sleep_after_ms, Some(25));
         assert_eq!(report.tick_loop.steps[1].sleep_after_ms, None);
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -664,7 +664,7 @@ mod tests {
             checks: 0,
             stop_on_or_after: 2,
         };
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
 
         let report = run_daemon_foreground_until_stopped_from_filesystem(
             &shell,
@@ -679,7 +679,7 @@ mod tests {
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
         )
         .expect("foreground runner must stop cleanly");
 
@@ -690,7 +690,7 @@ mod tests {
         );
         assert!(sleeper.sleeps_ms.is_empty());
         assert_eq!(stop_signal.checks, 2);
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -714,7 +714,7 @@ mod tests {
             checks: 0,
             stop_on_or_after: 2,
         };
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
         let runtime_state = new_shared_worker_runtime_state();
@@ -745,7 +745,7 @@ mod tests {
             &mut sleeper,
             &mut stop_signal,
             &mut spawner,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
         .expect("foreground worker runner must succeed");
@@ -761,7 +761,7 @@ mod tests {
             other => panic!("unexpected worker runtime outcome: {other:?}"),
         }
         assert_eq!(spawner.spawn_calls, 0);
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -797,7 +797,7 @@ mod tests {
             sent_messages: Arc::clone(&sent_messages),
             spawn_calls: 0,
         };
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
         let runtime_state = new_shared_worker_runtime_state();
         let worker_config = AgentWorkerProcessConfig::default();
@@ -827,7 +827,7 @@ mod tests {
             &mut sleeper,
             &mut stop_signal,
             &mut spawner,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
         .expect("foreground worker runner must complete queued dispatch");
@@ -889,7 +889,7 @@ mod tests {
             observed_now_ms_values: Vec::new(),
         };
         let mut sleeper = RecordingSleeper::default();
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
 
         let error = run_daemon_foreground_from_filesystem(
             &shell,
@@ -903,7 +903,7 @@ mod tests {
             },
             &mut clock,
             &mut sleeper,
-            &mut publisher,
+            &publisher,
         )
         .expect_err("missing backend config must fail the tick loop");
 
@@ -927,7 +927,7 @@ mod tests {
             None
         );
         assert!(sleeper.sleeps_ms.is_empty());
-        assert!(publisher.published_event_ids.is_empty());
+        assert!(publisher.lock().unwrap().published_event_ids.is_empty());
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

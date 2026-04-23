@@ -157,7 +157,7 @@ where
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ProcessSignalAwareSleeper;
     let mut stop_signal = ProcessSignalStopSignal;
-    let mut publisher = actual_relay_publisher(&options)?;
+    let publisher = Arc::new(Mutex::new(actual_relay_publisher(&options)?));
 
     let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)?;
     let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
@@ -196,7 +196,7 @@ where
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
     } else {
@@ -208,7 +208,7 @@ where
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
     };
@@ -730,7 +730,7 @@ fn run_daemon_foreground<C, S, Stop, P>(
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     telegram_publisher: &mut dyn tenex_daemon::daemon_maintenance::TelegramMaintenancePublisher,
 ) -> Result<DaemonForegroundDiagnostics, CliError>
 where
@@ -1231,7 +1231,7 @@ mod tests {
         };
         let mut sleeper = RecordingSleeper::default();
         let mut stop_signal = NeverStopDaemonMaintenanceLoop;
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
 
         let diagnostics = run_daemon_foreground(
@@ -1241,7 +1241,7 @@ mod tests {
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
         .expect("foreground runner must succeed");
@@ -1260,7 +1260,7 @@ mod tests {
         assert_eq!(diagnostics.steps.len(), 2);
         assert_eq!(diagnostics.steps[0].iteration_index, 0);
         assert_eq!(diagnostics.steps[0].sleep_after_ms, Some(25));
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
 
         let json = serde_json::to_value(&diagnostics).expect("diagnostics must serialize");
         assert_eq!(json["schemaVersion"], Value::from(1));

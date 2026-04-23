@@ -334,19 +334,24 @@ where
 
 pub fn run_daemon_tick_once_from_filesystem<P: PublishOutboxRelayPublisher>(
     input: DaemonMaintenanceInput<'_>,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     retry_policy: PublishOutboxRetryPolicy,
 ) -> Result<DaemonTickOutcome, DaemonTickError> {
     let daemon_dir = input.daemon_dir;
     let now_ms = input.now_ms;
     let maintenance = run_daemon_maintenance_once_from_filesystem(input)?;
-    let publish_outbox = maintain_publish_runtime(PublishRuntimeMaintainInput {
-        daemon_dir,
-        publisher,
-        now: now_ms,
-        retry_policy,
-    })?
-    .maintenance_report;
+    let publish_outbox = {
+        let mut guard = publisher
+            .lock()
+            .expect("publisher mutex poisoned; another thread panicked while publishing");
+        maintain_publish_runtime(PublishRuntimeMaintainInput {
+            daemon_dir,
+            publisher: &mut *guard,
+            now: now_ms,
+            retry_policy,
+        })?
+        .maintenance_report
+    };
     log_daemon_tick_publish_summary("daemon tick", now_ms, &maintenance, None, &publish_outbox);
 
     Ok(DaemonTickOutcome {
@@ -359,7 +364,7 @@ pub fn run_daemon_tick_once_from_filesystem_with_worker<P, S>(
     input: DaemonMaintenanceInput<'_>,
     worker: DaemonWorkerTickInput<'_>,
     spawner: &mut S,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     retry_policy: PublishOutboxRetryPolicy,
     telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<DaemonTickWithWorkerOutcome, DaemonTickWithWorkerError>
@@ -393,10 +398,14 @@ where
         project_owner_pubkeys: &operations_status_project_owner_pubkeys,
     };
     let worker_runtime = {
-        let mut live_publish_maintenance = |daemon_dir: &Path, now: u64| {
+        let publisher_for_live = Arc::clone(publisher);
+        let mut live_publish_maintenance = move |daemon_dir: &Path, now: u64| {
+            let mut guard = publisher_for_live
+                .lock()
+                .expect("publisher mutex poisoned; another thread panicked while publishing");
             maintain_publish_runtime(PublishRuntimeMaintainInput {
                 daemon_dir,
-                publisher,
+                publisher: &mut *guard,
                 now,
                 retry_policy,
             })
@@ -432,9 +441,12 @@ where
     let worker_runtime = match worker_runtime {
         Ok(worker_runtime) => worker_runtime,
         Err(source) => {
+            let mut guard = publisher
+                .lock()
+                .expect("publisher mutex poisoned; another thread panicked while publishing");
             maintain_publish_runtime(PublishRuntimeMaintainInput {
                 daemon_dir,
-                publisher,
+                publisher: &mut *guard,
                 now: now_ms,
                 retry_policy,
             })?;
@@ -443,13 +455,18 @@ where
             });
         }
     };
-    let publish_outbox = maintain_publish_runtime(PublishRuntimeMaintainInput {
-        daemon_dir,
-        publisher,
-        now: now_ms,
-        retry_policy,
-    })?
-    .maintenance_report;
+    let publish_outbox = {
+        let mut guard = publisher
+            .lock()
+            .expect("publisher mutex poisoned; another thread panicked while publishing");
+        maintain_publish_runtime(PublishRuntimeMaintainInput {
+            daemon_dir,
+            publisher: &mut *guard,
+            now: now_ms,
+            retry_policy,
+        })?
+        .maintenance_report
+    };
     log_daemon_tick_publish_summary(
         "daemon worker tick",
         now_ms,
@@ -614,7 +631,7 @@ pub fn run_daemon_tick_loop_from_filesystem<C, S, P>(
     input: DaemonMaintenanceLoopInput<'_>,
     clock: &mut C,
     sleeper: &mut S,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     retry_policy: PublishOutboxRetryPolicy,
 ) -> Result<
     DaemonMaintenanceLoopOutcome<DaemonTickOutcome>,
@@ -653,7 +670,7 @@ pub fn run_daemon_tick_loop_until_stopped_from_filesystem<C, S, Stop, P>(
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     retry_policy: PublishOutboxRetryPolicy,
 ) -> Result<
     DaemonMaintenanceLoopOutcome<DaemonTickOutcome>,
@@ -719,7 +736,7 @@ pub fn run_daemon_tick_loop_until_stopped_from_filesystem_with_worker<C, Sleep, 
     sleeper: &mut Sleep,
     stop_signal: &mut Stop,
     spawner: &mut S,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     retry_policy: PublishOutboxRetryPolicy,
     telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<
@@ -1145,7 +1162,7 @@ mod tests {
             observed_now_ms_values: Vec::new(),
         };
         let mut sleeper = RecordingSleeper::default();
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
 
         let outcome = run_daemon_tick_loop_from_filesystem(
             DaemonMaintenanceLoopInput {
@@ -1158,7 +1175,7 @@ mod tests {
             },
             &mut clock,
             &mut sleeper,
-            &mut publisher,
+            &publisher,
             PublishOutboxRetryPolicy::default(),
         )
         .expect("filesystem tick loop must succeed");
@@ -1176,7 +1193,7 @@ mod tests {
         assert_eq!(tick.publish_outbox.drained.len(), 3);
         assert_eq!(tick.publish_outbox.diagnostics_after.pending_count, 0);
         assert_eq!(tick.publish_outbox.diagnostics_after.published_count, 3);
-        assert_eq!(publisher.event_ids.len(), 3);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 3);
         assert!(sleeper.sleeps_ms.is_empty());
 
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
@@ -1193,7 +1210,7 @@ mod tests {
             observed_now_ms_values: Vec::new(),
         };
         let mut sleeper = RecordingSleeper::default();
-        let mut publisher = RetryableFailurePublisher::default();
+        let publisher = Arc::new(Mutex::new(RetryableFailurePublisher::default()));
 
         let outcome = run_daemon_tick_loop_from_filesystem(
             DaemonMaintenanceLoopInput {
@@ -1206,7 +1223,7 @@ mod tests {
             },
             &mut clock,
             &mut sleeper,
-            &mut publisher,
+            &publisher,
             PublishOutboxRetryPolicy::default(),
         )
         .expect("filesystem tick loop must record retryable publish failures");
@@ -1235,7 +1252,7 @@ mod tests {
                 .and_then(|failure| failure.next_attempt_at)
                 .is_some()
         );
-        assert_eq!(publisher.publish_attempts, 3);
+        assert_eq!(publisher.lock().unwrap().publish_attempts, 3);
         assert!(sleeper.sleeps_ms.is_empty());
 
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
@@ -1247,7 +1264,7 @@ mod tests {
     #[test]
     fn filesystem_tick_with_worker_runs_worker_runtime_before_publish_drain() {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-empty-queue", 0x06);
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
         let runtime_state = new_shared_worker_runtime_state();
@@ -1274,7 +1291,7 @@ mod tests {
                 max_frames: 1,
             },
             &mut spawner,
-            &mut publisher,
+            &publisher,
             PublishOutboxRetryPolicy::default(),
             &mut telegram_publisher,
         )
@@ -1298,7 +1315,7 @@ mod tests {
         assert_eq!(outcome.publish_outbox.diagnostics_before.pending_count, 3);
         assert_eq!(outcome.publish_outbox.drained.len(), 3);
         assert_eq!(outcome.publish_outbox.diagnostics_after.pending_count, 0);
-        assert_eq!(publisher.event_ids.len(), 3);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 3);
     }
 
     #[test]
@@ -1306,7 +1323,7 @@ mod tests {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
         seed_queued_dispatch(&fixture.daemon_dir);
         seed_dispatch_input(&fixture.daemon_dir);
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = ProtocolErrorSpawner::default();
         let runtime_state = new_shared_worker_runtime_state();
@@ -1333,7 +1350,7 @@ mod tests {
                 max_frames: 1,
             },
             &mut spawner,
-            &mut publisher,
+            &publisher,
             PublishOutboxRetryPolicy::default(),
             &mut telegram_publisher,
         )
@@ -1344,7 +1361,7 @@ mod tests {
             DaemonTickWithWorkerError::WorkerRuntime { .. }
         ));
         assert_eq!(spawner.spawn_calls, 1);
-        assert_eq!(publisher.event_ids.len(), 3);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 3);
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
