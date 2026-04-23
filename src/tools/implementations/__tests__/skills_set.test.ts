@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ConversationToolContext } from "@/tools/types";
-import { agentStorage } from "@/agents/AgentStorage";
 import * as projectServices from "@/services/projects";
 import { SkillService } from "@/services/skill/SkillService";
 import { SkillWhitelistService } from "@/services/skill";
@@ -8,7 +7,6 @@ import { createSkillsSetTool } from "../skills_set";
 
 const mockFetchSkills = mock();
 const mockListAvailableSkills = mock();
-const mockUpdateDefaultConfig = mock();
 
 function createAvailableSkill(identifier: string) {
     return {
@@ -48,7 +46,6 @@ describe("skills_set tool", () => {
     const mockGetSelfAppliedSkillIds = mock();
     let whitelistServiceSpy: ReturnType<typeof spyOn>;
     let skillServiceSpy: ReturnType<typeof spyOn>;
-    let updateDefaultConfigSpy: ReturnType<typeof spyOn>;
     let projectContextSpy: ReturnType<typeof spyOn>;
 
     const createMockContext = (): ConversationToolContext => ({
@@ -99,15 +96,10 @@ describe("skills_set tool", () => {
                 tagValue: mock(() => PROJECT_DTAG),
             },
         } as never);
-        updateDefaultConfigSpy = spyOn(
-            agentStorage,
-            "updateDefaultConfig"
-        ).mockImplementation(mockUpdateDefaultConfig as never);
         mockFetchSkills.mockClear();
         mockListAvailableSkills.mockClear();
         mockSetSelfAppliedSkills.mockClear();
         mockGetSelfAppliedSkillIds.mockClear();
-        mockUpdateDefaultConfig.mockClear();
         mockListAvailableSkills.mockResolvedValue([]);
         mockGetSelfAppliedSkillIds.mockReturnValue([]);
     });
@@ -115,7 +107,6 @@ describe("skills_set tool", () => {
     afterEach(() => {
         skillServiceSpy?.mockRestore();
         whitelistServiceSpy?.mockRestore();
-        updateDefaultConfigSpy?.mockRestore();
         projectContextSpy?.mockRestore();
         mock.restore();
     });
@@ -209,23 +200,6 @@ describe("skills_set tool", () => {
         expect(result.activeSkills).toEqual([]);
         expect(result.message).toBe("All self-applied skills cleared.");
         expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith([], AGENT_PUBKEY);
-    });
-
-    it("should clear all skills with remove: ['*'] and persist with always: true", async () => {
-        mockUpdateDefaultConfig.mockResolvedValue(true);
-        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
-
-        const context = createMockContext();
-        const toolDef = createSkillsSetTool(context);
-        const result = await toolDef.execute(
-            { remove: ["*"], always: true },
-            toolCallOpts("tc-wildcard-always")
-        );
-
-        expect(result.success).toBe(true);
-        expect(result.activeSkills).toEqual([]);
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith([], AGENT_PUBKEY);
-        expect(mockUpdateDefaultConfig).toHaveBeenCalledWith(AGENT_PUBKEY, { skills: [] });
     });
 
     it("should fail when same ID appears in both add and remove", async () => {
@@ -531,57 +505,6 @@ describe("skills_set tool", () => {
         expect(result.skillContent).toContain("Download failed");
         expect(result.skillContent).toContain("</skill>");
         expect(result.message).toContain("file paths");
-    });
-
-    it("should persist to agent config when always: true", async () => {
-        mockUpdateDefaultConfig.mockResolvedValue(true);
-        mockListAvailableSkills.mockResolvedValue([createAvailableSkill("brainstorming")]);
-        mockFetchSkills.mockResolvedValue({
-            skills: [
-                createResolvedSkill("brainstorming", SKILL_ID_1, {
-                    name: "Brainstorming",
-                    content: "content1",
-                }),
-            ],
-            content: "skill content",
-        });
-
-        const context = createMockContext();
-        const toolDef = createSkillsSetTool(context);
-        const result = await toolDef.execute(
-            { add: ["brainstorming"], always: true },
-            toolCallOpts("tc-always-1")
-        );
-
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["brainstorming"], AGENT_PUBKEY);
-        expect(mockUpdateDefaultConfig).toHaveBeenCalledWith(AGENT_PUBKEY, {
-            skills: ["brainstorming"],
-        });
-        expect(result.success).toBe(true);
-        expect(result.message).toContain("Saved as always-on to agent config");
-        expect(result.message).not.toContain("file paths");
-    });
-
-    it("should NOT call updateDefaultConfig when always is not set", async () => {
-        mockListAvailableSkills.mockResolvedValue([createAvailableSkill("brainstorming")]);
-        mockFetchSkills.mockResolvedValue({
-            skills: [
-                createResolvedSkill("brainstorming", SKILL_ID_1, {
-                    name: "Brainstorming",
-                    content: "content1",
-                }),
-            ],
-            content: "skill content",
-        });
-
-        const context = createMockContext();
-        const toolDef = createSkillsSetTool(context);
-        await toolDef.execute(
-            { add: ["brainstorming"] },
-            toolCallOpts("tc-always-2")
-        );
-
-        expect(mockUpdateDefaultConfig).not.toHaveBeenCalled();
     });
 
     it("should not re-fetch skills that are already active when adding", async () => {

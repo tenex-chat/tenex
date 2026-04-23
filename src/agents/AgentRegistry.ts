@@ -69,8 +69,7 @@ function toProjectAgentInfo(pubkey: string, storedAgent: StoredAgent): ProjectAg
  * await agent.sign(event);
  * const llm = agent.createLLMService();
  *
- * // After storage updates, reload
- * await agentStorage.updateDefaultConfig(pubkey, { tools: newTools });
+ * // After the Rust daemon writes agent config (kind 24020), reload into the registry
  * await registry.reloadAgent(pubkey); // Refresh instance
  * ```
  *
@@ -442,14 +441,8 @@ export class AgentRegistry {
     /**
      * Reload an agent from storage into the registry.
      *
-     * Used after storage updates to refresh the in-memory instance.
-     * This is the second half of the storage update pattern.
-     *
-     * ## When to use
-     * Call this after any AgentStorage update method:
-     * - updateDefaultConfig()
-     * - updateProjectOverride()
-     * - Or any direct modification to stored agent data
+     * Used after the Rust daemon rewrites an agent file (e.g. kind 24020 handler)
+     * to refresh the in-memory runtime instance.
      *
      * ## What it does
      * 1. Load fresh StoredAgent from disk
@@ -459,11 +452,6 @@ export class AgentRegistry {
      *
      * @param pubkey - Agent's public key (hex string)
      * @returns true if reloaded successfully, false if agent not found in storage
-     *
-     * @example
-     * // Update pattern
-     * await agentStorage.updateDefaultConfig(pubkey, { model: 'anthropic:claude-opus-4' });
-     * await registry.reloadAgent(pubkey); // Pick up changes
      *
      * @example
      * // Check if agent exists before using

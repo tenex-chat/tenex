@@ -10,7 +10,6 @@ import type { AgentCategory } from "@/agents/role-categories";
 import type { MCPServerConfig } from "@/llm/providers/types";
 import {
     resolveEffectiveConfig,
-    deduplicateProjectConfig,
     type ResolvedAgentConfig,
 } from "@/agents/ConfigResolver";
 import { ensureDirectory, fileExists } from "@/lib/fs";
@@ -18,14 +17,6 @@ import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
-
-/**
- * Options for `updateDefaultConfig()`.
- */
-export interface UpdateDefaultConfigOptions {
-    /** If true, clears all projectOverrides (default: false) */
-    clearProjectOverrides?: boolean;
-}
 
 function stripUndefinedValues<T extends object>(value: T): Partial<T> {
     return Object.fromEntries(
@@ -305,24 +296,17 @@ interface AgentIndex {
  * ```
  *
  * ## Usage Pattern
- * 1. **Read operations**: Use load/get methods
- * 2. **Write operations**: Use save/update methods
- * 3. **After updates**: Call AgentRegistry.reloadAgent() to refresh in-memory instances
+ * - **Read operations**: Use load/get methods on this class.
+ * - **Write operations**: Agent config mutations are owned by the Rust daemon (kind 24020 handler).
+ *   TypeScript is read-only with respect to agent storage.
  *
  * ## Separation of Concerns
- * - Storage (this class): Disk persistence only
- * - Registry (AgentRegistry): Runtime instances only
- * - Updates: storage.update() → registry.reload()
+ * - Storage (this class): Disk reads + save when the daemon itself persists (e.g. installer flows).
+ * - Registry (AgentRegistry): Runtime instances only.
  *
  * @example
  * // Load agent from disk
  * const agent = await agentStorage.loadAgent(pubkey);
- *
- * // Update default configuration
- * await agentStorage.updateDefaultConfig(pubkey, { model: 'anthropic:claude-opus-4' });
- *
- * // Refresh in-memory instance
- * await agentRegistry.reloadAgent(pubkey);
  *
  * @see AgentRegistry for in-memory runtime management
  * @see agent-loader for loading orchestration
@@ -1132,178 +1116,6 @@ export class AgentStorage {
     }
 
     /**
-     * Update an agent's default configuration block.
-     *
-     * A 24020 event with NO a-tag should call this method.
-     * Writes to the `default` block in the agent file.
-     *
-     * @param pubkey - Agent's public key
-     * @param updates - Fields to update. Only defined fields are applied.
-     * @param options - Optional behavior flags
-     * @param options.clearProjectOverrides - If true, clears all projectOverrides (default: false)
-     * @returns true if updated successfully, false if agent not found
-     */
-    async updateDefaultConfig(
-        pubkey: string,
-        updates: AgentDefaultConfig,
-        options?: UpdateDefaultConfigOptions
-    ): Promise<boolean> {
-        const agent = await this.loadAgent(pubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${pubkey} not found`);
-            return false;
-        }
-
-        if (!agent.default) {
-            agent.default = {};
-        }
-
-        if (updates.model !== undefined) {
-            agent.default.model = updates.model;
-        }
-
-        if (updates.tools !== undefined) {
-            if (updates.tools.length > 0) {
-                agent.default.tools = updates.tools;
-            } else {
-                agent.default.tools = undefined;
-            }
-        }
-
-        if (updates.skills !== undefined) {
-            if (updates.skills.length > 0) {
-                agent.default.skills = updates.skills;
-            } else {
-                agent.default.skills = undefined;
-            }
-        }
-
-        if (updates.blockedSkills !== undefined) {
-            if (updates.blockedSkills.length > 0) {
-                agent.default.blockedSkills = updates.blockedSkills;
-            } else {
-                agent.default.blockedSkills = undefined;
-            }
-        }
-
-        if (updates.mcpAccess !== undefined) {
-            if (updates.mcpAccess.length > 0) {
-                agent.default.mcpAccess = updates.mcpAccess;
-            } else {
-                agent.default.mcpAccess = undefined;
-            }
-        }
-
-        // Clean up empty default block
-        if (agent.default && Object.keys(agent.default).length === 0) {
-            agent.default = undefined;
-        }
-
-        // Clear all project overrides when a global config update is received
-        if (options?.clearProjectOverrides && agent.projectOverrides) {
-            agent.projectOverrides = undefined;
-            logger.info(`Cleared projectOverrides for agent ${agent.name} (global config update)`);
-        }
-
-        await this.saveAgent(agent);
-        logger.info(`Updated default config for agent ${agent.name}`, { updates });
-        return true;
-    }
-
-    /**
-     * Update an agent's per-project override configuration.
-     *
-     * A 24020 event WITH an a-tag should call this method.
-     * Writes to `projectOverrides[projectDTag]`.
-     *
-     * If any provided values equal the defaults after resolution, they are cleared
-     * from the override (dedup logic) to keep overrides minimal.
-     *
-     * If `reset` is true, clears the entire project override.
-     *
-     * @param pubkey - Agent's public key
-     * @param projectDTag - Project dTag to scope the config to
-     * @param override - The new project override (full replacement, not merge)
-     * @param reset - If true, clear the entire project override instead of setting it
-     * @returns true if updated successfully, false if agent not found
-     */
-    async updateProjectOverride(
-        pubkey: string,
-        projectDTag: string,
-        override: AgentProjectConfig,
-        reset = false
-    ): Promise<boolean> {
-        const agent = await this.loadAgent(pubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${pubkey} not found`);
-            return false;
-        }
-
-        if (reset) {
-            if (agent.projectOverrides) {
-                delete agent.projectOverrides[projectDTag];
-                if (Object.keys(agent.projectOverrides).length === 0) {
-                    agent.projectOverrides = undefined;
-                }
-            }
-            logger.info(`Cleared project override for agent ${agent.name}`, { projectDTag });
-        } else {
-            const defaultConfig: AgentDefaultConfig = {
-                model: agent.default?.model,
-                tools: agent.default?.tools,
-                skills: agent.default?.skills,
-                blockedSkills: agent.default?.blockedSkills,
-                mcpAccess: agent.default?.mcpAccess,
-            };
-
-            const deduplicated = stripUndefinedValues(
-                deduplicateProjectConfig(defaultConfig, override)
-            );
-
-            if (!agent.projectOverrides) {
-                agent.projectOverrides = {};
-            }
-
-            if (Object.keys(deduplicated).length === 0) {
-                delete agent.projectOverrides[projectDTag];
-                if (Object.keys(agent.projectOverrides).length === 0) {
-                    agent.projectOverrides = undefined;
-                }
-                logger.info(`Project override for ${projectDTag} cleared (all fields match defaults)`, {
-                    agentSlug: agent.slug,
-                });
-            } else {
-                agent.projectOverrides[projectDTag] = deduplicated;
-                logger.info(`Updated project override for agent ${agent.name}`, {
-                    projectDTag,
-                    override: deduplicated,
-                });
-            }
-        }
-
-        await this.saveAgent(agent);
-        return true;
-    }
-
-    async updateAgentTelegramConfig(
-        pubkey: string,
-        telegram?: TelegramAgentConfig
-    ): Promise<boolean> {
-        const agent = await this.loadAgent(pubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${pubkey} not found`);
-            return false;
-        }
-
-        agent.telegram = sanitizeTelegramConfig(telegram);
-        await this.saveAgent(agent);
-        logger.info(`Updated Telegram transport for agent ${agent.name}`, {
-            enabled: Boolean(agent.telegram?.botToken),
-        });
-        return true;
-    }
-
-    /**
      * Resolve the effective PM status for an agent in a specific project.
      * Priority:
      * 1. agent.isPM (global PM designation via kind 24020 without a-tag)
@@ -1318,55 +1130,6 @@ export class AgentStorage {
             return true;
         }
         return agent.pmOverrides?.[projectDTag] === true;
-    }
-
-    /**
-     * Update an agent's project-scoped PM designation.
-     * Writes to projectOverrides[projectDTag].isPM.
-     *
-     * @param pubkey - Agent's public key
-     * @param projectDTag - Project dTag to scope the config to
-     * @param isPM - PM designation (true/false/undefined to clear)
-     * @returns true if updated successfully, false if agent not found
-     */
-    async updateProjectScopedIsPM(
-        pubkey: string,
-        projectDTag: string,
-        isPM: boolean | undefined
-    ): Promise<boolean> {
-        const agent = await this.loadAgent(pubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${pubkey} not found`);
-            return false;
-        }
-
-        if (isPM === true) {
-            if (!agent.projectOverrides) {
-                agent.projectOverrides = {};
-            }
-            if (!agent.projectOverrides[projectDTag]) {
-                agent.projectOverrides[projectDTag] = {};
-            }
-            agent.projectOverrides[projectDTag].isPM = true;
-        } else {
-            const override = agent.projectOverrides?.[projectDTag];
-            if (override) {
-                override.isPM = undefined;
-                if (Object.keys(override).length === 0) {
-                    delete agent.projectOverrides?.[projectDTag];
-                    if (Object.keys(agent.projectOverrides ?? {}).length === 0) {
-                        agent.projectOverrides = undefined;
-                    }
-                }
-            }
-        }
-
-        await this.saveAgent(agent);
-        logger.info(`Updated project-scoped PM flag for agent ${agent.name}`, {
-            projectDTag,
-            isPM,
-        });
-        return true;
     }
 
     /**

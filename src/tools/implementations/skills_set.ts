@@ -4,7 +4,6 @@ import { homedir } from "node:os";
 import type { AISdkTool, ConversationToolContext } from "@/tools/types";
 import { SkillService } from "@/services/skill/SkillService";
 import { renderSkill } from "@/agents/execution/skill-reminder-renderers";
-import { agentStorage } from "@/agents/AgentStorage";
 import { getProjectContext } from "@/services/projects";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import {
@@ -26,12 +25,6 @@ const skillsSetSchema = z.object({
         .describe(
             'Skill IDs to deactivate. Pass ["*"] to clear all skills before applying `add`.'
         ),
-    always: z
-        .boolean()
-        .optional()
-        .describe(
-            "When true, persists the resulting skill set to agent config for all future conversations."
-        ),
 });
 
 type SkillsSetInput = z.infer<typeof skillsSetSchema>;
@@ -45,7 +38,7 @@ type SkillsSetInput = z.infer<typeof skillsSetSchema>;
  * - Validates `add` IDs against `skill_list` results. Partial resolution is rejected.
  * - Merges `add` into the remaining set (deduped).
  * - Fetches only newly-added skills for rendering (the agent already has content for previously-active ones).
- * - Persists via `setSelfAppliedSkills` and optionally `updateDefaultConfig`.
+ * - Persists via `setSelfAppliedSkills` (conversation-scoped only).
  */
 export function createSkillsSetTool(context: ConversationToolContext): AISdkTool {
     const { conversationStore, agent } = context;
@@ -55,7 +48,7 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
             "Add or remove skills on yourself for this conversation. Use `add` to activate skills and `remove` to deactivate them (or pass remove: [\"*\"] to clear all). Both fields are optional and can be combined. Only newly-added skill content is returned; the system prompt updates on the next step.",
         inputSchema: skillsSetSchema,
         execute: async (input: SkillsSetInput) => {
-            const { add: rawAdd, remove: rawRemove, always } = input;
+            const { add: rawAdd, remove: rawRemove } = input;
             const agentPubkey = agent.pubkey;
 
             const addIds = (rawAdd ?? []).map((id) => id.trim()).filter(Boolean);
@@ -101,9 +94,6 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
             if (addIds.length === 0) {
                 const finalSkills = [...currentSkills];
                 conversationStore.setSelfAppliedSkills(finalSkills, agentPubkey);
-                if (always) {
-                    await agentStorage.updateDefaultConfig(agentPubkey, { skills: finalSkills });
-                }
                 const message = finalSkills.length === 0
                     ? "All self-applied skills cleared."
                     : `Removed skill(s). Active skills: ${finalSkills.join(", ")}.`;
@@ -218,13 +208,7 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
             const finalSkills = [...currentSkills];
             conversationStore.setSelfAppliedSkills(finalSkills, agentPubkey);
 
-            if (always) {
-                await agentStorage.updateDefaultConfig(agentPubkey, { skills: finalSkills });
-            }
-
-            const message = always
-                ? `Activated ${uniqueAddIds.length} skill(s): ${uniqueAddIds.join(", ")}. Saved as always-on to agent config.`
-                : `Activated ${uniqueAddIds.length} skill(s): ${uniqueAddIds.join(", ")}. Full skill content (including file paths) is included below — apply it immediately.`;
+            const message = `Activated ${uniqueAddIds.length} skill(s): ${uniqueAddIds.join(", ")}. Full skill content (including file paths) is included below — apply it immediately.`;
 
             return {
                 success: true,
