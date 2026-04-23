@@ -25,6 +25,7 @@ use tenex_daemon::daemon_shell::DaemonShell;
 use tenex_daemon::nip46::client::PublishOutboxHandle;
 use tenex_daemon::nip46::outbox_adapter::PublishOutboxAdapter;
 use tenex_daemon::nip46::pending::PendingNip46Requests;
+use tenex_daemon::nip46::protocol::NIP46_KIND;
 use tenex_daemon::nip46::registry::NIP46Registry;
 use tenex_daemon::nostr_subscription_gateway::{
     NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
@@ -34,7 +35,9 @@ use tenex_daemon::project_agent_whitelist::ingress::WhitelistIngress;
 use tenex_daemon::project_agent_whitelist::reconciler::{ReconcilerDeps, run_reconciler_loop};
 use tenex_daemon::project_agent_whitelist::snapshot_state::SnapshotState;
 use tenex_daemon::project_agent_whitelist::trigger_source::AgentInventoryPoller;
-use tenex_daemon::publish_outbox::PublishOutboxMaintenanceReport;
+use tenex_daemon::publish_outbox::{
+    PublishOutboxMaintenanceReport, cancel_pending_publish_outbox_records_matching,
+};
 use tenex_daemon::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
 use tenex_daemon::subscription_runtime::{
@@ -409,12 +412,10 @@ fn build_whitelist_wiring(
             .map_err(|error| runtime_error(error.to_string()))?,
     );
     let backend_pubkey = backend_signer.pubkey_hex().to_string();
+    cancel_stale_nip46_publish_requests(daemon_dir, &backend_pubkey)?;
 
     let pending = PendingNip46Requests::default();
-    let outbox_adapter = Arc::new(PublishOutboxAdapter::new(
-        daemon_dir.to_path_buf(),
-        backend_pubkey.clone(),
-    ));
+    let outbox_adapter = Arc::new(PublishOutboxAdapter::new(daemon_dir.to_path_buf()));
     let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = outbox_adapter;
 
     let nip46_registry = Arc::new(NIP46Registry::new(
@@ -425,14 +426,17 @@ fn build_whitelist_wiring(
 
     let snapshot_state = Arc::new(SnapshotState::default());
     let heartbeat_latch = Arc::new(Mutex::new(BackendHeartbeatLatchPlanner::new(
-        backend_pubkey,
+        backend_pubkey.clone(),
         config.whitelisted_pubkeys.clone(),
     )));
 
     let (trigger_tx, trigger_rx) = channel::<String>();
+    let reconciler_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
+    let poller_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
     let ingress = Arc::new(WhitelistIngress {
         snapshot_state: Arc::clone(&snapshot_state),
         heartbeat_latch: Arc::clone(&heartbeat_latch),
+        owners: Arc::clone(&reconciler_owners),
         reconciler_trigger: trigger_tx.clone(),
         nip46_registry: Arc::clone(&nip46_registry),
     });
@@ -442,10 +446,9 @@ fn build_whitelist_wiring(
         .first()
         .cloned()
         .unwrap_or_default();
-    let reconciler_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
-    let poller_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
     let reconciler_deps = ReconcilerDeps {
         tenex_base_dir: tenex_base_dir.to_path_buf(),
+        backend_pubkey,
         owners: Arc::clone(&reconciler_owners),
         snapshot_state,
         nip46_registry: Arc::clone(&nip46_registry),
@@ -482,6 +485,27 @@ fn build_whitelist_wiring(
         _reconciler_thread: reconciler_thread,
         _poller_thread: poller_thread,
     }))
+}
+
+fn cancel_stale_nip46_publish_requests(
+    daemon_dir: &Path,
+    backend_pubkey: &str,
+) -> Result<(), CliError> {
+    let cancelled = cancel_pending_publish_outbox_records_matching(daemon_dir, |record| {
+        record.event.kind == NIP46_KIND
+            && record.event.pubkey == backend_pubkey
+            && record.request.request_id.starts_with("nip46:")
+    })
+    .map_err(|error| runtime_error(error.to_string()))?;
+
+    if !cancelled.is_empty() {
+        tracing::warn!(
+            cancelled_count = cancelled.len(),
+            "cancelled stale pending NIP-46 publish requests from previous daemon session"
+        );
+    }
+
+    Ok(())
 }
 
 fn start_nostr_subscription_supervisor_from_options(
@@ -1594,8 +1618,10 @@ mod tests {
 
         let reconciler_owners = Arc::new(RwLock::new(vec![owner_a.xonly_hex.clone()]));
         let snapshot_state = Arc::new(SnapshotState::new());
+        snapshot_state.mark_catchup_complete();
         let deps = ReconcilerDeps {
             tenex_base_dir: tenex_base_dir.clone(),
+            backend_pubkey: backend_pubkey.clone(),
             owners: Arc::clone(&reconciler_owners),
             snapshot_state: Arc::clone(&snapshot_state),
             nip46_registry: Arc::clone(&registry),

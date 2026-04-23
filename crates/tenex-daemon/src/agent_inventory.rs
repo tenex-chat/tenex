@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -5,6 +6,7 @@ use std::str::FromStr;
 
 use bech32::{self, FromBase32, Variant};
 use secp256k1::{Keypair, Secp256k1, SecretKey, XOnlyPublicKey};
+use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -26,6 +28,15 @@ pub struct AgentInventorySkippedFile {
 pub enum AgentInventoryError {
     #[error("failed to read agents directory {path:?}: {source}")]
     ReadDirectory { path: PathBuf, source: io::Error },
+    #[error("failed to read agents index {path:?}: {source}")]
+    ReadIndex { path: PathBuf, source: io::Error },
+    #[error("failed to parse agents index {path:?}: {source}")]
+    ParseIndex {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    #[error("agents index {path:?} is invalid: {reason}")]
+    InvalidIndex { path: PathBuf, reason: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,10 +52,62 @@ struct ParsedAgentInventoryFile {
     status: AgentInventoryStatus,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentProjectIndex {
+    #[serde(default)]
+    by_project: std::collections::BTreeMap<String, Vec<String>>,
+}
+
 pub fn read_installed_agent_list_agents(
     agents_dir: impl AsRef<Path>,
 ) -> Result<Vec<InstalledAgentListAgent>, AgentInventoryError> {
     Ok(read_installed_agent_inventory(agents_dir)?.active_agents)
+}
+
+pub fn read_project_index_agent_pubkeys(
+    agents_dir: impl AsRef<Path>,
+) -> Result<BTreeSet<String>, AgentInventoryError> {
+    let agents_dir = agents_dir.as_ref();
+    let index_path = agents_dir.join("index.json");
+    let content = match fs::read_to_string(&index_path) {
+        Ok(content) => content,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            return Ok(read_installed_agent_inventory(agents_dir)?
+                .active_agents
+                .into_iter()
+                .map(|agent| agent.pubkey)
+                .collect());
+        }
+        Err(source) => {
+            return Err(AgentInventoryError::ReadIndex {
+                path: index_path,
+                source,
+            });
+        }
+    };
+    let index: AgentProjectIndex =
+        serde_json::from_str(&content).map_err(|source| AgentInventoryError::ParseIndex {
+            path: index_path.clone(),
+            source,
+        })?;
+    let mut pubkeys = BTreeSet::new();
+
+    for (project_id, project_pubkeys) in index.by_project {
+        for pubkey in project_pubkeys {
+            validate_filename_pubkey(&pubkey).map_err(|reason| {
+                AgentInventoryError::InvalidIndex {
+                    path: index_path.clone(),
+                    reason: format!(
+                        "project {project_id:?} has invalid agent pubkey {pubkey:?}: {reason}"
+                    ),
+                }
+            })?;
+            pubkeys.insert(pubkey);
+        }
+    }
+
+    Ok(pubkeys)
 }
 
 pub fn read_installed_agent_inventory(
@@ -485,6 +548,66 @@ mod tests {
     }
 
     #[test]
+    fn reads_project_index_pubkeys_from_by_project() {
+        let temp_dir = unique_temp_dir("project-index");
+        fs::create_dir_all(&temp_dir).expect("temp dir must create");
+
+        let indexed_a = pubkey_hex(0x21);
+        let indexed_b = pubkey_hex(0x22);
+        let file_only = pubkey_hex(0x23);
+        write_json(
+            &temp_dir.join("index.json"),
+            serde_json::json!({
+                "byProject": {
+                    "project-a": [indexed_a, indexed_b],
+                    "project-b": [indexed_b],
+                }
+            }),
+        );
+        write_json(
+            &temp_dir.join(format!("{file_only}.json")),
+            serde_json::json!({
+                "slug": "file-only",
+                "status": "active",
+            }),
+        );
+
+        let pubkeys = read_project_index_agent_pubkeys(&temp_dir).expect("project index must read");
+        let expected: BTreeSet<String> = [pubkey_hex(0x21), pubkey_hex(0x22)].into_iter().collect();
+
+        assert_eq!(pubkeys, expected);
+    }
+
+    #[test]
+    fn project_index_pubkeys_fall_back_to_agent_files_when_index_missing() {
+        let temp_dir = unique_temp_dir("project-index-missing");
+        fs::create_dir_all(&temp_dir).expect("temp dir must create");
+
+        let active = pubkey_hex(0x21);
+        let inactive = pubkey_hex(0x22);
+        write_json(
+            &temp_dir.join(format!("{active}.json")),
+            serde_json::json!({
+                "slug": "active",
+                "status": "active",
+            }),
+        );
+        write_json(
+            &temp_dir.join(format!("{inactive}.json")),
+            serde_json::json!({
+                "slug": "inactive",
+                "status": "inactive",
+            }),
+        );
+
+        let pubkeys =
+            read_project_index_agent_pubkeys(&temp_dir).expect("agent file fallback must read");
+        let expected: BTreeSet<String> = [active].into_iter().collect();
+
+        assert_eq!(pubkeys, expected);
+    }
+
+    #[test]
     fn missing_status_defaults_to_active() {
         let temp_dir = unique_temp_dir("status");
         fs::create_dir_all(&temp_dir).expect("temp dir must create");
@@ -543,6 +666,7 @@ mod tests {
             AgentInventoryError::ReadDirectory { path, .. } => {
                 assert_eq!(path, missing_dir);
             }
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 

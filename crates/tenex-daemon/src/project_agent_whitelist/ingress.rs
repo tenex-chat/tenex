@@ -1,6 +1,6 @@
 use std::fmt;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::nip46::protocol::NIP46_KIND;
@@ -18,6 +18,7 @@ use crate::project_agent_whitelist::snapshot_state::{PROJECT_AGENT_SNAPSHOT_KIND
 pub struct WhitelistIngress {
     pub snapshot_state: Arc<SnapshotState>,
     pub heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
+    pub owners: Arc<RwLock<Vec<String>>>,
     pub reconciler_trigger: Sender<String>,
     pub nip46_registry: Arc<NIP46Registry>,
 }
@@ -47,6 +48,21 @@ impl WhitelistIngress {
                 }
             }
             _ => {}
+        }
+    }
+
+    pub fn handle_eose(&self) {
+        if !self.snapshot_state.mark_catchup_complete() {
+            return;
+        }
+
+        let owners = self
+            .owners
+            .read()
+            .expect("whitelist owners lock must not be poisoned")
+            .clone();
+        for owner in owners {
+            let _ = self.reconciler_trigger.send(owner);
         }
     }
 }
@@ -153,12 +169,14 @@ mod tests {
         snapshot_state: Arc<SnapshotState>,
         heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
         registry: Arc<NIP46Registry>,
+        owners: Vec<String>,
     ) -> (WhitelistIngress, mpsc::Receiver<String>) {
         let (tx, rx) = mpsc::channel();
         (
             WhitelistIngress {
                 snapshot_state,
                 heartbeat_latch,
+                owners: Arc::new(RwLock::new(owners)),
                 reconciler_trigger: tx,
                 nip46_registry: registry,
             },
@@ -184,6 +202,7 @@ mod tests {
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
+            vec![owner.xonly_hex.clone()],
         );
 
         let tags = vec![
@@ -235,6 +254,7 @@ mod tests {
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
+            Vec::new(),
         );
 
         let event = stranger.sign(NormalizedNostrEvent {
@@ -285,6 +305,7 @@ mod tests {
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             Arc::clone(&registry),
+            vec![owner.xonly_hex.clone()],
         );
 
         let event = owner.sign(NormalizedNostrEvent {
@@ -315,6 +336,7 @@ mod tests {
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
+            vec![owner.xonly_hex.clone()],
         );
 
         let event = owner.sign(NormalizedNostrEvent {
@@ -350,6 +372,7 @@ mod tests {
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
+            vec![owner.xonly_hex.clone()],
         );
 
         let event = owner.sign(NormalizedNostrEvent {
@@ -368,6 +391,44 @@ mod tests {
         );
 
         ingress.handle_event(&event);
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn eose_marks_snapshot_catchup_and_triggers_current_owners_once() {
+        let owner_a = OwnerKeys::from_secret_hex(OWNER_SECRET_HEX);
+        let owner_b = OwnerKeys::from_secret_hex(
+            "0303030303030303030303030303030303030303030303030303030303030303",
+        );
+
+        let snapshot_state = Arc::new(SnapshotState::new());
+        let heartbeat_latch = Arc::new(Mutex::new(BackendHeartbeatLatchPlanner::new(
+            backend_signer().pubkey_hex().to_string(),
+            vec![owner_a.xonly_hex.clone(), owner_b.xonly_hex.clone()],
+        )));
+
+        let (ingress, rx) = ingress_with(
+            Arc::clone(&snapshot_state),
+            Arc::clone(&heartbeat_latch),
+            empty_registry(),
+            vec![owner_a.xonly_hex.clone(), owner_b.xonly_hex.clone()],
+        );
+
+        ingress.handle_eose();
+        assert!(snapshot_state.is_catchup_complete());
+
+        let mut triggered = vec![
+            rx.recv_timeout(Duration::from_millis(100))
+                .expect("owner a trigger"),
+            rx.recv_timeout(Duration::from_millis(100))
+                .expect("owner b trigger"),
+        ];
+        triggered.sort();
+        let mut expected = vec![owner_a.xonly_hex, owner_b.xonly_hex];
+        expected.sort();
+        assert_eq!(triggered, expected);
+
+        ingress.handle_eose();
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
 }

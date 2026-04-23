@@ -12,15 +12,11 @@ const NIP46_OUTBOX_CONVERSATION_ID: &str = "nip46";
 
 pub struct PublishOutboxAdapter {
     pub outbox_root: PathBuf,
-    pub publisher_pubkey: String,
 }
 
 impl PublishOutboxAdapter {
-    pub fn new(outbox_root: PathBuf, publisher_pubkey: String) -> Self {
-        Self {
-            outbox_root,
-            publisher_pubkey,
-        }
+    pub fn new(outbox_root: PathBuf) -> Self {
+        Self { outbox_root }
     }
 }
 
@@ -29,6 +25,7 @@ impl PublishOutboxHandle for PublishOutboxAdapter {
         let accepted_at = current_millis();
         let request_id = format!("{NIP46_OUTBOX_REQUEST_PREFIX}:{}", event.id);
         let correlation_id = format!("{NIP46_OUTBOX_CORRELATION_PREFIX}:{}", event.id);
+        let publisher_pubkey = event.pubkey.clone();
 
         let input = BackendPublishOutboxInput {
             request_id,
@@ -37,7 +34,7 @@ impl PublishOutboxHandle for PublishOutboxAdapter {
             correlation_id,
             project_id: NIP46_OUTBOX_PROJECT_ID.to_string(),
             conversation_id: NIP46_OUTBOX_CONVERSATION_ID.to_string(),
-            publisher_pubkey: self.publisher_pubkey.clone(),
+            publisher_pubkey,
             ral_number: 0,
             wait_for_relay_ok: false,
             timeout_ms: 0,
@@ -66,6 +63,8 @@ mod tests {
 
     const BACKEND_SECRET_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";
+    const OWNER_SECRET_HEX: &str =
+        "0202020202020202020202020202020202020202020202020202020202020202";
     const REMOTE_PUBKEY_HEX: &str =
         "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f";
 
@@ -84,8 +83,7 @@ mod tests {
         let signer = backend_signer();
         let event = signed_nip46_event(&signer);
 
-        let adapter =
-            PublishOutboxAdapter::new(tmp.path().to_path_buf(), signer.pubkey_hex().to_string());
+        let adapter = PublishOutboxAdapter::new(tmp.path().to_path_buf());
 
         adapter
             .enqueue(event.clone(), vec!["wss://relay".to_string()])
@@ -108,6 +106,29 @@ mod tests {
     }
 
     #[test]
+    fn adapter_enqueues_event_signed_by_non_backend_pubkey() {
+        let tmp = tempfile::tempdir().expect("tempdir must create");
+        let backend = backend_signer();
+        let owner =
+            HexBackendSigner::from_private_key_hex(OWNER_SECRET_HEX).expect("owner signer loads");
+        let event = signed_nip46_event(&owner);
+
+        let adapter = PublishOutboxAdapter::new(tmp.path().to_path_buf());
+
+        adapter
+            .enqueue(event.clone(), vec!["wss://relay".to_string()])
+            .expect("owner-signed enqueue must succeed");
+
+        let persisted = read_pending_publish_outbox_record(tmp.path(), &event.id)
+            .expect("pending record read must succeed")
+            .expect("pending record must exist");
+
+        assert_eq!(persisted.event, event);
+        assert_eq!(persisted.request.agent_pubkey, owner.pubkey_hex());
+        assert_ne!(persisted.request.agent_pubkey, backend.pubkey_hex());
+    }
+
+    #[test]
     fn adapter_returns_error_string_when_outbox_root_missing() {
         let tmp = tempfile::tempdir().expect("tempdir must create");
         let blocking_file = tmp.path().join("not-a-dir");
@@ -116,7 +137,7 @@ mod tests {
         let signer = backend_signer();
         let event = signed_nip46_event(&signer);
 
-        let adapter = PublishOutboxAdapter::new(blocking_file, signer.pubkey_hex().to_string());
+        let adapter = PublishOutboxAdapter::new(blocking_file);
 
         let err = adapter
             .enqueue(event, vec!["wss://relay".to_string()])

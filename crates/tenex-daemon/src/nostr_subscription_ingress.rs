@@ -58,11 +58,16 @@ pub fn process_relay_subscription_frame(
             subscription_id,
             event,
         } => process_event_frame(input, subscription_id, event),
-        RelaySubscriptionFrame::Eose { subscription_id } => Ok(ignored(
-            "eose",
-            Some(subscription_id.clone()),
-            "relay sent end-of-stored-events marker",
-        )),
+        RelaySubscriptionFrame::Eose { subscription_id } => {
+            if let Some(whitelist_ingress) = input.whitelist_ingress {
+                whitelist_ingress.handle_eose();
+            }
+            Ok(ignored(
+                "eose",
+                Some(subscription_id.clone()),
+                "relay sent end-of-stored-events marker",
+            ))
+        }
         RelaySubscriptionFrame::Notice { message } => {
             Ok(ignored("notice", None, format!("relay notice: {message}")))
         }

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tracing::warn;
 
-use crate::agent_inventory::read_installed_agent_inventory;
+use crate::agent_inventory::read_project_index_agent_pubkeys;
 use crate::backend_config::Nip46Config;
 use crate::backend_status_runtime::agents_dir;
 use crate::nip46::client::{PublishOutboxHandle, SignError};
@@ -38,6 +38,7 @@ pub enum ReconcileOutcome {
 
 pub struct ReconcilerDeps {
     pub tenex_base_dir: PathBuf,
+    pub backend_pubkey: String,
     /// Whitelisted owner pubkeys shared with the daemon boot and the SIGHUP
     /// reload path. The reconciler itself does not iterate this set — each
     /// reconcile is driven by a trigger message carrying a specific owner
@@ -57,20 +58,30 @@ pub fn reconcile_owner(
     deps: &ReconcilerDeps,
     owner: &str,
 ) -> Result<ReconcileOutcome, ReconcilerError> {
-    let inventory = read_installed_agent_inventory(agents_dir(&deps.tenex_base_dir))
+    let local = read_project_index_agent_pubkeys(agents_dir(&deps.tenex_base_dir))
         .map_err(|err| ReconcilerError::Inventory(err.to_string()))?;
-    let local: BTreeSet<String> = inventory
-        .active_agents
-        .iter()
-        .map(|agent| agent.pubkey.clone())
-        .collect();
 
-    let cached = deps.snapshot_state.p_tags_for(owner).unwrap_or_default();
-    if local == cached {
+    let cached = deps.snapshot_state.p_tags_for(owner);
+    if cached.is_none() && !deps.snapshot_state.is_catchup_complete() {
         return Ok(ReconcileOutcome::NoChange);
     }
 
-    let tags: Vec<Vec<String>> = local
+    let desired = desired_p_tags(cached.as_ref(), &local, &deps.backend_pubkey);
+    let current = cached.unwrap_or_default();
+    if desired == current {
+        return Ok(ReconcileOutcome::NoChange);
+    }
+
+    if desired.len() == 1 && desired.contains(&deps.backend_pubkey) {
+        warn!(
+            owner = %owner,
+            backend_pubkey = %deps.backend_pubkey,
+            "skipping 14199 reconciliation because no current snapshot or local agent pubkeys are available"
+        );
+        return Ok(ReconcileOutcome::NoChange);
+    }
+
+    let tags: Vec<Vec<String>> = desired
         .iter()
         .map(|pubkey| vec!["p".to_string(), pubkey.clone()])
         .collect();
@@ -98,6 +109,19 @@ pub fn reconcile_owner(
         .map_err(ReconcilerError::Outbox)?;
 
     Ok(ReconcileOutcome::Published { p_tag_count })
+}
+
+fn desired_p_tags(
+    cached: Option<&BTreeSet<String>>,
+    local_agents: &BTreeSet<String>,
+    backend_pubkey: &str,
+) -> BTreeSet<String> {
+    let mut desired = cached.cloned().unwrap_or_default();
+    if !backend_pubkey.is_empty() {
+        desired.insert(backend_pubkey.to_string());
+    }
+    desired.extend(local_agents.iter().cloned());
+    desired
 }
 
 pub fn run_reconciler_loop(deps: ReconcilerDeps, trigger_rx: Receiver<String>) {
@@ -169,6 +193,7 @@ mod tests {
     use crate::nip46::protocol::{Nip46Request, Nip46Response};
     use crate::nostr_event::{SignedNostrEvent, canonical_payload, event_hash_hex};
     use secp256k1::{Keypair, PublicKey, Secp256k1, SecretKey};
+    use std::collections::BTreeSet;
     use std::fs;
     use std::path::Path;
     use std::str::FromStr;
@@ -331,6 +356,7 @@ mod tests {
 
         let deps = ReconcilerDeps {
             tenex_base_dir,
+            backend_pubkey: backend.pubkey_hex().to_string(),
             owners: Arc::new(RwLock::new(vec![owner.xonly_hex.clone()])),
             snapshot_state,
             nip46_registry: Arc::clone(&registry),
@@ -469,8 +495,11 @@ mod tests {
         write_agent(&agents, &agent_b, "beta");
 
         let owner = OwnerKeys::from_secret_hex(OWNER_SECRET_HEX);
+        let backend_pubkey = backend_signer().pubkey_hex().to_string();
         let snapshot_state = Arc::new(SnapshotState::new());
-        let expected: BTreeSet<String> = [agent_a.clone(), agent_b.clone()].into_iter().collect();
+        let expected: BTreeSet<String> = [agent_a.clone(), agent_b.clone(), backend_pubkey.clone()]
+            .into_iter()
+            .collect();
         // Prime cache with a signed event whose p-tags match the inventory.
         let prime_event = SignedNostrEvent {
             id: "0".repeat(64),
@@ -545,7 +574,7 @@ mod tests {
             &owner.xonly_hex,
             &deps.nip46_config,
             &deps.default_relay,
-            backend_pubkey,
+            backend_pubkey.clone(),
             Arc::clone(&outbox),
             1,
         );
@@ -553,7 +582,7 @@ mod tests {
         let outcome = reconcile_owner(&deps, &owner.xonly_hex).expect("reconcile succeeds");
         completer.join().expect("bunker thread");
 
-        assert_eq!(outcome, ReconcileOutcome::Published { p_tag_count: 2 });
+        assert_eq!(outcome, ReconcileOutcome::Published { p_tag_count: 3 });
         // Outbox contains: connect envelope, sign_event envelope, final signed 14199.
         let captured = outbox.captured();
         assert_eq!(captured.len(), 3);
@@ -570,12 +599,66 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let expected: BTreeSet<String> = [agent_a, agent_b].into_iter().collect();
+        let expected: BTreeSet<String> = [agent_a, agent_b, backend_pubkey].into_iter().collect();
         assert_eq!(p_tags, expected);
     }
 
     #[test]
-    fn reconcile_owner_publishes_with_fewer_pubkeys_when_agent_removed() {
+    fn reconcile_owner_waits_for_snapshot_catchup_before_first_publish() {
+        let temp = unique_temp_dir("wait-for-catchup");
+        fs::create_dir_all(&temp).expect("temp dir");
+        let agents = agents_dir(&temp);
+        let agent_a = pubkey_hex(0x21);
+        write_agent(&agents, &agent_a, "alpha");
+
+        let owner = OwnerKeys::from_secret_hex(OWNER_SECRET_HEX);
+        let snapshot_state = Arc::new(SnapshotState::new());
+        let outbox = MockOutbox::new();
+        let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = Arc::clone(&outbox) as _;
+        let (deps, _registry, _pending) = reconciler_deps_with_registered_client(
+            backend_signer(),
+            &owner,
+            outbox_handle,
+            snapshot_state,
+            temp.clone(),
+            Duration::from_millis(200),
+            0,
+        );
+
+        let outcome = reconcile_owner(&deps, &owner.xonly_hex).expect("reconcile succeeds");
+
+        assert_eq!(outcome, ReconcileOutcome::NoChange);
+        assert_eq!(outbox.len(), 0);
+    }
+
+    #[test]
+    fn reconcile_owner_skips_backend_only_publish_after_empty_catchup() {
+        let temp = unique_temp_dir("backend-only");
+        fs::create_dir_all(agents_dir(&temp)).expect("agents dir");
+
+        let owner = OwnerKeys::from_secret_hex(OWNER_SECRET_HEX);
+        let snapshot_state = Arc::new(SnapshotState::new());
+        snapshot_state.mark_catchup_complete();
+        let outbox = MockOutbox::new();
+        let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = Arc::clone(&outbox) as _;
+        let (deps, _registry, _pending) = reconciler_deps_with_registered_client(
+            backend_signer(),
+            &owner,
+            outbox_handle,
+            snapshot_state,
+            temp.clone(),
+            Duration::from_millis(200),
+            0,
+        );
+
+        let outcome = reconcile_owner(&deps, &owner.xonly_hex).expect("reconcile succeeds");
+
+        assert_eq!(outcome, ReconcileOutcome::NoChange);
+        assert_eq!(outbox.len(), 0);
+    }
+
+    #[test]
+    fn reconcile_owner_preserves_existing_pubkeys_when_agent_removed() {
         let temp = unique_temp_dir("removed-agent");
         fs::create_dir_all(&temp).expect("temp dir");
         let agents = agents_dir(&temp);
@@ -623,7 +706,7 @@ mod tests {
             &owner.xonly_hex,
             &deps.nip46_config,
             &deps.default_relay,
-            backend_pubkey,
+            backend_pubkey.clone(),
             Arc::clone(&outbox),
             1,
         );
@@ -631,7 +714,7 @@ mod tests {
         let outcome = reconcile_owner(&deps, &owner.xonly_hex).expect("reconcile succeeds");
         completer.join().expect("bunker thread");
 
-        assert_eq!(outcome, ReconcileOutcome::Published { p_tag_count: 2 });
+        assert_eq!(outcome, ReconcileOutcome::Published { p_tag_count: 4 });
         let final_event = outbox.captured().last().expect("final event").0.clone();
         let p_tags: BTreeSet<String> = final_event
             .tags
@@ -641,9 +724,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let expected: BTreeSet<String> = [agent_a, agent_b].into_iter().collect();
+        let expected: BTreeSet<String> = [agent_a, agent_b, agent_c.clone(), backend_pubkey]
+            .into_iter()
+            .collect();
         assert_eq!(p_tags, expected);
-        assert!(!p_tags.contains(&agent_c));
+        assert!(p_tags.contains(&agent_c));
     }
 
     #[test]
@@ -656,6 +741,7 @@ mod tests {
 
         let owner = OwnerKeys::from_secret_hex(OWNER_SECRET_HEX);
         let snapshot_state = Arc::new(SnapshotState::new());
+        snapshot_state.mark_catchup_complete();
 
         let outbox = MockOutbox::new();
         let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = Arc::clone(&outbox) as _;

@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::nostr_event::{NormalizedNostrEvent, SignedNostrEvent};
 
@@ -18,9 +19,18 @@ pub struct CachedSnapshot {
 /// the cache keeps the first observation and reports no change even if the
 /// p-tag set differs, because NIP-01 leaves ordering undefined within a
 /// single timestamp and we want deterministic, monotonic behaviour.
-#[derive(Default)]
 pub struct SnapshotState {
     inner: RwLock<HashMap<String, CachedSnapshot>>,
+    catchup_complete: AtomicBool,
+}
+
+impl Default for SnapshotState {
+    fn default() -> Self {
+        Self {
+            inner: RwLock::new(HashMap::new()),
+            catchup_complete: AtomicBool::new(false),
+        }
+    }
 }
 
 impl SnapshotState {
@@ -56,6 +66,14 @@ impl SnapshotState {
     pub fn created_at_for(&self, owner_pubkey: &str) -> Option<u64> {
         let guard = self.inner.read().expect("snapshot state lock poisoned");
         guard.get(owner_pubkey).map(|entry| entry.created_at)
+    }
+
+    pub fn mark_catchup_complete(&self) -> bool {
+        !self.catchup_complete.swap(true, Ordering::SeqCst)
+    }
+
+    pub fn is_catchup_complete(&self) -> bool {
+        self.catchup_complete.load(Ordering::SeqCst)
     }
 
     fn apply(&self, owner_pubkey: &str, created_at: u64, p_tags: BTreeSet<String>) -> bool {

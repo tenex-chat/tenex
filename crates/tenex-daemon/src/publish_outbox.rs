@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -19,6 +19,7 @@ pub const PUBLISH_OUTBOX_DIR_NAME: &str = "publish-outbox";
 pub const PUBLISH_OUTBOX_PENDING_DIR_NAME: &str = "pending";
 pub const PUBLISH_OUTBOX_PUBLISHED_DIR_NAME: &str = "published";
 pub const PUBLISH_OUTBOX_FAILED_DIR_NAME: &str = "failed";
+pub const PUBLISH_OUTBOX_INVALID_DIR_NAME: &str = "invalid";
 pub const PUBLISH_OUTBOX_TMP_DIR_NAME: &str = "tmp";
 pub const PUBLISH_OUTBOX_RECORD_SCHEMA_VERSION: u32 = 1;
 pub const PUBLISH_OUTBOX_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
@@ -240,7 +241,7 @@ pub trait PublishOutboxRelayPublisher {
     ) -> Result<PublishRelayReport, PublishRelayError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishOutboxRequestRef {
     pub request_id: String,
@@ -259,6 +260,55 @@ pub struct PublishOutboxRequestRef {
     pub runtime_event_class: Option<RuntimeEventClass>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_variant: Option<ConversationVariant>,
+}
+
+impl<'de> Deserialize<'de> for PublishOutboxRequestRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wire {
+            request_id: String,
+            request_sequence: u64,
+            request_timestamp: u64,
+            correlation_id: String,
+            project_id: String,
+            agent_pubkey: String,
+            conversation_id: String,
+            ral_number: u64,
+            #[serde(default)]
+            wait_for_relay_ok: Option<bool>,
+            #[serde(default, rename = "requiresEventId")]
+            requires_event_id: Option<bool>,
+            #[serde(default)]
+            timeout_ms: u64,
+            #[serde(default)]
+            runtime_event_class: Option<RuntimeEventClass>,
+            #[serde(default)]
+            conversation_variant: Option<ConversationVariant>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            request_id: wire.request_id,
+            request_sequence: wire.request_sequence,
+            request_timestamp: wire.request_timestamp,
+            correlation_id: wire.correlation_id,
+            project_id: wire.project_id,
+            agent_pubkey: wire.agent_pubkey,
+            conversation_id: wire.conversation_id,
+            ral_number: wire.ral_number,
+            wait_for_relay_ok: wire
+                .wait_for_relay_ok
+                .or(wire.requires_event_id)
+                .unwrap_or(false),
+            timeout_ms: wire.timeout_ms,
+            runtime_event_class: wire.runtime_event_class,
+            conversation_variant: wire.conversation_variant,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -303,6 +353,10 @@ pub fn published_publish_outbox_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
 
 pub fn failed_publish_outbox_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
     publish_outbox_dir(daemon_dir).join(PUBLISH_OUTBOX_FAILED_DIR_NAME)
+}
+
+pub fn invalid_publish_outbox_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
+    publish_outbox_dir(daemon_dir).join(PUBLISH_OUTBOX_INVALID_DIR_NAME)
 }
 
 pub fn tmp_publish_outbox_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
@@ -472,12 +526,18 @@ pub fn inspect_publish_outbox(
     now: u64,
 ) -> PublishOutboxResult<PublishOutboxDiagnostics> {
     let daemon_dir = daemon_dir.as_ref();
-    let pending_records =
-        read_records_from_paths(list_pending_publish_outbox_record_paths(daemon_dir)?)?;
-    let published_records =
-        read_records_from_paths(list_record_paths(published_publish_outbox_dir(daemon_dir))?)?;
-    let failed_records =
-        read_records_from_paths(list_failed_publish_outbox_record_paths(daemon_dir)?)?;
+    let pending_records = read_records_from_paths(
+        daemon_dir,
+        list_pending_publish_outbox_record_paths(daemon_dir)?,
+    )?;
+    let published_records = read_records_from_paths(
+        daemon_dir,
+        list_record_paths(published_publish_outbox_dir(daemon_dir))?,
+    )?;
+    let failed_records = read_records_from_paths(
+        daemon_dir,
+        list_failed_publish_outbox_record_paths(daemon_dir)?,
+    )?;
 
     let mut retryable_failed_count = 0;
     let mut retry_due_count = 0;
@@ -583,7 +643,8 @@ pub fn drain_pending_publish_outbox_with_retry_policy<P: PublishOutboxRelayPubli
     let mut outcomes = Vec::with_capacity(paths.len());
 
     for source_path in paths {
-        let Some(mut record) = read_optional_record(&source_path)? else {
+        let Some(mut record) = read_optional_record_for_maintenance(daemon_dir, &source_path)?
+        else {
             continue;
         };
         if record.status != PublishOutboxStatus::Accepted {
@@ -697,7 +758,8 @@ pub fn requeue_due_failed_publish_outbox_records(
     let mut outcomes = Vec::with_capacity(paths.len());
 
     for source_path in paths {
-        let Some(mut record) = read_optional_record(&source_path)? else {
+        let Some(mut record) = read_optional_record_for_maintenance(daemon_dir, &source_path)?
+        else {
             continue;
         };
         if record.status != PublishOutboxStatus::Failed {
@@ -734,7 +796,8 @@ where
     let mut outcomes = Vec::new();
 
     for source_path in paths {
-        let Some(record) = read_optional_record(&source_path)? else {
+        let Some(record) = read_optional_record_for_maintenance(daemon_dir.as_ref(), &source_path)?
+        else {
             continue;
         };
         if record.status != PublishOutboxStatus::Accepted {
@@ -809,14 +872,19 @@ fn list_record_paths(dir: PathBuf) -> PublishOutboxResult<Vec<PathBuf>> {
     Ok(paths)
 }
 
-fn read_records_from_paths(paths: Vec<PathBuf>) -> PublishOutboxResult<Vec<PublishOutboxRecord>> {
+fn read_records_from_paths(
+    daemon_dir: &Path,
+    paths: Vec<PathBuf>,
+) -> PublishOutboxResult<Vec<PublishOutboxRecord>> {
     paths
         .into_iter()
-        .filter_map(|path| match read_optional_record(&path) {
-            Ok(Some(record)) => Some(Ok(record)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        })
+        .filter_map(
+            |path| match read_optional_record_for_maintenance(daemon_dir, &path) {
+                Ok(Some(record)) => Some(Ok(record)),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            },
+        )
         .collect()
 }
 
@@ -1192,6 +1260,59 @@ fn read_optional_record(
     }
 }
 
+fn read_optional_record_for_maintenance(
+    daemon_dir: &Path,
+    path: &Path,
+) -> PublishOutboxResult<Option<PublishOutboxRecord>> {
+    match fs::read_to_string(path) {
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(record) => Ok(Some(record)),
+            Err(error) => {
+                let target_path = quarantine_invalid_record(daemon_dir, path)?;
+                tracing::warn!(
+                    source_path = %path.display(),
+                    target_path = %target_path.display(),
+                    error = %error,
+                    "publish outbox record quarantined after JSON decode failure"
+                );
+                Ok(None)
+            }
+        },
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn quarantine_invalid_record(
+    daemon_dir: &Path,
+    source_path: &Path,
+) -> PublishOutboxResult<PathBuf> {
+    let invalid_dir = invalid_publish_outbox_dir(daemon_dir);
+    fs::create_dir_all(&invalid_dir)?;
+
+    let source_bucket = source_path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown");
+    let source_file_name = source_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("record.json");
+    let mut target_path = invalid_dir.join(format!("{source_bucket}-{source_file_name}"));
+    if target_path.exists() {
+        target_path = invalid_dir.join(format!(
+            "{source_bucket}-{}-{source_file_name}",
+            now_nanos()
+        ));
+    }
+
+    fs::rename(source_path, &target_path)?;
+    sync_parent_dir(source_path)?;
+    sync_parent_dir(&target_path)?;
+    Ok(target_path)
+}
+
 fn write_record_file(path: &Path, record: &PublishOutboxRecord) -> PublishOutboxResult<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     serde_json::to_writer_pretty(&mut file, record)?;
@@ -1439,6 +1560,84 @@ mod tests {
         let diagnostics_when_due =
             inspect_publish_outbox(&daemon_dir, 1710001001300).expect("diagnostics must inspect");
         assert_eq!(diagnostics_when_due.retry_due_count, 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn reads_legacy_requires_event_id_request_field_as_wait_for_relay_ok() {
+        let fixture: Value =
+            serde_json::from_str(PUBLISH_OUTBOX_FIXTURE).expect("fixture must parse");
+        let daemon_dir = unique_temp_daemon_dir();
+        let mut legacy_record = fixture["records"]["accepted"].clone();
+        legacy_record["request"]
+            .as_object_mut()
+            .expect("request must be an object")
+            .remove("waitForRelayOk");
+        legacy_record["request"]["requiresEventId"] = json!(true);
+        let event_id = legacy_record["event"]["id"]
+            .as_str()
+            .expect("fixture event id")
+            .to_string();
+        let record_path = pending_publish_outbox_record_path(&daemon_dir, &event_id);
+        fs::create_dir_all(record_path.parent().expect("record path parent"))
+            .expect("pending dir must be created");
+        fs::write(
+            &record_path,
+            serde_json::to_string_pretty(&legacy_record).expect("legacy record json"),
+        )
+        .expect("legacy record must be written");
+
+        let record = read_pending_publish_outbox_record(&daemon_dir, &event_id)
+            .expect("legacy record must read")
+            .expect("legacy record must exist");
+        assert!(record.request.wait_for_relay_ok);
+
+        let diagnostics =
+            inspect_publish_outbox(&daemon_dir, 1710001000000).expect("diagnostics must inspect");
+        assert_eq!(diagnostics.pending_count, 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn maintenance_quarantines_invalid_pending_record_instead_of_failing() {
+        let fixture = signed_event_fixture();
+        let daemon_dir = unique_temp_daemon_dir();
+        let valid = accept_backend_signed_publish_event(
+            &daemon_dir,
+            backend_publish_input(&fixture, 41, 1710001000000),
+            1710001000100,
+        )
+        .expect("valid backend event must be accepted");
+        let invalid_event_id = "bad-json-record";
+        let invalid_path = pending_publish_outbox_record_path(&daemon_dir, invalid_event_id);
+        fs::write(&invalid_path, b"{ definitely not json")
+            .expect("invalid pending record must be written");
+        let mut publisher = MockRelayPublisher::new(vec![Ok(PublishRelayReport {
+            relay_results: vec![PublishRelayResult {
+                relay_url: "wss://relay-one.test".to_string(),
+                accepted: true,
+                message: Some("ok".to_string()),
+            }],
+        })]);
+
+        let report = run_publish_outbox_maintenance(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("maintenance must skip invalid record and continue");
+
+        assert_eq!(report.diagnostics_before.pending_count, 1);
+        assert_eq!(report.drained.len(), 1);
+        assert_eq!(report.drained[0].event_id, valid.event.id);
+        assert!(!invalid_path.exists());
+        let invalid_paths = list_record_paths(invalid_publish_outbox_dir(&daemon_dir))
+            .expect("invalid dir must list");
+        assert_eq!(invalid_paths.len(), 1);
+        assert!(
+            invalid_paths[0]
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("pending-bad-json-record"))
+        );
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

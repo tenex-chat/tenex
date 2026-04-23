@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use tracing::debug;
 
-use crate::agent_inventory::read_installed_agent_inventory;
+use crate::agent_inventory::read_project_index_agent_pubkeys;
 use crate::backend_status_runtime::agents_dir;
 
 /// Polls the local agent inventory on a fixed interval and emits a trigger
@@ -83,12 +83,8 @@ impl AgentInventoryPoller {
     }
 
     fn collect_current_pubkeys(&self) -> BTreeSet<String> {
-        match read_installed_agent_inventory(agents_dir(&self.tenex_base_dir)) {
-            Ok(report) => report
-                .active_agents
-                .into_iter()
-                .map(|agent| agent.pubkey)
-                .collect(),
+        match read_project_index_agent_pubkeys(agents_dir(&self.tenex_base_dir)) {
+            Ok(pubkeys) => pubkeys,
             Err(err) => {
                 debug!(
                     base_dir = %self.tenex_base_dir.display(),
