@@ -412,14 +412,11 @@ where
             .map(|_| ())
             .map_err(|source| source.to_string())
         };
-        let mut runtime_state_guard = worker.runtime_state.lock().expect(
-            "WorkerRuntimeState mutex poisoned; another thread panicked while holding the lock",
-        );
         run_daemon_worker_runtime_once_from_filesystem(
             spawner,
             DaemonWorkerRuntimeFilesystemInput {
                 daemon_dir,
-                runtime_state: &mut runtime_state_guard,
+                runtime_state: &worker.runtime_state,
                 limits: worker.limits,
                 now_ms,
                 correlation_id: worker.correlation_id,

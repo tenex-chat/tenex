@@ -9,7 +9,7 @@ use crate::worker_message_flow::{
     handle_worker_message_flow,
 };
 use crate::worker_protocol::{WorkerProtocolError, decode_agent_worker_protocol_frame};
-use crate::worker_runtime_state::WorkerRuntimeState;
+use crate::worker_runtime_state::SharedWorkerRuntimeState;
 
 pub trait WorkerFrameReceiver {
     type Error: Error + Send + Sync + 'static;
@@ -19,7 +19,7 @@ pub trait WorkerFrameReceiver {
 
 #[derive(Debug)]
 pub struct WorkerFramePumpInput<'a> {
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: &'a SharedWorkerRuntimeState,
     pub message_flow: WorkerMessageFlowInput<'a>,
 }
 
@@ -178,12 +178,12 @@ mod tests {
             incoming_frames: VecDeque::from([frame_for(&message)]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity);
+        let runtime_state = runtime_state_for("worker-alpha", identity);
 
         let outcome = pump_worker_frame(
             &mut worker,
             WorkerFramePumpInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 message_flow: message_flow_input(&message, "worker-alpha", None),
             },
         )
@@ -197,6 +197,8 @@ mod tests {
         assert!(worker.sent_messages.is_empty());
         assert_eq!(
             runtime_state
+                .lock()
+                .unwrap()
                 .get_worker("worker-alpha")
                 .expect("worker must stay active")
                 .worker_id,
@@ -214,12 +216,12 @@ mod tests {
             incoming_frames: VecDeque::from([frame_for(&message)]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity);
+        let runtime_state = runtime_state_for("worker-alpha", identity);
 
         let outcome = pump_worker_frame(
             &mut worker,
             WorkerFramePumpInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 message_flow: message_flow_input_at(
                     &daemon_dir,
                     &message,
@@ -255,12 +257,12 @@ mod tests {
             incoming_frames: VecDeque::from([vec![0, 1, 2]]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity);
+        let runtime_state = runtime_state_for("worker-alpha", identity);
 
         let error = pump_worker_frame(
             &mut worker,
             WorkerFramePumpInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 message_flow: message_flow_input(&message, "worker-alpha", None),
             },
         )
@@ -343,9 +345,12 @@ mod tests {
     fn runtime_state_for(
         worker_id: &str,
         identity: crate::ral_journal::RalJournalIdentity,
-    ) -> WorkerRuntimeState {
-        let mut state = WorkerRuntimeState::default();
+    ) -> SharedWorkerRuntimeState {
+        use crate::worker_runtime_state::new_shared_worker_runtime_state;
+        let state = new_shared_worker_runtime_state();
         state
+            .lock()
+            .expect("runtime state mutex poisoned")
             .register_started_dispatch(crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
                 worker_id: worker_id.to_string(),
                 pid: 1234,

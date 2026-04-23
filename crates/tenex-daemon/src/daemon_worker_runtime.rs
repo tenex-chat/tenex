@@ -44,7 +44,9 @@ use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTermi
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
 use crate::worker_result::WorkerResultTransitionContext;
-use crate::worker_runtime_state::{WorkerRuntimeStartedDispatch, WorkerRuntimeState};
+use crate::worker_runtime_state::{
+    SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch, WorkerRuntimeState,
+};
 use crate::worker_session_loop::{
     WorkerSessionLoopError, WorkerSessionLoopInput, WorkerSessionLoopOutcome,
     run_worker_session_loop,
@@ -54,7 +56,7 @@ use crate::worker_telegram_egress::WorkerTelegramEgressContext;
 #[derive(Debug)]
 pub struct DaemonWorkerRuntimeInput<'a> {
     pub daemon_dir: &'a Path,
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: &'a SharedWorkerRuntimeState,
     pub limits: WorkerConcurrencyLimits,
     pub lease_sequence: u64,
     pub lease_timestamp: u64,
@@ -81,7 +83,7 @@ pub struct DaemonWorkerRuntimeInput<'a> {
 #[derive(Debug)]
 pub struct DaemonWorkerRuntimeFilesystemInput<'a> {
     pub daemon_dir: &'a Path,
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: &'a SharedWorkerRuntimeState,
     pub limits: WorkerConcurrencyLimits,
     pub now_ms: u64,
     pub correlation_id: String,
@@ -230,7 +232,7 @@ pub enum AdmitWorkerDispatchOutcome<S> {
 pub fn admit_one_worker_dispatch_from_filesystem<S>(
     spawner: &mut S,
     daemon_dir: &Path,
-    runtime_state: &mut WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     limits: WorkerConcurrencyLimits,
     now_ms: u64,
     correlation_id: &str,
@@ -271,8 +273,15 @@ where
     }
 
     let lease_sequence = next_sequence(dispatch_state.last_sequence, "dispatch queue")?;
-    let active_workers = runtime_state.to_active_worker_concurrency_snapshots();
-    let active_dispatches = runtime_state.to_active_dispatch_concurrency_snapshots();
+    let (active_workers, active_dispatches) = {
+        let guard = runtime_state
+            .lock()
+            .expect("runtime state mutex poisoned");
+        (
+            guard.to_active_worker_concurrency_snapshots(),
+            guard.to_active_dispatch_concurrency_snapshots(),
+        )
+    };
     let admission = plan_worker_dispatch_admission(WorkerDispatchAdmissionInput {
         dispatch_state: &dispatch_state,
         active_workers: &active_workers,
@@ -306,26 +315,31 @@ where
     );
     let launch_input = read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
 
-    let started = start_admitted_worker_dispatch(
-        spawner,
-        StartAdmittedWorkerDispatchInput {
-            daemon_dir,
-            runtime_state,
-            admitted,
-            execute_sequence: 1,
-            execute_timestamp: now_ms,
-            launch_input,
-            lock_owner,
-            command,
-            worker_config,
-            started_at: now_ms,
-        },
-    )
-    .map_err(|source| DaemonWorkerRuntimeError::DispatchTick {
-        source: Box::new(WorkerDispatchTickError::AdmissionStart {
-            source: Box::new(source),
-        }),
-    })?;
+    let started = {
+        let mut runtime_guard = runtime_state
+            .lock()
+            .expect("runtime state mutex poisoned");
+        start_admitted_worker_dispatch(
+            spawner,
+            StartAdmittedWorkerDispatchInput {
+                daemon_dir,
+                runtime_state: &mut runtime_guard,
+                admitted,
+                execute_sequence: 1,
+                execute_timestamp: now_ms,
+                launch_input,
+                lock_owner,
+                command,
+                worker_config,
+                started_at: now_ms,
+            },
+        )
+        .map_err(|source| DaemonWorkerRuntimeError::DispatchTick {
+            source: Box::new(WorkerDispatchTickError::AdmissionStart {
+                source: Box::new(source),
+            }),
+        })?
+    };
 
     Ok(AdmitWorkerDispatchOutcome::Admitted(started))
     // _dispatch_lock released here; the session runs without holding the lock
@@ -447,7 +461,7 @@ where
         spawner,
         WorkerDispatchTickInput {
             daemon_dir,
-            runtime_state,
+            runtime_state: &mut runtime_state.lock().expect("runtime state mutex poisoned"),
             limits,
             lease_sequence,
             lease_timestamp,
@@ -688,7 +702,7 @@ struct DaemonWorkerFilesystemTerminalInput {
 
 fn run_started_worker_session<S>(
     daemon_dir: &Path,
-    runtime_state: &mut WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext<'_>>,
     telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
@@ -735,7 +749,7 @@ where
 
 fn run_started_worker_session_from_filesystem<S>(
     daemon_dir: &Path,
-    runtime_state: &mut WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext<'_>>,
     telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
@@ -792,7 +806,7 @@ where
 
 fn run_started_worker_session_with_state<S>(
     daemon_dir: &Path,
-    runtime_state: &mut WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext<'_>>,
     telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
@@ -839,10 +853,13 @@ where
         tenex_base_dir,
     );
 
-    let active_pubkeys = runtime_state.agent_pubkeys_for_conversation(
-        &started.runtime_started.identity.project_id,
-        &started.runtime_started.identity.conversation_id,
-    );
+    let active_pubkeys = runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
+        .agent_pubkeys_for_conversation(
+            &started.runtime_started.identity.project_id,
+            &started.runtime_started.identity.conversation_id,
+        );
     let active_now_ms = crate::daemon_loop::current_unix_time_ms();
     publish_worker_operations_status(
         daemon_dir,
@@ -908,11 +925,14 @@ where
     // Ensure the worker is removed from runtime state before snapshotting. Normal terminal
     // handling in the session loop already removes it; on error paths it may still be
     // registered, and we must not leak it into the conversation snapshot.
-    let _ = runtime_state.remove_terminal_worker(&worker_id);
-    let remaining_pubkeys = runtime_state.agent_pubkeys_for_conversation(
-        &started.runtime_started.identity.project_id,
-        &started.runtime_started.identity.conversation_id,
-    );
+    let remaining_pubkeys = {
+        let mut guard = runtime_state.lock().expect("runtime state mutex poisoned");
+        let _ = guard.remove_terminal_worker(&worker_id);
+        guard.agent_pubkeys_for_conversation(
+            &started.runtime_started.identity.project_id,
+            &started.runtime_started.identity.conversation_id,
+        )
+    };
     let cleanup_now_ms = crate::daemon_loop::current_unix_time_ms();
     let (cleanup_variant, cleanup_pubkeys): (&str, &[String]) = if remaining_pubkeys.is_empty() {
         ("cleanup", &[])
@@ -1216,12 +1236,12 @@ mod tests {
             ]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect("runtime dispatch must complete");
 
@@ -1243,7 +1263,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
 
         let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert_eq!(queue.queued.len(), 0);
@@ -1273,12 +1293,12 @@ mod tests {
             incoming_frames: VecDeque::from([malformed_frame()]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let error = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect_err("malformed frame must fail");
 
@@ -1298,7 +1318,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_none());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1316,12 +1336,12 @@ mod tests {
             ]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let error = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 1),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 1),
         )
         .expect_err("max frame limit must fail");
 
@@ -1345,7 +1365,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_none());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1360,12 +1380,12 @@ mod tests {
             incoming_frames: VecDeque::from([frame_for(&waiting_for_delegation_message())]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let error = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect_err("terminal planning failure must fail");
 
@@ -1413,7 +1433,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_none());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
 
         release_worker_launch_locks(locks).expect("locks must release");
         cleanup_temp_dir(daemon_dir);
@@ -1432,12 +1452,12 @@ mod tests {
             ]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect("worker must transition to waiting for a same-session delegation");
 
@@ -1452,7 +1472,7 @@ mod tests {
                 },
             }
         );
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
 
         let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
         let entry = ral.states.get(&identity()).expect("RAL state must exist");
@@ -1478,12 +1498,12 @@ mod tests {
             incoming_frames: VecDeque::from([frame_for(&heartbeat_message())]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let error = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect_err("missing terminal frame must fail");
 
@@ -1503,7 +1523,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_none());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1522,14 +1542,14 @@ mod tests {
             ]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
             runtime_input(
                 &daemon_dir,
-                &mut runtime_state,
+                &runtime_state,
                 &worker_config,
                 Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_000_800_100,
@@ -1577,12 +1597,12 @@ mod tests {
             ]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let outcome = run_daemon_worker_runtime_once_from_filesystem(
             &mut spawner,
-            filesystem_runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            filesystem_runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect("filesystem runtime dispatch must complete");
 
@@ -1607,7 +1627,7 @@ mod tests {
         assert_eq!(execute["sequence"], 1);
         assert_eq!(execute["projectBasePath"], "/sidecar/repo");
         assert_eq!(execute["triggeringEnvelope"]["content"], "from sidecar");
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
 
         let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert_eq!(queue.last_sequence, 3);
@@ -1637,12 +1657,12 @@ mod tests {
             incoming_frames: VecDeque::new(),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let outcome = run_daemon_worker_runtime_once_from_filesystem(
             &mut spawner,
-            filesystem_runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            filesystem_runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect("empty filesystem queue is not an error");
 
@@ -1654,7 +1674,7 @@ mod tests {
             } if blocked_candidates.is_empty()
         ));
         assert!(sent_messages.lock().expect("sent message lock").is_empty());
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
         assert!(
             replay_dispatch_queue(&daemon_dir)
                 .expect("missing dispatch queue must replay")
@@ -1674,12 +1694,12 @@ mod tests {
             incoming_frames: VecDeque::new(),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &mut runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
         )
         .expect("empty queue is not an error");
 
@@ -1691,7 +1711,7 @@ mod tests {
             } if blocked_candidates.is_empty()
         ));
         assert!(sent_messages.lock().expect("sent message lock").is_empty());
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1714,13 +1734,13 @@ mod tests {
             daemon_dir: daemon_dir.clone(),
             inner: AgentWorkerProcessDispatchSpawner,
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
             runtime_input_with_command(
                 &daemon_dir,
-                &mut runtime_state,
+                &runtime_state,
                 &worker_config,
                 command,
                 None,
@@ -1747,7 +1767,7 @@ mod tests {
             }
             other => panic!("expected session completion, got {other:?}"),
         }
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
 
         let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert_eq!(queue.queued.len(), 0);
@@ -1770,7 +1790,7 @@ mod tests {
 
     fn runtime_input<'a>(
         daemon_dir: &'a Path,
-        runtime_state: &'a mut WorkerRuntimeState,
+        runtime_state: &'a SharedWorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         publish: Option<WorkerMessagePublishContext<'a>>,
         max_frames: u64,
@@ -1821,7 +1841,7 @@ mod tests {
 
     fn runtime_input_with_command<'a>(
         daemon_dir: &'a Path,
-        runtime_state: &'a mut WorkerRuntimeState,
+        runtime_state: &'a SharedWorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         command: AgentWorkerCommand,
         publish: Option<WorkerMessagePublishContext<'a>>,
@@ -1840,7 +1860,7 @@ mod tests {
 
     fn filesystem_runtime_input<'a>(
         daemon_dir: &'a Path,
-        runtime_state: &'a mut WorkerRuntimeState,
+        runtime_state: &'a SharedWorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         publish: Option<WorkerMessagePublishContext<'a>>,
         max_frames: u64,
