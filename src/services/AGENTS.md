@@ -27,7 +27,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `trust-pubkeys/`, `pubkey-gate/` — Trust and access control
 - `nip46/` — NIP-46 remote signing
 - `image/` — Image processing
-- `intervention/` — Human intervention handling
 - `event-context/` — Event context resolution
 - `heuristics/` — Behavioral heuristics
 - `storage/` — Storage abstractions

@@ -16,6 +16,7 @@ pub const TENEX_CONFIG_FILE_NAME: &str = "config.json";
 pub const DEFAULT_RELAY_URLS: &[&str] = &["wss://relay.tenex.chat"];
 pub const DEFAULT_IDENTITY_RELAY_URLS: &[&str] = &["wss://purplepag.es"];
 pub const DEFAULT_BACKEND_NAME: &str = "tenex backend";
+pub const DEFAULT_INTERVENTION_TIMEOUT_SECONDS: u32 = 300;
 
 #[derive(Debug, Error)]
 pub enum BackendConfigError {
@@ -56,6 +57,30 @@ pub struct BackendConfigSnapshot {
     pub blossom_server_url: Option<String>,
     pub generated_tenex_private_key: bool,
     pub nip46: Nip46Config,
+    pub intervention: InterventionConfig,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterventionConfig {
+    pub enabled: bool,
+    pub agent_slug: Option<String>,
+    pub timeout_seconds: u32,
+}
+
+impl Default for InterventionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            agent_slug: None,
+            timeout_seconds: DEFAULT_INTERVENTION_TIMEOUT_SECONDS,
+        }
+    }
+}
+
+impl InterventionConfig {
+    pub fn is_active(&self) -> bool {
+        self.enabled && self.agent_slug.is_some()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +126,7 @@ impl fmt::Debug for BackendConfigSnapshot {
                 &self.generated_tenex_private_key,
             )
             .field("nip46", &self.nip46)
+            .field("intervention", &self.intervention)
             .finish()
     }
 }
@@ -153,6 +179,38 @@ struct RawTenexConfig {
     blossom_server_url: Option<String>,
     #[serde(default)]
     nip46: Option<RawNip46Config>,
+    #[serde(default)]
+    intervention: Option<RawInterventionConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawInterventionConfig {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    timeout_seconds: Option<u32>,
+}
+
+impl RawInterventionConfig {
+    fn into_config(self) -> InterventionConfig {
+        let defaults = InterventionConfig::default();
+        let agent_slug = self.agent.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        InterventionConfig {
+            enabled: self.enabled.unwrap_or(defaults.enabled),
+            agent_slug,
+            timeout_seconds: self.timeout_seconds.unwrap_or(defaults.timeout_seconds),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +293,10 @@ pub fn read_backend_config(
         nip46: raw
             .nip46
             .map(RawNip46Config::into_config)
+            .unwrap_or_default(),
+        intervention: raw
+            .intervention
+            .map(RawInterventionConfig::into_config)
             .unwrap_or_default(),
     })
 }
@@ -489,6 +551,7 @@ mod tests {
             blossom_server_url: None,
             generated_tenex_private_key: false,
             nip46: Nip46Config::default(),
+            intervention: InterventionConfig::default(),
         };
 
         assert!(matches!(
@@ -544,6 +607,7 @@ mod tests {
             blossom_server_url: None,
             generated_tenex_private_key: false,
             nip46: Nip46Config::default(),
+            intervention: InterventionConfig::default(),
         };
 
         let debug = format!("{snapshot:?}");

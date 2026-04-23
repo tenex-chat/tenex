@@ -27,6 +27,10 @@ use crate::scheduled_task_maintenance::{
     ScheduledTaskMaintenanceError, ScheduledTaskMaintenanceOutcome,
     ScheduledTaskMaintenanceSharedSchedulerInput, maintain_scheduled_tasks_from_shared_scheduler,
 };
+use crate::intervention::{
+    InterventionMaintenanceError, InterventionMaintenanceInput, InterventionMaintenanceOutcome,
+    run_intervention_maintenance,
+};
 use crate::scheduler_wakeups::{
     SchedulerWakeupError, SchedulerWakeupsMaintenanceReport, run_scheduler_maintenance,
 };
@@ -63,6 +67,7 @@ pub struct DaemonMaintenanceOutcome {
     pub backend_events: BackendEventsMaintenanceOutcome,
     pub scheduled_tasks: ScheduledTaskMaintenanceOutcome,
     pub scheduler_wakeups: SchedulerWakeupsMaintenanceReport,
+    pub intervention: InterventionMaintenanceOutcome,
     pub telegram_outbox: TelegramOutboxMaintenanceReport,
 }
 
@@ -80,6 +85,8 @@ pub enum DaemonMaintenanceError {
     SchedulerState(#[from] PeriodicTickStateError),
     #[error("scheduler wakeups maintenance failed: {0}")]
     SchedulerWakeups(#[from] SchedulerWakeupError),
+    #[error("intervention maintenance failed: {0}")]
+    Intervention(#[from] InterventionMaintenanceError),
     #[error("telegram outbox maintenance failed: {0}")]
     TelegramOutbox(#[from] TelegramOutboxError),
 }
@@ -163,6 +170,13 @@ where
     )?;
     write_periodic_scheduler_state(input.daemon_dir, &scheduler)?;
     let scheduler_wakeups = run_scheduler_maintenance(input.daemon_dir, input.now_ms)?;
+    let intervention = run_intervention_maintenance(InterventionMaintenanceInput {
+        tenex_base_dir: input.tenex_base_dir,
+        daemon_dir: input.daemon_dir,
+        now_ms: input.now_ms,
+        project_descriptors: &booted_project_descriptor_report.descriptors,
+        writer_version: DAEMON_MAINTENANCE_WRITER_VERSION,
+    })?;
     let telegram_outbox = telegram_publisher.run_maintenance(input.daemon_dir, input.now_ms)?;
 
     Ok(DaemonMaintenanceOutcome {
@@ -177,6 +191,7 @@ where
         backend_events,
         scheduled_tasks,
         scheduler_wakeups,
+        intervention,
         telegram_outbox,
     })
 }

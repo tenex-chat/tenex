@@ -110,6 +110,65 @@ pub fn read_project_index_agent_pubkeys(
     Ok(pubkeys)
 }
 
+pub fn read_project_agent_pubkeys_for(
+    agents_dir: impl AsRef<Path>,
+    project_d_tag: &str,
+) -> Result<BTreeSet<String>, AgentInventoryError> {
+    let agents_dir = agents_dir.as_ref();
+    let index_path = agents_dir.join("index.json");
+    let content = match fs::read_to_string(&index_path) {
+        Ok(content) => content,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(source) => {
+            return Err(AgentInventoryError::ReadIndex {
+                path: index_path,
+                source,
+            });
+        }
+    };
+    let index: AgentProjectIndex =
+        serde_json::from_str(&content).map_err(|source| AgentInventoryError::ParseIndex {
+            path: index_path.clone(),
+            source,
+        })?;
+
+    let mut pubkeys = BTreeSet::new();
+    if let Some(project_pubkeys) = index.by_project.get(project_d_tag) {
+        for pubkey in project_pubkeys {
+            validate_filename_pubkey(pubkey).map_err(|reason| {
+                AgentInventoryError::InvalidIndex {
+                    path: index_path.clone(),
+                    reason: format!(
+                        "project {project_d_tag:?} has invalid agent pubkey {pubkey:?}: {reason}"
+                    ),
+                }
+            })?;
+            pubkeys.insert(pubkey.clone());
+        }
+    }
+    Ok(pubkeys)
+}
+
+pub fn resolve_agent_slug_in_project(
+    agents_dir: impl AsRef<Path>,
+    project_d_tag: &str,
+    slug: &str,
+) -> Result<Option<String>, AgentInventoryError> {
+    let agents_dir = agents_dir.as_ref();
+    let project_pubkeys = read_project_agent_pubkeys_for(agents_dir, project_d_tag)?;
+    for pubkey in project_pubkeys {
+        let agent_path = agents_dir.join(format!("{pubkey}.json"));
+        match parse_agent_inventory_file(&agent_path) {
+            Ok(record) if record.slug == slug && record.status == AgentInventoryStatus::Active => {
+                return Ok(Some(record.pubkey));
+            }
+            Ok(_) => continue,
+            Err(_) => continue,
+        }
+    }
+    Ok(None)
+}
+
 pub fn read_installed_agent_inventory(
     agents_dir: impl AsRef<Path>,
 ) -> Result<AgentInventoryReport, AgentInventoryError> {

@@ -13,7 +13,6 @@ import type {
     DelegationIntent,
     ErrorIntent,
     EventContext,
-    InterventionReviewIntent,
     LessonIntent,
     StreamTextDeltaIntent,
     ToolUseIntent,
@@ -659,57 +658,6 @@ export class AgentEventEncoder {
 
         // Forward branch tag when present to preserve worktree context.
         this.forwardTagPair(event, context);
-
-        return event;
-    }
-
-    /**
-     * Encode an intervention review request event.
-     * This is used by the InterventionService when a user hasn't responded
-     * to an agent's completion within the configured timeout.
-     *
-     * Event structure:
-     * - kind: 1 (text note)
-     * - content: Review request message with human-readable names (pre-resolved by caller)
-     * - tags:
-     *   - ["p", targetPubkey] - The intervention agent to notify
-     *   - ["context", "intervention-review"] - Context marker
-     *   - ["a", projectTag] - Project reference (added internally via aTagProject)
-     *
-     * The original conversation ID is included in the content only. Intervention
-     * reviews must publish as standalone events, not as replies anchored to the
-     * conversation being reviewed.
-     *
-     * Note: This method does NOT call addStandardTags() since intervention events
-     * are not part of an agent execution context. However, the project tag is
-     * added internally via aTagProject() for proper project association.
-     *
-     * Names (userName, agentName) are pre-resolved by the caller (InterventionPublisher)
-     * to avoid layer violations - AgentEventEncoder (layer 2) cannot import PubkeyService (layer 3).
-     */
-    encodeInterventionReview(intent: InterventionReviewIntent): NDKEvent {
-        const event = new NDKEvent();
-        event.kind = NDKKind.Text; // kind:1
-
-        const shortConversationId = shortenConversationId(intent.conversationId);
-
-        event.content = `Conversation ${shortConversationId} has completed and ${intent.userName} hasn't responded. ${intent.agentName} finished their work. Please review and decide if action is needed.`;
-
-        // Target intervention agent
-        event.tag(["p", intent.targetPubkey]);
-
-        // Context marker for intervention routing
-        event.tag(["context", "intervention-review"]);
-
-        // Add project tag (intervention events need project association)
-        this.aTagProject(event);
-
-        logger.debug("Encoded intervention review event", {
-            targetPubkey: intent.targetPubkey.substring(0, 8),
-            conversationId: shortConversationId,
-            userName: intent.userName,
-            agentName: intent.agentName,
-        });
 
         return event;
     }

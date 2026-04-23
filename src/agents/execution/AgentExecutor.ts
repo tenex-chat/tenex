@@ -34,7 +34,6 @@ import {
 import { shortenConversationId, shortenOptionalConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
-import { InterventionService } from "@/services/intervention";
 import { getProjectContext } from "@/services/projects";
 import { createProjectDTag } from "@/types/project-ids";
 import { RALRegistry } from "@/services/ral";
@@ -97,64 +96,6 @@ export class AgentExecutor {
             );
         }
         this.publisherFactory = options.publisherFactory;
-    }
-
-    /**
-     * Start the intervention timer only at the semantic final-completion seam:
-     * after the executor has decided there is no outstanding work and has
-     * successfully published a `complete()` event to the root human user.
-     */
-    private async notifyInterventionOfFinalCompletion(
-        context: FullRuntimeContext,
-        responseEvent: PublishedMessageRef
-    ): Promise<void> {
-        const interventionService = InterventionService.getInstance();
-        if (!interventionService.isEnabled()) {
-            return;
-        }
-
-        const rootAuthorPubkey = context.conversationStore.getRootAuthorPubkey();
-        if (!rootAuthorPubkey) {
-            return;
-        }
-
-        const recipientPubkeys = responseEvent.envelope.recipients
-            .map((recipient) => recipient.linkedPubkey)
-            .filter((pubkey): pubkey is string => !!pubkey);
-
-        if (!recipientPubkeys.includes(rootAuthorPubkey)) {
-            return;
-        }
-
-        const dTagValue = context.projectContext.project.tagValue("d");
-        if (!dTagValue) {
-            logger.warn("[AgentExecutor] Cannot start intervention timer - project missing d-tag", {
-                agent: context.agent.slug,
-                conversationId: shortenConversationId(context.conversationId),
-            });
-            return;
-        }
-
-        const projectId = createProjectDTag(dTagValue);
-
-        try {
-            await interventionService.setProject(projectId);
-        } catch (error) {
-            logger.error("[AgentExecutor] Failed to set intervention project context", {
-                projectId: projectId.substring(0, 12),
-                conversationId: shortenConversationId(context.conversationId),
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return;
-        }
-
-        interventionService.onAgentCompletion(
-            context.conversationId,
-            responseEvent.envelope.occurredAt * 1000,
-            context.agent.pubkey,
-            rootAuthorPubkey,
-            projectId
-        );
     }
 
     /**
@@ -713,8 +654,6 @@ export class AgentExecutor {
 
         if (responseEvent) {
             if (!finalOutstandingWork.hasWork) {
-                await this.notifyInterventionOfFinalCompletion(context, responseEvent);
-
                 const summarizer = new ConversationSummarizer(context.projectContext);
                 metadataDebounceManager.schedulePublish(
                     context.conversationId,

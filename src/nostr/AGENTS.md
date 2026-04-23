@@ -7,7 +7,6 @@ Encapsulates all Nostr protocol interactions. Higher layers never manipulate NDK
 - `ndkClient.ts` — NDK bootstrap and connection management
 - `AgentPublisher.ts` — Primary agent event publication interface; signs events and hands them to the Rust publish outbox
 - `AgentProfilePublisher.ts` — Agent profile/metadata publication through the Rust publish outbox
-- `InterventionPublisher.ts` — Intervention event publication through the Rust publish outbox
 - `AgentEventEncoder.ts` — Encode data into Nostr event format
 - `AgentEventDecoder.ts` — Decode Nostr events into TENEX data
 - `NostrInboundAdapter.ts` — Normalize inbound Nostr events into canonical transport envelopes

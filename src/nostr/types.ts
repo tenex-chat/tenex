@@ -123,25 +123,6 @@ export interface StreamTextDeltaIntent {
     sequence: number;
 }
 
-/**
- * Intent for intervention review requests.
- * Used when the InterventionService detects that a user hasn't responded
- * to an agent's completion and triggers a human-replica review.
- *
- * Names are pre-resolved by the caller (InterventionPublisher) to avoid
- * layer violations - AgentEventEncoder (layer 2) cannot import PubkeyService (layer 3).
- */
-export interface InterventionReviewIntent {
-    /** Pubkey of the intervention agent (human-replica) to notify */
-    targetPubkey: string;
-    /** The conversation ID being reviewed */
-    conversationId: string;
-    /** Human-readable name of the user who hasn't responded (pre-resolved) */
-    userName: string;
-    /** Human-readable name of the agent that completed work (pre-resolved) */
-    agentName: string;
-}
-
 export type AgentIntent =
     | CompletionIntent
     | ConversationIntent
@@ -151,8 +132,7 @@ export type AgentIntent =
     | LessonIntent
     | StatusIntent
     | ToolUseIntent
-    | StreamTextDeltaIntent
-    | InterventionReviewIntent;
+    | StreamTextDeltaIntent;
 
 // ============================================================================
 // Event Context - Execution context provided by RAL

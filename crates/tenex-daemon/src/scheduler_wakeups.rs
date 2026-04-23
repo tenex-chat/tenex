@@ -83,6 +83,13 @@ pub enum WakeupTarget {
     DelegationTimeout {
         ral_id: String,
     },
+    InterventionReview {
+        project_d_tag: String,
+        conversation_id: String,
+        completing_agent_pubkey: String,
+        user_pubkey: String,
+        intervention_agent_slug: String,
+    },
 }
 
 impl WakeupTarget {
@@ -91,6 +98,7 @@ impl WakeupTarget {
             WakeupTarget::ProjectWakeup { .. } => "project_wakeup",
             WakeupTarget::AgentWakeup { .. } => "agent_wakeup",
             WakeupTarget::DelegationTimeout { .. } => "delegation_timeout",
+            WakeupTarget::InterventionReview { .. } => "intervention_review",
         }
     }
 }
@@ -691,6 +699,39 @@ fn validate_enqueue_request(request: &WakeupEnqueueRequest, now: u64) -> Schedul
             if ral_id.is_empty() {
                 return Err(SchedulerWakeupError::MissingField {
                     field: "target.ralId",
+                });
+            }
+        }
+        WakeupTarget::InterventionReview {
+            project_d_tag,
+            conversation_id,
+            completing_agent_pubkey,
+            user_pubkey,
+            intervention_agent_slug,
+        } => {
+            if project_d_tag.is_empty() {
+                return Err(SchedulerWakeupError::MissingField {
+                    field: "target.projectDTag",
+                });
+            }
+            if conversation_id.is_empty() {
+                return Err(SchedulerWakeupError::MissingField {
+                    field: "target.conversationId",
+                });
+            }
+            if completing_agent_pubkey.is_empty() {
+                return Err(SchedulerWakeupError::MissingField {
+                    field: "target.completingAgentPubkey",
+                });
+            }
+            if user_pubkey.is_empty() {
+                return Err(SchedulerWakeupError::MissingField {
+                    field: "target.userPubkey",
+                });
+            }
+            if intervention_agent_slug.is_empty() {
+                return Err(SchedulerWakeupError::MissingField {
+                    field: "target.interventionAgentSlug",
                 });
             }
         }

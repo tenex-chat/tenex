@@ -19,7 +19,6 @@ export {
     publishCompiledInstructions,
 } from "./AgentProfilePublisher";
 export { AgentPublisher } from "./AgentPublisher";
-export { InterventionPublisher } from "./InterventionPublisher";
 export { injectTraceContext, type EventWithTags } from "./trace-context";
 export { collectEvents } from "./collectEvents";
 export type { CollectEventsOptions } from "./collectEvents";

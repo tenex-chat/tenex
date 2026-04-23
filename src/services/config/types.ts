@@ -90,14 +90,6 @@ export interface TenexConfig {
         agent?: string; // Agent slug to route ask() calls through (acts as first line of defense)
     };
 
-    // Intervention configuration
-    // Monitors agent work completions and triggers human-replica review if user doesn't respond
-    intervention?: {
-        enabled?: boolean; // Enable intervention monitoring (default: false)
-        agent?: string; // Agent slug to notify when user doesn't respond (required if enabled)
-        timeoutSeconds?: number; // Seconds to wait for user response (default: 300 = 5 minutes)
-    };
-
     // NIP-46 remote signing configuration
     nip46?: {
         enabled?: boolean;                    // Master switch (default: false)
@@ -193,13 +185,6 @@ export const TenexConfigSchema = z.object({
     escalation: z
         .object({
             agent: z.string().optional(),
-        })
-        .optional(),
-    intervention: z
-        .object({
-            enabled: z.boolean().optional(),
-            agent: z.string().optional(),
-            timeoutSeconds: z.number().optional(),
         })
         .optional(),
     nip46: z
