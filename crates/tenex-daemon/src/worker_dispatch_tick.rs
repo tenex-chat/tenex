@@ -389,6 +389,7 @@ mod tests {
             execution_flags: crate::worker_protocol::AgentWorkerExecutionFlags {
                 is_delegation_completion: false,
                 has_pending_delegations: false,
+                pending_delegation_ids: Vec::new(),
                 debug: false,
             },
         }
@@ -412,6 +413,7 @@ mod tests {
             execution_flags: crate::worker_protocol::AgentWorkerExecutionFlags {
                 is_delegation_completion: false,
                 has_pending_delegations: true,
+                pending_delegation_ids: Vec::new(),
                 debug: true,
             },
             task_diagnostic_metadata: ScheduledTaskDispatchTaskDiagnosticMetadata {

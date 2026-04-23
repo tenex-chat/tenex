@@ -254,6 +254,14 @@ mod tests {
                 has_pending_delegations: flags["hasPendingDelegations"]
                     .as_bool()
                     .expect("pending flag must be bool"),
+                pending_delegation_ids: flags["pendingDelegationIds"]
+                    .as_array()
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| id.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 debug: flags["debug"].as_bool().expect("debug flag must be bool"),
             },
         }

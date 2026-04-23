@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
@@ -7,7 +8,12 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::dispatch_queue::{
-    DispatchQueueError, DispatchQueueRecord, append_dispatch_queue_record, replay_dispatch_queue,
+    DispatchQueueError, DispatchQueueRecord, acquire_dispatch_queue_lock,
+    append_dispatch_queue_record, replay_dispatch_queue,
+};
+use crate::operations_status_runtime::{
+    OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE, OperationsStatusPublishConversationInput,
+    OperationsStatusRuntimeError, publish_operations_status_conversation,
 };
 use crate::ral_journal::{RalJournalError, RalPendingDelegation};
 use crate::ral_lock::RalLockInfo;
@@ -66,6 +72,8 @@ pub struct DaemonWorkerRuntimeInput<'a> {
     pub frame_observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
     pub telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
+    pub operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'a>>,
+    pub live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'a>>,
     pub terminal: DaemonWorkerTerminalRuntimeInput,
     pub max_frames: u64,
 }
@@ -84,6 +92,8 @@ pub struct DaemonWorkerRuntimeFilesystemInput<'a> {
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
     pub telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
+    pub operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'a>>,
+    pub live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'a>>,
     pub max_frames: u64,
 }
 
@@ -92,6 +102,22 @@ pub struct DaemonWorkerTelegramEgressRuntimeInput {
     pub data_dir: PathBuf,
     pub backend_pubkey: String,
     pub writer_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonWorkerOperationsStatusRuntimeInput<'a> {
+    pub tenex_base_dir: &'a Path,
+    pub project_owner_pubkeys: &'a BTreeMap<String, String>,
+}
+
+pub struct DaemonWorkerLivePublishMaintenance<'a> {
+    pub maintain: &'a mut dyn FnMut(&Path, u64) -> Result<(), String>,
+}
+
+impl std::fmt::Debug for DaemonWorkerLivePublishMaintenance<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DaemonWorkerLivePublishMaintenance")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,6 +203,13 @@ where
         #[source]
         source: Box<WorkerSessionLoopError<E>>,
     },
+    #[error("worker operations-status publish failed: {source}")]
+    OperationsStatus {
+        #[source]
+        source: Box<OperationsStatusRuntimeError>,
+    },
+    #[error("worker live publish maintenance failed: {message}")]
+    LivePublishMaintenance { message: String },
 }
 
 pub fn run_daemon_worker_runtime_once_from_filesystem<S>(
@@ -205,79 +238,94 @@ where
         resolved_pending_delegations,
         publish,
         telegram_egress,
+        operations_status,
+        live_publish_maintenance,
         max_frames,
     } = input;
 
-    let dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
-        DaemonWorkerRuntimeError::DispatchReplay {
-            source: Box::new(source),
-        }
-    })?;
+    // Hold the dispatch queue lock for the entire read-compute-write-lease cycle so the
+    // background subscription thread cannot write a QUEUED record between the read and the
+    // lease write, which would produce duplicate sequence numbers in the JSONL file.
+    let started = {
+        let _dispatch_lock = acquire_dispatch_queue_lock(daemon_dir).map_err(|source| {
+            DaemonWorkerRuntimeError::DispatchReplay {
+                source: Box::new(source),
+            }
+        })?;
 
-    if dispatch_state.queued.is_empty() {
-        tracing::debug!("worker runtime: no queued dispatches");
-        return Ok(DaemonWorkerRuntimeOutcome::NotAdmitted {
-            reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
-            blocked_candidates: Vec::new(),
-        });
-    }
+        let dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
+            DaemonWorkerRuntimeError::DispatchReplay {
+                source: Box::new(source),
+            }
+        })?;
 
-    let lease_sequence = next_sequence(dispatch_state.last_sequence, "dispatch queue")?;
-    let active_workers = runtime_state.to_active_worker_concurrency_snapshots();
-    let active_dispatches = runtime_state.to_active_dispatch_concurrency_snapshots();
-    let admission = plan_worker_dispatch_admission(WorkerDispatchAdmissionInput {
-        dispatch_state: &dispatch_state,
-        active_workers: &active_workers,
-        active_dispatches: &active_dispatches,
-        limits,
-        sequence: lease_sequence,
-        timestamp: now_ms,
-        correlation_id: format!("{correlation_id}:lease"),
-    })
-    .map_err(|source| DaemonWorkerRuntimeError::DispatchAdmission {
-        source: Box::new(source),
-    })?;
-
-    let admitted = match admission {
-        WorkerDispatchAdmissionPlan::Admitted(admitted) => *admitted,
-        WorkerDispatchAdmissionPlan::NotAdmitted {
-            reason,
-            blocked_candidates,
-        } => {
-            tracing::debug!(reason = ?reason, "worker dispatch not admitted");
+        if dispatch_state.queued.is_empty() {
+            tracing::debug!("worker runtime: no queued dispatches");
             return Ok(DaemonWorkerRuntimeOutcome::NotAdmitted {
-                reason,
-                blocked_candidates,
+                reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
+                blocked_candidates: Vec::new(),
             });
         }
-    };
-    tracing::info!(
-        dispatch_id = %admitted.selected_dispatch.dispatch_id,
-        agent_pubkey = %admitted.selected_dispatch.ral.agent_pubkey,
-        "worker dispatch admitted, spawning"
-    );
-    let launch_input = read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
 
-    let started = start_admitted_worker_dispatch(
-        spawner,
-        StartAdmittedWorkerDispatchInput {
-            daemon_dir,
-            runtime_state,
-            admitted,
-            execute_sequence: 1,
-            execute_timestamp: now_ms,
-            launch_input,
-            lock_owner,
-            command,
-            worker_config,
-            started_at: now_ms,
-        },
-    )
-    .map_err(|source| DaemonWorkerRuntimeError::DispatchTick {
-        source: Box::new(WorkerDispatchTickError::AdmissionStart {
+        let lease_sequence = next_sequence(dispatch_state.last_sequence, "dispatch queue")?;
+        let active_workers = runtime_state.to_active_worker_concurrency_snapshots();
+        let active_dispatches = runtime_state.to_active_dispatch_concurrency_snapshots();
+        let admission = plan_worker_dispatch_admission(WorkerDispatchAdmissionInput {
+            dispatch_state: &dispatch_state,
+            active_workers: &active_workers,
+            active_dispatches: &active_dispatches,
+            limits,
+            sequence: lease_sequence,
+            timestamp: now_ms,
+            correlation_id: format!("{correlation_id}:lease"),
+        })
+        .map_err(|source| DaemonWorkerRuntimeError::DispatchAdmission {
             source: Box::new(source),
-        }),
-    })?;
+        })?;
+
+        let admitted = match admission {
+            WorkerDispatchAdmissionPlan::Admitted(admitted) => *admitted,
+            WorkerDispatchAdmissionPlan::NotAdmitted {
+                reason,
+                blocked_candidates,
+            } => {
+                tracing::debug!(reason = ?reason, "worker dispatch not admitted");
+                return Ok(DaemonWorkerRuntimeOutcome::NotAdmitted {
+                    reason,
+                    blocked_candidates,
+                });
+            }
+        };
+        tracing::info!(
+            dispatch_id = %admitted.selected_dispatch.dispatch_id,
+            agent_pubkey = %admitted.selected_dispatch.ral.agent_pubkey,
+            "worker dispatch admitted, spawning"
+        );
+        let launch_input =
+            read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
+
+        start_admitted_worker_dispatch(
+            spawner,
+            StartAdmittedWorkerDispatchInput {
+                daemon_dir,
+                runtime_state,
+                admitted,
+                execute_sequence: 1,
+                execute_timestamp: now_ms,
+                launch_input,
+                lock_owner,
+                command,
+                worker_config,
+                started_at: now_ms,
+            },
+        )
+        .map_err(|source| DaemonWorkerRuntimeError::DispatchTick {
+            source: Box::new(WorkerDispatchTickError::AdmissionStart {
+                source: Box::new(source),
+            }),
+        })?
+        // _dispatch_lock released here; the session runs without holding the lock
+    };
 
     run_started_worker_session_from_filesystem(
         daemon_dir,
@@ -285,6 +333,8 @@ where
         now_ms,
         publish,
         telegram_egress,
+        operations_status,
+        live_publish_maintenance,
         DaemonWorkerFilesystemTerminalInput {
             timestamp: now_ms,
             writer_version,
@@ -329,6 +379,8 @@ where
         frame_observed_at,
         publish,
         telegram_egress,
+        operations_status,
+        live_publish_maintenance,
         terminal,
         max_frames,
     } = input;
@@ -377,6 +429,8 @@ where
             frame_observed_at,
             publish,
             telegram_egress,
+            operations_status,
+            live_publish_maintenance,
             terminal,
             max_frames,
             *started,
@@ -564,6 +618,8 @@ fn run_started_worker_session<S>(
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext<'_>>,
     telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
+    operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
+    live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerTerminalRuntimeInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -593,6 +649,8 @@ where
         frame_observed_at,
         publish,
         telegram_egress,
+        operations_status,
+        live_publish_maintenance,
         terminal,
         max_frames,
         started,
@@ -607,6 +665,8 @@ fn run_started_worker_session_from_filesystem<S>(
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext<'_>>,
     telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
+    operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
+    live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerFilesystemTerminalInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -646,6 +706,8 @@ where
         frame_observed_at,
         publish,
         telegram_egress,
+        operations_status,
+        live_publish_maintenance,
         terminal,
         max_frames,
         started,
@@ -660,6 +722,8 @@ fn run_started_worker_session_with_state<S>(
     frame_observed_at: u64,
     publish: Option<WorkerMessagePublishContext<'_>>,
     telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
+    operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
+    mut live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerTerminalRuntimeInput,
     max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
@@ -677,6 +741,11 @@ where
     let worker_id = started.runtime_started.worker_id.clone();
     let dispatch_id = started.context.admission.leased_record.dispatch_id.clone();
     let claim_token = started.context.admission.leased_record.claim_token.clone();
+    let resolved_pending_delegations = scheduler
+        .entry(&started.runtime_started.identity)
+        .map(|entry| entry.pending_delegations.clone())
+        .filter(|pending| !pending.is_empty())
+        .unwrap_or_else(|| terminal.resolved_pending_delegations.clone());
     let mut session = started.started.dispatch.session;
 
     let _session_span = tracing::info_span!(
@@ -686,6 +755,21 @@ where
     )
     .entered();
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
+
+    publish_worker_operations_status(
+        daemon_dir,
+        frame_observed_at,
+        &started.runtime_started.identity,
+        operations_status.as_ref(),
+        "active",
+        OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE,
+        &[started.runtime_started.identity.agent_pubkey.clone()],
+    )
+    .map_err(|source| DaemonWorkerRuntimeError::OperationsStatus {
+        source: Box::new(source),
+    })?;
+    run_live_publish_maintenance(&mut live_publish_maintenance, daemon_dir, frame_observed_at)
+        .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
 
     let publish = publish.map(|mut publish| {
         publish.telegram_egress =
@@ -699,7 +783,7 @@ where
         publish
     });
 
-    let session = run_worker_session_loop(
+    let session_result = run_worker_session_loop(
         &mut session,
         WorkerSessionLoopInput {
             daemon_dir,
@@ -707,6 +791,9 @@ where
             worker_id: &worker_id,
             observed_at: frame_observed_at,
             publish,
+            live_publish_maintenance: live_publish_maintenance
+                .as_mut()
+                .map(|maintenance| &mut *maintenance.maintain as _),
             terminal: Some(WorkerMessageTerminalContext {
                 scheduler,
                 dispatch_state,
@@ -716,7 +803,7 @@ where
                     journal_sequence: terminal.journal_sequence,
                     journal_timestamp: terminal.journal_timestamp,
                     writer_version: terminal.writer_version,
-                    resolved_pending_delegations: terminal.resolved_pending_delegations,
+                    resolved_pending_delegations,
                 },
                 dispatch: Some(WorkerCompletionDispatchInput {
                     dispatch_id: dispatch_id.clone(),
@@ -728,10 +815,25 @@ where
             }),
             max_frames,
         },
-    )
-    .map_err(|source| DaemonWorkerRuntimeError::SessionLoop {
+    );
+    let cleanup_result = publish_worker_operations_status(
+        daemon_dir,
+        frame_observed_at,
+        &started.runtime_started.identity,
+        operations_status.as_ref(),
+        "cleanup",
+        OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE.saturating_add(1),
+        &[],
+    );
+
+    let session = session_result.map_err(|source| DaemonWorkerRuntimeError::SessionLoop {
         source: Box::new(source),
     })?;
+    cleanup_result.map_err(|source| DaemonWorkerRuntimeError::OperationsStatus {
+        source: Box::new(source),
+    })?;
+    run_live_publish_maintenance(&mut live_publish_maintenance, daemon_dir, frame_observed_at)
+        .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
 
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session completed");
     Ok(DaemonWorkerRuntimeOutcome::SessionCompleted {
@@ -739,6 +841,68 @@ where
         worker_id,
         session,
     })
+}
+
+fn run_live_publish_maintenance(
+    live_publish_maintenance: &mut Option<DaemonWorkerLivePublishMaintenance<'_>>,
+    daemon_dir: &Path,
+    now_ms: u64,
+) -> Result<(), String> {
+    if let Some(maintenance) = live_publish_maintenance.as_mut() {
+        (maintenance.maintain)(daemon_dir, now_ms)?;
+    }
+    Ok(())
+}
+
+fn publish_worker_operations_status(
+    daemon_dir: &Path,
+    now_ms: u64,
+    identity: &crate::ral_journal::RalJournalIdentity,
+    operations_status: Option<&DaemonWorkerOperationsStatusRuntimeInput<'_>>,
+    variant: &str,
+    request_sequence: u64,
+    agent_pubkeys: &[String],
+) -> Result<(), OperationsStatusRuntimeError> {
+    let Some(operations_status) = operations_status else {
+        return Ok(());
+    };
+    let Some(project_owner_pubkey) = operations_status
+        .project_owner_pubkeys
+        .get(&identity.project_id)
+    else {
+        tracing::debug!(
+            project_id = %identity.project_id,
+            conversation_id = %identity.conversation_id,
+            variant,
+            "worker operations-status skipped because project descriptor is unavailable"
+        );
+        return Ok(());
+    };
+
+    let published =
+        publish_operations_status_conversation(OperationsStatusPublishConversationInput {
+            tenex_base_dir: operations_status.tenex_base_dir,
+            daemon_dir,
+            project_id: &identity.project_id,
+            project_owner_pubkey,
+            project_d_tag: &identity.project_id,
+            created_at: now_ms / 1_000,
+            accepted_at: now_ms,
+            request_timestamp: now_ms,
+            conversation_id: &identity.conversation_id,
+            agent_pubkeys,
+            variant,
+            request_sequence,
+        })?;
+
+    tracing::debug!(
+        event_id = %published.publish.record.event.id,
+        project_id = %identity.project_id,
+        conversation_id = %identity.conversation_id,
+        variant,
+        "worker operations-status publish enqueued"
+    );
+    Ok(())
 }
 
 fn next_sequence<S, E>(
@@ -1542,6 +1706,7 @@ mod tests {
             execution_flags: AgentWorkerExecutionFlags {
                 is_delegation_completion: false,
                 has_pending_delegations: false,
+                pending_delegation_ids: Vec::new(),
                 debug: false,
             },
             lock_owner: build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
@@ -1551,6 +1716,8 @@ mod tests {
             frame_observed_at: 1_710_000_700_040,
             publish,
             telegram_egress: None,
+            operations_status: None,
+            live_publish_maintenance: None,
             terminal: DaemonWorkerTerminalRuntimeInput {
                 journal_sequence: 3,
                 journal_timestamp: 1_710_000_700_050,
@@ -1607,6 +1774,8 @@ mod tests {
             resolved_pending_delegations: Vec::new(),
             publish,
             telegram_egress: None,
+            operations_status: None,
+            live_publish_maintenance: None,
             max_frames,
         }
     }
@@ -1684,6 +1853,12 @@ mod tests {
             }
             DaemonWorkerRuntimeError::SessionLoop { source } => {
                 format!("session loop: {source}")
+            }
+            DaemonWorkerRuntimeError::OperationsStatus { source } => {
+                format!("operations-status: {source}")
+            }
+            DaemonWorkerRuntimeError::LivePublishMaintenance { message } => {
+                format!("live publish maintenance: {message}")
             }
         }
     }
@@ -1849,6 +2024,7 @@ mod tests {
                 execution_flags: AgentWorkerExecutionFlags {
                     is_delegation_completion: false,
                     has_pending_delegations: false,
+                    pending_delegation_ids: Vec::new(),
                     debug: false,
                 },
             },

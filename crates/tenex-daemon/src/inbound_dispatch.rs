@@ -8,13 +8,17 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::dispatch_queue::{
-    DispatchQueueError, DispatchQueueRecord, DispatchQueueStatus, append_dispatch_queue_record,
-    replay_dispatch_queue,
+    DispatchQueueError, DispatchQueueRecord, DispatchQueueStatus, acquire_dispatch_queue_lock,
+    append_dispatch_queue_record, replay_dispatch_queue,
 };
 use crate::inbound_envelope::{InboundEnvelope, RuntimeTransport};
-use crate::ral_journal::{RalJournalError, append_ral_journal_record};
+use crate::ral_journal::{
+    RalCompletedDelegation, RalJournalError, RalJournalIdentity, RalJournalRecord, RalReplayStatus,
+    append_ral_journal_record,
+};
 use crate::ral_scheduler::{
-    RalDispatchPreparation, RalDispatchPreparationInput, RalNamespace, RalScheduler,
+    RalDelegationCompletionPlanInput, RalDispatchPreparation, RalDispatchPreparationInput,
+    RalNamespace, RalResumeDispatchPreparation, RalResumeDispatchPreparationInput, RalScheduler,
     RalSchedulerError,
 };
 use crate::worker_dispatch_input::{
@@ -28,6 +32,9 @@ const INBOUND_DISPATCH_DIGEST_DOMAIN: &[u8] = b"tenex-inbound-dispatch-v1";
 const INBOUND_WORKER_ID_PREFIX: &str = "inbound-worker";
 const INBOUND_CLAIM_TOKEN_PREFIX: &str = "inbound-claim";
 const INBOUND_DISPATCH_ID_PREFIX: &str = "inbound";
+const DELEGATION_RESUME_WORKER_ID_PREFIX: &str = "delegation-resume-worker";
+const DELEGATION_RESUME_CLAIM_TOKEN_PREFIX: &str = "delegation-resume-claim";
+const DELEGATION_RESUME_DISPATCH_ID_PREFIX: &str = "delegation-resume";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InboundDispatchProject<'a> {
@@ -52,6 +59,20 @@ pub struct InboundDispatchEnqueueInput<'a> {
     pub writer_version: &'a str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DelegationCompletionDispatchInput<'a> {
+    pub daemon_dir: &'a Path,
+    pub project: InboundDispatchProject<'a>,
+    pub identity: &'a RalJournalIdentity,
+    pub parent_status: RalReplayStatus,
+    pub completion: &'a RalCompletedDelegation,
+    pub triggering_envelope: &'a InboundEnvelope,
+    pub remaining_pending_delegation_ids: &'a [String],
+    pub resume_if_waiting: bool,
+    pub timestamp: u64,
+    pub writer_version: &'a str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboundDispatchEnqueueOutcome {
@@ -66,6 +87,29 @@ pub struct InboundDispatchEnqueueOutcome {
     pub queued: bool,
     pub already_existed: bool,
     pub dispatch_record: DispatchQueueRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum DelegationCompletionDispatchOutcome {
+    Recorded {
+        completion_record: RalJournalRecord,
+    },
+    Resumed {
+        dispatch_id: String,
+        triggering_event_id: String,
+        worker_id: String,
+        claim_token: String,
+        project_id: String,
+        agent_pubkey: String,
+        conversation_id: String,
+        ral_number: u64,
+        sidecar_path: PathBuf,
+        queued: bool,
+        already_existed: bool,
+        completion_record: Option<RalJournalRecord>,
+        dispatch_record: DispatchQueueRecord,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -116,6 +160,7 @@ pub fn enqueue_inbound_dispatch(
                 execution_flags: AgentWorkerExecutionFlags {
                     is_delegation_completion: false,
                     has_pending_delegations: false,
+                    pending_delegation_ids: Vec::new(),
                     debug: false,
                 },
             },
@@ -123,6 +168,7 @@ pub fn enqueue_inbound_dispatch(
         });
     write_create_or_compare_equal(input.daemon_dir, &sidecar_input)?;
 
+    let _dispatch_lock = acquire_dispatch_queue_lock(input.daemon_dir)?;
     let dispatch_state = replay_dispatch_queue(input.daemon_dir)?;
     if let Some(existing) = dispatch_state.latest_record(&ids.dispatch_id) {
         return Ok(InboundDispatchEnqueueOutcome {
@@ -190,6 +236,140 @@ pub fn enqueue_inbound_dispatch(
     })
 }
 
+pub fn enqueue_delegation_completion_dispatch(
+    input: DelegationCompletionDispatchInput<'_>,
+) -> Result<DelegationCompletionDispatchOutcome, InboundDispatchEnqueueError> {
+    let source_type = source_type_for_transport(input.triggering_envelope.transport)?;
+    let triggering_event_id = input.triggering_envelope.message.native_id.clone();
+    let ids = delegation_resume_dispatch_ids(
+        &input.identity.project_id,
+        &input.identity.agent_pubkey,
+        &input.identity.conversation_id,
+        input.identity.ral_number,
+        &input.completion.completion_event_id,
+    );
+    let should_resume =
+        input.resume_if_waiting && input.parent_status == RalReplayStatus::WaitingForDelegation;
+
+    if should_resume {
+        let sidecar_input =
+            WorkerDispatchInput::from_execute_fields(WorkerDispatchInputFromExecuteFields {
+                dispatch_id: ids.dispatch_id.clone(),
+                source_type,
+                writer: WorkerDispatchInputWriterMetadata {
+                    writer: "inbound_dispatch".to_string(),
+                    writer_version: input.writer_version.to_string(),
+                    timestamp: input.timestamp,
+                },
+                execute_fields: WorkerDispatchExecuteFields {
+                    worker_id: Some(ids.worker_id.clone()),
+                    triggering_event_id: triggering_event_id.clone(),
+                    project_base_path: input.project.project_base_path.to_string(),
+                    metadata_path: input.project.metadata_path.to_string(),
+                    triggering_envelope: serde_json::to_value(input.triggering_envelope)?,
+                    execution_flags: AgentWorkerExecutionFlags {
+                        is_delegation_completion: true,
+                        has_pending_delegations: !input.remaining_pending_delegation_ids.is_empty(),
+                        pending_delegation_ids: input.remaining_pending_delegation_ids.to_vec(),
+                        debug: false,
+                    },
+                },
+                source_metadata: Some(source_metadata(input.triggering_envelope)),
+            });
+        write_create_or_compare_equal(input.daemon_dir, &sidecar_input)?;
+    }
+
+    let _dispatch_lock = acquire_dispatch_queue_lock(input.daemon_dir)?;
+    let dispatch_state = replay_dispatch_queue(input.daemon_dir)?;
+    if should_resume && let Some(existing) = dispatch_state.latest_record(&ids.dispatch_id) {
+        return Ok(DelegationCompletionDispatchOutcome::Resumed {
+            dispatch_id: ids.dispatch_id,
+            triggering_event_id,
+            worker_id: ids.worker_id,
+            claim_token: existing.claim_token.clone(),
+            project_id: input.identity.project_id.clone(),
+            agent_pubkey: input.identity.agent_pubkey.clone(),
+            conversation_id: input.identity.conversation_id.clone(),
+            ral_number: input.identity.ral_number,
+            sidecar_path: worker_dispatch_input_path(
+                input.daemon_dir,
+                existing.dispatch_id.as_str(),
+            ),
+            queued: existing.status == DispatchQueueStatus::Queued,
+            already_existed: true,
+            completion_record: None,
+            dispatch_record: existing.clone(),
+        });
+    }
+
+    let scheduler = RalScheduler::from_daemon_dir(input.daemon_dir)?;
+    let completion_plan =
+        scheduler.plan_delegation_completion(RalDelegationCompletionPlanInput {
+            identity: input.identity.clone(),
+            completion: input.completion.clone(),
+            sequence: next_sequence(scheduler.state().last_sequence, "RAL journal")?,
+            timestamp: input.timestamp,
+            correlation_id: ids.correlation_id.clone(),
+            writer_version: input.writer_version.to_string(),
+        })?;
+
+    if !should_resume {
+        append_ral_journal_record(input.daemon_dir, &completion_plan.record)?;
+        return Ok(DelegationCompletionDispatchOutcome::Recorded {
+            completion_record: completion_plan.record,
+        });
+    }
+
+    let resume_preparation =
+        scheduler.plan_resume_dispatch_preparation(RalResumeDispatchPreparationInput {
+            identity: input.identity.clone(),
+            worker_id: ids.worker_id.clone(),
+            claim_token: ids.claim_token.clone(),
+            journal_sequence: next_sequence(completion_plan.record.sequence, "RAL journal")?,
+            dispatch_sequence: next_sequence(dispatch_state.last_sequence, "dispatch queue")?,
+            last_dispatch_sequence: dispatch_state.last_sequence,
+            timestamp: input.timestamp,
+            correlation_id: ids.correlation_id.clone(),
+            dispatch_id: ids.dispatch_id.clone(),
+            triggering_event_id: triggering_event_id.clone(),
+            writer_version: input.writer_version.to_string(),
+        })?;
+    append_delegation_resume_preparation(
+        input.daemon_dir,
+        &completion_plan.record,
+        &resume_preparation,
+    )?;
+
+    tracing::info!(
+        dispatch_id = %ids.dispatch_id,
+        agent_pubkey = %input.identity.agent_pubkey,
+        project_id = %input.identity.project_id,
+        conversation_id = %input.identity.conversation_id,
+        ral_number = input.identity.ral_number,
+        completion_event_id = %input.completion.completion_event_id,
+        "delegation completion resume dispatch queued"
+    );
+
+    Ok(DelegationCompletionDispatchOutcome::Resumed {
+        dispatch_id: ids.dispatch_id,
+        triggering_event_id,
+        worker_id: ids.worker_id,
+        claim_token: resume_preparation.claim.claim_token.clone(),
+        project_id: input.identity.project_id.clone(),
+        agent_pubkey: input.identity.agent_pubkey.clone(),
+        conversation_id: input.identity.conversation_id.clone(),
+        ral_number: input.identity.ral_number,
+        sidecar_path: worker_dispatch_input_path(
+            input.daemon_dir,
+            resume_preparation.dispatch_record.dispatch_id.as_str(),
+        ),
+        queued: true,
+        already_existed: false,
+        completion_record: Some(completion_plan.record),
+        dispatch_record: resume_preparation.dispatch_record,
+    })
+}
+
 fn append_dispatch_preparation(
     daemon_dir: &Path,
     preparation: &RalDispatchPreparation,
@@ -197,6 +377,17 @@ fn append_dispatch_preparation(
     append_ral_journal_record(daemon_dir, &preparation.allocation_record)?;
     append_ral_journal_record(daemon_dir, &preparation.claim_record)?;
     append_dispatch_queue_record(daemon_dir, &preparation.dispatch_record)?;
+    Ok(())
+}
+
+fn append_delegation_resume_preparation(
+    daemon_dir: &Path,
+    completion_record: &RalJournalRecord,
+    resume_preparation: &RalResumeDispatchPreparation,
+) -> Result<(), InboundDispatchEnqueueError> {
+    append_ral_journal_record(daemon_dir, completion_record)?;
+    append_ral_journal_record(daemon_dir, &resume_preparation.claim_record)?;
+    append_dispatch_queue_record(daemon_dir, &resume_preparation.dispatch_record)?;
     Ok(())
 }
 
@@ -249,6 +440,30 @@ fn inbound_dispatch_ids(
     }
 }
 
+fn delegation_resume_dispatch_ids(
+    project_id: &str,
+    agent_pubkey: &str,
+    conversation_id: &str,
+    ral_number: u64,
+    completion_event_id: &str,
+) -> InboundDispatchIds {
+    let ral_number = ral_number.to_string();
+    let digest = stable_digest(&[
+        "delegation-resume",
+        project_id,
+        agent_pubkey,
+        conversation_id,
+        ral_number.as_str(),
+        completion_event_id,
+    ]);
+    InboundDispatchIds {
+        dispatch_id: format!("{DELEGATION_RESUME_DISPATCH_ID_PREFIX}-{digest}"),
+        worker_id: format!("{DELEGATION_RESUME_WORKER_ID_PREFIX}-{digest}"),
+        claim_token: format!("{DELEGATION_RESUME_CLAIM_TOKEN_PREFIX}-{digest}"),
+        correlation_id: format!("delegation-resume-{digest}"),
+    }
+}
+
 fn stable_digest(parts: &[&str]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(INBOUND_DISPATCH_DIGEST_DOMAIN);
@@ -280,8 +495,10 @@ mod tests {
         TelegramChatType, TelegramTransportMetadata, TransportMetadataBag,
     };
     use crate::ral_journal::{
-        RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
-        RalReplayStatus, read_ral_journal_records, replay_ral_journal,
+        RAL_JOURNAL_WRITER_RUST_DAEMON, RalCompletedDelegation, RalDelegationType, RalJournalEvent,
+        RalJournalIdentity, RalJournalRecord, RalPendingDelegation, RalReplayStatus,
+        RalTerminalSummary, append_ral_journal_record, read_ral_journal_records,
+        replay_ral_journal,
     };
     use crate::worker_dispatch_input::read_optional as read_worker_dispatch_input;
     use serde_json::{Value, json};
@@ -490,6 +707,136 @@ mod tests {
     }
 
     #[test]
+    fn delegation_completion_resume_reclaims_waiting_ral_without_allocating_new_one() {
+        let daemon_dir = unique_temp_dir("delegation-completion-resume");
+        let identity = RalJournalIdentity {
+            project_id: "TENEX-demo".to_string(),
+            agent_pubkey: "agent-pubkey".to_string(),
+            conversation_id: "conversation-alpha".to_string(),
+            ral_number: 1,
+        };
+        for record in [
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-dispatch-test@0",
+                1,
+                1_710_000_700_000,
+                "seed",
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("event-alpha".to_string()),
+                },
+            ),
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-dispatch-test@0",
+                2,
+                1_710_000_700_001,
+                "seed",
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-dispatch-test@0",
+                3,
+                1_710_000_700_002,
+                "seed",
+                RalJournalEvent::WaitingForDelegation {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                    pending_delegations: vec![
+                        pending_delegation("delegation-a"),
+                        pending_delegation("delegation-b"),
+                    ],
+                    terminal: terminal_summary(),
+                },
+            ),
+        ] {
+            append_ral_journal_record(&daemon_dir, &record).expect("seed journal must append");
+        }
+        let parent_trigger = nostr_envelope();
+        let completion = RalCompletedDelegation {
+            delegation_conversation_id: "delegation-a".to_string(),
+            sender_pubkey: "recipient-a".to_string(),
+            recipient_pubkey: "agent-pubkey".to_string(),
+            response: "done".to_string(),
+            completed_at: 1_710_000_900,
+            completion_event_id: "completion-a".to_string(),
+            full_transcript: None,
+        };
+
+        let outcome = enqueue_delegation_completion_dispatch(DelegationCompletionDispatchInput {
+            daemon_dir: &daemon_dir,
+            project: InboundDispatchProject {
+                project_id: "TENEX-demo",
+                project_base_path: "/repo/demo",
+                metadata_path: "/repo/demo/.tenex/project.json",
+            },
+            identity: &identity,
+            parent_status: RalReplayStatus::WaitingForDelegation,
+            completion: &completion,
+            triggering_envelope: &parent_trigger,
+            remaining_pending_delegation_ids: &["delegation-b".to_string()],
+            resume_if_waiting: true,
+            timestamp: 1_710_000_900_000,
+            writer_version: "inbound-dispatch-test@0",
+        })
+        .expect("delegation completion must enqueue resume");
+
+        let DelegationCompletionDispatchOutcome::Resumed {
+            dispatch_id,
+            dispatch_record,
+            ..
+        } = outcome
+        else {
+            panic!("expected resumed dispatch");
+        };
+        let sidecar = read_worker_dispatch_input(&daemon_dir, &dispatch_id)
+            .expect("sidecar must read")
+            .expect("sidecar must exist");
+        let fields = sidecar
+            .resolved_execute_fields()
+            .expect("sidecar execute fields must resolve");
+        assert!(fields.execution_flags.is_delegation_completion);
+        assert!(fields.execution_flags.has_pending_delegations);
+        assert_eq!(
+            fields.execution_flags.pending_delegation_ids,
+            vec!["delegation-b".to_string()]
+        );
+
+        let journal = read_ral_journal_records(&daemon_dir).expect("journal must read");
+        assert_eq!(journal.len(), 5);
+        assert!(matches!(
+            journal[3].event,
+            RalJournalEvent::DelegationCompleted { .. }
+        ));
+        assert!(matches!(journal[4].event, RalJournalEvent::Claimed { .. }));
+        let replay = replay_ral_journal(&daemon_dir).expect("journal must replay");
+        let entry = replay.states.get(&identity).expect("identity must exist");
+        assert_eq!(entry.status, RalReplayStatus::Claimed);
+        assert_eq!(
+            entry
+                .pending_delegations
+                .iter()
+                .map(|pending| pending.delegation_conversation_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["delegation-b"]
+        );
+        assert_eq!(entry.completed_delegations, vec![completion]);
+        let dispatch = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(dispatch.queued, vec![dispatch_record]);
+
+        if daemon_dir.exists() {
+            fs::remove_dir_all(daemon_dir).expect("temp dir cleanup must succeed");
+        }
+    }
+
+    #[test]
     fn unsupported_transport_is_rejected() {
         let daemon_dir = unique_temp_dir("inbound-dispatch-unsupported");
         let mut envelope = nostr_envelope();
@@ -603,6 +950,35 @@ mod tests {
                 }),
                 ..InboundMetadata::default()
             },
+        }
+    }
+
+    fn pending_delegation(delegation_conversation_id: &str) -> RalPendingDelegation {
+        RalPendingDelegation {
+            delegation_conversation_id: delegation_conversation_id.to_string(),
+            recipient_pubkey: "recipient-a".to_string(),
+            sender_pubkey: "agent-pubkey".to_string(),
+            prompt: "delegated prompt".to_string(),
+            delegation_type: RalDelegationType::Standard,
+            ral_number: 1,
+            parent_delegation_conversation_id: None,
+            pending_sub_delegations: None,
+            deferred_completion: None,
+            followup_event_id: None,
+            project_id: None,
+            suggestions: None,
+            killed: None,
+            killed_at: None,
+        }
+    }
+
+    fn terminal_summary() -> RalTerminalSummary {
+        RalTerminalSummary {
+            published_user_visible_event: false,
+            pending_delegations_remain: true,
+            accumulated_runtime_ms: 0,
+            final_event_ids: Vec::new(),
+            keep_worker_warm: false,
         }
     }
 

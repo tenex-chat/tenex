@@ -168,6 +168,8 @@ struct WorkerDispatchExecuteFieldsRaw {
 struct AgentWorkerExecutionFlagsRaw {
     is_delegation_completion: bool,
     has_pending_delegations: bool,
+    #[serde(default)]
+    pending_delegation_ids: Vec<String>,
     debug: bool,
 }
 
@@ -176,6 +178,7 @@ impl From<AgentWorkerExecutionFlagsRaw> for AgentWorkerExecutionFlags {
         Self {
             is_delegation_completion: raw.is_delegation_completion,
             has_pending_delegations: raw.has_pending_delegations,
+            pending_delegation_ids: raw.pending_delegation_ids,
             debug: raw.debug,
         }
     }
@@ -476,6 +479,7 @@ fn execute_fields_from_execute_message(
         execution_flags: AgentWorkerExecutionFlags {
             is_delegation_completion: require_bool(flags, "isDelegationCompletion")?,
             has_pending_delegations: require_bool(flags, "hasPendingDelegations")?,
+            pending_delegation_ids: require_optional_string_array(flags, "pendingDelegationIds")?,
             debug: require_bool(flags, "debug")?,
         },
     })
@@ -546,6 +550,29 @@ fn require_bool(
         .get(key)
         .and_then(Value::as_bool)
         .ok_or(WorkerDispatchInputValidationError::InvalidExecuteMessageField { field: key })
+}
+
+fn require_optional_string_array(
+    object: &Map<String, Value>,
+    key: &'static str,
+) -> Result<Vec<String>, WorkerDispatchInputValidationError> {
+    let Some(value) = object.get(key) else {
+        return Ok(Vec::new());
+    };
+    let Some(array) = value.as_array() else {
+        return Err(WorkerDispatchInputValidationError::InvalidExecuteMessageField { field: key });
+    };
+    array
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .ok_or(
+                    WorkerDispatchInputValidationError::InvalidExecuteMessageField { field: key },
+                )
+        })
+        .collect()
 }
 
 fn remove_optional_file(path: impl AsRef<Path>) -> WorkerDispatchInputResult<()> {
@@ -774,6 +801,7 @@ mod tests {
             AgentWorkerExecutionFlags {
                 is_delegation_completion: false,
                 has_pending_delegations: false,
+                pending_delegation_ids: Vec::new(),
                 debug: true,
             }
         );
@@ -851,6 +879,7 @@ mod tests {
                 execution_flags: AgentWorkerExecutionFlags {
                     is_delegation_completion: false,
                     has_pending_delegations: true,
+                    pending_delegation_ids: Vec::new(),
                     debug: true,
                 },
             },

@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::backend_events::project_status::ProjectStatusScheduledTaskKind;
 use crate::dispatch_queue::{
     DispatchQueueError, DispatchQueueRecord, DispatchQueueRecordParams, DispatchQueueState,
-    DispatchQueueStatus, DispatchRalIdentity, append_dispatch_queue_record,
-    build_dispatch_queue_record, replay_dispatch_queue,
+    DispatchQueueStatus, DispatchRalIdentity, acquire_dispatch_queue_lock,
+    append_dispatch_queue_record, build_dispatch_queue_record, replay_dispatch_queue,
 };
 use crate::project_status_agent_sources::{
     ProjectStatusAgentSourceError, read_project_status_agent_sources,
@@ -137,6 +137,7 @@ pub fn enqueue_scheduled_task_dispatch(
     let execution_flags = AgentWorkerExecutionFlags {
         is_delegation_completion: false,
         has_pending_delegations: false,
+        pending_delegation_ids: Vec::new(),
         debug: false,
     };
 
@@ -172,6 +173,7 @@ pub fn enqueue_scheduled_task_dispatch(
         },
     )?;
 
+    let _dispatch_lock = acquire_dispatch_queue_lock(input.daemon_dir)?;
     let dispatch_state = replay_dispatch_queue(input.daemon_dir)?;
     if let Some(existing) = dispatch_state.latest_record(&ids.dispatch_id) {
         return Ok(ScheduledTaskEnqueueOutcome {

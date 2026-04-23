@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -119,6 +120,39 @@ pub fn workers_dir(daemon_dir: impl AsRef<Path>) -> PathBuf {
 
 pub fn dispatch_queue_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
     workers_dir(daemon_dir).join(DISPATCH_QUEUE_FILE_NAME)
+}
+
+fn dispatch_queue_lock_path(daemon_dir: impl AsRef<Path>) -> PathBuf {
+    workers_dir(daemon_dir).join("dispatch-queue.lock")
+}
+
+/// RAII guard for the dispatch queue exclusive lock.
+/// The lock is released when this value is dropped (the file handle closes).
+pub struct DispatchQueueLock {
+    _lock_file: File,
+}
+
+/// Acquire an exclusive advisory lock on the dispatch queue.
+/// Blocks until no other writer holds the lock.
+/// All callers that perform a read-compute-write cycle on the dispatch queue
+/// must hold this lock for the duration of the critical section.
+pub fn acquire_dispatch_queue_lock(
+    daemon_dir: impl AsRef<Path>,
+) -> DispatchQueueResult<DispatchQueueLock> {
+    let path = dispatch_queue_lock_path(daemon_dir.as_ref());
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&path)?;
+    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if ret != 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(DispatchQueueLock { _lock_file: file })
 }
 
 pub fn build_dispatch_queue_record(params: DispatchQueueRecordParams) -> DispatchQueueRecord {

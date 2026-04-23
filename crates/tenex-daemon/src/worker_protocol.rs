@@ -176,6 +176,8 @@ pub struct InvalidWorkerFrameFixture {
 pub struct AgentWorkerExecutionFlags {
     pub is_delegation_completion: bool,
     pub has_pending_delegations: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_delegation_ids: Vec<String>,
     pub debug: bool,
 }
 
@@ -538,9 +540,33 @@ fn validate_execute(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     let flags = require_object(object, "executionFlags")?;
     require_bool(flags, "isDelegationCompletion")?;
     require_bool(flags, "hasPendingDelegations")?;
+    optional_string_array(flags, "pendingDelegationIds")?;
     require_bool(flags, "debug")?;
 
     Ok(())
+}
+
+fn optional_string_array<'a>(
+    object: &'a Map<String, Value>,
+    key: &'static str,
+) -> WorkerProtocolResult<Option<Vec<&'a str>>> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    let Some(array) = value.as_array() else {
+        return Err(WorkerProtocolError::InvalidField(key));
+    };
+    let mut strings = Vec::with_capacity(array.len());
+    for item in array {
+        let Some(string) = item.as_str() else {
+            return Err(WorkerProtocolError::InvalidField(key));
+        };
+        if string.is_empty() {
+            return Err(WorkerProtocolError::InvalidField(key));
+        }
+        strings.push(string);
+    }
+    Ok(Some(strings))
 }
 
 fn validate_inject(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
@@ -1542,6 +1568,14 @@ mod tests {
                 has_pending_delegations: flags["hasPendingDelegations"]
                     .as_bool()
                     .expect("fixture pending flag must be bool"),
+                pending_delegation_ids: flags["pendingDelegationIds"]
+                    .as_array()
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| id.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 debug: flags["debug"]
                     .as_bool()
                     .expect("fixture debug flag must be bool"),

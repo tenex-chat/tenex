@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::dispatch_queue::{DispatchQueueError, append_dispatch_queue_record};
+use crate::dispatch_queue::{
+    DispatchQueueError, acquire_dispatch_queue_lock, append_dispatch_queue_record,
+    replay_dispatch_queue,
+};
 use crate::ral_journal::{RalJournalError, append_ral_journal_record};
 use crate::worker_completion::WorkerCompletionPlan;
 use crate::worker_launch_lock::{
@@ -45,14 +48,24 @@ pub fn apply_worker_completion(
 ) -> Result<AppliedWorkerCompletion, WorkerCompletionApplyError> {
     let WorkerCompletionApplyInput {
         daemon_dir,
-        plan,
+        mut plan,
         locks,
     } = input;
 
     append_ral_journal_record(&daemon_dir, &plan.ral_journal_record)
         .map_err(WorkerCompletionApplyError::from)?;
 
-    if let Some(record) = &plan.dispatch_queue_record {
+    if let Some(record) = &mut plan.dispatch_queue_record {
+        // Acquire the lock and re-read the current queue tail so the terminal sequence
+        // is computed against the actual last_sequence at write time, not the one that
+        // was sampled before the worker session started (which may be stale if the
+        // background subscription thread enqueued new dispatches during the session).
+        let _dispatch_lock =
+            acquire_dispatch_queue_lock(&daemon_dir).map_err(WorkerCompletionApplyError::from)?;
+        let current_last = replay_dispatch_queue(&daemon_dir)
+            .map_err(WorkerCompletionApplyError::from)?
+            .last_sequence;
+        record.sequence = current_last + 1;
         append_dispatch_queue_record(&daemon_dir, record)
             .map_err(WorkerCompletionApplyError::from)?;
     }

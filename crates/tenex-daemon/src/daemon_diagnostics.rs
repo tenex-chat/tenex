@@ -1350,6 +1350,7 @@ mod tests {
             execution_flags: AgentWorkerExecutionFlags {
                 is_delegation_completion: false,
                 has_pending_delegations: false,
+                pending_delegation_ids: Vec::new(),
                 debug: false,
             },
             lock_owner: build_ral_lock_info(100, "host-alpha", 1_710_001_000_000),
@@ -1359,6 +1360,8 @@ mod tests {
             frame_observed_at: 1_710_001_000_040,
             publish,
             telegram_egress: None,
+            operations_status: None,
+            live_publish_maintenance: None,
             terminal: DaemonWorkerTerminalRuntimeInput {
                 journal_sequence: 3,
                 journal_timestamp: 1_710_001_000_050,

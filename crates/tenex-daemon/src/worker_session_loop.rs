@@ -14,13 +14,13 @@ use crate::worker_message_flow::{
 use crate::worker_protocol::{WorkerProtocolError, decode_agent_worker_protocol_frame};
 use crate::worker_runtime_state::WorkerRuntimeState;
 
-#[derive(Debug)]
 pub struct WorkerSessionLoopInput<'a> {
     pub daemon_dir: &'a Path,
     pub runtime_state: &'a mut WorkerRuntimeState,
     pub worker_id: &'a str,
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
+    pub live_publish_maintenance: Option<&'a mut dyn FnMut(&Path, u64) -> Result<(), String>>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
     pub max_frames: u64,
 }
@@ -61,6 +61,8 @@ where
     },
     #[error("worker session loop exceeded max frame count {max_frames} after {frame_count} frames")]
     MaxFrameLimitExceeded { frame_count: u64, max_frames: u64 },
+    #[error("worker session publish maintenance failed: {message}")]
+    PublishMaintenance { message: String },
 }
 
 pub fn run_worker_session_loop<S>(
@@ -120,13 +122,28 @@ where
                     final_reason: WorkerSessionLoopFinalReason::BootFailureCandidate,
                 });
             }
+            WorkerMessageFlowOutcome::PublishRequestHandled { .. } => {
+                run_live_publish_maintenance(&mut input)?;
+            }
             WorkerMessageFlowOutcome::HeartbeatUpdated { .. }
-            | WorkerMessageFlowOutcome::PublishRequestHandled { .. }
             | WorkerMessageFlowOutcome::ControlTelemetry { .. }
             | WorkerMessageFlowOutcome::StreamTelemetry { .. }
             | WorkerMessageFlowOutcome::PublishedNotification { .. } => {}
         }
     }
+}
+
+fn run_live_publish_maintenance<E>(
+    input: &mut WorkerSessionLoopInput<'_>,
+) -> Result<(), WorkerSessionLoopError<E>>
+where
+    E: Error + Send + Sync + 'static,
+{
+    if let Some(maintenance) = input.live_publish_maintenance.as_deref_mut() {
+        maintenance(input.daemon_dir, input.observed_at)
+            .map_err(|message| WorkerSessionLoopError::PublishMaintenance { message })?;
+    }
+    Ok(())
 }
 
 fn is_terminal_message(message: &Value) -> bool {
@@ -256,6 +273,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
                     scheduler: &scheduler,
                     dispatch_state: &dispatch_state,
@@ -294,6 +312,13 @@ mod tests {
         };
         let mut runtime_state =
             runtime_state_for("worker-alpha", identity_with_agent(&fixture.pubkey));
+        let maintenance_calls = std::cell::Cell::new(0_u64);
+        let mut live_publish_maintenance = |daemon_dir_seen: &Path, now_seen: u64| {
+            assert_eq!(daemon_dir_seen, daemon_dir.as_path());
+            assert_eq!(now_seen, 1_710_000_403_000);
+            maintenance_calls.set(maintenance_calls.get() + 1);
+            Ok(())
+        };
 
         let outcome = run_worker_session_loop(
             &mut worker,
@@ -308,6 +333,7 @@ mod tests {
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
+                live_publish_maintenance: Some(&mut live_publish_maintenance),
                 terminal: None,
                 max_frames: 4,
             },
@@ -322,6 +348,7 @@ mod tests {
         assert_eq!(worker.sent_messages.len(), 1);
         assert_eq!(worker.sent_messages[0]["type"], "publish_result");
         assert_eq!(worker.sent_messages[0]["status"], "accepted");
+        assert_eq!(maintenance_calls.get(), 1);
         assert!(runtime_state.get_worker("worker-alpha").is_some());
 
         cleanup_temp_dir(daemon_dir);
@@ -344,6 +371,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                live_publish_maintenance: None,
                 terminal: None,
                 max_frames: 4,
             },
@@ -377,6 +405,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                live_publish_maintenance: None,
                 terminal: None,
                 max_frames: 4,
             },
@@ -405,6 +434,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                live_publish_maintenance: None,
                 terminal: None,
                 max_frames: 1,
             },
@@ -461,6 +491,7 @@ mod tests {
                 worker_id: &worker_id,
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
                     scheduler: &scheduler,
                     dispatch_state: &dispatch_state,

@@ -111,6 +111,8 @@ struct ScheduledTaskDispatchInputRaw {
 struct AgentWorkerExecutionFlagsRaw {
     is_delegation_completion: bool,
     has_pending_delegations: bool,
+    #[serde(default)]
+    pending_delegation_ids: Vec<String>,
     debug: bool,
 }
 
@@ -129,6 +131,7 @@ impl From<AgentWorkerExecutionFlagsRaw> for AgentWorkerExecutionFlags {
         Self {
             is_delegation_completion: raw.is_delegation_completion,
             has_pending_delegations: raw.has_pending_delegations,
+            pending_delegation_ids: raw.pending_delegation_ids,
             debug: raw.debug,
         }
     }
@@ -421,6 +424,7 @@ mod tests {
             execution_flags: AgentWorkerExecutionFlags {
                 is_delegation_completion: false,
                 has_pending_delegations: false,
+                pending_delegation_ids: Vec::new(),
                 debug: true,
             },
             task_diagnostic_metadata: ScheduledTaskDispatchTaskDiagnosticMetadata {
