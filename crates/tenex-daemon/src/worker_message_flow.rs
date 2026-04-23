@@ -490,10 +490,7 @@ fn handle_delegation_killed(
         env!("CARGO_PKG_VERSION"),
         sequence,
         input.observed_at,
-        format!(
-            "{}:delegation_killed",
-            message_plan.metadata.correlation_id
-        ),
+        format!("{}:delegation_killed", message_plan.metadata.correlation_id),
         RalJournalEvent::DelegationKilled {
             identity: active_worker.identity,
             delegation_conversation_id,

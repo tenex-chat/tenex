@@ -41,15 +41,14 @@ pub fn append_notified(
     entry: &InterventionNotifiedEntry,
 ) -> InterventionNotifiedLogResult<()> {
     let dir = intervention_dir(&daemon_dir);
-    fs::create_dir_all(&dir).map_err(|source| InterventionNotifiedLogError::Io {
-        path: dir,
-        source,
-    })?;
+    fs::create_dir_all(&dir)
+        .map_err(|source| InterventionNotifiedLogError::Io { path: dir, source })?;
     let path = notified_log_path(&daemon_dir);
-    let line = serde_json::to_string(entry).map_err(|source| InterventionNotifiedLogError::Json {
-        path: path.clone(),
-        source,
-    })?;
+    let line =
+        serde_json::to_string(entry).map_err(|source| InterventionNotifiedLogError::Json {
+            path: path.clone(),
+            source,
+        })?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -82,12 +81,11 @@ pub fn read_notified_entries(
         if line.trim().is_empty() {
             continue;
         }
-        let entry: InterventionNotifiedEntry = serde_json::from_str(line).map_err(|source| {
-            InterventionNotifiedLogError::Json {
+        let entry: InterventionNotifiedEntry =
+            serde_json::from_str(line).map_err(|source| InterventionNotifiedLogError::Json {
                 path: path.clone(),
                 source,
-            }
-        })?;
+            })?;
         entries.push(entry);
     }
     Ok(entries)
@@ -131,10 +129,8 @@ pub fn compact(
     ttl_ms: u64,
 ) -> InterventionNotifiedLogResult<usize> {
     let dir = intervention_dir(&daemon_dir);
-    fs::create_dir_all(&dir).map_err(|source| InterventionNotifiedLogError::Io {
-        path: dir,
-        source,
-    })?;
+    fs::create_dir_all(&dir)
+        .map_err(|source| InterventionNotifiedLogError::Io { path: dir, source })?;
     let retained: Vec<InterventionNotifiedEntry> = read_notified_entries(&daemon_dir)?
         .into_iter()
         .filter(|entry| now_ms.saturating_sub(entry.notified_at_ms) < ttl_ms)
@@ -143,10 +139,11 @@ pub fn compact(
     let path = notified_log_path(&daemon_dir);
     let tmp = path.with_extension(format!("jsonl.tmp.{}", std::process::id()));
     {
-        let mut file = fs::File::create(&tmp).map_err(|source| InterventionNotifiedLogError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
+        let mut file =
+            fs::File::create(&tmp).map_err(|source| InterventionNotifiedLogError::Io {
+                path: tmp.clone(),
+                source,
+            })?;
         for entry in &retained {
             let line = serde_json::to_string(entry).map_err(|source| {
                 InterventionNotifiedLogError::Json {
@@ -196,9 +193,7 @@ mod tests {
     #[test]
     fn unknown_conversation_is_not_recently_notified() {
         let dir = unique_temp_daemon_dir();
-        assert!(
-            !is_notified_recently(&dir, "p", "c", 1_000, 500).expect("read")
-        );
+        assert!(!is_notified_recently(&dir, "p", "c", 1_000, 500).expect("read"));
         fs::remove_dir_all(&dir).ok();
     }
 

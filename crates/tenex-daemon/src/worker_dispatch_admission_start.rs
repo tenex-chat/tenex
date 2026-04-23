@@ -217,10 +217,12 @@ where
         )?;
 
     let delegation_snapshot = load_delegation_snapshot(daemon_dir, &admitted.leased_record)
-        .map_err(|source| WorkerDispatchAdmissionStartError::DelegationSnapshot {
-            admission: Box::new(admitted.clone()),
-            source: Box::new(source),
-        })?;
+        .map_err(
+            |source| WorkerDispatchAdmissionStartError::DelegationSnapshot {
+                admission: Box::new(admitted.clone()),
+                source: Box::new(source),
+            },
+        )?;
 
     let launch_plan = plan_launch_for_admitted_dispatch(
         &admitted,

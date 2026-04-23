@@ -171,7 +171,11 @@ pub fn process_verified_nostr_event(
             input.writer_version,
             input.timestamp,
         )?;
-        crate::stdout_status::print_agent_installed(&install.slug, &install.agent_pubkey, install.already_installed);
+        crate::stdout_status::print_agent_installed(
+            &install.slug,
+            &install.agent_pubkey,
+            install.already_installed,
+        );
         return Ok(NostrIngressOutcome::AgentInstalled { class, install });
     }
 

@@ -87,9 +87,7 @@ fn extract_root_author(state: &Value, conversation_id: &str) -> Option<String> {
 
 fn message_author_pubkey(message: &Value) -> Option<String> {
     if let Some(sender_principal) = message.get("senderPrincipal")
-        && let Some(linked) = sender_principal
-            .get("linkedPubkey")
-            .and_then(Value::as_str)
+        && let Some(linked) = sender_principal.get("linkedPubkey").and_then(Value::as_str)
         && !linked.is_empty()
     {
         return Some(linked.to_string());
@@ -114,7 +112,9 @@ fn message_matches_user_after(message: &Value, user_pubkey: &str, after_ms: u64)
         return false;
     }
     let timestamp_ms = match message.get("timestamp") {
-        Some(Value::Number(number)) => number.as_u64().or_else(|| number.as_i64().map(|v| v as u64)),
+        Some(Value::Number(number)) => number
+            .as_u64()
+            .or_else(|| number.as_i64().map(|v| v as u64)),
         _ => None,
     };
     timestamp_ms.is_some_and(|ts| ts > after_ms)

@@ -480,10 +480,12 @@ where
                 &admitted.leased_record.ral.conversation_id,
             )
         })
-        .map_err(|source| WorkerDispatchAdmissionStartError::DelegationSnapshot {
-            admission: Box::new(admitted.clone()),
-            source: Box::new(source),
-        })?;
+        .map_err(
+            |source| WorkerDispatchAdmissionStartError::DelegationSnapshot {
+                admission: Box::new(admitted.clone()),
+                source: Box::new(source),
+            },
+        )?;
 
     let launch_plan = plan_worker_launch(WorkerLaunchPlanInput {
         dispatch: &admitted.leased_record,
@@ -772,7 +774,12 @@ where
     .entered();
     let tenex_base_dir = operations_status.as_ref().map(|o| o.tenex_base_dir);
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
-    crate::stdout_status::print_agent_started(&project_id, &agent_pubkey, &worker_id, tenex_base_dir);
+    crate::stdout_status::print_agent_started(
+        &project_id,
+        &agent_pubkey,
+        &worker_id,
+        tenex_base_dir,
+    );
 
     let active_pubkeys = runtime_state.agent_pubkeys_for_conversation(
         &started.runtime_started.identity.project_id,
@@ -874,7 +881,12 @@ where
         .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
 
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session completed");
-    crate::stdout_status::print_agent_stopped(&project_id, &agent_pubkey, &worker_id, tenex_base_dir);
+    crate::stdout_status::print_agent_stopped(
+        &project_id,
+        &agent_pubkey,
+        &worker_id,
+        tenex_base_dir,
+    );
     Ok(DaemonWorkerRuntimeOutcome::SessionCompleted {
         dispatch_id,
         worker_id,

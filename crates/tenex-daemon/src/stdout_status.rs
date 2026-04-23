@@ -11,14 +11,14 @@ const YELLOW: &str = "\x1b[33m";
 const RED: &str = "\x1b[31m";
 
 static PALETTE: &[&str] = &[
-    "\x1b[36m",  // cyan
-    "\x1b[35m",  // magenta
-    "\x1b[34m",  // blue
-    "\x1b[96m",  // bright cyan
-    "\x1b[95m",  // bright magenta
-    "\x1b[94m",  // bright blue
-    "\x1b[93m",  // bright yellow
-    "\x1b[92m",  // bright green
+    "\x1b[36m", // cyan
+    "\x1b[35m", // magenta
+    "\x1b[34m", // blue
+    "\x1b[96m", // bright cyan
+    "\x1b[95m", // bright magenta
+    "\x1b[94m", // bright blue
+    "\x1b[93m", // bright yellow
+    "\x1b[92m", // bright green
 ];
 
 fn color_for(key: &str) -> &'static str {

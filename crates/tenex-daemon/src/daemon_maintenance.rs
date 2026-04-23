@@ -11,6 +11,10 @@ use crate::backend_events_maintenance::{
 };
 use crate::backend_events_tick::{BackendEventsTickProject, ensure_backend_events_tasks};
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
+use crate::intervention::{
+    InterventionMaintenanceError, InterventionMaintenanceInput, InterventionMaintenanceOutcome,
+    run_intervention_maintenance,
+};
 use crate::periodic_tick_state::{
     PeriodicTickStateError, read_periodic_scheduler_state, write_periodic_scheduler_state,
 };
@@ -26,10 +30,6 @@ use crate::publish_outbox::{
 use crate::scheduled_task_maintenance::{
     ScheduledTaskMaintenanceError, ScheduledTaskMaintenanceOutcome,
     ScheduledTaskMaintenanceSharedSchedulerInput, maintain_scheduled_tasks_from_shared_scheduler,
-};
-use crate::intervention::{
-    InterventionMaintenanceError, InterventionMaintenanceInput, InterventionMaintenanceOutcome,
-    run_intervention_maintenance,
 };
 use crate::scheduler_wakeups::{
     SchedulerWakeupError, SchedulerWakeupsMaintenanceReport, run_scheduler_maintenance,

@@ -72,8 +72,9 @@ mod tests {
 
         write_worker_stop_request(dir.path(), &request).expect("write must succeed");
 
-        let taken = take_worker_stop_request(dir.path(), &request.agent_pubkey, &request.conversation_id)
-            .expect("take must succeed");
+        let taken =
+            take_worker_stop_request(dir.path(), &request.agent_pubkey, &request.conversation_id)
+                .expect("take must succeed");
         assert_eq!(taken, Some(request));
     }
 
@@ -98,8 +99,9 @@ mod tests {
         write_worker_stop_request(dir.path(), &request).expect("write must succeed");
         take_worker_stop_request(dir.path(), &request.agent_pubkey, &request.conversation_id)
             .expect("first take must succeed");
-        let second = take_worker_stop_request(dir.path(), &request.agent_pubkey, &request.conversation_id)
-            .expect("second take must succeed");
+        let second =
+            take_worker_stop_request(dir.path(), &request.agent_pubkey, &request.conversation_id)
+                .expect("second take must succeed");
         assert_eq!(second, None);
     }
 }

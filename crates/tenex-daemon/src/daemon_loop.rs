@@ -346,13 +346,7 @@ pub fn run_daemon_tick_once_from_filesystem<P: PublishOutboxRelayPublisher>(
         retry_policy,
     })?
     .maintenance_report;
-    log_daemon_tick_publish_summary(
-        "daemon tick",
-        now_ms,
-        &maintenance,
-        None,
-        &publish_outbox,
-    );
+    log_daemon_tick_publish_summary("daemon tick", now_ms, &maintenance, None, &publish_outbox);
 
     Ok(DaemonTickOutcome {
         maintenance,
@@ -1364,7 +1358,6 @@ mod tests {
         assert_eq!(publisher.event_ids.len(), 3);
     }
 
-
     #[test]
     fn filesystem_tick_with_worker_drains_publish_outbox_after_worker_runtime_error() {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
@@ -1782,5 +1775,4 @@ mod tests {
         let (xonly, _) = keypair.x_only_public_key();
         hex::encode(xonly.serialize())
     }
-
 }

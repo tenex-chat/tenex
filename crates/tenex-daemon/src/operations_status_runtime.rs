@@ -189,21 +189,22 @@ mod tests {
         let agent_one = pubkey_hex(0x05);
         let agent_two = pubkey_hex(0x06);
 
-        let outcome = publish_operations_status_conversation(OperationsStatusPublishConversationInput {
-            tenex_base_dir: &tenex_base_dir,
-            daemon_dir: &daemon_dir,
-            project_id: "demo-project",
-            project_owner_pubkey: &project_owner,
-            project_d_tag: "demo-project",
-            created_at: 1_700_000_020,
-            accepted_at: 1_700_000_020_100,
-            request_timestamp: 1_700_000_020_050,
-            conversation_id: &conversation_id,
-            agent_pubkeys: &[agent_one.clone(), agent_two.clone()],
-            variant: "active",
-            request_sequence: OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE,
-        })
-        .expect("operations status must publish");
+        let outcome =
+            publish_operations_status_conversation(OperationsStatusPublishConversationInput {
+                tenex_base_dir: &tenex_base_dir,
+                daemon_dir: &daemon_dir,
+                project_id: "demo-project",
+                project_owner_pubkey: &project_owner,
+                project_d_tag: "demo-project",
+                created_at: 1_700_000_020,
+                accepted_at: 1_700_000_020_100,
+                request_timestamp: 1_700_000_020_050,
+                conversation_id: &conversation_id,
+                agent_pubkeys: &[agent_one.clone(), agent_two.clone()],
+                variant: "active",
+                request_sequence: OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE,
+            })
+            .expect("operations status must publish");
 
         let record = &outcome.publish.record;
         assert_eq!(record.event.kind, OPERATIONS_STATUS_KIND);
@@ -262,21 +263,22 @@ mod tests {
         let project_owner = pubkey_hex(0x02);
         let conversation_id = event_id_hex(0x31);
 
-        let outcome = publish_operations_status_conversation(OperationsStatusPublishConversationInput {
-            tenex_base_dir: &tenex_base_dir,
-            daemon_dir: &daemon_dir,
-            project_id: "demo-project",
-            project_owner_pubkey: &project_owner,
-            project_d_tag: "demo-project",
-            created_at: 1_700_000_021,
-            accepted_at: 1_700_000_021_100,
-            request_timestamp: 1_700_000_021_050,
-            conversation_id: &conversation_id,
-            agent_pubkeys: &[],
-            variant: "cleanup",
-            request_sequence: OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE + 1,
-        })
-        .expect("cleanup operations status must publish");
+        let outcome =
+            publish_operations_status_conversation(OperationsStatusPublishConversationInput {
+                tenex_base_dir: &tenex_base_dir,
+                daemon_dir: &daemon_dir,
+                project_id: "demo-project",
+                project_owner_pubkey: &project_owner,
+                project_d_tag: "demo-project",
+                created_at: 1_700_000_021,
+                accepted_at: 1_700_000_021_100,
+                request_timestamp: 1_700_000_021_050,
+                conversation_id: &conversation_id,
+                agent_pubkeys: &[],
+                variant: "cleanup",
+                request_sequence: OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE + 1,
+            })
+            .expect("cleanup operations status must publish");
 
         let record = &outcome.publish.record;
         assert_eq!(record.event.kind, OPERATIONS_STATUS_KIND);

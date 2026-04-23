@@ -157,8 +157,8 @@ mod tests {
             }
             other => panic!("expected InterventionReview target, got {other:?}"),
         }
-        let pending = list_pending_for_conversation(&dir, "proj-alpha", "conv-alpha")
-            .expect("list pending");
+        let pending =
+            list_pending_for_conversation(&dir, "proj-alpha", "conv-alpha").expect("list pending");
         assert_eq!(pending.len(), 1);
         fs::remove_dir_all(&dir).ok();
     }
@@ -172,8 +172,8 @@ mod tests {
         inputs.scheduled_for_ms = 15_000;
         arm_review(&dir, inputs.clone(), 2_000).expect("second arm");
 
-        let pending = list_pending_for_conversation(&dir, "proj-alpha", "conv-alpha")
-            .expect("list pending");
+        let pending =
+            list_pending_for_conversation(&dir, "proj-alpha", "conv-alpha").expect("list pending");
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].scheduled_for, 15_000);
         fs::remove_dir_all(&dir).ok();
@@ -184,11 +184,11 @@ mod tests {
         let dir = unique_temp_daemon_dir();
         let inputs = sample_inputs();
         arm_review(&dir, inputs, 1_000).expect("arm");
-        let cancelled = cancel_pending_for_conversation(&dir, "proj-alpha", "conv-alpha")
-            .expect("cancel");
+        let cancelled =
+            cancel_pending_for_conversation(&dir, "proj-alpha", "conv-alpha").expect("cancel");
         assert_eq!(cancelled, 1);
-        let pending = list_pending_for_conversation(&dir, "proj-alpha", "conv-alpha")
-            .expect("list pending");
+        let pending =
+            list_pending_for_conversation(&dir, "proj-alpha", "conv-alpha").expect("list pending");
         assert!(pending.is_empty());
         fs::remove_dir_all(&dir).ok();
     }

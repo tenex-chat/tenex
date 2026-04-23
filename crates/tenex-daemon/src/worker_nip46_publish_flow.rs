@@ -96,8 +96,8 @@ fn build_outcome(
         }
     };
 
-    let unsigned_json = build_unsigned_json(&parsed)
-        .map_err(WorkerNip46PublishFlowError::JsonBuild)?;
+    let unsigned_json =
+        build_unsigned_json(&parsed).map_err(WorkerNip46PublishFlowError::JsonBuild)?;
 
     let signed = match client.sign_event_json(&unsigned_json) {
         Ok(signed) => signed,
@@ -121,7 +121,8 @@ fn build_outcome(
         event: signed,
     };
 
-    let record = accept_backend_signed_publish_event(input.daemon_dir, outbox_input, input.accepted_at)?;
+    let record =
+        accept_backend_signed_publish_event(input.daemon_dir, outbox_input, input.accepted_at)?;
 
     let publish_result = build_accepted_result(input, &parsed, &record.event.id);
     Ok(WorkerNip46PublishFlowOutcome {
@@ -236,20 +237,21 @@ fn build_failure_result(
 }
 
 fn build_unsigned_json(parsed: &Nip46PublishRequest) -> Result<String, serde_json::Error> {
-    let created_at = parsed
-        .created_at
-        .unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time after epoch")
-                .as_secs()
-        });
+    let created_at = parsed.created_at.unwrap_or_else(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_secs()
+    });
 
     let mut object = serde_json::Map::new();
     object.insert("kind".to_string(), Value::from(parsed.kind));
     object.insert("content".to_string(), Value::from(parsed.content.clone()));
     object.insert("tags".to_string(), Value::from(parsed.tags.clone()));
-    object.insert("pubkey".to_string(), Value::from(parsed.owner_pubkey.clone()));
+    object.insert(
+        "pubkey".to_string(),
+        Value::from(parsed.owner_pubkey.clone()),
+    );
     object.insert("created_at".to_string(), Value::from(created_at));
     if let Some(explanation) = &parsed.tenex_explanation {
         object.insert(
@@ -304,11 +306,9 @@ fn parse_request(message: &Value) -> Result<Nip46PublishRequest, WorkerNip46Publ
 
     let created_at = match unsigned.get("created_at") {
         None => None,
-        Some(value) => Some(
-            value
-                .as_u64()
-                .ok_or(WorkerNip46PublishFlowError::InvalidUnsignedField("created_at"))?,
-        ),
+        Some(value) => Some(value.as_u64().ok_or(
+            WorkerNip46PublishFlowError::InvalidUnsignedField("created_at"),
+        )?),
     };
 
     let tenex_explanation = match object.get("tenexExplanation") {
@@ -317,7 +317,9 @@ fn parse_request(message: &Value) -> Result<Nip46PublishRequest, WorkerNip46Publ
         Some(value) => Some(
             value
                 .as_str()
-                .ok_or(WorkerNip46PublishFlowError::InvalidField("tenexExplanation"))?
+                .ok_or(WorkerNip46PublishFlowError::InvalidField(
+                    "tenexExplanation",
+                ))?
                 .to_string(),
         ),
     };
@@ -569,10 +571,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "tenex-worker-nip46-{}-{nanos}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("tenex-worker-nip46-{}-{nanos}", std::process::id()))
     }
 
     fn build_request_message(
@@ -935,4 +934,3 @@ mod tests {
         std::fs::remove_dir_all(&daemon_dir).ok();
     }
 }
-

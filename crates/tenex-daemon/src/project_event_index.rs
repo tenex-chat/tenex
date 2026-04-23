@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::nostr_classification::KIND_PROJECT;
 use crate::nostr_event::SignedNostrEvent;
-use crate::project_status_descriptors::{
-    ProjectStatusDescriptor, ProjectStatusDescriptorReport,
-};
+use crate::project_status_descriptors::{ProjectStatusDescriptor, ProjectStatusDescriptorReport};
 
 /// In-memory index of kind 31933 project events, keyed by
 /// `(owner_pubkey, d_tag)`. The daemon owns one instance at the top of its

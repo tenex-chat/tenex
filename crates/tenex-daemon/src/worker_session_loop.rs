@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::worker_abort::DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS;
 use crate::worker_dispatch_execution::WorkerDispatchSession;
 use crate::worker_frame_pump::WorkerFrameReceiver;
-use crate::worker_abort::DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS;
 use crate::worker_injection_queue::{
     WorkerInjectionMarkSentInput, WorkerInjectionQueueError, WorkerInjectionQueueRecord,
     WorkerInjectionRole, mark_worker_injection_sent, pending_worker_injections_for,

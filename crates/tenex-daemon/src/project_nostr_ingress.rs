@@ -141,8 +141,9 @@ fn write_agent_index_project_entry(
 
     let index_path = agents_dir.join(AGENT_INDEX_FILE_NAME);
     let mut index: RawAgentIndex = match fs::read_to_string(&index_path) {
-        Ok(content) => serde_json::from_str(&content)
-            .map_err(ProjectNostrIngressError::ParseAgentIndex)?,
+        Ok(content) => {
+            serde_json::from_str(&content).map_err(ProjectNostrIngressError::ParseAgentIndex)?
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => RawAgentIndex::default(),
         Err(source) => return Err(ProjectNostrIngressError::ReadAgentIndex(source)),
     };
@@ -170,10 +171,7 @@ fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .expect("agent index path must have a UTF-8 file name");
-    let temp_path = parent.join(format!(
-        "{file_name}.tmp.{}",
-        std::process::id()
-    ));
+    let temp_path = parent.join(format!("{file_name}.tmp.{}", std::process::id()));
 
     {
         let mut file = OpenOptions::new()
@@ -198,12 +196,12 @@ struct AgentIndexWriteLock {
 fn acquire_agent_index_write_lock(
     agents_dir: &Path,
 ) -> Result<AgentIndexWriteLock, ProjectNostrIngressError> {
-    let process_guard = AGENT_INDEX_WRITE_MUTEX
-        .lock()
-        .map_err(|_| ProjectNostrIngressError::AcquireAgentIndexLock {
+    let process_guard = AGENT_INDEX_WRITE_MUTEX.lock().map_err(|_| {
+        ProjectNostrIngressError::AcquireAgentIndexLock {
             path: agents_dir.join(AGENT_INDEX_LOCK_FILE_NAME),
             source: io::Error::other("agent index write mutex poisoned"),
-        })?;
+        }
+    })?;
 
     let lock_path = agents_dir.join(AGENT_INDEX_LOCK_FILE_NAME);
     let lock_file = OpenOptions::new()
@@ -491,7 +489,10 @@ mod tests {
             .as_array()
             .expect("byProject entry must be an array");
 
-        let pubkeys: Vec<&str> = by_project.iter().map(|value| value.as_str().unwrap()).collect();
+        let pubkeys: Vec<&str> = by_project
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
         assert_eq!(
             pubkeys,
             vec![agent1.as_str(), agent3.as_str()],

@@ -248,10 +248,12 @@ fn try_arm_completion(
         return Ok(ArmOutcome::Skipped(eligibility));
     }
 
-    let user_pubkey = root_event_author
-        .expect("root author is Some when eligibility returns Arm");
+    let user_pubkey = root_event_author.expect("root author is Some when eligibility returns Arm");
     let timeout_ms = u64::from(config.intervention.timeout_seconds).saturating_mul(1_000);
-    let scheduled_for_ms = record.timestamp.saturating_add(timeout_ms).max(input.now_ms);
+    let scheduled_for_ms = record
+        .timestamp
+        .saturating_add(timeout_ms)
+        .max(input.now_ms);
 
     arm_review(
         input.daemon_dir,

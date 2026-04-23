@@ -13,8 +13,8 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, connect};
 
 use crate::agent_definition_watcher::{
-    AGENT_DEFINITION_WATCHER_WRITER, AgentDefinitionEntry, AgentDefinitionSnapshot,
-    AgentDefinitionWatcherError, AGENT_DEFINITION_WATCHER_SCHEMA_VERSION, read_agent_definitions,
+    AGENT_DEFINITION_WATCHER_SCHEMA_VERSION, AGENT_DEFINITION_WATCHER_WRITER, AgentDefinitionEntry,
+    AgentDefinitionSnapshot, AgentDefinitionWatcherError, read_agent_definitions,
     write_agent_definitions,
 };
 use crate::nostr_event::SignedNostrEvent;
@@ -82,7 +82,14 @@ pub fn install_agent_from_nostr(
     let nsec = encode_nsec(&secret_key);
 
     write_agent_config(tenex_base_dir, &pubkey_hex, &nsec, &parsed)?;
-    upsert_agent_definitions(daemon_dir, &pubkey_hex, &parsed, &definition_event_id, writer_version, timestamp)?;
+    upsert_agent_definitions(
+        daemon_dir,
+        &pubkey_hex,
+        &parsed,
+        &definition_event_id,
+        writer_version,
+        timestamp,
+    )?;
 
     Ok(AgentInstallOutcome {
         agent_pubkey: pubkey_hex,
@@ -105,7 +112,10 @@ fn extract_definition_event_id(event: &SignedNostrEvent) -> Result<String, Agent
     Err(AgentInstallError::MissingDefinitionEventId)
 }
 
-fn find_existing_entry(daemon_dir: &Path, definition_event_id: &str) -> Option<AgentDefinitionEntry> {
+fn find_existing_entry(
+    daemon_dir: &Path,
+    definition_event_id: &str,
+) -> Option<AgentDefinitionEntry> {
     let snapshot = read_agent_definitions(daemon_dir).ok()??;
     snapshot
         .definitions
@@ -243,10 +253,16 @@ fn write_agent_config(
         doc.insert("role".to_string(), Value::String(role.clone()));
     }
     if let Some(ref instructions) = parsed.instructions {
-        doc.insert("instructions".to_string(), Value::String(instructions.clone()));
+        doc.insert(
+            "instructions".to_string(),
+            Value::String(instructions.clone()),
+        );
     }
     if let Some(ref use_criteria) = parsed.use_criteria {
-        doc.insert("useCriteria".to_string(), Value::String(use_criteria.clone()));
+        doc.insert(
+            "useCriteria".to_string(),
+            Value::String(use_criteria.clone()),
+        );
     }
     if let Some(ref category) = parsed.category {
         doc.insert("category".to_string(), Value::String(category.clone()));
@@ -256,7 +272,13 @@ fn write_agent_config(
     if !parsed.tools.is_empty() {
         default_config.insert(
             "tools".to_string(),
-            Value::Array(parsed.tools.iter().map(|t| Value::String(t.clone())).collect()),
+            Value::Array(
+                parsed
+                    .tools
+                    .iter()
+                    .map(|t| Value::String(t.clone()))
+                    .collect(),
+            ),
         );
     }
     if !default_config.is_empty() {
@@ -285,8 +307,8 @@ fn upsert_agent_definitions(
         .map(|d| d.as_secs())
         .unwrap_or(timestamp / 1_000);
 
-    let mut existing = read_agent_definitions(daemon_dir)?
-        .unwrap_or_else(|| AgentDefinitionSnapshot {
+    let mut existing =
+        read_agent_definitions(daemon_dir)?.unwrap_or_else(|| AgentDefinitionSnapshot {
             schema_version: AGENT_DEFINITION_WATCHER_SCHEMA_VERSION,
             writer: AGENT_DEFINITION_WATCHER_WRITER.to_string(),
             writer_version: writer_version.to_string(),
@@ -315,7 +337,9 @@ fn upsert_agent_definitions(
         .iter()
         .any(|entry| entry.event_id == definition_event_id);
     if replaced {
-        existing.definitions.retain(|entry| entry.event_id != definition_event_id);
+        existing
+            .definitions
+            .retain(|entry| entry.event_id != definition_event_id);
     }
     existing.definitions.push(new_entry);
     existing.writer = AGENT_DEFINITION_WATCHER_WRITER.to_string();
@@ -462,8 +486,7 @@ mod tests {
     fn extracts_definition_event_id_from_e_tag() {
         let event_id = event_id_hex(0xcc);
         let event = signed_event(24001, vec![vec!["e", event_id.as_str()]]);
-        let extracted =
-            extract_definition_event_id(&event).expect("e tag must be extracted");
+        let extracted = extract_definition_event_id(&event).expect("e tag must be extracted");
         assert_eq!(extracted, event_id);
     }
 
@@ -507,7 +530,10 @@ mod tests {
         assert_eq!(parsed.instructions.as_deref(), Some("Be helpful."));
         assert_eq!(parsed.use_criteria.as_deref(), Some("when you need help"));
         assert_eq!(parsed.category.as_deref(), Some("worker"));
-        assert_eq!(parsed.tools, vec!["fs_read".to_string(), "shell".to_string()]);
+        assert_eq!(
+            parsed.tools,
+            vec!["fs_read".to_string(), "shell".to_string()]
+        );
         assert_eq!(parsed.created_at, 1_710_001_000);
         assert_eq!(parsed.author_pubkey, author);
     }
