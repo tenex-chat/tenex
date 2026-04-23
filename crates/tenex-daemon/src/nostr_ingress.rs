@@ -1,3 +1,4 @@
+use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +33,7 @@ use crate::project_status_descriptors::{
 use crate::project_status_runtime::{
     ProjectStatusRuntimeError, ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
+use crate::worker_stop_request::{WorkerStopRequest, write_worker_stop_request};
 
 #[derive(Debug, Clone, Copy)]
 pub struct NostrIngressInput<'a> {
@@ -66,6 +68,11 @@ pub enum NostrIngressOutcome {
         /// was a no-op, when no boot state was supplied, or when no booted
         /// project matched the update scope.
         republished_projects: Vec<String>,
+    },
+    StopRequested {
+        class: DaemonNostrEventClass,
+        agent_pubkey: String,
+        conversation_id: String,
     },
     Ignored {
         class: DaemonNostrEventClass,
@@ -102,6 +109,8 @@ pub enum NostrIngressError {
         #[source]
         source: ProjectStatusRuntimeError,
     },
+    #[error("failed to write stop request to filesystem: {0}")]
+    StopRequest(#[from] io::Error),
 }
 
 pub fn process_verified_nostr_event(
@@ -136,6 +145,11 @@ pub fn process_verified_nostr_event(
             .lock()
             .expect("project boot state mutex must not be poisoned")
             .record_boot_event(input.event, input.timestamp)?;
+        crate::stdout_status::print_project_booted(
+            &boot.project_d_tag,
+            boot.booted_project_count,
+            boot.already_booted,
+        );
         return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
     }
 
@@ -152,6 +166,10 @@ pub fn process_verified_nostr_event(
             config_update,
             republished_projects,
         });
+    }
+
+    if class == DaemonNostrEventClass::StopCommand {
+        return handle_stop_command(input.daemon_dir, input.event, input.timestamp);
     }
 
     if !class.should_normalize_for_worker() {
@@ -258,6 +276,63 @@ fn scope_matches_descriptor(
     }
 }
 
+fn handle_stop_command(
+    daemon_dir: &Path,
+    event: &SignedNostrEvent,
+    timestamp: u64,
+) -> Result<NostrIngressOutcome, NostrIngressError> {
+    let class = DaemonNostrEventClass::StopCommand;
+
+    let Some(agent_pubkey) = event
+        .tags
+        .iter()
+        .find(|tag| tag.first().is_some_and(|name| name == "p"))
+        .and_then(|tag| tag.get(1))
+        .cloned()
+    else {
+        return Ok(NostrIngressOutcome::Ignored {
+            class,
+            reason: NostrIngressIgnoredReason {
+                code: "stop_command_missing_p_tag".to_string(),
+                detail: "stop command event has no p-tag identifying the target agent".to_string(),
+            },
+        });
+    };
+
+    let Some(conversation_id) = event
+        .tags
+        .iter()
+        .find(|tag| tag.first().is_some_and(|name| name == "e"))
+        .and_then(|tag| tag.get(1))
+        .cloned()
+    else {
+        return Ok(NostrIngressOutcome::Ignored {
+            class,
+            reason: NostrIngressIgnoredReason {
+                code: "stop_command_missing_e_tag".to_string(),
+                detail: "stop command event has no e-tag identifying the target conversation"
+                    .to_string(),
+            },
+        });
+    };
+
+    write_worker_stop_request(
+        daemon_dir,
+        &WorkerStopRequest {
+            agent_pubkey: agent_pubkey.clone(),
+            conversation_id: conversation_id.clone(),
+            stop_event_id: event.id.clone(),
+            requested_at: timestamp,
+        },
+    )?;
+
+    Ok(NostrIngressOutcome::StopRequested {
+        class,
+        agent_pubkey,
+        conversation_id,
+    })
+}
+
 fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
     match class {
         DaemonNostrEventClass::NeverRoute => "never_route",
@@ -267,6 +342,7 @@ fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
         | DaemonNostrEventClass::Boot
         | DaemonNostrEventClass::AgentCreate => "daemon_control_event",
         DaemonNostrEventClass::ConfigUpdate => "config_update_not_ignored",
+        DaemonNostrEventClass::StopCommand => "stop_command_not_ignored",
         DaemonNostrEventClass::Other => "unsupported_nostr_event_class",
         DaemonNostrEventClass::Conversation => "conversation_not_ignored",
     }

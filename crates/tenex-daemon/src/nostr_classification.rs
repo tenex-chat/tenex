@@ -17,6 +17,7 @@ pub const KIND_TENEX_INSTALLED_AGENT_LIST: u64 = 24011;
 pub const KIND_TENEX_AGENT_CONFIG_UPDATE: u64 = 24020;
 pub const KIND_TENEX_AGENT_DELETE: u64 = 24030;
 pub const KIND_TENEX_OPERATIONS_STATUS: u64 = 24133;
+pub const KIND_TENEX_STOP_COMMAND: u64 = 24134;
 pub const KIND_TENEX_STREAM_TEXT_DELTA: u64 = 24135;
 
 const NEVER_ROUTE_EVENT_KINDS: &[u64] = &[
@@ -40,6 +41,7 @@ pub enum DaemonNostrEventClass {
     Boot,
     AgentCreate,
     ConfigUpdate,
+    StopCommand,
     Other,
 }
 
@@ -79,6 +81,9 @@ pub fn classify_for_daemon(event: &SignedNostrEvent) -> DaemonNostrEventClass {
     }
     if event.kind == KIND_TENEX_AGENT_CONFIG_UPDATE {
         return DaemonNostrEventClass::ConfigUpdate;
+    }
+    if event.kind == KIND_TENEX_STOP_COMMAND {
+        return DaemonNostrEventClass::StopCommand;
     }
     if matches!(event.kind, KIND_TEXT | KIND_EVENT_METADATA) {
         return DaemonNostrEventClass::Conversation;

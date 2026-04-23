@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::worker_dispatch_execution::WorkerDispatchSession;
 use crate::worker_frame_pump::WorkerFrameReceiver;
+use crate::worker_abort::DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS;
 use crate::worker_injection_queue::{
     WorkerInjectionMarkSentInput, WorkerInjectionQueueError, WorkerInjectionQueueRecord,
     WorkerInjectionRole, mark_worker_injection_sent, pending_worker_injections_for,
@@ -21,6 +22,7 @@ use crate::worker_protocol::{
 };
 use crate::worker_publish_flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
 use crate::worker_runtime_state::WorkerRuntimeState;
+use crate::worker_stop_request::take_worker_stop_request;
 
 pub struct WorkerSessionLoopInput<'a> {
     pub daemon_dir: &'a Path,
@@ -87,6 +89,18 @@ where
         #[source]
         source: E,
     },
+    #[error("worker session stop request filesystem failed: {0}")]
+    StopRequest(std::io::Error),
+    #[error("worker session stop request abort protocol failed: {source}")]
+    StopRequestProtocol {
+        #[source]
+        source: WorkerProtocolError,
+    },
+    #[error("worker session stop request abort send failed: {source}")]
+    SendAbort {
+        #[source]
+        source: E,
+    },
     #[error(
         "worker pipe closed after accepted non-terminal publish_request with runtimeEventClass {runtime_event_class}: {error}"
     )]
@@ -114,6 +128,7 @@ where
         }
 
         send_pending_worker_injections(worker, &input)?;
+        send_pending_stop_request(worker, &input)?;
 
         let frame = worker
             .receive_worker_frame()
@@ -169,12 +184,14 @@ where
                     );
                 }
                 send_pending_worker_injections(worker, &input)?;
+                send_pending_stop_request(worker, &input)?;
             }
             WorkerMessageFlowOutcome::HeartbeatUpdated { .. }
             | WorkerMessageFlowOutcome::ControlTelemetry { .. }
             | WorkerMessageFlowOutcome::StreamTelemetry { .. }
             | WorkerMessageFlowOutcome::PublishedNotification { .. } => {
                 send_pending_worker_injections(worker, &input)?;
+                send_pending_stop_request(worker, &input)?;
             }
         }
     }
@@ -340,6 +357,66 @@ where
         })
         .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
     }
+
+    Ok(())
+}
+
+fn send_pending_stop_request<S>(
+    worker: &mut S,
+    input: &WorkerSessionLoopInput<'_>,
+) -> Result<(), WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
+where
+    S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
+{
+    let Some(active_worker) = input.runtime_state.get_worker(input.worker_id).cloned() else {
+        return Ok(());
+    };
+
+    let stop_request = take_worker_stop_request(
+        input.daemon_dir,
+        &active_worker.identity.agent_pubkey,
+        &active_worker.identity.conversation_id,
+    )
+    .map_err(WorkerSessionLoopError::StopRequest)?;
+
+    let Some(stop_request) = stop_request else {
+        return Ok(());
+    };
+
+    let sequence = active_worker
+        .last_heartbeat
+        .as_ref()
+        .map(|hb| hb.sequence + 1)
+        .unwrap_or(1);
+
+    let message = serde_json::json!({
+        "version": AGENT_WORKER_PROTOCOL_VERSION,
+        "type": "abort",
+        "correlationId": format!("stop-command:{}", stop_request.stop_event_id),
+        "sequence": sequence,
+        "timestamp": input.observed_at,
+        "projectId": active_worker.identity.project_id,
+        "agentPubkey": active_worker.identity.agent_pubkey,
+        "conversationId": active_worker.identity.conversation_id,
+        "ralNumber": active_worker.identity.ral_number,
+        "reason": "user_requested_stop",
+        "gracefulTimeoutMs": DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS,
+    });
+
+    validate_agent_worker_protocol_message(&message)
+        .map_err(|source| WorkerSessionLoopError::StopRequestProtocol { source })?;
+
+    worker
+        .send_worker_message(&message)
+        .map_err(|source| WorkerSessionLoopError::SendAbort { source })?;
+
+    tracing::info!(
+        worker_id = %input.worker_id,
+        stop_event_id = %stop_request.stop_event_id,
+        agent_pubkey = %active_worker.identity.agent_pubkey,
+        conversation_id = %active_worker.identity.conversation_id,
+        "sent abort to worker from user stop command"
+    );
 
     Ok(())
 }

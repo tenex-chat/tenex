@@ -343,6 +343,23 @@ fn dispatch_diagnostic(
             pubkeys: vec![config_update.agent_pubkey],
             dispatch_id: None,
         },
+        NostrIngressOutcome::StopRequested {
+            class,
+            agent_pubkey,
+            conversation_id,
+        } => NostrSubscriptionTickDispatch::Ignored {
+            frame_index,
+            event_id,
+            code: "stop_requested".to_string(),
+            detail: format!(
+                "stop request written for agent {} conversation {}",
+                agent_pubkey, conversation_id
+            ),
+            class: Some(class),
+            project_id: None,
+            pubkeys: vec![agent_pubkey],
+            dispatch_id: None,
+        },
     }
 }
 
@@ -352,7 +369,8 @@ fn ingress_class(ingress: &NostrIngressOutcome) -> DaemonNostrEventClass {
         | NostrIngressOutcome::Ignored { class, .. }
         | NostrIngressOutcome::ProjectUpdated { class, .. }
         | NostrIngressOutcome::ProjectBooted { class, .. }
-        | NostrIngressOutcome::AgentConfigUpdated { class, .. } => *class,
+        | NostrIngressOutcome::AgentConfigUpdated { class, .. }
+        | NostrIngressOutcome::StopRequested { class, .. } => *class,
     }
 }
 
