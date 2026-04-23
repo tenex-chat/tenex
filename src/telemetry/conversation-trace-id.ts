@@ -5,30 +5,29 @@ import {
     trace,
     TraceFlags,
 } from "@opentelemetry/api";
+import { SHORT_EVENT_ID_LENGTH } from "@/types/event-ids";
+import { shortenConversationId } from "@/utils/conversation-id";
 
-const HEX_32_OR_MORE = /^[0-9a-f]{32,}$/;
-
-function sha256Hex(input: string): string {
-    return createHash("sha256").update(input).digest("hex");
-}
+const TRACE_ID_LENGTH = 32;
+const ZERO_PADDING = "0".repeat(TRACE_ID_LENGTH - SHORT_EVENT_ID_LENGTH);
 
 /**
  * Derive a deterministic 32-char hex OTEL trace ID from a conversation ID so that
  * every span emitted during a conversation lands in the same Jaeger trace.
  *
- * Hex-shaped conversation IDs (Nostr event IDs) map to their first 32 chars;
- * anything else (e.g. `tg_*`) is hashed so it still yields a valid trace ID.
+ * Format: `<shortenConversationId(id)><zeros to 32 chars>`. This lets humans recognise
+ * the trace in /trace/<traceId> from the same 10-char prefix used in span attributes
+ * and logs.
  */
 export function traceIdFromConversationId(conversationId: string): string {
-    const normalized = conversationId.toLowerCase();
-    if (HEX_32_OR_MORE.test(normalized)) {
-        return normalized.slice(0, 32);
-    }
-    return sha256Hex(conversationId).slice(0, 32);
+    return `${shortenConversationId(conversationId)}${ZERO_PADDING}`;
 }
 
 function parentSpanIdFromConversationId(conversationId: string): string {
-    return sha256Hex(`tenex.conversation.parent:${conversationId}`).slice(0, 16);
+    return createHash("sha256")
+        .update(`tenex.conversation.parent:${conversationId}`)
+        .digest("hex")
+        .slice(0, 16);
 }
 
 /**

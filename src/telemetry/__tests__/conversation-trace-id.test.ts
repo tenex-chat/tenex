@@ -4,18 +4,28 @@ import {
     contextForConversation,
     traceIdFromConversationId,
 } from "@/telemetry/conversation-trace-id";
+import { shortenConversationId } from "@/utils/conversation-id";
 
 describe("traceIdFromConversationId", () => {
-    it("returns the first 32 chars of a 64-char hex conversation ID lowercased", () => {
-        const conversationId = "ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    it("uses the 10-char shortened conversation ID padded with zeros to 32 chars", () => {
+        const conversationId = "747A01F1D4ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
         expect(traceIdFromConversationId(conversationId)).toBe(
-            "abcdef0123456789abcdef0123456789"
+            "747a01f1d40000000000000000000000"
         );
     });
 
-    it("hashes non-hex conversation IDs (e.g. telegram) to 32 hex chars", () => {
-        const traceId = traceIdFromConversationId("tg_599309204_123");
-        expect(traceId).toMatch(/^[0-9a-f]{32}$/);
+    it("matches shortenConversationId + zero padding for the short prefix", () => {
+        const conversationId = "747A01F1D4ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+        const traceId = traceIdFromConversationId(conversationId);
+        expect(traceId.slice(0, 10)).toBe(shortenConversationId(conversationId));
+        expect(traceId.slice(10)).toBe("0".repeat(22));
+    });
+
+    it("hashes non-hex conversation IDs (telegram) via shortenConversationId and pads with zeros", () => {
+        const conversationId = "tg_599309204_123";
+        const traceId = traceIdFromConversationId(conversationId);
+        expect(traceId.slice(0, 10)).toBe(shortenConversationId(conversationId));
+        expect(traceId.slice(10)).toBe("0".repeat(22));
     });
 
     it("is deterministic for the same conversation ID", () => {
@@ -23,14 +33,8 @@ describe("traceIdFromConversationId", () => {
         expect(traceIdFromConversationId(id)).toBe(traceIdFromConversationId(id));
     });
 
-    it("produces different trace IDs for different conversation IDs", () => {
-        const a = traceIdFromConversationId("tg_42_7");
-        const b = traceIdFromConversationId("tg_42_8");
-        expect(a).not.toBe(b);
-    });
-
-    it("always emits 32 hex characters", () => {
-        for (const input of ["short", "tg_1_2", "a".repeat(64), "😀-weird-id"]) {
+    it("emits 32 hex characters for realistic conversation IDs (Nostr hex + telegram)", () => {
+        for (const input of ["tg_1_2", "a".repeat(64), "DEADBEEF".repeat(8)]) {
             expect(traceIdFromConversationId(input)).toMatch(/^[0-9a-f]{32}$/);
         }
     });
@@ -41,7 +45,7 @@ describe("contextForConversation", () => {
         const conversationId = "a".repeat(64);
         const ctx = contextForConversation(conversationId);
         const spanContext = trace.getSpanContext(ctx);
-        expect(spanContext?.traceId).toBe("a".repeat(32));
+        expect(spanContext?.traceId).toBe(`aaaaaaaaaa${"0".repeat(22)}`);
     });
 
     it("marks the span context as sampled so child spans are exported", () => {
