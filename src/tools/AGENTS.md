@@ -12,7 +12,7 @@ Actions that agents can invoke. Tools own validation, call into services or lowe
 ## Current Tool Families
 
 - Agent orchestration: `agents_write`, `ask`, `delegate`, `delegate_followup`, `self_delegate`
-- Project and conversation context: `modify_project`, `conversation_get`, `conversation_list`, `conversation_search`, `todo_write`, `lesson_learn`
+- Project and conversation context: `conversation_get`, `conversation_list`, `conversation_search`, `todo_write`, `lesson_learn`
 - Knowledge and indexing: `rag_*`, `skills_set`
 - Execution control: `shell`, `kill`, `schedule_task`, `no_response` (Telegram-triggered turns only)
 - Integrations: `mcp_*`, `nostr_publish_as_user`, `skills_set`, `send_message`
@@ -20,7 +20,7 @@ Actions that agents can invoke. Tools own validation, call into services or lowe
 
 ## Naming
 
-- Tool implementation files follow `<domain>_<action>.ts`: `rag_search.ts`, `agents_write.ts`, `modify_project.ts`
+- Tool implementation files follow `<domain>_<action>.ts`: `rag_search.ts`, `agents_write.ts`, `schedule_task.ts`
 - Single-word tools keep the plain filename: `ask.ts`, `delegate.ts`, `kill.ts`
 - `fs-hooks.ts` is the main exception: it supports the registry-managed filesystem tools rather than defining a user-visible tool itself
 
