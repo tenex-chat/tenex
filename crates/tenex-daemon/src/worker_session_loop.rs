@@ -22,12 +22,12 @@ use crate::worker_protocol::{
     validate_agent_worker_protocol_message,
 };
 use crate::worker_publish_flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
-use crate::worker_runtime_state::WorkerRuntimeState;
+use crate::worker_runtime_state::SharedWorkerRuntimeState;
 use crate::worker_stop_request::take_worker_stop_request;
 
 pub struct WorkerSessionLoopInput<'a> {
     pub daemon_dir: &'a Path,
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: &'a SharedWorkerRuntimeState,
     pub worker_id: &'a str,
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
@@ -50,8 +50,6 @@ pub enum WorkerSessionLoopFinalReason {
 pub struct WorkerSessionLoopOutcome {
     pub frame_count: u64,
     pub final_reason: WorkerSessionLoopFinalReason,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_publish_result_sequence: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -153,7 +151,7 @@ where
                 worker_id: input.worker_id,
                 message: &decoded_message,
                 observed_at: input.observed_at,
-                publish: input.publish,
+                publish: input.publish.clone(),
                 nip46_publish: input.nip46_publish.clone(),
                 terminal,
             },
@@ -167,21 +165,16 @@ where
                 return Ok(WorkerSessionLoopOutcome {
                     frame_count,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: input.publish.map(|p| p.result_sequence),
                 });
             }
             WorkerMessageFlowOutcome::BootFailureCandidate { .. } => {
                 return Ok(WorkerSessionLoopOutcome {
                     frame_count,
                     final_reason: WorkerSessionLoopFinalReason::BootFailureCandidate,
-                    next_publish_result_sequence: input.publish.map(|p| p.result_sequence),
                 });
             }
             WorkerMessageFlowOutcome::PublishRequestHandled { outcome } => {
                 run_live_publish_maintenance(&mut input)?;
-                if let Some(publish) = input.publish.as_mut() {
-                    publish.result_sequence = publish.result_sequence.saturating_add(1);
-                }
                 if let WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error } =
                     &outcome.result_delivery
                 {
@@ -276,7 +269,7 @@ where
             worker_id: input.worker_id,
             message: &terminal_message,
             observed_at: input.observed_at,
-            publish: input.publish,
+            publish: input.publish.clone(),
             nip46_publish: input.nip46_publish.clone(),
             terminal: Some(terminal),
         },
@@ -287,7 +280,6 @@ where
         WorkerMessageFlowOutcome::TerminalResultHandled { .. } => Ok(WorkerSessionLoopOutcome {
             frame_count,
             final_reason: WorkerSessionLoopFinalReason::PublishAcceptedWorkerPipeClosed,
-            next_publish_result_sequence: input.publish.as_ref().map(|p| p.result_sequence),
         }),
         other => Err(WorkerSessionLoopError::MessageFlow {
             source: WorkerMessageFlowError::MissingTerminalContext {
@@ -345,7 +337,13 @@ fn send_pending_worker_injections<S>(
 where
     S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
 {
-    let Some(active_worker) = input.runtime_state.get_worker(input.worker_id).cloned() else {
+    let Some(active_worker) = input
+        .runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
+        .get_worker(input.worker_id)
+        .cloned()
+    else {
         return Ok(());
     };
     let pending =
@@ -392,7 +390,13 @@ fn send_pending_stop_request<S>(
 where
     S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
 {
-    let Some(active_worker) = input.runtime_state.get_worker(input.worker_id).cloned() else {
+    let Some(active_worker) = input
+        .runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
+        .get_worker(input.worker_id)
+        .cloned()
+    else {
         return Ok(());
     };
 
@@ -504,7 +508,10 @@ mod tests {
         AgentWorkerProcess, AgentWorkerProcessConfig, bun_agent_worker_command,
     };
     use crate::worker_protocol::{WorkerProtocolFixture, encode_agent_worker_protocol_frame};
-    use crate::worker_runtime_state::{WorkerRuntimeStartedDispatch, WorkerRuntimeState};
+    use crate::worker_runtime_state::{
+        SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch,
+        new_shared_worker_runtime_state,
+    };
     use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::error::Error;
@@ -599,13 +606,13 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity());
+        let runtime_state = runtime_state_for("worker-alpha", identity());
 
         let outcome = run_worker_session_loop(
             &mut worker,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
@@ -628,7 +635,7 @@ mod tests {
             outcome.final_reason,
             WorkerSessionLoopFinalReason::TerminalResultHandled
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_none());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
         assert!(worker.sent_messages.is_empty());
 
         cleanup_temp_dir(daemon_dir);
@@ -647,7 +654,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let mut runtime_state =
+        let runtime_state =
             runtime_state_for("worker-alpha", identity_with_agent(&fixture.pubkey));
         let maintenance_calls = std::cell::Cell::new(0_u64);
         let mut live_publish_maintenance = |daemon_dir_seen: &Path, now_seen: u64| {
@@ -661,12 +668,14 @@ mod tests {
             &mut worker,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence: 900,
+                    result_sequence_source: std::sync::Arc::new(
+                        std::sync::atomic::AtomicU64::new(900),
+                    ),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
@@ -687,7 +696,7 @@ mod tests {
         assert_eq!(worker.sent_messages[0]["type"], "publish_result");
         assert_eq!(worker.sent_messages[0]["status"], "accepted");
         assert_eq!(maintenance_calls.get(), 1);
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_some());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -712,18 +721,20 @@ mod tests {
             send_error: Some(FakeWorkerError("broken pipe")),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity.clone());
+        let runtime_state = runtime_state_for("worker-alpha", identity.clone());
 
         let outcome = run_worker_session_loop(
             &mut worker,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence: 900,
+                    result_sequence_source: std::sync::Arc::new(
+                        std::sync::atomic::AtomicU64::new(900),
+                    ),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
@@ -754,7 +765,7 @@ mod tests {
                 .expect("pending outbox must read")
                 .is_some()
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_none());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
 
         let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
         let entry = ral
@@ -786,13 +797,13 @@ mod tests {
             incoming_frames: VecDeque::from([frame_for(&fixture_valid_message("boot-error"))]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity());
+        let runtime_state = runtime_state_for("worker-alpha", identity());
 
         let outcome = run_worker_session_loop(
             &mut worker,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
@@ -821,13 +832,13 @@ mod tests {
             incoming_frames: VecDeque::from([vec![0, 1, 2]]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity());
+        let runtime_state = runtime_state_for("worker-alpha", identity());
 
         let error = run_worker_session_loop(
             &mut worker,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
@@ -851,13 +862,13 @@ mod tests {
             incoming_frames: VecDeque::from([frame_for(&fixture_valid_message("heartbeat"))]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity());
+        let runtime_state = runtime_state_for("worker-alpha", identity());
 
         let error = run_worker_session_loop(
             &mut worker,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
@@ -908,13 +919,13 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let mut runtime_state = runtime_state_for("worker-alpha", identity());
+        let runtime_state = runtime_state_for("worker-alpha", identity());
 
         let outcome = run_worker_session_loop(
             &mut worker,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
@@ -973,7 +984,7 @@ mod tests {
         let worker_id = worker.ready.worker_id.clone();
         let scheduler = scheduler_from_records_for(&worker_id);
         let dispatch_state = dispatch_state_from_records();
-        let mut runtime_state = runtime_state_for(&worker_id, identity);
+        let runtime_state = runtime_state_for(&worker_id, identity);
 
         worker
             .process
@@ -984,7 +995,7 @@ mod tests {
             &mut worker.process,
             WorkerSessionLoopInput {
                 daemon_dir: &daemon_dir,
-                runtime_state: &mut runtime_state,
+                runtime_state: &runtime_state,
                 worker_id: &worker_id,
                 observed_at: 1_710_000_403_000,
                 publish: None,
@@ -1007,7 +1018,7 @@ mod tests {
             outcome.final_reason,
             WorkerSessionLoopFinalReason::TerminalResultHandled
         );
-        assert!(runtime_state.get_worker(&worker_id).is_none());
+        assert!(runtime_state.lock().unwrap().get_worker(&worker_id).is_none());
 
         let status = worker
             .process
@@ -1046,9 +1057,11 @@ mod tests {
         }
     }
 
-    fn runtime_state_for(worker_id: &str, identity: RalJournalIdentity) -> WorkerRuntimeState {
-        let mut state = WorkerRuntimeState::default();
+    fn runtime_state_for(worker_id: &str, identity: RalJournalIdentity) -> SharedWorkerRuntimeState {
+        let state = new_shared_worker_runtime_state();
         state
+            .lock()
+            .expect("runtime state mutex poisoned")
             .register_started_dispatch(WorkerRuntimeStartedDispatch {
                 worker_id: worker_id.to_string(),
                 pid: 4242,

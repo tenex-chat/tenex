@@ -524,7 +524,7 @@ fn run_daemon_foreground(
         Duration::from_millis(DEFAULT_FOREGROUND_RELAY_TIMEOUT_MS),
     )
     .map_err(|error| runtime_error(error.to_string()))?;
-    let mut publisher = NostrRelayPublisher::new(relay_config);
+    let publisher = std::sync::Arc::new(std::sync::Mutex::new(NostrRelayPublisher::new(relay_config)));
     let shell = DaemonShell::new(&options.daemon_dir);
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
@@ -545,7 +545,7 @@ fn run_daemon_foreground(
         },
         &mut clock,
         &mut sleeper,
-        &mut publisher,
+        &publisher,
     )
     .map_err(|error| runtime_error(error.to_string()))?;
     let stopped_at = current_unix_time_ms();

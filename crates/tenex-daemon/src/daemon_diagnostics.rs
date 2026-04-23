@@ -25,17 +25,17 @@ use crate::worker_diagnostics::{
 use crate::worker_heartbeat::{
     WorkerHeartbeatFreshnessConfig, classify_worker_heartbeat_freshness,
 };
-use crate::worker_runtime_state::{ActiveWorkerRuntimeSnapshot, WorkerRuntimeState};
+use crate::worker_runtime_state::{ActiveWorkerRuntimeSnapshot, SharedWorkerRuntimeState};
 
 pub const DAEMON_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 pub const DAEMON_RAL_JOURNAL_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 pub const DAEMON_WORKER_RUNTIME_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct DaemonDiagnosticsInput<'a> {
     pub daemon_dir: &'a Path,
     pub inspected_at: u64,
-    pub worker_runtime_state: Option<&'a WorkerRuntimeState>,
+    pub worker_runtime_state: Option<&'a SharedWorkerRuntimeState>,
 }
 
 #[derive(Debug, Error)]
@@ -221,10 +221,12 @@ fn ral_journal_summary(replay: &RalJournalReplay) -> DaemonRalJournalDiagnostics
 }
 
 fn build_worker_runtime_summary(
-    runtime_state: &WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     inspected_at: u64,
 ) -> DaemonWorkerRuntimeDiagnostics {
     let active_workers = runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
         .workers()
         .map(|worker| active_worker_diagnostics(worker, inspected_at))
         .collect::<Vec<_>>();
@@ -377,7 +379,7 @@ mod tests {
         encode_agent_worker_protocol_frame,
     };
     use crate::worker_runtime_state::{
-        WorkerRuntimeGracefulSignal, WorkerRuntimeStartedDispatch, WorkerRuntimeState,
+        SharedWorkerRuntimeState, WorkerRuntimeGracefulSignal, WorkerRuntimeStartedDispatch,
     };
     use crate::worker_session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
     use serde_json::{Value, json};
@@ -386,7 +388,7 @@ mod tests {
     use std::fmt;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -845,8 +847,10 @@ mod tests {
         )
         .expect("second routing shadow record must append");
 
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         runtime_state
+            .lock()
+            .unwrap()
             .register_started_dispatch(WorkerRuntimeStartedDispatch {
                 worker_id: "worker-alpha".to_string(),
                 pid: 9_001,
@@ -864,6 +868,8 @@ mod tests {
             })
             .expect("runtime dispatch must register");
         runtime_state
+            .lock()
+            .unwrap()
             .update_worker_heartbeat(
                 "worker-alpha",
                 WorkerHeartbeatSnapshot {
@@ -887,6 +893,8 @@ mod tests {
             )
             .expect("heartbeat must update");
         runtime_state
+            .lock()
+            .unwrap()
             .mark_graceful_signal_sent(
                 "worker-alpha",
                 WorkerRuntimeGracefulSignal {
@@ -998,18 +1006,18 @@ mod tests {
             ]),
             sent_messages: Arc::clone(&sent_messages),
         };
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let worker_config = worker_config();
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
             runtime_input(
                 &daemon_dir,
-                &mut runtime_state,
+                &runtime_state,
                 &worker_config,
                 Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_090,
-                    result_sequence: 900,
+                    result_sequence_source: Arc::new(AtomicU64::new(900)),
                     result_timestamp: 1_710_001_000_100,
                     telegram_egress: None,
                 }),
@@ -1026,11 +1034,10 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: Some(901),
                 },
             }
         );
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
         assert!(
             sent_messages
                 .lock()
@@ -1287,7 +1294,7 @@ mod tests {
 
     fn runtime_input<'a>(
         daemon_dir: &'a Path,
-        runtime_state: &'a mut WorkerRuntimeState,
+        runtime_state: &'a SharedWorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         publish: Option<WorkerMessagePublishContext<'a>>,
         max_frames: u64,

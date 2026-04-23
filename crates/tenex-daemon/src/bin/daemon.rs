@@ -2,7 +2,7 @@ use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
@@ -60,11 +60,12 @@ use tenex_daemon::worker_dispatch_execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{
     AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
 };
-use tenex_daemon::worker_runtime_state::WorkerRuntimeState;
+use tenex_daemon::worker_runtime_state::new_shared_worker_runtime_state;
 
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
 const DEFAULT_WORKER_MAX_FRAMES: u64 = 4_096;
+const DEFAULT_MAX_CONCURRENT_WORKERS: u64 = 16;
 const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
@@ -86,6 +87,10 @@ struct DaemonCliOptions {
     iterations: Option<u64>,
     sleep_ms: u64,
     debug: bool,
+    /// Maximum number of concurrently running worker sessions across all
+    /// projects and agents. `None` means unlimited. Overridable via
+    /// `--max-concurrent-workers`; defaults to 16.
+    max_concurrent_workers: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -157,7 +162,7 @@ where
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ProcessSignalAwareSleeper;
     let mut stop_signal = ProcessSignalStopSignal;
-    let mut publisher = actual_relay_publisher(&options)?;
+    let publisher = Arc::new(Mutex::new(actual_relay_publisher(&options)?));
 
     let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)?;
     let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
@@ -202,7 +207,7 @@ where
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
     } else {
@@ -215,7 +220,7 @@ where
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
     };
@@ -743,14 +748,14 @@ fn run_daemon_foreground<C, S, Stop, P>(
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     telegram_publisher: &mut dyn tenex_daemon::daemon_maintenance::TelegramMaintenancePublisher,
 ) -> Result<DaemonForegroundDiagnostics, CliError>
 where
     C: DaemonMaintenanceLoopClock,
     S: DaemonMaintenanceLoopSleeper,
     Stop: DaemonMaintenanceLoopStopSignal,
-    P: PublishOutboxRelayPublisher,
+    P: PublishOutboxRelayPublisher + Send,
 {
     validate_iterations(options)?;
 
@@ -758,7 +763,7 @@ where
     let shell = DaemonShell::new(&daemon_dir);
     let worker_command = build_agent_worker_command()?;
     let worker_config = AgentWorkerProcessConfig::default();
-    let mut worker_runtime_state = WorkerRuntimeState::default();
+    let worker_runtime_state = new_shared_worker_runtime_state();
     let mut worker_spawner = AgentWorkerProcessDispatchSpawner;
     let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
         &shell,
@@ -772,14 +777,18 @@ where
             heartbeat_latch,
         },
         DaemonForegroundWorkerInput {
-            runtime_state: &mut worker_runtime_state,
-            limits: WorkerConcurrencyLimits::default(),
+            runtime_state: worker_runtime_state,
+            limits: WorkerConcurrencyLimits {
+                global: options.max_concurrent_workers,
+                per_project: None,
+                per_agent: None,
+            },
             correlation_id_prefix: "daemon-foreground-worker".to_string(),
             command: worker_command,
             worker_config: &worker_config,
             writer_version: daemon_writer_version(),
             resolved_pending_delegations: Vec::new(),
-            first_publish_result_sequence: Some(1),
+            publish_result_sequence: Some(Arc::new(AtomicU64::new(1))),
             max_frames: DEFAULT_WORKER_MAX_FRAMES,
         },
         clock,
@@ -882,6 +891,7 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
     let mut iterations = None;
     let mut sleep_ms = DEFAULT_SLEEP_MS;
     let mut debug = false;
+    let mut max_concurrent_workers = Some(DEFAULT_MAX_CONCURRENT_WORKERS);
     let mut index = 0;
 
     while index < args.len() {
@@ -917,6 +927,14 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
             "--debug" => {
                 debug = true;
             }
+            "--max-concurrent-workers" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--max-concurrent-workers requires a value"))?;
+                let parsed = parse_u64_arg("--max-concurrent-workers", value)?;
+                max_concurrent_workers = if parsed == 0 { None } else { Some(parsed) };
+            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -938,6 +956,7 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
         iterations,
         sleep_ms,
         debug,
+        max_concurrent_workers,
     })
 }
 
@@ -987,8 +1006,11 @@ fn current_unix_time_ms() -> u64 {
 fn usage() -> String {
     [
         "usage:",
-        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
-        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
+        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--max-concurrent-workers <count>] [--debug]",
+        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--max-concurrent-workers <count>] [--debug]",
+        "",
+        "  --max-concurrent-workers <count>  Cap the number of worker sessions that run concurrently.",
+        "                                   0 means unlimited. Default: 16.",
     ]
     .join("\n")
 }
@@ -1199,6 +1221,7 @@ mod tests {
             iterations: Some(1),
             sleep_ms: 0,
             debug: false,
+            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1216,6 +1239,7 @@ mod tests {
             iterations: Some(1),
             sleep_ms: 0,
             debug: false,
+            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1234,6 +1258,7 @@ mod tests {
             iterations: Some(2),
             sleep_ms: 25,
             debug: false,
+            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![
@@ -1245,7 +1270,7 @@ mod tests {
         };
         let mut sleeper = RecordingSleeper::default();
         let mut stop_signal = NeverStopDaemonMaintenanceLoop;
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
 
         let diagnostics = run_daemon_foreground(
@@ -1258,7 +1283,7 @@ mod tests {
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
         .expect("foreground runner must succeed");
@@ -1277,7 +1302,7 @@ mod tests {
         assert_eq!(diagnostics.steps.len(), 2);
         assert_eq!(diagnostics.steps[0].iteration_index, 0);
         assert_eq!(diagnostics.steps[0].sleep_after_ms, Some(25));
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
 
         let json = serde_json::to_value(&diagnostics).expect("diagnostics must serialize");
         assert_eq!(json["schemaVersion"], Value::from(1));

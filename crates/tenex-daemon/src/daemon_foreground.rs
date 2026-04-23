@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
@@ -24,7 +25,7 @@ use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
-use crate::worker_runtime_state::WorkerRuntimeState;
+use crate::worker_runtime_state::SharedWorkerRuntimeState;
 
 #[derive(Debug, Clone)]
 pub struct DaemonForegroundInput<'a> {
@@ -53,14 +54,14 @@ pub struct DaemonForegroundStoppableInput<'a> {
 
 #[derive(Debug)]
 pub struct DaemonForegroundWorkerInput<'a> {
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: SharedWorkerRuntimeState,
     pub limits: WorkerConcurrencyLimits,
     pub correlation_id_prefix: String,
     pub command: AgentWorkerCommand,
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
-    pub first_publish_result_sequence: Option<u64>,
+    pub publish_result_sequence: Option<Arc<AtomicU64>>,
     pub max_frames: u64,
 }
 
@@ -137,7 +138,7 @@ pub fn run_daemon_foreground_from_filesystem<C, S, P, Probe>(
     input: DaemonForegroundInput<'_>,
     clock: &mut C,
     sleeper: &mut S,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
 ) -> Result<DaemonForegroundReport, DaemonForegroundError>
 where
     Probe: ProcessLivenessProbe + Clone,
@@ -200,7 +201,7 @@ pub fn run_daemon_foreground_until_stopped_from_filesystem<C, S, Stop, P, Probe>
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
 ) -> Result<DaemonForegroundReport, DaemonForegroundError>
 where
     Probe: ProcessLivenessProbe + Clone,
@@ -274,7 +275,7 @@ pub fn run_daemon_foreground_until_stopped_from_filesystem_with_worker<
     sleeper: &mut Sleep,
     stop_signal: &mut Stop,
     spawner: &mut Spawner,
-    publisher: &mut P,
+    publisher: &Arc<Mutex<P>>,
     telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<DaemonForegroundWithWorkerReport, DaemonForegroundWithWorkerError>
 where
@@ -282,11 +283,13 @@ where
     C: DaemonMaintenanceLoopClock,
     Sleep: DaemonMaintenanceLoopSleeper,
     Stop: DaemonMaintenanceLoopStopSignal,
-    P: PublishOutboxRelayPublisher,
+    P: PublishOutboxRelayPublisher + Send,
     Spawner: WorkerDispatchSpawner,
     Spawner::Session: WorkerFrameReceiver
         + WorkerDispatchSession<Error = <Spawner::Session as WorkerFrameReceiver>::Error>
+        + Send
         + 'static,
+    <Spawner::Session as WorkerFrameReceiver>::Error: Send,
 {
     let started_at_ms = clock.now_ms();
     let session = shell
@@ -313,7 +316,7 @@ where
             worker_config: worker.worker_config,
             writer_version: worker.writer_version,
             resolved_pending_delegations: worker.resolved_pending_delegations,
-            first_publish_result_sequence: worker.first_publish_result_sequence,
+            publish_result_sequence: worker.publish_result_sequence,
             max_frames: worker.max_frames,
         },
         clock,
@@ -356,6 +359,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worker_runtime_state::new_shared_worker_runtime_state;
     use crate::backend_config::backend_config_path;
     use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
@@ -608,7 +612,7 @@ mod tests {
             observed_now_ms_values: Vec::new(),
         };
         let mut sleeper = RecordingSleeper::default();
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let report = run_daemon_foreground_from_filesystem(
@@ -624,7 +628,7 @@ mod tests {
             },
             &mut clock,
             &mut sleeper,
-            &mut publisher,
+            &publisher,
         )
         .expect("foreground runner must succeed");
 
@@ -641,7 +645,7 @@ mod tests {
         assert_eq!(report.tick_loop.steps[1].iteration_index, 1);
         assert_eq!(report.tick_loop.steps[0].sleep_after_ms, Some(25));
         assert_eq!(report.tick_loop.steps[1].sleep_after_ms, None);
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -670,7 +674,7 @@ mod tests {
             checks: 0,
             stop_on_or_after: 2,
         };
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let report = run_daemon_foreground_until_stopped_from_filesystem(
@@ -687,7 +691,7 @@ mod tests {
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
-            &mut publisher,
+            &publisher,
         )
         .expect("foreground runner must stop cleanly");
 
@@ -698,7 +702,7 @@ mod tests {
         );
         assert!(sleeper.sleeps_ms.is_empty());
         assert_eq!(stop_signal.checks, 2);
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -722,10 +726,10 @@ mod tests {
             checks: 0,
             stop_on_or_after: 2,
         };
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = new_shared_worker_runtime_state();
         let worker_config = AgentWorkerProcessConfig::default();
         let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
@@ -741,27 +745,29 @@ mod tests {
                 heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: runtime_state.clone(),
                 limits: WorkerConcurrencyLimits::default(),
                 correlation_id_prefix: "foreground-worker-test".to_string(),
                 command: AgentWorkerCommand::new("bun"),
                 worker_config: &worker_config,
                 writer_version: "foreground-worker-test@0".to_string(),
                 resolved_pending_delegations: Vec::new(),
-                first_publish_result_sequence: Some(700),
+                publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                 max_frames: 1,
             },
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
             &mut spawner,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
         .expect("foreground worker runner must succeed");
 
         assert_eq!(report.tick_loop.steps.len(), 1);
-        match &report.tick_loop.steps[0].maintenance_outcome.worker_runtime {
+        let worker_runtime = &report.tick_loop.steps[0].maintenance_outcome.worker_runtime;
+        assert_eq!(worker_runtime.len(), 1);
+        match &worker_runtime[0] {
             DaemonWorkerRuntimeOutcome::NotAdmitted { reason, .. } => {
                 assert_eq!(
                     reason,
@@ -771,7 +777,7 @@ mod tests {
             other => panic!("unexpected worker runtime outcome: {other:?}"),
         }
         assert_eq!(spawner.spawn_calls, 0);
-        assert!(!publisher.published_event_ids.is_empty());
+        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -807,9 +813,9 @@ mod tests {
             sent_messages: Arc::clone(&sent_messages),
             spawn_calls: 0,
         };
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = new_shared_worker_runtime_state();
         let worker_config = AgentWorkerProcessConfig::default();
         let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
@@ -825,21 +831,21 @@ mod tests {
                 heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: runtime_state.clone(),
                 limits: WorkerConcurrencyLimits::default(),
                 correlation_id_prefix: "foreground-worker-dispatch-test".to_string(),
                 command: AgentWorkerCommand::new("bun"),
                 worker_config: &worker_config,
                 writer_version: "foreground-worker-test@0".to_string(),
                 resolved_pending_delegations: Vec::new(),
-                first_publish_result_sequence: Some(700),
+                publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                 max_frames: 4,
             },
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
             &mut spawner,
-            &mut publisher,
+            &publisher,
             &mut telegram_publisher,
         )
         .expect("foreground worker runner must complete queued dispatch");
@@ -848,15 +854,14 @@ mod tests {
         assert_eq!(report.tick_loop.steps.len(), 1);
         assert_eq!(
             report.tick_loop.steps[0].maintenance_outcome.worker_runtime,
-            DaemonWorkerRuntimeOutcome::SessionCompleted {
+            vec![DaemonWorkerRuntimeOutcome::SessionCompleted {
                 dispatch_id: "dispatch-alpha".to_string(),
                 worker_id: "worker-alpha".to_string(),
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: Some(700),
                 },
-            }
+            }]
         );
         let sent_messages = sent_messages
             .lock()
@@ -867,7 +872,7 @@ mod tests {
             .expect("execute message must be sent");
         assert_eq!(execute["projectBasePath"], "/sidecar/repo");
         assert_eq!(execute["triggeringEnvelope"]["content"], "from sidecar");
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().expect("runtime state lock").is_empty());
 
         let queue = replay_dispatch_queue(&fixture.daemon_dir).expect("dispatch queue must replay");
         assert!(queue.queued.is_empty());
@@ -902,7 +907,7 @@ mod tests {
             observed_now_ms_values: Vec::new(),
         };
         let mut sleeper = RecordingSleeper::default();
-        let mut publisher = RecordingPublisher::default();
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let error = run_daemon_foreground_from_filesystem(
@@ -918,7 +923,7 @@ mod tests {
             },
             &mut clock,
             &mut sleeper,
-            &mut publisher,
+            &publisher,
         )
         .expect_err("missing backend config must fail the tick loop");
 
@@ -941,7 +946,7 @@ mod tests {
             None
         );
         assert!(sleeper.sleeps_ms.is_empty());
-        assert!(publisher.published_event_ids.is_empty());
+        assert!(publisher.lock().unwrap().published_event_ids.is_empty());
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

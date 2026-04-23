@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 use thiserror::Error;
@@ -9,7 +10,8 @@ use crate::dispatch_queue::DispatchQueueState;
 use crate::nip46::registry::NIP46Registry;
 use crate::ral_journal::{
     RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalError, RalJournalEvent,
-    RalJournalIdentity, RalJournalRecord, RalPendingDelegation, append_ral_journal_record,
+    RalJournalIdentity, RalJournalRecord, RalPendingDelegation,
+    append_ral_journal_record_with_resequence,
 };
 use crate::ral_scheduler::RalScheduler;
 use crate::worker_completion::WorkerCompletionDispatchInput;
@@ -33,7 +35,7 @@ use crate::worker_publish_flow::{
 };
 use crate::worker_result::WorkerResultTransitionContext;
 use crate::worker_runtime_state::{
-    ActiveWorkerRuntimeSnapshot, WorkerRuntimeState, WorkerRuntimeStateError,
+    ActiveWorkerRuntimeSnapshot, SharedWorkerRuntimeState, WorkerRuntimeStateError,
 };
 use crate::worker_telegram_egress::WorkerTelegramEgressContext;
 use crate::worker_terminal_flow::{
@@ -62,10 +64,10 @@ pub struct WorkerMessageNip46PublishContext<'a> {
     pub result_timestamp: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct WorkerMessagePublishContext<'a> {
     pub accepted_at: u64,
-    pub result_sequence: u64,
+    pub result_sequence_source: Arc<AtomicU64>,
     pub result_timestamp: u64,
     pub telegram_egress: Option<WorkerTelegramEgressContext<'a>>,
 }
@@ -195,7 +197,7 @@ pub enum WorkerMessageFlowError {
 
 pub fn handle_worker_message_flow<S>(
     session: &mut S,
-    runtime_state: &mut WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     input: WorkerMessageFlowInput<'_>,
 ) -> Result<WorkerMessageFlowOutcome, WorkerMessageFlowError>
 where
@@ -219,13 +221,14 @@ where
                         message_type: message_plan.metadata.message_type.clone(),
                     })?;
             ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
+            let result_sequence = publish.result_sequence_source.fetch_add(1, Ordering::Relaxed);
             let outcome = handle_worker_publish_request(
                 session,
                 WorkerPublishFlowInput {
                     daemon_dir: input.daemon_dir,
                     message: &message_plan.message,
                     accepted_at: publish.accepted_at,
-                    result_sequence: publish.result_sequence,
+                    result_sequence,
                     result_timestamp: publish.result_timestamp,
                     telegram_egress: publish.telegram_egress,
                 },
@@ -308,6 +311,8 @@ where
             .map_err(WorkerMessageFlowError::from)?;
 
             let removed_worker = runtime_state
+                .lock()
+                .expect("runtime state mutex poisoned")
                 .remove_terminal_worker(input.worker_id)
                 .map_err(WorkerMessageFlowError::from)?;
 
@@ -350,7 +355,7 @@ where
 }
 
 fn handle_heartbeat(
-    runtime_state: &mut WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     worker_id: &str,
     observed_at: u64,
     message_plan: WorkerMessagePlan,
@@ -365,6 +370,8 @@ fn handle_heartbeat(
     .map_err(WorkerMessageFlowError::from)?;
 
     runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
         .update_worker_heartbeat(worker_id, snapshot.clone())
         .map_err(WorkerMessageFlowError::from)?;
 
@@ -375,11 +382,13 @@ fn handle_heartbeat(
 }
 
 fn ensure_active_worker_matches_message(
-    runtime_state: &WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     worker_id: &str,
     message_plan: &WorkerMessagePlan,
 ) -> Result<ActiveWorkerRuntimeSnapshot, WorkerMessageFlowError> {
     let worker = runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
         .get_worker(worker_id)
         .cloned()
         .ok_or_else(|| WorkerRuntimeStateError::UnknownWorker {
@@ -422,7 +431,7 @@ fn ensure_terminal_context_matches_worker(
 }
 
 fn handle_delegation_registered(
-    runtime_state: &WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     input: &WorkerMessageFlowInput<'_>,
     message_plan: &WorkerMessagePlan,
 ) -> Result<(), WorkerMessageFlowError> {
@@ -440,7 +449,7 @@ fn handle_delegation_registered(
             last_sequence: scheduler.state().last_sequence,
         },
     )?;
-    let record = RalJournalRecord::new(
+    let mut record = RalJournalRecord::new(
         RAL_JOURNAL_WRITER_RUST_DAEMON,
         env!("CARGO_PKG_VERSION"),
         sequence,
@@ -456,7 +465,7 @@ fn handle_delegation_registered(
             pending_delegation,
         },
     );
-    append_ral_journal_record(input.daemon_dir, &record).map_err(|source| {
+    append_ral_journal_record_with_resequence(input.daemon_dir, &mut record).map_err(|source| {
         WorkerMessageFlowError::RalJournal {
             source: Box::new(source),
         }
@@ -466,7 +475,7 @@ fn handle_delegation_registered(
 }
 
 fn handle_delegation_killed(
-    runtime_state: &WorkerRuntimeState,
+    runtime_state: &SharedWorkerRuntimeState,
     input: &WorkerMessageFlowInput<'_>,
     message_plan: &WorkerMessagePlan,
 ) -> Result<(), WorkerMessageFlowError> {
@@ -485,7 +494,7 @@ fn handle_delegation_killed(
             last_sequence: scheduler.state().last_sequence,
         },
     )?;
-    let record = RalJournalRecord::new(
+    let mut record = RalJournalRecord::new(
         RAL_JOURNAL_WRITER_RUST_DAEMON,
         env!("CARGO_PKG_VERSION"),
         sequence,
@@ -498,7 +507,7 @@ fn handle_delegation_killed(
             reason,
         },
     );
-    append_ral_journal_record(input.daemon_dir, &record).map_err(|source| {
+    append_ral_journal_record_with_resequence(input.daemon_dir, &mut record).map_err(|source| {
         WorkerMessageFlowError::RalJournal {
             source: Box::new(source),
         }
@@ -685,7 +694,7 @@ mod tests {
     use crate::worker_launch_lock::acquire_worker_launch_locks;
     use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
     use crate::worker_publish_flow::WorkerPublishResultDelivery;
-    use crate::worker_runtime_state::{WorkerRuntimeStartedDispatch, WorkerRuntimeState};
+    use crate::worker_runtime_state::{SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch};
     use serde_json::json;
     use std::error::Error;
     use std::fmt;
@@ -730,12 +739,12 @@ mod tests {
     #[test]
     fn handles_heartbeat_by_updating_runtime_state() {
         let daemon_dir = unique_temp_daemon_dir();
-        let mut runtime_state = runtime_state_for(identity());
+        let runtime_state = runtime_state_for(identity());
         let mut session = RecordingSession::default();
 
         let outcome = handle_worker_message_flow(
             &mut session,
-            &mut runtime_state,
+            &runtime_state,
             WorkerMessageFlowInput {
                 daemon_dir: &daemon_dir,
                 worker_id: "worker-alpha",
@@ -755,9 +764,12 @@ mod tests {
                 assert_eq!(snapshot.observed_at, 1_710_000_403_000);
                 assert_eq!(
                     runtime_state
+                        .lock()
+                        .unwrap()
                         .get_worker("worker-alpha")
                         .expect("worker must remain active")
-                        .last_heartbeat,
+                        .last_heartbeat
+                        .clone(),
                     Some(snapshot)
                 );
             }
@@ -772,7 +784,7 @@ mod tests {
     fn delegation_registered_records_pending_delegation_for_claimed_ral() {
         let daemon_dir = unique_temp_daemon_dir();
         append_initial_ral_records(&daemon_dir);
-        let mut runtime_state = runtime_state_for(identity());
+        let runtime_state = runtime_state_for(identity());
         let mut session = RecordingSession::default();
         let message = json!({
             "version": AGENT_WORKER_PROTOCOL_VERSION,
@@ -793,7 +805,7 @@ mod tests {
 
         let outcome = handle_worker_message_flow(
             &mut session,
-            &mut runtime_state,
+            &runtime_state,
             WorkerMessageFlowInput {
                 daemon_dir: &daemon_dir,
                 worker_id: "worker-alpha",
@@ -834,13 +846,13 @@ mod tests {
     fn handles_publish_request_through_publish_flow() {
         let daemon_dir = unique_temp_daemon_dir();
         let fixture = signed_event_fixture();
-        let mut runtime_state = runtime_state_for(identity_with_agent(&fixture.pubkey));
+        let runtime_state = runtime_state_for(identity_with_agent(&fixture.pubkey));
         let mut session = RecordingSession::default();
         let message = publish_request_message(&fixture, 41, 1_710_001_000_000);
 
         let outcome = handle_worker_message_flow(
             &mut session,
-            &mut runtime_state,
+            &runtime_state,
             WorkerMessageFlowInput {
                 daemon_dir: &daemon_dir,
                 worker_id: "worker-alpha",
@@ -848,7 +860,7 @@ mod tests {
                 observed_at: 1_710_001_000_050,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence: 900,
+                    result_sequence_source: Arc::new(AtomicU64::new(900)),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
@@ -883,7 +895,7 @@ mod tests {
                 .expect("pending publish record must read")
                 .is_some()
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_some());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -900,12 +912,12 @@ mod tests {
             .expect("launch locks must acquire");
         let allocation_lock_path = locks.allocation.path.clone();
         let state_lock_path = locks.state.path.clone();
-        let mut runtime_state = runtime_state_for(identity());
+        let runtime_state = runtime_state_for(identity());
         let mut session = RecordingSession::default();
 
         let outcome = handle_worker_message_flow(
             &mut session,
-            &mut runtime_state,
+            &runtime_state,
             WorkerMessageFlowInput {
                 daemon_dir: &daemon_dir,
                 worker_id: "worker-alpha",
@@ -934,7 +946,7 @@ mod tests {
             }
             other => panic!("expected terminal outcome, got {other:?}"),
         }
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
         assert!(session.sent_messages.is_empty());
         assert_eq!(
             read_ral_lock_info(&allocation_lock_path).expect("allocation lock must read"),
@@ -951,12 +963,12 @@ mod tests {
     #[test]
     fn returns_telemetry_without_runtime_or_filesystem_side_effects() {
         let daemon_dir = unique_temp_daemon_dir();
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let mut session = RecordingSession::default();
 
         let outcome = handle_worker_message_flow(
             &mut session,
-            &mut runtime_state,
+            &runtime_state,
             WorkerMessageFlowInput {
                 daemon_dir: &daemon_dir,
                 worker_id: "worker-alpha",
@@ -976,7 +988,7 @@ mod tests {
             }
             other => panic!("expected telemetry outcome, got {other:?}"),
         }
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
         assert!(session.sent_messages.is_empty());
         assert!(!daemon_dir.exists());
     }
@@ -984,12 +996,12 @@ mod tests {
     #[test]
     fn returns_boot_error_as_reconciliation_candidate() {
         let daemon_dir = unique_temp_daemon_dir();
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         let mut session = RecordingSession::default();
 
         let outcome = handle_worker_message_flow(
             &mut session,
-            &mut runtime_state,
+            &runtime_state,
             WorkerMessageFlowInput {
                 daemon_dir: &daemon_dir,
                 worker_id: "worker-boot",
@@ -1015,7 +1027,7 @@ mod tests {
             }
             other => panic!("expected boot failure candidate, got {other:?}"),
         }
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
         assert!(session.sent_messages.is_empty());
         assert!(!daemon_dir.exists());
     }
@@ -1023,12 +1035,12 @@ mod tests {
     #[test]
     fn rejects_terminal_message_without_terminal_context_before_side_effects() {
         let daemon_dir = unique_temp_daemon_dir();
-        let mut runtime_state = runtime_state_for(identity());
+        let runtime_state = runtime_state_for(identity());
         let mut session = RecordingSession::default();
 
         let error = handle_worker_message_flow(
             &mut session,
-            &mut runtime_state,
+            &runtime_state,
             WorkerMessageFlowInput {
                 daemon_dir: &daemon_dir,
                 worker_id: "worker-alpha",
@@ -1045,14 +1057,16 @@ mod tests {
             error,
             WorkerMessageFlowError::MissingTerminalContext { .. }
         ));
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_some());
         assert!(session.sent_messages.is_empty());
         assert!(!daemon_dir.exists());
     }
 
-    fn runtime_state_for(identity: RalJournalIdentity) -> WorkerRuntimeState {
-        let mut state = WorkerRuntimeState::default();
+    fn runtime_state_for(identity: RalJournalIdentity) -> SharedWorkerRuntimeState {
+        let state = crate::worker_runtime_state::new_shared_worker_runtime_state();
         state
+            .lock()
+            .unwrap()
             .register_started_dispatch(WorkerRuntimeStartedDispatch {
                 worker_id: "worker-alpha".to_string(),
                 pid: 4242,
