@@ -35,7 +35,7 @@ use tenex_daemon::daemon_maintenance::{
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
 use tenex_daemon::project_status_descriptors::{
-    ProjectStatusDescriptorReport, read_project_status_descriptors,
+    ProjectStatusDescriptorReport,
 };
 use tenex_daemon::project_status_runtime::{
     ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
@@ -369,10 +369,12 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
 fn inspect_nostr_subscription_plan(
     options: &DaemonControlCliOptions,
 ) -> Result<NostrSubscriptionPlanDiagnostics, CliError> {
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
         tenex_base_dir: &options.tenex_base_dir,
         since: options.since,
         lesson_definition_ids: &options.lesson_definition_ids,
+        project_event_index: &project_event_index,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 
@@ -403,11 +405,11 @@ fn run_backend_events_periodic_tick(
         ));
     }
 
-    let project_descriptor_report = if options.discover_projects {
-        Some(
-            read_project_status_descriptors(&options.tenex_base_dir)
-                .map_err(|error| runtime_error(error.to_string()))?,
-        )
+    let project_descriptor_report: Option<ProjectStatusDescriptorReport> = if options.discover_projects {
+        Some(ProjectStatusDescriptorReport {
+            descriptors: Vec::new(),
+            skipped_files: Vec::new(),
+        })
     } else {
         None
     };
@@ -422,11 +424,7 @@ fn run_backend_events_periodic_tick(
                     project_d_tag: &descriptor.project_d_tag,
                     project_manager_pubkey: descriptor.project_manager_pubkey.as_deref(),
                     project_base_path: descriptor.project_base_path.as_deref().map(Path::new),
-                    worktrees: if descriptor.worktrees.is_empty() {
-                        None
-                    } else {
-                        Some(&descriptor.worktrees)
-                    },
+                    worktrees: None,
                 })
                 .collect::<Vec<_>>()
         })
@@ -487,12 +485,14 @@ fn run_backend_events_periodic_tick(
 fn run_daemon_maintenance(
     options: &DaemonControlCliOptions,
 ) -> Result<DaemonMaintenanceDiagnostics, CliError> {
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
     let diagnostics = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
         tenex_base_dir: &options.tenex_base_dir,
         daemon_dir: &options.daemon_dir,
         now_ms: options.inspected_at,
         project_boot_state: tenex_daemon::project_boot_state::empty_booted_projects_state(),
         heartbeat_latch: None,
+        project_event_index: std::sync::Arc::clone(&project_event_index),
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 
@@ -505,6 +505,7 @@ fn run_daemon_maintenance(
 fn run_daemon_foreground(
     options: &DaemonControlCliOptions,
 ) -> Result<DaemonForegroundDiagnostics, CliError> {
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
     let iterations = options
         .iterations
         .ok_or_else(|| usage_error("--iterations is required"))?;
@@ -534,6 +535,7 @@ fn run_daemon_foreground(
                 tenex_daemon::project_boot_state::ProjectBootState::new(),
             )),
             heartbeat_latch: None,
+            project_event_index: std::sync::Arc::clone(&project_event_index),
         },
         &mut clock,
         &mut sleeper,

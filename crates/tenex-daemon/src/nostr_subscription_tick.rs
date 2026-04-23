@@ -442,6 +442,7 @@ mod tests {
 
     #[test]
     fn intake_tick_processes_matching_event_and_reports_ignored_frames() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -485,6 +486,7 @@ mod tests {
             writer_version: "nostr-subscription-tick-test@0",
             whitelist_ingress: None,
             project_boot_state: None,
+            project_event_index: &project_event_index,
         })
         .expect("subscription tick must process");
 
@@ -540,6 +542,7 @@ mod tests {
 
     #[test]
     fn intake_tick_reports_dispatch_ignored_without_writing_worker_artifacts() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -564,6 +567,7 @@ mod tests {
             writer_version: "nostr-subscription-tick-test@0",
             whitelist_ingress: None,
             project_boot_state: None,
+            project_event_index: &project_event_index,
         })
         .expect("subscription tick must process");
 

@@ -319,6 +319,7 @@ mod tests {
 
     #[test]
     fn route_and_enqueue_inbound_dispatch_writes_worker_artifacts() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -336,6 +337,7 @@ mod tests {
             envelope: &envelope,
             timestamp: 1_710_000_700_000,
             writer_version: "inbound-runtime-test@0",
+            project_event_index: &project_event_index,
         })
         .expect("inbound runtime must enqueue");
 
@@ -384,6 +386,7 @@ mod tests {
 
     #[test]
     fn route_and_enqueue_inbound_dispatch_returns_ignored_outcome_when_unmatched() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -400,6 +403,7 @@ mod tests {
             envelope: &envelope,
             timestamp: 1_710_000_700_001,
             writer_version: "inbound-runtime-test@0",
+            project_event_index: &project_event_index,
         })
         .expect("inbound runtime must resolve");
 
@@ -416,6 +420,7 @@ mod tests {
 
     #[test]
     fn delegation_completion_records_child_reply_and_resumes_idle_parent_ral() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -462,6 +467,7 @@ mod tests {
             envelope: &envelope,
             timestamp: 1_710_000_900_000,
             writer_version: "inbound-runtime-test@0",
+            project_event_index: &project_event_index,
         })
         .expect("delegation completion must route");
 
@@ -539,6 +545,7 @@ mod tests {
 
     #[test]
     fn delegation_completion_queues_injection_for_claimed_parent_ral() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -585,6 +592,7 @@ mod tests {
             envelope: &envelope,
             timestamp: 1_710_000_901_000,
             writer_version: "inbound-runtime-test@0",
+            project_event_index: &project_event_index,
         })
         .expect("delegation completion must route");
 

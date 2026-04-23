@@ -462,7 +462,7 @@ mod tests {
         write_agent(&temp_dir, &first_agent, "alpha-one");
         write_agent(&temp_dir, &second_agent, "alpha-two");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir).expect("catalog must build");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
         let mut envelope = nostr_envelope(&first_agent, "event-new");
         envelope.recipients.push(nostr_recipient(&second_agent));
         envelope.channel.project_binding = Some(format!("31933:{owner}:project-alpha"));
@@ -504,7 +504,7 @@ mod tests {
         write_agent_index(&temp_dir, "project-beta", &[&agent]);
         write_agent(&temp_dir, &agent, "beta-agent");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir).expect("catalog must build");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
         let envelope = nostr_envelope(&agent, "event-new");
 
         let resolution = resolve_inbound_route(InboundRoutingInput {
@@ -532,7 +532,7 @@ mod tests {
         write_agent_index(&temp_dir, "project-echo", &[&agent]);
         write_agent(&temp_dir, &agent, "echo-agent");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir).expect("catalog must build");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
         let mut envelope = nostr_envelope(&agent, "event-self");
         envelope.principal = nostr_recipient(&agent);
         envelope.channel.project_binding = Some(format!("31933:{owner}:project-echo"));
@@ -578,7 +578,7 @@ mod tests {
         )
         .expect("conversation file must write");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir).expect("catalog must build");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
         let mut envelope = nostr_envelope(&agent, "event-reply");
         envelope.message.reply_to_id = Some("nostr:intermediate-event".to_string());
 
@@ -608,7 +608,7 @@ mod tests {
         write_agent_index(&temp_dir, "project-b", &[&shared_agent]);
         write_agent(&temp_dir, &shared_agent, "shared-agent");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir).expect("catalog must build");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
         let envelope = nostr_envelope(&shared_agent, "event-new");
         let resolution = resolve_inbound_route(InboundRoutingInput {
             catalog: &catalog,

@@ -536,11 +536,13 @@ fn start_nostr_subscription_supervisor_from_options(
     whitelist_ingress: Option<Arc<WhitelistIngress>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
         tenex_base_dir: &tenex_base_dir,
         since: Some(current_unix_time_ms() / 1_000),
         lesson_definition_ids: &[],
+        project_event_index: &project_event_index,
     })
     .map_err(|error| runtime_error(format!("nostr subscription plan failed: {error}")))?;
     if plan.relay_urls.is_empty() || plan.filters.is_empty() {
@@ -747,6 +749,9 @@ where
     let worker_config = AgentWorkerProcessConfig::default();
     let mut worker_runtime_state = WorkerRuntimeState::default();
     let mut worker_spawner = AgentWorkerProcessDispatchSpawner;
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(
+        tenex_daemon::project_event_index::ProjectEventIndex::new(),
+    ));
     let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
         &shell,
         DaemonForegroundStoppableInput {
@@ -756,6 +761,7 @@ where
             retry_policy: PublishOutboxRetryPolicy::default(),
             project_boot_state,
             heartbeat_latch,
+            project_event_index: std::sync::Arc::clone(&project_event_index),
         },
         DaemonForegroundWorkerInput {
             runtime_state: &mut worker_runtime_state,
@@ -1439,6 +1445,7 @@ mod tests {
 
     #[test]
     fn subscription_plan_includes_14199_and_nip46_filters_when_owner_is_whitelisted() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
         use tenex_daemon::subscription_runtime::{
             NostrSubscriptionPlanInput, build_nostr_subscription_plan,
         };
@@ -1462,6 +1469,7 @@ mod tests {
             tenex_base_dir: &tenex_base_dir,
             since: Some(1_710_001_000),
             lesson_definition_ids: &[],
+            project_event_index: &project_event_index,
         })
         .expect("subscription plan must build");
 

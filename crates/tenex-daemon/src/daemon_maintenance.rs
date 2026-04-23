@@ -367,6 +367,7 @@ mod tests {
 
     #[test]
     fn daemon_maintenance_discovers_projects_and_runs_backend_events_once() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -411,6 +412,7 @@ mod tests {
             now_ms: 1_710_001_000_000,
             project_boot_state,
             heartbeat_latch: None,
+            project_event_index: std::sync::Arc::clone(&project_event_index),
         })
         .expect("daemon maintenance must run");
 
@@ -482,6 +484,7 @@ mod tests {
 
     #[test]
     fn daemon_maintenance_enqueues_due_scheduled_tasks() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-scheduled-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -580,6 +583,7 @@ mod tests {
             now_ms: 1_710_001_000_000,
             project_boot_state,
             heartbeat_latch: None,
+            project_event_index: std::sync::Arc::clone(&project_event_index),
         })
         .expect("daemon maintenance must run");
 
@@ -615,6 +619,7 @@ mod tests {
 
     #[test]
     fn daemon_maintenance_does_not_publish_or_schedule_unbooted_project_status() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-unbooted-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -665,6 +670,7 @@ mod tests {
             now_ms: 1_710_001_000_000,
             project_boot_state: empty_booted_projects_state(),
             heartbeat_latch: None,
+            project_event_index: std::sync::Arc::clone(&project_event_index),
         })
         .expect("daemon maintenance must run");
 

@@ -424,6 +424,7 @@ mod tests {
 
     #[test]
     fn conversation_event_routes_through_inbound_runtime_and_dispatch_queue() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -442,6 +443,7 @@ mod tests {
             timestamp: 1_710_000_800_000,
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
+            project_event_index: &project_event_index,
         })
         .expect("nostr ingress must process");
 
@@ -463,6 +465,7 @@ mod tests {
 
     #[test]
     fn never_route_event_does_not_write_dispatch_artifacts() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -475,6 +478,7 @@ mod tests {
             timestamp: 1_710_000_800_001,
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
+            project_event_index: &project_event_index,
         })
         .expect("nostr ingress must process");
 
@@ -493,6 +497,7 @@ mod tests {
 
     #[test]
     fn config_update_event_applies_agent_config_update() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -516,6 +521,7 @@ mod tests {
             timestamp: 1_710_000_800_002,
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
+            project_event_index: &project_event_index,
         })
         .expect("nostr ingress must process");
 
@@ -550,6 +556,7 @@ mod tests {
 
     #[test]
     fn boot_event_records_project_boot_state_without_dispatch() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -576,6 +583,7 @@ mod tests {
             timestamp: 1_710_000_800_003,
             writer_version: "nostr-ingress-test@0",
             project_boot_state: Some(&project_boot_state),
+            project_event_index: &project_event_index,
         })
         .expect("nostr ingress must process");
 

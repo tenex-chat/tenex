@@ -806,6 +806,7 @@ mod tests {
 
     #[test]
     fn relay_once_sends_req_consumes_event_and_closes_subscription() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -846,6 +847,7 @@ mod tests {
             whitelist_ingress: None,
             project_boot_state: None,
             observer: None,
+            project_event_index: &project_event_index,
         })
         .expect("relay subscription must drain");
 
@@ -870,6 +872,7 @@ mod tests {
 
     #[test]
     fn relay_once_authenticates_and_resubscribes_after_auth_challenge() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -913,6 +916,7 @@ mod tests {
             whitelist_ingress: None,
             project_boot_state: None,
             observer: None,
+            project_event_index: &project_event_index,
         })
         .expect("relay subscription must authenticate and drain");
 

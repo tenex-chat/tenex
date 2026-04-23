@@ -127,6 +127,7 @@ mod tests {
 
     #[test]
     fn builds_subscription_plan_from_config_and_filesystem_routing_catalog() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let owner = pubkey_hex(0x11);
@@ -148,6 +149,7 @@ mod tests {
             tenex_base_dir: base_dir,
             since: Some(1_710_001_000),
             lesson_definition_ids: std::slice::from_ref(&lesson_id),
+            project_event_index: &project_event_index,
         })
         .expect("subscription plan must build");
 
@@ -201,6 +203,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_default_relay_and_omits_empty_dynamic_filters() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         write_config(base_dir, &[], &[]);
@@ -209,6 +212,7 @@ mod tests {
             tenex_base_dir: base_dir,
             since: None,
             lesson_definition_ids: &[],
+            project_event_index: &project_event_index,
         })
         .expect("subscription plan must build");
 

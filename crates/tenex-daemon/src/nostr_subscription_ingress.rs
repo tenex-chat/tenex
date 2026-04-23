@@ -144,6 +144,7 @@ mod tests {
 
     #[test]
     fn event_frame_runs_nostr_ingress_and_keeps_subscription_context() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -167,6 +168,7 @@ mod tests {
             writer_version: "nostr-subscription-ingress-test@0",
             whitelist_ingress: None,
             project_boot_state: None,
+            project_event_index: &project_event_index,
         })
         .expect("subscription frame must process");
 
@@ -197,6 +199,7 @@ mod tests {
 
     #[test]
     fn relay_lifecycle_frames_are_structured_ignored_outcomes() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let daemon_dir = temp_dir.path().join("daemon");
         let frames = [
@@ -240,6 +243,7 @@ mod tests {
                 writer_version: "nostr-subscription-ingress-test@0",
                 whitelist_ingress: None,
                 project_boot_state: None,
+                project_event_index: &project_event_index,
             })
             .expect("lifecycle frame must process");
 

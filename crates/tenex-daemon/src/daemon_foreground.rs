@@ -597,6 +597,7 @@ mod tests {
 
     #[test]
     fn foreground_runner_runs_the_tick_loop_and_shuts_down() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = foreground_fixture("foreground_runner_runs_the_tick_loop_and_shuts_down");
         let shell = test_shell(&fixture.daemon_dir);
         let mut clock = RecordingClock {
@@ -619,6 +620,7 @@ mod tests {
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -656,6 +658,7 @@ mod tests {
 
     #[test]
     fn foreground_runner_until_stopped_honors_stop_signal_and_shuts_down() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture =
             foreground_fixture("foreground_runner_until_stopped_honors_stop_signal_and_shuts_down");
         let shell = test_shell(&fixture.daemon_dir);
@@ -679,6 +682,7 @@ mod tests {
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -707,6 +711,7 @@ mod tests {
 
     #[test]
     fn foreground_runner_with_worker_runs_runtime_and_shuts_down() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = foreground_fixture("foreground_runner_with_worker_runs_runtime");
         let shell = test_shell(&fixture.daemon_dir);
         let mut clock = RecordingClock {
@@ -733,6 +738,7 @@ mod tests {
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonForegroundWorkerInput {
                 runtime_state: &mut runtime_state,
@@ -778,6 +784,7 @@ mod tests {
 
     #[test]
     fn foreground_runner_with_worker_executes_queued_dispatch_from_sidecar() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = foreground_fixture("foreground_runner_with_worker_executes_dispatch");
         seed_claimed_ral(&fixture.daemon_dir);
         seed_queued_dispatch(&fixture.daemon_dir);
@@ -815,6 +822,7 @@ mod tests {
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonForegroundWorkerInput {
                 runtime_state: &mut runtime_state,
@@ -887,6 +895,7 @@ mod tests {
 
     #[test]
     fn foreground_runner_releases_lock_and_status_when_the_tick_loop_fails() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let daemon_dir = unique_temp_daemon_dir();
         let shell = test_shell(&daemon_dir);
         let mut clock = RecordingClock {
@@ -905,6 +914,7 @@ mod tests {
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,

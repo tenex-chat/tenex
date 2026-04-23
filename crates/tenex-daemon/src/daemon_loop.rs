@@ -1207,6 +1207,7 @@ mod tests {
 
     #[test]
     fn filesystem_tick_loop_drains_publish_outbox_after_daemon_maintenance() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-publish-success", 0x04);
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![1_710_001_000_000]),
@@ -1223,6 +1224,7 @@ mod tests {
                 sleep_ms: 30_000,
                 project_boot_state: Arc::clone(&fixture.project_boot_state),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -1255,6 +1257,7 @@ mod tests {
 
     #[test]
     fn filesystem_tick_loop_records_retryable_publish_failures() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-publish-failure", 0x05);
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![1_710_001_000_000]),
@@ -1271,6 +1274,7 @@ mod tests {
                 sleep_ms: 30_000,
                 project_boot_state: Arc::clone(&fixture.project_boot_state),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -1314,6 +1318,7 @@ mod tests {
 
     #[test]
     fn filesystem_tick_with_worker_runs_worker_runtime_before_publish_drain() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-empty-queue", 0x06);
         let mut publisher = RecordingPublisher::default();
         let mut telegram_publisher = NoTelegramPublisher;
@@ -1328,6 +1333,7 @@ mod tests {
                 now_ms: 1_710_001_000_000,
                 project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonWorkerTickInput {
                 runtime_state: &mut runtime_state,
@@ -1371,6 +1377,7 @@ mod tests {
 
     #[test]
     fn filesystem_tick_with_worker_drains_publish_outbox_after_worker_runtime_error() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
         seed_queued_dispatch(&fixture.daemon_dir);
         seed_dispatch_input(&fixture.daemon_dir);
@@ -1387,6 +1394,7 @@ mod tests {
                 now_ms: 1_710_001_000_000,
                 project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
                 heartbeat_latch: None,
+                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonWorkerTickInput {
                 runtime_state: &mut runtime_state,

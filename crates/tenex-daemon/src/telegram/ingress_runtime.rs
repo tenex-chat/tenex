@@ -385,6 +385,7 @@ mod tests {
 
     #[test]
     fn bound_private_chat_normalizes_and_enqueues_inbound_dispatch() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let data_dir = base_dir.join("data");
@@ -413,6 +414,7 @@ mod tests {
             session_reply_to_native_id: None,
             timestamp: 1_710_001_500_000,
             writer_version: "telegram-ingress-runtime-test@0",
+            project_event_index: &project_event_index,
         })
         .expect("telegram ingress must process");
 
@@ -463,6 +465,7 @@ mod tests {
 
     #[test]
     fn unbound_channel_is_ignored_without_dispatch_artifacts() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let data_dir = base_dir.join("data");
@@ -490,6 +493,7 @@ mod tests {
             session_reply_to_native_id: None,
             timestamp: 1_710_001_500_001,
             writer_version: "telegram-ingress-runtime-test@0",
+            project_event_index: &project_event_index,
         })
         .expect("telegram ingress must process");
 
@@ -514,6 +518,7 @@ mod tests {
 
     #[test]
     fn unauthorized_private_sender_is_ignored_without_dispatch_artifacts() {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let data_dir = base_dir.join("data");
@@ -541,6 +546,7 @@ mod tests {
             session_reply_to_native_id: None,
             timestamp: 1_710_001_500_002,
             writer_version: "telegram-ingress-runtime-test@0",
+            project_event_index: &project_event_index,
         })
         .expect("telegram ingress must process");
 

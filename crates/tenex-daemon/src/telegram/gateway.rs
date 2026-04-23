@@ -1197,6 +1197,7 @@ mod tests {
         daemon_dir: &Path,
         data_dir: &Path,
     ) -> GatewayThreadConfig {
+        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         GatewayThreadConfig {
             tenex_base_dir: tenex_base_dir.to_path_buf(),
             daemon_dir: daemon_dir.to_path_buf(),
@@ -1206,6 +1207,7 @@ mod tests {
             poll_limit: 100,
             chat_context_api_sync_ttl_ms: 0,
             signer: None,
+            project_event_index: std::sync::Arc::clone(&project_event_index),
         }
     }
 
