@@ -20,9 +20,8 @@ describe("SubscriptionFilterBuilder", () => {
             expect(filters[0].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
             expect(filters[0].since).toBeUndefined();
 
-            // Second filter: agent create/config updates + deletions
+            // Second filter: config updates + deletions
             expect(filters[1].kinds).toEqual([
-                NDKKind.TenexAgentCreate,
                 NDKKind.TenexAgentConfigUpdate,
                 NDKKind.TenexAgentDelete,
             ]);

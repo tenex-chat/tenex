@@ -572,8 +572,7 @@ export class Daemon {
                 this.knownProjects,
                 knownAgentPubkeys,
                 this.whitelistedPubkeys,
-                activeRuntimes,
-                this.backendPubkey ?? undefined
+                activeRuntimes
             )
         ) {
             return;
@@ -642,17 +641,6 @@ export class Daemon {
                 this.routingLogger,
                 event,
                 "Lesson comment - hydrated into active runtimes only"
-            );
-            return;
-        }
-
-        if (eventType === "agent_create") {
-            addRoutingEvent(span, "agent_create", { reason: "kind_24001" });
-            await this.getEventHandlerRegistry().handleAgentCreateRequest(event);
-            await logDropped(
-                this.routingLogger,
-                event,
-                "Handled backend-targeted agent create request"
             );
             return;
         }

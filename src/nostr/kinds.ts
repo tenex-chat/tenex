@@ -26,7 +26,6 @@ export const NDKKind = {
 
     // Tenex custom kinds (2xxxx range)
     TenexBootProject: 24000 as BaseNDKKind, // Boot project via a-tag
-    TenexAgentCreate: 24001 as BaseNDKKind, // Request backend-side agent creation/install
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexInstalledAgentList: 24011 as BaseNDKKind, // Backend inventory of installed agents
     TenexBackendHeartbeat: 24012 as BaseNDKKind, // Backend whitelist request (ephemeral, p-tags owner)

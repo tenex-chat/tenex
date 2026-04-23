@@ -4,7 +4,6 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getNDK } from "@/nostr/ndkClient";
 import { AgentConfigUpdateService } from "@/services/agents";
-import { installAgentFromDefinitionEventId } from "@/services/agents/AgentProvisioningService";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { AgentInstance } from "@/agents/types";
@@ -40,7 +39,6 @@ export interface EventHandlerRegistryDeps {
  * - handleProjectEvent: kind:31933 — project discovery, auto-boot, runtime wiring
  * - handleLessonEvent: kind:4129 — hydrate lessons into active runtimes
  * - handleLessonCommentEvent: kind:1111 with K:4129 — hydrate comments into runtimes
- * - handleAgentCreateRequest: kind:24001 — install agent from definition
  * - handleGlobalAgentConfigUpdate: kind:24020 without a-tag — global agent config
  */
 export class EventHandlerRegistry {
@@ -484,54 +482,4 @@ export class EventHandlerRegistry {
         });
     }
 
-    /**
-     * Handle agent create requests (kind 24001).
-     * Installs an agent from a definition event.
-     */
-    async handleAgentCreateRequest(event: NDKEvent): Promise<void> {
-        const backendPubkey = this.deps.getBackendPubkey();
-        if (!backendPubkey) {
-            logger.warn("[Daemon] Ignoring agent create request before backend pubkey is initialized", {
-                eventId: event.id,
-            });
-            return;
-        }
-
-        const targetedBackendPubkeys = event.tags
-            .filter((tag) => tag[0] === "p" && tag[1])
-            .map((tag) => tag[1]);
-        if (!targetedBackendPubkeys.includes(backendPubkey)) {
-            return;
-        }
-
-        if (!this.deps.getWhitelistedPubkeys().includes(event.pubkey)) {
-            logger.warn("[Daemon] Unauthorized agent create request", {
-                author: event.pubkey.slice(0, 8),
-                eventId: event.id,
-            });
-            return;
-        }
-
-        const definitionEventId = event.tags.find((tag) => tag[0] === "e" && tag[1])?.[1];
-        if (!definitionEventId) {
-            logger.warn("[Daemon] Agent create request missing definition e-tag", {
-                eventId: event.id,
-            });
-            return;
-        }
-
-        const slugOverride = event.tags.find((tag) => tag[0] === "slug" && tag[1])?.[1];
-        const result = await installAgentFromDefinitionEventId(definitionEventId, {
-            slugOverride,
-            ndk: this.deps.getNdk() || undefined,
-        });
-
-        logger.info("[Daemon] Processed agent create request", {
-            author: event.pubkey.slice(0, 8),
-            definitionEventId: definitionEventId.slice(0, 8),
-            agentPubkey: result.pubkey.slice(0, 8),
-            slug: result.storedAgent.slug,
-            created: result.created,
-        });
-    }
 }

@@ -3,7 +3,6 @@ import {
     isProjectEvent,
     isConfigUpdate,
     isLessonEvent,
-    isAgentCreateRequest,
 } from "@/nostr/AgentEventDecoder";
 import { tryExtractDTagFromAddress, type ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
@@ -37,8 +36,7 @@ export function shouldTraceEvent(
     knownProjects: Map<ProjectDTag, NDKProject>,
     knownAgentPubkeys: Set<Hexpubkey>,
     whitelistedPubkeys: Hexpubkey[],
-    activeRuntimes: Map<ProjectDTag, ProjectRuntime>,
-    backendPubkey?: Hexpubkey
+    activeRuntimes: Map<ProjectDTag, ProjectRuntime>
 ): boolean {
     // Never-route kinds don't need tracing at all
     if (isNeverRouteKind(event)) {
@@ -64,15 +62,6 @@ export function shouldTraceEvent(
     if (isConfigUpdate(event)) {
         const isWhitelisted = whitelistedPubkeys.includes(event.pubkey);
         return isWhitelisted;
-    }
-
-    if (isAgentCreateRequest(event)) {
-        const isWhitelisted = whitelistedPubkeys.includes(event.pubkey);
-        if (!isWhitelisted || !backendPubkey) {
-            return false;
-        }
-
-        return event.tags.some((tag) => tag[0] === "p" && tag[1] === backendPubkey);
     }
 
     // Lesson events from our agents should be traced if we have a runtime
