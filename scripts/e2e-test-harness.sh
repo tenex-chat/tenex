@@ -190,6 +190,85 @@ start_daemon() {
   _log "daemon ready (pid $HARNESS_DAEMON_PID, lock at $DAEMON_DIR/tenex.lock)"
 }
 
+# await_daemon_subscribed [timeout_seconds]
+# Waits for proof that the daemon's relay listener is registered for EACH
+# distinct REQ filter and will receive live broadcasts.
+#
+# Why per-filter: Khatru processes each WS message in its own goroutine, and
+# the per-filter `addListener` call (handlers.go:316) happens AFTER each
+# filter's historical query completes. **Each filter is registered
+# independently and in order.** A broadcast that matches filter N can be lost
+# even after filter N-1 is fully registered. So we must probe every filter
+# group the test cares about.
+#
+# We probe two kinds:
+#   - kind:14199 (project_agent_snapshot_filter)
+#   - kind:24030 (BOOT/AGENT group filter — same group as kind:24000)
+# Both are sent and we wait for both to round-trip via the daemon's log.
+# kind:24030 is chosen because it's in the same filter as the boot kind
+# (24000) but classifies as DaemonNostrEventClass::Other and is ignored by
+# the ingress without side effects. Other kinds in this filter (24001
+# AgentCreate, 24020 ConfigUpdate) trigger ingress code paths that fail
+# noisily on a malformed probe and DISCONNECT the daemon's subscription.
+# Once both kinds are observed, all listener filters that matter for the
+# tests are guaranteed active.
+#
+# Use this after start_daemon AND before publishing any ephemeral kinds.
+await_daemon_subscribed() {
+  local timeout="${1:-45}"
+  local log="$DAEMON_DIR/daemon.log"
+  local deadline=$(( $(date +%s) + timeout ))
+
+  [[ -n "${USER_NSEC:-}" && -n "${USER_PUBKEY:-}" ]] || _die "USER_NSEC/USER_PUBKEY unset; call harness_init first"
+  [[ -n "${HARNESS_RELAY_URL:-}" ]] || _die "HARNESS_RELAY_URL unset; call start_local_relay first"
+
+  # First: wait for the AUTH log line. Without this, our probe publishes
+  # before the daemon's WebSocket is even connected.
+  while [[ $(date +%s) -lt $deadline ]]; do
+    if [[ -f "$log" ]] && grep -q '"relay authenticated, resubscribed"' "$log"; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  # Probe each kind and watch for the daemon to log receipt. Retry up to N
+  # times per kind because the first probe can land in the (REQ-sent,
+  # addListener-pending) window.
+  local kind
+  for kind in 14199 24030; do
+    local got=0
+    local attempt
+    for attempt in 1 2 3 4 5 6; do
+      local probe_evt probe_id
+      probe_evt="$(nak event --sec "$USER_NSEC" -k "$kind" \
+        -c "harness probe k=$kind a=$attempt t=$(date +%s%N)" \
+        --tag "p=$USER_PUBKEY" \
+        "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+      probe_id="$(printf '%s' "$probe_evt" | jq -r '.id // empty' 2>/dev/null)"
+      [[ -z "$probe_id" ]] && { sleep 1; continue; }
+
+      local poll
+      for poll in 1 2 3 4 5 6 7 8; do
+        if [[ -f "$log" ]] && grep -q "$probe_id" "$log"; then
+          _log "kind:$kind listener confirmed (probe #$attempt round-tripped after $((poll*500))ms)"
+          got=1
+          break 2
+        fi
+        sleep 0.5
+        [[ $(date +%s) -ge $deadline ]] && break
+      done
+      [[ $(date +%s) -ge $deadline ]] && break
+    done
+    if [[ "$got" -ne 1 ]]; then
+      _log "TIMEOUT: kind:$kind probe never round-tripped within ${timeout}s"
+      return 1
+    fi
+  done
+
+  _log "daemon subscription confirmed live (all probed listener filters registered)"
+  return 0
+}
+
 stop_daemon() {
   if [[ -n "${HARNESS_DAEMON_PID:-}" ]]; then
     _log "stopping daemon pid $HARNESS_DAEMON_PID (SIGTERM)"

@@ -111,6 +111,11 @@ publish_event_as "$USER_NSEC" 31933 "NAK interop test project" \
 # --- Start daemon -------------------------------------------------------------
 start_daemon
 
+# Wait for the daemon's relay listeners to be registered for both filter
+# groups we care about. Without this, the kind:24000 boot publish below races
+# against per-filter listener registration in Khatru and is silently dropped.
+await_daemon_subscribed 45 || _die "daemon subscription never became live"
+
 # ============================================================================
 # Phase A — deterministic daemon plumbing
 # ============================================================================
