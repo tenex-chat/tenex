@@ -1,32 +1,9 @@
 // Agent event system
 
 export {
-    isDirectedToSystem,
-    isEventFromAgent as isEventFromAgentByMap,
     getReplyTarget,
     getMentionedPubkeys,
-    isAgentInternalMessage,
-    isDelegationRequest,
-    isDelegationCompletion,
-    getDelegationRequestId,
-    isStatusEvent,
-    getErrorType,
-    hasTool,
-    getToolTags,
-    getParticipants,
     extractSkillEventIds,
-    isNeverRouteKind,
-    isProjectEvent,
-    isLessonEvent,
-    extractProjectId,
-    extractAgentDefinitionIdFromLesson,
-    hasProjectATags,
-    extractProjectATags,
-    classifyForDaemon,
-    isLessonCommentEvent,
-    isConfigUpdate,
-    isMetadata,
-    isStopCommand,
 } from "./AgentEventDecoder";
 
 export type {
