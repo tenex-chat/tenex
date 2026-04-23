@@ -4,7 +4,10 @@ import type {
     TransportMessageIntent,
 } from "@/events/runtime/AgentRuntimePublisher";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
+import { AgentEventEncoder } from "@/nostr/AgentEventEncoder";
 import { NDKKind } from "@/nostr/kinds";
+import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
+import { injectTraceContext } from "@/nostr/trace-context";
 import type {
     AskConfig,
     CompletionIntent,
@@ -19,10 +22,10 @@ import type {
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import type { AgentWorkerProtocolMessage } from "@/events/runtime/AgentWorkerProtocol";
-import type { InboundEnvelope, PrincipalRef } from "@/events/runtime/InboundEnvelope";
-import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { getEventHash } from "nostr-tools";
+import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
 
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_result" }>;
@@ -54,7 +57,22 @@ export function createWorkerProtocolPublisherFactory(
         });
 }
 
+/**
+ * Worker-side publisher that bridges `AgentRuntimePublisher` to the worker↔daemon
+ * stdin/stdout protocol.
+ *
+ * Event tagging is fully delegated to `AgentEventEncoder` (the canonical encoder
+ * also used by the daemon-side `AgentPublisher`) so worker-published events match
+ * TENEX client expectations. The only responsibility left here is the transport:
+ * sign the encoded event, emit a `publish_request` frame, await the daemon's
+ * `publish_result` for acceptance, and fan out worker-protocol side-channel
+ * messages (`delegation_registered`, `tool_call_completed`,
+ * `silent_completion_requested`, `delegation_killed`).
+ */
 class WorkerProtocolPublisher implements AgentRuntimePublisher {
+    private readonly encoder = new AgentEventEncoder();
+    private readonly inboundAdapter = new NostrInboundAdapter();
+
     constructor(private readonly options: WorkerProtocolPublisherOptions) {}
 
     async complete(
@@ -78,51 +96,65 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             context.conversationId,
             context.ralNumber
         );
+        const contextWithExtras: EventContext = {
+            ...enhancedContext,
+            llmRuntimeTotal: totalRuntime > 0 ? totalRuntime : undefined,
+        };
 
-        return this.publishTextEvent(intent.content, {
-            context: {
-                ...enhancedContext,
-                llmRuntimeTotal: totalRuntime > 0 ? totalRuntime : undefined,
-            },
-            runtimeEventClass: "complete",
-            status: "completed",
-            usage: intent.usage,
-            metadata: {
-                statusValue: "completed",
-            },
-        });
+        const event = this.encoder.encodeCompletion(intent, contextWithExtras);
+        return this.signAndEmit(event, "complete");
     }
 
     async conversation(
         intent: ConversationIntent,
         context: EventContext
     ): Promise<PublishedMessageRef> {
-        return this.publishTextEvent(intent.content, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "conversation",
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = this.encoder.encodeConversation(intent, enhancedContext);
+        return this.signAndEmit(event, "conversation", {
             conversationVariant: intent.isReasoning ? "reasoning" : "primary",
-            usage: intent.usage,
-            metadata: {},
         });
     }
 
     async delegate(config: DelegateConfig, context: EventContext): Promise<string> {
-        const ref = await this.publishTextEvent(config.content, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "delegation",
-            recipientPubkey: config.recipient,
-            metadata: {
-                delegationParentConversationId: context.conversationId,
-                branchName: config.branch,
-            },
-            tags: [
-                ["delegation", context.conversationId],
-                ...(config.branch ? [["branch", config.branch]] : []),
-                ...(config.team ? [["team", config.team]] : []),
-                ...(config.variant ? [["variant", config.variant]] : []),
-                ...(config.skills ?? []).map((skillId) => ["skill", skillId]),
-            ],
-        });
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = new NDKEvent();
+        event.kind = NDKKind.Text;
+        event.content = config.content;
+
+        event.tags.push(["p", config.recipient]);
+
+        if (config.branch) {
+            event.tags.push(["branch", config.branch]);
+        }
+
+        if (config.team) {
+            event.tags.push(["team", config.team]);
+        }
+
+        if (config.skills && config.skills.length > 0) {
+            const uniqueSkills = [...new Set(config.skills)];
+            for (const skillId of uniqueSkills) {
+                event.tags.push(["skill", skillId]);
+            }
+        }
+
+        if (config.variant) {
+            event.tags.push(["variant", config.variant]);
+        }
+
+        this.encoder.addStandardTags(event, enhancedContext);
+
+        if (!config.branch) {
+            this.encoder.forwardBranchTag(event, enhancedContext);
+        }
+        if (!config.team) {
+            this.encoder.forwardTeamTag(event, enhancedContext);
+        }
+
+        event.tags.push(["delegation", context.conversationId]);
+
+        const ref = await this.signAndEmit(event, "delegation");
 
         PendingDelegationsRegistry.register(
             this.options.agent.pubkey,
@@ -143,35 +175,40 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     }
 
     async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
-        const ref = await this.publishTextEvent(config.context, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "ask",
-            recipientPubkey: config.recipient,
-            metadata: {
-                delegationParentConversationId: context.conversationId,
-            },
-            tags: [
-                ["title", config.title],
-                ["ask", "true"],
-                ["t", "ask"],
-                ["delegation", context.conversationId],
-                ...config.questions.map((question) =>
-                    question.type === "question"
-                        ? [
-                              "question",
-                              question.title,
-                              question.question,
-                              ...(question.suggestions ?? []),
-                          ]
-                        : [
-                              "multiselect",
-                              question.title,
-                              question.question,
-                              ...(question.options ?? []),
-                          ]
-                ),
-            ],
-        });
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = new NDKEvent();
+        event.kind = NDKKind.Text;
+        event.content = config.context;
+
+        event.tags.push(["title", config.title]);
+
+        for (const question of config.questions) {
+            if (question.type === "question") {
+                const tag = ["question", question.title, question.question];
+                if (question.suggestions) {
+                    tag.push(...question.suggestions);
+                }
+                event.tags.push(tag);
+            } else if (question.type === "multiselect") {
+                const tag = ["multiselect", question.title, question.question];
+                if (question.options) {
+                    tag.push(...question.options);
+                }
+                event.tags.push(tag);
+            }
+        }
+
+        event.tags.push(["p", config.recipient]);
+
+        this.encoder.addStandardTags(event, enhancedContext);
+        this.encoder.forwardBranchTag(event, enhancedContext);
+        this.encoder.forwardTeamTag(event, enhancedContext);
+
+        event.tags.push(["ask", "true"]);
+        event.tags.push(["t", "ask"]);
+        event.tags.push(["delegation", context.conversationId]);
+
+        const ref = await this.signAndEmit(event, "ask");
 
         PendingDelegationsRegistry.register(
             this.options.agent.pubkey,
@@ -202,17 +239,23 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         },
         context: EventContext
     ): Promise<string> {
-        const ref = await this.publishTextEvent(params.content, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "delegate_followup",
-            recipientPubkey: params.recipient,
-            tags: [
-                ["e", params.delegationEventId, "", "root"],
-                ...(params.replyToEventId
-                    ? [["e", params.replyToEventId, "", "reply"]]
-                    : []),
-            ],
-        });
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = new NDKEvent();
+        event.kind = NDKKind.Text;
+        event.content = params.content;
+
+        event.tags.push(["p", params.recipient]);
+        event.tags.push(["e", params.delegationEventId, "", "root"]);
+
+        if (params.replyToEventId) {
+            event.tags.push(["e", params.replyToEventId, "", "reply"]);
+        }
+
+        this.encoder.addStandardTags(event, enhancedContext);
+        this.encoder.forwardBranchTag(event, enhancedContext);
+        this.encoder.forwardTeamTag(event, enhancedContext);
+
+        const ref = await this.signAndEmit(event, "delegate_followup");
 
         await this.registerPendingDelegation({
             context,
@@ -228,42 +271,21 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     }
 
     async error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef> {
-        return this.publishTextEvent(intent.message, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "error",
-            status: intent.errorType ?? "execution_error",
-            metadata: {
-                statusValue: intent.errorType ?? "execution_error",
-            },
-        });
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = this.encoder.encodeError(intent, enhancedContext);
+        return this.signAndEmit(event, "error");
     }
 
     async lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef> {
-        return this.publishTextEvent(intent.lesson, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "lesson",
-            kind: NDKKind.AgentLesson,
-            metadata: {},
-            tags: [
-                ["title", intent.title],
-                ...(intent.category ? [["category", intent.category]] : []),
-                ...(intent.hashtags ?? []).map((tag) => ["t", tag]),
-            ],
-        });
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const lessonEvent = this.encoder.encodeLesson(intent, enhancedContext, this.options.agent);
+        return this.signAndEmit(lessonEvent, "lesson");
     }
 
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef> {
-        const ref = await this.publishTextEvent(intent.content, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "tool_use",
-            metadata: {
-                toolName: intent.toolName,
-            },
-            tags: [
-                ["tool", intent.toolName],
-                ...(intent.referencedEventIds ?? []).map((eventId) => ["q", eventId]),
-            ],
-        });
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = this.encoder.encodeToolUse(intent, enhancedContext);
+        const ref = await this.signAndEmit(event, "tool_use");
 
         if (intent.toolName === "no_response") {
             if (this.options.executionState) {
@@ -294,16 +316,39 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         intent: TransportMessageIntent,
         context: EventContext
     ): Promise<PublishedMessageRef> {
-        return this.publishTextEvent(intent.content, {
-            context: this.consumeAndEnhanceContext(context),
-            runtimeEventClass: "conversation",
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = new NDKEvent();
+        event.kind = NDKKind.Text;
+        event.content = intent.content;
+        if (enhancedContext.rootEvent.id) {
+            event.tag(["e", enhancedContext.rootEvent.id, "", "root"]);
+        }
+        event.tag(["tenex:egress", "telegram"]);
+        event.tag(["tenex:channel", intent.channelId]);
+        this.encoder.addStandardTags(event, enhancedContext);
+
+        const ref = await this.signAndEmit(event, "conversation", {
             conversationVariant: "primary",
-            tags: [
-                ["tenex:egress", "telegram"],
-                ["tenex:channel", intent.channelId],
-            ],
             outputTransport: "telegram",
         });
+
+        return {
+            ...ref,
+            transport: "telegram",
+            envelope: {
+                ...ref.envelope,
+                transport: "telegram",
+                channel: {
+                    ...ref.envelope.channel,
+                    id: intent.channelId,
+                    transport: "telegram",
+                },
+                message: {
+                    ...ref.envelope.message,
+                    transport: "telegram",
+                },
+            },
+        };
     }
 
     async streamTextDelta(
@@ -311,18 +356,8 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         context: EventContext
     ): Promise<void> {
         try {
-            await this.publishTextEvent(intent.delta, {
-                context,
-                runtimeEventClass: "stream_text_delta",
-                kind: NDKKind.TenexStreamTextDelta,
-                tags: [
-                    ["llm-ral", context.ralNumber.toString()],
-                    ["stream-seq", intent.sequence.toString()],
-                    ...(context.model ? [["llm-model", context.model]] : []),
-                    ...(context.triggeringEnvelope.metadata.branchName
-                        ? [["branch", String(context.triggeringEnvelope.metadata.branchName)]]
-                        : []),
-                ],
+            const event = this.encoder.encodeStreamTextDelta(intent, context);
+            await this.signAndEmit(event, "stream_text_delta", {
                 waitForRelayOk: false,
             });
         } catch {
@@ -431,56 +466,37 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         });
     }
 
-    private async publishTextEvent(
-        content: string,
-        options: {
-            context: EventContext;
-            runtimeEventClass: PublishRequestMessage["runtimeEventClass"];
+    /**
+     * Sign the already-encoded event, emit a `publish_request` frame, and await
+     * the daemon's `publish_result` for acceptance. Returns a PublishedMessageRef
+     * with the envelope derived from the signed event.
+     */
+    private async signAndEmit(
+        event: NDKEvent,
+        runtimeEventClass: PublishRequestMessage["runtimeEventClass"],
+        options?: {
             conversationVariant?: PublishRequestMessage["conversationVariant"];
-            kind?: number;
-            status?: string;
-            recipientPubkey?: string;
-            tags?: string[][];
-            usage?: unknown;
-            metadata?: Partial<InboundEnvelope["metadata"]>;
             outputTransport?: PublishedMessageRef["transport"];
             waitForRelayOk?: boolean;
             timeoutMs?: number;
         }
     ): Promise<PublishedMessageRef> {
-        const kind = options.kind ?? NDKKind.Text;
-        const tags = this.buildTags(options);
-        const createdAt = Math.floor(Date.now() / 1000);
-        const event = new NDKEvent(undefined, {
-            kind,
-            content,
-            tags,
-            created_at: createdAt,
-        });
+        injectTraceContext(event);
         await this.options.agent.sign(event);
         const signedEvent = requireSignedPublishEvent(event, this.options.agent.pubkey);
         const eventId = signedEvent.id;
         const requestId = `publish-${eventId}`;
-        const envelope = this.toEnvelope({
-            id: eventId,
-            kind,
-            content,
-            tags,
-            context: options.context,
-            metadata: options.metadata ?? {},
-            occurredAt: createdAt,
-            transport: options.outputTransport ?? "nostr",
-        });
+        const waitForRelayOk = options?.waitForRelayOk ?? true;
 
         await this.options.emit({
             type: "publish_request",
             correlationId: this.options.execution.correlationId,
             ...this.identity(),
             requestId,
-            waitForRelayOk: options.waitForRelayOk ?? true,
-            timeoutMs: options.timeoutMs ?? 30_000,
-            runtimeEventClass: options.runtimeEventClass,
-            ...(options.conversationVariant
+            waitForRelayOk,
+            timeoutMs: options?.timeoutMs ?? 30_000,
+            runtimeEventClass,
+            ...(options?.conversationVariant
                 ? { conversationVariant: options.conversationVariant }
                 : {}),
             event: signedEvent,
@@ -488,13 +504,24 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         await this.waitForPublishAcceptance(
             requestId,
             eventId,
-            this.options.publishResults?.waitForPublishResult(requestId, 30_000)
+            waitForRelayOk
+                ? this.options.publishResults?.waitForPublishResult(requestId, 30_000)
+                : undefined
         );
 
+        return this.toPublishedMessageRef(event, options?.outputTransport);
+    }
+
+    private toPublishedMessageRef(
+        event: NDKEvent,
+        outputTransport?: PublishedMessageRef["transport"]
+    ): PublishedMessageRef {
+        const envelope: InboundEnvelope = this.inboundAdapter.toEnvelope(event);
         return {
-            id: eventId,
-            transport: options.outputTransport ?? "nostr",
+            id: event.id ?? envelope.message.nativeId,
+            transport: outputTransport ?? envelope.transport,
             envelope,
+            ...(event.id ? { encodedId: event.encode() } : {}),
         };
     }
 
@@ -520,120 +547,6 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         const errorMessage =
             result.error?.message ?? `Publish request ${requestId} ended with ${result.status}`;
         throw new Error(errorMessage);
-    }
-
-    private buildTags(options: {
-        context: EventContext;
-        runtimeEventClass: PublishRequestMessage["runtimeEventClass"];
-        status?: string;
-        recipientPubkey?: string;
-        tags?: string[][];
-    }): string[][] {
-        const tags: string[][] = [];
-
-        const startsNewConversation =
-            options.runtimeEventClass === "delegation" ||
-            options.runtimeEventClass === "ask";
-        const hasExplicitRootTag = options.tags?.some(
-            (tag) => tag[0] === "e" && tag[3] === "root"
-        );
-        if (!startsNewConversation && !hasExplicitRootTag && options.context.rootEvent.id) {
-            tags.push(["e", options.context.rootEvent.id, "", "root"]);
-        }
-
-        const projectBinding = options.context.triggeringEnvelope.channel.projectBinding;
-        if (projectBinding) {
-            tags.push(["a", projectBinding]);
-        }
-
-        const recipient =
-            options.recipientPubkey ??
-            options.context.completionRecipientPubkey ??
-            options.context.triggeringEnvelope.principal.linkedPubkey;
-        if (recipient) {
-            tags.push(["p", recipient]);
-        }
-
-        if (options.status) {
-            tags.push(["status", options.status]);
-        }
-
-        if (options.context.model) {
-            tags.push(["model", options.context.model]);
-        }
-
-        if (options.context.llmRuntime !== undefined && options.context.llmRuntime > 0) {
-            tags.push(["llm-runtime", options.context.llmRuntime.toString(), "ms"]);
-        }
-
-        if (
-            options.context.llmRuntimeTotal !== undefined &&
-            options.context.llmRuntimeTotal > 0
-        ) {
-            tags.push(["llm-runtime-total", options.context.llmRuntimeTotal.toString(), "ms"]);
-        }
-
-        tags.push(...(options.tags ?? []));
-        return tags;
-    }
-
-    private toEnvelope(params: {
-        id: string;
-        kind: number;
-        content: string;
-        tags: string[][];
-        context: EventContext;
-        metadata: Partial<InboundEnvelope["metadata"]>;
-        occurredAt: number;
-        transport: PublishedMessageRef["transport"];
-    }): InboundEnvelope {
-        const agentPrincipal: PrincipalRef = {
-            id: `${params.transport}:${this.options.agent.pubkey}`,
-            transport: params.transport,
-            linkedPubkey: this.options.agent.pubkey,
-            displayName: this.options.agent.name,
-            kind: "agent",
-        };
-
-        const recipientPubkeys = params.tags
-            .filter((tag) => tag[0] === "p" && tag[1])
-            .map((tag) => tag[1])
-            .filter((pubkey): pubkey is string => Boolean(pubkey));
-        const recipients =
-            params.context.completionRecipientPrincipal &&
-            recipientPubkeys.includes(params.context.completionRecipientPrincipal.linkedPubkey ?? "")
-                ? [params.context.completionRecipientPrincipal]
-                : recipientPubkeys.map((pubkey) => ({
-                      id: `nostr:${pubkey}`,
-                      transport: "nostr" as const,
-                      linkedPubkey: pubkey,
-                  }));
-
-        return {
-            transport: params.transport,
-            principal: agentPrincipal,
-            channel: {
-                ...params.context.triggeringEnvelope.channel,
-                transport: params.transport,
-            },
-            message: {
-                id: `${params.transport}:${params.id}`,
-                transport: params.transport,
-                nativeId: params.id,
-                replyToId: params.context.rootEvent.id
-                    ? `${params.transport}:${params.context.rootEvent.id}`
-                    : undefined,
-            },
-            recipients,
-            content: params.content,
-            occurredAt: params.occurredAt,
-            capabilities: ["project-routing-a-tag", "threaded-replies"],
-            metadata: {
-                eventKind: params.kind,
-                eventTagCount: params.tags.length,
-                ...params.metadata,
-            },
-        };
     }
 
     private identity(): {

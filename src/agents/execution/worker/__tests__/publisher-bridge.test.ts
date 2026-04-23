@@ -9,6 +9,8 @@ import {
 } from "@/events/runtime/AgentWorkerProtocol";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import type { EventContext } from "@/nostr/types";
+import type { ProjectContext } from "@/services/projects";
+import { projectContextStore } from "@/services/projects";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import type {
     AgentWorkerOutboundProtocolMessage,
@@ -168,28 +170,33 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
 
     for (const testCase of publishRequestCases) {
         it(`emits ${testCase.name} publish_request metadata`, async () => {
-            const harness = createHarness();
+            await withProjectContext(async () => {
+                const harness = createHarness();
 
-            await testCase.act(harness.publisher, harness.context);
+                await testCase.act(harness.publisher, harness.context);
 
-            const publishRequests = harness.emitted.filter(isPublishRequest);
-            expect(publishRequests).toHaveLength(1);
+                const publishRequests = harness.emitted.filter(isPublishRequest);
+                expect(publishRequests).toHaveLength(1);
 
-            const [publishRequest] = publishRequests;
-            expect(publishRequest.runtimeEventClass).toBe(testCase.runtimeEventClass);
-            expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
+                const [publishRequest] = publishRequests;
+                expect(publishRequest.runtimeEventClass).toBe(testCase.runtimeEventClass);
+                expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
 
-            if (testCase.conversationVariant) {
-                expect(publishRequest.conversationVariant).toBe(testCase.conversationVariant);
-            } else {
-                expect("conversationVariant" in publishRequest).toBe(false);
-            }
+                if (testCase.conversationVariant) {
+                    expect(publishRequest.conversationVariant).toBe(testCase.conversationVariant);
+                } else {
+                    expect("conversationVariant" in publishRequest).toBe(false);
+                }
 
-            expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
+                expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(
+                    true
+                );
+            });
         });
     }
 
     it("emits signed Telegram egress publish_request metadata", async () => {
+        await withProjectContext(async () => {
         const harness = createHarness();
 
         const ref = await harness.publisher.sendMessage(
@@ -219,57 +226,81 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
             `31933:${OWNER_PUBKEY}:${PROJECT_ID}`,
         ]);
         expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
+        });
     });
 
     it("emits signed stream text delta publish_request metadata", async () => {
-        const harness = createHarness();
+        await withProjectContext(async () => {
+            const harness = createHarness();
 
-        await harness.publisher.streamTextDelta(
-            {
-                delta: "partial response",
-                sequence: 3,
-            },
-            harness.context
-        );
+            await harness.publisher.streamTextDelta(
+                {
+                    delta: "partial response",
+                    sequence: 3,
+                },
+                harness.context
+            );
 
-        const publishRequests = harness.emitted.filter(isPublishRequest);
-        expect(publishRequests).toHaveLength(1);
+            const publishRequests = harness.emitted.filter(isPublishRequest);
+            expect(publishRequests).toHaveLength(1);
 
-        const [publishRequest] = publishRequests;
-        expect(publishRequest.runtimeEventClass).toBe("stream_text_delta");
-        expect(publishRequest.waitForRelayOk).toBe(false);
-        expect(publishRequest.event.kind).toBe(24135);
-        expect(publishRequest.event.content).toBe("partial response");
-        expect(publishRequest.event.tags).toContainEqual(["llm-ral", "1"]);
-        expect(publishRequest.event.tags).toContainEqual(["stream-seq", "3"]);
-        expect(publishRequest.event.tags).toContainEqual(["llm-model", "mock-model"]);
-        expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
-        expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
+            const [publishRequest] = publishRequests;
+            expect(publishRequest.runtimeEventClass).toBe("stream_text_delta");
+            expect(publishRequest.waitForRelayOk).toBe(false);
+            expect(publishRequest.event.kind).toBe(24135);
+            expect(publishRequest.event.content).toBe("partial response");
+            expect(publishRequest.event.tags).toContainEqual(["llm-ral", "1"]);
+            expect(publishRequest.event.tags).toContainEqual(["stream-seq", "3"]);
+            expect(publishRequest.event.tags).toContainEqual(["llm-model", "mock-model"]);
+            expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
+            expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
+        });
     });
 
     it("anchors delegate followups to the delegated conversation root", async () => {
-        const harness = createHarness();
-        const delegationEventId = "a".repeat(64);
+        await withProjectContext(async () => {
+            const harness = createHarness();
+            const delegationEventId = "a".repeat(64);
 
-        await harness.publisher.delegateFollowup(
-            {
-                recipient: RECIPIENT_PUBKEY,
-                content: "Follow up in delegated thread.",
-                delegationEventId,
-                replyToEventId: "9".repeat(64),
-            },
-            harness.context
-        );
+            await harness.publisher.delegateFollowup(
+                {
+                    recipient: RECIPIENT_PUBKEY,
+                    content: "Follow up in delegated thread.",
+                    delegationEventId,
+                    replyToEventId: "9".repeat(64),
+                },
+                harness.context
+            );
 
-        const publishRequest = harness.emitted.find(isPublishRequest);
-        expect(publishRequest).toBeDefined();
-        const rootTags = publishRequest!.event.tags.filter(
-            (tag) => tag[0] === "e" && tag[3] === "root"
-        );
-        expect(rootTags).toEqual([["e", delegationEventId, "", "root"]]);
-        expect(rootTags).not.toContainEqual(["e", ROOT_EVENT_ID, "", "root"]);
+            const publishRequest = harness.emitted.find(isPublishRequest);
+            expect(publishRequest).toBeDefined();
+            const rootTags = publishRequest!.event.tags.filter(
+                (tag) => tag[0] === "e" && tag[3] === "root"
+            );
+            expect(rootTags).toEqual([["e", delegationEventId, "", "root"]]);
+            expect(rootTags).not.toContainEqual(["e", ROOT_EVENT_ID, "", "root"]);
+        });
     });
 });
+
+function createMockProjectContext(): ProjectContext {
+    const projectRef = `31933:${OWNER_PUBKEY}:${PROJECT_ID}`;
+    return {
+        project: {
+            pubkey: OWNER_PUBKEY,
+            dTag: PROJECT_ID,
+            tagValue: (tag: string) => (tag === "d" ? PROJECT_ID : undefined),
+            tagReference: () => ["a", projectRef] as string[],
+        },
+        agentRegistry: {
+            getAgentByPubkey: () => undefined,
+        },
+    } as unknown as ProjectContext;
+}
+
+function withProjectContext<T>(fn: () => Promise<T>): Promise<T> {
+    return projectContextStore.run(createMockProjectContext(), fn);
+}
 
 function createHarness(): {
     agent: RuntimePublishAgent;

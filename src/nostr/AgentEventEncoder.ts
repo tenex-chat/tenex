@@ -1,7 +1,6 @@
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
-import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
 import { shortenConversationId, shortenOptionalConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
@@ -128,7 +127,7 @@ export class AgentEventEncoder {
      * a human responds to an "ask" hours later).
      */
     encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
+        const event = new NDKEvent();
         event.kind = NDKKind.Text; // kind:1
         event.content = intent.content;
 
@@ -182,7 +181,7 @@ export class AgentEventEncoder {
      * Conversations have NO p-tag (no notification) - used for mid-loop responses.
      */
     encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
+        const event = new NDKEvent();
         event.kind = NDKKind.Text; // kind:1 - same as completion
         event.content = intent.content;
 
@@ -252,7 +251,7 @@ export class AgentEventEncoder {
      */
     encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
         return intent.delegations.map((delegation) => {
-            const event = new NDKEvent(getNDK());
+            const event = new NDKEvent();
             event.kind = NDKKind.Text; // kind:1 - unified conversation format
 
             // Prepend recipient to the content
@@ -294,7 +293,7 @@ export class AgentEventEncoder {
      * Creates an event that asks questions to the project manager/human user.
      */
     encodeAsk(intent: AskIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
+        const event = new NDKEvent();
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.context;
 
@@ -395,7 +394,7 @@ export class AgentEventEncoder {
      * Error events act as finalization: they have p-tag (triggers notification) and status=completed.
      */
     encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
+        const event = new NDKEvent();
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.message;
 
@@ -509,7 +508,7 @@ export class AgentEventEncoder {
         context: EventContext,
         agent: { eventId?: string }
     ): NDKAgentLesson {
-        const lessonEvent = new NDKAgentLesson(getNDK());
+        const lessonEvent = new NDKAgentLesson();
 
         // Set core properties
         lessonEvent.title = intent.title;
@@ -579,7 +578,7 @@ export class AgentEventEncoder {
      * Creates an event that tracks tool invocation with output.
      */
     encodeToolUse(intent: ToolUseIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
+        const event = new NDKEvent();
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
@@ -633,7 +632,7 @@ export class AgentEventEncoder {
      * These events are best-effort live updates and do not replace kind:1 snapshots.
      */
     encodeStreamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
+        const event = new NDKEvent();
         event.kind = NDKKind.TenexStreamTextDelta;
         event.content = intent.delta;
 
@@ -689,7 +688,7 @@ export class AgentEventEncoder {
      * to avoid layer violations - AgentEventEncoder (layer 2) cannot import PubkeyService (layer 3).
      */
     encodeInterventionReview(intent: InterventionReviewIntent): NDKEvent {
-        const event = new NDKEvent(getNDK());
+        const event = new NDKEvent();
         event.kind = NDKKind.Text; // kind:1
 
         const shortConversationId = shortenConversationId(intent.conversationId);
