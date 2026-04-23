@@ -12,7 +12,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 
 ## Subdirectories
 
-- `dispatch/` — Chat routing, delegation handling (`AgentDispatchService`, `AgentRouter`)
 - `ral/` — Request-Agent Lifecycle state (`RALRegistry`)
 - `rag/` — LanceDB document ingestion and querying
 - `mcp/` — MCP server lifecycle management (`MCPManager` is single source of truth)

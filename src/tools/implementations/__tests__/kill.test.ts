@@ -2,7 +2,7 @@
  * Tests for the unified kill tool
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,14 +14,12 @@ import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { SchedulerService } from "@/services/scheduling";
 import { prefixKVStore } from "@/services/storage";
-import { AgentDispatchService } from "@/services/dispatch/AgentDispatchService";
 import type { ToolRegistryContext } from "@/tools/types";
 
 describe("kill tool", () => {
     let mockContext: ToolRegistryContext;
     let ralRegistry: RALRegistry;
     let cooldownRegistry: CooldownRegistry;
-    let dispatchKillWakeupSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
@@ -32,10 +30,7 @@ describe("kill tool", () => {
             getProjectId: () => projectId,
         };
 
-        // Stub dispatchKillWakeup so tests don't require project context setup
-        dispatchKillWakeupSpy = spyOn(AgentDispatchService.getInstance(), "dispatchKillWakeup").mockResolvedValue(undefined);
-
-        // Create mock context with all required fields including agentExecutor
+        // Create mock context with all required fields.
         mockContext = {
             agent: {
                 slug: "test-agent",
@@ -49,7 +44,6 @@ describe("kill tool", () => {
                     dTag: projectId,
                 },
             },
-            agentExecutor: {} as any,
         } as any;
 
         // Get registry instances
@@ -62,7 +56,6 @@ describe("kill tool", () => {
     });
 
     afterEach(() => {
-        dispatchKillWakeupSpy?.mockRestore();
         ralRegistry.clearAll();
         cooldownRegistry.clearAll();
     });
@@ -96,8 +89,6 @@ describe("kill tool", () => {
             expect(result.success).toBe(true);
             expect(result.targetType).toBe("agent");
             expect(ralRegistry.abortWithCascade).toHaveBeenCalled();
-            // Verify executor is passed through to dispatchKillWakeup
-            expect(dispatchKillWakeupSpy).toHaveBeenCalledWith(conversationId, mockContext.agentExecutor);
 
             // Restore
             ConversationStore.has = originalHas;

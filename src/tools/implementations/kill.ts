@@ -14,12 +14,10 @@
  */
 
 import type { AISdkTool, ToolExecutionContext, ToolRegistryContext } from "@/tools/types";
-import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { killBackgroundTask, getBackgroundTaskInfo, getAllBackgroundTasks } from "./shell";
 import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { AgentDispatchService } from "@/services/dispatch/AgentDispatchService";
 import { SchedulerService } from "@/services/scheduling";
 import { tool } from "ai";
 import { z } from "zod";
@@ -158,7 +156,7 @@ interface KillOutput {
 /**
  * Core implementation of the unified kill functionality
  */
-async function executeKill(input: KillInput, context: ToolExecutionContext, agentExecutor: AgentExecutor): Promise<KillOutput> {
+async function executeKill(input: KillInput, context: ToolExecutionContext): Promise<KillOutput> {
     const { target, reason } = input;
 
     if (!reason) {
@@ -193,13 +191,13 @@ async function executeKill(input: KillInput, context: ToolExecutionContext, agen
             // Conversation ID (64-char hex) - check if it exists
             const isConversationId = ConversationStore.has(resolved.id);
             if (isConversationId) {
-                return await killAgent(resolved.id, reason, context, agentExecutor);
+                return await killAgent(resolved.id, reason, context);
             }
             // Also try prefix match on the resolved ID (in case it's a prefix itself)
             const allConversations = ConversationStore.getAll();
             const matchingConv = allConversations.find((c) => c.id.startsWith(resolved.id));
             if (matchingConv) {
-                return await killAgent(matchingConv.id, reason, context, agentExecutor);
+                return await killAgent(matchingConv.id, reason, context);
             }
             // Resolved ID but not found in store - fall through to error
         }
@@ -212,7 +210,7 @@ async function executeKill(input: KillInput, context: ToolExecutionContext, agen
     const isDirectShellTaskId = !isDirectConversationId && !!getBackgroundTaskInfo(normalizedTarget);
 
     if (isDirectConversationId) {
-        return await killAgent(normalizedTarget, reason, context, agentExecutor);
+        return await killAgent(normalizedTarget, reason, context);
     }
 
     if (isDirectShellTaskId) {
@@ -226,7 +224,7 @@ async function executeKill(input: KillInput, context: ToolExecutionContext, agen
 
     if (matchingConv) {
         // Found a conversation by prefix - use it
-        return await killAgent(matchingConv.id, reason, context, agentExecutor);
+        return await killAgent(matchingConv.id, reason, context);
     }
 
     // Not found - provide helpful error with project-filtered listings.
@@ -275,8 +273,7 @@ async function executeKill(input: KillInput, context: ToolExecutionContext, agen
 async function killAgent(
     conversationId: string,
     reason: string,
-    context: ToolExecutionContext,
-    agentExecutor: AgentExecutor
+    context: ToolExecutionContext
 ): Promise<KillOutput> {
     const ralRegistry = RALRegistry.getInstance();
     const cooldownRegistry = CooldownRegistry.getInstance();
@@ -363,9 +360,6 @@ async function killAgent(
             // Also mark the parent delegation as killed
             ralRegistry.markParentDelegationKilled(conversationId);
 
-            // Wake up the parent agent waiting on this delegation
-            await AgentDispatchService.getInstance().dispatchKillWakeup(conversationId, agentExecutor);
-
             // Add to cooldown registry
             const cooldownRegistry = CooldownRegistry.getInstance();
             cooldownRegistry.add(projectId, conversationId, delegationRecipient, reason);
@@ -417,9 +411,6 @@ async function killAgent(
         reason,
         cooldownRegistry
     );
-
-    // Wake up the parent agent waiting on this delegation
-    await AgentDispatchService.getInstance().dispatchKillWakeup(conversationId, agentExecutor);
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_completed", {
         "kill.conversation_id": shortenConversationId(conversationId),
@@ -585,11 +576,7 @@ export function createKillTool(context: ToolRegistryContext): AISdkTool {
         inputSchema: killSchema,
 
         execute: async (input: KillInput) => {
-            const { agentExecutor } = context;
-            if (!agentExecutor) {
-                throw new Error("[kill] agentExecutor missing from context — kill tool requires a real execution context");
-            }
-            return await executeKill(input, context, agentExecutor);
+            return await executeKill(input, context);
         },
     });
 
