@@ -18,6 +18,8 @@ import { assertSupervisionHealth } from "@/agents/supervision";
 import { checkPostCompletion } from "./PostCompletionChecker";
 import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
+import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
 import type {
     AgentRuntimePublisher,
     PublishedMessageRef,
@@ -709,6 +711,13 @@ export class AgentExecutor {
         if (responseEvent) {
             if (!finalOutstandingWork.hasWork) {
                 await this.notifyInterventionOfFinalCompletion(context, responseEvent);
+
+                const summarizer = new ConversationSummarizer(context.projectContext);
+                metadataDebounceManager.schedulePublish(
+                    context.conversationId,
+                    false,
+                    () => summarizer.summarizeAndPublish(context.conversationStore)
+                );
             }
 
             await ConversationStore.addEnvelope(context.conversationId, responseEvent.envelope);
