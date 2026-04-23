@@ -9,6 +9,7 @@ use crate::agent_config_update::{
     AgentConfigUpdateError, AgentConfigUpdateOutcome, AgentConfigUpdateScope,
     apply_agent_config_update,
 };
+use crate::agent_install::{AgentInstallError, AgentInstallOutcome, install_agent_from_nostr};
 use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
@@ -69,6 +70,10 @@ pub enum NostrIngressOutcome {
         /// project matched the update scope.
         republished_projects: Vec<String>,
     },
+    AgentInstalled {
+        class: DaemonNostrEventClass,
+        install: AgentInstallOutcome,
+    },
     StopRequested {
         class: DaemonNostrEventClass,
         agent_pubkey: String,
@@ -111,6 +116,8 @@ pub enum NostrIngressError {
     },
     #[error("failed to write stop request to filesystem: {0}")]
     StopRequest(#[from] io::Error),
+    #[error("failed to install agent from Nostr: {0}")]
+    AgentInstall(#[from] AgentInstallError),
 }
 
 pub fn process_verified_nostr_event(
@@ -151,6 +158,21 @@ pub fn process_verified_nostr_event(
             boot.already_booted,
         );
         return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
+    }
+
+    if class == DaemonNostrEventClass::AgentCreate {
+        let config = read_backend_config(input.tenex_base_dir)?;
+        let relay_urls = config.effective_relay_urls();
+        let install = install_agent_from_nostr(
+            input.daemon_dir,
+            input.tenex_base_dir,
+            input.event,
+            &relay_urls,
+            input.writer_version,
+            input.timestamp,
+        )?;
+        crate::stdout_status::print_agent_installed(&install.slug, &install.agent_pubkey, install.already_installed);
+        return Ok(NostrIngressOutcome::AgentInstalled { class, install });
     }
 
     if class == DaemonNostrEventClass::ConfigUpdate {
@@ -339,8 +361,8 @@ fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
         DaemonNostrEventClass::Project
         | DaemonNostrEventClass::Lesson
         | DaemonNostrEventClass::LessonComment
-        | DaemonNostrEventClass::Boot
-        | DaemonNostrEventClass::AgentCreate => "daemon_control_event",
+        | DaemonNostrEventClass::Boot => "daemon_control_event",
+        DaemonNostrEventClass::AgentCreate => "agent_install_not_ignored",
         DaemonNostrEventClass::ConfigUpdate => "config_update_not_ignored",
         DaemonNostrEventClass::StopCommand => "stop_command_not_ignored",
         DaemonNostrEventClass::Other => "unsupported_nostr_event_class",
