@@ -112,6 +112,16 @@ The delegated agent’s conversation root is the delegation event, so all of its
 2. `AgentExecutor` consumes injections in `prepareStep` with `getAndConsumeInjections`.
 3. Injections are persisted into `ConversationStore` so they become part of the conversation history.
 
+## Self-Delegation
+
+`self_delegate` is a variant of `delegate` where the recipient is the agent's own pubkey. It allows an agent to spawn a fresh instance of itself with a new prompt, typically to break a large task into a focused sub-task or to run with a different skill set.
+
+### Single-depth restriction
+
+An agent that is already executing under a self-delegation cannot self-delegate again. `self_delegate` is removed from the tools array at tool-selection time (`isToolAvailableInContext` in `src/tools/registry.ts`) whenever `triggeringEnvelope.principal.linkedPubkey === agent.pubkey`. The tool is simply absent; the agent never sees it.
+
+This prevents unbounded self-delegation chains. Regular cross-agent delegation is not affected.
+
 ## Worktree Context
 
 Delegation events can include a `branch` tag. `ExecutionContextFactory` uses that tag to:

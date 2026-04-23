@@ -114,6 +114,10 @@ function isToolAvailableInContext(name: ToolName, context: ToolExecutionContext)
         return context.triggeringEnvelope.transport === "telegram";
     }
 
+    if (name === "self_delegate") {
+        return context.triggeringEnvelope.principal.linkedPubkey !== context.agent.pubkey;
+    }
+
     return true;
 }
 
