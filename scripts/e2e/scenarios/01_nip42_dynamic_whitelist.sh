@@ -22,7 +22,9 @@ source "$repo_root/scripts/e2e-test-harness.sh"
 
 # Use the existing fixture script with publishing skipped — we just want the
 # filesystem layout, keys, and manifest. We'll publish to our local relay.
-fixture_root="$(mktemp -d -t tenex-e2e-XXXXXXXX)"
+# The fixture refuses to overwrite an existing directory, so we pass a unique
+# non-existent path rather than pre-creating one.
+fixture_root="${TMPDIR:-/tmp}/tenex-e2e-$(date +%s)-$$"
 echo "[scenario] fixture_root=$fixture_root"
 
 TENEX_INTEROP_FIXTURE_ROOT="$fixture_root" \
@@ -39,79 +41,68 @@ start_local_relay --admin "$BACKEND_PUBKEY"
 
 trap harness_cleanup EXIT
 
-# --- Generate a signing-only sender pubkey ------------------------------------
-# The user's pubkey from the fixture is what we'll later whitelist via 14199.
-# But we need *another* pubkey to act as a "sender of historical events" so we
-# have some content to backfill. We'll use the backend pubkey for that since
-# it's already admin — it can publish freely.
-
-backend_nsec="$(jq -r .nsec "$BACKEND_BASE/agents/${BACKEND_PUBKEY}.json" 2>/dev/null || echo "")"
-if [[ -z "$backend_nsec" ]]; then
-  # Backend nsec lives in config.json
-  backend_nsec="$(jq -r .tenexPrivateKey "$BACKEND_BASE/config.json")"
-  # tenexPrivateKey is hex; convert to nsec
-  backend_nsec="$(nak encode nsec "$backend_nsec")"
-fi
-echo "[scenario] backend_nsec=${backend_nsec:0:12}…"
+echo "[scenario] backend_nsec=${BACKEND_NSEC:0:12}…"
 
 # --- Step 1: backend (admin) publishes some historical kind:1 events ---------
 echo "[scenario] step 1: backend publishes 3 historical kind:1 events"
 for i in 1 2 3; do
-  publish_event_as "$backend_nsec" 1 "historical message $i" \
-    "p,$USER_PUBKEY" >/dev/null
+  publish_event_as "$BACKEND_NSEC" 1 "historical message $i" \
+    "p=$USER_PUBKEY" >/dev/null
 done
 
 # Sanity: backend can read its own events (it's admin)
-backend_seen="$(nak req -k 1 -a "$BACKEND_PUBKEY" --auth --sec "$backend_nsec" \
+backend_seen="$(nak req -k 1 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
   "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
 [[ "$backend_seen" -ge 3 ]] || _die "ASSERT: admin backend should see >=3 events, saw $backend_seen"
 echo "[scenario]   backend (admin) sees $backend_seen events ✓"
 
 # --- Step 2: user attempts to subscribe BEFORE being whitelisted -------------
 # Expected: relay sends auth-required, then on AUTH the filter is rewritten with
-# LimitZero=true, so historical results are empty. The sub IS registered for
-# later backfill.
+# LimitZero=true, so historical results are empty.
+#
+# Note on filter limits below: the relay's historicalQueryReplayGuard
+# (relay.go:337) caches recent queries by signature (kinds + authors + tags +
+# search + limit) and short-circuits re-queries within 5s with LimitZero.
+# We vary --limit between steps 2 and 4 so the second query has a distinct
+# signature; otherwise the guard masks the whitelist transition.
 echo "[scenario] step 2: user (non-whitelisted) subscribes for kind:1; expect 0 historical events"
 user_seen_before="$(nak req -k 1 -a "$BACKEND_PUBKEY" --auth --sec "$USER_NSEC" \
   --limit 100 "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
 echo "[scenario]   user saw $user_seen_before events before whitelist (expect 0)"
 [[ "$user_seen_before" -eq 0 ]] || _die "ASSERT: non-whitelisted user should see 0 events, saw $user_seen_before"
 
-# --- Step 3: user publishes kind:14199 self-whitelisting ---------------------
-echo "[scenario] step 3: user publishes kind:14199 with self in p-tag (self-whitelist)"
-whitelist_evt="$(publish_event_as "$USER_NSEC" 14199 "" "p,$USER_PUBKEY")"
+# --- Step 3: user publishes kind:14199 self-whitelist + transitively agent2 --
+# Single 14199 listing both user and agent2 in p-tags. This whitelists the
+# author (user, since they signed the 14199) and transitively any p-tagged
+# pubkey (agent2). Avoids replaceable-event semantics that complicate a
+# "republish to add" approach.
+echo "[scenario] step 3: user publishes kind:14199 with self + agent2 in p-tags"
+whitelist_evt="$(publish_event_as "$USER_NSEC" 14199 "" \
+  "p=$USER_PUBKEY" \
+  "p=$AGENT2_PUBKEY")"
 whitelist_id="$(printf '%s' "$whitelist_evt" | jq -r .id)"
 echo "[scenario]   14199 event id=$whitelist_id"
 
-# Relay processes 14199 synchronously in OnEventSavedHook; whitelist update is
-# immediate. Give it a brief moment to flush logs.
+# Relay processes 14199 synchronously in OnEventSavedHook.
 sleep 0.3
 
 # --- Step 4: user re-subscribes; expect to see ALL 3 historical events -------
+# Use --limit 50 (≠ step 2's 100) so we get a fresh cache key in the replay guard.
 echo "[scenario] step 4: user (now whitelisted) re-subscribes; expect 3+ historical events"
 user_seen_after="$(nak req -k 1 -a "$BACKEND_PUBKEY" --auth --sec "$USER_NSEC" \
-  --limit 100 "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
+  --limit 50 "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
 echo "[scenario]   user saw $user_seen_after events after whitelist"
 [[ "$user_seen_after" -ge 3 ]] || _die "ASSERT: whitelisted user should see >=3 events, saw $user_seen_after"
 
-# --- Step 5: transitive whitelist — user's 14199 includes agent2 -------------
-echo "[scenario] step 5: user republishes 14199 adding agent2 in p-tags (transitive)"
-publish_event_as "$USER_NSEC" 14199 "" \
-  "p,$USER_PUBKEY" \
-  "p,$AGENT2_PUBKEY" >/dev/null
-sleep 0.3
+# --- Step 5: transitive whitelist — agent2 reads via user's p-tag ------------
+echo "[scenario] step 5: backend publishes a kind:1 for agent2; agent2 reads it"
+publish_event_as "$BACKEND_NSEC" 1 "for agent2" "p=$AGENT2_PUBKEY" >/dev/null
 
-# agent2 nsec from fixture
-agent2_nsec="$(jq -r .nsec "$BACKEND_BASE/agents/${AGENT2_PUBKEY}.json")"
-
-# Have backend publish a fresh event tagged for agent2
-echo "[scenario]   backend publishes a new kind:1 mentioning agent2"
-publish_event_as "$backend_nsec" 1 "for agent2" "p,$AGENT2_PUBKEY" >/dev/null
-
-# agent2 should now be able to subscribe and see events
-agent2_seen="$(nak req -k 1 -a "$BACKEND_PUBKEY" --auth --sec "$agent2_nsec" \
-  --limit 100 "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
-echo "[scenario]   agent2 (transitively whitelisted) saw $agent2_seen events"
+# agent2 should now be able to subscribe and see events.
+# Use a fresh limit value (25) to dodge the historical query replay guard.
+agent2_seen="$(nak req -k 1 -a "$BACKEND_PUBKEY" --auth --sec "$AGENT2_NSEC" \
+  --limit 25 "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
+echo "[scenario]   agent2 (transitively whitelisted via user's 14199) saw $agent2_seen events"
 [[ "$agent2_seen" -ge 1 ]] || _die "ASSERT: transitively whitelisted agent2 should see >=1 event, saw $agent2_seen"
 
 # --- Done --------------------------------------------------------------------

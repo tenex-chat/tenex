@@ -98,16 +98,6 @@ export interface TenexConfig {
         timeoutSeconds?: number; // Seconds to wait for user response (default: 300 = 5 minutes)
     };
 
-    // APNs push notification configuration
-    apns?: {
-        enabled?: boolean;                // Master switch (default: false)
-        keyPath?: string;                 // Path to .p8 key file from Apple
-        keyId?: string;                   // Apple Key ID (from developer portal)
-        teamId?: string;                  // Apple Team ID
-        bundleId?: string;                // App Bundle ID (e.g., com.example.tenex)
-        production?: boolean;             // true = api.push.apple.com, false = api.sandbox.push.apple.com
-    };
-
     // NIP-46 remote signing configuration
     nip46?: {
         enabled?: boolean;                    // Master switch (default: false)
@@ -210,16 +200,6 @@ export const TenexConfigSchema = z.object({
             enabled: z.boolean().optional(),
             agent: z.string().optional(),
             timeoutSeconds: z.number().optional(),
-        })
-        .optional(),
-    apns: z
-        .object({
-            enabled: z.boolean().optional(),
-            keyPath: z.string().optional(),
-            keyId: z.string().optional(),
-            teamId: z.string().optional(),
-            bundleId: z.string().optional(),
-            production: z.boolean().optional(),
         })
         .optional(),
     nip46: z

@@ -26,7 +26,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `config/` — Config subsystem
 - `trust-pubkeys/`, `pubkey-gate/` — Trust and access control
 - `nip46/` — NIP-46 remote signing
-- `apns/` — Apple Push Notifications
 - `image/` — Image processing
 - `intervention/` — Human intervention handling
 - `event-context/` — Event context resolution

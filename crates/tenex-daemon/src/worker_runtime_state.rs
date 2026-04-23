@@ -240,13 +240,20 @@ impl WorkerRuntimeState {
         project_id: &str,
         conversation_id: &str,
     ) -> Vec<String> {
+        let mut seen = std::collections::BTreeSet::new();
         self.workers
             .values()
             .filter(|worker| {
                 worker.identity.project_id == project_id
                     && worker.identity.conversation_id == conversation_id
             })
-            .map(|worker| worker.identity.agent_pubkey.clone())
+            .filter_map(|worker| {
+                if seen.insert(worker.identity.agent_pubkey.clone()) {
+                    Some(worker.identity.agent_pubkey.clone())
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 

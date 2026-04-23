@@ -61,8 +61,16 @@ harness_init() {
 
   # nsecs are not in the manifest (chmod 600 manifest doesn't include them).
   # The fixture writes them into the cli config and individual agent files.
-  export USER_NSEC
-  USER_NSEC="$(jq -r .nsec "$BACKEND_BASE/cli/config.json")"
+  export USER_NSEC BACKEND_NSEC AGENT1_NSEC AGENT2_NSEC TRANSPARENT_NSEC
+  USER_NSEC="$(jq -r .credentials.key "$BACKEND_BASE/cli/config.json")"
+  AGENT1_NSEC="$(jq -r .nsec "$BACKEND_BASE/agents/${AGENT1_PUBKEY}.json")"
+  AGENT2_NSEC="$(jq -r .nsec "$BACKEND_BASE/agents/${AGENT2_PUBKEY}.json")"
+  TRANSPARENT_NSEC="$(jq -r .nsec "$BACKEND_BASE/agents/${TRANSPARENT_PUBKEY}.json")"
+
+  # Backend key is stored hex in backend/config.json; convert to nsec via nak.
+  local backend_hex
+  backend_hex="$(jq -r .tenexPrivateKey "$BACKEND_BASE/config.json")"
+  BACKEND_NSEC="$(nak encode nsec "$backend_hex")"
 
   _log "fixture loaded from $fixture_root"
   _log "  backend pubkey:  $BACKEND_PUBKEY"
@@ -233,8 +241,9 @@ clear_whitelist_file() {
 # === Event publishing (uses HARNESS_RELAY_URL) ================================
 
 # publish_event_as <nsec> <kind> <content> [tag-spec...]
-# Each tag-spec is a comma-separated tag, e.g. "p,<pubkey>" or "a,31933:owner:dtag".
-# Echoes the event JSON as printed by `nak event`.
+# Each tag-spec uses nak's --tag syntax: "<name>=<value>", e.g. "p=<pubkey>"
+# or "a=31933:<owner>:<dtag>". For multi-value tags use semicolons:
+# "e=<id>;<relay>;<marker>". Echoes the event JSON.
 publish_event_as() {
   local nsec="${1:?nsec}"; shift
   local kind="${1:?kind}"; shift

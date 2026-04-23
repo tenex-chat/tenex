@@ -32,7 +32,6 @@ export const NDKKind = {
     TenexBackendHeartbeat: 24012 as BaseNDKKind, // Backend whitelist request (ephemeral, p-tags owner)
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
     TenexAgentDelete: 24030 as BaseNDKKind, // Agent deletion from projects or globally
-    TenexConfigUpdate: 25000 as BaseNDKKind, // Encrypted config updates (e.g., APNs device tokens)
     TenexOperationsStatus: 24133 as BaseNDKKind,
     TenexStopCommand: 24134 as BaseNDKKind,
     TenexStreamTextDelta: 24135 as BaseNDKKind,

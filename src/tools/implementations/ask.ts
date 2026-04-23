@@ -11,7 +11,6 @@ import { tool } from "ai";
 import { z } from "zod";
 import { RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
-import { APNsService } from "@/services/apns";
 import { shortenEventId } from "@/utils/conversation-id";
 
 /**
@@ -330,26 +329,6 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     // Only transcript retrieval will be affected if this fails.
     logger.warn("[ask] Failed to create ConversationStore for ask transcript", {
       eventId: shortenEventId(eventId),
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  // Send APNs push notification if APNs is enabled.
-  // Unix socket presence detection was removed with local socket streaming.
-  try {
-    const apnsService = APNsService.getInstance();
-    if (apnsService.isEnabled()) {
-      const bodyPreview = askContext.length > 100 ? `${askContext.substring(0, 100)}…` : askContext;
-      await apnsService.notifyIfNeeded(ownerPubkey, {
-        title: "Agent needs your input",
-        body: bodyPreview,
-        conversationId: context.conversationId,
-        eventId,
-      });
-    }
-  } catch (error) {
-    // Don't fail the ask tool if push notification fails
-    logger.warn("[ask] Failed to send APNs notification", {
       error: error instanceof Error ? error.message : String(error),
     });
   }

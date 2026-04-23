@@ -9,10 +9,6 @@ use crate::filesystem_state::{
     DaemonStatusData, FilesystemStateError, LockInfo, RestartStateData, read_lock_info_file,
     read_restart_state_file, read_status_file,
 };
-use crate::operations_status_state::{
-    OperationsStatusActiveSnapshot, OperationsStatusStateError,
-    read_operations_status_active_snapshot,
-};
 use crate::publish_outbox::{PublishOutboxDiagnostics, PublishOutboxError, inspect_publish_outbox};
 use crate::ral_journal::{RalJournalError, RalJournalReplay, RalReplayStatus, replay_ral_journal};
 use crate::routing_shadow_log::{
@@ -56,8 +52,6 @@ pub enum DaemonDiagnosticsError {
     RoutingShadowLog(#[from] RoutingShadowLogError),
     #[error("telegram outbox error: {0}")]
     TelegramOutbox(#[from] TelegramOutboxError),
-    #[error("operations-status state error: {0}")]
-    OperationsStatusState(#[from] OperationsStatusStateError),
 }
 
 pub type DaemonDiagnosticsResult<T> = Result<T, DaemonDiagnosticsError>;
@@ -73,7 +67,6 @@ pub struct DaemonDiagnosticsSnapshot {
     pub publish_outbox: PublishOutboxDiagnostics,
     pub routing_shadow_log: RoutingShadowLogDiagnostics,
     pub telegram_outbox: TelegramOutboxDiagnostics,
-    pub operations_status_active: OperationsStatusActiveSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_runtime: Option<DaemonWorkerRuntimeDiagnostics>,
 }
@@ -128,7 +121,6 @@ pub fn inspect_daemon_diagnostics(
     let publish_outbox = inspect_publish_outbox(input.daemon_dir, input.inspected_at)?;
     let routing_shadow_log = replay_routing_shadow_log(input.daemon_dir)?.diagnostics;
     let telegram_outbox = inspect_telegram_outbox(input.daemon_dir, input.inspected_at)?;
-    let operations_status_active = read_operations_status_active_snapshot(input.daemon_dir)?;
     let worker_runtime = input
         .worker_runtime_state
         .map(|runtime_state| build_worker_runtime_summary(runtime_state, input.inspected_at));
@@ -142,7 +134,6 @@ pub fn inspect_daemon_diagnostics(
         publish_outbox,
         routing_shadow_log,
         telegram_outbox,
-        operations_status_active,
         worker_runtime,
     })
 }
@@ -354,9 +345,6 @@ mod tests {
         save_restart_state_file, write_lock_info_file, write_status_file,
     };
     use crate::nostr_event::Nip01EventFixture;
-    use crate::operations_status_state::{
-        operations_status_active_snapshot_from_projects, write_operations_status_active_snapshot,
-    };
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::publish_outbox::{
         PublishOutboxRecord, failed_publish_outbox_record_path, pending_publish_outbox_record_path,
@@ -444,7 +432,6 @@ mod tests {
         assert_eq!(snapshot.telegram_outbox.pending_count, 0);
         assert_eq!(snapshot.telegram_outbox.delivered_count, 0);
         assert_eq!(snapshot.telegram_outbox.failed_count, 0);
-        assert!(snapshot.operations_status_active.projects.is_empty());
         assert!(snapshot.worker_runtime.is_none());
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
@@ -486,14 +473,6 @@ mod tests {
             &build_restart_state(1_710_001_000_500, 4_242, "tenex-host"),
         )
         .expect("restart state write must succeed");
-        write_operations_status_active_snapshot(
-            &daemon_dir,
-            operations_status_active_snapshot_from_projects([(
-                "project-alpha".to_string(),
-                vec!["conversation-alpha".to_string()],
-            )]),
-        )
-        .expect("operations-status active state write must succeed");
 
         append_dispatch_queue_record(
             &daemon_dir,
@@ -977,15 +956,6 @@ mod tests {
         assert_eq!(snapshot.telegram_outbox.failed_count, 2);
         assert_eq!(snapshot.telegram_outbox.retryable_failed_count, 1);
         assert_eq!(snapshot.telegram_outbox.permanent_failed_count, 1);
-        assert_eq!(snapshot.operations_status_active.projects.len(), 1);
-        assert_eq!(
-            snapshot.operations_status_active.projects[0].project_id,
-            "project-alpha"
-        );
-        assert_eq!(
-            snapshot.operations_status_active.projects[0].conversation_ids,
-            vec!["conversation-alpha".to_string()]
-        );
         assert_eq!(
             snapshot
                 .worker_runtime

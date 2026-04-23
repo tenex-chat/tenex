@@ -741,6 +741,8 @@ where
     let worker_id = started.runtime_started.worker_id.clone();
     let dispatch_id = started.context.admission.leased_record.dispatch_id.clone();
     let claim_token = started.context.admission.leased_record.claim_token.clone();
+    let project_id = started.runtime_started.identity.project_id.clone();
+    let agent_pubkey = started.runtime_started.identity.agent_pubkey.clone();
     let resolved_pending_delegations = scheduler
         .entry(&started.runtime_started.identity)
         .map(|entry| entry.pending_delegations.clone())
@@ -755,15 +757,21 @@ where
     )
     .entered();
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
+    crate::stdout_status::print_agent_started(&project_id, &agent_pubkey, &worker_id);
 
+    let active_pubkeys = runtime_state.agent_pubkeys_for_conversation(
+        &started.runtime_started.identity.project_id,
+        &started.runtime_started.identity.conversation_id,
+    );
+    let active_now_ms = crate::daemon_loop::current_unix_time_ms();
     publish_worker_operations_status(
         daemon_dir,
-        frame_observed_at,
+        active_now_ms,
         &started.runtime_started.identity,
         operations_status.as_ref(),
         "active",
         OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE,
-        &[started.runtime_started.identity.agent_pubkey.clone()],
+        &active_pubkeys,
     )
     .map_err(|source| DaemonWorkerRuntimeError::OperationsStatus {
         source: Box::new(source),
@@ -816,14 +824,28 @@ where
             max_frames,
         },
     );
+    // Ensure the worker is removed from runtime state before snapshotting. Normal terminal
+    // handling in the session loop already removes it; on error paths it may still be
+    // registered, and we must not leak it into the conversation snapshot.
+    let _ = runtime_state.remove_terminal_worker(&worker_id);
+    let remaining_pubkeys = runtime_state.agent_pubkeys_for_conversation(
+        &started.runtime_started.identity.project_id,
+        &started.runtime_started.identity.conversation_id,
+    );
+    let cleanup_now_ms = crate::daemon_loop::current_unix_time_ms();
+    let (cleanup_variant, cleanup_pubkeys): (&str, &[String]) = if remaining_pubkeys.is_empty() {
+        ("cleanup", &[])
+    } else {
+        ("active", &remaining_pubkeys)
+    };
     let cleanup_result = publish_worker_operations_status(
         daemon_dir,
-        frame_observed_at,
+        cleanup_now_ms,
         &started.runtime_started.identity,
         operations_status.as_ref(),
-        "cleanup",
+        cleanup_variant,
         OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE.saturating_add(1),
-        &[],
+        cleanup_pubkeys,
     );
 
     let session = session_result.map_err(|source| DaemonWorkerRuntimeError::SessionLoop {
@@ -836,6 +858,7 @@ where
         .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
 
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session completed");
+    crate::stdout_status::print_agent_stopped(&project_id, &agent_pubkey, &worker_id);
     Ok(DaemonWorkerRuntimeOutcome::SessionCompleted {
         dispatch_id,
         worker_id,
@@ -1191,7 +1214,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.get_worker("worker-alpha").is_none());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1238,7 +1261,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.get_worker("worker-alpha").is_none());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1306,7 +1329,7 @@ mod tests {
                 .expect("pending outbox must read")
                 .is_none()
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.get_worker("worker-alpha").is_none());
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1374,7 +1397,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.get_worker("worker-alpha").is_none());
 
         release_worker_launch_locks(locks).expect("locks must release");
         cleanup_temp_dir(daemon_dir);
@@ -1464,7 +1487,7 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.get_worker("worker-alpha").is_some());
+        assert!(runtime_state.get_worker("worker-alpha").is_none());
 
         cleanup_temp_dir(daemon_dir);
     }
