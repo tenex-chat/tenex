@@ -2549,8 +2549,7 @@ describe("RALRegistry", () => {
   /**
    * Injection Queue Clearing After Delivery
    *
-   * Tests for clearQueuedInjections() - called by AgentDispatchService after
-   * MessageInjector successfully delivers a queued message.
+   * Tests for clearQueuedInjections() after a queued message is delivered.
    */
   describe("clearQueuedInjections", () => {
     const agentPubkey = "test-agent-pubkey";

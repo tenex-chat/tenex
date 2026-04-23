@@ -155,7 +155,7 @@ export class MessageInjectionQueue {
 
   /**
    * Clear all queued injections for an agent's conversation.
-   * Called by AgentDispatchService after MessageInjector successfully delivers a message.
+   * Called after the runtime successfully delivers a queued message.
    * This prevents hasOutstandingWork() from incorrectly reporting queued injections
    * that have already been delivered, which would cause the agent to use conversation()
    * instead of complete().

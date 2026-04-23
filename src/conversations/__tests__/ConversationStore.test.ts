@@ -933,7 +933,7 @@ describe("ConversationStore", () => {
             // When a user sends a message during a delegation (supervision/injection),
             // the message was inserted TWICE via different code paths:
             //
-            // 1. Nostr Event Path (AgentDispatchService → ConversationStore.addEvent()):
+            // 1. Inbound event path (runtime → ConversationStore.addEvent()):
             //    - Adds message WITH eventId
             //
             // 2. Injection Path (AgentExecutor → conversationStore.addMessage()):

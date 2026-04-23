@@ -44,10 +44,9 @@ export interface ExecutionContext {
      * serialization contract that prevents two concurrent dispatches from
      * both resuming the same idle RAL (see RALRegistry.tryAcquireResumptionClaim).
      *
-     * The matching release token is held by the dispatcher, not passed here:
-     * `AgentDispatchService` releases it in its own finally block, not
-     * `AgentExecutor`'s, because `createExecutionContext` can throw before
-     * `execute()` is even invoked.
+     * The matching release token is held by the caller, not passed here. The
+     * caller releases it if execution setup fails before the stream can take
+     * ownership.
      */
     preferredRalNumber?: number;
 

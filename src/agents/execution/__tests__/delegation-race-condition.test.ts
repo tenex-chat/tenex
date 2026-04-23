@@ -449,8 +449,7 @@ describe("Delegation Race Condition Fix", () => {
         completedAt: Date.now(),
       });
 
-      // Step 3: Simulate debounce queuing the result as an injection
-      // (This is what AgentDispatchService does when delegation completes)
+      // Step 3: Simulate debounce queuing the result as an injection.
       ralRegistry.queueUserMessage(
         AGENT_PUBKEY,
         CONVERSATION_ID,
@@ -945,7 +944,7 @@ describe("Executor Finalization Guard", () => {
         completedAt: Date.now(),
       });
 
-      // Step 3: Result is queued via debounce (simulating AgentDispatchService)
+      // Step 3: Result is queued via debounce.
       ralRegistry.queueUserMessage(
         AGENT_PUBKEY,
         CONVERSATION_ID,

@@ -61,13 +61,13 @@ export interface StreamExecutionConfig {
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
     /**
-     * Resumption claim token acquired by the dispatcher (see
-     * `AgentDispatchService.dispatchToAgent`). Passed only on the first
-     * stream invocation for a given dispatch; on supervision re-engagement
-     * this is undefined because the original claim has already been handed
-     * off. When present, `execute()` calls `handOffResumptionClaimToStream`
-     * atomically with `setStreaming(true)` so the claim transfers ownership
-     * from the dispatch-scope finally block to the live streaming flag.
+     * Resumption claim token acquired by the execution caller. Passed only on
+     * the first stream invocation for a given dispatch; on supervision
+     * re-engagement this is undefined because the original claim has already
+     * been handed off. When present, `execute()` calls
+     * `handOffResumptionClaimToStream` atomically with `setStreaming(true)` so
+     * the claim transfers ownership from the caller scope to the live
+     * streaming flag.
      */
     resumptionClaimToken?: string;
 }
