@@ -235,6 +235,21 @@ impl WorkerRuntimeState {
         self.remove_terminal_worker(&worker_id)
     }
 
+    pub fn agent_pubkeys_for_conversation(
+        &self,
+        project_id: &str,
+        conversation_id: &str,
+    ) -> Vec<String> {
+        self.workers
+            .values()
+            .filter(|worker| {
+                worker.identity.project_id == project_id
+                    && worker.identity.conversation_id == conversation_id
+            })
+            .map(|worker| worker.identity.agent_pubkey.clone())
+            .collect()
+    }
+
     pub fn to_active_worker_concurrency_snapshots(&self) -> Vec<ActiveWorkerConcurrencySnapshot> {
         self.workers
             .values()
@@ -638,6 +653,72 @@ mod tests {
                 claim_token: "claim-ready".to_string(),
                 started_at: 10_000,
             }
+        );
+    }
+
+    #[test]
+    fn agent_pubkeys_for_conversation_filters_by_project_and_conversation() {
+        let mut state = WorkerRuntimeState::default();
+
+        let workers = [
+            (
+                "worker-a",
+                "dispatch-a",
+                "project-a",
+                "agent-a",
+                "conversation-x",
+            ),
+            (
+                "worker-b",
+                "dispatch-b",
+                "project-a",
+                "agent-b",
+                "conversation-x",
+            ),
+            (
+                "worker-c",
+                "dispatch-c",
+                "project-a",
+                "agent-c",
+                "conversation-y",
+            ),
+            (
+                "worker-d",
+                "dispatch-d",
+                "project-b",
+                "agent-d",
+                "conversation-x",
+            ),
+        ];
+
+        for (worker_id, dispatch_id, project_id, agent_pubkey, conversation_id) in workers {
+            let identity = RalJournalIdentity {
+                project_id: project_id.to_string(),
+                agent_pubkey: agent_pubkey.to_string(),
+                conversation_id: conversation_id.to_string(),
+                ral_number: 1,
+            };
+            state
+                .register_started_dispatch(started_dispatch(worker_id, dispatch_id, identity))
+                .expect("worker must register");
+        }
+
+        assert_eq!(
+            state.agent_pubkeys_for_conversation("project-a", "conversation-x"),
+            vec!["agent-a".to_string(), "agent-b".to_string()]
+        );
+        assert_eq!(
+            state.agent_pubkeys_for_conversation("project-a", "conversation-y"),
+            vec!["agent-c".to_string()]
+        );
+        assert_eq!(
+            state.agent_pubkeys_for_conversation("project-b", "conversation-x"),
+            vec!["agent-d".to_string()]
+        );
+        assert!(
+            state
+                .agent_pubkeys_for_conversation("project-a", "conversation-unknown")
+                .is_empty()
         );
     }
 
