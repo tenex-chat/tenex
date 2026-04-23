@@ -2,7 +2,8 @@
  * Tests for the unified kill tool
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock, type Mock } from "bun:test";
+import { DelegationJournalReader } from "@/services/ral/DelegationJournalReader";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -835,15 +836,23 @@ describe("kill tool", () => {
             const parentAgentPubkey = "parent-agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef12";
             const delegateAgentPubkey = "delegate-agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcd";
 
-            // Create parent RAL and register a pending delegation
+            // Create parent RAL and register a pending delegation via the journal overlay
             const ralNumber = ralRegistry.create(parentAgentPubkey, parentConversationId, projectId);
-            ralRegistry.mergePendingDelegations(parentAgentPubkey, parentConversationId, ralNumber, [{
-                delegationConversationId,
-                recipientPubkey: delegateAgentPubkey,
-                senderPubkey: parentAgentPubkey,
-                prompt: "Test prompt",
+            DelegationJournalReader.getInstance().appendOverlay({
+                event: "delegation_registered",
+                projectId,
+                agentPubkey: parentAgentPubkey,
+                conversationId: parentConversationId,
                 ralNumber,
-            }]);
+                pendingDelegation: {
+                    type: "standard",
+                    delegationConversationId,
+                    recipientPubkey: delegateAgentPubkey,
+                    senderPubkey: parentAgentPubkey,
+                    prompt: "Test prompt",
+                    ralNumber,
+                },
+            });
 
             // Mock conversation that has no active RALs (delegation hasn't started yet)
             const mockDelegationConversation = {
@@ -867,8 +876,11 @@ describe("kill tool", () => {
             expect(result.abortedTuples?.length).toBe(1);
             expect(result.abortedTuples?.[0].agentPubkey).toBe(delegateAgentPubkey);
 
-            // Verify that the agent is marked as killed
-            expect(ralRegistry.isAgentConversationKilled(delegateAgentPubkey, delegationConversationId)).toBe(true);
+            // Verify the mock publisher received the killDelegation emission
+            const killMock = (mockContext as unknown as {
+                agentPublisher: { killDelegation: Mock<(...args: unknown[]) => unknown> };
+            }).agentPublisher.killDelegation;
+            expect(killMock).toHaveBeenCalledWith(delegationConversationId, "test kill");
 
             // Restore
             ConversationStore.has = originalHas;

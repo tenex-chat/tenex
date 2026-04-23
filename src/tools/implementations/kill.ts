@@ -342,8 +342,14 @@ async function killAgent(
         const delegationRecipient = ralRegistry.getDelegationRecipientPubkey(conversationId);
 
         if (delegationRecipient) {
-            // Pre-emptive kill: Mark the agent+conversation as killed before it starts
-            ralRegistry.markAgentConversationKilled(delegationRecipient, conversationId);
+            // Pre-emptive kill: emit delegation_killed so Rust records the kill
+            // in the RAL journal. When the recipient agent eventually starts,
+            // its delegation snapshot read will surface killed=true and the
+            // publisher will refuse to publish a completion.
+            const publisher = context.agentPublisher;
+            if (publisher) {
+                await publisher.killDelegation(conversationId, reason);
+            }
 
             trace.getActiveSpan()?.addEvent("kill.pre_emptive_kill", {
                 "kill.conversation_id": shortenConversationId(conversationId),
@@ -356,9 +362,6 @@ async function killAgent(
                 recipientPubkey: shortenPubkey(delegationRecipient),
                 reason,
             });
-
-            // Also mark the parent delegation as killed
-            ralRegistry.markParentDelegationKilled(conversationId);
 
             // Add to cooldown registry
             const cooldownRegistry = CooldownRegistry.getInstance();

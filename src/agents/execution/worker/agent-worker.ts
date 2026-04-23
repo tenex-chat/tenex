@@ -174,56 +174,46 @@ class AgentWorkerSession {
         const ralRegistry = RALRegistry.getInstance();
         const delegationCompletion = message.delegationCompletion;
         if (delegationCompletion) {
-            const location = ralRegistry.recordCompletion({
-                delegationConversationId: delegationCompletion.delegationConversationId,
-                recipientPubkey: delegationCompletion.recipientPubkey,
-                response: message.content,
-                completedAt: delegationCompletion.completedAt,
-            });
-
-            if (location) {
-                const parentStore = ConversationStore.get(location.conversationId);
-                if (parentStore) {
-                    const updated = parentStore.updateDelegationMarker(
-                        delegationCompletion.delegationConversationId,
-                        {
-                            status: "completed",
-                            completedAt: delegationCompletion.completedAt,
-                        }
-                    );
-
-                    if (!updated) {
-                        parentStore.addDelegationMarker(
-                            {
-                                delegationConversationId:
-                                    delegationCompletion.delegationConversationId,
-                                recipientPubkey: delegationCompletion.recipientPubkey,
-                                parentConversationId: location.conversationId,
-                                completedAt: delegationCompletion.completedAt,
-                                status: "completed",
-                            },
-                            location.agentPubkey,
-                            location.ralNumber
-                        );
+            // Rust's inbound runtime has already written the DelegationCompleted
+            // journal record before dispatching this inject, so the journal is
+            // authoritative for delegation state. Update the parent conversation
+            // store's marker so the UI reflects the completion; the delegation
+            // state itself is read from the journal on next query.
+            const parentConversationId = message.conversationId;
+            const parentStore = ConversationStore.get(parentConversationId);
+            if (parentStore) {
+                const updated = parentStore.updateDelegationMarker(
+                    delegationCompletion.delegationConversationId,
+                    {
+                        status: "completed",
+                        completedAt: delegationCompletion.completedAt,
                     }
+                );
 
-                    void parentStore.save().catch((error: unknown) => {
-                        logger.warn("[AgentWorker] Failed to persist injected delegation marker", {
+                if (!updated) {
+                    parentStore.addDelegationMarker(
+                        {
                             delegationConversationId:
                                 delegationCompletion.delegationConversationId,
-                            error: error instanceof Error ? error.message : String(error),
-                        });
-                    });
+                            recipientPubkey: delegationCompletion.recipientPubkey,
+                            parentConversationId,
+                            completedAt: delegationCompletion.completedAt,
+                            status: "completed",
+                        },
+                        message.agentPubkey,
+                        message.ralNumber
+                    );
                 }
-                return;
-            }
 
-            logger.warn("[AgentWorker] Delegation completion inject did not match a pending RAL", {
-                delegationConversationId: delegationCompletion.delegationConversationId,
-                agentPubkey: message.agentPubkey.substring(0, 8),
-                conversationId: message.conversationId.substring(0, 8),
-                ralNumber: message.ralNumber,
-            });
+                void parentStore.save().catch((error: unknown) => {
+                    logger.warn("[AgentWorker] Failed to persist injected delegation marker", {
+                        delegationConversationId:
+                            delegationCompletion.delegationConversationId,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                });
+            }
+            return;
         }
 
         if (message.role === "system") {

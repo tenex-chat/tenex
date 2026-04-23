@@ -20,7 +20,7 @@ import type {
     ToolUseIntent,
 } from "@/nostr/types";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
-import type { PendingDelegation } from "@/services/ral/types";
+import { DelegationJournalReader } from "@/services/ral/DelegationJournalReader";
 import type { AgentWorkerProtocolMessage } from "@/events/runtime/AgentWorkerProtocol";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -366,6 +366,16 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     }
 
     async killDelegation(delegationConversationId: string, reason: string): Promise<void> {
+        DelegationJournalReader.getInstance().appendOverlay({
+            event: "delegation_killed",
+            projectId: this.options.execution.projectId,
+            agentPubkey: this.options.execution.agentPubkey,
+            conversationId: this.options.execution.conversationId,
+            ralNumber: this.options.execution.ralNumber,
+            delegationConversationId,
+            killedAt: Date.now(),
+            reason,
+        });
         await this.options.emit({
             type: "delegation_killed",
             correlationId: this.options.execution.correlationId,
@@ -407,45 +417,29 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             return;
         }
 
-        const ralRegistry = RALRegistry.getInstance();
-        const basePending = {
+        const pendingEntry = {
             delegationConversationId: params.delegationConversationId,
             recipientPubkey: params.recipientPubkey,
             senderPubkey: this.options.agent.pubkey,
             prompt: params.prompt,
             ralNumber: params.context.ralNumber,
+            type: params.delegationType,
             ...(params.parentDelegationConversationId
                 ? { parentDelegationConversationId: params.parentDelegationConversationId }
                 : {}),
+            ...(params.followupEventId ? { followupEventId: params.followupEventId } : {}),
+            ...(params.suggestions && params.suggestions.length > 0
+                ? { suggestions: params.suggestions }
+                : {}),
         };
-        const pending: PendingDelegation =
-            params.delegationType === "followup"
-                ? {
-                      ...basePending,
-                      type: "followup",
-                      ...(params.followupEventId ? { followupEventId: params.followupEventId } : {}),
-                  }
-                : params.delegationType === "ask"
-                  ? {
-                        ...basePending,
-                        type: "ask",
-                        ...(params.suggestions && params.suggestions.length > 0
-                            ? { suggestions: params.suggestions }
-                            : {}),
-                    }
-                  : { ...basePending, type: "standard" };
-        ralRegistry.mergePendingDelegations(
-            this.options.agent.pubkey,
-            params.context.conversationId,
-            params.context.ralNumber,
-            [pending]
-        );
-        if (params.parentDelegationConversationId) {
-            ralRegistry.registerPendingSubDelegation(
-                params.parentDelegationConversationId,
-                pending
-            );
-        }
+        DelegationJournalReader.getInstance().appendOverlay({
+            event: "delegation_registered",
+            projectId: this.options.execution.projectId,
+            agentPubkey: this.options.execution.agentPubkey,
+            conversationId: this.options.execution.conversationId,
+            ralNumber: this.options.execution.ralNumber,
+            pendingDelegation: pendingEntry,
+        });
 
         await this.options.emit({
             type: "delegation_registered",

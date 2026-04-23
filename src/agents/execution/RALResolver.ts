@@ -133,10 +133,6 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
         const abortedCount = completedDelegations.filter(d => d.status === "aborted").length;
         const successfulCount = completedDelegations.filter(d => d.status !== "aborted").length;
 
-        // Clear completed delegations after inserting markers
-        // This prevents re-processing on subsequent executions
-        ralRegistry.clearCompletedDelegations(agentPubkey, conversationId, ralNumber);
-
         span.addEvent("executor.ral_resumed", {
             "ral.number": ralNumber,
             "delegation.completed_count": successfulCount,

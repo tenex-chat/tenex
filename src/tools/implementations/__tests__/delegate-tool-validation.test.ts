@@ -7,6 +7,7 @@ import * as nostrModule from "@/nostr";
 import { shortenConversationId } from "@/utils/conversation-id";
 
 import { RALRegistry } from "@/services/ral";
+import { DelegationJournalReader } from "@/services/ral/DelegationJournalReader";
 import { createDelegateTool } from "@/tools/implementations/delegate";
 import { createDelegateFollowupTool } from "@/tools/implementations/delegate_followup";
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -120,6 +121,7 @@ describe("Delegation tools - Self-delegation validation", () => {
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
         RALRegistry.instance = undefined;
+        DelegationJournalReader.resetForTests();
         registry = RALRegistry.getInstance();
     });
 
@@ -313,6 +315,7 @@ describe("Delegation tools - RAL isolation", () => {
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
         RALRegistry.instance = undefined;
+        DelegationJournalReader.resetForTests();
         registry = RALRegistry.getInstance();
     });
 
@@ -322,15 +325,21 @@ describe("Delegation tools - RAL isolation", () => {
 
             // Create RAL 1 with pending delegations (simulating previous execution)
             const ral1Number = registry.create(agentPubkey, conversationId, projectId);
-            registry.setPendingDelegations(agentPubkey, conversationId, ral1Number, [
-                {
+            DelegationJournalReader.getInstance().appendOverlay({
+                event: "delegation_registered",
+                projectId,
+                agentPubkey,
+                conversationId,
+                ralNumber: ral1Number,
+                pendingDelegation: {
+                    type: "standard",
                     delegationConversationId: "old-delegation-id",
                     recipientPubkey: "some-other-agent",
                     senderPubkey: agentPubkey,
                     prompt: "Old task",
                     ralNumber: ral1Number,
                 },
-            ]);
+            });
 
             // Create RAL 2 (current execution) with NO pending delegations
             const ral2Number = registry.create(agentPubkey, conversationId, projectId);
@@ -364,17 +373,23 @@ describe("Delegation tools - RAL isolation", () => {
         it("should allow delegation even when current RAL has pending delegations", async () => {
             const agentPubkey = "agent-pubkey-123";
 
-            // Create a RAL with pending delegations
+            // Create a RAL with pending delegations (seeded via journal overlay)
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-            registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [
-                {
+            DelegationJournalReader.getInstance().appendOverlay({
+                event: "delegation_registered",
+                projectId,
+                agentPubkey,
+                conversationId,
+                ralNumber,
+                pendingDelegation: {
+                    type: "standard",
                     delegationConversationId: "pending-delegation-id",
                     recipientPubkey: "some-other-agent",
                     senderPubkey: agentPubkey,
                     prompt: "Pending task",
                     ralNumber,
                 },
-            ]);
+            });
 
             // Context with this RAL number should still allow new delegation
             const context = createMockContext(ralNumber);
@@ -418,8 +433,13 @@ describe("Delegation tools - RALRegistry state verification", () => {
             agentPublisher: {
                 delegate: async (config: { recipient: string; content: string }) => {
                     const delegationId = `mock-delegation-id-${Math.random().toString(36).substring(7)}`;
-                    registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
-                        {
+                    DelegationJournalReader.getInstance().appendOverlay({
+                        event: "delegation_registered",
+                        projectId,
+                        agentPubkey,
+                        conversationId,
+                        ralNumber,
+                        pendingDelegation: {
                             type: "standard",
                             delegationConversationId: delegationId,
                             recipientPubkey: config.recipient,
@@ -427,7 +447,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
                             prompt: config.content,
                             ralNumber,
                         },
-                    ]);
+                    });
                     return delegationId;
                 },
             } as any,
@@ -446,6 +466,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
         RALRegistry.instance = undefined;
+        DelegationJournalReader.resetForTests();
         registry = RALRegistry.getInstance();
     });
 
@@ -483,15 +504,21 @@ describe("Delegation tools - RALRegistry state verification", () => {
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
             // Pre-seed with existing delegation (simulating concurrent call)
-            registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
-                {
+            DelegationJournalReader.getInstance().appendOverlay({
+                event: "delegation_registered",
+                projectId,
+                agentPubkey,
+                conversationId,
+                ralNumber,
+                pendingDelegation: {
+                    type: "standard",
                     delegationConversationId: "pre-existing-delegation",
                     recipientPubkey: "pre-existing-recipient",
                     senderPubkey: agentPubkey,
                     prompt: "Pre-existing task",
                     ralNumber,
                 },
-            ]);
+            });
 
             // Now execute another delegation
             const context = createMockContext(ralNumber);
@@ -518,27 +545,34 @@ describe("Delegation tools - RALRegistry state verification", () => {
             expect(preExisting?.prompt).toBe("Pre-existing task");
         });
 
-        it("should merge fields into existing delegations with the same delegationConversationId", async () => {
+        it("replays delegation_registered idempotently so re-emissions upsert the pending delegation", async () => {
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+            const reader = DelegationJournalReader.getInstance();
 
-            // Add a delegation manually
-            const { insertedCount: firstInserted } = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
-                {
+            reader.appendOverlay({
+                event: "delegation_registered",
+                projectId,
+                agentPubkey,
+                conversationId,
+                ralNumber,
+                pendingDelegation: {
+                    type: "standard",
                     delegationConversationId: "fixed-delegation-id",
                     recipientPubkey: "other-pubkey-456",
                     senderPubkey: agentPubkey,
                     prompt: "Original task",
                     ralNumber,
                 },
-            ]);
-            expect(firstInserted).toBe(1);
-
-            // Try to add the same delegation again with different metadata
-            // This simulates a followup re-registering the delegation with new fields (e.g., followupEventId)
-            const { insertedCount, mergedCount } = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
-                {
-                    type: "followup" as const,
+            });
+            reader.appendOverlay({
+                event: "delegation_registered",
+                projectId,
+                agentPubkey,
+                conversationId,
+                ralNumber,
+                pendingDelegation: {
+                    type: "followup",
                     delegationConversationId: "fixed-delegation-id",
                     recipientPubkey: "other-pubkey-456",
                     senderPubkey: agentPubkey,
@@ -546,11 +580,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
                     followupEventId: "followup-event-xyz",
                     ralNumber,
                 },
-            ]);
-
-            // Should still only have one delegation, but merged
-            expect(insertedCount).toBe(0);
-            expect(mergedCount).toBe(1);
+            });
 
             const pendingDelegations = registry.getConversationPendingDelegations(
                 agentPubkey,
@@ -558,10 +588,13 @@ describe("Delegation tools - RALRegistry state verification", () => {
                 ralNumber
             );
             expect(pendingDelegations).toHaveLength(1);
-            // Merged entry should have the updated fields
             expect(pendingDelegations[0].prompt).toBe("Updated prompt for followup");
             expect(pendingDelegations[0].type).toBe("followup");
-            expect(pendingDelegations[0].followupEventId).toBe("followup-event-xyz");
+            expect(
+                pendingDelegations[0].type === "followup"
+                    ? pendingDelegations[0].followupEventId
+                    : undefined
+            ).toBe("followup-event-xyz");
         });
     });
 });
@@ -610,6 +643,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
         RALRegistry.instance = undefined;
+        DelegationJournalReader.resetForTests();
         registry = RALRegistry.getInstance();
 
         // Mock ConversationStore.get - default to no chain
@@ -798,6 +832,7 @@ describe("delegate_followup - ID handling", () => {
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
         RALRegistry.instance = undefined;
+        DelegationJournalReader.resetForTests();
         registry = RALRegistry.getInstance();
     });
 
@@ -809,15 +844,22 @@ describe("delegate_followup - ID handling", () => {
         const canonicalId = "1111111111111111111111111111111111111111111111111111111111111111";
         const followupId = "2222222222222222222222222222222222222222222222222222222222222222";
 
-        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
-            type: "followup",
-            delegationConversationId: canonicalId,
-            followupEventId: followupId,
-            recipientPubkey: "recipient-agent-pubkey",
-            senderPubkey: agentPubkey,
-            prompt: "Original prompt",
+        DelegationJournalReader.getInstance().appendOverlay({
+            event: "delegation_registered",
+            projectId,
+            agentPubkey,
+            conversationId,
             ralNumber,
-        }]);
+            pendingDelegation: {
+                type: "followup",
+                delegationConversationId: canonicalId,
+                followupEventId: followupId,
+                recipientPubkey: "recipient-agent-pubkey",
+                senderPubkey: agentPubkey,
+                prompt: "Original prompt",
+                ralNumber,
+            },
+        });
 
         const context = createMockContext(ralNumber);
         const followupTool = createDelegateFollowupTool(context);
@@ -880,14 +922,21 @@ describe("delegate_followup - ID handling", () => {
         // Register a standard delegation (not a followup)
         const canonicalId = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
-        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
-            type: "standard",
-            delegationConversationId: canonicalId,
-            recipientPubkey: "recipient-agent-pubkey",
-            senderPubkey: agentPubkey,
-            prompt: "Original prompt",
+        DelegationJournalReader.getInstance().appendOverlay({
+            event: "delegation_registered",
+            projectId,
+            agentPubkey,
+            conversationId,
             ralNumber,
-        }]);
+            pendingDelegation: {
+                type: "standard",
+                delegationConversationId: canonicalId,
+                recipientPubkey: "recipient-agent-pubkey",
+                senderPubkey: agentPubkey,
+                prompt: "Original prompt",
+                ralNumber,
+            },
+        });
 
         const context = createMockContext(ralNumber);
         const followupTool = createDelegateFollowupTool(context);
@@ -910,14 +959,21 @@ describe("delegate_followup - ID handling", () => {
 
         const canonicalId = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
-        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
-            type: "standard",
-            delegationConversationId: canonicalId,
-            recipientPubkey: "recipient-agent-pubkey",
-            senderPubkey: agentPubkey,
-            prompt: "Original prompt",
+        DelegationJournalReader.getInstance().appendOverlay({
+            event: "delegation_registered",
+            projectId,
+            agentPubkey,
+            conversationId,
             ralNumber,
-        }]);
+            pendingDelegation: {
+                type: "standard",
+                delegationConversationId: canonicalId,
+                recipientPubkey: "recipient-agent-pubkey",
+                senderPubkey: agentPubkey,
+                prompt: "Original prompt",
+                ralNumber,
+            },
+        });
 
         const context = createMockContext(ralNumber);
         const followupTool = createDelegateFollowupTool(context);

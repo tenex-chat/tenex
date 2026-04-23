@@ -6,7 +6,7 @@
  */
 
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { RALRegistry, extractPendingDelegations } from "@/services/ral";
+import { RALRegistry } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -265,40 +265,10 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): ToolEve
             ] as ToolResultPart[],
         });
 
-        // Check for StopExecutionSignal in tool result
-        const delegationsFromResult = extractPendingDelegations(event.result);
-        if (delegationsFromResult && delegationsFromResult.length > 0) {
-            trace.getActiveSpan()?.addEvent("executor.delegation_detected_in_tool_result", {
-                "ral.number": ralNumber,
-                "tool.name": event.toolName,
-                "delegation.count": delegationsFromResult.length,
-            });
-
-            // Use atomic merge to safely handle concurrent tool executions
-            // that may each produce delegation results
-            const { insertedCount, mergedCount } = ralRegistry.mergePendingDelegations(
-                context.agent.pubkey,
-                context.conversationId,
-                ralNumber,
-                delegationsFromResult
-            );
-
-            const totalPending = ralRegistry.getConversationPendingDelegations(
-                context.agent.pubkey,
-                context.conversationId,
-                ralNumber
-            ).length;
-
-            logger.info("[ToolEventHandlers] Registered pending delegations from tool result", {
-                agent: context.agent.slug,
-                ralNumber,
-                toolName: event.toolName,
-                delegationCount: delegationsFromResult.length,
-                insertedCount,
-                mergedCount,
-                totalPending,
-            });
-        }
+        // StopExecutionSignal is an obsolete tool-result protocol; modern
+        // delegation tools register directly through the publisher bridge,
+        // which emits delegation_registered frames to Rust. No extraction
+        // from tool results is needed.
 
         // === HEURISTIC EVALUATION POST-TOOL ===
         // Evaluate heuristics after tool execution to detect pattern violations
