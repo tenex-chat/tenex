@@ -13,6 +13,7 @@ import type {
     ContentEvent,
     ReasoningEvent,
     StreamErrorEvent,
+    ToolWillExecuteEvent,
 } from "@/llm/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
@@ -80,6 +81,9 @@ export class StreamExecutionHandler {
 
     private contentBuffer = "";
     private reasoningBuffer = "";
+    private pendingPreToolText = "";
+    private deferredTodoText = "";
+    private turnToolCount = 0;
     private streamTextDeltaBuffer = "";
     private streamTextDeltaSequence = 0;
     private streamTextDeltaTimer: NodeJS.Timeout | undefined;
@@ -364,8 +368,19 @@ export class StreamExecutionHandler {
                     force: true,
                     reason: "chunk-type-change",
                 });
-                await this.flushContentBuffer();
+                // Don't publish yet. Stash the buffered text — the upcoming
+                // tool-will-execute event determines whether this belongs to a
+                // deferred todo_write close-out (fold into complete()) or is a
+                // true mid-loop segment (publish as conversation()).
+                this.capturePreToolText();
             }
+        });
+
+        llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
+            if (this.silentTerminationRequested) {
+                return;
+            }
+            await this.handleToolStart(event.toolName);
         });
 
         // Track when we register the complete listener
@@ -401,7 +416,7 @@ export class StreamExecutionHandler {
             if (!this.result) {
                 const completionEvent = this.silentTerminationRequested
                     ? { ...event, message: "" }
-                    : event;
+                    : this.foldDeferredTodoTextInto(event);
                 this.result = {
                     kind: "complete",
                     event: completionEvent,
@@ -537,54 +552,133 @@ export class StreamExecutionHandler {
     }
 
     /**
-     * Flush content buffer to publish interim text
+     * Stash the current contentBuffer as pendingPreToolText. Called at the
+     * text-delta → tool-call chunk-type-change seam. The decision to publish
+     * (as a mid-loop conversation event) vs defer (fold into complete()) is
+     * made at tool-will-execute once we know the tool name.
      */
-    private async flushContentBuffer(): Promise<void> {
-        if (this.contentBuffer.trim().length > 0) {
-            const { context } = this.config;
-            const eventContext = this.createEventContext();
-            const contentToFlush = this.contentBuffer;
-
-            // Add to conversation store BEFORE publishing - capture index for eventId reconciliation
-            const messageIndex = context.conversationStore.addMessage({
-                pubkey: context.agent.pubkey,
-                ral: this.config.ralNumber,
-                content: contentToFlush,
-                messageType: "text",
-                timestamp: Math.floor(Date.now() / 1000),
-            });
-
-            // DIAGNOSTIC: Track content buffer flushes to correlate with duplicate message bug
-            this.executionSpan?.addEvent("content_buffer.stored", {
-                "content.preview": contentToFlush.slice(0, 120),
-                "content.length": contentToFlush.length,
-                "store.index": messageIndex,
-                "ral.number": this.config.ralNumber,
-                "agent.slug": context.agent.slug,
-            });
-
-            // Clear buffer BEFORE async publish to prevent re-adding on retry
+    private capturePreToolText(): void {
+        if (this.contentBuffer.trim().length === 0) {
             this.contentBuffer = "";
+            return;
+        }
+        this.pendingPreToolText += this.contentBuffer;
+        this.contentBuffer = "";
+    }
 
-            try {
-                const event = await context.agentPublisher.conversation(
-                    { content: contentToFlush },
-                    eventContext
-                );
+    /**
+     * Decide whether pre-tool text belongs to a todo_write close-out (defer
+     * it into the final complete() event) or should be published as a normal
+     * mid-loop conversation() event.
+     *
+     * Defer condition: first tool call of the turn AND tool is todo_write.
+     * Any other tool, or a second tool call, triggers an immediate flush of
+     * whatever was previously deferred plus the pending pre-tool text.
+     */
+    private async handleToolStart(toolName: string): Promise<void> {
+        this.turnToolCount += 1;
 
-                // Link the published eventId to the message for loopback deduplication
-                if (event.id && messageIndex >= 0) {
-                    context.conversationStore.setEventId(messageIndex, event.id);
-                }
-            } catch (publishError) {
-                // Log but don't throw - message is already in store, just unlinked
-                // The loopback dedup will handle this gracefully (worst case: duplicate display)
-                logger.warn("[StreamExecutionHandler] Failed to publish content buffer", {
-                    error: publishError instanceof Error ? publishError.message : String(publishError),
-                    ralNumber: this.config.ralNumber,
-                    agent: context.agent.slug,
-                });
+        if (
+            this.turnToolCount === 1 &&
+            toolName === "todo_write" &&
+            this.pendingPreToolText.trim().length > 0
+        ) {
+            this.deferredTodoText = this.pendingPreToolText;
+            this.pendingPreToolText = "";
+            this.executionSpan?.addEvent("content_buffer.deferred_for_todo_write", {
+                "content.length": this.deferredTodoText.length,
+                "ral.number": this.config.ralNumber,
+                "agent.slug": this.config.context.agent.slug,
+            });
+            return;
+        }
+
+        if (this.deferredTodoText.trim().length > 0) {
+            const toFlush = this.deferredTodoText;
+            this.deferredTodoText = "";
+            this.executionSpan?.addEvent("content_buffer.deferred_flushed", {
+                "trigger.tool_name": toolName,
+                "trigger.tool_count": this.turnToolCount,
+                "content.length": toFlush.length,
+                "ral.number": this.config.ralNumber,
+                "agent.slug": this.config.context.agent.slug,
+            });
+            await this.publishBufferedAsConversation(toFlush);
+        }
+
+        if (this.pendingPreToolText.trim().length > 0) {
+            const toFlush = this.pendingPreToolText;
+            this.pendingPreToolText = "";
+            await this.publishBufferedAsConversation(toFlush);
+        }
+    }
+
+    /**
+     * Fold deferred todo_write close-out text into the completion event's
+     * message so that the final p-tagged event carries the full response.
+     * Consumes the deferred buffer.
+     */
+    private foldDeferredTodoTextInto(event: CompleteEvent): CompleteEvent {
+        if (this.deferredTodoText.trim().length === 0) {
+            this.deferredTodoText = "";
+            return event;
+        }
+
+        const prefix = this.deferredTodoText;
+        this.deferredTodoText = "";
+        const trailing = event.message ?? "";
+        const merged = trailing.trim().length > 0 ? `${prefix}\n\n${trailing}` : prefix;
+
+        this.executionSpan?.addEvent("content_buffer.deferred_folded_into_complete", {
+            "deferred.length": prefix.length,
+            "trailing.length": trailing.length,
+            "merged.length": merged.length,
+            "ral.number": this.config.ralNumber,
+            "agent.slug": this.config.context.agent.slug,
+        });
+
+        return { ...event, message: merged };
+    }
+
+    /**
+     * Publish buffered text as a mid-loop conversation() event, mirroring the
+     * store-then-publish-then-link pattern used for reasoning buffers.
+     */
+    private async publishBufferedAsConversation(contentToFlush: string): Promise<void> {
+        const { context } = this.config;
+        const eventContext = this.createEventContext();
+
+        const messageIndex = context.conversationStore.addMessage({
+            pubkey: context.agent.pubkey,
+            ral: this.config.ralNumber,
+            content: contentToFlush,
+            messageType: "text",
+            timestamp: Math.floor(Date.now() / 1000),
+        });
+
+        this.executionSpan?.addEvent("content_buffer.stored", {
+            "content.preview": contentToFlush.slice(0, 120),
+            "content.length": contentToFlush.length,
+            "store.index": messageIndex,
+            "ral.number": this.config.ralNumber,
+            "agent.slug": context.agent.slug,
+        });
+
+        try {
+            const event = await context.agentPublisher.conversation(
+                { content: contentToFlush },
+                eventContext
+            );
+
+            if (event.id && messageIndex >= 0) {
+                context.conversationStore.setEventId(messageIndex, event.id);
             }
+        } catch (publishError) {
+            logger.warn("[StreamExecutionHandler] Failed to publish content buffer", {
+                error: publishError instanceof Error ? publishError.message : String(publishError),
+                ralNumber: this.config.ralNumber,
+                agent: context.agent.slug,
+            });
         }
     }
 
@@ -790,6 +884,8 @@ export class StreamExecutionHandler {
         this.silentTerminationRequested = true;
         this.contentBuffer = "";
         this.reasoningBuffer = "";
+        this.pendingPreToolText = "";
+        this.deferredTodoText = "";
         this.streamTextDeltaBuffer = "";
         this.clearStreamTextDeltaTimer();
 
