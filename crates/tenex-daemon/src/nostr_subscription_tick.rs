@@ -360,6 +360,25 @@ fn dispatch_diagnostic(
             pubkeys: vec![agent_pubkey],
             dispatch_id: None,
         },
+        NostrIngressOutcome::AgentInstalled { class, install } => {
+            NostrSubscriptionTickDispatch::Ignored {
+                frame_index,
+                event_id,
+                code: if install.already_installed {
+                    "agent_already_installed".to_string()
+                } else {
+                    "agent_installed".to_string()
+                },
+                detail: format!(
+                    "agent {} ({}) installed from definition {}",
+                    install.slug, install.agent_pubkey, install.definition_event_id
+                ),
+                class: Some(class),
+                project_id: None,
+                pubkeys: vec![install.agent_pubkey],
+                dispatch_id: None,
+            }
+        }
     }
 }
 
@@ -370,7 +389,8 @@ fn ingress_class(ingress: &NostrIngressOutcome) -> DaemonNostrEventClass {
         | NostrIngressOutcome::ProjectUpdated { class, .. }
         | NostrIngressOutcome::ProjectBooted { class, .. }
         | NostrIngressOutcome::AgentConfigUpdated { class, .. }
-        | NostrIngressOutcome::StopRequested { class, .. } => *class,
+        | NostrIngressOutcome::StopRequested { class, .. }
+        | NostrIngressOutcome::AgentInstalled { class, .. } => *class,
     }
 }
 

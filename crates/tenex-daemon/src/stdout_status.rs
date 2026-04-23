@@ -126,6 +126,16 @@ pub fn print_stale_injection_skipped(worker_id: &str, injection_id: &str) {
     );
 }
 
+pub fn print_agent_installed(slug: &str, agent_pubkey: &str, already_installed: bool) {
+    let marker = if already_installed { "↻" } else { "+" };
+    let agent_color = color_for(agent_pubkey);
+    let short_pubkey = &agent_pubkey[..agent_pubkey.len().min(8)];
+    println!(
+        "{DIM}{}{RESET}  {marker}  {BOLD}{agent_color}{slug}{RESET}  {DIM}{short_pubkey}…{RESET}",
+        timestamp()
+    );
+}
+
 pub fn print_sighup_reload_failed(error: &dyn std::error::Error) {
     let mut message = error.to_string();
     let mut source = error.source();
