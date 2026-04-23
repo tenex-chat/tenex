@@ -65,6 +65,7 @@ use tenex_daemon::worker_runtime_state::new_shared_worker_runtime_state;
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
 const DEFAULT_WORKER_MAX_FRAMES: u64 = 4_096;
+const DEFAULT_MAX_CONCURRENT_WORKERS: u64 = 16;
 const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
@@ -86,6 +87,10 @@ struct DaemonCliOptions {
     iterations: Option<u64>,
     sleep_ms: u64,
     debug: bool,
+    /// Maximum number of concurrently running worker sessions across all
+    /// projects and agents. `None` means unlimited. Overridable via
+    /// `--max-concurrent-workers`; defaults to 16.
+    max_concurrent_workers: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -759,7 +764,11 @@ where
         },
         DaemonForegroundWorkerInput {
             runtime_state: worker_runtime_state,
-            limits: WorkerConcurrencyLimits::default(),
+            limits: WorkerConcurrencyLimits {
+                global: options.max_concurrent_workers,
+                per_project: None,
+                per_agent: None,
+            },
             correlation_id_prefix: "daemon-foreground-worker".to_string(),
             command: worker_command,
             worker_config: &worker_config,
@@ -868,6 +877,7 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
     let mut iterations = None;
     let mut sleep_ms = DEFAULT_SLEEP_MS;
     let mut debug = false;
+    let mut max_concurrent_workers = Some(DEFAULT_MAX_CONCURRENT_WORKERS);
     let mut index = 0;
 
     while index < args.len() {
@@ -903,6 +913,14 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
             "--debug" => {
                 debug = true;
             }
+            "--max-concurrent-workers" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--max-concurrent-workers requires a value"))?;
+                let parsed = parse_u64_arg("--max-concurrent-workers", value)?;
+                max_concurrent_workers = if parsed == 0 { None } else { Some(parsed) };
+            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -924,6 +942,7 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
         iterations,
         sleep_ms,
         debug,
+        max_concurrent_workers,
     })
 }
 
@@ -973,8 +992,11 @@ fn current_unix_time_ms() -> u64 {
 fn usage() -> String {
     [
         "usage:",
-        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
-        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
+        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--max-concurrent-workers <count>] [--debug]",
+        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--max-concurrent-workers <count>] [--debug]",
+        "",
+        "  --max-concurrent-workers <count>  Cap the number of worker sessions that run concurrently.",
+        "                                   0 means unlimited. Default: 16.",
     ]
     .join("\n")
 }
@@ -1185,6 +1207,7 @@ mod tests {
             iterations: Some(1),
             sleep_ms: 0,
             debug: false,
+            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1202,6 +1225,7 @@ mod tests {
             iterations: Some(1),
             sleep_ms: 0,
             debug: false,
+            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1220,6 +1244,7 @@ mod tests {
             iterations: Some(2),
             sleep_ms: 25,
             debug: false,
+            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![
