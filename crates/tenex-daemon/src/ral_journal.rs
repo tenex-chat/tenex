@@ -95,6 +95,19 @@ pub struct RalDeferredCompletion {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RalCompletedDelegation {
+    pub delegation_conversation_id: String,
+    pub sender_pubkey: String,
+    pub recipient_pubkey: String,
+    pub response: String,
+    pub completed_at: u64,
+    pub completion_event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_transcript: Option<Vec<RalDelegationMessage>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RalPendingDelegation {
     pub delegation_conversation_id: String,
     pub recipient_pubkey: String,
@@ -172,6 +185,11 @@ pub enum RalJournalEvent {
         #[serde(flatten)]
         terminal: RalTerminalSummary,
     },
+    DelegationCompleted {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        completion: RalCompletedDelegation,
+    },
     Completed {
         #[serde(flatten)]
         identity: RalJournalIdentity,
@@ -248,6 +266,7 @@ impl RalJournalEvent {
             Self::Allocated { identity, .. }
             | Self::Claimed { identity, .. }
             | Self::WaitingForDelegation { identity, .. }
+            | Self::DelegationCompleted { identity, .. }
             | Self::Completed { identity, .. }
             | Self::NoResponse { identity, .. }
             | Self::Error { identity, .. }
@@ -313,7 +332,10 @@ pub struct RalReplayEntry {
     pub last_correlation_id: String,
     pub worker_id: Option<String>,
     pub active_claim_token: Option<String>,
+    #[serde(default)]
     pub pending_delegations: Vec<RalPendingDelegation>,
+    #[serde(default)]
+    pub completed_delegations: Vec<RalCompletedDelegation>,
     pub triggering_event_id: Option<String>,
     pub final_event_ids: Vec<String>,
     pub accumulated_runtime_ms: u64,
@@ -580,7 +602,6 @@ fn apply_record(
             entry.status = RalReplayStatus::Claimed;
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = Some(claim_token.clone());
-            entry.pending_delegations.clear();
             entry.final_event_ids.clear();
             entry.error = None;
             entry.abort_reason = None;
@@ -596,7 +617,14 @@ fn apply_record(
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = None;
             entry.pending_delegations = pending_delegations.clone();
+            entry.completed_delegations.clear();
             apply_terminal_summary(entry, terminal);
+            entry.error = None;
+            entry.abort_reason = None;
+            entry.crash_reason = None;
+        }
+        RalJournalEvent::DelegationCompleted { completion, .. } => {
+            apply_delegation_completion(entry, completion);
             entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = None;
@@ -610,6 +638,7 @@ fn apply_record(
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
+            entry.completed_delegations.clear();
             apply_terminal_summary(entry, terminal);
             entry.error = None;
             entry.abort_reason = None;
@@ -624,6 +653,7 @@ fn apply_record(
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
+            entry.completed_delegations.clear();
             apply_terminal_summary(entry, terminal);
             entry.error = None;
             entry.abort_reason = None;
@@ -639,6 +669,7 @@ fn apply_record(
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
+            entry.completed_delegations.clear();
             apply_terminal_summary(entry, terminal);
             entry.error = Some(error.clone());
             entry.abort_reason = None;
@@ -654,6 +685,7 @@ fn apply_record(
             entry.worker_id = worker_id.clone();
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
+            entry.completed_delegations.clear();
             apply_terminal_summary(entry, terminal);
             entry.error = None;
             entry.abort_reason = Some(abort_reason.clone());
@@ -668,6 +700,7 @@ fn apply_record(
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = None;
             entry.pending_delegations.clear();
+            entry.completed_delegations.clear();
             entry.final_event_ids.clear();
             entry.error = None;
             entry.abort_reason = None;
@@ -686,6 +719,7 @@ fn empty_replay_entry(identity: RalJournalIdentity, record: &RalJournalRecord) -
         worker_id: None,
         active_claim_token: None,
         pending_delegations: Vec::new(),
+        completed_delegations: Vec::new(),
         triggering_event_id: None,
         final_event_ids: Vec::new(),
         accumulated_runtime_ms: 0,
@@ -693,6 +727,41 @@ fn empty_replay_entry(identity: RalJournalIdentity, record: &RalJournalRecord) -
         abort_reason: None,
         crash_reason: None,
     }
+}
+
+fn apply_delegation_completion(entry: &mut RalReplayEntry, completion: &RalCompletedDelegation) {
+    if entry
+        .completed_delegations
+        .iter()
+        .any(|existing| existing.completion_event_id == completion.completion_event_id)
+    {
+        return;
+    }
+
+    let Some(index) = entry.pending_delegations.iter().position(|pending| {
+        pending.delegation_conversation_id == completion.delegation_conversation_id
+            && pending.recipient_pubkey == completion.sender_pubkey
+            && pending.sender_pubkey == completion.recipient_pubkey
+    }) else {
+        return;
+    };
+
+    let has_pending_sub_delegations = entry.pending_delegations[index]
+        .pending_sub_delegations
+        .as_ref()
+        .is_some_and(|pending| !pending.is_empty());
+    if has_pending_sub_delegations {
+        entry.pending_delegations[index].deferred_completion = Some(RalDeferredCompletion {
+            recipient_pubkey: completion.sender_pubkey.clone(),
+            response: completion.response.clone(),
+            completed_at: completion.completed_at,
+            full_transcript: completion.full_transcript.clone(),
+        });
+        return;
+    }
+
+    entry.pending_delegations.remove(index);
+    entry.completed_delegations.push(completion.clone());
 }
 
 fn apply_terminal_summary(entry: &mut RalReplayEntry, terminal: &RalTerminalSummary) {
@@ -764,6 +833,13 @@ mod tests {
                         RalDelegationType::Ask,
                     )],
                     terminal: terminal(Vec::new(), 10),
+                },
+            ),
+            (
+                "delegation_completed",
+                RalJournalEvent::DelegationCompleted {
+                    identity: identity.clone(),
+                    completion: test_completed_delegation("delegation-1", "completion-event-1"),
                 },
             ),
             (
@@ -953,6 +1029,72 @@ mod tests {
         assert_eq!(replay_entry.last_correlation_id, "corr-5");
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn delegation_completion_removes_matching_pending_and_resume_claim_preserves_remaining() {
+        let identity = sample_identity();
+        let first_pending = test_pending_delegation("delegation-1", RalDelegationType::Standard);
+        let second_pending = test_pending_delegation("delegation-2", RalDelegationType::Ask);
+        let completion = test_completed_delegation("delegation-1", "completion-event-1");
+        let replay = replay_ral_journal_records(vec![
+            record(
+                1,
+                "corr-1",
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-event-1".to_string()),
+                },
+            ),
+            record(
+                2,
+                "corr-2",
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-1".to_string(),
+                    claim_token: "claim-1".to_string(),
+                },
+            ),
+            record(
+                3,
+                "corr-3",
+                RalJournalEvent::WaitingForDelegation {
+                    identity: identity.clone(),
+                    worker_id: "worker-1".to_string(),
+                    claim_token: "claim-1".to_string(),
+                    pending_delegations: vec![first_pending, second_pending.clone()],
+                    terminal: terminal(Vec::new(), 10),
+                },
+            ),
+            record(
+                4,
+                "corr-4",
+                RalJournalEvent::DelegationCompleted {
+                    identity: identity.clone(),
+                    completion: completion.clone(),
+                },
+            ),
+            record(
+                5,
+                "corr-5",
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-2".to_string(),
+                    claim_token: "claim-2".to_string(),
+                },
+            ),
+        ])
+        .expect("journal replay must succeed");
+
+        let entry = replay
+            .states
+            .get(&identity)
+            .expect("identity must replay to current state");
+        assert_eq!(entry.status, RalReplayStatus::Claimed);
+        assert_eq!(entry.worker_id.as_deref(), Some("worker-2"));
+        assert_eq!(entry.active_claim_token.as_deref(), Some("claim-2"));
+        assert_eq!(entry.pending_delegations, vec![second_pending]);
+        assert_eq!(entry.completed_delegations, vec![completion]);
     }
 
     #[test]
@@ -1355,6 +1497,21 @@ mod tests {
             suggestions: None,
             killed: None,
             killed_at: None,
+        }
+    }
+
+    fn test_completed_delegation(
+        delegation_conversation_id: &str,
+        completion_event_id: &str,
+    ) -> RalCompletedDelegation {
+        RalCompletedDelegation {
+            delegation_conversation_id: delegation_conversation_id.to_string(),
+            sender_pubkey: "b".repeat(64),
+            recipient_pubkey: "a".repeat(64),
+            response: "done".to_string(),
+            completed_at: 1_710_000_900,
+            completion_event_id: completion_event_id.to_string(),
+            full_transcript: None,
         }
     }
 

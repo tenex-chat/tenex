@@ -11,9 +11,10 @@ use crate::dispatch_queue::{
     build_dispatch_queue_record,
 };
 use crate::ral_journal::{
-    RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
-    RalJournalReplay, RalJournalResult, RalJournalSnapshot, RalPendingDelegation, RalReplayEntry,
-    RalReplayStatus, RalTerminalSummary, RalWorkerError, replay_ral_journal, write_ral_snapshot,
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalCompletedDelegation, RalJournalEvent, RalJournalIdentity,
+    RalJournalRecord, RalJournalReplay, RalJournalResult, RalJournalSnapshot, RalPendingDelegation,
+    RalReplayEntry, RalReplayStatus, RalTerminalSummary, RalWorkerError, replay_ral_journal,
+    write_ral_snapshot,
 };
 
 static CLAIM_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -223,6 +224,71 @@ impl RalScheduler {
             .active_triggering_event(namespace, triggering_event_id)
     }
 
+    pub fn find_delegation_completion(
+        &self,
+        input: RalDelegationCompletionLookupInput<'_>,
+    ) -> Option<RalDelegationCompletionLookup> {
+        let mut entries = self
+            .state
+            .entries
+            .values()
+            .filter(|entry| is_active_ral_status(entry.status))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| compare_identity(&left.identity, &right.identity));
+
+        for reply_target in input.reply_targets.iter().rev() {
+            for entry in &entries {
+                if entry.completed_delegations.iter().any(|completion| {
+                    completion.completion_event_id == input.completion_event_id
+                        || (completion.delegation_conversation_id == *reply_target
+                            && completion.sender_pubkey == input.completion_sender_pubkey)
+                }) {
+                    return Some(RalDelegationCompletionLookup::AlreadyRecorded(
+                        RalDelegationCompletionAlreadyRecorded {
+                            identity: entry.identity.clone(),
+                            delegation_conversation_id: reply_target.clone(),
+                            completion_event_id: input.completion_event_id.to_string(),
+                        },
+                    ));
+                }
+
+                let Some(pending) = entry.pending_delegations.iter().find(|pending| {
+                    pending.delegation_conversation_id == *reply_target
+                        && pending.recipient_pubkey == input.completion_sender_pubkey
+                }) else {
+                    continue;
+                };
+
+                let remaining_pending_delegations = entry
+                    .pending_delegations
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.delegation_conversation_id != pending.delegation_conversation_id
+                            || candidate.recipient_pubkey != pending.recipient_pubkey
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let deferred = pending
+                    .pending_sub_delegations
+                    .as_ref()
+                    .is_some_and(|pending| !pending.is_empty());
+
+                return Some(RalDelegationCompletionLookup::Pending(
+                    RalDelegationCompletionTarget {
+                        identity: entry.identity.clone(),
+                        status: entry.status,
+                        triggering_event_id: entry.triggering_event_id.clone(),
+                        pending_delegation: pending.clone(),
+                        remaining_pending_delegations,
+                        deferred,
+                    },
+                ));
+            }
+        }
+
+        None
+    }
+
     pub fn allocate(
         &self,
         namespace: RalNamespace,
@@ -339,6 +405,94 @@ impl RalScheduler {
             allocation,
             claim,
             allocation_record,
+            claim_record,
+            dispatch_record,
+        })
+    }
+
+    pub fn plan_delegation_completion(
+        &self,
+        input: RalDelegationCompletionPlanInput,
+    ) -> Result<RalDelegationCompletionPlan, RalSchedulerError> {
+        if input.sequence <= self.state.last_sequence {
+            return Err(RalSchedulerError::NonIncreasingJournalSequence {
+                sequence: input.sequence,
+                last_sequence: self.state.last_sequence,
+            });
+        }
+
+        let entry = self.entry_or_error(&input.identity)?;
+        if is_terminal_ral_status(entry.status) {
+            return Err(RalSchedulerError::TerminalRal {
+                identity: Box::new(input.identity),
+                status: entry.status,
+            });
+        }
+
+        let event = RalJournalEvent::DelegationCompleted {
+            identity: input.identity,
+            completion: input.completion,
+        };
+        Ok(RalDelegationCompletionPlan {
+            record: RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                input.writer_version,
+                input.sequence,
+                input.timestamp,
+                input.correlation_id,
+                event,
+            ),
+        })
+    }
+
+    pub fn plan_resume_dispatch_preparation(
+        &self,
+        input: RalResumeDispatchPreparationInput,
+    ) -> Result<RalResumeDispatchPreparation, RalSchedulerError> {
+        if input.journal_sequence <= self.state.last_sequence {
+            return Err(RalSchedulerError::NonIncreasingJournalSequence {
+                sequence: input.journal_sequence,
+                last_sequence: self.state.last_sequence,
+            });
+        }
+        if input.dispatch_sequence <= input.last_dispatch_sequence {
+            return Err(RalSchedulerError::NonIncreasingDispatchSequence {
+                sequence: input.dispatch_sequence,
+                last_sequence: input.last_dispatch_sequence,
+            });
+        }
+
+        let claim = self.claim(
+            &input.identity,
+            input.worker_id.clone(),
+            Some(input.claim_token.clone()),
+        )?;
+        let claim_record = RalJournalRecord::new(
+            RAL_JOURNAL_WRITER_RUST_DAEMON,
+            input.writer_version,
+            input.journal_sequence,
+            input.timestamp,
+            input.correlation_id.clone(),
+            claim.event.clone(),
+        );
+        let dispatch_record = build_dispatch_queue_record(DispatchQueueRecordParams {
+            sequence: input.dispatch_sequence,
+            timestamp: input.timestamp,
+            correlation_id: input.correlation_id,
+            dispatch_id: input.dispatch_id,
+            ral: DispatchRalIdentity {
+                project_id: input.identity.project_id,
+                agent_pubkey: input.identity.agent_pubkey,
+                conversation_id: input.identity.conversation_id,
+                ral_number: input.identity.ral_number,
+            },
+            triggering_event_id: input.triggering_event_id,
+            claim_token: claim.claim_token.clone(),
+            status: DispatchQueueStatus::Queued,
+        });
+
+        Ok(RalResumeDispatchPreparation {
+            claim,
             claim_record,
             dispatch_record,
         })
@@ -633,6 +787,73 @@ pub struct RalDispatchPreparation {
     pub allocation: RalAllocation,
     pub claim: RalClaim,
     pub allocation_record: RalJournalRecord,
+    pub claim_record: RalJournalRecord,
+    pub dispatch_record: DispatchQueueRecord,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RalDelegationCompletionLookupInput<'a> {
+    pub reply_targets: &'a [String],
+    pub completion_sender_pubkey: &'a str,
+    pub completion_event_id: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RalDelegationCompletionLookup {
+    Pending(RalDelegationCompletionTarget),
+    AlreadyRecorded(RalDelegationCompletionAlreadyRecorded),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalDelegationCompletionTarget {
+    pub identity: RalJournalIdentity,
+    pub status: RalReplayStatus,
+    pub triggering_event_id: Option<String>,
+    pub pending_delegation: RalPendingDelegation,
+    pub remaining_pending_delegations: Vec<RalPendingDelegation>,
+    pub deferred: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalDelegationCompletionAlreadyRecorded {
+    pub identity: RalJournalIdentity,
+    pub delegation_conversation_id: String,
+    pub completion_event_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalDelegationCompletionPlanInput {
+    pub identity: RalJournalIdentity,
+    pub completion: RalCompletedDelegation,
+    pub sequence: u64,
+    pub timestamp: u64,
+    pub correlation_id: String,
+    pub writer_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalDelegationCompletionPlan {
+    pub record: RalJournalRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalResumeDispatchPreparationInput {
+    pub identity: RalJournalIdentity,
+    pub worker_id: String,
+    pub claim_token: String,
+    pub journal_sequence: u64,
+    pub dispatch_sequence: u64,
+    pub last_dispatch_sequence: u64,
+    pub timestamp: u64,
+    pub correlation_id: String,
+    pub dispatch_id: String,
+    pub triggering_event_id: String,
+    pub writer_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RalResumeDispatchPreparation {
+    pub claim: RalClaim,
     pub claim_record: RalJournalRecord,
     pub dispatch_record: DispatchQueueRecord,
 }
@@ -1122,6 +1343,129 @@ mod tests {
                 claim_token: "claim-resume".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn finds_delegation_completion_by_reply_target_and_delegatee_pubkey() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let identity = namespace.identity(1);
+        let pending = pending_delegation("delegation-a", RalDelegationType::Standard);
+        let records = vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+            record(
+                3,
+                RalJournalEvent::WaitingForDelegation {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                    pending_delegations: vec![
+                        pending.clone(),
+                        pending_delegation("delegation-b", RalDelegationType::Ask),
+                    ],
+                    terminal: terminal(),
+                },
+            ),
+        ];
+        let scheduler = make_scheduler(records);
+        let lookup = scheduler
+            .find_delegation_completion(RalDelegationCompletionLookupInput {
+                reply_targets: &["irrelevant".to_string(), "delegation-a".to_string()],
+                completion_sender_pubkey: "recipient-a",
+                completion_event_id: "completion-a",
+            })
+            .expect("delegation completion must match");
+
+        let RalDelegationCompletionLookup::Pending(target) = lookup else {
+            panic!("expected pending completion target");
+        };
+        assert_eq!(target.identity, identity);
+        assert_eq!(target.status, RalReplayStatus::WaitingForDelegation);
+        assert_eq!(target.pending_delegation, pending);
+        assert_eq!(
+            target
+                .remaining_pending_delegations
+                .iter()
+                .map(|pending| pending.delegation_conversation_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["delegation-b"]
+        );
+        assert!(!target.deferred);
+    }
+
+    #[test]
+    fn plans_resume_dispatch_without_allocating_a_new_ral() {
+        let namespace = make_namespace("project-a", "agent-a", "conversation-a");
+        let identity = namespace.identity(1);
+        let scheduler = make_scheduler(vec![
+            record(
+                1,
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("trigger-a".to_string()),
+                },
+            ),
+            record(
+                2,
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+            record(
+                3,
+                RalJournalEvent::WaitingForDelegation {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                    pending_delegations: vec![pending_delegation(
+                        "delegation-a",
+                        RalDelegationType::Standard,
+                    )],
+                    terminal: terminal(),
+                },
+            ),
+        ]);
+
+        let preparation = scheduler
+            .plan_resume_dispatch_preparation(RalResumeDispatchPreparationInput {
+                identity: identity.clone(),
+                worker_id: "worker-resume".to_string(),
+                claim_token: "claim-resume".to_string(),
+                journal_sequence: 4,
+                dispatch_sequence: 1,
+                last_dispatch_sequence: 0,
+                timestamp: 1_710_000_900_000,
+                correlation_id: "delegation-resume-test".to_string(),
+                dispatch_id: "dispatch-resume".to_string(),
+                triggering_event_id: "trigger-a".to_string(),
+                writer_version: "test-version".to_string(),
+            })
+            .expect("resume dispatch preparation must build");
+
+        assert_eq!(preparation.claim.identity, identity);
+        assert_eq!(preparation.claim_record.sequence, 4);
+        assert!(matches!(
+            preparation.claim_record.event,
+            RalJournalEvent::Claimed { .. }
+        ));
+        assert_eq!(preparation.dispatch_record.dispatch_id, "dispatch-resume");
+        assert_eq!(preparation.dispatch_record.ral.ral_number, 1);
+        assert_eq!(preparation.dispatch_record.triggering_event_id, "trigger-a");
     }
 
     #[test]
