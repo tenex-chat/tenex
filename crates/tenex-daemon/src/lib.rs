@@ -53,6 +53,7 @@ pub mod periodic_tick_state;
 pub mod process_liveness;
 pub mod project_agent_whitelist;
 pub mod project_boot_state;
+pub mod project_event_index;
 pub mod project_nostr_ingress;
 pub mod project_repository_init;
 pub mod project_status_agent_sources;
