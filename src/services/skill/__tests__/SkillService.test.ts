@@ -288,9 +288,9 @@ describe("SkillService", () => {
             `${BUILT_IN_SKILLS_PATH}/agent-management/SKILL.md`,
             createSkillDocument({
                 name: "agent-management",
-                description: "Create and update agent configurations and current project metadata",
+                description: "Create and update agent configurations",
                 content: "Built-in skill content",
-                tools: ["agents_write", "modify_project"],
+                tools: ["agents_write"],
             }),
         );
 
@@ -298,7 +298,7 @@ describe("SkillService", () => {
         const fetched = await SkillService.getInstance().fetchSkills(["agent-management"]);
 
         expect(skills.map((skill) => skill.identifier)).toEqual(["agent-management"]);
-        expect(skills[0]?.toolNames).toEqual(["agents_write", "modify_project"]);
+        expect(skills[0]?.toolNames).toEqual(["agents_write"]);
         expect(skills.some((skill) => skill.identifier === "agents-write")).toBe(false);
         expect(fetched.skills).toHaveLength(1);
         expect(fetched.skills[0]?.identifier).toBe("agent-management");

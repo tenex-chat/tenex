@@ -78,20 +78,6 @@ jq -n \
   > "$desc_dir/project.json"
 echo "[scenario] pre-seeded project descriptor at $desc_dir/project.json"
 
-# Pre-seed the project-agent membership in agents/index.json. The daemon only
-# READS byProject (no production code writes it), so without this the inbound
-# routing path drops kind:1 events with `no_project_agent_recipient`. The
-# fixture creates index.json with empty byProject; we populate our project's
-# agent list here.
-agent_index="$BACKEND_BASE/agents/index.json"
-jq --arg p "$PROJECT_D_TAG" \
-   --arg a1 "$AGENT1_PUBKEY" \
-   --arg a2 "$AGENT2_PUBKEY" \
-   --arg at "$TRANSPARENT_PUBKEY" \
-   '.byProject[$p] = [$a1, $a2, $at]' \
-   "$agent_index" > "$agent_index.tmp" && mv "$agent_index.tmp" "$agent_index"
-echo "[scenario] populated agents/index.json byProject with 3 agents"
-
 # Admin on the relay = backend. Agents and user are whitelisted via a 14199
 # that user publishes below (admin-level events aren't enough to let broadcasts
 # reach the daemon for events authored by the user/agents; whitelisting is
