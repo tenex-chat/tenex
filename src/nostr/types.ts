@@ -210,6 +210,8 @@ export interface DelegateConfig {
     skills?: string[];
     /** Optional team name for team-scoped delegation */
     team?: string;
+    /** Parent delegation conversation id when this delegation is nested under another */
+    parentDelegationConversationId?: string;
 }
 
 /**
@@ -225,4 +227,8 @@ export interface AskConfig {
     title: string;
     /** Array of questions (single-select or multi-select) */
     questions: AskQuestion[];
+    /** Parent delegation conversation id when this ask is nested under another delegation */
+    parentDelegationConversationId?: string;
+    /** Suggestions included in the ask event (flattened single-select suggestions) */
+    suggestions?: string[];
 }

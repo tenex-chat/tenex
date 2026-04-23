@@ -241,6 +241,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
           const eventId = await context.agentPublisher.delegate({
             recipient: escalationAgentPubkey,
             content: escalationPrompt,
+            parentDelegationConversationId,
           }, eventContext);
 
           // Build prompt summary for delegation tracking using helper
@@ -307,12 +308,17 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   });
 
   const eventContext = createEventContext(context);
+  const flattenedSuggestions = questions.flatMap((question) =>
+    question.type === "question" ? question.suggestions ?? [] : question.options ?? []
+  );
   const askEvent = await context.agentPublisher.ask(
     {
       recipient: ownerPubkey,
       title,
       context: askContext,
       questions,
+      parentDelegationConversationId,
+      suggestions: flattenedSuggestions.length > 0 ? flattenedSuggestions : undefined,
     },
     eventContext
   );

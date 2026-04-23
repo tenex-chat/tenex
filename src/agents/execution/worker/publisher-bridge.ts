@@ -139,6 +139,9 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
                 delegationType: "standard",
                 senderPubkey: this.options.agent.pubkey,
                 prompt: config.content,
+                ...(config.parentDelegationConversationId
+                    ? { parentDelegationConversationId: config.parentDelegationConversationId }
+                    : {}),
             });
         }
 
@@ -146,7 +149,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     }
 
     async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
-        return this.publishTextEvent(config.context, {
+        const ref = await this.publishTextEvent(config.context, {
             context: this.consumeAndEnhanceContext(context),
             runtimeEventClass: "ask",
             recipientPubkey: config.recipient,
@@ -175,6 +178,33 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
                 ),
             ],
         });
+
+        PendingDelegationsRegistry.register(
+            this.options.agent.pubkey,
+            context.conversationId,
+            ref.id
+        );
+
+        if (isHexPubkey(config.recipient)) {
+            await this.options.emit({
+                type: "delegation_registered",
+                correlationId: this.options.execution.correlationId,
+                ...this.identity(),
+                delegationConversationId: ref.id,
+                recipientPubkey: config.recipient,
+                delegationType: "ask",
+                senderPubkey: this.options.agent.pubkey,
+                prompt: buildAskPrompt(config),
+                ...(config.parentDelegationConversationId
+                    ? { parentDelegationConversationId: config.parentDelegationConversationId }
+                    : {}),
+                ...(config.suggestions && config.suggestions.length > 0
+                    ? { suggestions: config.suggestions }
+                    : {}),
+            });
+        }
+
+        return ref;
     }
 
     async delegateFollowup(
@@ -183,6 +213,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             content: string;
             delegationEventId: string;
             replyToEventId?: string;
+            parentDelegationConversationId?: string;
         },
         context: EventContext
     ): Promise<string> {
@@ -197,6 +228,23 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
                     : []),
             ],
         });
+
+        if (isHexPubkey(params.recipient)) {
+            await this.options.emit({
+                type: "delegation_registered",
+                correlationId: this.options.execution.correlationId,
+                ...this.identity(),
+                delegationConversationId: params.delegationEventId,
+                recipientPubkey: params.recipient,
+                delegationType: "followup",
+                senderPubkey: this.options.agent.pubkey,
+                prompt: params.content,
+                followupEventId: ref.id,
+                ...(params.parentDelegationConversationId
+                    ? { parentDelegationConversationId: params.parentDelegationConversationId }
+                    : {}),
+            });
+        }
 
         return ref.id;
     }
@@ -544,6 +592,13 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
 
 function isHexPubkey(value: string): boolean {
     return /^[0-9a-f]{64}$/.test(value);
+}
+
+function buildAskPrompt(config: AskConfig): string {
+    const questionSummary = config.questions
+        .map((question) => `[${question.title}] ${question.question}`)
+        .join("\n");
+    return `${config.title}\n\n${config.context}\n\n---\n\n${questionSummary}`;
 }
 
 function requireSignedPublishEvent(
