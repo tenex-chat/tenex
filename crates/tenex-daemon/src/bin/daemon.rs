@@ -51,8 +51,7 @@ use tenex_daemon::subscription_runtime::{
 };
 use tenex_daemon::telegram::agent_config::read_agent_gateway_bots;
 use tenex_daemon::telegram::gateway::{
-    DEFAULT_LONG_POLL_TIMEOUT_SECONDS, GatewayConfig, NoopIngressObserver,
-    TelegramGatewaySupervisor, start_telegram_gateway,
+    GatewayConfig, NoopIngressObserver, TelegramGatewaySupervisor, start_telegram_gateway,
 };
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::telemetry;
@@ -216,11 +215,7 @@ where
 
     emit_shutdown_status("foreground loop stopped; shutting down gateway threads");
     if let Some(supervisor) = gateway_supervisor {
-        emit_shutdown_status(format_args!(
-            "stopping Telegram gateway; waiting for active long-poll requests, up to {DEFAULT_LONG_POLL_TIMEOUT_SECONDS}s"
-        ));
         supervisor.request_stop();
-        supervisor.join();
         emit_shutdown_status("Telegram gateway stopped");
     }
     if let Some(supervisor) = nostr_supervisor {
