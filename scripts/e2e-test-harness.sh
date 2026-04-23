@@ -286,6 +286,10 @@ await_dispatch_status() {
 # await_kind_event <kind> [d-tag] [author] [timeout_seconds]
 # Polls the relay (over websocket via nak req) until at least one matching event
 # is returned. Echoes the first event JSON.
+#
+# Authenticates as BACKEND_NSEC (admin on the harness relay).
+# Varies --limit per iteration to dodge the relay's historicalQueryReplayGuard,
+# which short-circuits repeated identical filters within ~5s with LimitZero.
 await_kind_event() {
   local kind="${1:?kind}"
   local d_tag="${2:-}"
@@ -293,20 +297,22 @@ await_kind_event() {
   local timeout="${4:-$HARNESS_DEFAULT_TIMEOUT}"
 
   [[ -n "${HARNESS_RELAY_URL:-}" ]] || _die "HARNESS_RELAY_URL unset"
-
-  local args=(req -k "$kind" --limit 1)
-  [[ -n "$d_tag" ]] && args+=(-d "$d_tag")
-  [[ -n "$author" ]] && args+=(-a "$author")
-  args+=("$HARNESS_RELAY_URL")
+  [[ -n "${BACKEND_NSEC:-}" ]] || _die "BACKEND_NSEC unset; call harness_init first"
 
   local deadline=$(( $(date +%s) + timeout ))
+  local lim=20
   while [[ $(date +%s) -lt $deadline ]]; do
+    local args=(req -k "$kind" --limit "$lim" --auth --sec "$BACKEND_NSEC")
+    [[ -n "$d_tag" ]] && args+=(-d "$d_tag")
+    [[ -n "$author" ]] && args+=(-a "$author")
+    args+=("$HARNESS_RELAY_URL")
     local out
     out="$(nak "${args[@]}" 2>/dev/null || true)"
     if [[ -n "$out" ]] && [[ "$out" != "[]" ]]; then
-      printf '%s\n' "$out"
+      printf '%s\n' "$out" | head -1
       return 0
     fi
+    lim=$((lim + 1))
     sleep "$HARNESS_POLL_INTERVAL"
   done
   _log "TIMEOUT: no kind=$kind d=$d_tag author=$author event seen"

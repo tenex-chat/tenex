@@ -708,6 +708,12 @@ pub fn drain_pending_publish_outbox_with_retry_policy<P: PublishOutboxRelayPubli
                     relay_results = ?record.attempts.last().map(|attempt| &attempt.relay_results),
                     "publish outbox event was not accepted by any relay"
                 );
+                if !retryable {
+                    crate::stdout_status::print_publish_outbox_permanent_failure(
+                        &record.event.id,
+                        &record.request.request_id,
+                    );
+                }
                 outcomes.push(transition_pending_record(
                     daemon_dir,
                     &source_path,
@@ -1275,6 +1281,7 @@ fn read_optional_record_for_maintenance(
                     error = %error,
                     "publish outbox record quarantined after JSON decode failure"
                 );
+                crate::stdout_status::print_publish_outbox_quarantined(path, &target_path);
                 Ok(None)
             }
         },

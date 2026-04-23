@@ -337,6 +337,7 @@ fn run_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) {
                         error = %error,
                         "SIGHUP reload failed; keeping previous configuration"
                     );
+                    tenex_daemon::stdout_status::print_sighup_reload_failed(&error);
                 }
             }
         }

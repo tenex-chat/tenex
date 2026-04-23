@@ -62,13 +62,6 @@ impl WorkerPublishAcceptedEgress {
 pub enum WorkerPublishError {
     #[error("worker publish field is missing or invalid: {0}")]
     InvalidField(&'static str),
-    #[error(
-        "publish_result sequence {result_sequence} must be greater than publish_request sequence {request_sequence}"
-    )]
-    PublishResultSequenceNotAfterRequest {
-        request_sequence: u64,
-        result_sequence: u64,
-    },
     #[error("publish outbox acceptance failed: {0}")]
     Outbox(#[from] PublishOutboxError),
     #[error("worker egress routing failed: {0}")]
@@ -94,13 +87,6 @@ pub fn accept_worker_publish_and_build_result(
     let request: WorkerPublishRoutingRequest = serde_json::from_value(input.message.clone())
         .map_err(|_| WorkerPublishError::InvalidField("publish_request"))?;
     let request_sequence = request.sequence;
-
-    if input.result_sequence <= request_sequence {
-        return Err(WorkerPublishError::PublishResultSequenceNotAfterRequest {
-            request_sequence,
-            result_sequence: input.result_sequence,
-        });
-    }
 
     let (egress, publish_result) = match classify_worker_egress_route(&request.event)? {
         WorkerEgressRoute::Nostr => {
@@ -154,9 +140,7 @@ mod tests {
     use crate::nostr_event::{
         Nip01EventFixture, NormalizedNostrEvent, canonical_payload, event_hash_hex,
     };
-    use crate::publish_outbox::{
-        read_pending_publish_outbox_record, read_published_publish_outbox_record,
-    };
+    use crate::publish_outbox::read_pending_publish_outbox_record;
     use crate::telegram::bindings::{RuntimeTransport, write_transport_binding};
     use crate::telegram_outbox::{TelegramDeliveryPayload, read_pending_telegram_outbox_record};
     use crate::worker_protocol::{
@@ -258,48 +242,6 @@ mod tests {
         );
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
-    }
-
-    #[test]
-    fn rejects_non_advancing_publish_result_sequence_before_persisting() {
-        let daemon_dir = unique_temp_daemon_dir();
-        let fixture = signed_event_fixture();
-        let message = publish_request_message(&fixture, 41, 1710001000000);
-
-        let error = accept_worker_publish_and_build_result(WorkerPublishAcceptanceInput {
-            daemon_dir: &daemon_dir,
-            message: &message,
-            accepted_at: 1710001000100,
-            result_sequence: 41,
-            result_timestamp: 1710001000200,
-            telegram_egress: None,
-        })
-        .expect_err("non-advancing result sequence must fail");
-
-        match error {
-            WorkerPublishError::PublishResultSequenceNotAfterRequest {
-                request_sequence,
-                result_sequence,
-            } => {
-                assert_eq!(request_sequence, 41);
-                assert_eq!(result_sequence, 41);
-            }
-            other => panic!("expected sequence error, got {other:?}"),
-        }
-        assert!(
-            read_published_publish_outbox_record(&daemon_dir, &fixture.signed.id)
-                .expect("published record read must succeed")
-                .is_none()
-        );
-        assert!(
-            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
-                .expect("pending record read must succeed")
-                .is_none()
-        );
-
-        if daemon_dir.exists() {
-            fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
-        }
     }
 
     #[test]

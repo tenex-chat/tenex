@@ -1,4 +1,4 @@
-import type { ExportResult } from "@opentelemetry/core";
+import { ExportResultCode, type ExportResult } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
@@ -13,22 +13,30 @@ import { NostrSpanProcessor } from "./NostrSpanProcessor.js";
 
 const DEFAULT_SERVICE_NAME = "tenex-daemon";
 const DEFAULT_ENDPOINT = "http://localhost:4318/v1/traces";
+const INITIAL_BACKOFF_MS = 1_000;
+const MAX_BACKOFF_MS = 300_000;
 
-class ErrorHandlingExporterWrapper implements SpanExporter {
-    private disabled = false;
+class ExportBackoffWrapper implements SpanExporter {
+    private nextAttemptAt = 0;
+    private currentBackoffMs = INITIAL_BACKOFF_MS;
 
-    constructor(private traceExporter: OTLPTraceExporter) {}
+    constructor(private traceExporter: SpanExporter) {}
 
     export(spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
-        // Once disabled, drop all spans silently
-        if (this.disabled) {
-            resultCallback({ code: 0 }); // ExportResultCode.SUCCESS
+        if (Date.now() < this.nextAttemptAt) {
+            // Inside the backoff window — drop silently so BatchSpanProcessor
+            // doesn't accumulate or repeatedly log the same outage.
+            resultCallback({ code: ExportResultCode.SUCCESS });
             return;
         }
 
         this.traceExporter.export(spans, (result) => {
-            if (result.error && !this.disabled) {
-                this.disabled = true;
+            if (result.code === ExportResultCode.SUCCESS) {
+                this.nextAttemptAt = 0;
+                this.currentBackoffMs = INITIAL_BACKOFF_MS;
+            } else {
+                this.nextAttemptAt = Date.now() + this.currentBackoffMs;
+                this.currentBackoffMs = Math.min(this.currentBackoffMs * 2, MAX_BACKOFF_MS);
             }
             resultCallback(result);
         });
@@ -94,8 +102,9 @@ export function initializeTelemetry(
         url: exporterUrl,
     });
 
-    // Wrap the exporter with error handling
-    const wrappedExporter = new ErrorHandlingExporterWrapper(traceExporter);
+    // Wrap the exporter so transient outages trigger exponential backoff
+    // instead of permanently dropping traces.
+    const wrappedExporter = new ExportBackoffWrapper(traceExporter);
 
     sdk = createSDK(serviceName, wrappedExporter);
     sdk.start();

@@ -45,6 +45,7 @@ import { logger } from "@/utils/logger";
 import { createEventContext } from "@/services/event-context";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
+import { contextForConversation } from "@/telemetry/conversation-trace-id";
 import type { ModelMessage } from "ai";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { didEstablishPromptCacheFromUsage } from "./prompt-cache";
@@ -217,6 +218,7 @@ export class AgentExecutor {
      */
     async execute(context: ExecutionContext): Promise<PublishedMessageRef | undefined> {
         const telegramMetadata = context.triggeringEnvelope.metadata.transport?.telegram;
+        const conversationCtx = contextForConversation(context.conversationId);
         const span = tracer.startSpan("tenex.agent.execute", {
             attributes: {
                 "agent.slug": context.agent.slug,
@@ -232,9 +234,9 @@ export class AgentExecutor {
                 "telegram.chat.thread_id": telegramMetadata?.threadId ?? "",
                 "telegram.sender.id": telegramMetadata?.senderUserId ?? "",
             },
-        }, otelContext.active());
+        }, conversationCtx);
 
-        return otelContext.with(trace.setSpan(otelContext.active(), span), async () =>
+        return otelContext.with(trace.setSpan(conversationCtx, span), async () =>
             runWithSystemReminderContext(async () => {
                 try {
                     // Get project ID for multi-project isolation in daemon mode

@@ -283,6 +283,7 @@ where
                     error = %source,
                     "daemon tick failed; continuing"
                 );
+                crate::stdout_status::print_daemon_tick_failure(iteration_index, &source);
 
                 let next_iteration_index = iteration_index.saturating_add(1);
                 let stop_requested = stop_signal.should_stop();
@@ -769,11 +770,8 @@ where
                         telegram_egress: None,
                     }
                 });
-                if let Some(result_sequence) = next_publish_result_sequence.as_mut() {
-                    *result_sequence = result_sequence.saturating_add(1);
-                }
 
-                run_daemon_tick_once_from_filesystem_with_worker(
+                let outcome = run_daemon_tick_once_from_filesystem_with_worker(
                     DaemonMaintenanceInput {
                         tenex_base_dir: input.tenex_base_dir,
                         daemon_dir: input.daemon_dir,
@@ -797,7 +795,14 @@ where
                     publisher,
                     retry_policy,
                     &mut *telegram_publisher,
-                )
+                )?;
+
+                advance_publish_result_sequence(
+                    &mut next_publish_result_sequence,
+                    &outcome.worker_runtime,
+                );
+
+                Ok(outcome)
             },
         )
     } else {
@@ -816,11 +821,8 @@ where
                         telegram_egress: None,
                     }
                 });
-                if let Some(result_sequence) = next_publish_result_sequence.as_mut() {
-                    *result_sequence = result_sequence.saturating_add(1);
-                }
 
-                run_daemon_tick_once_from_filesystem_with_worker(
+                let outcome = run_daemon_tick_once_from_filesystem_with_worker(
                     DaemonMaintenanceInput {
                         tenex_base_dir: input.tenex_base_dir,
                         daemon_dir: input.daemon_dir,
@@ -844,10 +846,32 @@ where
                     publisher,
                     retry_policy,
                     &mut *telegram_publisher,
-                )
+                )?;
+
+                advance_publish_result_sequence(
+                    &mut next_publish_result_sequence,
+                    &outcome.worker_runtime,
+                );
+
+                Ok(outcome)
             },
         )
     }
+}
+
+fn advance_publish_result_sequence(
+    counter: &mut Option<u64>,
+    worker_runtime: &DaemonWorkerRuntimeOutcome,
+) {
+    let Some(current) = counter.as_mut() else {
+        return;
+    };
+    if let DaemonWorkerRuntimeOutcome::SessionCompleted { session, .. } = worker_runtime
+        && let Some(next) = session.next_publish_result_sequence
+    {
+        *current = (*current).max(next);
+    }
+    *current = current.saturating_add(1);
 }
 
 pub fn current_unix_time_ms() -> u64 {

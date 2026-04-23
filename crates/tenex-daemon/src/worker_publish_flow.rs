@@ -291,37 +291,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_publish_acceptance_errors_before_send() {
-        let daemon_dir = unique_temp_daemon_dir();
-        let fixture = signed_event_fixture();
-        let message = publish_request_message(&fixture, 41, 1_710_001_000_000);
-        let mut session = RecordingSession::default();
-
-        let error = handle_worker_publish_request(
-            &mut session,
-            WorkerPublishFlowInput {
-                daemon_dir: &daemon_dir,
-                message: &message,
-                accepted_at: 1_710_001_000_100,
-                result_sequence: 41,
-                result_timestamp: 1_710_001_000_200,
-                telegram_egress: None,
-            },
-        )
-        .expect_err("non-advancing result sequence must fail");
-
-        assert!(matches!(error, WorkerPublishFlowError::Publish { .. }));
-        assert!(session.sent_messages.is_empty());
-        assert!(
-            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
-                .expect("pending record read must succeed")
-                .is_none()
-        );
-
-        cleanup_temp_dir(daemon_dir);
-    }
-
-    #[test]
     fn reports_send_failure_after_persisting_accepted_outbox_record() {
         let daemon_dir = unique_temp_daemon_dir();
         let fixture = signed_event_fixture();

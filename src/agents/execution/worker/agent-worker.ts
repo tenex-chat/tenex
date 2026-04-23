@@ -8,6 +8,7 @@ import {
 } from "@/events/runtime/AgentWorkerProtocol";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
+import { initializeTelemetry, shutdownTelemetry } from "@/telemetry/setup";
 import { logger } from "@/utils/logger";
 import {
     decodeAgentWorkerProtocolChunks,
@@ -477,14 +478,28 @@ function mockDelta(message: ExecuteMessage): string {
     return `Accepted ${message.triggeringEnvelope.transport} execution for ${message.conversationId}`;
 }
 
+initializeTelemetry(true, "tenex-agent-worker");
+
+async function exitWithTelemetryFlush(code: number): Promise<never> {
+    try {
+        await shutdownTelemetry();
+    } catch {
+        // Swallow shutdown errors so the worker always exits with the intended code.
+    }
+    process.exit(code);
+}
+
 new AgentWorkerSession()
     .run()
     .then(() => {
         process.exitCode = 0;
-        setImmediate(() => process.exit(process.exitCode ?? 0));
+        setImmediate(() => {
+            const code = typeof process.exitCode === "number" ? process.exitCode : 0;
+            void exitWithTelemetryFlush(code);
+        });
     })
     .catch((error: unknown) => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         process.stderr.write(`${message}\n`);
-        process.exit(1);
+        void exitWithTelemetryFlush(1);
     });

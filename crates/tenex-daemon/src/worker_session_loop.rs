@@ -48,6 +48,8 @@ pub enum WorkerSessionLoopFinalReason {
 pub struct WorkerSessionLoopOutcome {
     pub frame_count: u64,
     pub final_reason: WorkerSessionLoopFinalReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_publish_result_sequence: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -162,16 +164,21 @@ where
                 return Ok(WorkerSessionLoopOutcome {
                     frame_count,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                    next_publish_result_sequence: input.publish.map(|p| p.result_sequence),
                 });
             }
             WorkerMessageFlowOutcome::BootFailureCandidate { .. } => {
                 return Ok(WorkerSessionLoopOutcome {
                     frame_count,
                     final_reason: WorkerSessionLoopFinalReason::BootFailureCandidate,
+                    next_publish_result_sequence: input.publish.map(|p| p.result_sequence),
                 });
             }
             WorkerMessageFlowOutcome::PublishRequestHandled { outcome } => {
                 run_live_publish_maintenance(&mut input)?;
+                if let Some(publish) = input.publish.as_mut() {
+                    publish.result_sequence = publish.result_sequence.saturating_add(1);
+                }
                 if let WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error } =
                     &outcome.result_delivery
                 {
@@ -268,6 +275,7 @@ where
         WorkerMessageFlowOutcome::TerminalResultHandled { .. } => Ok(WorkerSessionLoopOutcome {
             frame_count,
             final_reason: WorkerSessionLoopFinalReason::PublishAcceptedWorkerPipeClosed,
+            next_publish_result_sequence: input.publish.as_ref().map(|p| p.result_sequence),
         }),
         other => Err(WorkerSessionLoopError::MessageFlow {
             source: WorkerMessageFlowError::MissingTerminalContext {
@@ -338,6 +346,10 @@ where
                 worker_id = %record.worker_id,
                 injection_id = %record.injection_id,
                 "skipping worker injection with stale lease token"
+            );
+            crate::stdout_status::print_stale_injection_skipped(
+                &record.worker_id,
+                &record.injection_id,
             );
             continue;
         }

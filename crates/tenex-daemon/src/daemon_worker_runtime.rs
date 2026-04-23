@@ -756,8 +756,9 @@ where
         worker_id = %worker_id,
     )
     .entered();
+    let tenex_base_dir = operations_status.as_ref().map(|o| o.tenex_base_dir);
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
-    crate::stdout_status::print_agent_started(&project_id, &agent_pubkey, &worker_id);
+    crate::stdout_status::print_agent_started(&project_id, &agent_pubkey, &worker_id, tenex_base_dir);
 
     let active_pubkeys = runtime_state.agent_pubkeys_for_conversation(
         &started.runtime_started.identity.project_id,
@@ -858,7 +859,7 @@ where
         .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
 
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session completed");
-    crate::stdout_status::print_agent_stopped(&project_id, &agent_pubkey, &worker_id);
+    crate::stdout_status::print_agent_stopped(&project_id, &agent_pubkey, &worker_id, tenex_base_dir);
     Ok(DaemonWorkerRuntimeOutcome::SessionCompleted {
         dispatch_id,
         worker_id,
@@ -980,8 +981,6 @@ mod tests {
         AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
         AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolConfig, encode_agent_worker_protocol_frame,
     };
-    use crate::worker_publish::WorkerPublishError;
-    use crate::worker_publish_flow::WorkerPublishFlowError;
     use crate::worker_result::WorkerResultError;
     use crate::worker_session_loop::WorkerSessionLoopError;
     use crate::worker_session_loop::WorkerSessionLoopFinalReason;
@@ -1149,6 +1148,7 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                    next_publish_result_sequence: None,
                 },
             }
         );
@@ -1267,74 +1267,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_publish_acceptance_failure_after_dispatch_start() {
-        let daemon_dir = unique_temp_daemon_dir();
-        seed_claimed_ral(&daemon_dir);
-        seed_queued_dispatch(&daemon_dir);
-        let fixture = signed_event_fixture();
-        let sent_messages = Arc::new(Mutex::new(Vec::new()));
-        let mut spawner = RecordingSpawner {
-            incoming_frames: VecDeque::from([frame_for(&publish_request_message(&fixture))]),
-            sent_messages: Arc::clone(&sent_messages),
-        };
-        let mut runtime_state = WorkerRuntimeState::default();
-        let worker_config = worker_config();
-
-        let error = run_daemon_worker_runtime_once(
-            &mut spawner,
-            runtime_input(
-                &daemon_dir,
-                &mut runtime_state,
-                &worker_config,
-                Some(WorkerMessagePublishContext {
-                    accepted_at: 1_710_000_800_100,
-                    result_sequence: 20,
-                    result_timestamp: 1_710_000_800_200,
-                    telegram_egress: None,
-                }),
-                4,
-            ),
-        )
-        .expect_err("publish acceptance failure must fail");
-
-        match error {
-            DaemonWorkerRuntimeError::SessionLoop { source } => match *source {
-                WorkerSessionLoopError::MessageFlow { source } => match source {
-                    WorkerMessageFlowError::Publish { source } => match *source {
-                        WorkerPublishFlowError::Publish { source } => {
-                            assert!(matches!(
-                                *source,
-                                WorkerPublishError::PublishResultSequenceNotAfterRequest { .. }
-                            ));
-                        }
-                        other => panic!("expected publish acceptance failure, got {other:?}"),
-                    },
-                    other => panic!("expected publish message flow failure, got {other:?}"),
-                },
-                other => panic!("expected message flow failure, got {other:?}"),
-            },
-            other => panic!("expected session loop error, got {other:?}"),
-        }
-        let messages = sent_messages
-            .lock()
-            .expect("sent message lock must not be poisoned");
-        assert!(messages.iter().any(|message| message["type"] == "execute"));
-        assert!(
-            !messages
-                .iter()
-                .any(|message| message["type"] == "publish_result")
-        );
-        assert!(
-            read_pending_publish_outbox_record(&daemon_dir, &fixture.signed.id)
-                .expect("pending outbox must read")
-                .is_none()
-        );
-        assert!(runtime_state.get_worker("worker-alpha").is_none());
-
-        cleanup_temp_dir(daemon_dir);
-    }
-
-    #[test]
     fn returns_locks_from_terminal_planning_failure() {
         let daemon_dir = unique_temp_daemon_dir();
         seed_claimed_ral(&daemon_dir);
@@ -1433,6 +1365,7 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                    next_publish_result_sequence: None,
                 },
             }
         );
@@ -1578,6 +1511,7 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                    next_publish_result_sequence: None,
                 },
             }
         );

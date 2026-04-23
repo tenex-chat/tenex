@@ -1026,6 +1026,7 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                    next_publish_result_sequence: Some(901),
                 },
             }
         );

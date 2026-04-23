@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
-use std::fs;
-use std::io;
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::os::fd::AsRawFd;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -12,6 +14,10 @@ use crate::project_status_agent_sources::AGENT_INDEX_FILE_NAME;
 use crate::project_status_descriptors::{
     PROJECT_DESCRIPTOR_FILE_NAME, PROJECTS_DIR_NAME, project_descriptor_path,
 };
+
+const AGENT_INDEX_LOCK_FILE_NAME: &str = "index.lock";
+
+static AGENT_INDEX_WRITE_MUTEX: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectNostrIngressOutcome {
@@ -37,6 +43,8 @@ pub enum ProjectNostrIngressError {
     ParseAgentIndex(serde_json::Error),
     #[error("failed to write agent index: {0}")]
     WriteAgentIndex(io::Error),
+    #[error("failed to acquire agent index lock at {path}: {source}")]
+    AcquireAgentIndexLock { path: PathBuf, source: io::Error },
 }
 
 #[derive(Deserialize, Default)]
@@ -107,24 +115,7 @@ pub fn handle_project_nostr_event(
     let agents_dir = tenex_base_dir.join("agents");
     fs::create_dir_all(&agents_dir).map_err(ProjectNostrIngressError::CreateDir)?;
 
-    let index_path = agents_dir.join(AGENT_INDEX_FILE_NAME);
-    let mut index: RawAgentIndex = if index_path.exists() {
-        let content =
-            fs::read_to_string(&index_path).map_err(ProjectNostrIngressError::ReadAgentIndex)?;
-        serde_json::from_str(&content).map_err(ProjectNostrIngressError::ParseAgentIndex)?
-    } else {
-        RawAgentIndex::default()
-    };
-
-    index
-        .by_project
-        .insert(d_tag.to_string(), agent_pubkeys.clone());
-
-    fs::write(
-        &index_path,
-        serde_json::to_string_pretty(&index).expect("agent index serializes"),
-    )
-    .map_err(ProjectNostrIngressError::WriteAgentIndex)?;
+    write_agent_index_project_entry(&agents_dir, d_tag, &agent_pubkeys)?;
 
     Ok(ProjectNostrIngressOutcome {
         project_d_tag: d_tag.to_string(),
@@ -132,6 +123,110 @@ pub fn handle_project_nostr_event(
         is_new_project,
         agent_pubkeys,
         repo_url,
+    })
+}
+
+/// Replaces `byProject[<project_d_tag>]` in `agents/index.json` with the
+/// supplied agent pubkey list. Holds an in-process mutex and an `flock`-based
+/// cross-process lock for the duration of the read-modify-write so concurrent
+/// 31933 ingress paths cannot clobber each other's entries. Writes are atomic
+/// (temp-file in the same directory plus rename) so readers never observe a
+/// torn JSON document.
+fn write_agent_index_project_entry(
+    agents_dir: &Path,
+    project_d_tag: &str,
+    agent_pubkeys: &[String],
+) -> Result<(), ProjectNostrIngressError> {
+    let _lock = acquire_agent_index_write_lock(agents_dir)?;
+
+    let index_path = agents_dir.join(AGENT_INDEX_FILE_NAME);
+    let mut index: RawAgentIndex = match fs::read_to_string(&index_path) {
+        Ok(content) => serde_json::from_str(&content)
+            .map_err(ProjectNostrIngressError::ParseAgentIndex)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => RawAgentIndex::default(),
+        Err(source) => return Err(ProjectNostrIngressError::ReadAgentIndex(source)),
+    };
+
+    index
+        .by_project
+        .insert(project_d_tag.to_string(), agent_pubkeys.to_vec());
+
+    let serialized =
+        serde_json::to_vec_pretty(&index).expect("agent index serializes to JSON bytes");
+    atomic_write(&index_path, &serialized).map_err(ProjectNostrIngressError::WriteAgentIndex)?;
+
+    Ok(())
+}
+
+/// Atomically replaces `path` with `contents` by writing to a sibling temp
+/// file, fsyncing it, renaming over the destination, and fsyncing the parent
+/// directory. Readers see either the previous file or the new one, never a
+/// truncated or partially-written intermediate state.
+fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .expect("agent index path must have a parent directory");
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("agent index path must have a UTF-8 file name");
+    let temp_path = parent.join(format!(
+        "{file_name}.tmp.{}",
+        std::process::id()
+    ));
+
+    {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&temp_path)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+    }
+
+    fs::rename(&temp_path, path)?;
+    File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+struct AgentIndexWriteLock {
+    _process_guard: MutexGuard<'static, ()>,
+    _lock_file: File,
+}
+
+fn acquire_agent_index_write_lock(
+    agents_dir: &Path,
+) -> Result<AgentIndexWriteLock, ProjectNostrIngressError> {
+    let process_guard = AGENT_INDEX_WRITE_MUTEX
+        .lock()
+        .map_err(|_| ProjectNostrIngressError::AcquireAgentIndexLock {
+            path: agents_dir.join(AGENT_INDEX_LOCK_FILE_NAME),
+            source: io::Error::other("agent index write mutex poisoned"),
+        })?;
+
+    let lock_path = agents_dir.join(AGENT_INDEX_LOCK_FILE_NAME);
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|source| ProjectNostrIngressError::AcquireAgentIndexLock {
+            path: lock_path.clone(),
+            source,
+        })?;
+    let ret = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+    if ret != 0 {
+        return Err(ProjectNostrIngressError::AcquireAgentIndexLock {
+            path: lock_path,
+            source: io::Error::last_os_error(),
+        });
+    }
+
+    Ok(AgentIndexWriteLock {
+        _process_guard: process_guard,
+        _lock_file: lock_file,
     })
 }
 
@@ -325,5 +420,143 @@ mod tests {
         let err = handle_project_nostr_event(tmp.path(), &event, "/workspace")
             .expect_err("must fail without d tag");
         assert!(matches!(err, ProjectNostrIngressError::MissingDTag));
+    }
+
+    #[test]
+    fn ingesting_same_project_event_twice_is_idempotent() {
+        let tmp = tempdir().expect("temp dir");
+        let base = tmp.path();
+        let owner = "a".repeat(64);
+        let agent1 = "c".repeat(64);
+        let agent2 = "d".repeat(64);
+        let event = project_event(&owner, "idempotent-project", &[&agent1, &agent2]);
+
+        handle_project_nostr_event(base, &event, "/workspace/projects").expect("first ingest");
+        let index_after_first =
+            fs::read_to_string(base.join("agents").join("index.json")).expect("first read");
+
+        handle_project_nostr_event(base, &event, "/workspace/projects").expect("second ingest");
+        let index_after_second =
+            fs::read_to_string(base.join("agents").join("index.json")).expect("second read");
+
+        assert_eq!(
+            index_after_first, index_after_second,
+            "ingesting the same kind:31933 twice must produce identical agents/index.json bytes"
+        );
+
+        let parsed: Value = serde_json::from_str(&index_after_second).expect("index parses");
+        let by_project = parsed["byProject"]["idempotent-project"]
+            .as_array()
+            .expect("byProject entry must be an array");
+        assert_eq!(
+            by_project.len(),
+            2,
+            "agent list must not duplicate on repeat ingest"
+        );
+        assert_eq!(by_project[0], agent1.as_str());
+        assert_eq!(by_project[1], agent2.as_str());
+    }
+
+    #[test]
+    fn newer_project_event_replaces_byproject_entry_including_removals() {
+        let tmp = tempdir().expect("temp dir");
+        let base = tmp.path();
+        let owner = "a".repeat(64);
+        let agent1 = "c".repeat(64);
+        let agent2 = "d".repeat(64);
+        let agent3 = "e".repeat(64);
+
+        handle_project_nostr_event(
+            base,
+            &project_event(&owner, "replaceable", &[&agent1, &agent2]),
+            "/workspace/projects",
+        )
+        .expect("first ingest");
+
+        // A newer 31933 from the same (owner, d_tag) drops agent2 and adds
+        // agent3. The stored byProject[<d_tag>] must reflect the new event
+        // exactly, including REMOVING agent2.
+        handle_project_nostr_event(
+            base,
+            &project_event(&owner, "replaceable", &[&agent1, &agent3]),
+            "/workspace/projects",
+        )
+        .expect("replacement ingest");
+
+        let index: Value = serde_json::from_str(
+            &fs::read_to_string(base.join("agents").join("index.json")).expect("read index"),
+        )
+        .expect("index parses");
+        let by_project = index["byProject"]["replaceable"]
+            .as_array()
+            .expect("byProject entry must be an array");
+
+        let pubkeys: Vec<&str> = by_project.iter().map(|value| value.as_str().unwrap()).collect();
+        assert_eq!(
+            pubkeys,
+            vec![agent1.as_str(), agent3.as_str()],
+            "newer project event must replace the agent list verbatim"
+        );
+        assert!(
+            !pubkeys.contains(&agent2.as_str()),
+            "agents removed from the newer project event must not survive"
+        );
+    }
+
+    #[test]
+    fn concurrent_ingress_for_different_projects_does_not_clobber_each_other() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let tmp = tempdir().expect("temp dir");
+        let base: Arc<PathBuf> = Arc::new(tmp.path().to_path_buf());
+        let owner = "a".repeat(64);
+
+        let project_count = 8usize;
+        let mut handles = Vec::with_capacity(project_count);
+        for project_index in 0..project_count {
+            let base = Arc::clone(&base);
+            let owner = owner.clone();
+            handles.push(thread::spawn(move || {
+                let d_tag = format!("project-{project_index:02}");
+                let agent_pubkey = make_pubkey_hex(project_index);
+                let event = project_event(&owner, &d_tag, &[&agent_pubkey]);
+                handle_project_nostr_event(base.as_path(), &event, "/workspace/projects")
+                    .expect("concurrent ingest");
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("thread join");
+        }
+
+        let index: Value = serde_json::from_str(
+            &fs::read_to_string(base.as_path().join("agents").join("index.json"))
+                .expect("read index"),
+        )
+        .expect("index parses");
+
+        for project_index in 0..project_count {
+            let d_tag = format!("project-{project_index:02}");
+            let expected = make_pubkey_hex(project_index);
+            let entry = index["byProject"][&d_tag]
+                .as_array()
+                .unwrap_or_else(|| panic!("byProject must contain {d_tag}"));
+            assert_eq!(
+                entry.len(),
+                1,
+                "project {d_tag} must have exactly one agent after concurrent ingest"
+            );
+            assert_eq!(
+                entry[0].as_str().unwrap(),
+                expected,
+                "project {d_tag} must point to its own agent pubkey"
+            );
+        }
+    }
+
+    fn make_pubkey_hex(seed: usize) -> String {
+        // 64-char hex strings are sufficient as opaque identifiers in these
+        // tests; index.json stores them verbatim without secp256k1 validation.
+        format!("{seed:064x}")
     }
 }
