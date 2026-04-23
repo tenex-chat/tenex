@@ -34,7 +34,7 @@ use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpaw
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_message_flow::WorkerMessagePublishContext;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
-use crate::worker_runtime_state::WorkerRuntimeState;
+use crate::worker_runtime_state::SharedWorkerRuntimeState;
 
 pub trait DaemonMaintenanceLoopClock {
     fn now_ms(&mut self) -> u64;
@@ -96,7 +96,7 @@ pub struct DaemonTickOutcome {
 
 #[derive(Debug)]
 pub struct DaemonWorkerTickInput<'a> {
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: SharedWorkerRuntimeState,
     pub limits: WorkerConcurrencyLimits,
     pub correlation_id: String,
     pub lock_owner: RalLockInfo,
@@ -110,7 +110,7 @@ pub struct DaemonWorkerTickInput<'a> {
 
 #[derive(Debug)]
 pub struct DaemonWorkerLoopInput<'a> {
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: SharedWorkerRuntimeState,
     pub limits: WorkerConcurrencyLimits,
     pub correlation_id_prefix: String,
     pub lock_owner: RalLockInfo,
@@ -402,11 +402,14 @@ where
             .map(|_| ())
             .map_err(|source| source.to_string())
         };
+        let mut runtime_state_guard = worker.runtime_state.lock().expect(
+            "WorkerRuntimeState mutex poisoned; another thread panicked while holding the lock",
+        );
         run_daemon_worker_runtime_once_from_filesystem(
             spawner,
             DaemonWorkerRuntimeFilesystemInput {
                 daemon_dir,
-                runtime_state: worker.runtime_state,
+                runtime_state: &mut runtime_state_guard,
                 limits: worker.limits,
                 now_ms,
                 correlation_id: worker.correlation_id,
@@ -774,7 +777,7 @@ where
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     DaemonWorkerTickInput {
-                        runtime_state: &mut *runtime_state,
+                        runtime_state: runtime_state.clone(),
                         limits,
                         correlation_id: format!("{correlation_id_prefix}:{now_ms}"),
                         lock_owner: lock_owner.clone(),
@@ -825,7 +828,7 @@ where
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     DaemonWorkerTickInput {
-                        runtime_state: &mut *runtime_state,
+                        runtime_state: runtime_state.clone(),
                         limits,
                         correlation_id: format!("{correlation_id_prefix}:{now_ms}"),
                         lock_owner: lock_owner.clone(),
@@ -887,6 +890,7 @@ fn project_boot_state_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worker_runtime_state::new_shared_worker_runtime_state;
     use crate::backend_config::backend_config_path;
     use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::dispatch_queue::{
@@ -1307,7 +1311,7 @@ mod tests {
         let mut publisher = RecordingPublisher::default();
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = new_shared_worker_runtime_state();
         let worker_config = AgentWorkerProcessConfig::default();
 
         let outcome = run_daemon_tick_once_from_filesystem_with_worker(
@@ -1319,7 +1323,7 @@ mod tests {
                 heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: runtime_state.clone(),
                 limits: WorkerConcurrencyLimits::default(),
                 correlation_id: "daemon-loop-worker-empty-queue".to_string(),
                 lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
@@ -1366,7 +1370,7 @@ mod tests {
         let mut publisher = RecordingPublisher::default();
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = ProtocolErrorSpawner::default();
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = new_shared_worker_runtime_state();
         let worker_config = AgentWorkerProcessConfig::default();
 
         let error = run_daemon_tick_once_from_filesystem_with_worker(
@@ -1378,7 +1382,7 @@ mod tests {
                 heartbeat_latch: None,
             },
             DaemonWorkerTickInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: runtime_state.clone(),
                 limits: WorkerConcurrencyLimits::default(),
                 correlation_id: "daemon-loop-worker-error-drain".to_string(),
                 lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),

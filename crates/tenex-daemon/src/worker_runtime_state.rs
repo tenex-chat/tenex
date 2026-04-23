@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
@@ -54,6 +55,12 @@ pub struct WorkerRuntimeAbortDecisionContext {
 pub struct WorkerRuntimeState {
     workers: BTreeMap<String, ActiveWorkerRuntimeSnapshot>,
     dispatch_to_worker: BTreeMap<String, String>,
+}
+
+pub type SharedWorkerRuntimeState = Arc<Mutex<WorkerRuntimeState>>;
+
+pub fn new_shared_worker_runtime_state() -> SharedWorkerRuntimeState {
+    Arc::new(Mutex::new(WorkerRuntimeState::default()))
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

@@ -23,7 +23,7 @@ use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
-use crate::worker_runtime_state::WorkerRuntimeState;
+use crate::worker_runtime_state::SharedWorkerRuntimeState;
 
 #[derive(Debug, Clone)]
 pub struct DaemonForegroundInput<'a> {
@@ -50,7 +50,7 @@ pub struct DaemonForegroundStoppableInput<'a> {
 
 #[derive(Debug)]
 pub struct DaemonForegroundWorkerInput<'a> {
-    pub runtime_state: &'a mut WorkerRuntimeState,
+    pub runtime_state: SharedWorkerRuntimeState,
     pub limits: WorkerConcurrencyLimits,
     pub correlation_id_prefix: String,
     pub command: AgentWorkerCommand,
@@ -350,6 +350,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worker_runtime_state::new_shared_worker_runtime_state;
     use crate::backend_config::backend_config_path;
     use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
@@ -715,7 +716,7 @@ mod tests {
         let mut publisher = RecordingPublisher::default();
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = new_shared_worker_runtime_state();
         let worker_config = AgentWorkerProcessConfig::default();
 
         let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
@@ -729,7 +730,7 @@ mod tests {
                 heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: runtime_state.clone(),
                 limits: WorkerConcurrencyLimits::default(),
                 correlation_id_prefix: "foreground-worker-test".to_string(),
                 command: AgentWorkerCommand::new("bun"),
@@ -797,7 +798,7 @@ mod tests {
         };
         let mut publisher = RecordingPublisher::default();
         let mut telegram_publisher = NoTelegramPublisher;
-        let mut runtime_state = WorkerRuntimeState::default();
+        let runtime_state = new_shared_worker_runtime_state();
         let worker_config = AgentWorkerProcessConfig::default();
 
         let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
@@ -811,7 +812,7 @@ mod tests {
                 heartbeat_latch: None,
             },
             DaemonForegroundWorkerInput {
-                runtime_state: &mut runtime_state,
+                runtime_state: runtime_state.clone(),
                 limits: WorkerConcurrencyLimits::default(),
                 correlation_id_prefix: "foreground-worker-dispatch-test".to_string(),
                 command: AgentWorkerCommand::new("bun"),
@@ -853,7 +854,7 @@ mod tests {
             .expect("execute message must be sent");
         assert_eq!(execute["projectBasePath"], "/sidecar/repo");
         assert_eq!(execute["triggeringEnvelope"]["content"], "from sidecar");
-        assert!(runtime_state.is_empty());
+        assert!(runtime_state.lock().expect("runtime state lock").is_empty());
 
         let queue = replay_dispatch_queue(&fixture.daemon_dir).expect("dispatch queue must replay");
         assert!(queue.queued.is_empty());

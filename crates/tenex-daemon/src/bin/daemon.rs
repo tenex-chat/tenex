@@ -60,7 +60,7 @@ use tenex_daemon::worker_dispatch_execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{
     AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
 };
-use tenex_daemon::worker_runtime_state::WorkerRuntimeState;
+use tenex_daemon::worker_runtime_state::new_shared_worker_runtime_state;
 
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
@@ -745,7 +745,7 @@ where
     let shell = DaemonShell::new(&daemon_dir);
     let worker_command = build_agent_worker_command()?;
     let worker_config = AgentWorkerProcessConfig::default();
-    let mut worker_runtime_state = WorkerRuntimeState::default();
+    let worker_runtime_state = new_shared_worker_runtime_state();
     let mut worker_spawner = AgentWorkerProcessDispatchSpawner;
     let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
         &shell,
@@ -758,7 +758,7 @@ where
             heartbeat_latch,
         },
         DaemonForegroundWorkerInput {
-            runtime_state: &mut worker_runtime_state,
+            runtime_state: worker_runtime_state,
             limits: WorkerConcurrencyLimits::default(),
             correlation_id_prefix: "daemon-foreground-worker".to_string(),
             command: worker_command,
