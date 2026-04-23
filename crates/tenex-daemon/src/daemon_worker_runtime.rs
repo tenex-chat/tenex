@@ -212,6 +212,125 @@ where
     LivePublishMaintenance { message: String },
 }
 
+/// Returned by [`admit_one_worker_dispatch_from_filesystem`]: either an
+/// admitted + launched dispatch ready to run its session, or a reason the
+/// caller cannot admit right now.
+pub enum AdmitWorkerDispatchOutcome<S> {
+    Admitted(StartedWorkerDispatchAdmission<S>),
+    NotAdmitted {
+        reason: WorkerDispatchAdmissionBlockedReason,
+        blocked_candidates: Vec<WorkerDispatchAdmissionBlockedCandidate>,
+    },
+}
+
+/// Admits one queued dispatch and spawns its worker subprocess, returning a
+/// ready-to-run [`StartedWorkerDispatchAdmission`]. Holds the dispatch-queue
+/// lock across the read/plan/lease-write cycle; the lock is released before
+/// this function returns, so running the session happens without holding it.
+pub fn admit_one_worker_dispatch_from_filesystem<S>(
+    spawner: &mut S,
+    daemon_dir: &Path,
+    runtime_state: &mut WorkerRuntimeState,
+    limits: WorkerConcurrencyLimits,
+    now_ms: u64,
+    correlation_id: &str,
+    lock_owner: RalLockInfo,
+    command: AgentWorkerCommand,
+    worker_config: &AgentWorkerProcessConfig,
+) -> Result<
+    AdmitWorkerDispatchOutcome<S::Session>,
+    DaemonWorkerRuntimeError<S::Session, <S::Session as WorkerFrameReceiver>::Error>,
+>
+where
+    S: WorkerDispatchSpawner,
+    S::Session: WorkerFrameReceiver
+        + WorkerDispatchSession<Error = <S::Session as WorkerFrameReceiver>::Error>
+        + 'static,
+{
+    // Hold the dispatch queue lock for the entire read-compute-write-lease cycle so the
+    // background subscription thread cannot write a QUEUED record between the read and the
+    // lease write, which would produce duplicate sequence numbers in the JSONL file.
+    let _dispatch_lock = acquire_dispatch_queue_lock(daemon_dir).map_err(|source| {
+        DaemonWorkerRuntimeError::DispatchReplay {
+            source: Box::new(source),
+        }
+    })?;
+
+    let dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
+        DaemonWorkerRuntimeError::DispatchReplay {
+            source: Box::new(source),
+        }
+    })?;
+
+    if dispatch_state.queued.is_empty() {
+        tracing::debug!("worker runtime: no queued dispatches");
+        return Ok(AdmitWorkerDispatchOutcome::NotAdmitted {
+            reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
+            blocked_candidates: Vec::new(),
+        });
+    }
+
+    let lease_sequence = next_sequence(dispatch_state.last_sequence, "dispatch queue")?;
+    let active_workers = runtime_state.to_active_worker_concurrency_snapshots();
+    let active_dispatches = runtime_state.to_active_dispatch_concurrency_snapshots();
+    let admission = plan_worker_dispatch_admission(WorkerDispatchAdmissionInput {
+        dispatch_state: &dispatch_state,
+        active_workers: &active_workers,
+        active_dispatches: &active_dispatches,
+        limits,
+        sequence: lease_sequence,
+        timestamp: now_ms,
+        correlation_id: format!("{correlation_id}:lease"),
+    })
+    .map_err(|source| DaemonWorkerRuntimeError::DispatchAdmission {
+        source: Box::new(source),
+    })?;
+
+    let admitted = match admission {
+        WorkerDispatchAdmissionPlan::Admitted(admitted) => *admitted,
+        WorkerDispatchAdmissionPlan::NotAdmitted {
+            reason,
+            blocked_candidates,
+        } => {
+            tracing::debug!(reason = ?reason, "worker dispatch not admitted");
+            return Ok(AdmitWorkerDispatchOutcome::NotAdmitted {
+                reason,
+                blocked_candidates,
+            });
+        }
+    };
+    tracing::info!(
+        dispatch_id = %admitted.selected_dispatch.dispatch_id,
+        agent_pubkey = %admitted.selected_dispatch.ral.agent_pubkey,
+        "worker dispatch admitted, spawning"
+    );
+    let launch_input = read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
+
+    let started = start_admitted_worker_dispatch(
+        spawner,
+        StartAdmittedWorkerDispatchInput {
+            daemon_dir,
+            runtime_state,
+            admitted,
+            execute_sequence: 1,
+            execute_timestamp: now_ms,
+            launch_input,
+            lock_owner,
+            command,
+            worker_config,
+            started_at: now_ms,
+        },
+    )
+    .map_err(|source| DaemonWorkerRuntimeError::DispatchTick {
+        source: Box::new(WorkerDispatchTickError::AdmissionStart {
+            source: Box::new(source),
+        }),
+    })?;
+
+    Ok(AdmitWorkerDispatchOutcome::Admitted(started))
+    // _dispatch_lock released here; the session runs without holding the lock
+}
+
 pub fn run_daemon_worker_runtime_once_from_filesystem<S>(
     spawner: &mut S,
     input: DaemonWorkerRuntimeFilesystemInput<'_>,
@@ -243,88 +362,27 @@ where
         max_frames,
     } = input;
 
-    // Hold the dispatch queue lock for the entire read-compute-write-lease cycle so the
-    // background subscription thread cannot write a QUEUED record between the read and the
-    // lease write, which would produce duplicate sequence numbers in the JSONL file.
-    let started = {
-        let _dispatch_lock = acquire_dispatch_queue_lock(daemon_dir).map_err(|source| {
-            DaemonWorkerRuntimeError::DispatchReplay {
-                source: Box::new(source),
-            }
-        })?;
-
-        let dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
-            DaemonWorkerRuntimeError::DispatchReplay {
-                source: Box::new(source),
-            }
-        })?;
-
-        if dispatch_state.queued.is_empty() {
-            tracing::debug!("worker runtime: no queued dispatches");
+    let started = match admit_one_worker_dispatch_from_filesystem(
+        spawner,
+        daemon_dir,
+        runtime_state,
+        limits,
+        now_ms,
+        &correlation_id,
+        lock_owner,
+        command,
+        worker_config,
+    )? {
+        AdmitWorkerDispatchOutcome::Admitted(started) => started,
+        AdmitWorkerDispatchOutcome::NotAdmitted {
+            reason,
+            blocked_candidates,
+        } => {
             return Ok(DaemonWorkerRuntimeOutcome::NotAdmitted {
-                reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
-                blocked_candidates: Vec::new(),
-            });
-        }
-
-        let lease_sequence = next_sequence(dispatch_state.last_sequence, "dispatch queue")?;
-        let active_workers = runtime_state.to_active_worker_concurrency_snapshots();
-        let active_dispatches = runtime_state.to_active_dispatch_concurrency_snapshots();
-        let admission = plan_worker_dispatch_admission(WorkerDispatchAdmissionInput {
-            dispatch_state: &dispatch_state,
-            active_workers: &active_workers,
-            active_dispatches: &active_dispatches,
-            limits,
-            sequence: lease_sequence,
-            timestamp: now_ms,
-            correlation_id: format!("{correlation_id}:lease"),
-        })
-        .map_err(|source| DaemonWorkerRuntimeError::DispatchAdmission {
-            source: Box::new(source),
-        })?;
-
-        let admitted = match admission {
-            WorkerDispatchAdmissionPlan::Admitted(admitted) => *admitted,
-            WorkerDispatchAdmissionPlan::NotAdmitted {
                 reason,
                 blocked_candidates,
-            } => {
-                tracing::debug!(reason = ?reason, "worker dispatch not admitted");
-                return Ok(DaemonWorkerRuntimeOutcome::NotAdmitted {
-                    reason,
-                    blocked_candidates,
-                });
-            }
-        };
-        tracing::info!(
-            dispatch_id = %admitted.selected_dispatch.dispatch_id,
-            agent_pubkey = %admitted.selected_dispatch.ral.agent_pubkey,
-            "worker dispatch admitted, spawning"
-        );
-        let launch_input =
-            read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
-
-        start_admitted_worker_dispatch(
-            spawner,
-            StartAdmittedWorkerDispatchInput {
-                daemon_dir,
-                runtime_state,
-                admitted,
-                execute_sequence: 1,
-                execute_timestamp: now_ms,
-                launch_input,
-                lock_owner,
-                command,
-                worker_config,
-                started_at: now_ms,
-            },
-        )
-        .map_err(|source| DaemonWorkerRuntimeError::DispatchTick {
-            source: Box::new(WorkerDispatchTickError::AdmissionStart {
-                source: Box::new(source),
-            }),
-        })?
-        // _dispatch_lock released here; the session runs without holding the lock
+            });
+        }
     };
 
     run_started_worker_session_from_filesystem(
