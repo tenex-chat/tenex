@@ -239,7 +239,6 @@ mod tests {
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalEvent, RalJournalIdentity,
         RalJournalRecord, RalPendingDelegation, RalTerminalSummary, append_ral_journal_record,
     };
-    use crate::ral_scheduler::RalReplayStatus;
     use crate::worker_dispatch_input::read_optional as read_worker_dispatch_input;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
