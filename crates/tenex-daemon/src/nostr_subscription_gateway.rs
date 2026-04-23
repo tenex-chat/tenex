@@ -347,6 +347,25 @@ pub fn run_nostr_subscription_relay_once(
         &active_filters,
     )?))?;
 
+    // NIP-42 AUTH state machine. Khatru-based relays handle each incoming
+    // websocket message in a separate goroutine, so the post-AUTH REQ races
+    // the AUTH event commit. If the REQ is processed before the AUTH commit,
+    // the relay's `GetAuthed(ctx)` returns "" and the historical-query replay
+    // guard records the same key as the pre-AUTH (rejected) REQ; the next
+    // identical REQ — including the authenticated one — is then treated as a
+    // duplicate and served zero stored events for restricted kinds (e.g.
+    // kind:31933). To avoid that race, we send the AUTH event on the first
+    // challenge, wait for the relay's OK acknowledgement (which is emitted
+    // synchronously from the AUTH-handling goroutine after `AuthedPublicKey`
+    // is set), and only then re-send the REQ. Subsequent AUTH challenges on
+    // the same connection are ignored — one AUTH suffices for all filters.
+    enum AuthState {
+        NotChallenged,
+        AwaitingOk { auth_event_id: String },
+        Authenticated,
+    }
+    let mut auth_state = AuthState::NotChallenged;
+
     let mut diagnostics = empty_diagnostics(input.subscription_id, input.relay_url);
 
     while !input.stop_flag.load(Ordering::SeqCst)
@@ -447,21 +466,38 @@ pub fn run_nostr_subscription_relay_once(
                     }
                 }
                 if let Some(challenge) = auth_challenge {
-                    tracing::debug!(relay_url = %input.relay_url, "relay sent AUTH challenge, authenticating");
-                    let auth_signer = input
-                        .auth_signer
-                        .ok_or(NostrSubscriptionRelayError::AuthRequiredWithoutSigner)?;
-                    let auth_event = build_relay_auth_event(
-                        input.relay_url,
-                        &challenge,
-                        auth_signer,
-                        current_unix_time_ms() / 1_000,
-                    )?;
-                    socket.send(Message::text(build_auth_message(&auth_event)?))?;
+                    match &auth_state {
+                        AuthState::NotChallenged => {
+                            tracing::debug!(relay_url = %input.relay_url, "relay sent AUTH challenge, authenticating");
+                            let auth_signer = input
+                                .auth_signer
+                                .ok_or(NostrSubscriptionRelayError::AuthRequiredWithoutSigner)?;
+                            let auth_event = build_relay_auth_event(
+                                input.relay_url,
+                                &challenge,
+                                auth_signer,
+                                current_unix_time_ms() / 1_000,
+                            )?;
+                            let auth_event_id = auth_event.id.clone();
+                            socket.send(Message::text(build_auth_message(&auth_event)?))?;
+                            auth_state = AuthState::AwaitingOk { auth_event_id };
+                        }
+                        AuthState::AwaitingOk { .. } | AuthState::Authenticated => {
+                            tracing::debug!(
+                                relay_url = %input.relay_url,
+                                "ignoring duplicate AUTH challenge"
+                            );
+                        }
+                    }
+                }
+                if let AuthState::AwaitingOk { auth_event_id } = &auth_state
+                    && is_ok_frame_for(text.as_str(), auth_event_id)
+                {
                     socket.send(Message::text(build_req_message(
                         input.subscription_id,
                         &active_filters,
                     )?))?;
+                    auth_state = AuthState::Authenticated;
                     tracing::info!(relay_url = %input.relay_url, "relay authenticated, resubscribed");
                 }
                 if should_refresh_subscription_filters(&tick) {
@@ -546,6 +582,29 @@ fn auth_challenge_from_text_frame(message: &str) -> Option<String> {
         Ok(RelaySubscriptionFrame::Auth { challenge }) => Some(challenge),
         _ => None,
     }
+}
+
+/// Returns true when `message` is a NIP-20 `["OK", <event_id>, true, ...]`
+/// acknowledgement for the given event id. The relay emits this synchronously
+/// from the same goroutine that commits `AuthedPublicKey` for an `AUTH`
+/// envelope, so observing the OK is a sufficient signal that subsequent
+/// queries on the same connection will see the authenticated identity.
+fn is_ok_frame_for(message: &str, expected_event_id: &str) -> bool {
+    let value: serde_json::Value = match serde_json::from_str(message) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let frame = match value.as_array() {
+        Some(frame) => frame,
+        None => return false,
+    };
+    if frame.first().and_then(serde_json::Value::as_str) != Some("OK") {
+        return false;
+    }
+    if frame.get(1).and_then(serde_json::Value::as_str) != Some(expected_event_id) {
+        return false;
+    }
+    frame.get(2).and_then(serde_json::Value::as_bool) == Some(true)
 }
 
 fn empty_diagnostics(subscription_id: &str, relay_url: &str) -> NostrSubscriptionTickDiagnostics {
