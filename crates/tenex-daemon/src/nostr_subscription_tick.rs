@@ -216,6 +216,56 @@ fn dispatch_diagnostic(
                     dispatch_id: Some(dispatch.dispatch_id),
                 }
             }
+            InboundRuntimeOutcome::DelegationCompletion { dispatch, .. } => match dispatch {
+                crate::inbound_dispatch::DelegationCompletionDispatchOutcome::Resumed {
+                    dispatch_id,
+                    project_id,
+                    agent_pubkey,
+                    conversation_id,
+                    queued,
+                    already_existed,
+                    ..
+                } if queued => NostrSubscriptionTickDispatch::Queued {
+                    frame_index,
+                    event_id,
+                    dispatch_id,
+                    project_id,
+                    agent_pubkey,
+                    conversation_id,
+                    queued,
+                    already_existed,
+                },
+                crate::inbound_dispatch::DelegationCompletionDispatchOutcome::Resumed {
+                    dispatch_id,
+                    project_id,
+                    agent_pubkey,
+                    ..
+                } => NostrSubscriptionTickDispatch::Ignored {
+                    frame_index,
+                    event_id,
+                    code: "delegation_resume_not_queued".to_string(),
+                    detail:
+                        "delegation completion resume dispatch already exists in a non-queued state"
+                            .to_string(),
+                    class: Some(class),
+                    project_id: Some(project_id),
+                    pubkeys: vec![agent_pubkey],
+                    dispatch_id: Some(dispatch_id),
+                },
+                crate::inbound_dispatch::DelegationCompletionDispatchOutcome::Recorded {
+                    ..
+                } => NostrSubscriptionTickDispatch::Ignored {
+                    frame_index,
+                    event_id,
+                    code: "delegation_completion_recorded".to_string(),
+                    detail: "delegation completion was recorded without starting a new worker"
+                        .to_string(),
+                    class: Some(class),
+                    project_id: None,
+                    pubkeys: Vec::new(),
+                    dispatch_id: None,
+                },
+            },
             InboundRuntimeOutcome::Ignored { reason } => NostrSubscriptionTickDispatch::Ignored {
                 frame_index,
                 event_id,
@@ -261,6 +311,26 @@ fn dispatch_diagnostic(
                 dispatch_id: None,
             }
         }
+        NostrIngressOutcome::AgentConfigUpdated {
+            class,
+            config_update,
+        } => NostrSubscriptionTickDispatch::Ignored {
+            frame_index,
+            event_id,
+            code: if config_update.file_changed {
+                "agent_config_updated".to_string()
+            } else {
+                "agent_config_update_noop".to_string()
+            },
+            detail: format!(
+                "agent {} config update applied (changed={})",
+                config_update.agent_pubkey, config_update.file_changed
+            ),
+            class: Some(class),
+            project_id: None,
+            pubkeys: vec![config_update.agent_pubkey],
+            dispatch_id: None,
+        },
     }
 }
 
@@ -269,7 +339,8 @@ fn ingress_class(ingress: &NostrIngressOutcome) -> DaemonNostrEventClass {
         NostrIngressOutcome::Routed { class, .. }
         | NostrIngressOutcome::Ignored { class, .. }
         | NostrIngressOutcome::ProjectUpdated { class, .. }
-        | NostrIngressOutcome::ProjectBooted { class, .. } => *class,
+        | NostrIngressOutcome::ProjectBooted { class, .. }
+        | NostrIngressOutcome::AgentConfigUpdated { class, .. } => *class,
     }
 }
 

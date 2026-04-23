@@ -3,6 +3,9 @@ use std::path::Path;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::agent_config_update::{
+    AgentConfigUpdateError, AgentConfigUpdateOutcome, apply_agent_config_update,
+};
 use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
@@ -42,6 +45,10 @@ pub enum NostrIngressOutcome {
         class: DaemonNostrEventClass,
         boot: ProjectBootOutcome,
     },
+    AgentConfigUpdated {
+        class: DaemonNostrEventClass,
+        config_update: AgentConfigUpdateOutcome,
+    },
     Ignored {
         class: DaemonNostrEventClass,
         reason: NostrIngressIgnoredReason,
@@ -65,6 +72,8 @@ pub enum NostrIngressError {
     ProjectIngress(#[from] ProjectNostrIngressError),
     #[error("failed to write project boot state: {0}")]
     ProjectBootState(#[from] ProjectBootStateError),
+    #[error("failed to apply agent config update: {0}")]
+    AgentConfigUpdate(#[from] AgentConfigUpdateError),
 }
 
 pub fn process_verified_nostr_event(
@@ -85,6 +94,15 @@ pub fn process_verified_nostr_event(
     if class == DaemonNostrEventClass::Boot {
         let boot = record_project_boot_event(input.daemon_dir, input.event, input.timestamp)?;
         return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
+    }
+
+    if class == DaemonNostrEventClass::ConfigUpdate {
+        let agents_dir = input.tenex_base_dir.join("agents");
+        let config_update = apply_agent_config_update(&agents_dir, input.event)?;
+        return Ok(NostrIngressOutcome::AgentConfigUpdated {
+            class,
+            config_update,
+        });
     }
 
     if !class.should_normalize_for_worker() {
@@ -116,8 +134,8 @@ fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
         | DaemonNostrEventClass::Lesson
         | DaemonNostrEventClass::LessonComment
         | DaemonNostrEventClass::Boot
-        | DaemonNostrEventClass::AgentCreate
-        | DaemonNostrEventClass::ConfigUpdate => "daemon_control_event",
+        | DaemonNostrEventClass::AgentCreate => "daemon_control_event",
+        DaemonNostrEventClass::ConfigUpdate => "config_update_not_ignored",
         DaemonNostrEventClass::Other => "unsupported_nostr_event_class",
         DaemonNostrEventClass::Conversation => "conversation_not_ignored",
     }
@@ -200,24 +218,54 @@ mod tests {
     }
 
     #[test]
-    fn daemon_control_event_is_reported_without_worker_normalization() {
+    fn config_update_event_applies_agent_config_update() {
         let temp_dir = tempdir().expect("temp dir must create");
-        let event = signed_event(24020, "config-event", vec![vec!["p", "agent"]]);
+        let base_dir = temp_dir.path();
+        let daemon_dir = base_dir.join("daemon");
+        let agent_pubkey = pubkey_hex(0x21);
+        write_agent(base_dir, &agent_pubkey, "alpha-agent");
+
+        let event = signed_event(
+            24020,
+            "config-event",
+            vec![
+                vec!["p", agent_pubkey.as_str()],
+                vec!["model", "anthropic:claude-opus-4-7"],
+                vec!["tool", "web_search"],
+            ],
+        );
 
         let outcome = process_verified_nostr_event(NostrIngressInput {
-            daemon_dir: &temp_dir.path().join("daemon"),
-            tenex_base_dir: temp_dir.path(),
+            daemon_dir: &daemon_dir,
+            tenex_base_dir: base_dir,
             event: &event,
             timestamp: 1_710_000_800_002,
             writer_version: "nostr-ingress-test@0",
         })
         .expect("nostr ingress must process");
 
-        let NostrIngressOutcome::Ignored { class, reason } = outcome else {
-            panic!("expected ignored outcome");
+        let NostrIngressOutcome::AgentConfigUpdated {
+            class,
+            config_update,
+        } = outcome
+        else {
+            panic!("expected agent config updated outcome");
         };
         assert_eq!(class, DaemonNostrEventClass::ConfigUpdate);
-        assert_eq!(reason.code, "daemon_control_event");
+        assert_eq!(config_update.agent_pubkey, agent_pubkey);
+        assert_eq!(config_update.model, "anthropic:claude-opus-4-7");
+        assert!(config_update.file_changed);
+
+        let stored: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(base_dir.join("agents").join(format!("{agent_pubkey}.json")))
+                .expect("agent file must read"),
+        )
+        .expect("agent file must parse");
+        assert_eq!(stored["default"]["model"], "anthropic:claude-opus-4-7");
+        assert_eq!(
+            stored["default"]["tools"],
+            serde_json::json!(["web_search"])
+        );
     }
 
     #[test]
