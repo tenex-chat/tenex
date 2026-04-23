@@ -20,6 +20,7 @@ const DAEMON_TO_WORKER_MESSAGE_TYPES: &[&str] = &[
     "shutdown",
     "ping",
     "publish_result",
+    "nip46_publish_result",
     "ack",
 ];
 
@@ -37,6 +38,7 @@ const WORKER_TO_DAEMON_MESSAGE_TYPES: &[&str] = &[
     "delegation_killed",
     "waiting_for_delegation",
     "publish_request",
+    "nip46_publish_request",
     "published",
     "complete",
     "silent_completion_requested",
@@ -297,6 +299,8 @@ pub fn validate_agent_worker_protocol_message(
         "delegation_killed" => validate_delegation_killed(object)?,
         "waiting_for_delegation" => validate_waiting_for_delegation(object)?,
         "publish_request" => validate_publish_request(object)?,
+        "nip46_publish_request" => validate_nip46_publish_request(object)?,
+        "nip46_publish_result" => validate_nip46_publish_result(object)?,
         "published" => validate_published(object)?,
         "complete" => validate_complete(object)?,
         "silent_completion_requested" => validate_silent_completion_requested(object)?,
@@ -783,6 +787,84 @@ fn validate_runtime_event_class(object: &Map<String, Value>) -> WorkerProtocolRe
         }
     }
 
+    Ok(())
+}
+
+fn validate_nip46_publish_request(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    validate_execution_identity(object)?;
+    require_string(object, "requestId")?;
+    require_hex_pubkey(object, "ownerPubkey")?;
+    require_bool(object, "waitForRelayOk")?;
+    require_positive_u64(object, "timeoutMs")?;
+
+    let unsigned = require_object(object, "unsignedEvent")?;
+    require_u64(unsigned, "kind")?;
+    let content = unsigned
+        .get("content")
+        .ok_or(WorkerProtocolError::MissingField("content"))?;
+    if !content.is_string() {
+        return Err(WorkerProtocolError::InvalidField("content"));
+    }
+    let tags = require_array(unsigned, "tags")?;
+    for tag in tags {
+        let tag = tag
+            .as_array()
+            .ok_or(WorkerProtocolError::InvalidField("tags"))?;
+        for value in tag {
+            if value.as_str().is_none() {
+                return Err(WorkerProtocolError::InvalidField("tags"));
+            }
+        }
+    }
+    if let Some(value) = unsigned.get("created_at")
+        && value.as_u64().is_none()
+    {
+        return Err(WorkerProtocolError::InvalidField("created_at"));
+    }
+
+    if let Some(value) = object.get("tenexExplanation") {
+        let text = value
+            .as_str()
+            .ok_or(WorkerProtocolError::InvalidField("tenexExplanation"))?;
+        if text.is_empty() {
+            return Err(WorkerProtocolError::InvalidField("tenexExplanation"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_nip46_publish_result(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    validate_execution_identity(object)?;
+    require_string(object, "requestId")?;
+    let status = require_string(object, "status")?;
+    if !["accepted", "rejected", "failed"].contains(&status) {
+        return Err(WorkerProtocolError::InvalidField("status"));
+    }
+
+    let has_event_id = object.contains_key("eventId");
+    let has_reason = object.contains_key("reason");
+
+    match status {
+        "accepted" => {
+            if !has_event_id {
+                return Err(WorkerProtocolError::MissingField("eventId"));
+            }
+            require_hex_string(object, "eventId", 64)?;
+            if has_reason {
+                return Err(WorkerProtocolError::InvalidField("reason"));
+            }
+        }
+        "rejected" | "failed" => {
+            if !has_reason {
+                return Err(WorkerProtocolError::MissingField("reason"));
+            }
+            require_string(object, "reason")?;
+            if has_event_id {
+                return Err(WorkerProtocolError::InvalidField("eventId"));
+            }
+        }
+        _ => unreachable!("status whitelist enforced above"),
+    }
     Ok(())
 }
 

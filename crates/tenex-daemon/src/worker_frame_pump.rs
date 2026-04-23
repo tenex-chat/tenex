@@ -73,6 +73,7 @@ where
         worker_id,
         observed_at,
         publish,
+        nip46_publish,
         terminal,
         message: _,
     } = message_flow;
@@ -86,6 +87,7 @@ where
             message: &decoded_message,
             observed_at,
             publish,
+            nip46_publish,
             terminal,
         },
     )
@@ -379,6 +381,7 @@ mod tests {
             message,
             observed_at: 1_710_000_403_000,
             publish,
+            nip46_publish: None,
             terminal: None,
         }
     }

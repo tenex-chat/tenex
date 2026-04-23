@@ -28,6 +28,7 @@ pub enum WorkerMessageAction {
     HeartbeatSnapshotCandidate,
     TerminalResultCandidate { kind: WorkerTerminalResultKind },
     PublishRequestCandidate,
+    Nip46PublishRequestCandidate,
     PublishedNotification { mode: WorkerPublishedMode },
 }
 
@@ -118,6 +119,7 @@ fn action_for_worker_message(
         "delegation_killed" => Ok(control(WorkerControlTelemetryKind::DelegationKilled)),
         "waiting_for_delegation" => Ok(terminal(WorkerTerminalResultKind::WaitingForDelegation)),
         "publish_request" => Ok(WorkerMessageAction::PublishRequestCandidate),
+        "nip46_publish_request" => Ok(WorkerMessageAction::Nip46PublishRequestCandidate),
         "published" => Ok(WorkerMessageAction::PublishedNotification {
             mode: published_mode(message)?,
         }),

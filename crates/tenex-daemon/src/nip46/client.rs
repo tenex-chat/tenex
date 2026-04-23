@@ -104,6 +104,18 @@ impl NIP46Client {
         &self,
         unsigned: &NormalizedNostrEvent,
     ) -> Result<SignedNostrEvent, SignError> {
+        let unsigned_json = serde_json::to_string(unsigned)
+            .map_err(|err| SignError::Protocol(Nip46ProtocolError::Json(err)))?;
+        self.sign_event_json(&unsigned_json)
+    }
+
+    /// Sign an unsigned event whose JSON the caller has already serialized.
+    ///
+    /// Unlike [`sign_event`], this lets the caller include root-level JSON
+    /// extras (e.g. `tenex_explanation`) that the bunker frontend may surface
+    /// to the user. Those extras are not part of the canonical NIP-01 hash
+    /// payload, so they never affect the resulting signature.
+    pub fn sign_event_json(&self, unsigned_json: &str) -> Result<SignedNostrEvent, SignError> {
         let _guard = self
             .sign_mutex
             .lock()
@@ -123,9 +135,7 @@ impl NIP46Client {
                 .expect("nip-46 connected mutex must not be poisoned") = true;
         }
 
-        let unsigned_json = serde_json::to_string(unsigned)
-            .map_err(|err| SignError::Protocol(Nip46ProtocolError::Json(err)))?;
-        let (id, request) = build_sign_event_request(&unsigned_json);
+        let (id, request) = build_sign_event_request(unsigned_json);
         let result_text = self.exchange(id, request)?;
 
         let signed: SignedNostrEvent = serde_json::from_str(&result_text)

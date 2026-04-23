@@ -15,6 +15,7 @@ export const DAEMON_TO_WORKER_MESSAGE_TYPES = [
     "shutdown",
     "ping",
     "publish_result",
+    "nip46_publish_result",
     "ack",
 ] as const;
 
@@ -32,6 +33,7 @@ export const WORKER_TO_DAEMON_MESSAGE_TYPES = [
     "delegation_killed",
     "waiting_for_delegation",
     "publish_request",
+    "nip46_publish_request",
     "published",
     "complete",
     "silent_completion_requested",
@@ -440,6 +442,68 @@ const publishedMessageSchema = frameSchema("published", {
     eventIds: z.array(z.string().min(1)),
 });
 
+const nip46UnsignedEventSchema = z
+    .object({
+        kind: nonNegativeIntegerSchema,
+        content: z.string(),
+        tags: z.array(z.array(z.string())),
+        created_at: nonNegativeIntegerSchema.optional(),
+    })
+    .passthrough();
+
+const nip46PublishRequestMessageSchema = frameSchema("nip46_publish_request", {
+    ...executionIdentityShape,
+    requestId: z.string().min(1),
+    ownerPubkey: hexPubkeySchema,
+    waitForRelayOk: z.boolean(),
+    timeoutMs: positiveIntegerSchema,
+    unsignedEvent: nip46UnsignedEventSchema,
+    tenexExplanation: z.string().min(1).optional(),
+});
+
+const nip46PublishResultMessageSchema = frameSchema("nip46_publish_result", {
+    ...executionIdentityShape,
+    requestId: z.string().min(1),
+    status: z.enum(["accepted", "rejected", "failed"]),
+    eventId: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .optional(),
+    reason: z.string().min(1).optional(),
+}).superRefine((message, context) => {
+    if (message.status === "accepted") {
+        if (!message.eventId) {
+            context.addIssue({
+                code: "custom",
+                path: ["eventId"],
+                message: "nip46_publish_result accepted status requires eventId",
+            });
+        }
+        if (message.reason !== undefined) {
+            context.addIssue({
+                code: "custom",
+                path: ["reason"],
+                message: "nip46_publish_result accepted status must not include reason",
+            });
+        }
+    } else {
+        if (!message.reason) {
+            context.addIssue({
+                code: "custom",
+                path: ["reason"],
+                message: `nip46_publish_result ${message.status} status requires reason`,
+            });
+        }
+        if (message.eventId !== undefined) {
+            context.addIssue({
+                code: "custom",
+                path: ["eventId"],
+                message: `nip46_publish_result ${message.status} status must not include eventId`,
+            });
+        }
+    }
+});
+
 const completeMessageSchema = frameSchema("complete", {
     ...executionIdentityShape,
     ...terminalShape,
@@ -500,6 +564,8 @@ export const AgentWorkerProtocolMessageSchema = z.union([
     delegationKilledMessageSchema,
     waitingForDelegationMessageSchema,
     publishRequestMessageSchema,
+    nip46PublishRequestMessageSchema,
+    nip46PublishResultMessageSchema,
     publishedMessageSchema,
     completeMessageSchema,
     silentCompletionRequestedMessageSchema,

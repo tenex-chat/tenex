@@ -14,7 +14,8 @@ use crate::worker_injection_queue::{
 };
 use crate::worker_message_flow::{
     WorkerMessageFlowError, WorkerMessageFlowInput, WorkerMessageFlowOutcome,
-    WorkerMessagePublishContext, WorkerMessageTerminalContext, handle_worker_message_flow,
+    WorkerMessageNip46PublishContext, WorkerMessagePublishContext, WorkerMessageTerminalContext,
+    handle_worker_message_flow,
 };
 use crate::worker_protocol::{
     AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolError, decode_agent_worker_protocol_frame,
@@ -30,6 +31,7 @@ pub struct WorkerSessionLoopInput<'a> {
     pub worker_id: &'a str,
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
+    pub nip46_publish: Option<WorkerMessageNip46PublishContext<'a>>,
     pub live_publish_maintenance: Option<&'a mut dyn FnMut(&Path, u64) -> Result<(), String>>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
     pub max_frames: u64,
@@ -152,6 +154,7 @@ where
                 message: &decoded_message,
                 observed_at: input.observed_at,
                 publish: input.publish,
+                nip46_publish: input.nip46_publish.clone(),
                 terminal,
             },
         )
@@ -189,6 +192,14 @@ where
                         &outcome,
                         error,
                     );
+                }
+                send_pending_worker_injections(worker, &input)?;
+                send_pending_stop_request(worker, &input)?;
+            }
+            WorkerMessageFlowOutcome::Nip46PublishRequestHandled { .. } => {
+                run_live_publish_maintenance(&mut input)?;
+                if let Some(nip46) = input.nip46_publish.as_mut() {
+                    nip46.result_sequence = nip46.result_sequence.saturating_add(1);
                 }
                 send_pending_worker_injections(worker, &input)?;
                 send_pending_stop_request(worker, &input)?;
@@ -266,6 +277,7 @@ where
             message: &terminal_message,
             observed_at: input.observed_at,
             publish: input.publish,
+            nip46_publish: input.nip46_publish.clone(),
             terminal: Some(terminal),
         },
     )
@@ -597,6 +609,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
                     scheduler: &scheduler,
@@ -657,6 +670,7 @@ mod tests {
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
+                nip46_publish: None,
                 live_publish_maintenance: Some(&mut live_publish_maintenance),
                 terminal: None,
                 max_frames: 4,
@@ -713,6 +727,7 @@ mod tests {
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
+                nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
                     scheduler: &scheduler,
@@ -781,6 +796,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: None,
                 max_frames: 4,
@@ -815,6 +831,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: None,
                 max_frames: 4,
@@ -844,6 +861,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: None,
                 max_frames: 1,
@@ -900,6 +918,7 @@ mod tests {
                 worker_id: "worker-alpha",
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: None,
                 max_frames: 4,
@@ -969,6 +988,7 @@ mod tests {
                 worker_id: &worker_id,
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
                     scheduler: &scheduler,

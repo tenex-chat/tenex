@@ -1,9 +1,12 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::backend_config::Nip46Config;
 use crate::dispatch_queue::DispatchQueueState;
+use crate::nip46::registry::NIP46Registry;
 use crate::ral_journal::{
     RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalError, RalJournalEvent,
     RalJournalIdentity, RalJournalRecord, RalPendingDelegation, append_ral_journal_record,
@@ -19,6 +22,10 @@ use crate::worker_launch_lock::WorkerLaunchLocks;
 use crate::worker_message::{
     WorkerControlTelemetryKind, WorkerMessageAction, WorkerMessageError, WorkerMessagePlan,
     WorkerPublishedMode, WorkerStreamTelemetryKind, plan_worker_message_handling,
+};
+use crate::worker_nip46_publish_flow::{
+    WorkerNip46PublishFlowError, WorkerNip46PublishFlowInput, WorkerNip46PublishFlowOutcome,
+    handle_worker_nip46_publish_request,
 };
 use crate::worker_publish_flow::{
     WorkerPublishFlowError, WorkerPublishFlowInput, WorkerPublishFlowOutcome,
@@ -41,7 +48,18 @@ pub struct WorkerMessageFlowInput<'a> {
     pub message: &'a Value,
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
+    pub nip46_publish: Option<WorkerMessageNip46PublishContext<'a>>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkerMessageNip46PublishContext<'a> {
+    pub registry: Arc<NIP46Registry>,
+    pub nip46_config: &'a Nip46Config,
+    pub default_relay: &'a str,
+    pub accepted_at: u64,
+    pub result_sequence: u64,
+    pub result_timestamp: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +87,10 @@ pub enum WorkerMessageFlowOutcome {
     },
     PublishRequestHandled {
         outcome: Box<WorkerPublishFlowOutcome>,
+    },
+    Nip46PublishRequestHandled {
+        message: WorkerMessagePlan,
+        outcome: Box<WorkerNip46PublishFlowOutcome>,
     },
     TerminalResultHandled {
         outcome: Box<AppliedWorkerTerminalFlow>,
@@ -143,12 +165,19 @@ pub enum WorkerMessageFlowError {
     },
     #[error("worker message type {message_type} needs publish context")]
     MissingPublishContext { message_type: String },
+    #[error("worker message type {message_type} needs nip46 publish context")]
+    MissingNip46PublishContext { message_type: String },
     #[error("worker message type {message_type} needs terminal context")]
     MissingTerminalContext { message_type: String },
     #[error("worker publish flow failed: {source}")]
     Publish {
         #[source]
         source: Box<WorkerPublishFlowError>,
+    },
+    #[error("worker nip46 publish flow failed: {source}")]
+    Nip46Publish {
+        #[source]
+        source: Box<WorkerNip46PublishFlowError>,
     },
     #[error("worker terminal flow failed: {source}")]
     Terminal {
@@ -204,6 +233,33 @@ where
             .map_err(WorkerMessageFlowError::from)?;
 
             Ok(WorkerMessageFlowOutcome::PublishRequestHandled {
+                outcome: Box::new(outcome),
+            })
+        }
+        WorkerMessageAction::Nip46PublishRequestCandidate => {
+            let nip46 = input.nip46_publish.ok_or_else(|| {
+                WorkerMessageFlowError::MissingNip46PublishContext {
+                    message_type: message_plan.metadata.message_type.clone(),
+                }
+            })?;
+            ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
+            let outcome = handle_worker_nip46_publish_request(
+                session,
+                WorkerNip46PublishFlowInput {
+                    daemon_dir: input.daemon_dir,
+                    registry: nip46.registry,
+                    nip46_config: nip46.nip46_config,
+                    default_relay: nip46.default_relay,
+                    message: &message_plan.message,
+                    accepted_at: nip46.accepted_at,
+                    result_sequence: nip46.result_sequence,
+                    result_timestamp: nip46.result_timestamp,
+                },
+            )
+            .map_err(WorkerMessageFlowError::from)?;
+
+            Ok(WorkerMessageFlowOutcome::Nip46PublishRequestHandled {
+                message: message_plan,
                 outcome: Box::new(outcome),
             })
         }
@@ -597,6 +653,14 @@ impl From<WorkerPublishFlowError> for WorkerMessageFlowError {
     }
 }
 
+impl From<WorkerNip46PublishFlowError> for WorkerMessageFlowError {
+    fn from(source: WorkerNip46PublishFlowError) -> Self {
+        Self::Nip46Publish {
+            source: Box::new(source),
+        }
+    }
+}
+
 impl From<WorkerTerminalFlowError> for WorkerMessageFlowError {
     fn from(source: WorkerTerminalFlowError) -> Self {
         Self::Terminal {
@@ -681,6 +745,7 @@ mod tests {
                 message: &fixture_valid_message("heartbeat"),
                 observed_at: 1_710_000_403_000,
                 publish: None,
+                nip46_publish: None,
                 terminal: None,
             },
         )
@@ -738,6 +803,7 @@ mod tests {
                 message: &message,
                 observed_at: 1_710_000_404_050,
                 publish: None,
+                nip46_publish: None,
                 terminal: None,
             },
         )
@@ -789,6 +855,7 @@ mod tests {
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
+                nip46_publish: None,
                 terminal: None,
             },
         )
@@ -848,6 +915,7 @@ mod tests {
                 message: &fixture_valid_message("complete"),
                 observed_at: 1_710_000_500_050,
                 publish: None,
+                nip46_publish: None,
                 terminal: Some(WorkerMessageTerminalContext {
                     scheduler: &scheduler,
                     dispatch_state: &dispatch_state,
@@ -898,6 +966,7 @@ mod tests {
                 message: &fixture_valid_message("stream-delta"),
                 observed_at: 1_710_000_401_500,
                 publish: None,
+                nip46_publish: None,
                 terminal: None,
             },
         )
@@ -930,6 +999,7 @@ mod tests {
                 message: &fixture_valid_message("boot-error"),
                 observed_at: 1_710_000_401_150,
                 publish: None,
+                nip46_publish: None,
                 terminal: None,
             },
         )
@@ -968,6 +1038,7 @@ mod tests {
                 message: &fixture_valid_message("complete"),
                 observed_at: 1_710_000_500_050,
                 publish: None,
+                nip46_publish: None,
                 terminal: None,
             },
         )

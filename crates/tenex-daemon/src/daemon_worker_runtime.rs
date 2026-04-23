@@ -814,6 +814,7 @@ where
             worker_id: &worker_id,
             observed_at: frame_observed_at,
             publish,
+            nip46_publish: None,
             live_publish_maintenance: live_publish_maintenance
                 .as_mut()
                 .map(|maintenance| &mut *maintenance.maintain as _),

@@ -24,6 +24,20 @@ pub struct NIP46Registry {
     clients: RwLock<HashMap<String, Arc<NIP46Client>>>,
 }
 
+impl std::fmt::Debug for NIP46Registry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cached = self
+            .clients
+            .read()
+            .map(|guard| guard.len())
+            .unwrap_or(0);
+        formatter
+            .debug_struct("NIP46Registry")
+            .field("cached_clients", &cached)
+            .finish_non_exhaustive()
+    }
+}
+
 impl NIP46Registry {
     pub fn new(
         backend_signer: Arc<HexBackendSigner>,

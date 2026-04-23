@@ -16,6 +16,7 @@ import {
     writeAgentWorkerProtocolFrame,
 } from "./protocol";
 import { AgentWorkerExecutionFailure, executeAgentWorkerRequest } from "./bootstrap";
+import { Nip46PublishCoordinator, Nip46WorkerBridge } from "./nip46-bridge";
 import type {
     AgentWorkerOutboundProtocolMessage,
     AgentWorkerProtocolEmit,
@@ -29,6 +30,7 @@ type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish
 class AgentWorkerSession {
     private sequence = 0;
     private readonly publishResults = new PublishResultCoordinator();
+    private readonly nip46Results = new Nip46PublishCoordinator();
     private readonly protocolSink = createProtocolStdoutSink();
     private readonly emit: AgentWorkerProtocolEmit = async (message) => {
         const framedMessage = {
@@ -44,6 +46,7 @@ class AgentWorkerSession {
     constructor() {
         installProcessStdoutSuppressor();
         installConsoleSuppressor();
+        Nip46WorkerBridge.install(this.emit, this.nip46Results);
     }
 
     async run(): Promise<void> {
@@ -101,6 +104,7 @@ class AgentWorkerSession {
                 const nextExecution = this.handleIncomingMessage(result.iteration.value);
                 if (nextExecution === "shutdown") {
                     this.publishResults.rejectAll(new Error("worker shutdown requested"));
+                    this.nip46Results.rejectAll(new Error("worker shutdown requested"));
                     return;
                 }
                 if (nextExecution) {
@@ -134,6 +138,11 @@ class AgentWorkerSession {
 
         if (message.type === "publish_result") {
             this.publishResults.resolve(message);
+            return undefined;
+        }
+
+        if (message.type === "nip46_publish_result") {
+            this.nip46Results.resolve(message);
             return undefined;
         }
 
