@@ -33,6 +33,7 @@ pub struct WorkerLaunchPlanInput<'a> {
     pub metadata_path: String,
     pub triggering_envelope: Value,
     pub execution_flags: AgentWorkerExecutionFlags,
+    pub delegation_snapshot: crate::ral_journal::RalDelegationSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +94,7 @@ pub fn plan_worker_launch(
         metadata_path: input.metadata_path,
         triggering_envelope: input.triggering_envelope,
         execution_flags: input.execution_flags,
+        delegation_snapshot: input.delegation_snapshot,
     })?;
 
     Ok(WorkerLaunchPlan {
@@ -264,6 +266,7 @@ mod tests {
                     .unwrap_or_default(),
                 debug: flags["debug"].as_bool().expect("debug flag must be bool"),
             },
+            delegation_snapshot: crate::ral_journal::RalDelegationSnapshot::default(),
         }
     }
 

@@ -112,6 +112,14 @@ export async function executeAgentWorkerRequest(
         return await projectContextStore.run(projectContext, async () => {
             await ensureTriggeringEnvelopeStored(message);
             const workerRalClaim = seedWorkerRalBridge(message);
+            if (message.delegationSnapshot) {
+                RALRegistry.getInstance().loadDelegationSnapshot(
+                    message.agentPubkey,
+                    message.conversationId,
+                    message.ralNumber,
+                    message.delegationSnapshot.pendingDelegations as never
+                );
+            }
 
             await emit({
                 type: "execution_started",

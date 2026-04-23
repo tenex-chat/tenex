@@ -124,6 +124,11 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   getUnreportedRuntime(agentPubkey: string, conversationId: string, ralNumber: number): number { return this.timingTracker.getUnreportedRuntime(this.getRAL(agentPubkey, conversationId, ralNumber)); }
 
   setPendingDelegations(agentPubkey: string, conversationId: string, ralNumber: number, pendingDelegations: PendingDelegation[]): void { this.delegationRegistry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations); }
+  loadDelegationSnapshot(agentPubkey: string, conversationId: string, ralNumber: number, pendingDelegations: PendingDelegation[]): void {
+    const forCurrentRal = pendingDelegations.filter((d) => d.ralNumber === ralNumber);
+    if (forCurrentRal.length === 0) return;
+    this.delegationRegistry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, forCurrentRal);
+  }
   mergePendingDelegations(agentPubkey: string, conversationId: string, ralNumber: number, newDelegations: PendingDelegation[]): { insertedCount: number; mergedCount: number } { return this.delegationRegistry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, newDelegations); }
   registerPendingSubDelegation(parentDelegationConversationId: string, subDelegation: PendingDelegation): boolean { return this.delegationRegistry.registerPendingSubDelegation(parentDelegationConversationId, subDelegation); }
   clearPendingSubDelegation(parentDelegationConversationId: string, subDelegationConversationId: string): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined { return this.delegationRegistry.clearPendingSubDelegation(parentDelegationConversationId, subDelegationConversationId); }

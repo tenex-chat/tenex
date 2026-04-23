@@ -472,6 +472,19 @@ where
         started_at,
     } = input;
 
+    let delegation_snapshot = crate::ral_scheduler::RalScheduler::from_daemon_dir(daemon_dir)
+        .map(|scheduler| {
+            scheduler.delegation_snapshot_for(
+                &admitted.leased_record.ral.project_id,
+                &admitted.leased_record.ral.agent_pubkey,
+                &admitted.leased_record.ral.conversation_id,
+            )
+        })
+        .map_err(|source| WorkerDispatchAdmissionStartError::DelegationSnapshot {
+            admission: Box::new(admitted.clone()),
+            source: Box::new(source),
+        })?;
+
     let launch_plan = plan_worker_launch(WorkerLaunchPlanInput {
         dispatch: &admitted.leased_record,
         identity: &ral_identity_from_dispatch(&admitted.leased_record),
@@ -481,6 +494,7 @@ where
         metadata_path: launch_input.metadata_path.clone(),
         triggering_envelope: launch_input.triggering_envelope.clone(),
         execution_flags: launch_input.execution_flags.clone(),
+        delegation_snapshot,
     })
     .map_err(|source| WorkerDispatchAdmissionStartError::LaunchPlan {
         admission: Box::new(admitted.clone()),
@@ -1892,6 +1906,9 @@ mod tests {
             }
             WorkerDispatchAdmissionStartError::LaunchPlan { source, .. } => {
                 format!("launch planning: {source}")
+            }
+            WorkerDispatchAdmissionStartError::DelegationSnapshot { source, .. } => {
+                format!("delegation snapshot: {source}")
             }
             WorkerDispatchAdmissionStartError::LeaseAppend { source, .. } => {
                 format!("lease append: {source}")

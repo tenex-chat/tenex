@@ -119,6 +119,10 @@
                     "isDelegationCompletion": false,
                     "hasPendingDelegations": false,
                     "debug": true
+                },
+                "delegationSnapshot": {
+                    "pendingDelegations": [],
+                    "completedDelegations": []
                 }
             }
         },

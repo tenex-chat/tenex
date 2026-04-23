@@ -366,6 +366,15 @@ pub struct RalJournalReplay {
     pub states: HashMap<RalJournalIdentity, RalReplayEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RalDelegationSnapshot {
+    #[serde(default)]
+    pub pending_delegations: Vec<RalPendingDelegation>,
+    #[serde(default)]
+    pub completed_delegations: Vec<RalCompletedDelegation>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RalJournalSnapshot {

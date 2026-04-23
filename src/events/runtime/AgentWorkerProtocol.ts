@@ -169,6 +169,41 @@ function frameSchema<const Type extends string, Shape extends z.ZodRawShape>(
         .passthrough();
 }
 
+const delegationSnapshotPendingSchema = z
+    .object({
+        delegationConversationId: z.string().min(1),
+        recipientPubkey: z.string().min(1),
+        senderPubkey: z.string().min(1),
+        prompt: z.string(),
+        type: z.enum(["standard", "followup", "external", "ask"]).optional(),
+        ralNumber: positiveIntegerSchema,
+        parentDelegationConversationId: z.string().min(1).optional(),
+        followupEventId: z.string().min(1).optional(),
+        projectId: z.string().min(1).optional(),
+        suggestions: z.array(z.string()).optional(),
+        killed: z.boolean().optional(),
+        killedAt: nonNegativeIntegerSchema.optional(),
+    })
+    .passthrough();
+
+const delegationSnapshotCompletedSchema = z
+    .object({
+        delegationConversationId: z.string().min(1),
+        senderPubkey: z.string().min(1),
+        recipientPubkey: z.string().min(1),
+        response: z.string(),
+        completedAt: nonNegativeIntegerSchema,
+        completionEventId: z.string().min(1),
+    })
+    .passthrough();
+
+const delegationSnapshotSchema = z
+    .object({
+        pendingDelegations: z.array(delegationSnapshotPendingSchema).default([]),
+        completedDelegations: z.array(delegationSnapshotCompletedSchema).default([]),
+    })
+    .passthrough();
+
 const executeMessageSchema = frameSchema("execute", {
     projectId: z.string().min(1),
     projectBasePath: z.string().min(1),
@@ -186,6 +221,7 @@ const executeMessageSchema = frameSchema("execute", {
             debug: z.boolean(),
         })
         .passthrough(),
+    delegationSnapshot: delegationSnapshotSchema.optional(),
 });
 
 const pingMessageSchema = frameSchema("ping", {

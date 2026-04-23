@@ -11,10 +11,10 @@ use crate::dispatch_queue::{
     build_dispatch_queue_record,
 };
 use crate::ral_journal::{
-    RAL_JOURNAL_WRITER_RUST_DAEMON, RalCompletedDelegation, RalJournalEvent, RalJournalIdentity,
-    RalJournalRecord, RalJournalReplay, RalJournalResult, RalJournalSnapshot, RalPendingDelegation,
-    RalReplayEntry, RalReplayStatus, RalTerminalSummary, RalWorkerError, replay_ral_journal,
-    write_ral_snapshot,
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalCompletedDelegation, RalDelegationSnapshot, RalJournalEvent,
+    RalJournalIdentity, RalJournalRecord, RalJournalReplay, RalJournalResult, RalJournalSnapshot,
+    RalPendingDelegation, RalReplayEntry, RalReplayStatus, RalTerminalSummary, RalWorkerError,
+    replay_ral_journal, write_ral_snapshot,
 };
 
 static CLAIM_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -222,6 +222,30 @@ impl RalScheduler {
     ) -> Option<&RalJournalIdentity> {
         self.state
             .active_triggering_event(namespace, triggering_event_id)
+    }
+
+    pub fn delegation_snapshot_for(
+        &self,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+    ) -> RalDelegationSnapshot {
+        let mut snapshot = RalDelegationSnapshot::default();
+        for entry in self.state.entries.values() {
+            if entry.identity.project_id != project_id
+                || entry.identity.agent_pubkey != agent_pubkey
+                || entry.identity.conversation_id != conversation_id
+            {
+                continue;
+            }
+            snapshot
+                .pending_delegations
+                .extend(entry.pending_delegations.iter().cloned());
+            snapshot
+                .completed_delegations
+                .extend(entry.completed_delegations.iter().cloned());
+        }
+        snapshot
     }
 
     pub fn find_delegation_completion(

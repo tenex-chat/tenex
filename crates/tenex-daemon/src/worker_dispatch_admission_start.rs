@@ -135,6 +135,10 @@ pub enum WorkerDispatchAdmissionStartError<S> {
         admission: Box<AdmittedWorkerDispatch>,
         source: Box<WorkerLaunchError>,
     },
+    DelegationSnapshot {
+        admission: Box<AdmittedWorkerDispatch>,
+        source: Box<crate::ral_journal::RalJournalError>,
+    },
     LeaseAppend {
         context: Box<WorkerDispatchAdmissionLaunchContext>,
         source: Box<DispatchQueueError>,
@@ -212,11 +216,18 @@ where
             },
         )?;
 
+    let delegation_snapshot = load_delegation_snapshot(daemon_dir, &admitted.leased_record)
+        .map_err(|source| WorkerDispatchAdmissionStartError::DelegationSnapshot {
+            admission: Box::new(admitted.clone()),
+            source: Box::new(source),
+        })?;
+
     let launch_plan = plan_launch_for_admitted_dispatch(
         &admitted,
         execute_sequence,
         execute_timestamp,
         resolved_launch_input.clone(),
+        delegation_snapshot,
     )
     .map_err(|source| WorkerDispatchAdmissionStartError::LaunchPlan {
         admission: Box::new(admitted.clone()),
@@ -307,11 +318,24 @@ where
     }
 }
 
+fn load_delegation_snapshot(
+    daemon_dir: &Path,
+    dispatch: &DispatchQueueRecord,
+) -> Result<crate::ral_journal::RalDelegationSnapshot, crate::ral_journal::RalJournalError> {
+    let scheduler = crate::ral_scheduler::RalScheduler::from_daemon_dir(daemon_dir)?;
+    Ok(scheduler.delegation_snapshot_for(
+        &dispatch.ral.project_id,
+        &dispatch.ral.agent_pubkey,
+        &dispatch.ral.conversation_id,
+    ))
+}
+
 fn plan_launch_for_admitted_dispatch(
     admitted: &AdmittedWorkerDispatch,
     sequence: u64,
     timestamp: u64,
     launch_input: WorkerDispatchExplicitLaunchInput,
+    delegation_snapshot: crate::ral_journal::RalDelegationSnapshot,
 ) -> Result<WorkerLaunchPlan, WorkerLaunchError> {
     let WorkerDispatchExplicitLaunchInput {
         worker_id: _,
@@ -330,6 +354,7 @@ fn plan_launch_for_admitted_dispatch(
         metadata_path,
         triggering_envelope,
         execution_flags,
+        delegation_snapshot,
     })
 }
 
@@ -421,6 +446,11 @@ impl<S> fmt::Debug for WorkerDispatchAdmissionStartError<S> {
                 .field("admission", admission)
                 .field("source", source)
                 .finish(),
+            Self::DelegationSnapshot { admission, source } => formatter
+                .debug_struct("DelegationSnapshot")
+                .field("admission", admission)
+                .field("source", source)
+                .finish(),
             Self::LeaseAppend { context, source } => formatter
                 .debug_struct("LeaseAppend")
                 .field("context", context)
@@ -452,6 +482,9 @@ impl<S> fmt::Display for WorkerDispatchAdmissionStartError<S> {
             Self::LaunchPlan { .. } => {
                 formatter.write_str("worker dispatch launch planning failed")
             }
+            Self::DelegationSnapshot { .. } => {
+                formatter.write_str("worker dispatch delegation snapshot load failed")
+            }
             Self::LeaseAppend { .. } => formatter.write_str("worker dispatch lease append failed"),
             Self::DispatchStart { .. } => formatter.write_str(
                 "worker dispatch start failed after the dispatch queue lease was appended",
@@ -472,6 +505,7 @@ where
             Self::Admission { source } => Some(source.as_ref()),
             Self::LaunchInput { source, .. } => Some(source.as_ref()),
             Self::LaunchPlan { source, .. } => Some(source.as_ref()),
+            Self::DelegationSnapshot { source, .. } => Some(source.as_ref()),
             Self::LeaseAppend { source, .. } => Some(source.as_ref()),
             Self::DispatchStart { source, .. } => Some(source.as_ref()),
             Self::RuntimeRegister { source, .. } => Some(source.as_ref()),

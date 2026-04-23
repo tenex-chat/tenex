@@ -190,6 +190,7 @@ pub struct AgentWorkerExecuteMessageInput<'a> {
     pub metadata_path: String,
     pub triggering_envelope: Value,
     pub execution_flags: AgentWorkerExecutionFlags,
+    pub delegation_snapshot: crate::ral_journal::RalDelegationSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,6 +345,7 @@ pub fn build_agent_worker_execute_message(
         "ralClaimToken": &input.dispatch.claim_token,
         "triggeringEnvelope": input.triggering_envelope,
         "executionFlags": input.execution_flags,
+        "delegationSnapshot": input.delegation_snapshot,
     });
 
     validate_agent_worker_protocol_message(&message)?;
@@ -1611,6 +1613,7 @@ mod tests {
                     .as_bool()
                     .expect("fixture debug flag must be bool"),
             },
+            delegation_snapshot: crate::ral_journal::RalDelegationSnapshot::default(),
         }
     }
 
