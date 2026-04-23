@@ -21,6 +21,7 @@ use crate::nostr_subscription_tick::{
 };
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::project_boot_state::ProjectBootState;
+use crate::project_event_index::ProjectEventIndex;
 use crate::relay_publisher::{
     RelayAuthSigner, RelayPublishError, build_auth_message, build_relay_auth_event,
 };
@@ -49,6 +50,7 @@ pub struct NostrSubscriptionGatewayConfig {
     pub auth_signer: Option<Arc<dyn RelayAuthSigner + Send + Sync>>,
     pub whitelist_ingress: Option<Arc<WhitelistIngress>>,
     pub project_boot_state: Arc<Mutex<ProjectBootState>>,
+    pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
 }
 
 impl NostrSubscriptionGatewayConfig {
@@ -64,6 +66,7 @@ impl NostrSubscriptionGatewayConfig {
             auth_signer: None,
             whitelist_ingress: None,
             project_boot_state: Arc::new(Mutex::new(ProjectBootState::new())),
+            project_event_index: Arc::new(Mutex::new(ProjectEventIndex::new())),
         }
     }
 
@@ -234,6 +237,7 @@ fn run_relay_loop(
             stop_flag: &stop_flag,
             whitelist_ingress: config.whitelist_ingress.as_deref(),
             project_boot_state: Some(&config.project_boot_state),
+            project_event_index: &config.project_event_index,
             observer: Some(observer.as_ref()),
         });
         drop(_span);
@@ -279,6 +283,7 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub stop_flag: &'a AtomicBool,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
+    pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
     pub observer: Option<&'a dyn NostrSubscriptionObserver>,
 }
 
@@ -403,6 +408,7 @@ pub fn run_nostr_subscription_relay_once(
                     writer_version: input.writer_version,
                     whitelist_ingress: input.whitelist_ingress,
                     project_boot_state: input.project_boot_state,
+                    project_event_index: input.project_event_index,
                 })?;
                 if let Some(observer) = input.observer {
                     observer.on_tick(input.relay_url, &tick);
@@ -537,6 +543,7 @@ fn refresh_subscription_filters(
         tenex_base_dir: input.tenex_base_dir,
         since,
         lesson_definition_ids: &[],
+        project_event_index: input.project_event_index,
     })?;
     if refreshed.filters.is_empty() || refreshed.filters == *active_filters {
         return Ok(());

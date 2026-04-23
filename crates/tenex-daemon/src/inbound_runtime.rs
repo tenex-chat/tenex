@@ -13,11 +13,14 @@ use crate::inbound_dispatch::{
     enqueue_delegation_completion_dispatch, enqueue_inbound_dispatch,
 };
 use crate::inbound_envelope::{ChannelKind, InboundEnvelope, RuntimeTransport};
+use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::inbound_routing::{
     InboundRoute, InboundRouteIgnoredReason, InboundRouteResolution, InboundRoutingCatalog,
     InboundRoutingCatalogError, InboundRoutingInput, build_inbound_routing_catalog,
     resolve_inbound_route,
 };
+use crate::project_event_index::ProjectEventIndex;
+use std::sync::{Arc, Mutex};
 use crate::ral_journal::{RalCompletedDelegation, RalJournalError, RalReplayStatus};
 use crate::ral_scheduler::{
     RalDelegationCompletionLookup, RalDelegationCompletionLookupInput, RalScheduler,
@@ -35,6 +38,7 @@ pub struct InboundRuntimeInput<'a> {
     pub envelope: &'a InboundEnvelope,
     pub timestamp: u64,
     pub writer_version: &'a str,
+    pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -64,6 +68,8 @@ pub enum InboundRuntimeOutcome {
 pub enum InboundRuntimeError {
     #[error("inbound routing catalog failed: {0}")]
     Catalog(#[from] InboundRoutingCatalogError),
+    #[error("inbound backend config failed: {0}")]
+    BackendConfig(#[from] BackendConfigError),
     #[error("inbound route resolution failed: {0}")]
     RouteResolution(#[from] io::Error),
     #[error("inbound dispatch enqueue failed: {0}")]
@@ -81,7 +87,17 @@ pub enum InboundRuntimeError {
 pub fn resolve_and_enqueue_inbound_dispatch(
     input: InboundRuntimeInput<'_>,
 ) -> Result<InboundRuntimeOutcome, InboundRuntimeError> {
-    let catalog = build_inbound_routing_catalog(input.tenex_base_dir)?;
+    let config = read_backend_config(input.tenex_base_dir)?;
+    let projects_base = config
+        .projects_base
+        .as_deref()
+        .unwrap_or("/tmp/tenex-projects");
+    let descriptor_report = input
+        .project_event_index
+        .lock()
+        .expect("project event index mutex must not be poisoned")
+        .descriptors_report(projects_base);
+    let catalog = build_inbound_routing_catalog(input.tenex_base_dir, &descriptor_report)?;
     if let Some(outcome) = try_handle_delegation_completion(input, &catalog)? {
         return Ok(outcome);
     }

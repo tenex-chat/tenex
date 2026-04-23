@@ -22,6 +22,7 @@ use crate::daemon_worker_runtime::{
     DaemonWorkerTelegramEgressRuntimeInput, run_daemon_worker_runtime_once_from_filesystem,
 };
 use crate::project_boot_state::{BootedProjectsState, ProjectBootState};
+use crate::project_event_index::ProjectEventIndex;
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
     PublishOutboxRetryPolicy,
@@ -590,6 +591,7 @@ pub struct DaemonMaintenanceLoopInput<'a> {
     pub max_iterations: u64,
     pub sleep_ms: u64,
     pub project_boot_state: Arc<Mutex<ProjectBootState>>,
+    pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
     /// Optional latch shared with the whitelist ingress; when present, a
     /// `Stopped` state gates the kind 24012 heartbeat publish.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
@@ -602,6 +604,7 @@ pub struct DaemonMaintenanceStoppableLoopInput<'a> {
     pub max_iterations: Option<u64>,
     pub sleep_ms: u64,
     pub project_boot_state: Arc<Mutex<ProjectBootState>>,
+    pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
     /// See [`DaemonMaintenanceLoopInput::heartbeat_latch`].
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
@@ -623,6 +626,7 @@ where
 {
     let heartbeat_latch = input.heartbeat_latch.clone();
     let project_boot_state = input.project_boot_state.clone();
+    let project_event_index = input.project_event_index.clone();
     run_daemon_maintenance_loop(
         clock,
         sleeper,
@@ -635,6 +639,7 @@ where
                     daemon_dir: input.daemon_dir,
                     now_ms,
                     project_boot_state: project_boot_state_snapshot(&project_boot_state),
+                    project_event_index: Arc::clone(&project_event_index),
                     heartbeat_latch: heartbeat_latch.clone(),
                 },
                 publisher,
@@ -663,6 +668,7 @@ where
 {
     let heartbeat_latch = input.heartbeat_latch.clone();
     let project_boot_state = input.project_boot_state.clone();
+    let project_event_index = input.project_event_index.clone();
     if input.max_iterations.is_some() {
         run_daemon_maintenance_loop_until_stopped(
             clock,
@@ -677,6 +683,7 @@ where
                         daemon_dir: input.daemon_dir,
                         now_ms,
                         project_boot_state: project_boot_state_snapshot(&project_boot_state),
+                        project_event_index: Arc::clone(&project_event_index),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     publisher,
@@ -698,6 +705,7 @@ where
                         daemon_dir: input.daemon_dir,
                         now_ms,
                         project_boot_state: project_boot_state_snapshot(&project_boot_state),
+                        project_event_index: Arc::clone(&project_event_index),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     publisher,
@@ -747,6 +755,7 @@ where
     let mut next_publish_result_sequence = first_publish_result_sequence;
     let heartbeat_latch = input.heartbeat_latch.clone();
     let project_boot_state = input.project_boot_state.clone();
+    let project_event_index = input.project_event_index.clone();
 
     if input.max_iterations.is_some() {
         run_daemon_maintenance_loop_until_stopped(
@@ -771,6 +780,7 @@ where
                         daemon_dir: input.daemon_dir,
                         now_ms,
                         project_boot_state: project_boot_state_snapshot(&project_boot_state),
+                        project_event_index: Arc::clone(&project_event_index),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     DaemonWorkerTickInput {
@@ -822,6 +832,7 @@ where
                         daemon_dir: input.daemon_dir,
                         now_ms,
                         project_boot_state: project_boot_state_snapshot(&project_boot_state),
+                        project_event_index: Arc::clone(&project_event_index),
                         heartbeat_latch: heartbeat_latch.clone(),
                     },
                     DaemonWorkerTickInput {

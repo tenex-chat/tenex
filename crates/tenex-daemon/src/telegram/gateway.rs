@@ -110,6 +110,7 @@ pub struct GatewayConfig {
     /// wiring always provides a signer; the `None` case keeps tests that
     /// don't exercise Nostr publishing terse.
     pub signer: Option<Arc<dyn BackendSigner + Send + Sync>>,
+    pub project_event_index: Arc<std::sync::Mutex<crate::project_event_index::ProjectEventIndex>>,
 }
 
 impl std::fmt::Debug for GatewayConfig {
@@ -143,6 +144,9 @@ impl GatewayConfig {
             poll_limit: DEFAULT_POLL_LIMIT,
             chat_context_api_sync_ttl_ms: DEFAULT_API_SYNC_TTL_MS,
             signer: None,
+            project_event_index: Arc::new(std::sync::Mutex::new(
+                crate::project_event_index::ProjectEventIndex::new(),
+            )),
         }
     }
 
@@ -346,6 +350,7 @@ where
                 poll_limit: config.poll_limit,
                 chat_context_api_sync_ttl_ms: config.chat_context_api_sync_ttl_ms,
                 signer: config.signer.clone(),
+                project_event_index: config.project_event_index.clone(),
             },
         );
         handles.push(handle);
@@ -363,6 +368,7 @@ struct GatewayThreadConfig {
     poll_limit: u32,
     chat_context_api_sync_ttl_ms: u64,
     signer: Option<Arc<dyn BackendSigner + Send + Sync>>,
+    project_event_index: Arc<std::sync::Mutex<crate::project_event_index::ProjectEventIndex>>,
 }
 
 fn spawn_gateway_thread<A>(
@@ -683,6 +689,7 @@ fn process_one<A>(
         session_reply_to_native_id: None,
         timestamp: now,
         writer_version: &config.writer_version,
+        project_event_index: &config.project_event_index,
     });
 
     match result {

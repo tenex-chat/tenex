@@ -14,8 +14,8 @@ use crate::project_status_agent_sources::{
     read_project_status_agent_sources,
 };
 use crate::project_status_descriptors::{
-    ProjectStatusDescriptorError, ProjectStatusDescriptorSkippedFile,
-    read_project_status_descriptors,
+    ProjectStatusDescriptorError, ProjectStatusDescriptorReport,
+    ProjectStatusDescriptorSkippedFile,
 };
 use crate::routing::extract_project_d_tag_from_address;
 
@@ -111,13 +111,13 @@ pub enum InboundRoutingCatalogError {
 
 pub fn build_inbound_routing_catalog(
     tenex_base_dir: impl AsRef<Path>,
+    descriptor_report: &ProjectStatusDescriptorReport,
 ) -> Result<InboundRoutingCatalog, InboundRoutingCatalogError> {
     let tenex_base_dir = tenex_base_dir.as_ref();
-    let descriptor_report = read_project_status_descriptors(tenex_base_dir)?;
     let mut projects = Vec::new();
     let mut skipped_agent_files = Vec::new();
 
-    for descriptor in descriptor_report.descriptors {
+    for descriptor in &descriptor_report.descriptors {
         let agent_report =
             read_project_status_agent_sources(tenex_base_dir, &descriptor.project_d_tag)?;
         skipped_agent_files.extend(agent_report.skipped_files);
@@ -138,7 +138,7 @@ pub fn build_inbound_routing_catalog(
         projects.push(InboundRoutingProject {
             project_id: descriptor.project_d_tag.clone(),
             owner_pubkey: descriptor.project_owner_pubkey.clone(),
-            project_base_path: descriptor.project_base_path,
+            project_base_path: descriptor.project_base_path.clone(),
             metadata_path: tenex_base_dir
                 .join("projects")
                 .join(&descriptor.project_d_tag),
@@ -154,7 +154,7 @@ pub fn build_inbound_routing_catalog(
 
     Ok(InboundRoutingCatalog {
         projects,
-        skipped_project_files: descriptor_report.skipped_files,
+        skipped_project_files: descriptor_report.skipped_files.clone(),
         skipped_agent_files,
     })
 }

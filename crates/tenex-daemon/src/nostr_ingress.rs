@@ -22,15 +22,14 @@ use crate::project_boot_state::{
     ProjectBootOutcome, ProjectBootState, ProjectBootStateError, extract_project_boot_reference,
     is_project_booted,
 };
+use crate::project_event_index::ProjectEventIndex;
 use crate::project_nostr_ingress::{
     ProjectNostrIngressError, ProjectNostrIngressOutcome, handle_project_nostr_event,
 };
 use crate::project_repository_init::{
     ProjectRepositoryInitError, ensure_project_repository_on_boot,
 };
-use crate::project_status_descriptors::{
-    ProjectStatusDescriptor, ProjectStatusDescriptorError, read_project_status_descriptors,
-};
+use crate::project_status_descriptors::{ProjectStatusDescriptor, ProjectStatusDescriptorError};
 use crate::project_status_runtime::{
     ProjectStatusRuntimeError, ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
@@ -44,6 +43,7 @@ pub struct NostrIngressInput<'a> {
     pub timestamp: u64,
     pub writer_version: &'a str,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
+    pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -126,12 +126,11 @@ pub fn process_verified_nostr_event(
     let class = classify_for_daemon(input.event);
 
     if class == DaemonNostrEventClass::Project {
-        let config = read_backend_config(input.tenex_base_dir)?;
-        let projects_base = config
-            .projects_base
-            .as_deref()
-            .unwrap_or("/tmp/tenex-projects");
-        let project = handle_project_nostr_event(input.tenex_base_dir, input.event, projects_base)?;
+        let project = handle_project_nostr_event(
+            input.tenex_base_dir,
+            input.event,
+            input.project_event_index,
+        )?;
         return Ok(NostrIngressOutcome::ProjectUpdated { class, project });
     }
 
@@ -147,7 +146,34 @@ pub fn process_verified_nostr_event(
             });
         };
         let reference = extract_project_boot_reference(input.event)?;
-        ensure_project_repository_on_boot(input.tenex_base_dir, &reference.project_d_tag)?;
+        let config = read_backend_config(input.tenex_base_dir)?;
+        let projects_base = config
+            .projects_base
+            .as_deref()
+            .unwrap_or("/tmp/tenex-projects");
+        let project_base_path = format!(
+            "{}/{}",
+            projects_base.trim_end_matches('/'),
+            reference.project_d_tag
+        );
+        let repo_url = input
+            .project_event_index
+            .lock()
+            .expect("project event index mutex must not be poisoned")
+            .get(&reference.project_owner_pubkey, &reference.project_d_tag)
+            .and_then(|event| {
+                event
+                    .tags
+                    .iter()
+                    .find(|tag| tag.first().map(String::as_str) == Some("repo"))
+                    .and_then(|tag| tag.get(1))
+                    .cloned()
+            });
+        ensure_project_repository_on_boot(
+            &reference.project_d_tag,
+            Path::new(&project_base_path),
+            repo_url.as_deref(),
+        )?;
         let boot = project_boot_state
             .lock()
             .expect("project boot state mutex must not be poisoned")
@@ -215,6 +241,7 @@ pub fn process_verified_nostr_event(
         envelope: &envelope,
         timestamp: input.timestamp,
         writer_version: input.writer_version,
+        project_event_index: input.project_event_index,
     })?;
 
     Ok(NostrIngressOutcome::Routed { class, inbound })
@@ -240,7 +267,16 @@ fn republish_project_status_after_config_update(
         .expect("project boot state mutex must not be poisoned")
         .snapshot();
 
-    let descriptor_report = read_project_status_descriptors(input.tenex_base_dir)?;
+    let config = read_backend_config(input.tenex_base_dir)?;
+    let projects_base = config
+        .projects_base
+        .as_deref()
+        .unwrap_or("/tmp/tenex-projects");
+    let descriptor_report = input
+        .project_event_index
+        .lock()
+        .expect("project event index mutex must not be poisoned")
+        .descriptors_report(projects_base);
 
     let accepted_at = input.timestamp;
     let request_timestamp = input.timestamp;
@@ -258,12 +294,15 @@ fn republish_project_status_after_config_update(
         ) {
             continue;
         }
-        let worktrees_slice: Option<&[String]> = if descriptor.worktrees.is_empty() {
+        let project_base_path = descriptor.project_base_path.as_deref().map(Path::new);
+        let worktrees_vec = project_base_path
+            .map(crate::project_worktrees::read_project_worktrees)
+            .unwrap_or_default();
+        let worktrees_slice: Option<&[String]> = if worktrees_vec.is_empty() {
             None
         } else {
-            Some(&descriptor.worktrees)
+            Some(&worktrees_vec)
         };
-        let project_base_path = descriptor.project_base_path.as_deref().map(Path::new);
         publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
             tenex_base_dir: input.tenex_base_dir,
             daemon_dir: input.daemon_dir,

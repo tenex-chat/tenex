@@ -16,6 +16,7 @@ use crate::daemon_maintenance::TelegramMaintenancePublisher;
 use crate::daemon_shell::{DaemonShell, DaemonShellError, DaemonShellStopMode};
 use crate::process_liveness::ProcessLivenessProbe;
 use crate::project_boot_state::ProjectBootState;
+use crate::project_event_index::ProjectEventIndex;
 use crate::publish_outbox::PublishOutboxRelayPublisher;
 use crate::publish_outbox::PublishOutboxRetryPolicy;
 use crate::ral_journal::RalPendingDelegation;
@@ -32,6 +33,7 @@ pub struct DaemonForegroundInput<'a> {
     pub sleep_ms: u64,
     pub retry_policy: PublishOutboxRetryPolicy,
     pub project_boot_state: Arc<Mutex<ProjectBootState>>,
+    pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
     /// Optional latch shared with the whitelist ingress; when present, the
     /// inner maintenance loop gates the kind 24012 heartbeat on it.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
@@ -44,6 +46,7 @@ pub struct DaemonForegroundStoppableInput<'a> {
     pub sleep_ms: u64,
     pub retry_policy: PublishOutboxRetryPolicy,
     pub project_boot_state: Arc<Mutex<ProjectBootState>>,
+    pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
     /// See [`DaemonForegroundInput::heartbeat_latch`].
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
@@ -154,6 +157,7 @@ where
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
             project_boot_state: input.project_boot_state.clone(),
+            project_event_index: input.project_event_index.clone(),
             heartbeat_latch: input.heartbeat_latch.clone(),
         },
         clock,
@@ -217,6 +221,7 @@ where
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
             project_boot_state: input.project_boot_state.clone(),
+            project_event_index: input.project_event_index.clone(),
             heartbeat_latch: input.heartbeat_latch.clone(),
         },
         clock,
@@ -296,6 +301,7 @@ where
             max_iterations: input.max_iterations,
             sleep_ms: input.sleep_ms,
             project_boot_state: input.project_boot_state.clone(),
+            project_event_index: input.project_event_index.clone(),
             heartbeat_latch: input.heartbeat_latch.clone(),
         },
         DaemonWorkerLoopInput {

@@ -3,17 +3,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::nostr_event::SignedNostrEvent;
+use crate::project_event_index::ProjectEventIndex;
 use crate::project_status_agent_sources::AGENT_INDEX_FILE_NAME;
-use crate::project_status_descriptors::{
-    PROJECT_DESCRIPTOR_FILE_NAME, PROJECTS_DIR_NAME, project_descriptor_path,
-};
 
 const AGENT_INDEX_LOCK_FILE_NAME: &str = "index.lock";
 
@@ -33,10 +31,8 @@ pub struct ProjectNostrIngressOutcome {
 pub enum ProjectNostrIngressError {
     #[error("project event missing d tag")]
     MissingDTag,
-    #[error("failed to create project directory: {0}")]
+    #[error("failed to create agents directory: {0}")]
     CreateDir(io::Error),
-    #[error("failed to write project descriptor: {0}")]
-    WriteDescriptor(io::Error),
     #[error("failed to read agent index: {0}")]
     ReadAgentIndex(io::Error),
     #[error("failed to parse agent index: {0}")]
@@ -77,10 +73,16 @@ impl Serialize for RawAgentIndex {
     }
 }
 
+/// Ingests a kind 31933 project event. The event is upserted into the
+/// in-memory [`ProjectEventIndex`] (newest `created_at` wins per
+/// `(owner_pubkey, d_tag)`), and the project's agent list is committed to
+/// `agents/index.json` under the `byProject` key. There is no per-project
+/// descriptor file — the daemon derives every downstream view from the
+/// index snapshot.
 pub fn handle_project_nostr_event(
     tenex_base_dir: &Path,
     event: &SignedNostrEvent,
-    projects_base: &str,
+    project_event_index: &Arc<Mutex<ProjectEventIndex>>,
 ) -> Result<ProjectNostrIngressOutcome, ProjectNostrIngressError> {
     let d_tag = tag_value(event, "d").ok_or(ProjectNostrIngressError::MissingDTag)?;
     let owner_pubkey = event.pubkey.clone();
@@ -89,28 +91,11 @@ pub fn handle_project_nostr_event(
         .map(str::to_string)
         .collect();
     let repo_url = optional_tag_value(event, "repo");
-    let project_base_path = format!("{}/{}", projects_base.trim_end_matches('/'), d_tag);
 
-    let descriptor_path = project_descriptor_path(tenex_base_dir, d_tag);
-    let is_new_project = !descriptor_path.exists();
-
-    let project_dir = tenex_base_dir.join(PROJECTS_DIR_NAME).join(d_tag);
-    fs::create_dir_all(&project_dir).map_err(ProjectNostrIngressError::CreateDir)?;
-
-    let mut descriptor = json!({
-        "projectOwnerPubkey": owner_pubkey,
-        "projectDTag": d_tag,
-        "projectBasePath": project_base_path,
-        "status": "active"
-    });
-    if let Some(repo_url) = &repo_url {
-        descriptor["repo"] = json!(repo_url);
-    }
-    fs::write(
-        project_dir.join(PROJECT_DESCRIPTOR_FILE_NAME),
-        serde_json::to_string_pretty(&descriptor).expect("descriptor serializes"),
-    )
-    .map_err(ProjectNostrIngressError::WriteDescriptor)?;
+    let is_new_project = project_event_index
+        .lock()
+        .expect("project event index mutex must not be poisoned")
+        .upsert(event.clone());
 
     let agents_dir = tenex_base_dir.join("agents");
     fs::create_dir_all(&agents_dir).map_err(ProjectNostrIngressError::CreateDir)?;
@@ -277,18 +262,23 @@ mod tests {
         }
     }
 
+    fn new_index() -> Arc<Mutex<ProjectEventIndex>> {
+        Arc::new(Mutex::new(ProjectEventIndex::new()))
+    }
+
     #[test]
-    fn writes_project_descriptor_and_agent_index_on_first_event() {
+    fn upserts_index_and_writes_agent_index_on_first_event() {
         let tmp = tempdir().expect("temp dir");
         let base = tmp.path();
         let owner = "a".repeat(64);
         let agent1 = "c".repeat(64);
         let agent2 = "d".repeat(64);
+        let index = new_index();
 
         let outcome = handle_project_nostr_event(
             base,
             &project_event(&owner, "my-project", &[&agent1, &agent2]),
-            "/workspace/projects",
+            &index,
         )
         .expect("handle must succeed");
 
@@ -298,51 +288,35 @@ mod tests {
         assert_eq!(outcome.agent_pubkeys, vec![agent1.clone(), agent2.clone()]);
         assert_eq!(outcome.repo_url, None);
 
-        let descriptor_path = base
-            .join("projects")
-            .join("my-project")
-            .join("project.json");
-        assert!(descriptor_path.exists());
-        let descriptor: Value =
-            serde_json::from_str(&fs::read_to_string(&descriptor_path).unwrap()).unwrap();
-        assert_eq!(descriptor["projectOwnerPubkey"], owner.as_str());
-        assert_eq!(descriptor["projectDTag"], "my-project");
-        assert_eq!(
-            descriptor["projectBasePath"],
-            "/workspace/projects/my-project"
-        );
-        assert_eq!(descriptor["status"], "active");
+        let locked = index.lock().expect("index lock");
+        let stored = locked.get(&owner, "my-project").expect("event indexed");
+        assert_eq!(stored.pubkey, owner);
+        assert_eq!(stored.kind, 31933);
 
         let index_path = base.join("agents").join("index.json");
         assert!(index_path.exists());
-        let index: Value = serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
-        assert!(index["bySlug"].is_object());
-        assert!(index["byEventId"].is_object());
-        let by_project = &index["byProject"]["my-project"];
+        let json: Value =
+            serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
+        assert!(json["bySlug"].is_object());
+        assert!(json["byEventId"].is_object());
+        let by_project = &json["byProject"]["my-project"];
         assert_eq!(by_project[0], agent1.as_str());
         assert_eq!(by_project[1], agent2.as_str());
     }
 
     #[test]
-    fn stores_repo_tag_in_project_descriptor() {
+    fn exposes_repo_tag_from_project_event() {
         let tmp = tempdir().expect("temp dir");
         let base = tmp.path();
         let owner = "a".repeat(64);
         let repo = "https://example.com/project.git";
         let mut event = project_event(&owner, "repo-project", &[]);
         event.tags.push(vec!["repo".to_string(), repo.to_string()]);
+        let index = new_index();
 
-        let outcome =
-            handle_project_nostr_event(base, &event, "/workspace/projects").expect("handle");
+        let outcome = handle_project_nostr_event(base, &event, &index).expect("handle");
 
         assert_eq!(outcome.repo_url.as_deref(), Some(repo));
-        let descriptor_path = base
-            .join("projects")
-            .join("repo-project")
-            .join("project.json");
-        let descriptor: Value =
-            serde_json::from_str(&fs::read_to_string(&descriptor_path).unwrap()).unwrap();
-        assert_eq!(descriptor["repo"], repo);
     }
 
     #[test]
@@ -351,6 +325,7 @@ mod tests {
         let base = tmp.path();
         let owner = "a".repeat(64);
         let agent = "c".repeat(64);
+        let index = new_index();
 
         let existing_index = json!({
             "bySlug": {
@@ -377,28 +352,28 @@ mod tests {
         handle_project_nostr_event(
             base,
             &project_event(&owner, "new-project", &[&agent]),
-            "/workspace",
+            &index,
         )
         .expect("handle must succeed");
 
-        let index: Value = serde_json::from_str(
+        let json: Value = serde_json::from_str(
             &fs::read_to_string(base.join("agents").join("index.json")).unwrap(),
         )
         .unwrap();
         assert!(
-            index["byProject"]["other-project"].is_array(),
+            json["byProject"]["other-project"].is_array(),
             "other-project preserved"
         );
         assert!(
-            index["byProject"]["new-project"].is_array(),
+            json["byProject"]["new-project"].is_array(),
             "new-project added"
         );
         assert!(
-            index["bySlug"]["existing-agent"].is_object(),
+            json["bySlug"]["existing-agent"].is_object(),
             "slug index preserved"
         );
         assert_eq!(
-            index["byEventId"]["event-alpha"],
+            json["byEventId"]["event-alpha"],
             "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         );
     }
@@ -415,7 +390,8 @@ mod tests {
             content: String::new(),
             sig: "c".repeat(128),
         };
-        let err = handle_project_nostr_event(tmp.path(), &event, "/workspace")
+        let index = new_index();
+        let err = handle_project_nostr_event(tmp.path(), &event, &index)
             .expect_err("must fail without d tag");
         assert!(matches!(err, ProjectNostrIngressError::MissingDTag));
     }
@@ -428,12 +404,13 @@ mod tests {
         let agent1 = "c".repeat(64);
         let agent2 = "d".repeat(64);
         let event = project_event(&owner, "idempotent-project", &[&agent1, &agent2]);
+        let index = new_index();
 
-        handle_project_nostr_event(base, &event, "/workspace/projects").expect("first ingest");
+        handle_project_nostr_event(base, &event, &index).expect("first ingest");
         let index_after_first =
             fs::read_to_string(base.join("agents").join("index.json")).expect("first read");
 
-        handle_project_nostr_event(base, &event, "/workspace/projects").expect("second ingest");
+        handle_project_nostr_event(base, &event, &index).expect("second ingest");
         let index_after_second =
             fs::read_to_string(base.join("agents").join("index.json")).expect("second read");
 
@@ -463,29 +440,27 @@ mod tests {
         let agent1 = "c".repeat(64);
         let agent2 = "d".repeat(64);
         let agent3 = "e".repeat(64);
+        let index = new_index();
 
         handle_project_nostr_event(
             base,
             &project_event(&owner, "replaceable", &[&agent1, &agent2]),
-            "/workspace/projects",
+            &index,
         )
         .expect("first ingest");
 
         // A newer 31933 from the same (owner, d_tag) drops agent2 and adds
         // agent3. The stored byProject[<d_tag>] must reflect the new event
         // exactly, including REMOVING agent2.
-        handle_project_nostr_event(
-            base,
-            &project_event(&owner, "replaceable", &[&agent1, &agent3]),
-            "/workspace/projects",
-        )
-        .expect("replacement ingest");
+        let mut newer = project_event(&owner, "replaceable", &[&agent1, &agent3]);
+        newer.created_at += 1;
+        handle_project_nostr_event(base, &newer, &index).expect("replacement ingest");
 
-        let index: Value = serde_json::from_str(
+        let json: Value = serde_json::from_str(
             &fs::read_to_string(base.join("agents").join("index.json")).expect("read index"),
         )
         .expect("index parses");
-        let by_project = index["byProject"]["replaceable"]
+        let by_project = json["byProject"]["replaceable"]
             .as_array()
             .expect("byProject entry must be an array");
 
@@ -506,23 +481,24 @@ mod tests {
 
     #[test]
     fn concurrent_ingress_for_different_projects_does_not_clobber_each_other() {
-        use std::sync::Arc;
         use std::thread;
 
         let tmp = tempdir().expect("temp dir");
         let base: Arc<PathBuf> = Arc::new(tmp.path().to_path_buf());
         let owner = "a".repeat(64);
+        let index = new_index();
 
         let project_count = 8usize;
         let mut handles = Vec::with_capacity(project_count);
         for project_index in 0..project_count {
             let base = Arc::clone(&base);
             let owner = owner.clone();
+            let index = Arc::clone(&index);
             handles.push(thread::spawn(move || {
                 let d_tag = format!("project-{project_index:02}");
                 let agent_pubkey = make_pubkey_hex(project_index);
                 let event = project_event(&owner, &d_tag, &[&agent_pubkey]);
-                handle_project_nostr_event(base.as_path(), &event, "/workspace/projects")
+                handle_project_nostr_event(base.as_path(), &event, &index)
                     .expect("concurrent ingest");
             }));
         }
@@ -530,7 +506,7 @@ mod tests {
             handle.join().expect("thread join");
         }
 
-        let index: Value = serde_json::from_str(
+        let json: Value = serde_json::from_str(
             &fs::read_to_string(base.as_path().join("agents").join("index.json"))
                 .expect("read index"),
         )
@@ -539,7 +515,7 @@ mod tests {
         for project_index in 0..project_count {
             let d_tag = format!("project-{project_index:02}");
             let expected = make_pubkey_hex(project_index);
-            let entry = index["byProject"][&d_tag]
+            let entry = json["byProject"][&d_tag]
                 .as_array()
                 .unwrap_or_else(|| panic!("byProject must contain {d_tag}"));
             assert_eq!(

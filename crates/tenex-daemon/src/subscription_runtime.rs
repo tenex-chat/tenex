@@ -5,16 +5,19 @@ use thiserror::Error;
 
 use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::inbound_routing::{InboundRoutingCatalogError, build_inbound_routing_catalog};
+use crate::project_event_index::ProjectEventIndex;
 use crate::subscription_filters::{
     NostrFilter, build_agent_mentions_filter, build_lesson_filter, build_nip46_reply_filter,
     build_project_agent_snapshot_filter, build_project_tagged_filter, build_static_filters,
 };
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy)]
 pub struct NostrSubscriptionPlanInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub since: Option<u64>,
     pub lesson_definition_ids: &'a [String],
+    pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -49,7 +52,16 @@ pub fn build_nostr_subscription_plan(
     input: NostrSubscriptionPlanInput<'_>,
 ) -> Result<NostrSubscriptionPlan, NostrSubscriptionPlanError> {
     let config = read_backend_config(input.tenex_base_dir)?;
-    let catalog = build_inbound_routing_catalog(input.tenex_base_dir)?;
+    let projects_base = config
+        .projects_base
+        .as_deref()
+        .unwrap_or("/tmp/tenex-projects");
+    let descriptor_report = input
+        .project_event_index
+        .lock()
+        .expect("project event index mutex must not be poisoned")
+        .descriptors_report(projects_base);
+    let catalog = build_inbound_routing_catalog(input.tenex_base_dir, &descriptor_report)?;
     let project_addresses = sorted_deduped(
         catalog
             .projects
