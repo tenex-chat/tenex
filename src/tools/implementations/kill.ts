@@ -403,13 +403,22 @@ async function killAgent(
         reason,
     });
 
-    // Perform cascading abort (blocks until all descendants are aborted)
+    // Perform cascading abort (blocks until all descendants are aborted).
+    // The onDelegationKilled callback informs Rust's RAL journal of each kill,
+    // so Rust remains the durable source of truth for delegation state even
+    // while TS still orchestrates the cascade.
+    const publisher = context.agentPublisher;
     const result = await ralRegistry.abortWithCascade(
         agentPubkey,
         conversationId,
         projectId,
         reason,
-        cooldownRegistry
+        cooldownRegistry,
+        publisher
+            ? async (delegationConversationId, killReason) => {
+                  await publisher.killDelegation(delegationConversationId, killReason);
+              }
+            : undefined
     );
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_completed", {

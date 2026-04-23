@@ -493,6 +493,7 @@ mod tests {
                 RalJournalEvent::DelegationRegistered { .. } => "delegation_registered",
                 RalJournalEvent::WaitingForDelegation { .. } => "waiting_for_delegation",
                 RalJournalEvent::DelegationCompleted { .. } => "delegation_completed",
+                RalJournalEvent::DelegationKilled { .. } => "delegation_killed",
                 RalJournalEvent::Completed { .. } => "completed",
                 RalJournalEvent::NoResponse { .. } => "no_response",
                 RalJournalEvent::Error { .. } => "error",

@@ -49,4 +49,5 @@ export interface AgentRuntimePublisher {
     toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef>;
     sendMessage(intent: TransportMessageIntent, context: EventContext): Promise<PublishedMessageRef>;
     streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void>;
+    killDelegation(delegationConversationId: string, reason: string): Promise<void>;
 }

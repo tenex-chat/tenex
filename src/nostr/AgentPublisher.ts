@@ -576,4 +576,11 @@ export class AgentPublisher implements AgentRuntimePublisher {
             });
         }
     }
+
+    async killDelegation(): Promise<void> {
+        throw new Error(
+            "[AgentPublisher.killDelegation] Not supported: kill_delegation requires the worker-protocol publisher. " +
+            "AgentPublisher is the daemon-side publisher which does not emit worker-protocol frames."
+        );
+    }
 }

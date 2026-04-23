@@ -330,6 +330,16 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         }
     }
 
+    async killDelegation(delegationConversationId: string, reason: string): Promise<void> {
+        await this.options.emit({
+            type: "delegation_killed",
+            correlationId: this.options.execution.correlationId,
+            ...this.identity(),
+            delegationConversationId,
+            reason,
+        });
+    }
+
     private consumeAndEnhanceContext(context: EventContext): EventContext {
         const ralRegistry = RALRegistry.getInstance();
         const unreportedRuntime = ralRegistry.consumeUnreportedRuntime(

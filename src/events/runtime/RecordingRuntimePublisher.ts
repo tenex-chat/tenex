@@ -33,7 +33,8 @@ export interface PublishedRuntimeRecord {
         | "lesson"
         | "sendMessage"
         | "streamTextDelta"
-        | "toolUse";
+        | "toolUse"
+        | "killDelegation";
     payload: Record<string, string | number | boolean | undefined>;
 }
 
@@ -338,6 +339,13 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
             delta: intent.delta,
             deltaLength: intent.delta.length,
             sequence: intent.sequence,
+        });
+    }
+
+    async killDelegation(delegationConversationId: string, reason: string): Promise<void> {
+        this.record("killDelegation", undefined, {
+            delegationConversationId,
+            reason,
         });
     }
 }

@@ -44,6 +44,9 @@ describe("kill tool", () => {
                     dTag: projectId,
                 },
             },
+            agentPublisher: {
+                killDelegation: mock(async () => undefined),
+            },
         } as any;
 
         // Get registry instances
@@ -226,7 +229,8 @@ describe("kill tool", () => {
                 conversationId,
                 projectId,
                 "test abort",
-                cooldownRegistry
+                cooldownRegistry,
+                expect.any(Function)
             );
 
             // Restore
@@ -402,7 +406,8 @@ describe("kill tool", () => {
                 conversationId,
                 targetProjectId,
                 "test kill",
-                cooldownRegistry
+                cooldownRegistry,
+                expect.any(Function)
             );
 
             // Restore
@@ -497,7 +502,8 @@ describe("kill tool", () => {
                 conversationId,
                 targetProjectId,
                 "test kill",
-                cooldownRegistry
+                cooldownRegistry,
+                expect.any(Function)
             );
 
             // Restore

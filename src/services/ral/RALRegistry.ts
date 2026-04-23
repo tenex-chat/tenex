@@ -176,7 +176,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
   abortCurrentTool(agentPubkey: string, conversationId: string): void { this.killSwitchRegistry.abortCurrentTool(agentPubkey, conversationId); }
   abortAllForAgent(agentPubkey: string, conversationId: string): number { return this.killSwitchRegistry.abortAllForAgent(agentPubkey, conversationId); }
-  async abortWithCascade(agentPubkey: string, conversationId: string, projectId: ProjectDTag, reason: string, cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> { return this.killSwitchRegistry.abortWithCascade(agentPubkey, conversationId, projectId, reason, cooldownRegistry); }
+  async abortWithCascade(agentPubkey: string, conversationId: string, projectId: ProjectDTag, reason: string, cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }, onDelegationKilled?: (delegationConversationId: string, reason: string) => Promise<void>): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> { return this.killSwitchRegistry.abortWithCascade(agentPubkey, conversationId, projectId, reason, cooldownRegistry, onDelegationKilled); }
   clearAll(): void { this.stateRegistry.clearAll(); this.delegationRegistry.clearAll(); this.killSwitchRegistry.clearAll(); }
 
   markDelegationKilled(delegationConversationId: string): boolean { return this.killSwitchRegistry.markDelegationKilled(delegationConversationId); }

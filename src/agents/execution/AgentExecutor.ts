@@ -80,6 +80,7 @@ function createSchemaOnlyPublisher(): AgentRuntimePublisher {
         toolUse: async () => failSchemaOnlyAccess("agentPublisher.toolUse"),
         sendMessage: async () => failSchemaOnlyAccess("agentPublisher.sendMessage"),
         streamTextDelta: async () => failSchemaOnlyAccess("agentPublisher.streamTextDelta"),
+        killDelegation: async () => failSchemaOnlyAccess("agentPublisher.killDelegation"),
     };
 }
 

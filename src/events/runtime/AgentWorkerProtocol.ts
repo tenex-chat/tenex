@@ -29,6 +29,7 @@ export const WORKER_TO_DAEMON_MESSAGE_TYPES = [
     "tool_call_completed",
     "tool_call_failed",
     "delegation_registered",
+    "delegation_killed",
     "waiting_for_delegation",
     "publish_request",
     "published",
@@ -375,6 +376,12 @@ const delegationRegisteredMessageSchema = frameSchema("delegation_registered", {
     suggestions: z.array(z.string()).optional(),
 });
 
+const delegationKilledMessageSchema = frameSchema("delegation_killed", {
+    ...executionIdentityShape,
+    delegationConversationId: z.string().min(1),
+    reason: z.string().min(1),
+});
+
 const waitingForDelegationMessageSchema = frameSchema("waiting_for_delegation", {
     ...executionIdentityShape,
     pendingDelegations: z.array(z.string().min(1)),
@@ -490,6 +497,7 @@ export const AgentWorkerProtocolMessageSchema = z.union([
     toolCallCompletedMessageSchema,
     toolCallFailedMessageSchema,
     delegationRegisteredMessageSchema,
+    delegationKilledMessageSchema,
     waitingForDelegationMessageSchema,
     publishRequestMessageSchema,
     publishedMessageSchema,

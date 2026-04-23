@@ -141,7 +141,8 @@ export class KillSwitchRegistry {
     conversationId: string,
     projectId: ProjectDTag,
     reason: string,
-    cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }
+    cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void },
+    onDelegationKilled?: (delegationConversationId: string, reason: string) => Promise<void>
   ): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> {
     if (!reason) {
       throw new Error("[RALRegistry] Missing abort reason for cascade.");
@@ -152,6 +153,12 @@ export class KillSwitchRegistry {
     const pendingDelegations = this.delegations.getConversationPendingDelegations(agentPubkey, conversationId);
     const key = this.deps.makeKey(agentPubkey, conversationId);
     const convDelegations = this.delegations.getConversationDelegationState(key);
+
+    if (onDelegationKilled) {
+      for (const pending of pendingDelegations) {
+        await onDelegationKilled(pending.delegationConversationId, reason);
+      }
+    }
 
     const killedDelegationCount = this.delegations.markAllDelegationsKilled(agentPubkey, conversationId);
     if (killedDelegationCount > 0) {
@@ -219,7 +226,8 @@ export class KillSwitchRegistry {
         descendantConvId,
         descendantProjectId,
         `cascaded from ${shortenConversationId(conversationId)}`,
-        cooldownRegistry
+        cooldownRegistry,
+        onDelegationKilled
       );
 
       abortedTuples.push({ conversationId: descendantConvId, agentPubkey: descendantAgentPubkey });

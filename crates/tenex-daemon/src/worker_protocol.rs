@@ -34,6 +34,7 @@ const WORKER_TO_DAEMON_MESSAGE_TYPES: &[&str] = &[
     "tool_call_completed",
     "tool_call_failed",
     "delegation_registered",
+    "delegation_killed",
     "waiting_for_delegation",
     "publish_request",
     "published",
@@ -293,6 +294,7 @@ pub fn validate_agent_worker_protocol_message(
         "tool_call_completed" => validate_tool_call_completed(object)?,
         "tool_call_failed" => validate_tool_call_failed(object)?,
         "delegation_registered" => validate_delegation_registered(object)?,
+        "delegation_killed" => validate_delegation_killed(object)?,
         "waiting_for_delegation" => validate_waiting_for_delegation(object)?,
         "publish_request" => validate_publish_request(object)?,
         "published" => validate_published(object)?,
@@ -726,6 +728,13 @@ fn validate_delegation_registered(object: &Map<String, Value>) -> WorkerProtocol
         "delegationType",
         &["standard", "followup", "external", "ask"],
     )?;
+    Ok(())
+}
+
+fn validate_delegation_killed(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    validate_execution_identity(object)?;
+    require_string(object, "delegationConversationId")?;
+    require_string(object, "reason")?;
     Ok(())
 }
 

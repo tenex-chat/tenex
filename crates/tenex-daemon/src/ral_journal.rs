@@ -205,6 +205,15 @@ pub enum RalJournalEvent {
         identity: RalJournalIdentity,
         completion: RalCompletedDelegation,
     },
+    DelegationKilled {
+        #[serde(flatten)]
+        identity: RalJournalIdentity,
+        #[serde(rename = "delegationConversationId")]
+        delegation_conversation_id: String,
+        #[serde(rename = "killedAt")]
+        killed_at: u64,
+        reason: String,
+    },
     Completed {
         #[serde(flatten)]
         identity: RalJournalIdentity,
@@ -283,6 +292,7 @@ impl RalJournalEvent {
             | Self::DelegationRegistered { identity, .. }
             | Self::WaitingForDelegation { identity, .. }
             | Self::DelegationCompleted { identity, .. }
+            | Self::DelegationKilled { identity, .. }
             | Self::Completed { identity, .. }
             | Self::NoResponse { identity, .. }
             | Self::Error { identity, .. }
@@ -699,6 +709,18 @@ fn apply_record(
             entry.error = None;
             entry.abort_reason = None;
             entry.crash_reason = None;
+        }
+        RalJournalEvent::DelegationKilled {
+            delegation_conversation_id,
+            killed_at,
+            ..
+        } => {
+            for pending in entry.pending_delegations.iter_mut() {
+                if pending.delegation_conversation_id == *delegation_conversation_id {
+                    pending.killed = Some(true);
+                    pending.killed_at = Some(*killed_at);
+                }
+            }
         }
         RalJournalEvent::Completed {
             worker_id,

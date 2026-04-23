@@ -263,6 +263,8 @@ where
         WorkerMessageAction::ControlTelemetry { kind } => {
             if kind == WorkerControlTelemetryKind::DelegationRegistered {
                 handle_delegation_registered(runtime_state, &input, &message_plan)?;
+            } else if kind == WorkerControlTelemetryKind::DelegationKilled {
+                handle_delegation_killed(runtime_state, &input, &message_plan)?;
             }
             Ok(WorkerMessageFlowOutcome::ControlTelemetry {
                 message: message_plan,
@@ -396,6 +398,51 @@ fn handle_delegation_registered(
             worker_id: active_worker.worker_id,
             claim_token: active_worker.claim_token,
             pending_delegation,
+        },
+    );
+    append_ral_journal_record(input.daemon_dir, &record).map_err(|source| {
+        WorkerMessageFlowError::RalJournal {
+            source: Box::new(source),
+        }
+    })?;
+
+    Ok(())
+}
+
+fn handle_delegation_killed(
+    runtime_state: &WorkerRuntimeState,
+    input: &WorkerMessageFlowInput<'_>,
+    message_plan: &WorkerMessagePlan,
+) -> Result<(), WorkerMessageFlowError> {
+    let active_worker =
+        ensure_active_worker_matches_message(runtime_state, input.worker_id, message_plan)?;
+    let delegation_conversation_id =
+        required_string(&message_plan.message, "delegationConversationId")?.to_string();
+    let reason = required_string(&message_plan.message, "reason")?.to_string();
+    let scheduler = RalScheduler::from_daemon_dir(input.daemon_dir).map_err(|source| {
+        WorkerMessageFlowError::RalJournal {
+            source: Box::new(source),
+        }
+    })?;
+    let sequence = scheduler.state().last_sequence.checked_add(1).ok_or(
+        WorkerMessageFlowError::RalJournalSequenceExhausted {
+            last_sequence: scheduler.state().last_sequence,
+        },
+    )?;
+    let record = RalJournalRecord::new(
+        RAL_JOURNAL_WRITER_RUST_DAEMON,
+        env!("CARGO_PKG_VERSION"),
+        sequence,
+        input.observed_at,
+        format!(
+            "{}:delegation_killed",
+            message_plan.metadata.correlation_id
+        ),
+        RalJournalEvent::DelegationKilled {
+            identity: active_worker.identity,
+            delegation_conversation_id,
+            killed_at: input.observed_at,
+            reason,
         },
     );
     append_ral_journal_record(input.daemon_dir, &record).map_err(|source| {

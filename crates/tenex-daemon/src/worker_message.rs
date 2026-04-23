@@ -40,6 +40,7 @@ pub enum WorkerControlTelemetryKind {
     ToolCallCompleted,
     ToolCallFailed,
     DelegationRegistered,
+    DelegationKilled,
     SilentCompletionRequested,
 }
 
@@ -114,6 +115,7 @@ fn action_for_worker_message(
         "tool_call_completed" => Ok(control(WorkerControlTelemetryKind::ToolCallCompleted)),
         "tool_call_failed" => Ok(control(WorkerControlTelemetryKind::ToolCallFailed)),
         "delegation_registered" => Ok(control(WorkerControlTelemetryKind::DelegationRegistered)),
+        "delegation_killed" => Ok(control(WorkerControlTelemetryKind::DelegationKilled)),
         "waiting_for_delegation" => Ok(terminal(WorkerTerminalResultKind::WaitingForDelegation)),
         "publish_request" => Ok(WorkerMessageAction::PublishRequestCandidate),
         "published" => Ok(WorkerMessageAction::PublishedNotification {
