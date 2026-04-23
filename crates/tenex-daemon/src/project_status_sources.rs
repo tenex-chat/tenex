@@ -28,6 +28,14 @@ pub enum ProjectStatusSourceError {
 struct RawGlobalLlms {
     #[serde(default)]
     configurations: serde_json::Map<String, Value>,
+    #[serde(rename = "default")]
+    default_model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalLlmConfig {
+    pub model_keys: Vec<String>,
+    pub default_model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,12 +63,15 @@ pub fn project_schedules_path(base_dir: impl AsRef<Path>, project_d_tag: &str) -
         .join(PROJECT_SCHEDULES_FILE_NAME)
 }
 
-pub fn read_global_llm_model_keys(
+pub fn read_global_llm_config(
     base_dir: impl AsRef<Path>,
-) -> Result<Vec<String>, ProjectStatusSourceError> {
+) -> Result<GlobalLlmConfig, ProjectStatusSourceError> {
     let path = global_llms_path(base_dir);
     let Some(content) = read_optional_text_file(&path)? else {
-        return Ok(Vec::new());
+        return Ok(GlobalLlmConfig {
+            model_keys: Vec::new(),
+            default_model: None,
+        });
     };
 
     let raw: RawGlobalLlms =
@@ -71,7 +82,17 @@ pub fn read_global_llm_model_keys(
 
     let mut model_keys: Vec<String> = raw.configurations.into_iter().map(|(key, _)| key).collect();
     model_keys.sort();
-    Ok(model_keys)
+    let default_model = raw.default_model.and_then(|s| nonempty(Some(s)));
+    Ok(GlobalLlmConfig {
+        model_keys,
+        default_model,
+    })
+}
+
+pub fn read_global_llm_model_keys(
+    base_dir: impl AsRef<Path>,
+) -> Result<Vec<String>, ProjectStatusSourceError> {
+    read_global_llm_config(base_dir).map(|c| c.model_keys)
 }
 
 pub fn read_project_scheduled_tasks(
@@ -307,6 +328,33 @@ mod tests {
             model_keys,
             vec!["alpha".to_string(), "beta".to_string(), "zeta".to_string()]
         );
+    }
+
+    #[test]
+    fn reads_global_llm_config_with_default_model() {
+        let base_dir = unique_temp_dir("project-status-llms-config");
+        fs::create_dir_all(&base_dir).expect("create temp dir");
+        fs::write(
+            global_llms_path(&base_dir),
+            r#"{
+                "configurations": {
+                    "zeta": { "provider": "openai", "model": "gpt-4o" },
+                    "alpha": { "provider": "anthropic", "model": "claude-3.5-sonnet" }
+                },
+                "default": "alpha"
+            }"#,
+        )
+        .expect("write llms file");
+
+        let config = read_global_llm_config(&base_dir).expect("read llms config");
+
+        assert_eq!(
+            config.model_keys,
+            vec!["alpha".to_string(), "zeta".to_string()]
+        );
+        assert_eq!(config.default_model, Some("alpha".to_string()));
+
+        fs::remove_dir_all(base_dir).expect("cleanup");
     }
 
     #[test]

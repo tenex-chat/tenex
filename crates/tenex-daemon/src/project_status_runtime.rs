@@ -16,7 +16,7 @@ use crate::project_status_agent_sources::{
 };
 use crate::project_status_snapshot::ProjectStatusSnapshot;
 use crate::project_status_sources::{
-    ProjectStatusSourceError, read_global_llm_model_keys, read_project_scheduled_tasks,
+    GlobalLlmConfig, ProjectStatusSourceError, read_global_llm_config, read_project_scheduled_tasks,
 };
 use crate::project_worktrees::read_project_worktrees;
 use crate::publish_runtime::BackendPublishRuntimeOutcome;
@@ -46,6 +46,7 @@ pub struct ProjectStatusRuntimeOutcome {
     pub agent_inventory: AgentInventoryReport,
     pub project_agent_sources: ProjectStatusAgentSourceReport,
     pub llm_model_keys: Vec<String>,
+    pub global_default_model: Option<String>,
     pub scheduled_tasks: Vec<crate::backend_events::project_status::ProjectStatusScheduledTask>,
     pub snapshot: ProjectStatusSnapshot,
     pub project_status: BackendPublishRuntimeOutcome,
@@ -73,7 +74,10 @@ pub fn publish_project_status_from_filesystem(
     let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
     let project_agent_sources =
         read_project_status_agent_sources(input.tenex_base_dir, input.project_d_tag)?;
-    let llm_model_keys = read_global_llm_model_keys(input.tenex_base_dir)?;
+    let GlobalLlmConfig {
+        model_keys: llm_model_keys,
+        default_model: global_default_model,
+    } = read_global_llm_config(input.tenex_base_dir)?;
     let scheduled_tasks = read_project_scheduled_tasks(input.tenex_base_dir, input.project_d_tag)?;
     let project_tag =
         ProjectStatusSnapshot::project_a_tag(input.project_owner_pubkey, input.project_d_tag);
@@ -109,7 +113,11 @@ pub fn publish_project_status_from_filesystem(
         config.whitelisted_pubkeys.clone(),
         input.project_manager_pubkey.map(str::to_string),
         agents,
-        project_status_models(&llm_model_keys, &project_agent_sources),
+        project_status_models(
+            &llm_model_keys,
+            global_default_model.as_deref(),
+            &project_agent_sources,
+        ),
         project_agent_sources.tools.clone(),
         project_agent_sources.skills.clone(),
         project_agent_sources.mcp_servers.clone(),
@@ -142,6 +150,7 @@ pub fn publish_project_status_from_filesystem(
         agent_inventory,
         project_agent_sources,
         llm_model_keys,
+        global_default_model,
         scheduled_tasks,
         snapshot,
         project_status,
@@ -162,17 +171,45 @@ fn project_status_correlation_id(project_d_tag: &str) -> String {
 
 fn project_status_models(
     llm_model_keys: &[String],
+    global_default_model: Option<&str>,
     project_agent_sources: &ProjectStatusAgentSourceReport,
 ) -> Vec<ProjectStatusModel> {
-    llm_model_keys
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let llm_keys_set: BTreeSet<&str> = llm_model_keys.iter().map(String::as_str).collect();
+
+    let mut model_to_agents: BTreeMap<&str, BTreeSet<String>> = llm_model_keys
         .iter()
-        .map(|slug| ProjectStatusModel {
-            slug: slug.clone(),
-            agents: project_agent_sources
-                .models
-                .iter()
-                .find(|model| model.slug == *slug)
-                .map_or_else(Vec::new, |model| model.agents.clone()),
+        .map(|key| (key.as_str(), BTreeSet::new()))
+        .collect();
+
+    let mut unassigned: BTreeSet<String> = project_agent_sources
+        .agents
+        .iter()
+        .map(|a| a.slug.clone())
+        .collect();
+
+    for model in &project_agent_sources.models {
+        if llm_keys_set.contains(model.slug.as_str()) {
+            let entry = model_to_agents.entry(model.slug.as_str()).or_default();
+            for slug in &model.agents {
+                entry.insert(slug.clone());
+                unassigned.remove(slug.as_str());
+            }
+        }
+    }
+
+    if let Some(default) = global_default_model {
+        if let Some(entry) = model_to_agents.get_mut(default) {
+            entry.extend(unassigned);
+        }
+    }
+
+    model_to_agents
+        .into_iter()
+        .map(|(slug, agents)| ProjectStatusModel {
+            slug: slug.to_string(),
+            agents: agents.into_iter().collect(),
         })
         .collect()
 }
@@ -598,5 +635,78 @@ mod tests {
         let _ = fs::remove_dir_all(tenex_base_dir);
         let _ = fs::remove_dir_all(daemon_dir);
         let _ = fs::remove_dir_all(project_base_path);
+    }
+
+    #[test]
+    fn agents_without_model_are_assigned_to_global_default() {
+        let tenex_base_dir = unique_temp_dir("project-status-runtime-default-model-base");
+        let daemon_dir = unique_temp_dir("project-status-runtime-default-model-daemon");
+        let agents_dir = agents_dir(&tenex_base_dir);
+        let project_dir = tenex_base_dir.join("projects").join("demo-project");
+
+        fs::create_dir_all(&agents_dir).expect("create agents dir");
+        fs::create_dir_all(&daemon_dir).expect("create daemon dir");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        let owner = pubkey_hex(0x02);
+        let worker_a = pubkey_hex(0x05);
+        let worker_b = pubkey_hex(0x06);
+
+        write_config(&tenex_base_dir, &[&owner]);
+        fs::write(
+            agents_dir.join("index.json"),
+            format!(r#"{{ "byProject": {{ "demo-project": ["{worker_a}", "{worker_b}"] }} }}"#),
+        )
+        .expect("write index");
+        fs::write(
+            agents_dir.join(format!("{worker_a}.json")),
+            r#"{ "slug": "worker-a", "default": { "model": "specific" } }"#,
+        )
+        .expect("write worker-a");
+        fs::write(
+            agents_dir.join(format!("{worker_b}.json")),
+            r#"{ "slug": "worker-b" }"#,
+        )
+        .expect("write worker-b (no model)");
+        fs::write(
+            tenex_base_dir.join("llms.json"),
+            r#"{ "configurations": { "specific": {}, "default-model": {} }, "default": "default-model" }"#,
+        )
+        .expect("write llms");
+
+        let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
+            tenex_base_dir: &tenex_base_dir,
+            daemon_dir: &daemon_dir,
+            created_at: 1_710_002_000,
+            accepted_at: 1_710_002_000_100,
+            request_timestamp: 1_710_002_000_050,
+            project_owner_pubkey: &owner,
+            project_d_tag: "demo-project",
+            project_manager_pubkey: None,
+            project_base_path: None,
+            agents: None,
+            worktrees: Some(&[]),
+        })
+        .expect("publish must succeed");
+
+        assert_eq!(
+            outcome.global_default_model,
+            Some("default-model".to_string())
+        );
+
+        let event_tags = &outcome.project_status.record.event.tags;
+        assert!(event_tags.contains(&vec![
+            "model".to_string(),
+            "specific".to_string(),
+            "worker-a".to_string(),
+        ]));
+        assert!(event_tags.contains(&vec![
+            "model".to_string(),
+            "default-model".to_string(),
+            "worker-b".to_string(),
+        ]));
+
+        let _ = fs::remove_dir_all(tenex_base_dir);
+        let _ = fs::remove_dir_all(daemon_dir);
     }
 }

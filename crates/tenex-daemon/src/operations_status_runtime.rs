@@ -81,6 +81,22 @@ pub struct OperationsStatusPublishRuntimeInput<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsStatusPublishConversationInput<'a> {
+    pub tenex_base_dir: &'a Path,
+    pub daemon_dir: &'a Path,
+    pub project_id: &'a str,
+    pub project_owner_pubkey: &'a str,
+    pub project_d_tag: &'a str,
+    pub created_at: u64,
+    pub accepted_at: u64,
+    pub request_timestamp: u64,
+    pub conversation_id: &'a str,
+    pub agent_pubkeys: &'a [String],
+    pub variant: &'a str,
+    pub request_sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationsStatusPublishedDraft {
     pub draft: OperationsStatusDraft,
     pub publish: BackendPublishRuntimeOutcome,
@@ -245,6 +261,33 @@ pub fn publish_operations_status_transition_from_runtime(
         active,
         cleanup,
     })
+}
+
+pub fn publish_operations_status_conversation(
+    input: OperationsStatusPublishConversationInput<'_>,
+) -> Result<OperationsStatusPublishedDraft, OperationsStatusRuntimeError> {
+    let config = read_backend_config(input.tenex_base_dir)?;
+    let signer = config.backend_signer()?;
+    let project_tag = project_a_tag(input.project_owner_pubkey, input.project_d_tag);
+    let draft = OperationsStatusDraft {
+        created_at: input.created_at,
+        conversation_id: input.conversation_id.to_string(),
+        whitelisted_pubkeys: config.whitelisted_pubkeys,
+        agent_pubkeys: input.agent_pubkeys.to_vec(),
+        project_tag,
+    };
+
+    Ok(publish_operations_status_draft(
+        input.daemon_dir,
+        input.accepted_at,
+        input.request_timestamp,
+        input.project_id,
+        input.project_d_tag,
+        input.variant,
+        input.request_sequence,
+        draft,
+        &signer,
+    )?)
 }
 
 fn publish_operations_status_draft<S: crate::backend_events::heartbeat::BackendSigner>(
