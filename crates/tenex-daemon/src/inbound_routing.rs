@@ -457,12 +457,15 @@ mod tests {
         let owner = pubkey_hex(0x11);
         let first_agent = pubkey_hex(0x21);
         let second_agent = pubkey_hex(0x31);
-        write_project(&temp_dir, "project-alpha", &owner, "/repo/alpha");
+        let mut index = crate::project_event_index::ProjectEventIndex::new();
+        write_project(&temp_dir, &mut index, "project-alpha", &owner);
         write_agent_index(&temp_dir, "project-alpha", &[&first_agent, &second_agent]);
         write_agent(&temp_dir, &first_agent, "alpha-one");
         write_agent(&temp_dir, &second_agent, "alpha-two");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
+        let descriptor_report = descriptor_report_for(&index, "/repo");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &descriptor_report)
+            .expect("catalog must build");
         let mut envelope = nostr_envelope(&first_agent, "event-new");
         envelope.recipients.push(nostr_recipient(&second_agent));
         envelope.channel.project_binding = Some(format!("31933:{owner}:project-alpha"));
@@ -477,7 +480,7 @@ mod tests {
             panic!("expected routed resolution");
         };
         assert_eq!(route.project_id, "project-alpha");
-        assert_eq!(route.project_base_path, "/repo/alpha");
+        assert_eq!(route.project_base_path, "/repo/project-alpha");
         assert_eq!(
             route.metadata_path,
             temp_dir.join("projects").join("project-alpha")
@@ -500,11 +503,14 @@ mod tests {
         let temp_dir = unique_temp_dir("recipient-project");
         let owner = pubkey_hex(0x12);
         let agent = pubkey_hex(0x22);
-        write_project(&temp_dir, "project-beta", &owner, "/repo/beta");
+        let mut index = crate::project_event_index::ProjectEventIndex::new();
+        write_project(&temp_dir, &mut index, "project-beta", &owner);
         write_agent_index(&temp_dir, "project-beta", &[&agent]);
         write_agent(&temp_dir, &agent, "beta-agent");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
+        let descriptor_report = descriptor_report_for(&index, "/repo");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &descriptor_report)
+            .expect("catalog must build");
         let envelope = nostr_envelope(&agent, "event-new");
 
         let resolution = resolve_inbound_route(InboundRoutingInput {
@@ -528,11 +534,14 @@ mod tests {
         let temp_dir = unique_temp_dir("self-addressed-agent-echo");
         let owner = pubkey_hex(0x17);
         let agent = pubkey_hex(0x27);
-        write_project(&temp_dir, "project-echo", &owner, "/repo/echo");
+        let mut index = crate::project_event_index::ProjectEventIndex::new();
+        write_project(&temp_dir, &mut index, "project-echo", &owner);
         write_agent_index(&temp_dir, "project-echo", &[&agent]);
         write_agent(&temp_dir, &agent, "echo-agent");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
+        let descriptor_report = descriptor_report_for(&index, "/repo");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &descriptor_report)
+            .expect("catalog must build");
         let mut envelope = nostr_envelope(&agent, "event-self");
         envelope.principal = nostr_recipient(&agent);
         envelope.channel.project_binding = Some(format!("31933:{owner}:project-echo"));
@@ -558,7 +567,8 @@ mod tests {
         let temp_dir = unique_temp_dir("conversation-lookup");
         let owner = pubkey_hex(0x13);
         let agent = pubkey_hex(0x23);
-        write_project(&temp_dir, "project-gamma", &owner, "/repo/gamma");
+        let mut index = crate::project_event_index::ProjectEventIndex::new();
+        write_project(&temp_dir, &mut index, "project-gamma", &owner);
         write_agent_index(&temp_dir, "project-gamma", &[&agent]);
         write_agent(&temp_dir, &agent, "gamma-agent");
         let conversations_dir = temp_dir
@@ -578,7 +588,9 @@ mod tests {
         )
         .expect("conversation file must write");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
+        let descriptor_report = descriptor_report_for(&index, "/repo");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &descriptor_report)
+            .expect("catalog must build");
         let mut envelope = nostr_envelope(&agent, "event-reply");
         envelope.message.reply_to_id = Some("nostr:intermediate-event".to_string());
 
@@ -602,13 +614,16 @@ mod tests {
         let owner_a = pubkey_hex(0x14);
         let owner_b = pubkey_hex(0x15);
         let shared_agent = pubkey_hex(0x24);
-        write_project(&temp_dir, "project-a", &owner_a, "/repo/a");
-        write_project(&temp_dir, "project-b", &owner_b, "/repo/b");
+        let mut index = crate::project_event_index::ProjectEventIndex::new();
+        write_project(&temp_dir, &mut index, "project-a", &owner_a);
+        write_project(&temp_dir, &mut index, "project-b", &owner_b);
         write_agent_index(&temp_dir, "project-a", &[&shared_agent]);
         write_agent_index(&temp_dir, "project-b", &[&shared_agent]);
         write_agent(&temp_dir, &shared_agent, "shared-agent");
 
-        let catalog = build_inbound_routing_catalog(&temp_dir, &crate::project_status_descriptors::ProjectStatusDescriptorReport { descriptors: vec![], skipped_files: vec![] }).expect("catalog must build");
+        let descriptor_report = descriptor_report_for(&index, "/repo");
+        let catalog = build_inbound_routing_catalog(&temp_dir, &descriptor_report)
+            .expect("catalog must build");
         let envelope = nostr_envelope(&shared_agent, "event-new");
         let resolution = resolve_inbound_route(InboundRoutingInput {
             catalog: &catalog,
@@ -667,20 +682,30 @@ mod tests {
         }
     }
 
-    fn write_project(temp_dir: &Path, project_id: &str, owner: &str, project_base_path: &str) {
+    fn write_project(
+        temp_dir: &Path,
+        index: &mut crate::project_event_index::ProjectEventIndex,
+        project_id: &str,
+        owner: &str,
+    ) {
         let project_dir = temp_dir.join("projects").join(project_id);
         fs::create_dir_all(&project_dir).expect("project dir must create");
-        fs::write(
-            project_dir.join("project.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "projectOwnerPubkey": owner,
-                "projectDTag": project_id,
-                "projectBasePath": project_base_path,
-                "status": "active"
-            }))
-            .expect("project json must serialize"),
-        )
-        .expect("project descriptor must write");
+        index.upsert(crate::nostr_event::SignedNostrEvent {
+            id: format!("project-event-{project_id}"),
+            pubkey: owner.to_string(),
+            created_at: 1,
+            kind: 31933,
+            tags: vec![vec!["d".to_string(), project_id.to_string()]],
+            content: String::new(),
+            sig: "0".repeat(128),
+        });
+    }
+
+    fn descriptor_report_for(
+        index: &crate::project_event_index::ProjectEventIndex,
+        projects_base: &str,
+    ) -> ProjectStatusDescriptorReport {
+        index.descriptors_report(projects_base)
     }
 
     fn write_agent_index(temp_dir: &Path, project_id: &str, pubkeys: &[&str]) {

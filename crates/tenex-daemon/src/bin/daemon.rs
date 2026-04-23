@@ -161,6 +161,9 @@ where
 
     let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)?;
     let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
+    let project_event_index = Arc::new(Mutex::new(
+        tenex_daemon::project_event_index::ProjectEventIndex::new(),
+    ));
 
     // While the daemon is running, a dedicated thread watches for SIGHUP
     // (via the global reload flag set by `request_daemon_reload`) and
@@ -180,8 +183,10 @@ where
             .as_ref()
             .map(|wiring| Arc::clone(&wiring.ingress)),
         Arc::clone(&project_boot_state),
+        Arc::clone(&project_event_index),
     )?;
-    let gateway_supervisor = start_gateway_supervisor_from_options(&options)?;
+    let gateway_supervisor =
+        start_gateway_supervisor_from_options(&options, Arc::clone(&project_event_index))?;
 
     let mut telegram_registry = build_telegram_publisher_registry_from_options(&options)?;
     let heartbeat_latch = whitelist_wiring
@@ -193,6 +198,7 @@ where
             &options,
             heartbeat_latch.clone(),
             Arc::clone(&project_boot_state),
+            Arc::clone(&project_event_index),
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -205,6 +211,7 @@ where
             &options,
             heartbeat_latch,
             project_boot_state,
+            project_event_index,
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -535,8 +542,8 @@ fn start_nostr_subscription_supervisor_from_options(
     options: &DaemonCliOptions,
     whitelist_ingress: Option<Arc<WhitelistIngress>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
+    project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
-    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
         tenex_base_dir: &tenex_base_dir,
@@ -558,6 +565,7 @@ fn start_nostr_subscription_supervisor_from_options(
         NostrSubscriptionGatewayConfig::new(tenex_base_dir.clone(), daemon_dir.clone(), plan)
             .with_auth_signer(auth_signer);
     config.project_boot_state = project_boot_state;
+    config.project_event_index = project_event_index;
     if let Some(ingress) = whitelist_ingress {
         config = config.with_whitelist_ingress(ingress);
     }
@@ -686,6 +694,7 @@ fn build_telegram_publisher_registry_from_options(
 /// configured; the gateway is simply not started in that case.
 fn start_gateway_supervisor_from_options(
     options: &DaemonCliOptions,
+    project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
 ) -> Result<Option<TelegramGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let bots = read_agent_gateway_bots(&tenex_base_dir)
@@ -708,6 +717,7 @@ fn start_gateway_supervisor_from_options(
     config.bots = bots;
     config.writer_version = daemon_writer_version();
     config.signer = Some(signer);
+    config.project_event_index = project_event_index;
 
     match start_telegram_gateway(config, NoopIngressObserver) {
         Ok(supervisor) => Ok(Some(supervisor)),
@@ -729,6 +739,7 @@ fn run_daemon_foreground<C, S, Stop, P>(
     options: &DaemonCliOptions,
     heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
+    project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
     clock: &mut C,
     sleeper: &mut S,
     stop_signal: &mut Stop,
@@ -749,9 +760,6 @@ where
     let worker_config = AgentWorkerProcessConfig::default();
     let mut worker_runtime_state = WorkerRuntimeState::default();
     let mut worker_spawner = AgentWorkerProcessDispatchSpawner;
-    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(
-        tenex_daemon::project_event_index::ProjectEventIndex::new(),
-    ));
     let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
         &shell,
         DaemonForegroundStoppableInput {
@@ -760,8 +768,8 @@ where
             sleep_ms: options.sleep_ms,
             retry_policy: PublishOutboxRetryPolicy::default(),
             project_boot_state,
+            project_event_index,
             heartbeat_latch,
-            project_event_index: std::sync::Arc::clone(&project_event_index),
         },
         DaemonForegroundWorkerInput {
             runtime_state: &mut worker_runtime_state,
@@ -1244,6 +1252,9 @@ mod tests {
             &options,
             None,
             Arc::new(Mutex::new(ProjectBootState::new())),
+            Arc::new(Mutex::new(
+                tenex_daemon::project_event_index::ProjectEventIndex::new(),
+            )),
             &mut clock,
             &mut sleeper,
             &mut stop_signal,
@@ -1445,7 +1456,6 @@ mod tests {
 
     #[test]
     fn subscription_plan_includes_14199_and_nip46_filters_when_owner_is_whitelisted() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
         use tenex_daemon::subscription_runtime::{
             NostrSubscriptionPlanInput, build_nostr_subscription_plan,
         };
@@ -1465,6 +1475,9 @@ mod tests {
         )
         .expect("config must write");
 
+        let project_event_index = Arc::new(Mutex::new(
+            tenex_daemon::project_event_index::ProjectEventIndex::new(),
+        ));
         let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
             tenex_base_dir: &tenex_base_dir,
             since: Some(1_710_001_000),

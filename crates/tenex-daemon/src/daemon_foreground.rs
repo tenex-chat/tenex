@@ -597,7 +597,6 @@ mod tests {
 
     #[test]
     fn foreground_runner_runs_the_tick_loop_and_shuts_down() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = foreground_fixture("foreground_runner_runs_the_tick_loop_and_shuts_down");
         let shell = test_shell(&fixture.daemon_dir);
         let mut clock = RecordingClock {
@@ -610,6 +609,7 @@ mod tests {
         };
         let mut sleeper = RecordingSleeper::default();
         let mut publisher = RecordingPublisher::default();
+        let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let report = run_daemon_foreground_from_filesystem(
             &shell,
@@ -619,8 +619,8 @@ mod tests {
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
+                project_event_index: Arc::clone(&project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -658,7 +658,6 @@ mod tests {
 
     #[test]
     fn foreground_runner_until_stopped_honors_stop_signal_and_shuts_down() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture =
             foreground_fixture("foreground_runner_until_stopped_honors_stop_signal_and_shuts_down");
         let shell = test_shell(&fixture.daemon_dir);
@@ -672,6 +671,7 @@ mod tests {
             stop_on_or_after: 2,
         };
         let mut publisher = RecordingPublisher::default();
+        let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let report = run_daemon_foreground_until_stopped_from_filesystem(
             &shell,
@@ -681,8 +681,8 @@ mod tests {
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
+                project_event_index: Arc::clone(&project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -711,7 +711,6 @@ mod tests {
 
     #[test]
     fn foreground_runner_with_worker_runs_runtime_and_shuts_down() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = foreground_fixture("foreground_runner_with_worker_runs_runtime");
         let shell = test_shell(&fixture.daemon_dir);
         let mut clock = RecordingClock {
@@ -728,6 +727,7 @@ mod tests {
         let mut spawner = EmptyQueueSpawner::default();
         let mut runtime_state = WorkerRuntimeState::default();
         let worker_config = AgentWorkerProcessConfig::default();
+        let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
             &shell,
@@ -737,8 +737,8 @@ mod tests {
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
+                project_event_index: Arc::clone(&project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonForegroundWorkerInput {
                 runtime_state: &mut runtime_state,
@@ -784,7 +784,6 @@ mod tests {
 
     #[test]
     fn foreground_runner_with_worker_executes_queued_dispatch_from_sidecar() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = foreground_fixture("foreground_runner_with_worker_executes_dispatch");
         seed_claimed_ral(&fixture.daemon_dir);
         seed_queued_dispatch(&fixture.daemon_dir);
@@ -812,6 +811,7 @@ mod tests {
         let mut telegram_publisher = NoTelegramPublisher;
         let mut runtime_state = WorkerRuntimeState::default();
         let worker_config = AgentWorkerProcessConfig::default();
+        let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
             &shell,
@@ -821,8 +821,8 @@ mod tests {
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
+                project_event_index: Arc::clone(&project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonForegroundWorkerInput {
                 runtime_state: &mut runtime_state,
@@ -895,7 +895,6 @@ mod tests {
 
     #[test]
     fn foreground_runner_releases_lock_and_status_when_the_tick_loop_fails() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let daemon_dir = unique_temp_daemon_dir();
         let shell = test_shell(&daemon_dir);
         let mut clock = RecordingClock {
@@ -904,6 +903,7 @@ mod tests {
         };
         let mut sleeper = RecordingSleeper::default();
         let mut publisher = RecordingPublisher::default();
+        let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
         let error = run_daemon_foreground_from_filesystem(
             &shell,
@@ -913,8 +913,8 @@ mod tests {
                 sleep_ms: 25,
                 retry_policy: PublishOutboxRetryPolicy::default(),
                 project_boot_state: empty_project_boot_state(),
+                project_event_index: Arc::clone(&project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -924,10 +924,9 @@ mod tests {
 
         match error {
             DaemonForegroundError::Tick { source } => {
+                let message = source.to_string();
                 assert!(
-                    source
-                        .to_string()
-                        .contains("backend-events maintenance failed"),
+                    message.contains("config.json"),
                     "unexpected tick failure: {source}"
                 );
             }

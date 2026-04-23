@@ -712,7 +712,6 @@ mod tests {
                 project_d_tag: "demo".to_string(),
                 project_manager_pubkey: Some(agent_pubkey.clone()),
                 project_base_path: Some(project_base_path.clone()),
-                
             };
 
             fs::create_dir_all(tenex_base_dir.join("projects").join("demo"))

@@ -34,9 +34,8 @@ use tenex_daemon::daemon_maintenance::{
 };
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
-use tenex_daemon::project_status_descriptors::{
-    ProjectStatusDescriptorReport,
-};
+use tenex_daemon::project_event_index::ProjectEventIndex;
+use tenex_daemon::project_status_descriptors::ProjectStatusDescriptorReport;
 use tenex_daemon::project_status_runtime::{
     ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
@@ -369,7 +368,8 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
 fn inspect_nostr_subscription_plan(
     options: &DaemonControlCliOptions,
 ) -> Result<NostrSubscriptionPlanDiagnostics, CliError> {
-    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
+    let project_event_index =
+        std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
         tenex_base_dir: &options.tenex_base_dir,
         since: options.since,
@@ -405,14 +405,18 @@ fn run_backend_events_periodic_tick(
         ));
     }
 
-    let project_descriptor_report: Option<ProjectStatusDescriptorReport> = if options.discover_projects {
-        Some(ProjectStatusDescriptorReport {
-            descriptors: Vec::new(),
-            skipped_files: Vec::new(),
-        })
-    } else {
-        None
-    };
+    let project_descriptor_report: Option<ProjectStatusDescriptorReport> =
+        if options.discover_projects {
+            let config = read_backend_config(&options.tenex_base_dir)
+                .map_err(|error| runtime_error(error.to_string()))?;
+            let projects_base = config
+                .projects_base
+                .as_deref()
+                .unwrap_or("/tmp/tenex-projects");
+            Some(ProjectEventIndex::new().descriptors_report(projects_base))
+        } else {
+            None
+        };
     let discovered_projects = project_descriptor_report
         .as_ref()
         .map(|report| {
@@ -485,14 +489,15 @@ fn run_backend_events_periodic_tick(
 fn run_daemon_maintenance(
     options: &DaemonControlCliOptions,
 ) -> Result<DaemonMaintenanceDiagnostics, CliError> {
-    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
+    let project_event_index =
+        std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
     let diagnostics = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
         tenex_base_dir: &options.tenex_base_dir,
         daemon_dir: &options.daemon_dir,
         now_ms: options.inspected_at,
         project_boot_state: tenex_daemon::project_boot_state::empty_booted_projects_state(),
+        project_event_index,
         heartbeat_latch: None,
-        project_event_index: std::sync::Arc::clone(&project_event_index),
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 
@@ -505,7 +510,6 @@ fn run_daemon_maintenance(
 fn run_daemon_foreground(
     options: &DaemonControlCliOptions,
 ) -> Result<DaemonForegroundDiagnostics, CliError> {
-    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(tenex_daemon::project_event_index::ProjectEventIndex::new()));
     let iterations = options
         .iterations
         .ok_or_else(|| usage_error("--iterations is required"))?;
@@ -524,6 +528,8 @@ fn run_daemon_foreground(
     let shell = DaemonShell::new(&options.daemon_dir);
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
+    let project_event_index =
+        std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
     let report = run_daemon_foreground_from_filesystem(
         &shell,
         DaemonForegroundInput {
@@ -534,8 +540,8 @@ fn run_daemon_foreground(
             project_boot_state: std::sync::Arc::new(std::sync::Mutex::new(
                 tenex_daemon::project_boot_state::ProjectBootState::new(),
             )),
+            project_event_index,
             heartbeat_latch: None,
-            project_event_index: std::sync::Arc::clone(&project_event_index),
         },
         &mut clock,
         &mut sleeper,

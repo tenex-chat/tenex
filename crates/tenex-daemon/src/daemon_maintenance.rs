@@ -367,7 +367,6 @@ mod tests {
 
     #[test]
     fn daemon_maintenance_discovers_projects_and_runs_backend_events_once() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -405,14 +404,16 @@ mod tests {
             &boot_event("boot-event", &owner, "demo-project"),
             1_710_000_999_000,
         );
+        let project_event_index =
+            project_event_index_with(project_event(&owner, "demo-project", 1_710_000_998));
 
         let outcome = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
             project_boot_state,
+            project_event_index,
             heartbeat_latch: None,
-            project_event_index: std::sync::Arc::clone(&project_event_index),
         })
         .expect("daemon maintenance must run");
 
@@ -484,7 +485,6 @@ mod tests {
 
     #[test]
     fn daemon_maintenance_enqueues_due_scheduled_tasks() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-scheduled-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -576,14 +576,16 @@ mod tests {
             .expect("scheduled task planner must register");
         write_periodic_scheduler_state(&daemon_dir, &scheduler)
             .expect("shared scheduler state must write");
+        let project_event_index =
+            project_event_index_with(project_event(&owner, "demo-project", 1_710_000_998));
 
         let outcome = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
             project_boot_state,
+            project_event_index,
             heartbeat_latch: None,
-            project_event_index: std::sync::Arc::clone(&project_event_index),
         })
         .expect("daemon maintenance must run");
 
@@ -619,7 +621,6 @@ mod tests {
 
     #[test]
     fn daemon_maintenance_does_not_publish_or_schedule_unbooted_project_status() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-unbooted-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -663,14 +664,16 @@ mod tests {
             .expect("stale project-status task must register");
         write_periodic_scheduler_state(&daemon_dir, &scheduler)
             .expect("shared scheduler state must write");
+        let project_event_index =
+            project_event_index_with(project_event(&owner, "demo-project", 1_710_000_998));
 
         let outcome = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
             tenex_base_dir: &tenex_base_dir,
             daemon_dir: &daemon_dir,
             now_ms: 1_710_001_000_000,
             project_boot_state: empty_booted_projects_state(),
+            project_event_index,
             heartbeat_latch: None,
-            project_event_index: std::sync::Arc::clone(&project_event_index),
         })
         .expect("daemon maintenance must run");
 
@@ -750,5 +753,32 @@ mod tests {
             .record_boot_event(event, timestamp_ms)
             .expect("project boot state must record");
         state.snapshot()
+    }
+
+    fn project_event(
+        owner: &str,
+        project_d_tag: &str,
+        created_at: u64,
+    ) -> crate::nostr_event::SignedNostrEvent {
+        crate::nostr_event::SignedNostrEvent {
+            id: format!("project-event-{project_d_tag}"),
+            pubkey: owner.to_string(),
+            created_at,
+            kind: 31933,
+            tags: vec![vec!["d".to_string(), project_d_tag.to_string()]],
+            content: String::new(),
+            sig: "0".repeat(128),
+        }
+    }
+
+    fn project_event_index_with(
+        event: crate::nostr_event::SignedNostrEvent,
+    ) -> Arc<Mutex<ProjectEventIndex>> {
+        let index = Arc::new(Mutex::new(ProjectEventIndex::new()));
+        index
+            .lock()
+            .expect("project event index lock")
+            .upsert(event);
+        index
     }
 }

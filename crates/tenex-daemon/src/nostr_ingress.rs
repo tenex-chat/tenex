@@ -424,14 +424,15 @@ mod tests {
 
     #[test]
     fn conversation_event_routes_through_inbound_runtime_and_dispatch_queue() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x11);
         let agent = pubkey_hex(0x21);
+        let project_event_index = fresh_project_event_index();
 
-        write_project(base_dir, "project-alpha", &owner, "/repo/alpha");
+        write_backend_config(base_dir, Path::new("/repo"));
+        write_project(base_dir, &project_event_index, "project-alpha", &owner);
         write_agent_index(base_dir, "project-alpha", &[&agent]);
         write_agent(base_dir, &agent, "alpha-agent");
 
@@ -465,11 +466,11 @@ mod tests {
 
     #[test]
     fn never_route_event_does_not_write_dispatch_artifacts() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let event = signed_event(24010, "status-event", Vec::new());
+        let project_event_index = fresh_project_event_index();
 
         let outcome = process_verified_nostr_event(NostrIngressInput {
             daemon_dir: &daemon_dir,
@@ -497,12 +498,12 @@ mod tests {
 
     #[test]
     fn config_update_event_applies_agent_config_update() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let agent_pubkey = pubkey_hex(0x21);
         write_agent(base_dir, &agent_pubkey, "alpha-agent");
+        let project_event_index = fresh_project_event_index();
 
         let event = signed_event(
             24020,
@@ -556,18 +557,15 @@ mod tests {
 
     #[test]
     fn boot_event_records_project_boot_state_without_dispatch() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x11);
-        let project_base_path = base_dir.join("work").join("project-alpha");
-        write_project(
-            base_dir,
-            "project-alpha",
-            &owner,
-            project_base_path.to_str().expect("project path utf8"),
-        );
+        let projects_base = base_dir.join("work");
+        let project_base_path = projects_base.join("project-alpha");
+        let project_event_index = fresh_project_event_index();
+        write_backend_config(base_dir, &projects_base);
+        write_project(base_dir, &project_event_index, "project-alpha", &owner);
         let project_reference = format!("31933:{owner}:project-alpha");
         let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
         let event = signed_event(
@@ -621,20 +619,47 @@ mod tests {
         }
     }
 
-    fn write_project(base_dir: &Path, project_id: &str, owner: &str, project_base_path: &str) {
+    fn write_project(
+        base_dir: &Path,
+        project_event_index: &Arc<Mutex<ProjectEventIndex>>,
+        project_id: &str,
+        owner: &str,
+    ) {
         let project_dir = base_dir.join("projects").join(project_id);
         fs::create_dir_all(&project_dir).expect("project dir must create");
+        project_event_index
+            .lock()
+            .expect("project event index lock")
+            .upsert(SignedNostrEvent {
+                id: format!("project-event-{project_id}"),
+                pubkey: owner.to_string(),
+                created_at: 1,
+                kind: 31933,
+                tags: vec![vec!["d".to_string(), project_id.to_string()]],
+                content: String::new(),
+                sig: "0".repeat(128),
+            });
+    }
+
+    const TEST_SECRET_KEY_HEX: &str =
+        "0101010101010101010101010101010101010101010101010101010101010101";
+
+    fn write_backend_config(base_dir: &Path, projects_base: &Path) {
         fs::write(
-            project_dir.join("project.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "projectOwnerPubkey": owner,
-                "projectDTag": project_id,
-                "projectBasePath": project_base_path,
-                "status": "active"
-            }))
-            .expect("project json must serialize"),
+            crate::backend_config::backend_config_path(base_dir),
+            format!(
+                r#"{{
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "projectsBase": "{}"
+                }}"#,
+                projects_base.to_str().expect("projects base utf8")
+            ),
         )
-        .expect("project descriptor must write");
+        .expect("backend config must write");
+    }
+
+    fn fresh_project_event_index() -> Arc<Mutex<ProjectEventIndex>> {
+        Arc::new(Mutex::new(ProjectEventIndex::new()))
     }
 
     fn write_agent_index(base_dir: &Path, project_id: &str, pubkeys: &[&str]) {

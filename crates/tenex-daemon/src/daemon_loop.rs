@@ -1207,7 +1207,6 @@ mod tests {
 
     #[test]
     fn filesystem_tick_loop_drains_publish_outbox_after_daemon_maintenance() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-publish-success", 0x04);
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![1_710_001_000_000]),
@@ -1223,8 +1222,8 @@ mod tests {
                 max_iterations: 1,
                 sleep_ms: 30_000,
                 project_boot_state: Arc::clone(&fixture.project_boot_state),
+                project_event_index: Arc::clone(&fixture.project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -1257,7 +1256,6 @@ mod tests {
 
     #[test]
     fn filesystem_tick_loop_records_retryable_publish_failures() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-publish-failure", 0x05);
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![1_710_001_000_000]),
@@ -1273,8 +1271,8 @@ mod tests {
                 max_iterations: 1,
                 sleep_ms: 30_000,
                 project_boot_state: Arc::clone(&fixture.project_boot_state),
+                project_event_index: Arc::clone(&fixture.project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             &mut clock,
             &mut sleeper,
@@ -1318,7 +1316,6 @@ mod tests {
 
     #[test]
     fn filesystem_tick_with_worker_runs_worker_runtime_before_publish_drain() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-empty-queue", 0x06);
         let mut publisher = RecordingPublisher::default();
         let mut telegram_publisher = NoTelegramPublisher;
@@ -1332,8 +1329,8 @@ mod tests {
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
                 project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
+                project_event_index: Arc::clone(&fixture.project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonWorkerTickInput {
                 runtime_state: &mut runtime_state,
@@ -1377,7 +1374,6 @@ mod tests {
 
     #[test]
     fn filesystem_tick_with_worker_drains_publish_outbox_after_worker_runtime_error() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
         seed_queued_dispatch(&fixture.daemon_dir);
         seed_dispatch_input(&fixture.daemon_dir);
@@ -1393,8 +1389,8 @@ mod tests {
                 daemon_dir: &fixture.daemon_dir,
                 now_ms: 1_710_001_000_000,
                 project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
+                project_event_index: Arc::clone(&fixture.project_event_index),
                 heartbeat_latch: None,
-                project_event_index: std::sync::Arc::clone(&project_event_index),
             },
             DaemonWorkerTickInput {
                 runtime_state: &mut runtime_state,
@@ -1433,6 +1429,7 @@ mod tests {
         daemon_dir: PathBuf,
         owner_pubkey: String,
         project_boot_state: Arc<Mutex<ProjectBootState>>,
+        project_event_index: Arc<Mutex<ProjectEventIndex>>,
     }
 
     impl TickFilesystemFixture {
@@ -1457,19 +1454,19 @@ mod tests {
                 ),
             )
             .expect("config must write");
-            fs::write(
-                project_dir.join("project.json"),
-                format!(
-                    r#"{{
-                        "schemaVersion": 1,
-                        "status": "running",
-                        "projectOwnerPubkey": "{owner_pubkey}",
-                        "projectDTag": "demo-project",
-                        "worktrees": ["main"]
-                    }}"#
-                ),
-            )
-            .expect("project descriptor must write");
+            let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
+            project_event_index
+                .lock()
+                .expect("project event index lock")
+                .upsert(SignedNostrEvent {
+                    id: format!("project-event-{prefix}"),
+                    pubkey: owner_pubkey.clone(),
+                    created_at: 1_710_000_998,
+                    kind: 31933,
+                    tags: vec![vec!["d".to_string(), "demo-project".to_string()]],
+                    content: String::new(),
+                    sig: "0".repeat(128),
+                });
             let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
             project_boot_state
                 .lock()
@@ -1496,6 +1493,7 @@ mod tests {
                 daemon_dir,
                 owner_pubkey,
                 project_boot_state,
+                project_event_index,
             }
         }
     }

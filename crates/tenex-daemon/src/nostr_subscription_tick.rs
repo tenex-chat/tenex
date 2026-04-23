@@ -442,14 +442,15 @@ mod tests {
 
     #[test]
     fn intake_tick_processes_matching_event_and_reports_ignored_frames() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x11);
         let agent = pubkey_hex(0x21);
+        let project_event_index = fresh_project_event_index();
 
-        write_project(base_dir, "project-alpha", &owner, "/repo/alpha");
+        write_backend_config(base_dir, "/repo");
+        write_project(base_dir, &project_event_index, "project-alpha", &owner);
         write_agent_index(base_dir, "project-alpha", &[&agent]);
         write_agent(base_dir, &agent, "alpha-agent");
 
@@ -542,7 +543,6 @@ mod tests {
 
     #[test]
     fn intake_tick_reports_dispatch_ignored_without_writing_worker_artifacts() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -556,6 +556,9 @@ mod tests {
         );
         let raw_message = relay_event_message("tenex-main", &event);
         let raw_messages = [raw_message.as_str()];
+        let project_event_index = fresh_project_event_index();
+
+        write_backend_config(base_dir, "/repo");
 
         let diagnostics = run_nostr_subscription_intake_tick(NostrSubscriptionTickInput {
             tenex_base_dir: base_dir,
@@ -634,20 +637,46 @@ mod tests {
         }
     }
 
-    fn write_project(base_dir: &Path, project_id: &str, owner: &str, project_base_path: &str) {
+    const TEST_SECRET_KEY_HEX: &str =
+        "0101010101010101010101010101010101010101010101010101010101010101";
+
+    fn write_backend_config(base_dir: &Path, projects_base: &str) {
+        fs::write(
+            crate::backend_config::backend_config_path(base_dir),
+            format!(
+                r#"{{
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "projectsBase": "{projects_base}"
+                }}"#
+            ),
+        )
+        .expect("backend config must write");
+    }
+
+    fn write_project(
+        base_dir: &Path,
+        project_event_index: &Arc<Mutex<ProjectEventIndex>>,
+        project_id: &str,
+        owner: &str,
+    ) {
         let project_dir = base_dir.join("projects").join(project_id);
         fs::create_dir_all(&project_dir).expect("project dir must create");
-        fs::write(
-            project_dir.join("project.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "projectOwnerPubkey": owner,
-                "projectDTag": project_id,
-                "projectBasePath": project_base_path,
-                "status": "active"
-            }))
-            .expect("project json must serialize"),
-        )
-        .expect("project descriptor must write");
+        project_event_index
+            .lock()
+            .expect("project event index lock")
+            .upsert(crate::nostr_event::SignedNostrEvent {
+                id: format!("project-event-{project_id}"),
+                pubkey: owner.to_string(),
+                created_at: 1,
+                kind: 31933,
+                tags: vec![vec!["d".to_string(), project_id.to_string()]],
+                content: String::new(),
+                sig: "0".repeat(128),
+            });
+    }
+
+    fn fresh_project_event_index() -> Arc<Mutex<ProjectEventIndex>> {
+        Arc::new(Mutex::new(ProjectEventIndex::new()))
     }
 
     fn write_agent_index(base_dir: &Path, project_id: &str, pubkeys: &[&str]) {

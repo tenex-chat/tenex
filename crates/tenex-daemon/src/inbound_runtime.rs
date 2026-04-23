@@ -319,14 +319,15 @@ mod tests {
 
     #[test]
     fn route_and_enqueue_inbound_dispatch_writes_worker_artifacts() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x11);
         let agent = pubkey_hex(0x21);
+        let project_event_index = fresh_project_event_index();
 
-        write_project(base_dir, "project-alpha", &owner, "/repo/alpha");
+        write_backend_config(base_dir, "/repo");
+        write_project(base_dir, &project_event_index, "project-alpha", &owner);
         write_agent_index(base_dir, "project-alpha", &[&agent]);
         write_agent(base_dir, &agent, "alpha-agent");
 
@@ -365,7 +366,7 @@ mod tests {
             .resolved_execute_fields()
             .expect("worker dispatch fields must resolve");
         assert_eq!(sidecar.writer.writer_version, "inbound-runtime-test@0");
-        assert_eq!(fields.project_base_path, "/repo/alpha");
+        assert_eq!(fields.project_base_path, "/repo/project-alpha");
         assert_eq!(
             fields.metadata_path,
             base_dir
@@ -386,14 +387,15 @@ mod tests {
 
     #[test]
     fn route_and_enqueue_inbound_dispatch_returns_ignored_outcome_when_unmatched() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x12);
         let agent = pubkey_hex(0x22);
+        let project_event_index = fresh_project_event_index();
 
-        write_project(base_dir, "project-beta", &owner, "/repo/beta");
+        write_backend_config(base_dir, "/repo");
+        write_project(base_dir, &project_event_index, "project-beta", &owner);
         write_agent(base_dir, &agent, "beta-agent");
 
         let envelope = nostr_envelope(&agent, "event-beta");
@@ -420,15 +422,16 @@ mod tests {
 
     #[test]
     fn delegation_completion_records_child_reply_and_resumes_idle_parent_ral() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x13);
         let parent_agent = pubkey_hex(0x23);
         let delegatee_agent = pubkey_hex(0x33);
+        let project_event_index = fresh_project_event_index();
 
-        write_project(base_dir, "project-gamma", &owner, "/repo/gamma");
+        write_backend_config(base_dir, "/repo");
+        write_project(base_dir, &project_event_index, "project-gamma", &owner);
         write_agent_index(
             base_dir,
             "project-gamma",
@@ -545,15 +548,16 @@ mod tests {
 
     #[test]
     fn delegation_completion_queues_injection_for_claimed_parent_ral() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x14);
         let parent_agent = pubkey_hex(0x24);
         let delegatee_agent = pubkey_hex(0x34);
+        let project_event_index = fresh_project_event_index();
 
-        write_project(base_dir, "project-delta", &owner, "/repo/delta");
+        write_backend_config(base_dir, "/repo");
+        write_project(base_dir, &project_event_index, "project-delta", &owner);
         write_agent_index(
             base_dir,
             "project-delta",
@@ -922,20 +926,46 @@ mod tests {
             .expect("conversation json must parse")
     }
 
-    fn write_project(base_dir: &Path, project_id: &str, owner: &str, project_base_path: &str) {
+    fn write_project(
+        base_dir: &Path,
+        project_event_index: &Arc<Mutex<ProjectEventIndex>>,
+        project_id: &str,
+        owner: &str,
+    ) {
         let project_dir = base_dir.join("projects").join(project_id);
         fs::create_dir_all(&project_dir).expect("project dir must create");
+        project_event_index
+            .lock()
+            .expect("project event index lock")
+            .upsert(crate::nostr_event::SignedNostrEvent {
+                id: format!("project-event-{project_id}"),
+                pubkey: owner.to_string(),
+                created_at: 1,
+                kind: 31933,
+                tags: vec![vec!["d".to_string(), project_id.to_string()]],
+                content: String::new(),
+                sig: "0".repeat(128),
+            });
+    }
+
+    const TEST_SECRET_KEY_HEX: &str =
+        "0101010101010101010101010101010101010101010101010101010101010101";
+
+    fn write_backend_config(base_dir: &Path, projects_base: &str) {
         fs::write(
-            project_dir.join("project.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "projectOwnerPubkey": owner,
-                "projectDTag": project_id,
-                "projectBasePath": project_base_path,
-                "status": "active"
-            }))
-            .expect("project json must serialize"),
+            crate::backend_config::backend_config_path(base_dir),
+            format!(
+                r#"{{
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "projectsBase": "{projects_base}"
+                }}"#
+            ),
         )
-        .expect("project descriptor must write");
+        .expect("backend config must write");
+    }
+
+    fn fresh_project_event_index() -> Arc<Mutex<ProjectEventIndex>> {
+        Arc::new(Mutex::new(ProjectEventIndex::new()))
     }
 
     fn write_agent_index(base_dir: &Path, project_id: &str, pubkeys: &[&str]) {

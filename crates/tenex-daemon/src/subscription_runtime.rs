@@ -127,7 +127,6 @@ mod tests {
 
     #[test]
     fn builds_subscription_plan_from_config_and_filesystem_routing_catalog() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let owner = pubkey_hex(0x11);
@@ -140,7 +139,8 @@ mod tests {
             &[&owner],
             &["wss://relay.one", "https://not-a-relay"],
         );
-        write_project(base_dir, "project-alpha", &owner, "/repo/alpha");
+        let project_event_index = fresh_project_event_index();
+        write_project(base_dir, &project_event_index, "project-alpha", &owner);
         write_agent_index(base_dir, "project-alpha", &[&agent, &other_agent, &agent]);
         write_agent(base_dir, &agent, "alpha-agent");
         write_agent(base_dir, &other_agent, "other-agent");
@@ -203,10 +203,10 @@ mod tests {
 
     #[test]
     fn falls_back_to_default_relay_and_omits_empty_dynamic_filters() {
-        let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(crate::project_event_index::ProjectEventIndex::new()));
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         write_config(base_dir, &[], &[]);
+        let project_event_index = fresh_project_event_index();
 
         let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
             tenex_base_dir: base_dir,
@@ -244,20 +244,30 @@ mod tests {
         .expect("config must write");
     }
 
-    fn write_project(base_dir: &Path, project_id: &str, owner: &str, project_base_path: &str) {
+    fn write_project(
+        base_dir: &Path,
+        project_event_index: &Arc<Mutex<ProjectEventIndex>>,
+        project_id: &str,
+        owner: &str,
+    ) {
         let project_dir = base_dir.join("projects").join(project_id);
         fs::create_dir_all(&project_dir).expect("project dir must create");
-        fs::write(
-            project_dir.join("project.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "projectOwnerPubkey": owner,
-                "projectDTag": project_id,
-                "projectBasePath": project_base_path,
-                "status": "active"
-            }))
-            .expect("project json must serialize"),
-        )
-        .expect("project descriptor must write");
+        project_event_index
+            .lock()
+            .expect("project event index lock")
+            .upsert(crate::nostr_event::SignedNostrEvent {
+                id: format!("project-event-{project_id}"),
+                pubkey: owner.to_string(),
+                created_at: 1,
+                kind: 31933,
+                tags: vec![vec!["d".to_string(), project_id.to_string()]],
+                content: String::new(),
+                sig: "0".repeat(128),
+            });
+    }
+
+    fn fresh_project_event_index() -> Arc<Mutex<ProjectEventIndex>> {
+        Arc::new(Mutex::new(ProjectEventIndex::new()))
     }
 
     fn write_agent_index(base_dir: &Path, project_id: &str, pubkeys: &[&str]) {
