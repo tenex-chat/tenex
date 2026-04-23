@@ -239,6 +239,49 @@ pub fn read_backend_config(
     })
 }
 
+/// Merge `fields` into config.json, preserving all existing keys not in `fields`.
+/// Creates the file with `{}` as the base if it doesn't exist yet.
+pub fn write_backend_config_fields(
+    base_dir: impl AsRef<Path>,
+    fields: &Map<String, Value>,
+) -> BackendConfigResult<()> {
+    let config_path = backend_config_path(base_dir);
+    let mut value: Value = if config_path.exists() {
+        let content =
+            fs::read_to_string(&config_path).map_err(|source| BackendConfigError::Io {
+                path: config_path.clone(),
+                source,
+            })?;
+        serde_json::from_str(&content).map_err(|source| BackendConfigError::Json {
+            path: config_path.clone(),
+            source,
+        })?
+    } else {
+        Value::Object(Map::new())
+    };
+
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| BackendConfigError::Json {
+            path: config_path.clone(),
+            source: serde_json::from_str::<Map<String, Value>>("[]")
+                .expect_err("array must not parse as object"),
+        })?;
+    for (key, val) in fields {
+        object.insert(key.clone(), val.clone());
+    }
+
+    let updated =
+        serde_json::to_string_pretty(&value).map_err(|source| BackendConfigError::WriteJson {
+            path: config_path.clone(),
+            source,
+        })?;
+    fs::write(&config_path, format!("{updated}\n")).map_err(|source| BackendConfigError::WriteIo {
+        path: config_path,
+        source,
+    })
+}
+
 fn ensure_config_private_key(config_path: &Path, value: &mut Value) -> BackendConfigResult<bool> {
     let object = value
         .as_object_mut()

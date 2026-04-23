@@ -85,6 +85,39 @@ pub fn event_hash_hex(canonical_payload: &str) -> String {
     hex::encode(digest)
 }
 
+/// Build and sign a Nostr event from its components.
+///
+/// `sign_fn` receives the 32-byte event-id digest and returns the hex-encoded Schnorr signature.
+pub fn build_signed_event(
+    kind: u64,
+    content: String,
+    tags: Vec<Vec<String>>,
+    pubkey_hex: &str,
+    created_at: u64,
+    sign_fn: impl Fn(&[u8; 32]) -> Result<String, secp256k1::Error>,
+) -> Result<SignedNostrEvent, NostrEventError> {
+    let normalized = NormalizedNostrEvent {
+        kind,
+        content: content.clone(),
+        tags: tags.clone(),
+        pubkey: Some(pubkey_hex.to_string()),
+        created_at: Some(created_at),
+    };
+    let canonical = canonical_payload(&normalized)?;
+    let id_hex = event_hash_hex(&canonical);
+    let digest = decode_32_bytes("event id", &id_hex)?;
+    let sig = sign_fn(&digest)?;
+    Ok(SignedNostrEvent {
+        id: id_hex,
+        pubkey: pubkey_hex.to_string(),
+        created_at,
+        kind,
+        tags,
+        content,
+        sig,
+    })
+}
+
 pub fn verify_signed_event(event: &SignedNostrEvent) -> Result<(), NostrEventError> {
     let canonical = canonical_payload(&event.normalized())?;
     let actual_id = event_hash_hex(&canonical);

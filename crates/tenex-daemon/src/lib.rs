@@ -5,6 +5,7 @@
     clippy::type_complexity
 )]
 
+pub mod agent_config_update;
 pub mod agent_definition_watcher;
 pub mod agent_inventory;
 pub mod backend_config;
@@ -18,6 +19,7 @@ pub mod backend_signer;
 pub mod backend_status_runtime;
 pub mod backend_status_tick;
 pub mod caches;
+pub mod cli;
 pub mod daemon_control;
 pub mod daemon_diagnostics;
 pub mod daemon_foreground;
@@ -33,6 +35,7 @@ pub mod inbound_dispatch;
 pub mod inbound_envelope;
 pub mod inbound_routing;
 pub mod inbound_runtime;
+pub mod llms_config;
 pub mod nip44;
 pub mod nip46;
 pub mod nostr_classification;
@@ -57,6 +60,7 @@ pub mod project_status_runtime;
 pub mod project_status_snapshot;
 pub mod project_status_sources;
 pub mod project_worktrees;
+pub mod providers_config;
 pub mod publish_outbox;
 pub mod publish_runtime;
 pub mod ral_journal;
