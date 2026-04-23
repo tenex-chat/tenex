@@ -6,7 +6,7 @@ use crate::dispatch_queue::{
     DispatchQueueError, acquire_dispatch_queue_lock, append_dispatch_queue_record,
     replay_dispatch_queue,
 };
-use crate::ral_journal::{RalJournalError, append_ral_journal_record};
+use crate::ral_journal::{RalJournalError, append_ral_journal_record_with_resequence};
 use crate::worker_completion::WorkerCompletionPlan;
 use crate::worker_launch_lock::{
     WorkerLaunchLockError, WorkerLaunchLocks, release_worker_launch_locks,
@@ -52,7 +52,7 @@ pub fn apply_worker_completion(
         locks,
     } = input;
 
-    append_ral_journal_record(&daemon_dir, &plan.ral_journal_record)
+    append_ral_journal_record_with_resequence(&daemon_dir, &mut plan.ral_journal_record)
         .map_err(WorkerCompletionApplyError::from)?;
 
     if let Some(record) = &mut plan.dispatch_queue_record {
@@ -280,7 +280,7 @@ mod tests {
             WorkerCompletionApplyError::DispatchAppend { .. }
         ));
         let replay = replay_ral_journal(&daemon_dir).expect("journal replay must succeed");
-        assert_eq!(replay.last_sequence, 3);
+        assert_eq!(replay.last_sequence, 1);
         assert_eq!(
             read_ral_lock_info(&allocation_lock_path).expect("allocation lock must be readable"),
             Some(owner.clone())

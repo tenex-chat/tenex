@@ -495,6 +495,29 @@ pub fn append_ral_journal_record(
 ) -> RalJournalResult<()> {
     let daemon_dir = daemon_dir.as_ref();
     let _append_lock = acquire_ral_journal_append_lock(daemon_dir)?;
+    append_ral_journal_record_locked(daemon_dir, record)
+}
+
+/// Append while rewriting `record.sequence` to `last_sequence + 1` computed
+/// under the same append lock, so concurrent appenders cannot collide on the
+/// same sequence number. Use this from session-completion paths where the
+/// record was built before the append lock was acquired.
+pub fn append_ral_journal_record_with_resequence(
+    daemon_dir: impl AsRef<Path>,
+    record: &mut RalJournalRecord,
+) -> RalJournalResult<()> {
+    let daemon_dir = daemon_dir.as_ref();
+    let _append_lock = acquire_ral_journal_append_lock(daemon_dir)?;
+    let replay = read_ral_journal_records(daemon_dir)?;
+    let last_sequence = replay.iter().map(|r| r.sequence).max().unwrap_or(0);
+    record.sequence = last_sequence + 1;
+    append_ral_journal_record_locked(daemon_dir, record)
+}
+
+fn append_ral_journal_record_locked(
+    daemon_dir: &Path,
+    record: &RalJournalRecord,
+) -> RalJournalResult<()> {
     let journal_path = ral_journal_path(daemon_dir);
     let journal_dir = journal_path
         .parent()
