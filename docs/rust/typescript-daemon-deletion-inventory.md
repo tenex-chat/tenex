@@ -4,19 +4,20 @@ This document is an inventory, not a deletion plan. It assumes the target archit
 
 The classification below is based on local file inspection and import search. Where a file is shared between the worker and the old daemon surface, it is marked ambiguous until the Rust worker-spine and end-to-end gates prove the TS path is no longer required.
 
-## Likely Deletable Daemon / Control-Plane Modules
+## Deleted Daemon / Control-Plane Modules
 
-These files look like the old TS daemon/control plane rather than execution support. They either have no current production consumers or are only serving responsibilities that the Rust daemon is intended to own.
+These files were old TS daemon/control-plane code rather than execution support. They have been deleted from the Rust-daemon branch; Bun/TypeScript keeps only worker execution and shared runtime contracts.
 
-| File | Why it is a deletion candidate | Notes |
-| --- | --- | --- |
-| `src/services/dispatch/AgentDispatchService.ts` | Legacy inbound routing, delegation completion, kill wake-up, and message injection coordination. | High risk because the kill tool still references it today. |
-| `src/services/dispatch/AgentRouter.ts` | Routing helpers for delegation completion and agent-target selection. | Pure control-plane routing logic. |
-| `src/services/dispatch/DelegationCompletionHandler.ts` | Delegation completion recognition and RAL recording. | Old routing/claim authority surface. |
-| `src/services/agents/AgentConfigUpdateService.ts` | Canonical interpreter for kind `24020` agent config events. | Fits the daemon/event-handler path; no live production consumer surfaced in search. |
-| `src/services/agents/ProjectMembershipPublishService.ts` | Project membership sync and publish helper. | Appears to be command/control-plane support rather than worker execution. |
-| `src/services/ingress/ChannelSessionStoreService.ts` | Persistent channel-session state for transport handling. | Search only found tests; no production import surfaced. |
-| `src/events/runtime/diagnostic-event-snapshot.ts` | Runtime diagnostic snapshot builder. | Test-only usage was found; this looks like daemon diagnostics scaffolding. |
+| File | Removed responsibility |
+| --- | --- |
+| `src/services/dispatch/AgentDispatchService.ts` | Legacy inbound routing, delegation completion, kill wake-up, and message injection coordination. |
+| `src/services/dispatch/AgentRouter.ts` | Routing helpers for delegation completion and agent-target selection. |
+| `src/services/dispatch/DelegationCompletionHandler.ts` | Delegation completion recognition and RAL recording for the TS daemon path. |
+| `src/services/agents/AgentConfigUpdateService.ts` | Kind `24020` agent config event interpretation for TS daemon event handling. |
+| `src/services/agents/ProjectMembershipPublishService.ts` | Project membership sync and publish helper. |
+| `src/services/ingress/ChannelSessionStoreService.ts` | Persistent channel-session state for old transport handling. |
+| `src/events/runtime/diagnostic-event-snapshot.ts` | Runtime diagnostic snapshot builder for TS daemon diagnostics. |
+| `src/nostr/AgentEventDecoder.ts` daemon/routing helpers and tests | Legacy TS daemon event classification (`classifyForDaemon`, never-route helpers, project/config/boot classification helpers) plus unused routing/tag helpers that were only re-exported through `src/nostr/index.ts`. Rust owns relay classification in `crates/tenex-daemon/src/nostr_classification.rs`; TypeScript keeps only worker-needed Nostr tag helpers. |
 
 ## Must Remain for Bun Worker Execution
 
@@ -46,19 +47,11 @@ These are not safe to delete just because they smell like daemon code. They are 
 
 ## Suggested Deletion Order and Gates
 
-1. Remove the obvious old-daemon routing layer first:
-   `src/services/dispatch/AgentRouter.ts`, `src/services/dispatch/DelegationCompletionHandler.ts`, then `src/services/dispatch/AgentDispatchService.ts`.
-   Gate: Rust worker-spine green, plus TS/Rust protocol smoke tests for kill wake-up, delegation completion, and inbound routing.
-
-2. Remove the standalone daemon-adjacent helpers next:
-   `src/services/agents/AgentConfigUpdateService.ts`, `src/services/agents/ProjectMembershipPublishService.ts`, `src/services/ingress/ChannelSessionStoreService.ts`, and `src/events/runtime/diagnostic-event-snapshot.ts`.
-   Gate: No live production imports remain in TS, and the Rust daemon owns the equivalent event/control-plane behavior.
-
-3. Remove the compatibility/test scaffolding only after the worker and protocol test suites have been reshaped:
+1. Remove the compatibility/test scaffolding only after the worker and protocol test suites have been reshaped:
    `src/events/runtime/RecordingRuntimePublisher.ts`, `src/events/runtime/LocalInboundAdapter.ts`, and any fixtures that become dead after the worker/daemon split settles.
    Gate: test migration completed, not just production parity.
 
-4. Defer `src/services/ral/**` until last.
+2. Defer `src/services/ral/**` until last.
    This tree is shared with worker execution, so it should only be deleted if the Rust side has taken over the full claim/resume/injection/kill model and the Bun worker no longer needs local RAL state.
    Gate: full worker-spine E2E, including delegation, injections, aborts, and warm-reuse behavior.
 

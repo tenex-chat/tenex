@@ -156,10 +156,6 @@ Services should be organized by domain, with related code grouped together:
 services/
 ├── analysis/            # LLM telemetry schema, migrations, and query services
 ├── migrations/          # Explicit TENEX state migrations keyed by config.json version
-├── dispatch/             # Chat routing + delegation dispatch
-│   ├── AgentDispatchService.ts
-│   ├── AgentRouter.ts
-│   └── DelegationCompletionHandler.ts
 ├── ral/                  # Delegation/RAL state
 │   ├── RALRegistry.ts
 │   ├── DelegationRegistry.ts
@@ -248,7 +244,7 @@ Rules for Rust code:
 ConfigService
 RAGService
 SchedulerService
-ProjectStatusService
+AgentEnvironmentService
 
 // ✅ Most business-logic classes use the "Service" suffix.
 ```

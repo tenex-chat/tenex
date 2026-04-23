@@ -397,12 +397,10 @@ Current implementation status:
   and started-worker bookkeeping.
 - `worker_message_flow.rs` routes worker frames through message handling,
   publish flow, and terminal cleanup.
-- `AgentDispatchService` now has a disabled-by-default `TENEX_AGENT_WORKER=1`
-  route through `src/agents/execution/worker/dispatch-adapter.ts`. The gate is
-  intentionally narrow: only fresh first-turn executions can run in a child
-  worker. Active RALs, resumption claims, delegation completions, kill signals,
-  and non-initial conversations still fall back to the in-process
-  `AgentExecutor`.
+- The TypeScript daemon dispatch layer has been removed. Rust writes
+  filesystem worker dispatch records and starts Bun only for agent execution;
+  the remaining TypeScript path is the worker runtime and shared execution
+  support.
 - Worker `publish_request` frames carry complete agent-signed NIP-01 events.
   The Rust publish path verifies the event hash, signature, and target-agent
   pubkey, then publishes the exact signed event without re-signing it.
@@ -454,7 +452,7 @@ Current implementation status:
 - Focused TypeScript adapter tests now exercise the framed child-process path:
   spawn configuration, `execute` frame construction, parent-side
   `publish_request` handling, `publish_result` replies, terminal cleanup, and
-  parent RAL waiting/delegation mirroring.
+  parent RAL idle-after-delegation mirroring.
 - Non-terminal worker failures after parent RAL seeding now clear the parent RAL
   and publish failures send a failed `publish_result` frame before the adapter
   surfaces the error.
@@ -465,7 +463,8 @@ Quality gates:
 
 - Worker can execute a mock-provider conversation and exit cleanly.
 - Worker can run a tool call and persist conversation state.
-- Worker can delegate and report waiting state.
+- Worker can delegate and report the existing `waiting_for_delegation` terminal
+  frame when it becomes idle after delegation.
 - Worker can handle no-response path and avoid emitting a visible completion.
 - Worker shuts down MCP manager resources before exit, including executor
   failure paths.
@@ -1334,7 +1333,7 @@ These gates apply to every milestone after M0.
   - worker booting
   - streaming
   - tool active
-  - waiting for delegation
+  - idle after delegation
   - aborting
   - crashed
   - journal failure

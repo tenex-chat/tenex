@@ -292,13 +292,13 @@ project is active when at least one of these is true:
 - the operator explicitly booted it with `--boot`
 - the project was restored from restart state
 - a boot-capable event started it
-- it has an active, waiting, or queued RAL
+- it has an active, idle-after-delegation, or queued RAL
 - it has a warm reusable worker
 - a long-lived transport binding has explicitly activated it
 
 Project activation is not the same thing as "a Bun worker process is currently
-running." A parent agent may be waiting for delegated work with no worker alive,
-but the project remains active for routing purposes.
+running." A parent agent may be idle and resumable after delegating with no
+worker alive, but the project remains active for routing purposes.
 
 Rust should persist a rebuildable activation snapshot:
 
@@ -697,38 +697,45 @@ The migration must preserve the most important multi-agent flow:
 
 ```text
 parent agent delegates
-  -> parent execution reaches waiting-for-delegation
-  -> parent worker exits
+  -> parent may continue streaming/executing or may become idle
   -> child agent completes later
   -> Rust routes completion to parent
-  -> Rust spawns a new parent worker
-  -> parent worker resumes the existing RAL or starts the correct follow-up RAL
+  -> if the parent is idle, Rust spawns a new parent worker
+  -> parent worker resumes the correct RAL or starts the correct follow-up RAL
   -> parent finishes or delegates again
 ```
 
-This flow cannot depend on live TypeScript project runtime state or a live
-parent worker. Rust needs enough filesystem state to decide:
+Delegation is not a blocking join. A parent does not wait for delegated work to
+complete; a delegation completion is a wakeup signal that resumes the parent
+only if the parent is not currently streaming or executing. If the parent is
+already active, Rust records the completion for that RAL/conversation and lets
+the active execution observe it through normal conversation state or injection
+delivery.
 
-- which parent agent is waiting
+This flow cannot depend on live TypeScript project runtime state. Rust needs
+enough filesystem state to decide:
+
+- which parent agent may be resumed
 - which child delegation completed
-- whether all required child delegations are complete
+- whether the parent is currently idle, streaming, or executing
 - whether the parent should resume the same RAL or start a follow-up RAL
 - which injections or completion messages must be included in the next prompt
 
-The worker terminal event for delegated waiting must therefore include:
+When a parent execution becomes idle after delegating, the worker terminal event
+currently named `waiting_for_delegation` must therefore include:
 
 - parent RAL identity
 - pending delegation IDs
 - child target pubkeys
 - delegation event IDs
-- whether the current worker has published all required delegation events
-- whether the parent is allowed to exit
+- whether the current worker has durably handed off the delegation events
+- whether the parent is idle and resumable
 
 Rust persists this as RAL journal state. When a child completion event arrives,
-Rust updates the delegation state and enqueues a parent execution if the parent
-is ready to resume. The new parent worker must be able to reconstruct the prompt
+Rust updates the delegation state and enqueues a parent execution only if the
+parent is idle. The new parent worker must be able to reconstruct the prompt
 from shared conversation files and leased injections; it must not rely on
-in-memory state from the previous parent worker.
+in-memory state from any previous parent worker.
 
 ## Minimal Worker Bootstrap
 
@@ -877,7 +884,7 @@ Work:
   - claim
   - stream start
   - tool start and completion
-  - wait for delegation
+  - idle after delegation
   - child completion
   - parent resume
   - silent completion
@@ -1161,7 +1168,7 @@ Work:
   - active RAL with no worker
   - leased injections with no terminal acknowledgement
   - worker marked active but PID missing
-  - parent waiting for children
+  - parent idle after delegation
   - crashed worker during tool execution
 - Add transition bridge in TypeScript so execution uses Rust-provided RAL data.
 - Ensure worker cannot create a competing RAL.
@@ -1442,15 +1449,17 @@ not add a new database for daemon/RAL coordination state.
 - kill signal aborts active worker
 - restart state restores pending projects
 - RAL journal restores active/waiting/crashed state after daemon restart
-- child completion wakes parent without a live parent worker
+- child completion resumes an idle parent without a live parent worker
 - dispatch queue survives daemon restart
 - orphaned RAL reconciliation releases unapplied injection leases
 
 ### End-to-End Tests
 
 - real Bun worker executes a simple mock-provider conversation
-- delegation registers child work and parent worker exits terminal waiting state
-- delegation completion wakes parent
+- delegation registers child work and parent worker can exit terminal
+  idle-after-delegation state
+- delegation completion resumes an idle parent and does not interrupt an active
+  parent
 - tool call events round-trip through protocol
 - post-completion supervision can trigger a follow-up execution
 - no-response path remains silent and terminal
