@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::Path;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -118,7 +119,7 @@ pub struct DaemonWorkerLoopInput<'a> {
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
-    pub first_publish_result_sequence: Option<u64>,
+    pub publish_result_sequence: Option<Arc<AtomicU64>>,
     pub max_frames: u64,
 }
 
@@ -744,12 +745,49 @@ where
         worker_config,
         writer_version,
         resolved_pending_delegations,
-        first_publish_result_sequence,
+        publish_result_sequence,
         max_frames,
     } = worker;
-    let mut next_publish_result_sequence = first_publish_result_sequence;
     let heartbeat_latch = input.heartbeat_latch.clone();
     let project_boot_state = input.project_boot_state.clone();
+
+    let run_tick = |now_ms: u64| {
+        let publish =
+            publish_result_sequence
+                .as_ref()
+                .map(|source| WorkerMessagePublishContext {
+                    accepted_at: now_ms,
+                    result_sequence_source: source.clone(),
+                    result_timestamp: now_ms,
+                    telegram_egress: None,
+                });
+
+        run_daemon_tick_once_from_filesystem_with_worker(
+            DaemonMaintenanceInput {
+                tenex_base_dir: input.tenex_base_dir,
+                daemon_dir: input.daemon_dir,
+                now_ms,
+                project_boot_state: project_boot_state_snapshot(&project_boot_state),
+                heartbeat_latch: heartbeat_latch.clone(),
+            },
+            DaemonWorkerTickInput {
+                runtime_state: runtime_state.clone(),
+                limits,
+                correlation_id: format!("{correlation_id_prefix}:{now_ms}"),
+                lock_owner: lock_owner.clone(),
+                command: command.clone(),
+                worker_config,
+                writer_version: writer_version.clone(),
+                resolved_pending_delegations: resolved_pending_delegations.clone(),
+                publish,
+                max_frames,
+            },
+            spawner,
+            publisher,
+            retry_policy,
+            &mut *telegram_publisher,
+        )
+    };
 
     if input.max_iterations.is_some() {
         run_daemon_maintenance_loop_until_stopped(
@@ -758,49 +796,7 @@ where
             stop_signal,
             input.max_iterations,
             input.sleep_ms,
-            |now_ms| {
-                let publish = next_publish_result_sequence.map(|result_sequence| {
-                    WorkerMessagePublishContext {
-                        accepted_at: now_ms,
-                        result_sequence,
-                        result_timestamp: now_ms,
-                        telegram_egress: None,
-                    }
-                });
-
-                let outcome = run_daemon_tick_once_from_filesystem_with_worker(
-                    DaemonMaintenanceInput {
-                        tenex_base_dir: input.tenex_base_dir,
-                        daemon_dir: input.daemon_dir,
-                        now_ms,
-                        project_boot_state: project_boot_state_snapshot(&project_boot_state),
-                        heartbeat_latch: heartbeat_latch.clone(),
-                    },
-                    DaemonWorkerTickInput {
-                        runtime_state: runtime_state.clone(),
-                        limits,
-                        correlation_id: format!("{correlation_id_prefix}:{now_ms}"),
-                        lock_owner: lock_owner.clone(),
-                        command: command.clone(),
-                        worker_config,
-                        writer_version: writer_version.clone(),
-                        resolved_pending_delegations: resolved_pending_delegations.clone(),
-                        publish,
-                        max_frames,
-                    },
-                    spawner,
-                    publisher,
-                    retry_policy,
-                    &mut *telegram_publisher,
-                )?;
-
-                advance_publish_result_sequence(
-                    &mut next_publish_result_sequence,
-                    &outcome.worker_runtime,
-                );
-
-                Ok(outcome)
-            },
+            run_tick,
         )
     } else {
         run_resilient_daemon_maintenance_loop_until_stopped(
@@ -809,66 +805,9 @@ where
             stop_signal,
             input.max_iterations,
             input.sleep_ms,
-            |now_ms| {
-                let publish = next_publish_result_sequence.map(|result_sequence| {
-                    WorkerMessagePublishContext {
-                        accepted_at: now_ms,
-                        result_sequence,
-                        result_timestamp: now_ms,
-                        telegram_egress: None,
-                    }
-                });
-
-                let outcome = run_daemon_tick_once_from_filesystem_with_worker(
-                    DaemonMaintenanceInput {
-                        tenex_base_dir: input.tenex_base_dir,
-                        daemon_dir: input.daemon_dir,
-                        now_ms,
-                        project_boot_state: project_boot_state_snapshot(&project_boot_state),
-                        heartbeat_latch: heartbeat_latch.clone(),
-                    },
-                    DaemonWorkerTickInput {
-                        runtime_state: runtime_state.clone(),
-                        limits,
-                        correlation_id: format!("{correlation_id_prefix}:{now_ms}"),
-                        lock_owner: lock_owner.clone(),
-                        command: command.clone(),
-                        worker_config,
-                        writer_version: writer_version.clone(),
-                        resolved_pending_delegations: resolved_pending_delegations.clone(),
-                        publish,
-                        max_frames,
-                    },
-                    spawner,
-                    publisher,
-                    retry_policy,
-                    &mut *telegram_publisher,
-                )?;
-
-                advance_publish_result_sequence(
-                    &mut next_publish_result_sequence,
-                    &outcome.worker_runtime,
-                );
-
-                Ok(outcome)
-            },
+            run_tick,
         )
     }
-}
-
-fn advance_publish_result_sequence(
-    counter: &mut Option<u64>,
-    worker_runtime: &DaemonWorkerRuntimeOutcome,
-) {
-    let Some(current) = counter.as_mut() else {
-        return;
-    };
-    if let DaemonWorkerRuntimeOutcome::SessionCompleted { session, .. } = worker_runtime
-        && let Some(next) = session.next_publish_result_sequence
-    {
-        *current = (*current).max(next);
-    }
-    *current = current.saturating_add(1);
 }
 
 pub fn current_unix_time_ms() -> u64 {

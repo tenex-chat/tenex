@@ -386,7 +386,7 @@ mod tests {
     use std::fmt;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1009,7 +1009,7 @@ mod tests {
                 &worker_config,
                 Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_090,
-                    result_sequence: 900,
+                    result_sequence_source: Arc::new(AtomicU64::new(900)),
                     result_timestamp: 1_710_001_000_100,
                     telegram_egress: None,
                 }),
@@ -1026,7 +1026,6 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: Some(901),
                 },
             }
         );

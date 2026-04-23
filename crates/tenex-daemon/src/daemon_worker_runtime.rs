@@ -1175,7 +1175,6 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: None,
                 },
             }
         );
@@ -1392,7 +1391,6 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: None,
                 },
             }
         );
@@ -1477,7 +1475,7 @@ mod tests {
                 &worker_config,
                 Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_000_800_100,
-                    result_sequence: 900,
+                    result_sequence_source: Arc::new(AtomicU64::new(900)),
                     result_timestamp: 1_710_000_800_200,
                     telegram_egress: None,
                 }),
@@ -1538,7 +1536,6 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: None,
                 },
             }
         );

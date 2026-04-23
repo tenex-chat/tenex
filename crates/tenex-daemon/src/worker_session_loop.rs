@@ -50,8 +50,6 @@ pub enum WorkerSessionLoopFinalReason {
 pub struct WorkerSessionLoopOutcome {
     pub frame_count: u64,
     pub final_reason: WorkerSessionLoopFinalReason,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_publish_result_sequence: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -153,7 +151,7 @@ where
                 worker_id: input.worker_id,
                 message: &decoded_message,
                 observed_at: input.observed_at,
-                publish: input.publish,
+                publish: input.publish.clone(),
                 nip46_publish: input.nip46_publish.clone(),
                 terminal,
             },
@@ -167,21 +165,16 @@ where
                 return Ok(WorkerSessionLoopOutcome {
                     frame_count,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: input.publish.map(|p| p.result_sequence),
                 });
             }
             WorkerMessageFlowOutcome::BootFailureCandidate { .. } => {
                 return Ok(WorkerSessionLoopOutcome {
                     frame_count,
                     final_reason: WorkerSessionLoopFinalReason::BootFailureCandidate,
-                    next_publish_result_sequence: input.publish.map(|p| p.result_sequence),
                 });
             }
             WorkerMessageFlowOutcome::PublishRequestHandled { outcome } => {
                 run_live_publish_maintenance(&mut input)?;
-                if let Some(publish) = input.publish.as_mut() {
-                    publish.result_sequence = publish.result_sequence.saturating_add(1);
-                }
                 if let WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error } =
                     &outcome.result_delivery
                 {
@@ -276,7 +269,7 @@ where
             worker_id: input.worker_id,
             message: &terminal_message,
             observed_at: input.observed_at,
-            publish: input.publish,
+            publish: input.publish.clone(),
             nip46_publish: input.nip46_publish.clone(),
             terminal: Some(terminal),
         },
@@ -287,7 +280,6 @@ where
         WorkerMessageFlowOutcome::TerminalResultHandled { .. } => Ok(WorkerSessionLoopOutcome {
             frame_count,
             final_reason: WorkerSessionLoopFinalReason::PublishAcceptedWorkerPipeClosed,
-            next_publish_result_sequence: input.publish.as_ref().map(|p| p.result_sequence),
         }),
         other => Err(WorkerSessionLoopError::MessageFlow {
             source: WorkerMessageFlowError::MissingTerminalContext {
@@ -666,7 +658,9 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence: 900,
+                    result_sequence_source: std::sync::Arc::new(
+                        std::sync::atomic::AtomicU64::new(900),
+                    ),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
@@ -723,7 +717,9 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence: 900,
+                    result_sequence_source: std::sync::Arc::new(
+                        std::sync::atomic::AtomicU64::new(900),
+                    ),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),

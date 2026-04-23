@@ -114,6 +114,8 @@ mod tests {
     use std::fmt;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
         "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
@@ -224,7 +226,7 @@ mod tests {
                     "worker-alpha",
                     Some(WorkerMessagePublishContext {
                         accepted_at: 1_710_001_000_100,
-                        result_sequence: 900,
+                        result_sequence_source: Arc::new(AtomicU64::new(900)),
                         result_timestamp: 1_710_001_000_200,
                         telegram_egress: None,
                     }),

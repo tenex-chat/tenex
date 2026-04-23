@@ -2,7 +2,7 @@ use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
@@ -765,7 +765,7 @@ where
             worker_config: &worker_config,
             writer_version: daemon_writer_version(),
             resolved_pending_delegations: Vec::new(),
-            first_publish_result_sequence: Some(1),
+            publish_result_sequence: Some(Arc::new(AtomicU64::new(1))),
             max_frames: DEFAULT_WORKER_MAX_FRAMES,
         },
         clock,

@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 use thiserror::Error;
@@ -62,10 +63,10 @@ pub struct WorkerMessageNip46PublishContext<'a> {
     pub result_timestamp: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct WorkerMessagePublishContext<'a> {
     pub accepted_at: u64,
-    pub result_sequence: u64,
+    pub result_sequence_source: Arc<AtomicU64>,
     pub result_timestamp: u64,
     pub telegram_egress: Option<WorkerTelegramEgressContext<'a>>,
 }
@@ -219,13 +220,14 @@ where
                         message_type: message_plan.metadata.message_type.clone(),
                     })?;
             ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
+            let result_sequence = publish.result_sequence_source.fetch_add(1, Ordering::Relaxed);
             let outcome = handle_worker_publish_request(
                 session,
                 WorkerPublishFlowInput {
                     daemon_dir: input.daemon_dir,
                     message: &message_plan.message,
                     accepted_at: publish.accepted_at,
-                    result_sequence: publish.result_sequence,
+                    result_sequence,
                     result_timestamp: publish.result_timestamp,
                     telegram_egress: publish.telegram_egress,
                 },
@@ -848,7 +850,7 @@ mod tests {
                 observed_at: 1_710_001_000_050,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence: 900,
+                    result_sequence_source: Arc::new(AtomicU64::new(900)),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),

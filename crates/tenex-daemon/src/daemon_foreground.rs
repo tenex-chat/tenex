@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
@@ -57,7 +58,7 @@ pub struct DaemonForegroundWorkerInput<'a> {
     pub worker_config: &'a AgentWorkerProcessConfig,
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
-    pub first_publish_result_sequence: Option<u64>,
+    pub publish_result_sequence: Option<Arc<AtomicU64>>,
     pub max_frames: u64,
 }
 
@@ -307,7 +308,7 @@ where
             worker_config: worker.worker_config,
             writer_version: worker.writer_version,
             resolved_pending_delegations: worker.resolved_pending_delegations,
-            first_publish_result_sequence: worker.first_publish_result_sequence,
+            publish_result_sequence: worker.publish_result_sequence,
             max_frames: worker.max_frames,
         },
         clock,
@@ -737,7 +738,7 @@ mod tests {
                 worker_config: &worker_config,
                 writer_version: "foreground-worker-test@0".to_string(),
                 resolved_pending_delegations: Vec::new(),
-                first_publish_result_sequence: Some(700),
+                publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                 max_frames: 1,
             },
             &mut clock,
@@ -819,7 +820,7 @@ mod tests {
                 worker_config: &worker_config,
                 writer_version: "foreground-worker-test@0".to_string(),
                 resolved_pending_delegations: Vec::new(),
-                first_publish_result_sequence: Some(700),
+                publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                 max_frames: 4,
             },
             &mut clock,
@@ -841,7 +842,6 @@ mod tests {
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                    next_publish_result_sequence: Some(700),
                 },
             }
         );
