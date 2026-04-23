@@ -13,6 +13,7 @@ use crate::daemon_loop::{
     run_daemon_tick_loop_from_filesystem, run_daemon_tick_loop_until_stopped_from_filesystem,
     run_daemon_tick_loop_until_stopped_from_filesystem_with_worker,
 };
+use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
 use crate::daemon_maintenance::TelegramMaintenancePublisher;
 use crate::daemon_shell::{DaemonShell, DaemonShellError, DaemonShellStopMode};
 use crate::process_liveness::ProcessLivenessProbe;
@@ -26,6 +27,7 @@ use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpaw
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
+use crate::worker_session_registry::WorkerSessionRegistry;
 
 #[derive(Debug, Clone)]
 pub struct DaemonForegroundInput<'a> {
@@ -63,6 +65,10 @@ pub struct DaemonForegroundWorkerInput<'a> {
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
     pub publish_result_sequence: Option<Arc<AtomicU64>>,
     pub max_frames: u64,
+    /// Shared across ticks and the loop driver so detached session threads
+    /// spawned by one tick can be observed (and joined at shutdown) by the
+    /// driver.
+    pub session_registry: WorkerSessionRegistry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +85,9 @@ pub struct DaemonForegroundWithWorkerReport {
     pub daemon_dir: PathBuf,
     pub started_at_ms: u64,
     pub tick_loop: DaemonMaintenanceLoopOutcome<DaemonTickWithWorkerOutcome>,
+    /// Session outcomes collected at loop shutdown by joining any session
+    /// threads still running when the stop signal fired.
+    pub shutdown_completions: Vec<DaemonWorkerRuntimeOutcome>,
 }
 
 #[derive(Debug, Error)]
@@ -283,7 +292,7 @@ where
     C: DaemonMaintenanceLoopClock,
     Sleep: DaemonMaintenanceLoopSleeper,
     Stop: DaemonMaintenanceLoopStopSignal,
-    P: PublishOutboxRelayPublisher + Send,
+    P: PublishOutboxRelayPublisher + Send + 'static,
     Spawner: WorkerDispatchSpawner,
     Spawner::Session: WorkerFrameReceiver
         + WorkerDispatchSession<Error = <Spawner::Session as WorkerFrameReceiver>::Error>
@@ -318,6 +327,7 @@ where
             resolved_pending_delegations: worker.resolved_pending_delegations,
             publish_result_sequence: worker.publish_result_sequence,
             max_frames: worker.max_frames,
+            session_registry: worker.session_registry,
         },
         clock,
         sleeper,
@@ -329,12 +339,13 @@ where
     );
 
     match tick_result {
-        Ok(tick_loop) => {
+        Ok(loop_outcome) => {
             let report = DaemonForegroundWithWorkerReport {
                 tenex_base_dir: input.tenex_base_dir.to_path_buf(),
                 daemon_dir: shell.daemon_dir().to_path_buf(),
                 started_at_ms,
-                tick_loop,
+                tick_loop: loop_outcome.tick_loop,
+                shutdown_completions: loop_outcome.shutdown_completions,
             };
             match session.stop(DaemonShellStopMode::Shutdown) {
                 Ok(()) => Ok(report),
@@ -754,6 +765,7 @@ mod tests {
                 resolved_pending_delegations: Vec::new(),
                 publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                 max_frames: 1,
+                session_registry: WorkerSessionRegistry::new(),
             },
             &mut clock,
             &mut sleeper,
@@ -840,6 +852,7 @@ mod tests {
                 resolved_pending_delegations: Vec::new(),
                 publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                 max_frames: 4,
+                session_registry: WorkerSessionRegistry::new(),
             },
             &mut clock,
             &mut sleeper,
@@ -852,8 +865,22 @@ mod tests {
 
         assert_eq!(spawner.spawn_calls, 1);
         assert_eq!(report.tick_loop.steps.len(), 1);
+        // First tick admits the queued dispatch; since the session thread is
+        // detached, the tick returns before it finishes. Admission is all
+        // the per-tick outcome carries.
+        let tick_outcomes = &report.tick_loop.steps[0].maintenance_outcome.worker_runtime;
+        assert!(
+            tick_outcomes.iter().any(|o| matches!(
+                o,
+                DaemonWorkerRuntimeOutcome::SessionAdmitted { dispatch_id, worker_id }
+                if dispatch_id == "dispatch-alpha" && worker_id == "worker-alpha"
+            )),
+            "expected SessionAdmitted for dispatch-alpha, got {tick_outcomes:?}"
+        );
+        // The session thread is joined at loop shutdown and its terminal
+        // outcome lands in shutdown_completions.
         assert_eq!(
-            report.tick_loop.steps[0].maintenance_outcome.worker_runtime,
+            report.shutdown_completions,
             vec![DaemonWorkerRuntimeOutcome::SessionCompleted {
                 dispatch_id: "dispatch-alpha".to_string(),
                 worker_id: "worker-alpha".to_string(),

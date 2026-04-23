@@ -139,10 +139,24 @@ pub enum DaemonWorkerRuntimeOutcome {
         reason: WorkerDispatchAdmissionBlockedReason,
         blocked_candidates: Vec<WorkerDispatchAdmissionBlockedCandidate>,
     },
+    /// Emitted by the tick that admitted a dispatch and spawned its session
+    /// thread. The thread runs independently; its final outcome is reported
+    /// later as SessionCompleted or SessionFailed once the thread finishes.
+    SessionAdmitted {
+        dispatch_id: String,
+        worker_id: String,
+    },
     SessionCompleted {
         dispatch_id: String,
         worker_id: String,
         session: WorkerSessionLoopOutcome,
+    },
+    /// The session thread returned an error instead of a clean terminal
+    /// outcome, or the thread itself panicked.
+    SessionFailed {
+        dispatch_id: String,
+        worker_id: String,
+        error: String,
     },
 }
 
