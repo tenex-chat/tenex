@@ -4,7 +4,6 @@ import type { LessonComment } from "@/events/LessonComment";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
-import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
 import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
@@ -200,11 +199,6 @@ export class ProjectContext {
      * Key: agent pubkey, Value: array of comments (limited to most recent 100 per agent)
      */
     public readonly agentComments: Map<string, LessonComment[]>;
-
-    /**
-     * Status publisher for immediately publishing project status updates
-     */
-    public statusPublisher?: ProjectStatusService;
 
     /**
      * MCP manager for this project's MCP tool access
