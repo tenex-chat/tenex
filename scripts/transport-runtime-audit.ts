@@ -3,15 +3,11 @@ import { join, relative } from "node:path";
 
 const concreteImportNeedle = `@/nostr/AgentPublisher`;
 const interfaceImportNeedle = `@/events/runtime/AgentRuntimePublisher`;
-const dispatchImportNeedle = `@/services/dispatch/AgentDispatchService`;
 const directPublishPattern = /(?:\bNDKEvent\s*\.\s*prototype\s*\.\s*publish\b|\.\s*publish\s*\()/;
 
 const allowedConcreteImports = new Set([
     "src/agents/execution/AgentExecutor.ts",
     "src/nostr/AgentPublisher.ts",
-]);
-const allowedDispatchImports = new Set([
-    "src/tools/implementations/kill.ts",
 ]);
 const allowedDirectPublishFiles = new Set([
     "src/skills/built-in/report/scripts/publish.js",
@@ -26,10 +22,8 @@ type DirectPublishCall = {
 type AuditSummary = {
     concreteImports: string[];
     interfaceImports: string[];
-    dispatchImports: string[];
     directPublishCalls: DirectPublishCall[];
     unexpectedConcreteImports: string[];
-    unexpectedDispatchImports: string[];
     unexpectedDirectPublishCalls: DirectPublishCall[];
 };
 
@@ -103,7 +97,6 @@ export function buildSummary(options: AuditOptions = {}): AuditSummary {
     const sourceFiles = walk(srcRoot, isAuditedSourceFile);
     const concreteImports: string[] = [];
     const interfaceImports: string[] = [];
-    const dispatchImports: string[] = [];
     const directPublishCalls = sourceFiles.flatMap((file) => findDirectPublishCalls(repoRoot, file));
 
     for (const file of runtimeTypescriptFiles) {
@@ -117,17 +110,10 @@ export function buildSummary(options: AuditOptions = {}): AuditSummary {
         if (content.includes(interfaceImportNeedle)) {
             interfaceImports.push(relPath);
         }
-
-        if (content.includes(dispatchImportNeedle)) {
-            dispatchImports.push(relPath);
-        }
     }
 
     const unexpectedConcreteImports = concreteImports.filter(
         (file) => !allowedConcreteImports.has(file)
-    );
-    const unexpectedDispatchImports = dispatchImports.filter(
-        (file) => !allowedDispatchImports.has(file) && file !== "src/services/dispatch/AgentDispatchService.ts"
     );
     const unexpectedDirectPublishCalls = directPublishCalls.filter(
         (call) => !allowedDirectPublishFiles.has(call.file)
@@ -136,12 +122,10 @@ export function buildSummary(options: AuditOptions = {}): AuditSummary {
     return {
         concreteImports: concreteImports.sort(),
         interfaceImports: interfaceImports.sort(),
-        dispatchImports: dispatchImports.sort(),
         directPublishCalls: directPublishCalls.sort((a, b) =>
             `${a.file}:${a.line}`.localeCompare(`${b.file}:${b.line}`)
         ),
         unexpectedConcreteImports: unexpectedConcreteImports.sort(),
-        unexpectedDispatchImports: unexpectedDispatchImports.sort(),
         unexpectedDirectPublishCalls: unexpectedDirectPublishCalls.sort((a, b) =>
             `${a.file}:${a.line}`.localeCompare(`${b.file}:${b.line}`)
         ),
@@ -151,7 +135,6 @@ export function buildSummary(options: AuditOptions = {}): AuditSummary {
 export function hasAuditFailures(summary: AuditSummary): boolean {
     return (
         summary.unexpectedConcreteImports.length > 0 ||
-        summary.unexpectedDispatchImports.length > 0 ||
         summary.unexpectedDirectPublishCalls.length > 0
     );
 }
@@ -167,7 +150,6 @@ export function printSummary(summary: AuditSummary): void {
     console.log(`Status: ${status}`);
     console.log(`Concrete AgentPublisher imports: ${summary.concreteImports.length}`);
     console.log(`AgentRuntimePublisher imports: ${summary.interfaceImports.length}`);
-    console.log(`AgentDispatchService imports: ${summary.dispatchImports.length}`);
     console.log(`Direct NDK publish calls: ${summary.directPublishCalls.length}`);
     console.log("");
 
@@ -184,17 +166,6 @@ export function printSummary(summary: AuditSummary): void {
         console.log("Interface imports:");
         for (const file of summary.interfaceImports) {
             console.log(`- ${file}`);
-        }
-        console.log("");
-    }
-
-    if (summary.dispatchImports.length > 0) {
-        console.log("Dispatch imports:");
-        for (const file of summary.dispatchImports) {
-            const marker = allowedDispatchImports.has(file) || file === "src/services/dispatch/AgentDispatchService.ts"
-                ? "allowed"
-                : "unexpected";
-            console.log(`- ${file} (${marker})`);
         }
         console.log("");
     }

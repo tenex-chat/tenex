@@ -35,7 +35,6 @@ export type {
     EventContext,
 } from "./types";
 export { AgentEventEncoder } from "./AgentEventEncoder";
-export { AgentConfigPublisher } from "./AgentConfigPublisher";
 export {
     publishProjectAgentSnapshot,
     publishAgentProfile,
