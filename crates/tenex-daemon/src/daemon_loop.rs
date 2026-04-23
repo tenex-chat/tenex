@@ -18,9 +18,10 @@ use crate::daemon_maintenance::{
     run_daemon_maintenance_once_from_filesystem_with_telegram,
 };
 use crate::daemon_worker_runtime::{
+    AdmitWorkerDispatchOutcome, DaemonWorkerFilesystemTerminalInput,
     DaemonWorkerLivePublishMaintenance, DaemonWorkerOperationsStatusRuntimeInput,
-    DaemonWorkerRuntimeFilesystemInput, DaemonWorkerRuntimeOutcome,
-    DaemonWorkerTelegramEgressRuntimeInput, run_daemon_worker_runtime_once_from_filesystem,
+    DaemonWorkerRuntimeOutcome, DaemonWorkerTelegramEgressRuntimeInput,
+    admit_one_worker_dispatch_from_filesystem, run_started_worker_session_from_filesystem,
 };
 use crate::project_boot_state::{BootedProjectsState, ProjectBootState};
 use crate::publish_outbox::{
@@ -126,7 +127,11 @@ pub struct DaemonWorkerLoopInput<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonTickWithWorkerOutcome {
     pub maintenance: DaemonMaintenanceOutcome,
-    pub worker_runtime: DaemonWorkerRuntimeOutcome,
+    /// Outcomes of the admit-and-run sessions for this tick. Each tick runs
+    /// its admitted sessions concurrently on scoped threads and joins them
+    /// before returning. A tick that admitted nothing returns a single entry
+    /// describing why (NoQueuedDispatches or a concurrency limit).
+    pub worker_runtime: Vec<DaemonWorkerRuntimeOutcome>,
     pub publish_outbox: PublishOutboxMaintenanceReport,
 }
 
@@ -369,11 +374,13 @@ pub fn run_daemon_tick_once_from_filesystem_with_worker<P, S>(
     telegram_publisher: &mut dyn TelegramMaintenancePublisher,
 ) -> Result<DaemonTickWithWorkerOutcome, DaemonTickWithWorkerError>
 where
-    P: PublishOutboxRelayPublisher,
+    P: PublishOutboxRelayPublisher + Send,
     S: WorkerDispatchSpawner,
     S::Session: WorkerFrameReceiver
         + WorkerDispatchSession<Error = <S::Session as WorkerFrameReceiver>::Error>
+        + Send
         + 'static,
+    <S::Session as WorkerFrameReceiver>::Error: Send,
 {
     let daemon_dir = input.daemon_dir;
     let tenex_base_dir = input.tenex_base_dir;
@@ -397,60 +404,123 @@ where
         tenex_base_dir,
         project_owner_pubkeys: &operations_status_project_owner_pubkeys,
     };
-    let worker_runtime = {
-        let publisher_for_live = Arc::clone(publisher);
-        let mut live_publish_maintenance = move |daemon_dir: &Path, now: u64| {
-            let mut guard = publisher_for_live
-                .lock()
-                .expect("publisher mutex poisoned; another thread panicked while publishing");
-            maintain_publish_runtime(PublishRuntimeMaintainInput {
-                daemon_dir,
-                publisher: &mut *guard,
-                now,
-                retry_policy,
-            })
-            .map(|_| ())
-            .map_err(|source| source.to_string())
-        };
-        run_daemon_worker_runtime_once_from_filesystem(
+    // Admit-loop: keep admitting queued dispatches and spawning a thread per
+    // admitted session until admission returns NotAdmitted (queue empty or
+    // concurrency limit reached). All session threads are scoped so they
+    // join before this function returns; that serializes parallelism to
+    // "within a single tick" for now, matching the test expectation that a
+    // tick's outcome reflects every session it kicked off.
+    let mut admitted_sessions = Vec::new();
+    let mut final_not_admitted: Option<DaemonWorkerRuntimeOutcome> = None;
+    loop {
+        let correlation_id = format!(
+            "{}:admission-{}",
+            worker.correlation_id,
+            admitted_sessions.len()
+        );
+        let admission = admit_one_worker_dispatch_from_filesystem(
             spawner,
-            DaemonWorkerRuntimeFilesystemInput {
-                daemon_dir,
-                runtime_state: &worker.runtime_state,
-                limits: worker.limits,
-                now_ms,
-                correlation_id: worker.correlation_id,
-                lock_owner: worker.lock_owner,
-                command: worker.command,
-                worker_config: worker.worker_config,
-                writer_version: worker.writer_version,
-                resolved_pending_delegations: worker.resolved_pending_delegations,
-                publish: worker.publish,
-                telegram_egress,
-                operations_status: Some(worker_operations_status),
-                live_publish_maintenance: Some(DaemonWorkerLivePublishMaintenance {
-                    maintain: &mut live_publish_maintenance,
-                }),
-                max_frames: worker.max_frames,
-            },
+            daemon_dir,
+            &worker.runtime_state,
+            worker.limits,
+            now_ms,
+            &correlation_id,
+            worker.lock_owner.clone(),
+            worker.command.clone(),
+            worker.worker_config,
         )
-    };
-    let worker_runtime = match worker_runtime {
-        Ok(worker_runtime) => worker_runtime,
-        Err(source) => {
-            let mut guard = publisher
-                .lock()
-                .expect("publisher mutex poisoned; another thread panicked while publishing");
-            maintain_publish_runtime(PublishRuntimeMaintainInput {
-                daemon_dir,
-                publisher: &mut *guard,
-                now: now_ms,
-                retry_policy,
-            })?;
-            return Err(DaemonTickWithWorkerError::WorkerRuntime {
-                message: source.to_string(),
-            });
+        .map_err(|source| DaemonTickWithWorkerError::WorkerRuntime {
+            message: source.to_string(),
+        })?;
+        match admission {
+            AdmitWorkerDispatchOutcome::Admitted(started) => admitted_sessions.push(started),
+            AdmitWorkerDispatchOutcome::NotAdmitted {
+                reason,
+                blocked_candidates,
+            } => {
+                final_not_admitted = Some(DaemonWorkerRuntimeOutcome::NotAdmitted {
+                    reason,
+                    blocked_candidates,
+                });
+                break;
+            }
         }
+    }
+
+    let worker_runtime: Vec<DaemonWorkerRuntimeOutcome> = if admitted_sessions.is_empty() {
+        vec![final_not_admitted.expect("admit-loop always produces NotAdmitted when no sessions admitted")]
+    } else {
+        let runtime_state = &worker.runtime_state;
+        let writer_version = worker.writer_version;
+        let resolved_pending_delegations = worker.resolved_pending_delegations;
+        let correlation_id = worker.correlation_id;
+        let publish_ctx = worker.publish;
+        let telegram_egress_ref = telegram_egress;
+        let worker_operations_status_ref = worker_operations_status;
+        let max_frames = worker.max_frames;
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = admitted_sessions
+                .into_iter()
+                .enumerate()
+                .map(|(index, started)| {
+                    let publisher_for_thread = Arc::clone(publisher);
+                    let publish_ctx = publish_ctx.clone();
+                    let telegram_egress = telegram_egress_ref.clone();
+                    let operations_status = worker_operations_status_ref.clone();
+                    let writer_version = writer_version.clone();
+                    let resolved_pending_delegations = resolved_pending_delegations.clone();
+                    let dispatch_correlation_id = format!("{correlation_id}:complete-{index}");
+                    scope.spawn(move || {
+                        let mut live_publish_maintenance =
+                            move |daemon_dir: &Path, now: u64| {
+                                let mut guard = publisher_for_thread
+                                    .lock()
+                                    .expect("publisher mutex poisoned");
+                                maintain_publish_runtime(PublishRuntimeMaintainInput {
+                                    daemon_dir,
+                                    publisher: &mut *guard,
+                                    now,
+                                    retry_policy,
+                                })
+                                .map(|_| ())
+                                .map_err(|source| source.to_string())
+                            };
+                        run_started_worker_session_from_filesystem(
+                            daemon_dir,
+                            runtime_state,
+                            now_ms,
+                            publish_ctx,
+                            telegram_egress,
+                            Some(operations_status),
+                            Some(DaemonWorkerLivePublishMaintenance {
+                                maintain: &mut live_publish_maintenance,
+                            }),
+                            DaemonWorkerFilesystemTerminalInput {
+                                timestamp: now_ms,
+                                writer_version,
+                                resolved_pending_delegations,
+                                dispatch_correlation_id,
+                            },
+                            max_frames,
+                            started,
+                        )
+                    })
+                })
+                .collect();
+            let mut outcomes = Vec::with_capacity(handles.len());
+            for handle in handles {
+                match handle.join().expect("session thread panicked") {
+                    Ok(outcome) => outcomes.push(outcome),
+                    Err(source) => {
+                        tracing::error!(error = %source, "session thread returned error");
+                        return Err(DaemonTickWithWorkerError::WorkerRuntime {
+                            message: source.to_string(),
+                        });
+                    }
+                }
+            }
+            Ok(outcomes)
+        })?
     };
     let publish_outbox = {
         let mut guard = publisher
@@ -468,7 +538,7 @@ where
         "daemon worker tick",
         now_ms,
         &maintenance,
-        Some(&worker_runtime),
+        Some(worker_runtime.as_slice()),
         &publish_outbox,
     );
 
@@ -483,7 +553,7 @@ fn log_daemon_tick_publish_summary(
     message: &'static str,
     now_ms: u64,
     maintenance: &DaemonMaintenanceOutcome,
-    worker_runtime: Option<&DaemonWorkerRuntimeOutcome>,
+    worker_runtime: Option<&[DaemonWorkerRuntimeOutcome]>,
     publish_outbox: &PublishOutboxMaintenanceReport,
 ) {
     let backend_enqueued_event_count = backend_enqueued_event_count(maintenance);
@@ -494,7 +564,12 @@ fn log_daemon_tick_publish_summary(
         .descriptors
         .len();
     let project_status_count = maintenance.backend_events.tick.project_statuses.len();
-    let worker_outcome = worker_runtime.map(worker_runtime_outcome_label);
+    let worker_outcome: Option<Vec<&'static str>> = worker_runtime.map(|outcomes| {
+        outcomes
+            .iter()
+            .map(worker_runtime_outcome_label)
+            .collect()
+    });
     let publish_pending_before = publish_outbox.diagnostics_before.pending_count;
     let publish_failed_before = publish_outbox.diagnostics_before.failed_count;
     let publish_requeued_count = publish_outbox.requeued.len();
@@ -503,16 +578,20 @@ fn log_daemon_tick_publish_summary(
     let publish_published_after = publish_outbox.diagnostics_after.published_count;
     let publish_failed_after = publish_outbox.diagnostics_after.failed_count;
     let publish_retry_due_after = publish_outbox.diagnostics_after.retry_due_count;
+    let any_session_completed = worker_runtime
+        .map(|outcomes| {
+            outcomes
+                .iter()
+                .any(|o| matches!(o, DaemonWorkerRuntimeOutcome::SessionCompleted { .. }))
+        })
+        .unwrap_or(false);
     let has_activity = backend_due_task_count > 0
         || backend_enqueued_event_count > 0
         || publish_pending_before > 0
         || publish_failed_before > 0
         || publish_requeued_count > 0
         || publish_drained_count > 0
-        || matches!(
-            worker_runtime,
-            Some(DaemonWorkerRuntimeOutcome::SessionCompleted { .. })
-        );
+        || any_session_completed;
 
     if has_activity {
         tracing::info!(
@@ -744,11 +823,13 @@ where
     C: DaemonMaintenanceLoopClock,
     Sleep: DaemonMaintenanceLoopSleeper,
     Stop: DaemonMaintenanceLoopStopSignal,
-    P: PublishOutboxRelayPublisher,
+    P: PublishOutboxRelayPublisher + Send,
     S: WorkerDispatchSpawner,
     S::Session: WorkerFrameReceiver
         + WorkerDispatchSession<Error = <S::Session as WorkerFrameReceiver>::Error>
+        + Send
         + 'static,
+    <S::Session as WorkerFrameReceiver>::Error: Send,
 {
     let DaemonWorkerLoopInput {
         runtime_state,
@@ -1301,8 +1382,9 @@ mod tests {
                 format!("project-status:{}:demo-project", fixture.owner_pubkey),
             ]
         );
+        assert_eq!(outcome.worker_runtime.len(), 1);
         assert!(matches!(
-            outcome.worker_runtime,
+            outcome.worker_runtime[0],
             DaemonWorkerRuntimeOutcome::NotAdmitted {
                 reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
                 blocked_candidates: _,

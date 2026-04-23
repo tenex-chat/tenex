@@ -737,7 +737,7 @@ where
     C: DaemonMaintenanceLoopClock,
     S: DaemonMaintenanceLoopSleeper,
     Stop: DaemonMaintenanceLoopStopSignal,
-    P: PublishOutboxRelayPublisher,
+    P: PublishOutboxRelayPublisher + Send,
 {
     validate_iterations(options)?;
 

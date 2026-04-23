@@ -693,11 +693,11 @@ fn ral_identity_from_dispatch(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DaemonWorkerFilesystemTerminalInput {
-    timestamp: u64,
-    writer_version: String,
-    resolved_pending_delegations: Vec<RalPendingDelegation>,
-    dispatch_correlation_id: String,
+pub struct DaemonWorkerFilesystemTerminalInput {
+    pub timestamp: u64,
+    pub writer_version: String,
+    pub resolved_pending_delegations: Vec<RalPendingDelegation>,
+    pub dispatch_correlation_id: String,
 }
 
 fn run_started_worker_session<S>(
@@ -747,7 +747,7 @@ where
     )
 }
 
-fn run_started_worker_session_from_filesystem<S>(
+pub fn run_started_worker_session_from_filesystem<S>(
     daemon_dir: &Path,
     runtime_state: &SharedWorkerRuntimeState,
     frame_observed_at: u64,

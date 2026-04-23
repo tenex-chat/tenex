@@ -278,11 +278,13 @@ where
     C: DaemonMaintenanceLoopClock,
     Sleep: DaemonMaintenanceLoopSleeper,
     Stop: DaemonMaintenanceLoopStopSignal,
-    P: PublishOutboxRelayPublisher,
+    P: PublishOutboxRelayPublisher + Send,
     Spawner: WorkerDispatchSpawner,
     Spawner::Session: WorkerFrameReceiver
         + WorkerDispatchSession<Error = <Spawner::Session as WorkerFrameReceiver>::Error>
+        + Send
         + 'static,
+    <Spawner::Session as WorkerFrameReceiver>::Error: Send,
 {
     let started_at_ms = clock.now_ms();
     let session = shell
@@ -751,7 +753,9 @@ mod tests {
         .expect("foreground worker runner must succeed");
 
         assert_eq!(report.tick_loop.steps.len(), 1);
-        match &report.tick_loop.steps[0].maintenance_outcome.worker_runtime {
+        let worker_runtime = &report.tick_loop.steps[0].maintenance_outcome.worker_runtime;
+        assert_eq!(worker_runtime.len(), 1);
+        match &worker_runtime[0] {
             DaemonWorkerRuntimeOutcome::NotAdmitted { reason, .. } => {
                 assert_eq!(
                     reason,
@@ -836,14 +840,14 @@ mod tests {
         assert_eq!(report.tick_loop.steps.len(), 1);
         assert_eq!(
             report.tick_loop.steps[0].maintenance_outcome.worker_runtime,
-            DaemonWorkerRuntimeOutcome::SessionCompleted {
+            vec![DaemonWorkerRuntimeOutcome::SessionCompleted {
                 dispatch_id: "dispatch-alpha".to_string(),
                 worker_id: "worker-alpha".to_string(),
                 session: WorkerSessionLoopOutcome {
                     frame_count: 2,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
                 },
-            }
+            }]
         );
         let sent_messages = sent_messages
             .lock()
