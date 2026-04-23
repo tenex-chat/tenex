@@ -3,11 +3,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 use tracing;
-
-use crate::project_status_descriptors::project_descriptor_path;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,15 +27,6 @@ pub struct ProjectRepositoryInitOutcome {
 
 #[derive(Debug, Error)]
 pub enum ProjectRepositoryInitError {
-    #[error("failed to read project descriptor {path:?}: {source}")]
-    ReadDescriptor { path: PathBuf, source: io::Error },
-    #[error("failed to parse project descriptor {path:?}: {source}")]
-    ParseDescriptor {
-        path: PathBuf,
-        source: serde_json::Error,
-    },
-    #[error("project descriptor {path:?} is missing projectBasePath")]
-    MissingProjectBasePath { path: PathBuf },
     #[error("failed to create project directory {path:?}: {source}")]
     CreateProjectDir { path: PathBuf, source: io::Error },
     #[error("failed to inspect project directory {path:?}: {source}")]
@@ -50,44 +39,29 @@ pub enum ProjectRepositoryInitError {
     },
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectRepositoryDescriptor {
-    #[serde(default)]
-    project_base_path: Option<String>,
-    #[serde(default, alias = "repo", alias = "repoUrl", alias = "repositoryUrl")]
-    project_repo_url: Option<String>,
-}
-
+/// Ensures the project repository at `project_base_path` is initialised.
+/// Callers supply the base path (derived from `projectsBase` + d-tag) and
+/// the optional repo URL (from the 31933 event's `repo` tag); there is no
+/// descriptor file to read.
 pub fn ensure_project_repository_on_boot(
-    tenex_base_dir: &Path,
     project_d_tag: &str,
+    project_base_path: &Path,
+    repo_url: Option<&str>,
 ) -> Result<ProjectRepositoryInitOutcome, ProjectRepositoryInitError> {
-    let descriptor_path = project_descriptor_path(tenex_base_dir, project_d_tag);
-    let descriptor = read_project_repository_descriptor(&descriptor_path)?;
-    let project_base_path = descriptor
-        .project_base_path
-        .as_deref()
+    let repo_url = repo_url
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| ProjectRepositoryInitError::MissingProjectBasePath {
-            path: descriptor_path.clone(),
-        })?;
-    let repo_url = descriptor
-        .project_repo_url
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+        .map(str::to_string);
 
-    let action = if is_git_repository(&project_base_path) {
+    let action = if is_git_repository(project_base_path) {
         ProjectRepositoryInitAction::AlreadyGit
-    } else if repo_url.is_some() && project_dir_is_cloneable(&project_base_path)? {
+    } else if repo_url.is_some() && project_dir_is_cloneable(project_base_path)? {
         clone_project_repository(
             repo_url.as_deref().expect("repo_url checked"),
-            &project_base_path,
+            project_base_path,
         )?
     } else {
-        init_project_repository(&project_base_path)?
+        init_project_repository(project_base_path)?
     };
 
     tracing::info!(
@@ -100,23 +74,9 @@ pub fn ensure_project_repository_on_boot(
 
     Ok(ProjectRepositoryInitOutcome {
         project_d_tag: project_d_tag.to_string(),
-        project_base_path,
+        project_base_path: project_base_path.to_path_buf(),
         action,
         repo_url,
-    })
-}
-
-fn read_project_repository_descriptor(
-    path: &Path,
-) -> Result<ProjectRepositoryDescriptor, ProjectRepositoryInitError> {
-    let content =
-        fs::read_to_string(path).map_err(|source| ProjectRepositoryInitError::ReadDescriptor {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    serde_json::from_str(&content).map_err(|source| ProjectRepositoryInitError::ParseDescriptor {
-        path: path.to_path_buf(),
-        source,
     })
 }
 
@@ -217,19 +177,18 @@ fn git_command_display(args: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use tempfile::tempdir;
 
     #[test]
     fn boot_initializes_missing_project_git_repository() {
         let temp = tempdir().expect("temp dir");
         let project_path = temp.path().join("work").join("demo");
-        write_descriptor(temp.path(), "demo", &project_path, None);
 
-        let outcome = ensure_project_repository_on_boot(temp.path(), "demo").expect("init");
+        let outcome = ensure_project_repository_on_boot("demo", &project_path, None).expect("init");
 
         assert_eq!(outcome.action, ProjectRepositoryInitAction::GitInit);
         assert!(project_path.join(".git").exists());
+        assert_eq!(outcome.project_base_path, project_path);
     }
 
     #[test]
@@ -238,9 +197,8 @@ mod tests {
         let project_path = temp.path().join("work").join("demo");
         fs::create_dir_all(&project_path).expect("project dir");
         run_git_command(&project_path, ["init"]).expect("git init");
-        write_descriptor(temp.path(), "demo", &project_path, None);
 
-        let outcome = ensure_project_repository_on_boot(temp.path(), "demo").expect("init");
+        let outcome = ensure_project_repository_on_boot("demo", &project_path, None).expect("init");
 
         assert_eq!(outcome.action, ProjectRepositoryInitAction::AlreadyGit);
     }
@@ -252,36 +210,15 @@ mod tests {
         fs::create_dir_all(&source).expect("source dir");
         run_git_command(&source, ["init"]).expect("source git init");
         let project_path = temp.path().join("work").join("demo");
-        write_descriptor(
-            temp.path(),
+
+        let outcome = ensure_project_repository_on_boot(
             "demo",
             &project_path,
             Some(source.to_str().expect("source path utf8")),
-        );
-
-        let outcome = ensure_project_repository_on_boot(temp.path(), "demo").expect("clone");
+        )
+        .expect("clone");
 
         assert_eq!(outcome.action, ProjectRepositoryInitAction::GitClone);
         assert!(project_path.join(".git").exists());
-    }
-
-    fn write_descriptor(base_dir: &Path, d_tag: &str, project_path: &Path, repo: Option<&str>) {
-        let descriptor_path = project_descriptor_path(base_dir, d_tag);
-        fs::create_dir_all(descriptor_path.parent().expect("descriptor parent"))
-            .expect("descriptor parent dir");
-        let mut descriptor = json!({
-            "projectOwnerPubkey": "a".repeat(64),
-            "projectDTag": d_tag,
-            "projectBasePath": project_path,
-            "status": "active",
-        });
-        if let Some(repo) = repo {
-            descriptor["repo"] = json!(repo);
-        }
-        fs::write(
-            descriptor_path,
-            serde_json::to_string_pretty(&descriptor).expect("descriptor json"),
-        )
-        .expect("descriptor write");
     }
 }

@@ -10,6 +10,7 @@ use crate::nostr_ingress::{
 };
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::project_boot_state::ProjectBootState;
+use crate::project_event_index::ProjectEventIndex;
 use crate::subscription_filters::{RelaySubscriptionFrame, SubscriptionMessageError};
 
 #[derive(Debug, Clone, Copy)]
@@ -21,6 +22,7 @@ pub struct NostrSubscriptionIngressInput<'a> {
     pub writer_version: &'a str,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
+    pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -106,6 +108,7 @@ fn process_event_frame(
         timestamp: input.timestamp,
         writer_version: input.writer_version,
         project_boot_state: input.project_boot_state,
+        project_event_index: input.project_event_index,
     })?;
 
     Ok(NostrSubscriptionIngressOutcome::Event {

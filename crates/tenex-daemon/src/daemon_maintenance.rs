@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::backend_events::project_status::PROJECT_STATUS_KIND;
 use crate::backend_events_maintenance::{
     BackendEventsMaintenanceError, BackendEventsMaintenanceOutcome,
@@ -15,9 +16,9 @@ use crate::periodic_tick_state::{
     PeriodicTickStateError, read_periodic_scheduler_state, write_periodic_scheduler_state,
 };
 use crate::project_boot_state::{BootedProjectsState, is_project_booted};
+use crate::project_event_index::ProjectEventIndex;
 use crate::project_status_descriptors::{
-    ProjectStatusDescriptor, ProjectStatusDescriptorError, ProjectStatusDescriptorReport,
-    read_project_status_descriptors,
+    ProjectStatusDescriptor, ProjectStatusDescriptorReport,
 };
 use crate::publish_outbox::{
     PublishOutboxCancellationOutcome, PublishOutboxError,
@@ -48,6 +49,7 @@ pub struct DaemonMaintenanceInput<'a> {
     pub daemon_dir: &'a Path,
     pub now_ms: u64,
     pub project_boot_state: BootedProjectsState,
+    pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
     /// When present, the backend-events maintenance pass gates the kind
     /// 24012 heartbeat on the latch state.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
@@ -73,8 +75,8 @@ pub struct DaemonMaintenanceOutcome {
 
 #[derive(Debug, Error)]
 pub enum DaemonMaintenanceError {
-    #[error("project descriptor discovery failed: {0}")]
-    ProjectDescriptors(#[from] ProjectStatusDescriptorError),
+    #[error("maintenance backend config failed: {0}")]
+    BackendConfig(#[from] BackendConfigError),
     #[error("publish outbox maintenance failed: {0}")]
     PublishOutbox(#[from] PublishOutboxError),
     #[error("backend-events maintenance failed: {0}")]
@@ -112,7 +114,16 @@ where
     P: TelegramMaintenancePublisher,
 {
     let now_seconds = input.now_ms / 1_000;
-    let project_descriptor_report = read_project_status_descriptors(input.tenex_base_dir)?;
+    let config = read_backend_config(input.tenex_base_dir)?;
+    let projects_base = config
+        .projects_base
+        .as_deref()
+        .unwrap_or("/tmp/tenex-projects");
+    let project_descriptor_report = input
+        .project_event_index
+        .lock()
+        .expect("project event index mutex must not be poisoned")
+        .descriptors_report(projects_base);
     let project_boot_state = input.project_boot_state;
     let booted_project_descriptor_report =
         filter_booted_project_descriptors(&project_descriptor_report, &project_boot_state);
@@ -264,11 +275,7 @@ fn backend_events_projects_from_descriptors<'a>(
             project_d_tag: &descriptor.project_d_tag,
             project_manager_pubkey: descriptor.project_manager_pubkey.as_deref(),
             project_base_path: descriptor.project_base_path.as_deref().map(Path::new),
-            worktrees: if descriptor.worktrees.is_empty() {
-                None
-            } else {
-                Some(&descriptor.worktrees)
-            },
+            worktrees: None,
         })
         .collect()
 }

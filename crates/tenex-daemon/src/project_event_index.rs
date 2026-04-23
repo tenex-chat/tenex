@@ -59,14 +59,16 @@ impl ProjectEventIndex {
         self.entries.is_empty()
     }
 
-    /// Projects every indexed 31933 event into the descriptor struct that the
-    /// rest of the daemon consumes. Replaces the old filesystem scan in
-    /// `read_project_status_descriptors`.
-    pub fn descriptors_report(&self) -> ProjectStatusDescriptorReport {
+    /// Projects every indexed 31933 event into the descriptor struct every
+    /// downstream subsystem consumes. `projects_base` is the filesystem root
+    /// under which project working trees live (from backend config
+    /// `projectsBase`); each project's `project_base_path` is rendered as
+    /// `<projects_base>/<d_tag>`.
+    pub fn descriptors_report(&self, projects_base: &str) -> ProjectStatusDescriptorReport {
         let descriptors = self
             .entries
             .values()
-            .map(project_status_descriptor_from_event)
+            .map(|event| project_status_descriptor_from_event(event, projects_base))
             .collect();
         ProjectStatusDescriptorReport {
             descriptors,
@@ -75,15 +77,22 @@ impl ProjectEventIndex {
     }
 }
 
-fn project_status_descriptor_from_event(event: &SignedNostrEvent) -> ProjectStatusDescriptor {
+fn project_status_descriptor_from_event(
+    event: &SignedNostrEvent,
+    projects_base: &str,
+) -> ProjectStatusDescriptor {
     let project_d_tag = tag_value(event, "d").unwrap_or("").to_string();
     let project_manager_pubkey = tag_value(event, "p").map(str::to_string);
+    let project_base_path = Some(format!(
+        "{}/{}",
+        projects_base.trim_end_matches('/'),
+        project_d_tag
+    ));
     ProjectStatusDescriptor {
         project_owner_pubkey: event.pubkey.clone(),
         project_d_tag,
         project_manager_pubkey,
-        project_base_path: None,
-        worktrees: Vec::new(),
+        project_base_path,
     }
 }
 
@@ -127,7 +136,12 @@ mod tests {
         let index = ProjectEventIndex::new();
         assert!(index.is_empty());
         assert_eq!(index.len(), 0);
-        assert!(index.descriptors_report().descriptors.is_empty());
+        assert!(
+            index
+                .descriptors_report("/workspace/projects")
+                .descriptors
+                .is_empty()
+        );
     }
 
     #[test]
@@ -140,12 +154,16 @@ mod tests {
         assert!(index.upsert(event));
         assert_eq!(index.len(), 1);
 
-        let report = index.descriptors_report();
+        let report = index.descriptors_report("/workspace/projects");
         assert_eq!(report.descriptors.len(), 1);
         let d = &report.descriptors[0];
         assert_eq!(d.project_owner_pubkey, owner);
         assert_eq!(d.project_d_tag, "demo");
         assert_eq!(d.project_manager_pubkey.as_deref(), Some(manager.as_str()));
+        assert_eq!(
+            d.project_base_path.as_deref(),
+            Some("/workspace/projects/demo")
+        );
     }
 
     #[test]
@@ -194,7 +212,9 @@ mod tests {
         index.upsert(project_event("2", &owner_a, "alpha", 1_000, &[]));
         index.upsert(project_event("3", &owner_a, "beta", 1_000, &[]));
 
-        let descriptors = index.descriptors_report().descriptors;
+        let descriptors = index
+            .descriptors_report("/workspace/projects")
+            .descriptors;
         let coords: Vec<_> = descriptors
             .iter()
             .map(|d| (d.project_owner_pubkey.clone(), d.project_d_tag.clone()))
@@ -217,7 +237,9 @@ mod tests {
         let agent = "d".repeat(64);
         index.upsert(project_event("1", &owner, "demo", 1, &[&manager, &agent]));
 
-        let descriptor = &index.descriptors_report().descriptors[0];
+        let descriptor = &index
+            .descriptors_report("/workspace/projects")
+            .descriptors[0];
         assert_eq!(
             descriptor.project_manager_pubkey.as_deref(),
             Some(manager.as_str())

@@ -8,6 +8,7 @@
 //! runtime.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -18,6 +19,7 @@ use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
     resolve_and_enqueue_inbound_dispatch,
 };
+use crate::project_event_index::ProjectEventIndex;
 use crate::telegram::bindings::{
     RuntimeTransport as BindingRuntimeTransport, TransportBindingReadError, find_binding,
     find_linked_pubkey_for_telegram_user, read_identity_bindings, read_transport_bindings,
@@ -41,6 +43,7 @@ pub struct TelegramIngressRuntimeInput<'a> {
     pub session_reply_to_native_id: Option<&'a str>,
     pub timestamp: u64,
     pub writer_version: &'a str,
+    pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -166,6 +169,7 @@ pub fn process_telegram_update(
         envelope: &envelope,
         timestamp: input.timestamp,
         writer_version: input.writer_version,
+        project_event_index: input.project_event_index,
     })?;
 
     Ok(TelegramIngressRuntimeOutcome::Routed {

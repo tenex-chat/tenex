@@ -17,6 +17,7 @@ use crate::nostr_subscription_ingress::{
 };
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::project_boot_state::ProjectBootState;
+use crate::project_event_index::ProjectEventIndex;
 use crate::subscription_filters::RelaySubscriptionFrame;
 
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +31,7 @@ pub struct NostrSubscriptionTickInput<'a> {
     pub writer_version: &'a str,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
+    pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -138,6 +140,7 @@ pub fn run_nostr_subscription_intake_tick(
             writer_version: input.writer_version,
             whitelist_ingress: input.whitelist_ingress,
             project_boot_state: input.project_boot_state,
+            project_event_index: input.project_event_index,
         })
         .map_err(|source| NostrSubscriptionTickError::Ingress {
             frame_index,
