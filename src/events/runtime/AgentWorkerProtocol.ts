@@ -182,6 +182,7 @@ const executeMessageSchema = frameSchema("execute", {
         .object({
             isDelegationCompletion: z.boolean(),
             hasPendingDelegations: z.boolean(),
+            pendingDelegationIds: z.array(z.string().min(1)).optional(),
             debug: z.boolean(),
         })
         .passthrough(),

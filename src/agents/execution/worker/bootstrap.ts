@@ -140,13 +140,17 @@ export async function executeAgentWorkerRequest(
                 message.conversationId,
                 message.ralNumber
             );
-            const pendingDelegations = RALRegistry.getInstance()
+            const registryPendingDelegations = RALRegistry.getInstance()
                 .getConversationPendingDelegations(
                     message.agentPubkey,
                     message.conversationId,
                     message.ralNumber
                 )
                 .map((delegation) => delegation.delegationConversationId);
+            const pendingDelegations =
+                registryPendingDelegations.length > 0
+                    ? registryPendingDelegations
+                    : (message.executionFlags.pendingDelegationIds ?? []);
             const pendingDelegationsRemain =
                 outstandingWork.details.pendingDelegations > 0 || pendingDelegations.length > 0;
 

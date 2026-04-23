@@ -220,6 +220,32 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
         ]);
         expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
     });
+
+    it("emits signed stream text delta publish_request metadata", async () => {
+        const harness = createHarness();
+
+        await harness.publisher.streamTextDelta(
+            {
+                delta: "partial response",
+                sequence: 3,
+            },
+            harness.context
+        );
+
+        const publishRequests = harness.emitted.filter(isPublishRequest);
+        expect(publishRequests).toHaveLength(1);
+
+        const [publishRequest] = publishRequests;
+        expect(publishRequest.runtimeEventClass).toBe("stream_text_delta");
+        expect(publishRequest.waitForRelayOk).toBe(false);
+        expect(publishRequest.event.kind).toBe(24135);
+        expect(publishRequest.event.content).toBe("partial response");
+        expect(publishRequest.event.tags).toContainEqual(["llm-ral", "1"]);
+        expect(publishRequest.event.tags).toContainEqual(["stream-seq", "3"]);
+        expect(publishRequest.event.tags).toContainEqual(["llm-model", "mock-model"]);
+        expectSignedPublishRequest(publishRequest, harness.agent.pubkey);
+        expect(AgentWorkerProtocolMessageSchema.safeParse(publishRequest).success).toBe(true);
+    });
 });
 
 function createHarness(): {
