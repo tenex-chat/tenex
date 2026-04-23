@@ -1,11 +1,9 @@
 import { agentStorage, createStoredAgent, type StoredAgent } from "@/agents/AgentStorage";
-import { installAgentFromNostr, installAgentFromNostrEvent } from "@/agents/agent-installer";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { initNDK } from "@/nostr/ndkClient";
 import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
 import { logger } from "@/utils/logger";
-import { NDKPrivateKeySigner, type NDKEvent } from "@nostr-dev-kit/ndk";
-import type NDK from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 export interface ProvisionedAgentResult {
     storedAgent: StoredAgent;
@@ -33,64 +31,6 @@ async function publishInstalledAgentsInventory(): Promise<void> {
             error: error instanceof Error ? error.message : String(error),
         });
     }
-}
-
-export async function installAgentFromDefinitionEventId(
-    definitionEventId: string,
-    options?: {
-        slugOverride?: string;
-        ndk?: NDK;
-        publishInventory?: boolean;
-    }
-): Promise<ProvisionedAgentResult> {
-    await agentStorage.initialize();
-
-    const existingAgent = await agentStorage.getAgentByEventId(definitionEventId);
-    const storedAgent = await installAgentFromNostr(
-        definitionEventId,
-        options?.slugOverride,
-        options?.ndk
-    );
-
-    if (options?.publishInventory !== false) {
-        await publishInstalledAgentsInventory();
-    }
-
-    return {
-        storedAgent,
-        pubkey: new NDKPrivateKeySigner(storedAgent.nsec).pubkey,
-        created: !existingAgent,
-    };
-}
-
-export async function installAgentFromDefinitionEvent(
-    definitionEvent: NDKEvent,
-    options?: {
-        slugOverride?: string;
-        ndk?: NDK;
-        publishInventory?: boolean;
-    }
-): Promise<ProvisionedAgentResult> {
-    await agentStorage.initialize();
-
-    const existingAgent = definitionEvent.id
-        ? await agentStorage.getAgentByEventId(definitionEvent.id)
-        : null;
-    const storedAgent = await installAgentFromNostrEvent(
-        definitionEvent,
-        options?.slugOverride,
-        options?.ndk
-    );
-
-    if (options?.publishInventory !== false) {
-        await publishInstalledAgentsInventory();
-    }
-
-    return {
-        storedAgent,
-        pubkey: new NDKPrivateKeySigner(storedAgent.nsec).pubkey,
-        created: !existingAgent,
-    };
 }
 
 export async function createLocalAgent(

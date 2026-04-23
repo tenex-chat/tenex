@@ -169,7 +169,7 @@ export interface StoredAgent extends StoredAgentData {
  * Factory function to create a StoredAgent object.
  *
  * Ensures consistent structure and defaults across the codebase.
- * Used by both agent-installer (Nostr agents) and agents_write (local agents).
+ * Used by AgentProvisioningService and agents_write tool implementations.
  *
  * ## Why this exists
  * Before: StoredAgent objects were manually constructed in 2 places with slight differences
