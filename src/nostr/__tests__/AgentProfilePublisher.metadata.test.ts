@@ -19,7 +19,6 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let getConfigSpy: ReturnType<typeof spyOn>;
     let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
     let ensureBackendPrivateKeySpy: ReturnType<typeof spyOn>;
-    let getProjectAgentsSpy: ReturnType<typeof spyOn>;
     let capturedEnqueues: Array<{
         event: NDKEvent;
         context: rustPublishOutbox.RustPublishOutboxContext;
@@ -65,7 +64,6 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
         spyOn(systemPubkeyListModule, "getSystemPubkeyListService").mockReturnValue({
             syncWhitelistFile: mockSyncWhitelistFile,
         } as any);
-        getProjectAgentsSpy = spyOn(agentStorage, "getProjectAgents").mockResolvedValue([]);
         spyOn(agentStorage, "loadAgent").mockResolvedValue(null);
         spyOn(agentStorage, "getAgentBySlugForProject").mockResolvedValue(null);
         spyOn(logger, "debug").mockImplementation(() => undefined);
@@ -92,39 +90,6 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
         expect(enqueueSpy).toHaveBeenCalled();
         expect(directPublishSpy).not.toHaveBeenCalled();
     };
-
-    describe("publishProjectAgentSnapshot", () => {
-        it("skips kind:14199 publishing entirely when NIP-46 is disabled", async () => {
-            getConfigSpy.mockReturnValue({
-                nip46: {
-                    enabled: false,
-                },
-            } as any);
-            getProjectAgentsSpy.mockResolvedValue([
-                { nsec: "1".repeat(64) },
-            ] as any);
-
-            const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((callback: Parameters<typeof setTimeout>[0]) => {
-                if (typeof callback === "function") {
-                    callback();
-                }
-                return 0 as ReturnType<typeof setTimeout>;
-            }) as typeof setTimeout);
-
-            try {
-                AgentProfilePublisherModule.publishProjectAgentSnapshot("project-1");
-                await Promise.resolve();
-                await Promise.resolve();
-            } finally {
-                setTimeoutSpy.mockRestore();
-            }
-
-            expect(mockSign).not.toHaveBeenCalled();
-            expect(enqueueSpy).not.toHaveBeenCalled();
-            expect(directPublishSpy).not.toHaveBeenCalled();
-            expect(capturedEnqueues).toHaveLength(0);
-        });
-    });
 
     describe("publishAgentProfile", () => {
         it("syncs daemon whitelist file before publishing kind:0", async () => {

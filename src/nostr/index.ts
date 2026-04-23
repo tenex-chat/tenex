@@ -13,7 +13,6 @@ export type {
 } from "./types";
 export { AgentEventEncoder } from "./AgentEventEncoder";
 export {
-    publishProjectAgentSnapshot,
     publishAgentProfile,
     publishBackendProfile,
     publishCompiledInstructions,

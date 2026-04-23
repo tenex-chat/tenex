@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
-import { publishAgentProfile, publishProjectAgentSnapshot } from "@/nostr/AgentProfilePublisher";
+import { publishAgentProfile } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { agentRuntimePolicyService } from "@/services/AgentRuntimePolicyService";
 import { getConfiguredEscalationAgent } from "@/services/agents/EscalationService";
@@ -431,9 +431,6 @@ export class AgentRegistry {
         this.agentsByPubkey.delete(agent.pubkey);
 
         logger.info(`Removed agent ${slug} from project ${this.projectDTag}`);
-
-        // Schedule debounced 14199 snapshot re-publish so the removed agent's p-tag is dropped
-        publishProjectAgentSnapshot(this.projectDTag);
 
         return true;
     }

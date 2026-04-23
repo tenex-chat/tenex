@@ -1,11 +1,7 @@
 import * as crypto from "node:crypto";
 import { agentStorage } from "@/agents/AgentStorage";
-import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { config } from "@/services/ConfigService";
-import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { getSystemPubkeyListService } from "@/services/trust-pubkeys/SystemPubkeyListService";
-import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { enqueueSignedEventForRustPublish } from "./RustPublishOutbox";
 import {
@@ -27,10 +23,6 @@ const AVATAR_FAMILIES = [
     "avataaars",
 ];
 
-/** Per-project debounce timers for 14199 snapshot publishing */
-const snapshotDebounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-const SNAPSHOT_DEBOUNCE_MS = 5000;
-
 /**
  * In-memory cache of last published instruction hash per agent pubkey.
  * Used for deduplication to avoid publishing duplicate kind:0 events
@@ -47,200 +39,6 @@ function buildAvatarUrl(pubkey: string): string {
         Number.parseInt(pubkey.substring(0, 8), 16) % AVATAR_FAMILIES.length;
     const avatarStyle = AVATAR_FAMILIES[familyIndex];
     return `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${pubkey}`;
-}
-
-/**
- * Schedule a kind:14199 snapshot publish for a specific project.
- * Debounced per-project: each project's agents are additively merged into
- * the owner's single 14199 event without removing other projects' agents.
- */
-export function publishProjectAgentSnapshot(projectDTag: string): void {
-    const existing = snapshotDebounceTimers.get(projectDTag);
-    if (existing) {
-        clearTimeout(existing);
-    }
-
-    const timer = setTimeout(() => {
-        snapshotDebounceTimers.delete(projectDTag);
-        executeSnapshotPublish(projectDTag).catch((error) => {
-            logger.warn("Debounced 14199 snapshot publish failed", {
-                projectDTag,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        });
-    }, SNAPSHOT_DEBOUNCE_MS);
-
-    snapshotDebounceTimers.set(projectDTag, timer);
-}
-
-/**
- * Execute the actual 14199 snapshot publish for a specific project.
- * Reads agents for this project only, then additively merges their pubkeys
- * into the owner's existing 14199 event (preserving agents from other projects).
- *
- * When NIP-46 is enabled, each whitelisted owner gets their own 14199 event signed
- * by that owner via NIP-46 remote signing. If signing fails, the event is simply
- * not published — there is no fallback to backend key signing.
- *
- * When NIP-46 is disabled, 14199 publishing is skipped entirely.
- */
-async function executeSnapshotPublish(projectDTag: string): Promise<void> {
-    const projectAgents = await agentStorage.getProjectAgents(projectDTag);
-    const whitelisted = config.getWhitelistedPubkeys();
-
-    // Collect unique agent pubkeys for this project
-    const agentPubkeys: string[] = [];
-    const seen = new Set<string>();
-    for (const agent of projectAgents) {
-        const agentSigner = new NDKPrivateKeySigner(agent.nsec);
-        if (!seen.has(agentSigner.pubkey)) {
-            seen.add(agentSigner.pubkey);
-            agentPubkeys.push(agentSigner.pubkey);
-        }
-    }
-
-    logger.info("Publishing debounced 14199 snapshot", {
-        projectDTag,
-        agentCount: agentPubkeys.length,
-    });
-
-    const nip46Service = Nip46SigningService.getInstance();
-
-    if (!nip46Service.isEnabled()) {
-        logger.info("[NIP-46] Disabled — skipping 14199 snapshot publish", {
-            projectDTag,
-            agentCount: agentPubkeys.length,
-        });
-        return;
-    }
-
-    for (const ownerPubkey of whitelisted) {
-        await publishSnapshotForOwner(
-            ownerPubkey,
-            agentPubkeys,
-            nip46Service,
-        );
-    }
-}
-
-/**
- * Publish a 14199 snapshot signed by a specific owner via NIP-46.
- * Additively merges this project's agent pubkeys into the owner's existing 14199.
- * If all project agents are already present, skips the publish entirely.
- * If signing fails for any reason, the event is not published.
- */
-async function publishSnapshotForOwner(
-    ownerPubkey: string,
-    projectAgentPubkeys: string[],
-    nip46Service: Nip46SigningService,
-): Promise<void> {
-    const existingPTags = await fetchExistingPTags(ownerPubkey);
-    const existingSet = new Set(existingPTags);
-    const newPubkeys = projectAgentPubkeys.filter((pk) => !existingSet.has(pk));
-
-    if (newPubkeys.length === 0 && existingPTags.length > 0) {
-        logger.debug("[NIP-46] All project agents already in 14199, skipping publish", {
-            ownerPubkey: shortenPubkey(ownerPubkey),
-            existingCount: existingPTags.length,
-        });
-        return;
-    }
-
-    const mergedPubkeys = [...existingPTags, ...newPubkeys];
-    const ndk = getNDK();
-    const signingLog = Nip46SigningLog.getInstance();
-    const ev = buildSnapshotEvent(ndk, mergedPubkeys);
-
-    const result = await nip46Service.signEvent(ownerPubkey, ev, "14199_snapshot");
-
-    if (result.outcome === "signed") {
-        try {
-            await enqueueSignedEventForRustPublish(ev, {
-                correlationId: "project_agent_snapshot",
-                projectId: "project-agent-snapshot",
-                conversationId: ownerPubkey,
-                requestId: `project-agent-snapshot:${ownerPubkey}:${ev.id}`,
-            });
-            signingLog.log({
-                op: "event_published",
-                ownerPubkey: Nip46SigningLog.truncatePubkey(ownerPubkey),
-                eventKind: NDKKind.ProjectAgentSnapshot as number,
-                signerType: "nip46",
-                pTagCount: ev.tags.filter((t) => t[0] === "p").length,
-                eventId: ev.id,
-            });
-            logger.info("[NIP-46] Enqueued owner-signed 14199 for Rust publish", {
-                ownerPubkey: shortenPubkey(ownerPubkey),
-                eventId: shortenOptionalEventId(ev.id),
-                existingPTags: existingPTags.length,
-                newPubkeys: newPubkeys.length,
-                totalPTags: mergedPubkeys.length,
-            });
-        } catch (error) {
-            logger.warn("[NIP-46] Failed to enqueue owner-signed 14199", {
-                ownerPubkey: shortenPubkey(ownerPubkey),
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-        return;
-    }
-
-    logger.warn("[NIP-46] Skipping 14199 publish — signing failed", {
-        ownerPubkey: shortenPubkey(ownerPubkey),
-        outcome: result.outcome,
-        reason: result.reason,
-    });
-}
-
-/**
- * Build an unsigned 14199 snapshot event with p-tags for the given pubkeys.
- */
-function buildSnapshotEvent(
-    ndk: ReturnType<typeof getNDK>,
-    allPubkeys: string[],
-): NDKEvent {
-    const ev = new NDKEvent(ndk, {
-        kind: NDKKind.ProjectAgentSnapshot,
-    });
-
-    for (const pk of allPubkeys) {
-        ev.tag(["p", pk]);
-    }
-
-    return ev;
-}
-
-/**
- * Fetch existing p-tag pubkeys from the owner's latest 14199 event.
- * Returns an empty array on fetch failure (safe: we only add, never remove).
- */
-async function fetchExistingPTags(ownerPubkey: string): Promise<string[]> {
-    try {
-        const ndk = getNDK();
-        const events = await ndk.fetchEvents({
-            kinds: [NDKKind.ProjectAgentSnapshot as number],
-            authors: [ownerPubkey],
-        });
-
-        if (events.size === 0) {
-            return [];
-        }
-
-        // Get the latest event (highest created_at)
-        const latest = Array.from(events).sort(
-            (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0),
-        )[0];
-
-        return latest.tags
-            .filter((t) => t[0] === "p" && t[1])
-            .map((t) => t[1]);
-    } catch (error) {
-        logger.warn("Failed to fetch existing 14199 event, proceeding with empty p-tags", {
-            ownerPubkey: shortenPubkey(ownerPubkey),
-            error: error instanceof Error ? error.message : String(error),
-        });
-        return [];
-    }
 }
 
 /**
@@ -267,26 +65,20 @@ export async function publishAgentProfile(
             additionalPubkeys: [signer.pubkey, ...(whitelistedPubkeys ?? [])],
         });
 
-        // Check if there are other agents with the same slug (name) in this project
-        // If so, append pubkey prefix for disambiguation
         const projectDTag = projectEvent.dTag;
         let displayName = agentName;
 
         if (projectDTag) {
-            // Load the agent's slug from storage to check for conflicts
             const agent = await agentStorage.loadAgent(signer.pubkey);
             if (agent?.slug) {
-                // Check if this slug has conflicts (multiple pubkeys for same slug)
                 const conflictingAgent = await agentStorage.getAgentBySlugForProject(
                     agent.slug,
                     projectDTag
                 );
 
-                // If we found an agent with this slug but it's a different pubkey, there's a conflict
                 if (conflictingAgent && conflictingAgent.nsec !== agent.nsec) {
                     const otherSigner = new NDKPrivateKeySigner(conflictingAgent.nsec);
                     if (otherSigner.pubkey !== signer.pubkey) {
-                        // Conflict exists - append pubkey prefix to both names
                         displayName = `${agentName} (${signer.pubkey.slice(0, 5)})`;
                         logger.info("Agent slug conflict detected, adding pubkey prefix to Kind 0 name", {
                             slug: agent.slug,
@@ -314,10 +106,6 @@ export async function publishAgentProfile(
             tags: [],
         });
 
-        // Validate projectEvent has required fields before tagging
-        // Both pubkey and dTag are required for valid NIP-01 addressable coordinates:
-        // Format: <kind>:<pubkey>:<d-tag> (e.g., "31933:abc123:my-project")
-        // Note: projectDTag was already declared earlier for conflict detection
         if (!projectEvent.pubkey) {
             logger.warn("Project event missing pubkey, skipping a-tag", {
                 agentPubkey: signer.pubkey,
@@ -328,23 +116,15 @@ export async function publishAgentProfile(
                 projectPubkey: projectEvent.pubkey,
             });
         } else {
-            // Properly tag the project event (creates an "a" tag for kind:31933)
-            // Note: We only tag the CURRENT project. Each project publishes
-            // the agent's profile with its own a-tag when the agent boots there.
-            // This avoids the multi-owner problem where other projects may have
-            // different owner pubkeys that we don't have access to.
             profileEvent.tag(projectEvent.tagReference());
         }
 
-        // Add e-tag for the agent definition event if it exists and is valid
-        // OR add metadata tags as fallback for agents without a valid event ID
         const trimmedEventId = agentDefinitionEventId?.trim() ?? "";
         const isValidHexEventId = /^[a-f0-9]{64}$/i.test(trimmedEventId);
 
         if (isValidHexEventId) {
             profileEvent.tags.push(["e", trimmedEventId]);
         } else {
-            // Log warning only if an event ID was provided but is invalid
             if (trimmedEventId !== "") {
                 logger.warn(
                     "Invalid event ID format for agent definition in profile, using metadata tags instead",
@@ -354,7 +134,6 @@ export async function publishAgentProfile(
                 );
             }
 
-            // Add metadata tags for agents without a valid NDKAgentDefinition event ID
             if (agentMetadata) {
                 if (agentMetadata.description) {
                     profileEvent.tags.push(["description", agentMetadata.description]);
@@ -368,44 +147,31 @@ export async function publishAgentProfile(
             }
         }
 
-        // Add p-tags for all whitelisted pubkeys
         if (whitelistedPubkeys && whitelistedPubkeys.length > 0) {
             for (const pubkey of whitelistedPubkeys) {
                 if (pubkey && pubkey !== signer.pubkey) {
-                    // Don't p-tag self
                     profileEvent.tags.push(["p", pubkey]);
                 }
             }
         }
 
-        // Add bot tag
         profileEvent.tags.push(["bot"]);
-
-        // Add tenex tag
         profileEvent.tags.push(["t", "tenex"]);
 
         await profileEvent.sign(signer, { pTags: false });
 
-        // Don't await; Rust drains the durable publish outbox.
         enqueueSignedEventForRustPublish(profileEvent, {
             correlationId: "agent_profile",
             projectId: projectDTag ?? "agent-profile",
             conversationId: signer.pubkey,
             requestId: `agent-profile:${signer.pubkey}:${profileEvent.id}`,
-        })
-            .catch((publishError) => {
+        }).catch((publishError) => {
             logger.warn("Failed to enqueue agent profile", {
                 error: publishError,
                 agentName,
                 pubkey: signer.pubkey.substring(0, 8),
             });
         });
-
-        // Schedule debounced 14199 snapshot publish for this project
-        const projectTag = projectEvent.dTag;
-        if (projectTag) {
-            publishProjectAgentSnapshot(projectTag);
-        }
     } catch (error) {
         logger.error("Failed to create agent profile", {
             error,
@@ -448,7 +214,6 @@ export async function publishBackendProfile(
             tags: [],
         });
 
-        // Add p-tags for all whitelisted pubkeys
         if (whitelistedPubkeys && whitelistedPubkeys.length > 0) {
             for (const pubkey of whitelistedPubkeys) {
                 if (pubkey && pubkey !== signer.pubkey) {
@@ -457,13 +222,8 @@ export async function publishBackendProfile(
             }
         }
 
-        // Add bot tag to indicate this is an automated system
         profileEvent.tags.push(["bot"]);
-
-        // Add tenex tag for discoverability
         profileEvent.tags.push(["t", "tenex"]);
-
-        // Add tenex-backend tag to distinguish from agents
         profileEvent.tags.push(["t", "tenex-backend"]);
 
         await profileEvent.sign(signer, { pTags: false });
@@ -490,7 +250,6 @@ export async function publishBackendProfile(
         logger.error("Failed to create backend profile", {
             error,
         });
-        // Don't throw - backend profile is not critical for operation
     }
 }
 
@@ -520,7 +279,6 @@ export async function publishCompiledInstructions(
             additionalPubkeys: [signer.pubkey],
         });
 
-        // Hash-based deduplication: skip if instructions haven't changed
         const instructionHash = crypto
             .createHash("sha256")
             .update(compiledInstructions)
@@ -549,13 +307,8 @@ export async function publishCompiledInstructions(
             tags: [],
         });
 
-        // Add instruction tag with compiled instructions
         profileEvent.tags.push(["instruction", compiledInstructions]);
-
-        // Add bot tag
         profileEvent.tags.push(["bot"]);
-
-        // Add tenex tag for discoverability
         profileEvent.tags.push(["t", "tenex"]);
 
         await profileEvent.sign(signer, { pTags: false });
@@ -569,7 +322,6 @@ export async function publishCompiledInstructions(
                 timeoutMs: PUBLISH_TIMEOUT_MS,
             });
 
-            // Update deduplication cache on successful publish
             lastPublishedInstructionHash.set(signer.pubkey, instructionHash);
 
             logger.info("Enqueued kind:0 with compiled instructions for Rust publish", {
@@ -588,6 +340,5 @@ export async function publishCompiledInstructions(
             error,
             agentPubkey: signer.pubkey.substring(0, 8),
         });
-        // Don't throw - this is fire-and-forget
     }
 }
