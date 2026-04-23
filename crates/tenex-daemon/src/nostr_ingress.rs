@@ -1,10 +1,12 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::agent_config_update::{
-    AgentConfigUpdateError, AgentConfigUpdateOutcome, apply_agent_config_update,
+    AgentConfigUpdateError, AgentConfigUpdateOutcome, AgentConfigUpdateScope,
+    apply_agent_config_update,
 };
 use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::inbound_runtime::{
@@ -15,10 +17,20 @@ use crate::nostr_classification::{DaemonNostrEventClass, classify_for_daemon};
 use crate::nostr_event::SignedNostrEvent;
 use crate::nostr_inbound::signed_event_to_inbound_envelope;
 use crate::project_boot_state::{
-    ProjectBootOutcome, ProjectBootStateError, record_project_boot_event,
+    ProjectBootOutcome, ProjectBootState, ProjectBootStateError, extract_project_boot_reference,
+    is_project_booted,
 };
 use crate::project_nostr_ingress::{
     ProjectNostrIngressError, ProjectNostrIngressOutcome, handle_project_nostr_event,
+};
+use crate::project_repository_init::{
+    ProjectRepositoryInitError, ensure_project_repository_on_boot,
+};
+use crate::project_status_descriptors::{
+    ProjectStatusDescriptor, ProjectStatusDescriptorError, read_project_status_descriptors,
+};
+use crate::project_status_runtime::{
+    ProjectStatusRuntimeError, ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -28,6 +40,7 @@ pub struct NostrIngressInput<'a> {
     pub event: &'a SignedNostrEvent,
     pub timestamp: u64,
     pub writer_version: &'a str,
+    pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -48,6 +61,11 @@ pub enum NostrIngressOutcome {
     AgentConfigUpdated {
         class: DaemonNostrEventClass,
         config_update: AgentConfigUpdateOutcome,
+        /// Project d-tags for which a fresh kind 24010 project-status event was
+        /// enqueued in response to this config update. Empty when the update
+        /// was a no-op, when no boot state was supplied, or when no booted
+        /// project matched the update scope.
+        republished_projects: Vec<String>,
     },
     Ignored {
         class: DaemonNostrEventClass,
@@ -70,10 +88,20 @@ pub enum NostrIngressError {
     BackendConfig(#[from] BackendConfigError),
     #[error("failed to write project state: {0}")]
     ProjectIngress(#[from] ProjectNostrIngressError),
-    #[error("failed to write project boot state: {0}")]
+    #[error("failed to record project boot state: {0}")]
     ProjectBootState(#[from] ProjectBootStateError),
+    #[error("failed to prepare project repository on boot: {0}")]
+    ProjectRepositoryInit(#[from] ProjectRepositoryInitError),
     #[error("failed to apply agent config update: {0}")]
     AgentConfigUpdate(#[from] AgentConfigUpdateError),
+    #[error("failed to enumerate project descriptors for status republish: {0}")]
+    ProjectDescriptors(#[from] ProjectStatusDescriptorError),
+    #[error("failed to republish project status for {project_d_tag}: {source}")]
+    ProjectStatusRepublish {
+        project_d_tag: String,
+        #[source]
+        source: ProjectStatusRuntimeError,
+    },
 }
 
 pub fn process_verified_nostr_event(
@@ -92,16 +120,37 @@ pub fn process_verified_nostr_event(
     }
 
     if class == DaemonNostrEventClass::Boot {
-        let boot = record_project_boot_event(input.daemon_dir, input.event, input.timestamp)?;
+        let Some(project_boot_state) = input.project_boot_state else {
+            return Ok(NostrIngressOutcome::Ignored {
+                class,
+                reason: NostrIngressIgnoredReason {
+                    code: "project_boot_state_unavailable".to_string(),
+                    detail: "project boot event received without a session boot-state handle"
+                        .to_string(),
+                },
+            });
+        };
+        let reference = extract_project_boot_reference(input.event)?;
+        ensure_project_repository_on_boot(input.tenex_base_dir, &reference.project_d_tag)?;
+        let boot = project_boot_state
+            .lock()
+            .expect("project boot state mutex must not be poisoned")
+            .record_boot_event(input.event, input.timestamp)?;
         return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
     }
 
     if class == DaemonNostrEventClass::ConfigUpdate {
         let agents_dir = input.tenex_base_dir.join("agents");
         let config_update = apply_agent_config_update(&agents_dir, input.event)?;
+        let republished_projects = if config_update.file_changed {
+            republish_project_status_after_config_update(&input, &config_update.scope)?
+        } else {
+            Vec::new()
+        };
         return Ok(NostrIngressOutcome::AgentConfigUpdated {
             class,
             config_update,
+            republished_projects,
         });
     }
 
@@ -125,6 +174,88 @@ pub fn process_verified_nostr_event(
     })?;
 
     Ok(NostrIngressOutcome::Routed { class, inbound })
+}
+
+/// Immediately publishes a fresh kind 24010 project-status event for every
+/// booted project affected by an agent-config update. A project-scoped update
+/// targets a single project; a global update fans out to every booted project.
+/// Returns the project d-tags that were republished, in filesystem order.
+///
+/// When the session has no boot state handle, no republish happens — the
+/// daemon cannot safely enqueue project-status events before the project boot
+/// gate has observed the project.
+fn republish_project_status_after_config_update(
+    input: &NostrIngressInput<'_>,
+    scope: &AgentConfigUpdateScope,
+) -> Result<Vec<String>, NostrIngressError> {
+    let Some(boot_state_handle) = input.project_boot_state else {
+        return Ok(Vec::new());
+    };
+    let boot_snapshot = boot_state_handle
+        .lock()
+        .expect("project boot state mutex must not be poisoned")
+        .snapshot();
+
+    let descriptor_report = read_project_status_descriptors(input.tenex_base_dir)?;
+
+    let accepted_at = input.timestamp;
+    let request_timestamp = input.timestamp;
+    let created_at = accepted_at / 1_000;
+
+    let mut republished = Vec::new();
+    for descriptor in descriptor_report.descriptors {
+        if !scope_matches_descriptor(scope, &descriptor) {
+            continue;
+        }
+        if !is_project_booted(
+            &boot_snapshot,
+            &descriptor.project_owner_pubkey,
+            &descriptor.project_d_tag,
+        ) {
+            continue;
+        }
+        let worktrees_slice: Option<&[String]> = if descriptor.worktrees.is_empty() {
+            None
+        } else {
+            Some(&descriptor.worktrees)
+        };
+        let project_base_path = descriptor.project_base_path.as_deref().map(Path::new);
+        publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
+            tenex_base_dir: input.tenex_base_dir,
+            daemon_dir: input.daemon_dir,
+            created_at,
+            accepted_at,
+            request_timestamp,
+            project_owner_pubkey: &descriptor.project_owner_pubkey,
+            project_d_tag: &descriptor.project_d_tag,
+            project_manager_pubkey: descriptor.project_manager_pubkey.as_deref(),
+            project_base_path,
+            agents: None,
+            worktrees: worktrees_slice,
+        })
+        .map_err(|source| NostrIngressError::ProjectStatusRepublish {
+            project_d_tag: descriptor.project_d_tag.clone(),
+            source,
+        })?;
+        republished.push(descriptor.project_d_tag);
+    }
+    Ok(republished)
+}
+
+fn scope_matches_descriptor(
+    scope: &AgentConfigUpdateScope,
+    descriptor: &ProjectStatusDescriptor,
+) -> bool {
+    match scope {
+        AgentConfigUpdateScope::Global => true,
+        AgentConfigUpdateScope::Project {
+            project_owner_pubkey,
+            project_d_tag,
+        } => {
+            descriptor.project_owner_pubkey == *project_owner_pubkey
+                && descriptor.project_d_tag == *project_d_tag
+        }
+    }
 }
 
 fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
@@ -169,6 +300,7 @@ mod tests {
             event: &event,
             timestamp: 1_710_000_800_000,
             writer_version: "nostr-ingress-test@0",
+            project_boot_state: None,
         })
         .expect("nostr ingress must process");
 
@@ -201,6 +333,7 @@ mod tests {
             event: &event,
             timestamp: 1_710_000_800_001,
             writer_version: "nostr-ingress-test@0",
+            project_boot_state: None,
         })
         .expect("nostr ingress must process");
 
@@ -241,12 +374,14 @@ mod tests {
             event: &event,
             timestamp: 1_710_000_800_002,
             writer_version: "nostr-ingress-test@0",
+            project_boot_state: None,
         })
         .expect("nostr ingress must process");
 
         let NostrIngressOutcome::AgentConfigUpdated {
             class,
             config_update,
+            republished_projects,
         } = outcome
         else {
             panic!("expected agent config updated outcome");
@@ -255,6 +390,10 @@ mod tests {
         assert_eq!(config_update.agent_pubkey, agent_pubkey);
         assert_eq!(config_update.model, "anthropic:claude-opus-4-7");
         assert!(config_update.file_changed);
+        assert!(
+            republished_projects.is_empty(),
+            "no boot state supplied so no republish should happen"
+        );
 
         let stored: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(base_dir.join("agents").join(format!("{agent_pubkey}.json")))
@@ -274,7 +413,15 @@ mod tests {
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let owner = pubkey_hex(0x11);
+        let project_base_path = base_dir.join("work").join("project-alpha");
+        write_project(
+            base_dir,
+            "project-alpha",
+            &owner,
+            project_base_path.to_str().expect("project path utf8"),
+        );
         let project_reference = format!("31933:{owner}:project-alpha");
+        let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
         let event = signed_event(
             24000,
             "boot-event",
@@ -287,6 +434,7 @@ mod tests {
             event: &event,
             timestamp: 1_710_000_800_003,
             writer_version: "nostr-ingress-test@0",
+            project_boot_state: Some(&project_boot_state),
         })
         .expect("nostr ingress must process");
 
@@ -296,7 +444,17 @@ mod tests {
         assert_eq!(class, DaemonNostrEventClass::Boot);
         assert_eq!(boot.project_owner_pubkey, owner);
         assert_eq!(boot.project_d_tag, "project-alpha");
+        assert!(project_base_path.join(".git").exists());
         assert!(!daemon_dir.join("dispatch-queue.jsonl").exists());
+        assert_eq!(
+            project_boot_state
+                .lock()
+                .expect("project boot state lock must not poison")
+                .snapshot()
+                .projects
+                .len(),
+            1
+        );
     }
 
     fn signed_event(kind: u64, event_id: &str, tags: Vec<Vec<&str>>) -> SignedNostrEvent {

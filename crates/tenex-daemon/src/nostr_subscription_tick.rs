@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -15,6 +16,7 @@ use crate::nostr_subscription_ingress::{
     process_relay_subscription_frame,
 };
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
+use crate::project_boot_state::ProjectBootState;
 use crate::subscription_filters::RelaySubscriptionFrame;
 
 #[derive(Debug, Clone, Copy)]
@@ -27,6 +29,7 @@ pub struct NostrSubscriptionTickInput<'a> {
     pub timestamp: u64,
     pub writer_version: &'a str,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
+    pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -47,6 +50,7 @@ pub struct NostrSubscriptionTickProcessedEvent {
     pub subscription_id: String,
     pub event_id: String,
     pub kind: u64,
+    pub pubkey: String,
     pub class: DaemonNostrEventClass,
 }
 
@@ -133,6 +137,7 @@ pub fn run_nostr_subscription_intake_tick(
             timestamp: input.timestamp,
             writer_version: input.writer_version,
             whitelist_ingress: input.whitelist_ingress,
+            project_boot_state: input.project_boot_state,
         })
         .map_err(|source| NostrSubscriptionTickError::Ingress {
             frame_index,
@@ -166,6 +171,7 @@ fn record_ingress_outcome(
                     subscription_id,
                     event_id: event_id.clone(),
                     kind,
+                    pubkey: frame_event_pubkey(frame).unwrap_or_default(),
                     class,
                 });
             diagnostics
@@ -304,7 +310,10 @@ fn dispatch_diagnostic(
                 frame_index,
                 event_id,
                 code: "project_booted".to_string(),
-                detail: format!("project {} boot state written to disk", boot.project_d_tag),
+                detail: format!(
+                    "project {} boot state recorded in session state",
+                    boot.project_d_tag
+                ),
                 class: Some(class),
                 project_id: Some(boot.project_d_tag),
                 pubkeys: Vec::new(),
@@ -347,6 +356,16 @@ fn ingress_class(ingress: &NostrIngressOutcome) -> DaemonNostrEventClass {
 fn frame_event_kind(frame: &RelaySubscriptionFrame) -> Option<u64> {
     match frame {
         RelaySubscriptionFrame::Event { event, .. } => Some(event.kind),
+        RelaySubscriptionFrame::Eose { .. }
+        | RelaySubscriptionFrame::Notice { .. }
+        | RelaySubscriptionFrame::Closed { .. }
+        | RelaySubscriptionFrame::Auth { .. } => None,
+    }
+}
+
+fn frame_event_pubkey(frame: &RelaySubscriptionFrame) -> Option<String> {
+    match frame {
+        RelaySubscriptionFrame::Event { event, .. } => Some(event.pubkey.clone()),
         RelaySubscriptionFrame::Eose { .. }
         | RelaySubscriptionFrame::Notice { .. }
         | RelaySubscriptionFrame::Closed { .. }
@@ -421,6 +440,7 @@ mod tests {
             timestamp: 1_710_001_100_000,
             writer_version: "nostr-subscription-tick-test@0",
             whitelist_ingress: None,
+            project_boot_state: None,
         })
         .expect("subscription tick must process");
 
@@ -434,6 +454,7 @@ mod tests {
                 subscription_id: "tenex-main".to_string(),
                 event_id: event.id.clone(),
                 kind: 1,
+                pubkey: event.pubkey.clone(),
                 class: DaemonNostrEventClass::Conversation,
             }]
         );
@@ -498,6 +519,7 @@ mod tests {
             timestamp: 1_710_001_200_000,
             writer_version: "nostr-subscription-tick-test@0",
             whitelist_ingress: None,
+            project_boot_state: None,
         })
         .expect("subscription tick must process");
 
