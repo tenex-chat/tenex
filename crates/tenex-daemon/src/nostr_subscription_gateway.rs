@@ -1,7 +1,6 @@
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle as StdJoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,6 +15,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle as TokioJoinHandle;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_util::sync::CancellationToken;
 use tungstenite::Message;
 use url::Url;
 
@@ -167,17 +167,18 @@ impl Drop for OwnedSubscriptionGatewayRuntime {
 #[derive(Debug)]
 pub struct NostrSubscriptionGatewaySupervisor {
     handles: Vec<TokioJoinHandle<()>>,
-    stop_flag: Arc<AtomicBool>,
+    stop_token: CancellationToken,
     runtime_handle: TokioRuntimeHandle,
     _owned_runtime: Option<OwnedSubscriptionGatewayRuntime>,
 }
 
 impl NostrSubscriptionGatewaySupervisor {
     pub fn request_stop(&self) {
-        self.stop_flag.store(true, Ordering::SeqCst);
+        self.stop_token.cancel();
     }
 
     pub fn join(mut self) {
+        self.stop_token.cancel();
         let handles = std::mem::take(&mut self.handles);
         self.runtime_handle.block_on(async move {
             for handle in handles {
@@ -185,15 +186,11 @@ impl NostrSubscriptionGatewaySupervisor {
             }
         });
     }
-
-    pub fn stop_flag(&self) -> Arc<AtomicBool> {
-        self.stop_flag.clone()
-    }
 }
 
 impl Drop for NostrSubscriptionGatewaySupervisor {
     fn drop(&mut self) {
-        self.stop_flag.store(true, Ordering::SeqCst);
+        self.stop_token.cancel();
     }
 }
 
@@ -232,7 +229,7 @@ where
         validate_relay_url(relay_url)?;
     }
 
-    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_token = CancellationToken::new();
     let observer: Arc<dyn NostrSubscriptionObserver> = Arc::new(observer);
     let mut handles = Vec::with_capacity(config.plan.relay_urls.len());
 
@@ -241,7 +238,7 @@ where
             relay_url.clone(),
             config.clone(),
             observer.clone(),
-            stop_flag.clone(),
+            stop_token.clone(),
             &runtime_handle,
         );
         handles.push(handle);
@@ -249,7 +246,7 @@ where
 
     Ok(NostrSubscriptionGatewaySupervisor {
         handles,
-        stop_flag,
+        stop_token,
         runtime_handle,
         _owned_runtime: None,
     })
@@ -295,43 +292,48 @@ fn spawn_relay_task(
     relay_url: String,
     config: NostrSubscriptionGatewayConfig,
     observer: Arc<dyn NostrSubscriptionObserver>,
-    stop_flag: Arc<AtomicBool>,
+    stop_token: CancellationToken,
     runtime_handle: &TokioRuntimeHandle,
 ) -> TokioJoinHandle<()> {
     runtime_handle
-        .spawn(async move { run_relay_loop_async(relay_url, config, observer, stop_flag).await })
+        .spawn(async move { run_relay_loop_async(relay_url, config, observer, stop_token).await })
 }
 
 async fn run_relay_loop_async(
     relay_url: String,
     config: NostrSubscriptionGatewayConfig,
     observer: Arc<dyn NostrSubscriptionObserver>,
-    stop_flag: Arc<AtomicBool>,
+    stop_token: CancellationToken,
 ) {
     tracing::info!(relay_url = %relay_url, "nostr relay task started");
-    while !stop_flag.load(Ordering::SeqCst) {
+    loop {
+        if stop_token.is_cancelled() {
+            break;
+        }
+
         tracing::debug!(relay_url = %relay_url, "connecting subscription relay session");
-        let result = run_nostr_subscription_relay_once_async(NostrSubscriptionRelayInput {
-            tenex_base_dir: &config.tenex_base_dir,
-            daemon_dir: &config.daemon_dir,
-            relay_url: &relay_url,
-            subscription_id: &config.subscription_id,
-            filters: &config.plan.filters,
-            writer_version: &config.writer_version,
-            read_timeout: config.relay_read_timeout,
-            stop_after_eose: false,
-            max_messages: None,
-            auth_signer: config
-                .auth_signer
-                .as_ref()
-                .map(|signer| signer.as_ref() as &(dyn RelayAuthSigner + Send + Sync)),
-            stop_flag: &stop_flag,
-            whitelist_ingress: config.whitelist_ingress.as_deref(),
-            project_boot_state: Some(&config.project_boot_state),
-            project_event_index: &config.project_event_index,
-            observer: Some(observer.as_ref()),
-        })
-        .await;
+        let result = tokio::select! {
+            _ = stop_token.cancelled() => break,
+            result = run_nostr_subscription_relay_once_async(NostrSubscriptionRelayInput {
+                tenex_base_dir: &config.tenex_base_dir,
+                daemon_dir: &config.daemon_dir,
+                relay_url: &relay_url,
+                subscription_id: &config.subscription_id,
+                filters: &config.plan.filters,
+                writer_version: &config.writer_version,
+                read_timeout: config.relay_read_timeout,
+                stop_after_eose: false,
+                max_messages: None,
+                auth_signer: config
+                    .auth_signer
+                    .as_ref()
+                    .map(|signer| signer.as_ref() as &(dyn RelayAuthSigner + Send + Sync)),
+                whitelist_ingress: config.whitelist_ingress.as_deref(),
+                project_boot_state: Some(&config.project_boot_state),
+                project_event_index: &config.project_event_index,
+                observer: Some(observer.as_ref()),
+            }) => result,
+        };
 
         match result {
             Ok(diagnostics) => {
@@ -354,7 +356,13 @@ async fn run_relay_loop_async(
             }
         }
 
-        sleep_with_stop_async(&stop_flag, config.reconnect_backoff).await;
+        let should_stop = tokio::select! {
+            _ = stop_token.cancelled() => true,
+            _ = sleep(config.reconnect_backoff) => false,
+        };
+        if should_stop {
+            break;
+        }
     }
     tracing::info!(relay_url = %relay_url, "nostr relay task stopped");
 }
@@ -371,7 +379,6 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub stop_after_eose: bool,
     pub max_messages: Option<usize>,
     pub auth_signer: Option<&'a (dyn RelayAuthSigner + Send + Sync)>,
-    pub stop_flag: &'a AtomicBool,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
     pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
@@ -477,10 +484,9 @@ async fn run_nostr_subscription_relay_once_async(
 
     let mut diagnostics = empty_diagnostics(input.subscription_id, input.relay_url);
 
-    while !input.stop_flag.load(Ordering::SeqCst)
-        && input
-            .max_messages
-            .is_none_or(|max| diagnostics.raw_message_count < max)
+    while input
+        .max_messages
+        .is_none_or(|max| diagnostics.raw_message_count < max)
     {
         let message = match timeout(input.read_timeout, socket.next()).await {
             Err(_) => continue,
@@ -883,17 +889,6 @@ async fn send_socket_message(
     Ok(())
 }
 
-async fn sleep_with_stop_async(stop_flag: &AtomicBool, duration: Duration) {
-    let poll_interval = Duration::from_millis(100);
-    let mut slept = Duration::ZERO;
-    while slept < duration && !stop_flag.load(Ordering::SeqCst) {
-        let remaining = duration.saturating_sub(slept);
-        let step = remaining.min(poll_interval);
-        sleep(step).await;
-        slept += step;
-    }
-}
-
 fn websocket_timeout_error(message: &str) -> NostrSubscriptionRelayError {
     NostrSubscriptionRelayError::WebSocket(tungstenite::Error::Io(io::Error::new(
         io::ErrorKind::TimedOut,
@@ -955,8 +950,6 @@ mod tests {
             json!(["EVENT", DEFAULT_SUBSCRIPTION_ID, event.clone()]),
             json!(["EOSE", DEFAULT_SUBSCRIPTION_ID]),
         ]);
-        let stop_flag = AtomicBool::new(false);
-
         let diagnostics = run_nostr_subscription_relay_once(NostrSubscriptionRelayInput {
             tenex_base_dir: base_dir,
             daemon_dir: &daemon_dir,
@@ -971,7 +964,6 @@ mod tests {
             stop_after_eose: true,
             max_messages: None,
             auth_signer: None,
-            stop_flag: &stop_flag,
             whitelist_ingress: None,
             project_boot_state: None,
             project_event_index: &project_event_index,
@@ -1024,7 +1016,6 @@ mod tests {
             json!(["EOSE", DEFAULT_SUBSCRIPTION_ID]),
         ]);
         let relay_url = relay.url.clone();
-        let stop_flag = AtomicBool::new(false);
         let signer = HexBackendSigner::from_private_key_hex(TEST_SECRET_KEY_HEX)
             .expect("test signer must load");
 
@@ -1042,7 +1033,6 @@ mod tests {
             stop_after_eose: true,
             max_messages: None,
             auth_signer: Some(&signer),
-            stop_flag: &stop_flag,
             whitelist_ingress: None,
             project_boot_state: None,
             project_event_index: &project_event_index,
@@ -1124,6 +1114,42 @@ mod tests {
             error,
             NostrSubscriptionGatewayStartError::NoFilters
         ));
+    }
+
+    #[test]
+    fn supervisor_stop_interrupts_reconnect_backoff_promptly() {
+        let temp_dir = tempdir().expect("temp dir must create");
+        let base_dir = temp_dir.path().to_path_buf();
+        let plan = NostrSubscriptionPlan {
+            relay_urls: vec!["ws://127.0.0.1:1".to_string()],
+            whitelisted_pubkeys: Vec::new(),
+            project_addresses: Vec::new(),
+            agent_pubkeys: Vec::new(),
+            filters: vec![NostrFilter::default()],
+            static_filters: Vec::new(),
+            project_tagged_filter: None,
+            agent_mentions_filter: None,
+            project_agent_snapshot_filter: None,
+            nip46_reply_filter: None,
+            lesson_filters: Vec::new(),
+        };
+        let mut config =
+            NostrSubscriptionGatewayConfig::new(base_dir.clone(), base_dir.join("daemon"), plan);
+        config.reconnect_backoff = Duration::from_secs(30);
+        config.relay_read_timeout = Duration::from_millis(250);
+
+        let supervisor = start_nostr_subscription_gateway(config, NoopNostrSubscriptionObserver)
+            .expect("gateway must start");
+
+        std::thread::sleep(Duration::from_millis(200));
+        let started = std::time::Instant::now();
+        supervisor.request_stop();
+        supervisor.join();
+
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "gateway stop should not wait for reconnect backoff"
+        );
     }
 
     struct CapturedRelayFrames {

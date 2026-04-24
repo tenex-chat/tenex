@@ -3,7 +3,6 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tracing;
@@ -34,10 +33,10 @@ use crate::ral_journal::RalPendingDelegation;
 use crate::ral_lock::RalLockInfo;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
-use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_message_flow::WorkerMessagePublishContext;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
+use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_session::registry::{SessionJoinHandle, WorkerSessionRegistry};
 
 pub trait DaemonMaintenanceLoopClock {
@@ -66,7 +65,7 @@ pub struct ThreadDaemonMaintenanceLoopSleeper;
 
 impl DaemonMaintenanceLoopSleeper for ThreadDaemonMaintenanceLoopSleeper {
     fn sleep_ms(&mut self, sleep_ms: u64) {
-        thread::sleep(Duration::from_millis(sleep_ms));
+        crate::foreground_wake::sleep_with_wake(Duration::from_millis(sleep_ms), || false);
     }
 }
 
@@ -1012,7 +1011,9 @@ mod tests {
         encode_agent_worker_protocol_frame,
     };
     use crate::worker_runtime_state::new_shared_worker_runtime_state;
-    use crate::worker_session::session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
+    use crate::worker_session::session_loop::{
+        WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome,
+    };
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
     use std::collections::VecDeque;
