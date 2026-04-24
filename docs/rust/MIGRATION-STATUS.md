@@ -6,7 +6,26 @@
 
 ## Work in flight
 
-- **Backend-event publish path simplification** (branch: sonnet worktree dispatched 2026-04-24). The `publish_outbox` layer was routing *backend-authored* ephemeral events (kinds 24010 project status, 24011 installed agent list, 24012 backend heartbeat, 24133 operations status) through the same durable pending→drain→published pipeline used for worker-signed events. This is ceremony for ephemeral, self-healing events — when a heartbeat publish fails, the next heartbeat 30s later is strictly better than a replayed old one. Agent is removing the outbox routing from backend events (direct `relay_publisher` calls, log-on-failure, next tick regenerates), while keeping the outbox intact for worker-signed events where durable acceptance before worker exit is load-bearing. Status will be updated here when the slice lands.
+- **Backend-event publish path simplification** — agent timed out with zero commits, work lost. Needs re-dispatch with updated context, but the baseline just shifted significantly (tokio async runtime, persistent WebSocket, kind 34011 per-agent config) and the design premise may need re-examination. **Deferred** until we re-read the new architecture.
+
+## Real daemon bugs surfaced by e2e scenarios (2026-04-24)
+
+Two production bugs surfaced by scenario 102 (SIGKILL mid-stream crash-restart), both directly relevant to milestone M9 gate "No stuck active RALs after restarts":
+
+### Bug 1: Orphan reconciliation never runs at daemon startup (M9 gate blocker)
+
+- `crates/tenex-daemon/src/worker_lifecycle/startup_recovery.rs` defines `plan_worker_startup_recovery` + `recover_worker_startup`
+- The code is tested (3 unit tests pass) but **has zero production callers**. `grep` across `daemon_foreground.rs`, `daemon_loop.rs`, `bin/daemon.rs` confirms the production startup path never invokes reconciliation.
+- Consequence: after SIGKILL, `Claimed`/`Allocated` RALs remain in the journal with no matching worker. New allocations for the same identity are blocked on the active-triggering-event check and the namespace's active_ral_count continues to grow.
+- Scenario 101 (graceful SIGTERM) doesn't expose this because graceful shutdown terminates workers cleanly before the daemon exits.
+- **Fix**: call `recover_worker_startup` from the daemon's foreground startup path after `replay_ral_journal` and before accepting inbound events. Append the produced `Crashed` records to the journal. Next step: dispatch a tight-scoped fix agent.
+
+### Bug 2: Static subscription filters empty when whitelist empty at restart
+
+- `crates/tenex-daemon/src/subscription_filters.rs:93-107` — `build_static_filters` returns an empty `Vec<NostrFilter>` when `whitelisted_pubkeys.is_empty()`.
+- Consequence: after a crash restart, until the daemon receives a fresh kind:14199 whitelist event, it subscribes to **nothing**. Inbound kind:1 messages during this window are ignored because the project isn't in the in-memory ProjectEventIndex.
+- Less severe than Bug 1 (the daemon recovers once a whitelist event lands), but it's a real bootstrap gap.
+- **Fix**: rebuild whitelist state from persisted filesystem state at startup (whitelist pubkeys are already recoverable from `$TENEX_BASE_DIR/daemon/acl/` or equivalent durable source), OR issue an initial unfiltered subscription to historical kind:31933 + kind:14199 before the whitelist is populated.
 
 ## TL;DR
 
