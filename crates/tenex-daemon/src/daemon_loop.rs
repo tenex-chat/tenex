@@ -295,11 +295,12 @@ where
             Ok(maintenance_outcome) => maintenance_outcome,
             Err(source) => {
                 drop(_tick_span);
+                let error_chain = format_error_chain(&source);
                 tracing::warn!(
                     iteration = iteration_index,
                     now_ms,
                     completed_iterations = steps.len(),
-                    error = %source,
+                    error = %error_chain,
                     "daemon tick failed; continuing"
                 );
                 crate::stdout_status::print_daemon_tick_failure(iteration_index, &source);
@@ -950,6 +951,17 @@ pub fn current_unix_time_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
+}
+
+fn format_error_chain(error: &dyn Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(" ← ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
 }
 
 fn project_boot_state_snapshot(

@@ -475,24 +475,28 @@ impl<S> fmt::Debug for WorkerDispatchAdmissionStartError<S> {
 impl<S> fmt::Display for WorkerDispatchAdmissionStartError<S> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Admission { .. } => {
-                formatter.write_str("worker dispatch admission planning failed")
+            Self::Admission { source } => {
+                write!(formatter, "worker dispatch admission planning failed: {source}")
             }
-            Self::LaunchInput { .. } => {
-                formatter.write_str("worker dispatch launch input resolution failed")
+            Self::LaunchInput { source, .. } => {
+                write!(formatter, "worker dispatch launch input resolution failed: {source}")
             }
-            Self::LaunchPlan { .. } => {
-                formatter.write_str("worker dispatch launch planning failed")
+            Self::LaunchPlan { source, .. } => {
+                write!(formatter, "worker dispatch launch planning failed: {source}")
             }
-            Self::DelegationSnapshot { .. } => {
-                formatter.write_str("worker dispatch delegation snapshot load failed")
+            Self::DelegationSnapshot { source, .. } => {
+                write!(formatter, "worker dispatch delegation snapshot load failed: {source}")
             }
-            Self::LeaseAppend { .. } => formatter.write_str("worker dispatch lease append failed"),
-            Self::DispatchStart { .. } => formatter.write_str(
-                "worker dispatch start failed after the dispatch queue lease was appended",
+            Self::LeaseAppend { source, .. } => {
+                write!(formatter, "worker dispatch lease append failed: {source}")
+            }
+            Self::DispatchStart { source, .. } => write!(
+                formatter,
+                "worker dispatch start failed after the dispatch queue lease was appended: {source}",
             ),
-            Self::RuntimeRegister { .. } => formatter.write_str(
-                "worker runtime registration failed after the worker dispatch was started",
+            Self::RuntimeRegister { source, .. } => write!(
+                formatter,
+                "worker runtime registration failed after the worker dispatch was started: {source}",
             ),
         }
     }
