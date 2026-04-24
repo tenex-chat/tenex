@@ -22,7 +22,6 @@ use crate::project_event_index::ProjectEventIndex;
 use crate::publish_outbox::PublishOutboxRelayPublisher;
 use crate::publish_outbox::PublishOutboxRetryPolicy;
 use crate::ral_journal::RalPendingDelegation;
-use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
@@ -57,7 +56,6 @@ pub struct DaemonForegroundStoppableInput<'a> {
 #[derive(Debug)]
 pub struct DaemonForegroundWorkerInput<'a> {
     pub runtime_state: SharedWorkerRuntimeState,
-    pub limits: WorkerConcurrencyLimits,
     pub correlation_id_prefix: String,
     pub command: AgentWorkerCommand,
     pub worker_config: &'a AgentWorkerProcessConfig,
@@ -318,7 +316,6 @@ where
         },
         DaemonWorkerLoopInput {
             runtime_state: worker.runtime_state,
-            limits: worker.limits,
             correlation_id_prefix: worker.correlation_id_prefix,
             lock_owner,
             command: worker.command,
@@ -759,7 +756,6 @@ mod tests {
             },
             DaemonForegroundWorkerInput {
                 runtime_state: runtime_state.clone(),
-                limits: WorkerConcurrencyLimits::default(),
                 correlation_id_prefix: "foreground-worker-test".to_string(),
                 command: AgentWorkerCommand::new("bun"),
                 worker_config: &worker_config,
@@ -846,7 +842,6 @@ mod tests {
             },
             DaemonForegroundWorkerInput {
                 runtime_state: runtime_state.clone(),
-                limits: WorkerConcurrencyLimits::default(),
                 correlation_id_prefix: "foreground-worker-dispatch-test".to_string(),
                 command: AgentWorkerCommand::new("bun"),
                 worker_config: &worker_config,

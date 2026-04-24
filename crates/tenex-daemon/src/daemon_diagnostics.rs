@@ -1304,11 +1304,6 @@ mod tests {
         DaemonWorkerRuntimeInput {
             daemon_dir,
             runtime_state,
-            limits: crate::worker_concurrency::WorkerConcurrencyLimits {
-                global: None,
-                per_project: None,
-                per_agent: None,
-            },
             lease_sequence: 2,
             lease_timestamp: 1_710_001_000_010,
             lease_correlation_id: "lease-dispatch-runtime".to_string(),

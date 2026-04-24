@@ -49,7 +49,6 @@ use tenex_daemon::telemetry;
 use tenex_daemon::whitelist_wiring::{
     WhitelistReloadHandle, build_whitelist_wiring, reload_whitelist_from_handle,
 };
-use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
 use tenex_daemon::worker_dispatch::execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{
     AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
@@ -60,7 +59,6 @@ use tenex_daemon::worker_session::registry::WorkerSessionRegistry;
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
 const DEFAULT_WORKER_MAX_FRAMES: u64 = 4_096;
-const DEFAULT_MAX_CONCURRENT_WORKERS: u64 = 16;
 const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
@@ -106,10 +104,6 @@ struct DaemonCliOptions {
     iterations: Option<u64>,
     sleep_ms: u64,
     debug: bool,
-    /// Maximum number of concurrently running worker sessions across all
-    /// projects and agents. `None` means unlimited. Overridable via
-    /// `--max-concurrent-workers`; defaults to 16.
-    max_concurrent_workers: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -239,7 +233,6 @@ where
     tenex_daemon::stdout_status::print_daemon_ready(
         nostr_supervisor.is_some(),
         gateway_supervisor.is_some(),
-        options.max_concurrent_workers,
     );
     let diagnostics_result = if options.iterations.is_none() {
         // Keep the production path on Tokio while preserving the established
@@ -617,7 +610,6 @@ where
             &tenex_base_dir,
             &daemon_dir,
             now_ms,
-            options.max_concurrent_workers,
             heartbeat_latch.clone(),
             Arc::clone(&project_boot_state),
             Arc::clone(&project_event_index),
@@ -704,7 +696,6 @@ async fn run_async_foreground_tick<P>(
     tenex_base_dir: &Path,
     daemon_dir: &Path,
     now_ms: u64,
-    max_concurrent_workers: Option<u64>,
     heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
@@ -747,11 +738,6 @@ where
                     },
                     DaemonWorkerTickInput {
                         runtime_state: worker_runtime_state,
-                        limits: WorkerConcurrencyLimits {
-                            global: max_concurrent_workers,
-                            per_project: None,
-                            per_agent: None,
-                        },
                         correlation_id: format!("daemon-foreground-worker:{now_ms}"),
                         lock_owner,
                         command: worker_command,
@@ -786,11 +772,6 @@ where
                         },
                         DaemonWorkerTickInput {
                             runtime_state: worker_runtime_state,
-                            limits: WorkerConcurrencyLimits {
-                                global: max_concurrent_workers,
-                                per_project: None,
-                                per_agent: None,
-                            },
                             correlation_id: format!("daemon-foreground-worker:{now_ms}"),
                             lock_owner,
                             command: worker_command,
@@ -871,11 +852,6 @@ where
         },
         DaemonForegroundWorkerInput {
             runtime_state: worker_runtime_state,
-            limits: WorkerConcurrencyLimits {
-                global: options.max_concurrent_workers,
-                per_project: None,
-                per_agent: None,
-            },
             correlation_id_prefix: "daemon-foreground-worker".to_string(),
             command: worker_command,
             worker_config: &worker_config,
@@ -990,7 +966,6 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
     let mut iterations = None;
     let mut sleep_ms = DEFAULT_SLEEP_MS;
     let mut debug = false;
-    let mut max_concurrent_workers = Some(DEFAULT_MAX_CONCURRENT_WORKERS);
     let mut index = 0;
 
     while index < args.len() {
@@ -1026,14 +1001,6 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
             "--debug" => {
                 debug = true;
             }
-            "--max-concurrent-workers" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or_else(|| usage_error("--max-concurrent-workers requires a value"))?;
-                let parsed = parse_u64_arg("--max-concurrent-workers", value)?;
-                max_concurrent_workers = if parsed == 0 { None } else { Some(parsed) };
-            }
             "--help" | "-h" => return Err(usage_error(usage())),
             argument => {
                 return Err(usage_error(format!(
@@ -1055,7 +1022,6 @@ fn parse_daemon_args(args: &[String]) -> Result<DaemonCliOptions, CliError> {
         iterations,
         sleep_ms,
         debug,
-        max_concurrent_workers,
     })
 }
 
@@ -1105,11 +1071,8 @@ fn current_unix_time_ms() -> u64 {
 fn usage() -> String {
     [
         "usage:",
-        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--max-concurrent-workers <count>] [--debug]",
-        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--max-concurrent-workers <count>] [--debug]",
-        "",
-        "  --max-concurrent-workers <count>  Cap the number of worker sessions that run concurrently.",
-        "                                   0 means unlimited. Default: 16.",
+        "  daemon --daemon-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
+        "  daemon --tenex-base-dir <path> [--iterations <count>] [--sleep-ms <ms>] [--debug]",
     ]
     .join("\n")
 }
@@ -1333,7 +1296,6 @@ mod tests {
             iterations: Some(1),
             sleep_ms: 0,
             debug: false,
-            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1351,7 +1313,6 @@ mod tests {
             iterations: Some(1),
             sleep_ms: 0,
             debug: false,
-            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
 
         let (tenex_base_dir, daemon_dir) =
@@ -1370,7 +1331,6 @@ mod tests {
             iterations: Some(2),
             sleep_ms: 25,
             debug: false,
-            max_concurrent_workers: Some(DEFAULT_MAX_CONCURRENT_WORKERS),
         };
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![

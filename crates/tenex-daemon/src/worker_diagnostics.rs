@@ -7,7 +7,6 @@ use crate::publish_outbox::{
     PublishOutboxDiagnostics, PublishOutboxFailureDiagnostic, PublishOutboxPendingDiagnostic,
 };
 use crate::ral_journal::RalJournalIdentity;
-use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_heartbeat::{
     WorkerHeartbeatFreshness, WorkerHeartbeatFreshnessConfig, WorkerHeartbeatSnapshot,
     WorkerHeartbeatState, classify_worker_heartbeat_freshness,
@@ -25,7 +24,6 @@ pub struct WorkerDiagnosticsInput<'a> {
     pub runtime_state: &'a WorkerRuntimeState,
     pub dispatch_queue: &'a DispatchQueueState,
     pub publish_outbox: &'a PublishOutboxDiagnostics,
-    pub concurrency_limits: WorkerConcurrencyLimits,
     pub heartbeat_freshness: WorkerHeartbeatFreshnessConfig,
 }
 
@@ -123,19 +121,10 @@ pub struct WorkerDiagnosticsDispatchQueueSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerDiagnosticsConcurrencySummary {
-    pub limits: WorkerDiagnosticsConcurrencyLimits,
     pub active_execution_count: u64,
     pub active_worker_count: u64,
     pub leased_dispatch_count: u64,
     pub projects: Vec<WorkerDiagnosticsProjectConcurrencySummary>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerDiagnosticsConcurrencyLimits {
-    pub global: Option<u64>,
-    pub per_project: Option<u64>,
-    pub per_agent: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -184,11 +173,7 @@ pub fn build_worker_diagnostics_snapshot(
             })
             .collect(),
         dispatch_queue: dispatch_queue_summary(input.dispatch_queue),
-        concurrency: concurrency_summary(
-            input.runtime_state,
-            input.dispatch_queue,
-            input.concurrency_limits,
-        ),
+        concurrency: concurrency_summary(input.runtime_state, input.dispatch_queue),
         publish_outbox: publish_outbox_summary(input.publish_outbox),
     }
 }
@@ -268,13 +253,11 @@ fn dispatch_queue_summary(state: &DispatchQueueState) -> WorkerDiagnosticsDispat
 fn concurrency_summary(
     runtime_state: &WorkerRuntimeState,
     dispatch_queue: &DispatchQueueState,
-    limits: WorkerConcurrencyLimits,
 ) -> WorkerDiagnosticsConcurrencySummary {
     let scopes = active_execution_scopes(runtime_state, dispatch_queue);
     let projects = project_concurrency_summaries(&scopes);
 
     WorkerDiagnosticsConcurrencySummary {
-        limits: limits.into(),
         active_execution_count: scopes.len() as u64,
         active_worker_count: runtime_state.len() as u64,
         leased_dispatch_count: dispatch_queue.leased.len() as u64,
@@ -409,16 +392,6 @@ impl From<WorkerHeartbeatFreshness> for WorkerDiagnosticsHeartbeatFreshnessSumma
     }
 }
 
-impl From<WorkerConcurrencyLimits> for WorkerDiagnosticsConcurrencyLimits {
-    fn from(limits: WorkerConcurrencyLimits) -> Self {
-        Self {
-            global: limits.global,
-            per_project: limits.per_project,
-            per_agent: limits.per_agent,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActiveExecutionScope {
     project_id: String,
@@ -517,11 +490,6 @@ mod tests {
             runtime_state: &runtime_state,
             dispatch_queue: &dispatch_queue,
             publish_outbox: &publish_outbox,
-            concurrency_limits: WorkerConcurrencyLimits {
-                global: Some(4),
-                per_project: Some(2),
-                per_agent: Some(1),
-            },
             heartbeat_freshness: WorkerHeartbeatFreshnessConfig {
                 interval_ms: 5_000,
                 missed_threshold: 2,
@@ -650,7 +618,6 @@ mod tests {
             runtime_state: &runtime_state,
             dispatch_queue: &dispatch_queue,
             publish_outbox: &empty_publish_outbox_diagnostics(),
-            concurrency_limits: WorkerConcurrencyLimits::default(),
             heartbeat_freshness: WorkerHeartbeatFreshnessConfig::default(),
         });
 
@@ -706,7 +673,6 @@ mod tests {
             runtime_state: &runtime_state,
             dispatch_queue: &DispatchQueueState::default(),
             publish_outbox: &empty_publish_outbox_diagnostics(),
-            concurrency_limits: WorkerConcurrencyLimits::default(),
             heartbeat_freshness: WorkerHeartbeatFreshnessConfig {
                 interval_ms: 5_000,
                 missed_threshold: 2,

@@ -28,36 +28,10 @@ pub struct ActiveDispatchConcurrencySnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct WorkerConcurrencyLimits {
-    pub global: Option<u64>,
-    pub per_project: Option<u64>,
-    pub per_agent: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkerConcurrencyPlanInput<'a> {
-    pub target: &'a WorkerConcurrencyTarget,
-    pub active_workers: &'a [ActiveWorkerConcurrencySnapshot],
-    pub active_dispatches: &'a [ActiveDispatchConcurrencySnapshot],
-    pub limits: WorkerConcurrencyLimits,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WorkerConcurrencyCounts {
     pub global: u64,
     pub project: u64,
     pub agent: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkerConcurrencyDecision {
-    StartAllowed {
-        counts: WorkerConcurrencyCounts,
-    },
-    Blocked {
-        reason: WorkerConcurrencyBlockReason,
-        counts: WorkerConcurrencyCounts,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,18 +46,6 @@ pub enum WorkerConcurrencyBlockReason {
         conversation_id: String,
         dispatch_id: Option<String>,
         worker_id: Option<String>,
-    },
-    GlobalLimitReached {
-        limit: u64,
-    },
-    ProjectLimitReached {
-        project_id: String,
-        limit: u64,
-    },
-    AgentLimitReached {
-        project_id: String,
-        agent_pubkey: String,
-        limit: u64,
     },
 }
 
@@ -109,98 +71,63 @@ impl ActiveDispatchConcurrencySnapshot {
     }
 }
 
-pub fn plan_worker_concurrency(input: WorkerConcurrencyPlanInput<'_>) -> WorkerConcurrencyDecision {
-    let counts =
-        count_active_executions(input.target, input.active_workers, input.active_dispatches);
+/// Check whether a candidate dispatch is blocked by deduplication rules:
+/// the same dispatch is already active, or the same conversation is already
+/// running on a different dispatch or worker.
+///
+/// Returns `Ok(counts)` if the candidate may start, or `Err(reason)` if it
+/// is blocked.
+pub fn check_worker_dispatch_dedup(
+    target: &WorkerConcurrencyTarget,
+    active_workers: &[ActiveWorkerConcurrencySnapshot],
+    active_dispatches: &[ActiveDispatchConcurrencySnapshot],
+) -> Result<WorkerConcurrencyCounts, WorkerConcurrencyBlockReason> {
+    let counts = count_active_executions(target, active_workers, active_dispatches);
 
-    if let Some(worker) = input
-        .active_workers
+    if let Some(worker) = active_workers
         .iter()
-        .find(|worker| worker.dispatch_id.as_deref() == Some(input.target.dispatch_id.as_str()))
+        .find(|worker| worker.dispatch_id.as_deref() == Some(target.dispatch_id.as_str()))
     {
-        return WorkerConcurrencyDecision::Blocked {
-            reason: WorkerConcurrencyBlockReason::CandidateAlreadyActive {
-                dispatch_id: input.target.dispatch_id.clone(),
-                worker_id: worker.worker_id.clone(),
-            },
-            counts,
-        };
+        return Err(WorkerConcurrencyBlockReason::CandidateAlreadyActive {
+            dispatch_id: target.dispatch_id.clone(),
+            worker_id: worker.worker_id.clone(),
+        });
     }
 
-    if let Some(worker) = input.active_workers.iter().find(|worker| {
-        worker.dispatch_id.as_deref() != Some(input.target.dispatch_id.as_str())
-            && worker.project_id == input.target.project_id
-            && worker.agent_pubkey == input.target.agent_pubkey
-            && worker.conversation_id == input.target.conversation_id
+    if let Some(worker) = active_workers.iter().find(|worker| {
+        worker.dispatch_id.as_deref() != Some(target.dispatch_id.as_str())
+            && worker.project_id == target.project_id
+            && worker.agent_pubkey == target.agent_pubkey
+            && worker.conversation_id == target.conversation_id
     }) {
-        return WorkerConcurrencyDecision::Blocked {
-            reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
-                project_id: input.target.project_id.clone(),
-                agent_pubkey: input.target.agent_pubkey.clone(),
-                conversation_id: input.target.conversation_id.clone(),
-                dispatch_id: worker.dispatch_id.clone(),
-                worker_id: Some(worker.worker_id.clone()),
-            },
-            counts,
-        };
+        return Err(WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+            project_id: target.project_id.clone(),
+            agent_pubkey: target.agent_pubkey.clone(),
+            conversation_id: target.conversation_id.clone(),
+            dispatch_id: worker.dispatch_id.clone(),
+            worker_id: Some(worker.worker_id.clone()),
+        });
     }
 
-    if let Some(dispatch) = input.active_dispatches.iter().find(|dispatch| {
-        dispatch.dispatch_id != input.target.dispatch_id
-            && dispatch.project_id == input.target.project_id
-            && dispatch.agent_pubkey == input.target.agent_pubkey
-            && dispatch.conversation_id == input.target.conversation_id
+    if let Some(dispatch) = active_dispatches.iter().find(|dispatch| {
+        dispatch.dispatch_id != target.dispatch_id
+            && dispatch.project_id == target.project_id
+            && dispatch.agent_pubkey == target.agent_pubkey
+            && dispatch.conversation_id == target.conversation_id
     }) {
-        return WorkerConcurrencyDecision::Blocked {
-            reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
-                project_id: input.target.project_id.clone(),
-                agent_pubkey: input.target.agent_pubkey.clone(),
-                conversation_id: input.target.conversation_id.clone(),
-                dispatch_id: Some(dispatch.dispatch_id.clone()),
-                worker_id: None,
-            },
-            counts,
-        };
+        return Err(WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+            project_id: target.project_id.clone(),
+            agent_pubkey: target.agent_pubkey.clone(),
+            conversation_id: target.conversation_id.clone(),
+            dispatch_id: Some(dispatch.dispatch_id.clone()),
+            worker_id: None,
+        });
     }
 
-    if let Some(limit) = input.limits.global
-        && counts.global >= limit
-    {
-        return WorkerConcurrencyDecision::Blocked {
-            reason: WorkerConcurrencyBlockReason::GlobalLimitReached { limit },
-            counts,
-        };
-    }
-
-    if let Some(limit) = input.limits.per_project
-        && counts.project >= limit
-    {
-        return WorkerConcurrencyDecision::Blocked {
-            reason: WorkerConcurrencyBlockReason::ProjectLimitReached {
-                project_id: input.target.project_id.clone(),
-                limit,
-            },
-            counts,
-        };
-    }
-
-    if let Some(limit) = input.limits.per_agent
-        && counts.agent >= limit
-    {
-        return WorkerConcurrencyDecision::Blocked {
-            reason: WorkerConcurrencyBlockReason::AgentLimitReached {
-                project_id: input.target.project_id.clone(),
-                agent_pubkey: input.target.agent_pubkey.clone(),
-                limit,
-            },
-            counts,
-        };
-    }
-
-    WorkerConcurrencyDecision::StartAllowed { counts }
+    Ok(counts)
 }
 
-fn count_active_executions(
+pub fn count_active_executions(
     target: &WorkerConcurrencyTarget,
     active_workers: &[ActiveWorkerConcurrencySnapshot],
     active_dispatches: &[ActiveDispatchConcurrencySnapshot],
@@ -286,9 +213,9 @@ mod tests {
     };
 
     #[test]
-    fn allows_start_when_counts_are_below_limits() {
+    fn allows_start_when_no_conflicts() {
         let target = target("dispatch-target", "project-a", "agent-a");
-        let decision = plan_worker_concurrency(input(
+        let result = check_worker_dispatch_dedup(
             &target,
             &[worker(
                 "worker-a",
@@ -297,173 +224,100 @@ mod tests {
                 "agent-a",
             )],
             &[],
-            WorkerConcurrencyLimits {
-                global: Some(2),
-                per_project: Some(2),
-                per_agent: Some(2),
-            },
-        ));
+        );
 
         assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::StartAllowed {
-                counts: WorkerConcurrencyCounts {
-                    global: 1,
-                    project: 1,
-                    agent: 1,
-                },
-            }
+            result,
+            Ok(WorkerConcurrencyCounts {
+                global: 1,
+                project: 1,
+                agent: 1,
+            })
         );
     }
 
     #[test]
-    fn blocks_when_global_limit_is_saturated() {
+    fn blocks_duplicate_start_when_candidate_worker_is_already_active() {
         let target = target("dispatch-target", "project-a", "agent-a");
-        let decision = plan_worker_concurrency(input(
+        let result = check_worker_dispatch_dedup(
             &target,
-            &[
-                worker("worker-a", Some("dispatch-a"), "project-a", "agent-a"),
-                worker("worker-b", Some("dispatch-b"), "project-b", "agent-b"),
-            ],
-            &[],
-            WorkerConcurrencyLimits {
-                global: Some(2),
-                per_project: None,
-                per_agent: None,
-            },
-        ));
+            &[worker(
+                "worker-target",
+                Some("dispatch-target"),
+                "project-a",
+                "agent-a",
+            )],
+            &[active_dispatch("dispatch-target", "project-a", "agent-a")],
+        );
 
         assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::Blocked {
-                reason: WorkerConcurrencyBlockReason::GlobalLimitReached { limit: 2 },
-                counts: WorkerConcurrencyCounts {
-                    global: 2,
-                    project: 1,
-                    agent: 1,
-                },
-            }
+            result,
+            Err(WorkerConcurrencyBlockReason::CandidateAlreadyActive {
+                dispatch_id: "dispatch-target".to_string(),
+                worker_id: "worker-target".to_string(),
+            })
         );
     }
 
     #[test]
-    fn blocks_when_project_limit_is_saturated() {
-        let target = target("dispatch-target", "project-a", "agent-c");
-        let decision = plan_worker_concurrency(input(
+    fn blocks_when_conversation_namespace_is_already_active_on_worker() {
+        let target =
+            target_with_conversation("dispatch-target", "project-a", "agent-a", "conversation-a");
+        let result = check_worker_dispatch_dedup(
             &target,
-            &[
-                worker("worker-a", Some("dispatch-a"), "project-a", "agent-a"),
-                worker("worker-b", Some("dispatch-b"), "project-a", "agent-b"),
-                worker("worker-c", Some("dispatch-c"), "project-b", "agent-c"),
-            ],
+            &[worker_with_conversation(
+                "worker-a",
+                Some("dispatch-a"),
+                "project-a",
+                "agent-a",
+                "conversation-a",
+            )],
             &[],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(2),
-                per_agent: None,
-            },
-        ));
+        );
 
         assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::Blocked {
-                reason: WorkerConcurrencyBlockReason::ProjectLimitReached {
-                    project_id: "project-a".to_string(),
-                    limit: 2,
-                },
-                counts: WorkerConcurrencyCounts {
-                    global: 3,
-                    project: 2,
-                    agent: 0,
-                },
-            }
+            result,
+            Err(WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                project_id: "project-a".to_string(),
+                agent_pubkey: "agent-a".to_string(),
+                conversation_id: "conversation-a".to_string(),
+                dispatch_id: Some("dispatch-a".to_string()),
+                worker_id: Some("worker-a".to_string()),
+            })
         );
     }
 
     #[test]
-    fn blocks_when_agent_limit_is_saturated() {
-        let target = target("dispatch-target", "project-a", "agent-a");
-        let decision = plan_worker_concurrency(input(
+    fn blocks_when_conversation_namespace_is_already_leased() {
+        let target =
+            target_with_conversation("dispatch-target", "project-a", "agent-a", "conversation-a");
+        let result = check_worker_dispatch_dedup(
             &target,
-            &[
-                worker("worker-a", Some("dispatch-a"), "project-a", "agent-a"),
-                worker("worker-b", Some("dispatch-b"), "project-a", "agent-a"),
-                worker("worker-c", Some("dispatch-c"), "project-a", "agent-b"),
-            ],
             &[],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(10),
-                per_agent: Some(2),
-            },
-        ));
-
-        assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::Blocked {
-                reason: WorkerConcurrencyBlockReason::AgentLimitReached {
-                    project_id: "project-a".to_string(),
-                    agent_pubkey: "agent-a".to_string(),
-                    limit: 2,
-                },
-                counts: WorkerConcurrencyCounts {
-                    global: 3,
-                    project: 3,
-                    agent: 2,
-                },
-            }
-        );
-    }
-
-    #[test]
-    fn treats_none_limits_as_unlimited_and_zero_as_block_all() {
-        let target = target("dispatch-target", "project-a", "agent-a");
-        let unlimited_decision = plan_worker_concurrency(input(
-            &target,
-            &[
-                worker("worker-a", Some("dispatch-a"), "project-a", "agent-a"),
-                worker("worker-b", Some("dispatch-b"), "project-a", "agent-a"),
-                worker("worker-c", Some("dispatch-c"), "project-b", "agent-a"),
-            ],
-            &[],
-            WorkerConcurrencyLimits::default(),
-        ));
-
-        assert_eq!(
-            unlimited_decision,
-            WorkerConcurrencyDecision::StartAllowed {
-                counts: WorkerConcurrencyCounts {
-                    global: 3,
-                    project: 2,
-                    agent: 2,
-                },
-            }
+            &[active_dispatch_with_conversation(
+                "dispatch-a",
+                "project-a",
+                "agent-a",
+                "conversation-a",
+            )],
         );
 
-        let zero_decision = plan_worker_concurrency(input(
-            &target,
-            &[],
-            &[],
-            WorkerConcurrencyLimits {
-                global: Some(0),
-                per_project: None,
-                per_agent: None,
-            },
-        ));
-
         assert_eq!(
-            zero_decision,
-            WorkerConcurrencyDecision::Blocked {
-                reason: WorkerConcurrencyBlockReason::GlobalLimitReached { limit: 0 },
-                counts: WorkerConcurrencyCounts::default(),
-            }
+            result,
+            Err(WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                project_id: "project-a".to_string(),
+                agent_pubkey: "agent-a".to_string(),
+                conversation_id: "conversation-a".to_string(),
+                dispatch_id: Some("dispatch-a".to_string()),
+                worker_id: None,
+            })
         );
     }
 
     #[test]
     fn counts_project_agent_namespace_and_deduplicates_dispatch_snapshots() {
         let target = target("dispatch-target", "project-a", "agent-a");
-        let decision = plan_worker_concurrency(input(
+        let result = check_worker_dispatch_dedup(
             &target,
             &[
                 worker("worker-a", Some("dispatch-a"), "project-a", "agent-a"),
@@ -476,132 +330,15 @@ mod tests {
                 active_dispatch("dispatch-a", "project-a", "agent-a"),
                 active_dispatch("dispatch-target", "project-a", "agent-a"),
             ],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(10),
-                per_agent: Some(10),
-            },
-        ));
-
-        assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::StartAllowed {
-                counts: WorkerConcurrencyCounts {
-                    global: 5,
-                    project: 4,
-                    agent: 3,
-                },
-            }
         );
-    }
-
-    #[test]
-    fn blocks_duplicate_start_when_candidate_worker_is_already_active() {
-        let target = target("dispatch-target", "project-a", "agent-a");
-        let decision = plan_worker_concurrency(input(
-            &target,
-            &[worker(
-                "worker-target",
-                Some("dispatch-target"),
-                "project-a",
-                "agent-a",
-            )],
-            &[active_dispatch("dispatch-target", "project-a", "agent-a")],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(10),
-                per_agent: Some(10),
-            },
-        ));
 
         assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::Blocked {
-                reason: WorkerConcurrencyBlockReason::CandidateAlreadyActive {
-                    dispatch_id: "dispatch-target".to_string(),
-                    worker_id: "worker-target".to_string(),
-                },
-                counts: WorkerConcurrencyCounts::default(),
-            }
-        );
-    }
-
-    #[test]
-    fn blocks_when_conversation_namespace_is_already_active_on_worker() {
-        let target =
-            target_with_conversation("dispatch-target", "project-a", "agent-a", "conversation-a");
-        let decision = plan_worker_concurrency(input(
-            &target,
-            &[worker_with_conversation(
-                "worker-a",
-                Some("dispatch-a"),
-                "project-a",
-                "agent-a",
-                "conversation-a",
-            )],
-            &[],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(10),
-                per_agent: Some(10),
-            },
-        ));
-
-        assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::Blocked {
-                reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
-                    project_id: "project-a".to_string(),
-                    agent_pubkey: "agent-a".to_string(),
-                    conversation_id: "conversation-a".to_string(),
-                    dispatch_id: Some("dispatch-a".to_string()),
-                    worker_id: Some("worker-a".to_string()),
-                },
-                counts: WorkerConcurrencyCounts {
-                    global: 1,
-                    project: 1,
-                    agent: 1,
-                },
-            }
-        );
-    }
-
-    #[test]
-    fn blocks_when_conversation_namespace_is_already_leased() {
-        let target =
-            target_with_conversation("dispatch-target", "project-a", "agent-a", "conversation-a");
-        let decision = plan_worker_concurrency(input(
-            &target,
-            &[],
-            &[active_dispatch_with_conversation(
-                "dispatch-a",
-                "project-a",
-                "agent-a",
-                "conversation-a",
-            )],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(10),
-                per_agent: Some(10),
-            },
-        ));
-
-        assert_eq!(
-            decision,
-            WorkerConcurrencyDecision::Blocked {
-                reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
-                    project_id: "project-a".to_string(),
-                    agent_pubkey: "agent-a".to_string(),
-                    conversation_id: "conversation-a".to_string(),
-                    dispatch_id: Some("dispatch-a".to_string()),
-                    worker_id: None,
-                },
-                counts: WorkerConcurrencyCounts {
-                    global: 1,
-                    project: 1,
-                    agent: 1,
-                },
-            }
+            result,
+            Ok(WorkerConcurrencyCounts {
+                global: 5,
+                project: 4,
+                agent: 3,
+            })
         );
     }
 
@@ -631,20 +368,6 @@ mod tests {
             ActiveDispatchConcurrencySnapshot::from_dispatch(&dispatch),
             active_dispatch("dispatch-a", "project-a", "agent-a")
         );
-    }
-
-    fn input<'a>(
-        target: &'a WorkerConcurrencyTarget,
-        active_workers: &'a [ActiveWorkerConcurrencySnapshot],
-        active_dispatches: &'a [ActiveDispatchConcurrencySnapshot],
-        limits: WorkerConcurrencyLimits,
-    ) -> WorkerConcurrencyPlanInput<'a> {
-        WorkerConcurrencyPlanInput {
-            target,
-            active_workers,
-            active_dispatches,
-            limits,
-        }
     }
 
     fn target(dispatch_id: &str, project_id: &str, agent_pubkey: &str) -> WorkerConcurrencyTarget {

@@ -56,11 +56,7 @@ fn read_agent_slug(tenex_base_dir: &Path, agent_pubkey: &str) -> Option<String> 
     value.get("slug")?.as_str().map(str::to_string)
 }
 
-pub fn print_daemon_ready(
-    nostr_enabled: bool,
-    telegram_enabled: bool,
-    max_concurrent_workers: Option<u64>,
-) {
+pub fn print_daemon_ready(nostr_enabled: bool, telegram_enabled: bool) {
     let nostr = if nostr_enabled {
         "nostr on"
     } else {
@@ -71,12 +67,8 @@ pub fn print_daemon_ready(
     } else {
         "telegram off"
     };
-    let workers = match max_concurrent_workers {
-        Some(n) => format!("max {n} workers"),
-        None => "unbounded workers".to_string(),
-    };
     println!(
-        "{DIM}{}{RESET}  {BOLD}{GREEN}✓{RESET}  {BOLD}{GREEN}daemon ready{RESET}  {DIM}({nostr}, {telegram}, {workers}){RESET}",
+        "{DIM}{}{RESET}  {BOLD}{GREEN}✓{RESET}  {BOLD}{GREEN}daemon ready{RESET}  {DIM}({nostr}, {telegram}){RESET}",
         timestamp()
     );
 }

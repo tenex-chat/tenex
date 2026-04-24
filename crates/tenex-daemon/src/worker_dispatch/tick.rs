@@ -4,7 +4,6 @@ use thiserror::Error;
 
 use crate::dispatch_queue::{DispatchQueueError, replay_dispatch_queue};
 use crate::ral_lock::RalLockInfo;
-use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::admission_start::{
     WorkerDispatchAdmissionStartError, WorkerDispatchAdmissionStartInput,
     WorkerDispatchAdmissionStartOutcome, WorkerDispatchLaunchInputSource,
@@ -18,7 +17,6 @@ use crate::worker_runtime_state::WorkerRuntimeState;
 pub struct WorkerDispatchTickInput<'a> {
     pub daemon_dir: &'a Path,
     pub runtime_state: &'a mut WorkerRuntimeState,
-    pub limits: WorkerConcurrencyLimits,
     pub lease_sequence: u64,
     pub lease_timestamp: u64,
     pub lease_correlation_id: String,
@@ -56,7 +54,6 @@ where
             daemon_dir: input.daemon_dir,
             dispatch_state: &dispatch_state,
             runtime_state: input.runtime_state,
-            limits: input.limits,
             lease_sequence: input.lease_sequence,
             lease_timestamp: input.lease_timestamp,
             lease_correlation_id: input.lease_correlation_id,
@@ -361,11 +358,6 @@ mod tests {
         WorkerDispatchTickInput {
             daemon_dir,
             runtime_state,
-            limits: WorkerConcurrencyLimits {
-                global: None,
-                per_project: None,
-                per_agent: None,
-            },
             lease_sequence: 2,
             lease_timestamp: 1_710_000_700_001,
             lease_correlation_id: "lease-correlation".to_string(),

@@ -31,7 +31,6 @@ use crate::publish_outbox::{
 use crate::publish_runtime::{PublishRuntimeMaintainInput, maintain_publish_runtime};
 use crate::ral_journal::RalPendingDelegation;
 use crate::ral_lock::RalLockInfo;
-use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_message_flow::WorkerMessagePublishContext;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
@@ -100,7 +99,6 @@ pub struct DaemonTickOutcome {
 #[derive(Debug)]
 pub struct DaemonWorkerTickInput<'a> {
     pub runtime_state: SharedWorkerRuntimeState,
-    pub limits: WorkerConcurrencyLimits,
     pub correlation_id: String,
     pub lock_owner: RalLockInfo,
     pub command: AgentWorkerCommand,
@@ -118,7 +116,6 @@ pub struct DaemonWorkerTickInput<'a> {
 #[derive(Debug)]
 pub struct DaemonWorkerLoopInput<'a> {
     pub runtime_state: SharedWorkerRuntimeState,
-    pub limits: WorkerConcurrencyLimits,
     pub correlation_id_prefix: String,
     pub lock_owner: RalLockInfo,
     pub command: AgentWorkerCommand,
@@ -429,7 +426,6 @@ where
             spawner,
             daemon_dir,
             &worker.runtime_state,
-            worker.limits,
             now_ms,
             &correlation_id,
             worker.lock_owner.clone(),
@@ -875,7 +871,6 @@ where
 {
     let DaemonWorkerLoopInput {
         runtime_state,
-        limits,
         correlation_id_prefix,
         lock_owner,
         command,
@@ -902,7 +897,6 @@ where
             },
             DaemonWorkerTickInput {
                 runtime_state: runtime_state.clone(),
-                limits,
                 correlation_id: format!("{correlation_id_prefix}:{now_ms}"),
                 lock_owner: lock_owner.clone(),
                 command: command.clone(),
@@ -1427,7 +1421,6 @@ mod tests {
             },
             DaemonWorkerTickInput {
                 runtime_state: runtime_state.clone(),
-                limits: WorkerConcurrencyLimits::default(),
                 correlation_id: "daemon-loop-worker-empty-queue".to_string(),
                 lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
                 command: AgentWorkerCommand::new("bun"),
@@ -1509,7 +1502,6 @@ mod tests {
             },
             DaemonWorkerTickInput {
                 runtime_state: runtime_state.clone(),
-                limits: WorkerConcurrencyLimits::default(),
                 correlation_id: "daemon-loop-worker-error-drain".to_string(),
                 lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
                 command: AgentWorkerCommand::new("bun"),
@@ -2208,11 +2200,6 @@ mod tests {
             },
             DaemonWorkerTickInput {
                 runtime_state: runtime_state.clone(),
-                limits: WorkerConcurrencyLimits {
-                    global: Some(4),
-                    per_project: None,
-                    per_agent: None,
-                },
                 correlation_id: "daemon-loop-worker-concurrent".to_string(),
                 lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
                 command: AgentWorkerCommand::new("bun"),

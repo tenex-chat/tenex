@@ -20,7 +20,6 @@ use crate::ral_lock::RalLockInfo;
 use crate::ral_scheduler::RalScheduler;
 use crate::worker_completion::plan::WorkerCompletionDispatchInput;
 use crate::worker_completion::result::WorkerResultTransitionContext;
-use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::admission::{
     AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
     WorkerDispatchAdmissionBlockedReason, WorkerDispatchAdmissionError,
@@ -58,7 +57,6 @@ use crate::worker_telegram_egress::WorkerTelegramEgressContext;
 pub struct DaemonWorkerRuntimeInput<'a> {
     pub daemon_dir: &'a Path,
     pub runtime_state: &'a SharedWorkerRuntimeState,
-    pub limits: WorkerConcurrencyLimits,
     pub lease_sequence: u64,
     pub lease_timestamp: u64,
     pub lease_correlation_id: String,
@@ -85,7 +83,6 @@ pub struct DaemonWorkerRuntimeInput<'a> {
 pub struct DaemonWorkerRuntimeFilesystemInput<'a> {
     pub daemon_dir: &'a Path,
     pub runtime_state: &'a SharedWorkerRuntimeState,
-    pub limits: WorkerConcurrencyLimits,
     pub now_ms: u64,
     pub correlation_id: String,
     pub lock_owner: RalLockInfo,
@@ -249,7 +246,6 @@ pub fn admit_one_worker_dispatch_from_filesystem<S>(
     spawner: &mut S,
     daemon_dir: &Path,
     runtime_state: &SharedWorkerRuntimeState,
-    limits: WorkerConcurrencyLimits,
     now_ms: u64,
     correlation_id: &str,
     lock_owner: RalLockInfo,
@@ -300,7 +296,6 @@ where
         dispatch_state: &dispatch_state,
         active_workers: &active_workers,
         active_dispatches: &active_dispatches,
-        limits,
         sequence: lease_sequence,
         timestamp: now_ms,
         correlation_id: format!("{correlation_id}:lease"),
@@ -386,7 +381,6 @@ where
     let DaemonWorkerRuntimeFilesystemInput {
         daemon_dir,
         runtime_state,
-        limits,
         now_ms,
         correlation_id,
         lock_owner,
@@ -405,7 +399,6 @@ where
         spawner,
         daemon_dir,
         runtime_state,
-        limits,
         now_ms,
         &correlation_id,
         lock_owner,
@@ -459,7 +452,6 @@ where
     let DaemonWorkerRuntimeInput {
         daemon_dir,
         runtime_state,
-        limits,
         lease_sequence,
         lease_timestamp,
         lease_correlation_id,
@@ -487,7 +479,6 @@ where
         WorkerDispatchTickInput {
             daemon_dir,
             runtime_state: &mut runtime_state.lock().expect("runtime state mutex poisoned"),
-            limits,
             lease_sequence,
             lease_timestamp,
             lease_correlation_id,
@@ -1834,7 +1825,6 @@ mod tests {
             &mut spawner,
             &daemon_dir,
             &runtime_state,
-            WorkerConcurrencyLimits::default(),
             1_710_000_700_600,
             "conversation-active",
             build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
@@ -1903,11 +1893,6 @@ mod tests {
             &mut spawner,
             &daemon_dir,
             &runtime_state,
-            WorkerConcurrencyLimits {
-                global: None,
-                per_project: None,
-                per_agent: None,
-            },
             1_710_000_700_600,
             "launch-lock-held",
             build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
@@ -2025,11 +2010,6 @@ mod tests {
         DaemonWorkerRuntimeInput {
             daemon_dir,
             runtime_state,
-            limits: WorkerConcurrencyLimits {
-                global: None,
-                per_project: None,
-                per_agent: None,
-            },
             lease_sequence: 2,
             lease_timestamp: 1_710_000_700_010,
             lease_correlation_id: "lease-dispatch-alpha".to_string(),
@@ -2095,11 +2075,6 @@ mod tests {
         DaemonWorkerRuntimeFilesystemInput {
             daemon_dir,
             runtime_state,
-            limits: WorkerConcurrencyLimits {
-                global: None,
-                per_project: None,
-                per_agent: None,
-            },
             now_ms: 1_710_000_700_030,
             correlation_id: "filesystem-runtime-alpha".to_string(),
             lock_owner: build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),

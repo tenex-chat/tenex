@@ -6,9 +6,8 @@ use crate::dispatch_queue::{
 };
 use crate::worker_concurrency::{
     ActiveDispatchConcurrencySnapshot, ActiveWorkerConcurrencySnapshot,
-    WorkerConcurrencyBlockReason, WorkerConcurrencyCounts, WorkerConcurrencyDecision,
-    WorkerConcurrencyLimits, WorkerConcurrencyPlanInput, WorkerConcurrencyTarget,
-    plan_worker_concurrency,
+    WorkerConcurrencyBlockReason, WorkerConcurrencyCounts, WorkerConcurrencyTarget,
+    check_worker_dispatch_dedup,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,7 +15,6 @@ pub struct WorkerDispatchAdmissionInput<'a> {
     pub dispatch_state: &'a DispatchQueueState,
     pub active_workers: &'a [ActiveWorkerConcurrencySnapshot],
     pub active_dispatches: &'a [ActiveDispatchConcurrencySnapshot],
-    pub limits: WorkerConcurrencyLimits,
     pub sequence: u64,
     pub timestamp: u64,
     pub correlation_id: String,
@@ -82,13 +80,8 @@ pub fn plan_worker_dispatch_admission(
 
     for dispatch in queued {
         let target = WorkerConcurrencyTarget::from_dispatch(dispatch);
-        match plan_worker_concurrency(WorkerConcurrencyPlanInput {
-            target: &target,
-            active_workers: input.active_workers,
-            active_dispatches: &active_dispatches,
-            limits: input.limits,
-        }) {
-            WorkerConcurrencyDecision::StartAllowed { counts } => {
+        match check_worker_dispatch_dedup(&target, input.active_workers, &active_dispatches) {
+            Ok(counts) => {
                 let leased_record = plan_dispatch_queue_lease(
                     input.dispatch_state,
                     DispatchQueueLifecycleInput {
@@ -107,7 +100,12 @@ pub fn plan_worker_dispatch_admission(
                     },
                 )));
             }
-            WorkerConcurrencyDecision::Blocked { reason, counts } => {
+            Err(reason) => {
+                let counts = crate::worker_concurrency::count_active_executions(
+                    &target,
+                    input.active_workers,
+                    &active_dispatches,
+                );
                 blocked_candidates.push(WorkerDispatchAdmissionBlockedCandidate {
                     dispatch_id: dispatch.dispatch_id.clone(),
                     reason,
@@ -164,18 +162,8 @@ mod tests {
             terminal: Vec::new(),
         };
 
-        let plan = plan_worker_dispatch_admission(input(
-            &state,
-            &[],
-            &[],
-            WorkerConcurrencyLimits {
-                global: Some(1),
-                per_project: Some(1),
-                per_agent: Some(1),
-            },
-            4,
-        ))
-        .expect("admission must plan");
+        let plan = plan_worker_dispatch_admission(input(&state, &[], &[], 4))
+            .expect("admission must plan");
 
         assert_eq!(
             plan,
@@ -213,18 +201,8 @@ mod tests {
             "agent-a",
         )];
 
-        let plan = plan_worker_dispatch_admission(input(
-            &state,
-            &active_workers,
-            &[],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(1),
-                per_agent: Some(10),
-            },
-            3,
-        ))
-        .expect("admission must skip blocked candidate");
+        let plan = plan_worker_dispatch_admission(input(&state, &active_workers, &[], 3))
+            .expect("admission must skip blocked candidate");
 
         match plan {
             WorkerDispatchAdmissionPlan::Admitted(admitted) => {
@@ -261,14 +239,8 @@ mod tests {
             terminal: Vec::new(),
         };
 
-        let plan = plan_worker_dispatch_admission(input(
-            &state,
-            &[],
-            &[],
-            WorkerConcurrencyLimits::default(),
-            2,
-        ))
-        .expect("empty queue must be a plan");
+        let plan = plan_worker_dispatch_admission(input(&state, &[], &[], 2))
+            .expect("empty queue must be a plan");
 
         assert_eq!(
             plan,
@@ -282,26 +254,34 @@ mod tests {
     #[test]
     fn reports_all_blocked_candidates_in_queue_order() {
         let first = dispatch_record(1, "dispatch-a", "project-a", "agent-a");
-        let second = dispatch_record(2, "dispatch-b", "project-b", "agent-b");
+        let second = dispatch_record(2, "dispatch-b", "project-a", "agent-a");
         let state = DispatchQueueState {
             last_sequence: 2,
             queued: vec![second, first],
             leased: Vec::new(),
             terminal: Vec::new(),
         };
+        // Both have the same conversation, so the second will be blocked by the first's active
+        // worker.
+        let active_workers = [
+            active_worker_with_conversation(
+                "worker-active-a",
+                Some("dispatch-active-a"),
+                "project-a",
+                "agent-a",
+                "conversation-a",
+            ),
+            active_worker_with_conversation(
+                "worker-active-b",
+                Some("dispatch-active-b"),
+                "project-a",
+                "agent-a",
+                "conversation-a",
+            ),
+        ];
 
-        let plan = plan_worker_dispatch_admission(input(
-            &state,
-            &[],
-            &[],
-            WorkerConcurrencyLimits {
-                global: Some(0),
-                per_project: None,
-                per_agent: None,
-            },
-            3,
-        ))
-        .expect("blocked queue must be a plan");
+        let plan = plan_worker_dispatch_admission(input(&state, &active_workers, &[], 3))
+            .expect("blocked queue must be a plan");
 
         assert_eq!(
             plan,
@@ -311,13 +291,33 @@ mod tests {
                 blocked_candidates: vec![
                     WorkerDispatchAdmissionBlockedCandidate {
                         dispatch_id: "dispatch-a".to_string(),
-                        reason: WorkerConcurrencyBlockReason::GlobalLimitReached { limit: 0 },
-                        counts: WorkerConcurrencyCounts::default(),
+                        reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                            project_id: "project-a".to_string(),
+                            agent_pubkey: "agent-a".to_string(),
+                            conversation_id: "conversation-a".to_string(),
+                            dispatch_id: Some("dispatch-active-a".to_string()),
+                            worker_id: Some("worker-active-a".to_string()),
+                        },
+                        counts: WorkerConcurrencyCounts {
+                            global: 2,
+                            project: 2,
+                            agent: 2,
+                        },
                     },
                     WorkerDispatchAdmissionBlockedCandidate {
                         dispatch_id: "dispatch-b".to_string(),
-                        reason: WorkerConcurrencyBlockReason::GlobalLimitReached { limit: 0 },
-                        counts: WorkerConcurrencyCounts::default(),
+                        reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                            project_id: "project-a".to_string(),
+                            agent_pubkey: "agent-a".to_string(),
+                            conversation_id: "conversation-a".to_string(),
+                            dispatch_id: Some("dispatch-active-a".to_string()),
+                            worker_id: Some("worker-active-a".to_string()),
+                        },
+                        counts: WorkerConcurrencyCounts {
+                            global: 2,
+                            project: 2,
+                            agent: 2,
+                        },
                     },
                 ],
             }
@@ -331,43 +331,23 @@ mod tests {
             .with_status(DispatchQueueStatus::Leased);
         let state = DispatchQueueState {
             last_sequence: 2,
-            queued: vec![queued],
+            queued: vec![queued.clone()],
             leased: vec![leased],
             terminal: Vec::new(),
         };
 
-        let plan = plan_worker_dispatch_admission(input(
-            &state,
-            &[],
-            &[],
-            WorkerConcurrencyLimits {
-                global: Some(10),
-                per_project: Some(1),
-                per_agent: Some(10),
-            },
-            3,
-        ))
-        .expect("blocked queue must be a plan");
+        let plan = plan_worker_dispatch_admission(input(&state, &[], &[], 3))
+            .expect("queue with leased entry must produce a plan");
 
-        assert_eq!(
-            plan,
-            WorkerDispatchAdmissionPlan::NotAdmitted {
-                reason:
-                    WorkerDispatchAdmissionBlockedReason::AllQueuedDispatchesBlockedByConcurrency,
-                blocked_candidates: vec![WorkerDispatchAdmissionBlockedCandidate {
-                    dispatch_id: "dispatch-queued".to_string(),
-                    reason: WorkerConcurrencyBlockReason::ProjectLimitReached {
-                        project_id: "project-a".to_string(),
-                        limit: 1,
-                    },
-                    counts: WorkerConcurrencyCounts {
-                        global: 1,
-                        project: 1,
-                        agent: 0,
-                    },
-                }],
+        // dispatch-queued is for agent-b; dispatch-leased is for agent-a — different agents,
+        // so the queued dispatch should be admitted.
+        match plan {
+            WorkerDispatchAdmissionPlan::Admitted(admitted) => {
+                assert_eq!(admitted.selected_dispatch, queued);
+                assert_eq!(admitted.leased_record.dispatch_id, "dispatch-queued");
             }
-        );
+            other => panic!("expected admitted plan for different-agent dispatch, got {other:?}"),
+        }
     }
 
     #[test]
@@ -400,14 +380,8 @@ mod tests {
             "conversation-a",
         )];
 
-        let plan = plan_worker_dispatch_admission(input(
-            &state,
-            &active_workers,
-            &[],
-            WorkerConcurrencyLimits::default(),
-            3,
-        ))
-        .expect("admission must skip same-conversation candidate");
+        let plan = plan_worker_dispatch_admission(input(&state, &active_workers, &[], 3))
+            .expect("admission must skip same-conversation candidate");
 
         match plan {
             WorkerDispatchAdmissionPlan::Admitted(admitted) => {
@@ -442,14 +416,8 @@ mod tests {
             terminal: Vec::new(),
         };
 
-        let plan = plan_worker_dispatch_admission(input(
-            &state,
-            &[],
-            &[],
-            WorkerConcurrencyLimits::default(),
-            3,
-        ))
-        .expect("same-conversation leased dispatch must block admission");
+        let plan = plan_worker_dispatch_admission(input(&state, &[], &[], 3))
+            .expect("same-conversation leased dispatch must block admission");
 
         assert_eq!(
             plan,
@@ -484,14 +452,8 @@ mod tests {
             terminal: Vec::new(),
         };
 
-        let error = plan_worker_dispatch_admission(input(
-            &state,
-            &[],
-            &[],
-            WorkerConcurrencyLimits::default(),
-            2,
-        ))
-        .expect_err("stale lease sequence must fail");
+        let error = plan_worker_dispatch_admission(input(&state, &[], &[], 2))
+            .expect_err("stale lease sequence must fail");
 
         match error {
             WorkerDispatchAdmissionError::DispatchQueue { source } => {
@@ -510,14 +472,12 @@ mod tests {
         dispatch_state: &'a DispatchQueueState,
         active_workers: &'a [ActiveWorkerConcurrencySnapshot],
         active_dispatches: &'a [ActiveDispatchConcurrencySnapshot],
-        limits: WorkerConcurrencyLimits,
         sequence: u64,
     ) -> WorkerDispatchAdmissionInput<'a> {
         WorkerDispatchAdmissionInput {
             dispatch_state,
             active_workers,
             active_dispatches,
-            limits,
             sequence,
             timestamp: 1_710_000_000_000 + sequence,
             correlation_id: "admit-correlation".to_string(),
