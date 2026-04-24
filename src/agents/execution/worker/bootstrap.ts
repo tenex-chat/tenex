@@ -103,6 +103,7 @@ export async function executeAgentWorkerRequest(
             execution: message,
             executionState: publisherExecutionState,
             publishResults: dependencies.publishResults,
+            projectContext,
         }),
     };
     const executor =

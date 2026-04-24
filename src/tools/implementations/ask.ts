@@ -138,8 +138,10 @@ When responding, provide your answers in a clear format that addresses each ques
  *
  * Returns null if no escalation agent configured, config not loaded, or agent doesn't exist
  */
-async function getEscalationTarget(): Promise<string | null> {
-  const result = await resolveEscalationTarget();
+async function getEscalationTargetForContext(
+  context: ToolExecutionContext
+): Promise<string | null> {
+  const result = await resolveEscalationTarget(context.projectContext);
   return result?.slug ?? null;
 }
 
@@ -179,12 +181,15 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   if (!isDirectHumanTrigger(context, ownerPubkey)) {
     // Check for escalation agent configuration using helper
     // This will auto-add the agent to the project if it exists in storage but not in project
-    const escalationAgentSlug = await getEscalationTarget();
+    const escalationAgentSlug = await getEscalationTargetForContext(context);
 
     // If escalation agent is configured AND current agent is not the escalation agent,
     // route through escalation agent instead of directly to user
     if (escalationAgentSlug && context.agent.slug !== escalationAgentSlug) {
-      const escalationAgentPubkey = resolveRecipientToPubkey(escalationAgentSlug);
+      const escalationAgentPubkey = resolveRecipientToPubkey(
+        escalationAgentSlug,
+        context.projectContext
+      );
 
       if (!escalationAgentPubkey) {
         // This shouldn't happen since getEscalationTarget() validates it,

@@ -19,7 +19,7 @@
  * import { resolveEscalationTarget } from "@/services/agents/EscalationService";
  *
  * // In a tool implementation
- * const escalationSlug = await resolveEscalationTarget();
+ * const escalationSlug = await resolveEscalationTarget(projectContext);
  * if (escalationSlug) {
  *   // Route through escalation agent
  * }
@@ -31,7 +31,7 @@ import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
 import { resolveRecipientToPubkey } from "@/services/agents/AgentResolution";
 import { config as configService } from "@/services/ConfigService";
-import { getProjectContext } from "@/services/projects";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { logger } from "@/utils/logger";
 
 export interface EscalationResolutionResult {
@@ -50,9 +50,12 @@ export interface EscalationResolutionResult {
  * 2. Checks if agent is already in project
  * 3. If missing, loads it from storage into the current project/registry
  *
+ * @param projectContext - Explicit project-scoped context for agent membership and notification
  * @returns EscalationResolutionResult if escalation agent is available, null otherwise
  */
-export async function resolveEscalationTarget(): Promise<EscalationResolutionResult | null> {
+export async function resolveEscalationTarget(
+    projectContext: Pick<ProjectContext, "agentRegistry" | "notifyAgentAdded">
+): Promise<EscalationResolutionResult | null> {
     try {
         const config = configService.getConfig();
         const escalationAgentSlug = config.escalation?.agent;
@@ -62,7 +65,7 @@ export async function resolveEscalationTarget(): Promise<EscalationResolutionRes
         }
 
         // Fast path: check if agent is already in the current project
-        const existingPubkey = resolveRecipientToPubkey(escalationAgentSlug);
+        const existingPubkey = resolveRecipientToPubkey(escalationAgentSlug, projectContext);
         if (existingPubkey) {
             return {
                 slug: escalationAgentSlug,
@@ -70,7 +73,6 @@ export async function resolveEscalationTarget(): Promise<EscalationResolutionRes
             };
         }
 
-        const projectContext = getProjectContext();
         const projectDTag = projectContext.agentRegistry.getProjectDTag();
 
         if (!projectDTag?.trim()) {

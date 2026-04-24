@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { ProjectContext } from "@/services/projects";
-import { projectContextStore } from "@/services/projects";
 import * as nostrModule from "@/nostr";
 import { PubkeyService } from "../PubkeyService";
 
@@ -66,16 +65,16 @@ describe("PubkeyService", () => {
 
     describe("Agent name resolution", () => {
         it("should return agent slug for agent pubkey", async () => {
-            const name = await projectContextStore.run(mockProjectContext, () =>
-                service.getName("agent1-pubkey")
-            );
+            const name = await service.getName("agent1-pubkey", {
+                projectContext: mockProjectContext,
+            });
             expect(name).toBe("code-writer");
         });
 
         it("should return agent slug synchronously", () => {
-            const name = projectContextStore.runSync(mockProjectContext, () =>
-                service.getNameSync("agent2-pubkey")
-            );
+            const name = service.getNameSync("agent2-pubkey", {
+                projectContext: mockProjectContext,
+            });
             expect(name).toBe("tester");
         });
 
@@ -190,9 +189,9 @@ describe("PubkeyService", () => {
 
     describe("getNameSync", () => {
         it("should return agent slug synchronously for agents", () => {
-            const name = projectContextStore.runSync(mockProjectContext, () =>
-                service.getNameSync("agent1-pubkey")
-            );
+            const name = service.getNameSync("agent1-pubkey", {
+                projectContext: mockProjectContext,
+            });
             expect(name).toBe("code-writer");
         });
 

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import * as projectsModule from "@/services/projects";
 import { AgentPublisher } from "../AgentPublisher";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext } from "../types";
@@ -9,6 +8,16 @@ import { logger } from "@/utils/logger";
 import * as ndkClientModule from "../ndkClient";
 import * as rustPublishOutbox from "../RustPublishOutbox";
 import * as traceContextModule from "../trace-context";
+
+const mockProjectContext = {
+    project: {
+        tagReference: () => ["a", "31933:testpubkey:test-project"],
+        pubkey: "testpubkey",
+    },
+    agentRegistry: {
+        getAgentByPubkey: () => null,
+    },
+};
 
 const loggerMocks = {
     debug: mock(),
@@ -21,15 +30,6 @@ describe("AgentPublisher.streamTextDelta", () => {
     beforeEach(() => {
         spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
         spyOn(traceContextModule, "injectTraceContext").mockImplementation(() => {});
-        spyOn(projectsModule, "getProjectContext").mockReturnValue({
-            project: {
-                tagReference: () => ["a", "31933:testpubkey:test-project"],
-                pubkey: "testpubkey",
-            },
-            agentRegistry: {
-                getAgentByPubkey: () => null,
-            },
-        } as any);
         spyOn(logger, "debug").mockImplementation(loggerMocks.debug);
         spyOn(logger, "info").mockImplementation(loggerMocks.info);
         spyOn(logger, "warn").mockImplementation(loggerMocks.warn);
@@ -52,7 +52,7 @@ describe("AgentPublisher.streamTextDelta", () => {
             pubkey: (await signer.user()).pubkey,
             sign: mock((event: NDKEvent) => event.sign(signer)),
         } as unknown as AgentInstance;
-        const publisher = new AgentPublisher(agent);
+        const publisher = new AgentPublisher(agent, mockProjectContext);
 
         const triggeringEnvelope = createMockInboundEnvelope({
             principal: {
@@ -109,7 +109,7 @@ describe("AgentPublisher.streamTextDelta", () => {
             pubkey: (await signer.user()).pubkey,
             sign: mock((event: NDKEvent) => event.sign(signer)),
         } as unknown as AgentInstance;
-        const publisher = new AgentPublisher(agent);
+        const publisher = new AgentPublisher(agent, mockProjectContext);
 
         const context: EventContext = {
             triggeringEnvelope: createMockInboundEnvelope({

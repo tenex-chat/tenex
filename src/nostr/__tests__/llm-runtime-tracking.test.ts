@@ -7,11 +7,20 @@ import {
     stopExecutionTime,
 } from "@/conversations/executionTime";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import * as projectsModule from "@/services/projects";
 import { AgentEventEncoder } from "../AgentEventEncoder";
 import * as ndkClientModule from "../ndkClient";
 import type { EventContext } from "../types";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+
+const mockProjectContext = {
+    project: {
+        tagReference: () => ["a", "31933:pubkey:d-tag"],
+        pubkey: "project-owner-pubkey",
+    },
+    agentRegistry: {
+        getAgentByPubkey: () => null,
+    },
+};
 
 /**
  * LLM Runtime Tracking Tests
@@ -35,15 +44,6 @@ describe("LLM Runtime Tracking", () => {
         mockTime = 1000000;
         Date.now = () => mockTime;
         spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
-        spyOn(projectsModule, "getProjectContext").mockReturnValue({
-            project: {
-                tagReference: () => ["a", "31933:pubkey:d-tag"],
-                pubkey: "project-owner-pubkey",
-            },
-            agentRegistry: {
-                getAgentByPubkey: () => null,
-            },
-        } as any);
     });
 
     afterEach(async () => {
@@ -98,7 +98,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should include execution-time tag when EventContext has executionTime", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey-123", "event-id-123");
 
             // Create EventContext with execution time (8 seconds = 8000ms)
@@ -126,7 +126,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should NOT include execution-time tag when EventContext lacks executionTime", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey-123", "event-id-123");
 
             // Create EventContext WITHOUT execution time
@@ -153,15 +153,15 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should include Codex thread and tool metadata tags when provided", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
 
-            const mockTriggeringEvent = new NDKEvent();
-            mockTriggeringEvent.pubkey = "user-pubkey-123";
-            mockTriggeringEvent.id = "event-id-123";
-            mockTriggeringEvent.tags = [];
+            const mockTriggeringEnvelope = createTriggeringEnvelope(
+                "user-pubkey-123",
+                "event-id-123"
+            );
 
             const context: EventContext = {
-                triggeringEvent: mockTriggeringEvent,
+                triggeringEnvelope: mockTriggeringEnvelope,
                 rootEvent: { id: "root-event-id" },
                 conversationId: "conv-123",
                 model: "gpt-5-codex",
@@ -232,7 +232,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should create separate completion events with respective runtimes", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope(
                 "delegator-pubkey",
                 "delegation-event-id"
@@ -319,7 +319,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should encode ask event without including pending human wait time", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             // Context at the time of ask (execution should be stopped before this)
@@ -402,7 +402,7 @@ describe("LLM Runtime Tracking", () => {
 
     describe("Test Case 4: Verify llm-runtime tag format in completion events", () => {
         it("should include execution-time tag with correct format in completion event", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             const context: EventContext = {
@@ -438,7 +438,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should include execution-time in conversation (mid-loop) events", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             const context: EventContext = {
@@ -467,7 +467,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should include execution-time in error events", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             const context: EventContext = {
@@ -503,7 +503,7 @@ describe("LLM Runtime Tracking", () => {
 
     describe("llm-runtime tag in completion events", () => {
         it("should include llm-runtime-total tag when only llmRuntimeTotal is provided", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             // Context with llmRuntimeTotal but no llmRuntime (incremental is 0)
@@ -534,7 +534,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should include llm-runtime tag from llmRuntime if provided", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             // Context with both llmRuntime (incremental) and llmRuntimeTotal
@@ -562,7 +562,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should include both llm-runtime and llm-runtime-total tags when both values exist", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             // Context with both llmRuntime and llmRuntimeTotal
@@ -596,7 +596,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should not include llm-runtime tag when neither llmRuntime nor llmRuntimeTotal is provided", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             // Context without runtime info
@@ -620,7 +620,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should include llm-runtime-total tag when provided", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             const context: EventContext = {
@@ -648,7 +648,7 @@ describe("LLM Runtime Tracking", () => {
 
     describe("Edge cases and robustness", () => {
         it("should handle zero execution time", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             const context: EventContext = {
@@ -673,7 +673,7 @@ describe("LLM Runtime Tracking", () => {
         });
 
         it("should handle very large execution times", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope("user-pubkey", "event-id");
 
             const context: EventContext = {

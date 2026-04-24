@@ -4,13 +4,22 @@ import { shortenConversationId } from "../conversation-id";
 import type { DelegationChainEntry } from "@/conversations/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
-import * as projectsModule from "@/services/projects";
 import * as pubkeyServiceModule from "@/services/PubkeyService";
 
 // Mock functions that will be used by the mocked modules
 const mockConversationStoreGet = mock();
 const mockConversationStoreGetCachedEnvelope = mock();
 const mockGetNameSync = mock();
+const mockProjectContext = {
+    getAgentByPubkey: (pubkey: string) => {
+        const agents: Record<string, { slug: string }> = {
+            "agent-pubkey-pm": { slug: "pm-wip" },
+            "agent-pubkey-exec": { slug: "execution-coordinator" },
+            "agent-pubkey-claude": { slug: "claude-code" },
+        };
+        return agents[pubkey];
+    },
+};
 
 function createEnvelope(
     pubkey: string,
@@ -202,16 +211,6 @@ describe("delegation-chain utilities", () => {
             spyOn(ConversationStore, "getCachedEnvelope").mockImplementation(
                 mockConversationStoreGetCachedEnvelope as typeof ConversationStore.getCachedEnvelope
             );
-            spyOn(projectsModule, "getProjectContext").mockReturnValue({
-                getAgentByPubkey: (pubkey: string) => {
-                    const agents: Record<string, { slug: string }> = {
-                        "agent-pubkey-pm": { slug: "pm-wip" },
-                        "agent-pubkey-exec": { slug: "execution-coordinator" },
-                        "agent-pubkey-claude": { slug: "claude-code" },
-                    };
-                    return agents[pubkey];
-                },
-            } as ReturnType<typeof projectsModule.getProjectContext>);
             spyOn(pubkeyServiceModule, "getPubkeyService").mockReturnValue({
                 getNameSync: (pubkey: string) => mockGetNameSync(pubkey),
             } as ReturnType<typeof pubkeyServiceModule.getPubkeyService>);
@@ -229,7 +228,13 @@ describe("delegation-chain utilities", () => {
         it("should return undefined for direct user messages (no delegation tag)", () => {
             const event = createEnvelope("user-pubkey");
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "any-conv-id");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "any-conv-id",
+                mockProjectContext
+            );
             expect(result).toBeUndefined();
         });
 
@@ -252,7 +257,13 @@ describe("delegation-chain utilities", () => {
             mockConversationStoreGet.mockReturnValue(mockParentStore);
 
             // Pass currentConversationId to indicate the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             // Full chain validation: User -> pm-wip -> claude-code
@@ -301,7 +312,13 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
 
@@ -322,7 +339,13 @@ describe("delegation-chain utilities", () => {
             mockConversationStoreGet.mockReturnValue(undefined);
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             // When parent is missing, use sender as first in chain
@@ -342,7 +365,13 @@ describe("delegation-chain utilities", () => {
             mockConversationStoreGet.mockReturnValue(undefined);
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "project-owner-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
@@ -361,7 +390,13 @@ describe("delegation-chain utilities", () => {
             mockGetNameSync.mockReturnValue("Pablo");
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "project-owner-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
@@ -412,7 +447,13 @@ describe("delegation-chain utilities", () => {
             });
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             // Full chain should be: User -> pm-wip -> exec -> claude-code
@@ -458,7 +499,13 @@ describe("delegation-chain utilities", () => {
             });
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             // Chain should include: User (from walking up) -> exec (immediate delegator) -> claude-code (current)
@@ -506,7 +553,13 @@ describe("delegation-chain utilities", () => {
             });
 
             // Should not hang, should return a chain without duplicates
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
             expect(result).toBeDefined();
 
             // Verify no duplicates from circular reference
@@ -554,7 +607,13 @@ describe("delegation-chain utilities", () => {
             });
 
             // Build the chain with currentConversationId for the conversation being created for claude-code
-            const chain = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const chain = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
             expect(chain).toBeDefined();
             expect(chain).toHaveLength(4);
 
@@ -612,7 +671,8 @@ describe("delegation-chain utilities", () => {
                 event,
                 "agent-pubkey-exec", // current agent is exec (same as event.pubkey)
                 "user-pubkey",
-                "self-deleg-conv-id-1234567890"
+                "self-deleg-conv-id-1234567890",
+                mockProjectContext
             );
 
             expect(result).toBeDefined();
@@ -634,7 +694,13 @@ describe("delegation-chain utilities", () => {
             mockConversationStoreGet.mockReturnValue(undefined);
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
@@ -687,7 +753,13 @@ describe("delegation-chain utilities", () => {
             });
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(4);
@@ -753,7 +825,13 @@ describe("delegation-chain utilities", () => {
             });
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(4);
@@ -816,7 +894,13 @@ describe("delegation-chain utilities", () => {
             });
 
             // Pass currentConversationId for the conversation being created for claude-code
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "claude-conv-id-1234567890",
+                mockProjectContext
+            );
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(4);
@@ -867,7 +951,8 @@ describe("delegation-chain utilities", () => {
                 event,
                 "agent-pubkey-claude",
                 "user-pubkey",
-                "current-conv-id"
+                "current-conv-id",
+                mockProjectContext
             );
 
             expect(result).toEqual([

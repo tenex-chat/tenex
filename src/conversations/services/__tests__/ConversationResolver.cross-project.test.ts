@@ -35,6 +35,13 @@ describe("ConversationResolver: cross-project scheduled task lookup", () => {
     // PROJECT_B is where the conversation was originally created and persisted.
     const PROJECT_A = "project-a";
     const PROJECT_B = "project-b";
+    const mockProjectContext = {
+        agents: new Map(),
+        project: {
+            pubkey: "project-owner-pubkey",
+        },
+        getAgentByPubkey: () => undefined,
+    } as const;
 
     let testDir: string;
 
@@ -86,7 +93,7 @@ describe("ConversationResolver: cross-project scheduled task lookup", () => {
     });
 
     it("resolveConversationForEvent returns the cross-project conversation via disk fallback", async () => {
-        const resolver = new ConversationResolver();
+        const resolver = new ConversationResolver(mockProjectContext);
 
         // Envelope simulates a scheduled task reply. replyToId is the root conversation
         // anchor (plain 64-char hex, no transport prefix) so toNativeId() passes it
@@ -117,7 +124,7 @@ describe("ConversationResolver: cross-project scheduled task lookup", () => {
 
         const warnSpy = spyOn(logger, "warn");
         try {
-            const resolver = new ConversationResolver();
+            const resolver = new ConversationResolver(mockProjectContext);
 
             // No recipients → getMentionedPubkeys returns [] → handleOrphanedReply
             // returns undefined immediately without making network calls.

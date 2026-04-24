@@ -16,6 +16,7 @@ import { createScheduleTaskTool } from "../schedule_task";
 describe("Schedule Task Tool", () => {
     const mockAgentPubkey = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
     const mockTargetPubkey = "feb842e2e624cb58e364f8f7cb363c03407be9519ad48326f518f976b3551059";
+    const mockProjectId = "test-project";
     const createMockContext = (): ToolExecutionContext => ({
         agent: {
             name: "Test Agent",
@@ -35,6 +36,11 @@ describe("Schedule Task Tool", () => {
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
+        projectContext: {
+            project: {
+                tagId: () => mockProjectId,
+            },
+        } as any,
         getConversation: () => ({
             getRootEventId: () => "mock-root-event-id",
         }) as any,
@@ -149,7 +155,7 @@ describe("Schedule Task Tool", () => {
                 "Start daily standup",
                 mockAgentPubkey,
                 "test-agent",
-                undefined,
+                mockProjectId,
                 "Morning Standup",
                 undefined
             );
@@ -245,13 +251,16 @@ describe("Schedule Task Tool", () => {
             });
 
             expect(result.success).toBe(true);
-            expect(mockResolveAgentSlug).toHaveBeenCalledWith("architect");
+            expect(mockResolveAgentSlug).toHaveBeenCalledWith(
+                "architect",
+                context.projectContext
+            );
             expect(mockSchedulerService.addTask).toHaveBeenCalledWith(
                 "0 9 * * *",
                 "Daily standup reminder",
                 mockAgentPubkey,
                 "architect",
-                undefined,
+                mockProjectId,
                 undefined,
                 undefined
             );
@@ -298,7 +307,7 @@ describe("Schedule Task Tool", () => {
                 "Self-reminder",
                 mockAgentPubkey,
                 "test-agent",
-                undefined,
+                mockProjectId,
                 undefined,
                 undefined
             );
@@ -321,13 +330,16 @@ describe("Schedule Task Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.type).toBe("oneoff");
-            expect(mockResolveAgentSlug).toHaveBeenCalledWith("architect");
+            expect(mockResolveAgentSlug).toHaveBeenCalledWith(
+                "architect",
+                context.projectContext
+            );
             expect(mockSchedulerService.addOneoffTask).toHaveBeenCalledWith(
                 expect.any(Date),
                 "Remind architect",
                 mockAgentPubkey,
                 "architect",
-                undefined,
+                mockProjectId,
                 undefined,
                 undefined
             );

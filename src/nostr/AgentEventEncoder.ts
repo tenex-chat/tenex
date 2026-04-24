@@ -1,7 +1,7 @@
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
-import { getProjectContext } from "@/services/projects";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { shortenConversationId, shortenOptionalConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -18,6 +18,8 @@ import type {
     ToolUseIntent,
 } from "./types";
 
+type AgentEventProjectContext = Pick<ProjectContext, "project" | "agentRegistry">;
+
 /**
  * Centralized module for encoding and decoding agent event semantics.
  * This module codifies the tagging structures and their meanings,
@@ -29,6 +31,8 @@ import type {
  * All tagging logic is centralized here for consistency and testability.
  */
 export class AgentEventEncoder {
+    constructor(private readonly projectContext: AgentEventProjectContext) {}
+
     /**
      * Add conversation tags consistently to any event.
      * Just e-tags the root event - no reply threading.
@@ -219,8 +223,7 @@ export class AgentEventEncoder {
         }
 
         // Get project context to look up agents
-        const projectCtx = getProjectContext();
-        const agentRegistry = projectCtx.agentRegistry;
+        const agentRegistry = this.projectContext.agentRegistry;
 
         // Build recipient identifiers
         const recipientIdentifiers = recipients.map((pubkey) => {
@@ -300,8 +303,7 @@ export class AgentEventEncoder {
         this.addConversationTags(event, context);
 
         // Get project owner to ask the question to
-        const projectCtx = getProjectContext();
-        const ownerPubkey = projectCtx?.project?.pubkey;
+        const ownerPubkey = this.projectContext.project.pubkey;
 
         if (ownerPubkey) {
             event.tag(["p", ownerPubkey]);
@@ -487,16 +489,14 @@ export class AgentEventEncoder {
     }
 
     aTagProject(event: NDKEvent): undefined {
-        const projectCtx = getProjectContext();
-        event.tag(projectCtx.project.tagReference());
+        event.tag(this.projectContext.project.tagReference());
     }
 
     /**
      * p-tags the project owner
      */
     pTagProjectOwner(event: NDKEvent): undefined {
-        const projectCtx = getProjectContext();
-        event.tag(["p", projectCtx.project.pubkey]);
+        event.tag(["p", this.projectContext.project.pubkey]);
     }
 
     /**

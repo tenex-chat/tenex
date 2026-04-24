@@ -9,6 +9,16 @@ import * as ndkClientModule from "@/nostr/ndkClient";
 import * as traceContextModule from "@/nostr/trace-context";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
+const mockProjectContext = {
+  project: {
+    tagReference: () => ["a", "31933:testpubkey:test-project"],
+    pubkey: "testpubkey",
+  },
+  agentRegistry: {
+    getAgentByPubkey: () => null,
+  },
+};
+
 describe("Ask Tool - Multi-question support", () => {
   let capturedEvents: NDKEvent[] = [];
   let mockAgentInstance: AgentInstance;
@@ -36,7 +46,7 @@ describe("Ask Tool - Multi-question support", () => {
       projectTag: "31933:testpubkey:test-project",
     } as unknown as AgentInstance;
 
-    publisher = new AgentPublisher(mockAgentInstance);
+    publisher = new AgentPublisher(mockAgentInstance, mockProjectContext);
     safePublishSpy = spyOn(publisher as any, "safePublish").mockImplementation(async (event: NDKEvent) => {
       capturedEvents.push(event);
     });

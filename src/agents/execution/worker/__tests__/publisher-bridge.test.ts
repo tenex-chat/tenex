@@ -332,6 +332,7 @@ function createHarness(): {
     const publisher = createWorkerProtocolPublisherFactory({
         execution: baseExecution(agent.pubkey, context.triggeringEnvelope),
         emit,
+        projectContext: createMockProjectContext(),
     })(agent);
 
     return {

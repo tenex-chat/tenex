@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import * as projectsModule from "@/services/projects";
 import { AgentPublisher } from "../AgentPublisher";
 import type { AskConfig, DelegateConfig } from "../types";
 import type { AgentInstance } from "@/agents/types";
@@ -10,6 +9,16 @@ import { logger } from "@/utils/logger";
 import * as ndkClientModule from "../ndkClient";
 import * as rustPublishOutbox from "../RustPublishOutbox";
 import * as traceContextModule from "../trace-context";
+
+const mockProjectContext = {
+    project: {
+        tagReference: () => ["a", "31933:testpubkey:test-project"],
+        pubkey: "testpubkey",
+    },
+    agentRegistry: {
+        getAgentByPubkey: () => null,
+    },
+};
 
 // Minimal mocks - only mock what's necessary for these specific tests
 
@@ -42,14 +51,6 @@ describe("AgentPublisher - Delegation Tag", () => {
             pool: { relays: new Map([[mockRelay.url, mockRelay]]) },
         } as any);
         spyOn(traceContextModule, "injectTraceContext").mockImplementation(() => {});
-        spyOn(projectsModule, "getProjectContext").mockReturnValue({
-            project: {
-                tagReference: () => ["a", "31933:testpubkey:test-project"],
-                pubkey: "testpubkey",
-            },
-            projectTag: "31933:testpubkey:test-project",
-        } as any);
-        spyOn(projectsModule, "isProjectContextInitialized").mockReturnValue(true);
         spyOn(logger, "debug").mockImplementation(() => {});
         spyOn(logger, "info").mockImplementation(() => {});
         spyOn(logger, "warn").mockImplementation(() => {});
@@ -73,7 +74,7 @@ describe("AgentPublisher - Delegation Tag", () => {
             projectTag: "31933:testpubkey:test-project",
         } as unknown as AgentInstance;
 
-        publisher = new AgentPublisher(mockAgentInstance);
+        publisher = new AgentPublisher(mockAgentInstance, mockProjectContext);
     });
 
     afterEach(() => {

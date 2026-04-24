@@ -1,6 +1,5 @@
 import { getNDK } from "@/nostr";
 import type { ProjectContext } from "@/services/projects/ProjectContext";
-import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { shortenPubkey } from "@/utils/conversation-id";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
@@ -29,6 +28,10 @@ interface CacheEntry {
     ttl: number;
 }
 
+interface PubkeyLookupOptions {
+    projectContext?: Pick<ProjectContext, "getAgentByPubkey">;
+}
+
 /**
  * Central repository for mapping pubkeys to human-readable names.
  * Handles both agent pubkeys (mapped to slugs) and user pubkeys (fetched from kind:0 events).
@@ -54,9 +57,9 @@ export class PubkeyService {
     /**
      * Get a display name for any pubkey (agent or user)
      */
-    async getName(pubkey: Hexpubkey): Promise<string> {
+    async getName(pubkey: Hexpubkey, options?: PubkeyLookupOptions): Promise<string> {
         // First, check if it's an agent (O(1) lookup)
-        const agentSlug = this.getAgentSlug(pubkey);
+        const agentSlug = this.getAgentSlug(pubkey, options?.projectContext);
         if (agentSlug) {
             return agentSlug;
         }
@@ -69,9 +72,9 @@ export class PubkeyService {
     /**
      * Get a display name synchronously (uses cache only, no fetching)
      */
-    getNameSync(pubkey: Hexpubkey): string {
+    getNameSync(pubkey: Hexpubkey, options?: PubkeyLookupOptions): string {
         // First, check if it's an agent
-        const agentSlug = this.getAgentSlug(pubkey);
+        const agentSlug = this.getAgentSlug(pubkey, options?.projectContext);
         if (agentSlug) {
             return agentSlug;
         }
@@ -90,17 +93,15 @@ export class PubkeyService {
      * Get agent slug for a pubkey if it belongs to an agent.
      * Uses AgentRegistry's getAgentByPubkey for efficient O(1) lookup.
      */
-    private getAgentSlug(pubkey: Hexpubkey): string | undefined {
-        let projectCtx: ProjectContext;
-        try {
-            projectCtx = getProjectContext();
-        } catch {
-            // Name resolution must remain available even outside a project-scoped context
+    private getAgentSlug(
+        pubkey: Hexpubkey,
+        projectContext?: Pick<ProjectContext, "getAgentByPubkey">
+    ): string | undefined {
+        if (!projectContext) {
             return undefined;
         }
 
-        // Use direct pubkey lookup from AgentRegistry (O(1) instead of O(n))
-        const agent = projectCtx.getAgentByPubkey(pubkey);
+        const agent = projectContext.getAgentByPubkey(pubkey);
         if (agent) {
             return agent.slug;
         }

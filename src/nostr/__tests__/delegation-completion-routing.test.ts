@@ -1,12 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import * as projectsModule from "@/services/projects";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { logger } from "@/utils/logger";
 import { AgentEventEncoder } from "../AgentEventEncoder";
 import * as ndkClientModule from "../ndkClient";
 import type { EventContext } from "../types";
+
+const mockProjectContext = {
+    project: {
+        tagReference: () => ["a", "31933:pubkey:d-tag"],
+        pubkey: "project-owner-pubkey",
+    },
+    agentRegistry: {
+        getAgentByPubkey: () => null,
+    },
+};
 
 /**
  * Delegation Completion Routing Tests
@@ -38,15 +47,6 @@ describe("Delegation Completion Routing", () => {
         await mkdir(TEST_DIR, { recursive: true });
         ConversationStore.initialize(TEST_DIR);
         spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
-        spyOn(projectsModule, "getProjectContext").mockReturnValue({
-            project: {
-                tagReference: () => ["a", "31933:pubkey:d-tag"],
-                pubkey: "project-owner-pubkey",
-            },
-            agentRegistry: {
-                getAgentByPubkey: () => null,
-            },
-        } as any);
         spyOn(logger, "debug").mockImplementation(() => {});
         spyOn(logger, "info").mockImplementation(() => {});
         spyOn(logger, "warn").mockImplementation(() => {});
@@ -76,7 +76,7 @@ describe("Delegation Completion Routing", () => {
 
     describe("Encoder completion p-tag routing (unit tests)", () => {
         it("should use completionRecipientPubkey when provided", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope(USER_PUBKEY, "user-event");
 
             const context: EventContext = {
@@ -99,7 +99,7 @@ describe("Delegation Completion Routing", () => {
         });
 
         it("should fall back to triggeringEnvelope.pubkey when completionRecipientPubkey is not set", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope(USER_PUBKEY, "direct-user-event");
 
             const context: EventContext = {
@@ -121,7 +121,7 @@ describe("Delegation Completion Routing", () => {
         });
 
         it("should fall back to triggeringEnvelope.pubkey when completionRecipientPubkey is undefined", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope(ARCHITECT_PUBKEY, "architect-event");
 
             const context: EventContext = {
@@ -142,7 +142,7 @@ describe("Delegation Completion Routing", () => {
         });
 
         it("should include status=completed tag on completion events", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope(USER_PUBKEY, "test-event");
 
             const context: EventContext = {
@@ -349,7 +349,7 @@ describe("Delegation Completion Routing", () => {
             expect(immediateDelegatorPubkey).toBe(EXEC_COORD_PUBKEY);
 
             // Phase 4: Encode completion with pre-resolved recipient
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope(
                 USER_PUBKEY,
                 "user-response-after-restart"
@@ -377,7 +377,7 @@ describe("Delegation Completion Routing", () => {
 
     describe("Error event routing (unchanged behavior)", () => {
         it("should route errors to triggeringEnvelope.pubkey (errors don't use delegation chain)", () => {
-            const encoder = new AgentEventEncoder();
+            const encoder = new AgentEventEncoder(mockProjectContext);
             const mockTriggeringEvent = createTriggeringEnvelope(USER_PUBKEY, "error-trigger");
 
             const context: EventContext = {

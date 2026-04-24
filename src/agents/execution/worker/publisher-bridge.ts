@@ -21,6 +21,7 @@ import type {
 } from "@/nostr/types";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import { DelegationJournalReader } from "@/services/ral/DelegationJournalReader";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import type { AgentWorkerProtocolMessage } from "@/events/runtime/AgentWorkerProtocol";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -33,6 +34,7 @@ type PublishRequestMessage = Extract<AgentWorkerProtocolMessage, { type: "publis
 
 interface WorkerProtocolPublisherOptions {
     agent: RuntimePublishAgent;
+    projectContext: Pick<ProjectContext, "project" | "agentRegistry">;
     emit: AgentWorkerProtocolEmit;
     execution: ExecuteMessage;
     executionState?: WorkerProtocolPublisherExecutionState;
@@ -70,10 +72,12 @@ export function createWorkerProtocolPublisherFactory(
  * `silent_completion_requested`, `delegation_killed`).
  */
 class WorkerProtocolPublisher implements AgentRuntimePublisher {
-    private readonly encoder = new AgentEventEncoder();
+    private readonly encoder: AgentEventEncoder;
     private readonly inboundAdapter = new NostrInboundAdapter();
 
-    constructor(private readonly options: WorkerProtocolPublisherOptions) {}
+    constructor(private readonly options: WorkerProtocolPublisherOptions) {
+        this.encoder = new AgentEventEncoder(options.projectContext);
+    }
 
     async complete(
         intent: CompletionIntent,

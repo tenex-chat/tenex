@@ -39,7 +39,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
             // Resolve target agent
             let targetAgentSlug: string;
             if (targetAgent) {
-                const resolution = resolveAgentSlug(targetAgent);
+                const resolution = resolveAgentSlug(targetAgent, context.projectContext);
                 if (!resolution.pubkey) {
                     const availableSlugsStr = resolution.availableSlugs.length > 0
                         ? `Available agent slugs: ${resolution.availableSlugs.join(", ")}`
@@ -55,6 +55,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
 
             const schedulerService = SchedulerService.getInstance();
             const fromPubkey = context.agent.pubkey;
+            const projectId = context.projectContext.project.tagId();
 
             // Try relative delay first
             const delayMs = parseRelativeDelay(when);
@@ -65,7 +66,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     prompt,
                     fromPubkey,
                     targetAgentSlug,
-                    undefined,
+                    projectId,
                     title,
                     targetChannel
                 );
@@ -97,7 +98,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                     prompt,
                     fromPubkey,
                     targetAgentSlug,
-                    undefined,
+                    projectId,
                     title,
                     targetChannel
                 );

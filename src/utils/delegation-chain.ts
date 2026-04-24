@@ -32,7 +32,7 @@
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { DelegationChainEntry, PrincipalSnapshot } from "@/conversations/types";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
-import { getProjectContext } from "@/services/projects";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
@@ -91,13 +91,15 @@ function toPrincipalSnapshot(params: {
  * @param currentAgentPubkey - The pubkey of the agent receiving the delegation
  * @param projectOwnerPubkey - The pubkey of the project owner (human user)
  * @param currentConversationId - The ID of the conversation being created for the current agent (required to ensure correct semantics)
+ * @param projectContext - Explicit project-scoped agent lookup context
  * @returns The delegation chain entries, or undefined if this is a direct user message
  */
 export function buildDelegationChain(
     envelope: InboundEnvelope,
     currentAgentPubkey: string,
     projectOwnerPubkey: string,
-    currentConversationId: string
+    currentConversationId: string,
+    projectContext: Pick<ProjectContext, "getAgentByPubkey">
 ): DelegationChainEntry[] | undefined {
     // Check for delegation tag - if not present, this is a direct user conversation
     const parentConversationId = envelope.metadata.delegationParentConversationId;
@@ -118,9 +120,6 @@ export function buildDelegationChain(
 
     const chain: DelegationChainEntry[] = [];
 
-    // Get project context for agent resolution
-    const projectContext = getProjectContext();
-
     /**
      * Helper to resolve a pubkey to a display name.
      * Returns the agent slug if known, or the user's name from their Nostr profile if it's the project owner.
@@ -129,7 +128,7 @@ export function buildDelegationChain(
     const resolveDisplayName = (pubkey: string): { displayName: string; isUser: boolean } => {
         if (pubkey === projectOwnerPubkey) {
             // Use PubkeyService to get the user's display name from their Nostr profile
-            const displayName = getPubkeyService().getNameSync(pubkey);
+            const displayName = getPubkeyService().getNameSync(pubkey, { projectContext });
             return { displayName, isUser: true };
         }
 

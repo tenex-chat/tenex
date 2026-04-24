@@ -119,10 +119,15 @@ function isShortPubkeyPrefix(value: string): boolean {
     return /^[0-9a-fA-F]+$/.test(value) && value.length >= PUBKEY_DISPLAY_LENGTH && value.length <= STORAGE_PREFIX_LENGTH;
 }
 
-function resolveParticipantName(message: ConversationRecord): string {
+function resolveParticipantName(
+    message: ConversationRecord,
+    context: Pick<ToolExecutionContext, "projectContext">
+): string {
     const authorPubkey = getConversationRecordAuthorPubkey(message);
     if (authorPubkey) {
-        return getPubkeyService().getNameSync(authorPubkey);
+        return getPubkeyService().getNameSync(authorPubkey, {
+            projectContext: context.projectContext,
+        });
     }
 
     const displayName = message.senderPrincipal?.displayName?.trim();
@@ -151,17 +156,25 @@ function resolveParticipantName(message: ConversationRecord): string {
 /**
  * Resolve a pubkey to a display name using the PubkeyService.
  */
-function resolveNameFromPubkey(pubkey: string): string {
-    return getPubkeyService().getNameSync(pubkey);
+function resolveNameFromPubkey(
+    pubkey: string,
+    context: Pick<ToolExecutionContext, "projectContext">
+): string {
+    return getPubkeyService().getNameSync(pubkey, {
+        projectContext: context.projectContext,
+    });
 }
 
 /**
  * Get sender name from the first message of a conversation.
  */
-function extractSender(conversation: ConversationStore): string | undefined {
+function extractSender(
+    conversation: ConversationStore,
+    context: Pick<ToolExecutionContext, "projectContext">
+): string | undefined {
     const messages = conversation.getAllMessages();
     if (messages.length === 0) return undefined;
-    return resolveParticipantName(messages[0]);
+    return resolveParticipantName(messages[0], context);
 }
 
 /**
@@ -169,7 +182,10 @@ function extractSender(conversation: ConversationStore): string | undefined {
  * 1. delegationChain last entry (current agent) if present
  * 2. targetedPubkeys of first message
  */
-function extractRecipient(conversation: ConversationStore): string | undefined {
+function extractRecipient(
+    conversation: ConversationStore,
+    context: Pick<ToolExecutionContext, "projectContext">
+): string | undefined {
     const metadata = conversation.metadata;
     const chain = metadata.delegationChain;
 
@@ -184,7 +200,7 @@ function extractRecipient(conversation: ConversationStore): string | undefined {
     const firstMessage = messages[0];
     const targeted = firstMessage.targetedPubkeys;
     if (targeted && targeted.length > 0) {
-        return resolveNameFromPubkey(targeted[0]);
+        return resolveNameFromPubkey(targeted[0], context);
     }
 
     return undefined;
@@ -431,9 +447,12 @@ function indexedSubtreeHasParticipant(
     return false;
 }
 
-function resolveParticipantNameFromCatalog(participant: ConversationCatalogParticipant): string {
+function resolveParticipantNameFromCatalog(
+    participant: ConversationCatalogParticipant,
+    context: Pick<ToolExecutionContext, "projectContext">
+): string {
     if (participant.linkedPubkey) {
-        return resolveNameFromPubkey(participant.linkedPubkey);
+        return resolveNameFromPubkey(participant.linkedPubkey, context);
     }
 
     const displayName = participant.displayName?.trim();
@@ -458,19 +477,25 @@ function resolveParticipantNameFromCatalog(participant: ConversationCatalogParti
     return "Unknown";
 }
 
-function extractSenderFromIndexedConversation(conversation: IndexedConversation): string | undefined {
+function extractSenderFromIndexedConversation(
+    conversation: IndexedConversation,
+    context: Pick<ToolExecutionContext, "projectContext">
+): string | undefined {
     const sender = conversation.entry.participants[0];
-    return sender ? resolveParticipantNameFromCatalog(sender) : undefined;
+    return sender ? resolveParticipantNameFromCatalog(sender, context) : undefined;
 }
 
-function extractRecipientFromIndexedConversation(conversation: IndexedConversation): string | undefined {
+function extractRecipientFromIndexedConversation(
+    conversation: IndexedConversation,
+    context: Pick<ToolExecutionContext, "projectContext">
+): string | undefined {
     const senderParticipantKey = conversation.entry.participants[0]?.participantKey;
     const recipient = conversation.entry.participants.find(
         (participant, index) =>
             participant.isAgent && (index > 0 || participant.participantKey !== senderParticipantKey)
     ) ?? conversation.entry.participants.find((participant) => participant.isAgent);
 
-    return recipient ? resolveParticipantNameFromCatalog(recipient) : undefined;
+    return recipient ? resolveParticipantNameFromCatalog(recipient, context) : undefined;
 }
 
 function loadConversationForSummary(
@@ -508,17 +533,18 @@ function loadConversationForSummary(
 
 function summarizeIndexedChildConversation(
     conversation: IndexedConversation,
-    graph: ConversationGraph
+    graph: ConversationGraph,
+    context: Pick<ToolExecutionContext, "projectContext">
 ): ChildConversationSummary {
     const children = (graph.childrenByParentId.get(conversation.entry.id) ?? []).map((child) =>
-        summarizeIndexedChildConversation(child, graph)
+        summarizeIndexedChildConversation(child, graph, context)
     );
 
     return {
         id: shortenConversationId(conversation.entry.id),
         fullId: conversation.entry.id,
         title: conversation.entry.title,
-        recipient: extractRecipientFromIndexedConversation(conversation),
+        recipient: extractRecipientFromIndexedConversation(conversation, context),
         lastActive: conversation.entry.lastActivity
             ? formatTimeAgo(conversation.entry.lastActivity * 1000)
             : undefined,
@@ -530,11 +556,12 @@ function summarizeIndexedConversation(
     conversation: IndexedConversation,
     graph: ConversationGraph,
     currentProjectId: ProjectDTag | null,
-    storeCache: Map<string, ConversationStore | null>
+    storeCache: Map<string, ConversationStore | null>,
+    context: Pick<ToolExecutionContext, "projectContext">
 ): ConversationSummary {
     const store = loadConversationForSummary(conversation, currentProjectId, storeCache);
     const children = (graph.childrenByParentId.get(conversation.entry.id) ?? []).map((child) =>
-        summarizeIndexedChildConversation(child, graph)
+        summarizeIndexedChildConversation(child, graph, context)
     );
 
     return {
@@ -543,8 +570,8 @@ function summarizeIndexedConversation(
         projectId: conversation.projectId,
         title: store?.metadata.title ?? store?.title ?? conversation.entry.title,
         summary: store?.metadata.summary ?? conversation.entry.summary,
-        sender: store ? extractSender(store) : extractSenderFromIndexedConversation(conversation),
-        recipient: store ? extractRecipient(store) : extractRecipientFromIndexedConversation(conversation),
+        sender: store ? extractSender(store, context) : extractSenderFromIndexedConversation(conversation, context),
+        recipient: store ? extractRecipient(store, context) : extractRecipientFromIndexedConversation(conversation, context),
         lastActive: conversation.entry.lastActivity
             ? formatTimeAgo(conversation.entry.lastActivity * 1000)
             : undefined,
@@ -561,7 +588,11 @@ function summarizeIndexedConversation(
  * @param isAllProjects - Whether projectId="all" was specified
  * @throws Error if the value cannot be resolved to a pubkey
  */
-function resolveWithParameter(withValue: string, isAllProjects: boolean): WithFilter {
+function resolveWithParameter(
+    withValue: string,
+    isAllProjects: boolean,
+    context: Pick<ToolExecutionContext, "projectContext">
+): WithFilter {
     const trimmed = withValue.trim();
 
     const parsedPubkey = parseNostrUser(trimmed);
@@ -596,7 +627,7 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): WithFi
     }
 
     // Try to resolve as agent slug (single project only)
-    const agentResult = resolveAgentSlug(trimmed);
+    const agentResult = resolveAgentSlug(trimmed, context.projectContext);
 
     if (agentResult.pubkey) {
         return { kind: "exact", pubkey: agentResult.pubkey };
@@ -638,7 +669,7 @@ async function executeConversationList(
     // This will throw an error if resolution fails, preventing silent fallback to unfiltered results
     let withFilter: WithFilter | null = null;
     if (withParam) {
-        withFilter = resolveWithParameter(withParam, isAllProjects);
+        withFilter = resolveWithParameter(withParam, isAllProjects, context);
     }
 
     logger.info("📋 Listing conversations (tree view)", {
@@ -709,7 +740,7 @@ async function executeConversationList(
     // Build summaries with nested children
     const storeCache = new Map<string, ConversationStore | null>();
     const summaries = limitedRoots.map(({ conversation }) =>
-        summarizeIndexedConversation(conversation, graph, currentProjectId, storeCache)
+        summarizeIndexedConversation(conversation, graph, currentProjectId, storeCache, context)
     );
 
     logger.info("✅ Conversations listed (tree view)", {

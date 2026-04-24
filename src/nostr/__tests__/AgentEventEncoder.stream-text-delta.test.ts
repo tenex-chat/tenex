@@ -1,24 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKKind } from "@/nostr/kinds";
-import * as projectsModule from "@/services/projects";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { logger } from "@/utils/logger";
 import { AgentEventEncoder } from "../AgentEventEncoder";
 import * as ndkClientModule from "../ndkClient";
 import type { EventContext } from "../types";
 
+const mockProjectContext = {
+    project: {
+        tagReference: () => ["a", "31933:testpubkey:test-project"],
+        pubkey: "testpubkey",
+    },
+    agentRegistry: {
+        getAgentByPubkey: () => null,
+    },
+};
+
 describe("AgentEventEncoder.encodeStreamTextDelta", () => {
     beforeEach(() => {
         spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
-        spyOn(projectsModule, "getProjectContext").mockReturnValue({
-            project: {
-                tagReference: () => ["a", "31933:testpubkey:test-project"],
-                pubkey: "testpubkey",
-            },
-            agentRegistry: {
-                getAgentByPubkey: () => null,
-            },
-        } as any);
         spyOn(logger, "debug").mockImplementation(() => {});
         spyOn(logger, "info").mockImplementation(() => {});
         spyOn(logger, "warn").mockImplementation(() => {});
@@ -30,7 +30,7 @@ describe("AgentEventEncoder.encodeStreamTextDelta", () => {
     });
 
     it("encodes ephemeral stream-delta events with required tags and no completion routing tags", () => {
-        const encoder = new AgentEventEncoder();
+        const encoder = new AgentEventEncoder(mockProjectContext);
         const triggeringEnvelope = createMockInboundEnvelope({
             principal: {
                 id: "trigger-pubkey",

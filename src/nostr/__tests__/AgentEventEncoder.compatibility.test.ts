@@ -8,12 +8,21 @@ import {
     toUnsignedNostrEvent,
     verifyNostrEventSignature,
 } from "@/test-utils";
-import * as projectsModule from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { AgentEventEncoder } from "../AgentEventEncoder";
 import * as ndkClientModule from "../ndkClient";
 import type { EventContext } from "../types";
 import streamTextDeltaFixture from "@/test-utils/fixtures/nostr/stream-text-delta.compat.json";
+
+const mockProjectContext = {
+    project: {
+        tagReference: () => ["a", "31933:testpubkey:test-project"],
+        pubkey: "testpubkey",
+    },
+    agentRegistry: {
+        getAgentByPubkey: () => null,
+    },
+};
 
 function bytesFromHex(hex: string): Uint8Array {
     if (hex.length % 2 !== 0) {
@@ -30,15 +39,6 @@ function bytesFromHex(hex: string): Uint8Array {
 describe("AgentEventEncoder stream-text-delta NIP-01 vector", () => {
     beforeEach(() => {
         spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
-        spyOn(projectsModule, "getProjectContext").mockReturnValue({
-            project: {
-                tagReference: () => ["a", "31933:testpubkey:test-project"],
-                pubkey: "testpubkey",
-            },
-            agentRegistry: {
-                getAgentByPubkey: () => null,
-            },
-        } as any);
         spyOn(logger, "debug").mockImplementation(() => {});
         spyOn(logger, "info").mockImplementation(() => {});
         spyOn(logger, "warn").mockImplementation(() => {});
@@ -53,7 +53,7 @@ describe("AgentEventEncoder stream-text-delta NIP-01 vector", () => {
         const secretKey = bytesFromHex(streamTextDeltaFixture.secretKeyHex);
         const pubkey = publicKeyForSecret(secretKey);
         const createdAt = streamTextDeltaFixture.created_at;
-        const encoder = new AgentEventEncoder();
+        const encoder = new AgentEventEncoder(mockProjectContext);
         const triggeringEnvelope = createMockInboundEnvelope({
             principal: {
                 id: "trigger-pubkey",

@@ -9,7 +9,7 @@ import {
 import { shortenConversationId, shortenEventId } from "@/utils/conversation-id";
 import { getNDK } from "@/nostr/ndkClient";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
-import { getProjectContext } from "@/services/projects";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { logger } from "@/utils/logger";
 import { buildDelegationChain } from "@/utils/delegation-chain";
 import { trace } from "@opentelemetry/api";
@@ -25,6 +25,10 @@ export interface ConversationResolutionResult {
  * based on incoming envelopes.
  */
 export class ConversationResolver {
+    constructor(
+        private readonly projectContext: Pick<ProjectContext, "agents" | "project" | "getAgentByPubkey">
+    ) {}
+
     async resolveConversationForEvent(
         envelope: InboundEnvelope,
         principalContext?: MessagePrincipalContext
@@ -93,9 +97,8 @@ export class ConversationResolver {
         }
 
         const mentionedPubkeys = getMentionedPubkeys(envelope);
-        const projectCtx = getProjectContext();
         const isDirectedToAgent = mentionedPubkeys.some((pubkey) =>
-            Array.from(projectCtx.agents.values()).some((agent) => agent.pubkey === pubkey)
+            Array.from(this.projectContext.agents.values()).some((agent) => agent.pubkey === pubkey)
         );
 
         if (!isDirectedToAgent) {
@@ -114,15 +117,16 @@ export class ConversationResolver {
         }
 
         const targetAgentPubkey = mentionedPubkeys.find((pubkey) =>
-            Array.from(projectCtx.agents.values()).some((agent) => agent.pubkey === pubkey)
+            Array.from(this.projectContext.agents.values()).some((agent) => agent.pubkey === pubkey)
         );
 
         if (targetAgentPubkey) {
             const delegationChain = buildDelegationChain(
                 envelope,
                 targetAgentPubkey,
-                projectCtx.project.pubkey,
-                conversation.id
+                this.projectContext.project.pubkey,
+                conversation.id,
+                this.projectContext
             );
 
             if (delegationChain && delegationChain.length > 0) {
@@ -160,9 +164,8 @@ export class ConversationResolver {
             return undefined;
         }
 
-        const projectCtx = getProjectContext();
         const isDirectedToAgent = mentionedPubkeys.some((pubkey) =>
-            Array.from(projectCtx.agents.values()).some((agent) => agent.pubkey === pubkey)
+            Array.from(this.projectContext.agents.values()).some((agent) => agent.pubkey === pubkey)
         );
 
         if (!isDirectedToAgent) {

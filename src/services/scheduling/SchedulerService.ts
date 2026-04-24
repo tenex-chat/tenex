@@ -2,7 +2,6 @@ import * as fs from "node:fs/promises";
 import { getProjectSchedulesPath, normalizeProjectIdForRuntime } from "./storage";
 import type { ScheduledTask } from "./types";
 import { config } from "@/services/ConfigService";
-import { getProjectContext } from "@/services/projects";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -59,7 +58,7 @@ export class SchedulerService {
         prompt: string,
         fromPubkey: string,
         targetAgentSlug: string,
-        projectId?: string,
+        projectId: string,
         options?: { title?: string; targetChannel?: string; projectRef?: string } | string,
         targetChannel?: string
     ): Promise<string> {
@@ -67,8 +66,7 @@ export class SchedulerService {
             throw new Error(`Invalid cron expression: ${schedule}`);
         }
 
-        const resolvedProjectId = this.resolveProjectId(projectId);
-        const normalizedProjectId = normalizeProjectIdForRuntime(resolvedProjectId);
+        const normalizedProjectId = normalizeProjectIdForRuntime(projectId);
         const taskId = this.generateTaskId();
 
         const resolvedTitle =
@@ -78,7 +76,7 @@ export class SchedulerService {
         const resolvedProjectRef =
             typeof options === "object" && options?.projectRef
                 ? options.projectRef
-                : resolvedProjectId;
+                : projectId;
 
         const task: ScheduledTask = {
             id: taskId,
@@ -114,7 +112,7 @@ export class SchedulerService {
         prompt: string,
         fromPubkey: string,
         targetAgentSlug: string,
-        projectId?: string,
+        projectId: string,
         title?: string,
         targetChannel?: string
     ): Promise<string> {
@@ -125,8 +123,7 @@ export class SchedulerService {
             );
         }
 
-        const resolvedProjectId = this.resolveProjectId(projectId);
-        const normalizedProjectId = normalizeProjectIdForRuntime(resolvedProjectId);
+        const normalizedProjectId = normalizeProjectIdForRuntime(projectId);
         const taskId = this.generateTaskId();
 
         const task: ScheduledTask = {
@@ -137,7 +134,7 @@ export class SchedulerService {
             fromPubkey,
             targetAgentSlug,
             projectId: normalizedProjectId,
-            projectRef: resolvedProjectId,
+            projectRef: projectId,
             createdAt: new Date().toISOString(),
             type: "oneoff",
             executeAt: executeAt.toISOString(),
@@ -298,20 +295,6 @@ export class SchedulerService {
     public shutdown(): void {
         this.taskMetadata.clear();
         trace.getActiveSpan()?.addEvent("scheduler.shutdown_complete");
-    }
-
-    private resolveProjectId(projectId?: string): string {
-        if (projectId) {
-            return projectId;
-        }
-
-        try {
-            return getProjectContext().project.tagId();
-        } catch {
-            throw new Error(
-                "projectId is required when scheduling tasks outside of a project context"
-            );
-        }
     }
 
     private async loadAllTasksFromDisk(): Promise<void> {

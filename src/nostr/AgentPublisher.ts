@@ -7,6 +7,7 @@ import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { shortenConversationId, shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -37,9 +38,12 @@ export class AgentPublisher implements AgentRuntimePublisher {
     private encoder: AgentEventEncoder;
     private readonly inboundAdapter = new NostrInboundAdapter();
 
-    constructor(agent: RuntimePublishAgent) {
+    constructor(
+        agent: RuntimePublishAgent,
+        projectContext: Pick<ProjectContext, "project" | "agentRegistry">
+    ) {
         this.agent = agent;
-        this.encoder = new AgentEventEncoder();
+        this.encoder = new AgentEventEncoder(projectContext);
     }
 
     private toPublishedMessageRef(event: NDKEvent): PublishedMessageRef {
