@@ -6,7 +6,7 @@ use crate::dispatch_queue::{
 };
 use crate::ral_journal::{RalJournalIdentity, RalJournalRecord};
 use crate::ral_scheduler::{RalScheduler, RalSchedulerError, RalWorkerTransitionInput};
-use crate::worker_result::WorkerResultTransitionPlan;
+use crate::worker_completion::result::WorkerResultTransitionPlan;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerCompletionDispatchInput {

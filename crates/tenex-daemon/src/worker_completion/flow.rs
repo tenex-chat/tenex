@@ -5,22 +5,22 @@ use thiserror::Error;
 
 use crate::dispatch_queue::DispatchQueueState;
 use crate::ral_scheduler::RalScheduler;
-use crate::worker_completion::{
+use crate::worker_completion::apply::{
+    AppliedWorkerCompletion, WorkerCompletionApplyError, WorkerCompletionApplyInput,
+    apply_worker_completion,
+};
+use crate::worker_completion::plan::{
     WorkerCompletionDispatchInput, WorkerCompletionError, WorkerCompletionInput,
     WorkerCompletionPlan, plan_worker_completion,
 };
-use crate::worker_completion_apply::{
-    AppliedWorkerCompletion, WorkerCompletionApplyError, WorkerCompletionApplyInput,
-    apply_worker_completion,
+use crate::worker_completion::result::{
+    WorkerResultError, WorkerResultTransitionContext, WorkerResultTransitionPlan,
+    plan_worker_result_transition,
 };
 use crate::worker_launch_lock::WorkerLaunchLocks;
 use crate::worker_message::{
     WorkerMessageAction, WorkerMessageError, WorkerMessagePlan, WorkerTerminalResultKind,
     plan_worker_message_handling,
-};
-use crate::worker_result::{
-    WorkerResultError, WorkerResultTransitionContext, WorkerResultTransitionPlan,
-    plan_worker_result_transition,
 };
 
 #[derive(Debug)]
@@ -203,7 +203,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
-        "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
+        "../../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
     );
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);

@@ -14,7 +14,7 @@ use crate::ral_journal::{
     append_ral_journal_record_with_resequence,
 };
 use crate::ral_scheduler::RalScheduler;
-use crate::worker_completion::WorkerCompletionDispatchInput;
+use crate::worker_completion::plan::WorkerCompletionDispatchInput;
 use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_heartbeat::{
     WorkerHeartbeatContext, WorkerHeartbeatError, WorkerHeartbeatSnapshot,
@@ -33,12 +33,12 @@ use crate::worker_publish::nip46_flow::{
     WorkerNip46PublishFlowError, WorkerNip46PublishFlowInput, WorkerNip46PublishFlowOutcome,
     handle_worker_nip46_publish_request,
 };
-use crate::worker_result::WorkerResultTransitionContext;
+use crate::worker_completion::result::WorkerResultTransitionContext;
 use crate::worker_runtime_state::{
     ActiveWorkerRuntimeSnapshot, SharedWorkerRuntimeState, WorkerRuntimeStateError,
 };
 use crate::worker_telegram_egress::WorkerTelegramEgressContext;
-use crate::worker_terminal_flow::{
+use crate::worker_completion::flow::{
     AppliedWorkerTerminalFlow, WorkerTerminalFlowError, WorkerTerminalFlowInput,
     handle_worker_terminal_result,
 };

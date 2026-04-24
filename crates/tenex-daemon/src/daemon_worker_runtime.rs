@@ -18,7 +18,7 @@ use crate::operations_status_runtime::{
 use crate::ral_journal::{RalJournalError, RalPendingDelegation};
 use crate::ral_lock::RalLockInfo;
 use crate::ral_scheduler::RalScheduler;
-use crate::worker_completion::WorkerCompletionDispatchInput;
+use crate::worker_completion::plan::WorkerCompletionDispatchInput;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::admission::{
     AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
@@ -43,7 +43,7 @@ use crate::worker_launch::{WorkerLaunchPlanInput, plan_worker_launch};
 use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
-use crate::worker_result::WorkerResultTransitionContext;
+use crate::worker_completion::result::WorkerResultTransitionContext;
 use crate::worker_runtime_state::{
     SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch, WorkerRuntimeState,
 };
@@ -1096,10 +1096,10 @@ mod tests {
         AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
         AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolConfig, encode_agent_worker_protocol_frame,
     };
-    use crate::worker_result::WorkerResultError;
+    use crate::worker_completion::flow::{WorkerTerminalFlowError, WorkerTerminalFlowPlanningError};
+    use crate::worker_completion::result::WorkerResultError;
     use crate::worker_session_loop::WorkerSessionLoopError;
     use crate::worker_session_loop::WorkerSessionLoopFinalReason;
-    use crate::worker_terminal_flow::{WorkerTerminalFlowError, WorkerTerminalFlowPlanningError};
     use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::fmt;

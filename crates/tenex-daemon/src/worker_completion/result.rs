@@ -220,7 +220,7 @@ mod tests {
     use crate::ral_journal::{RalDelegationType, RalPendingDelegation};
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
-        "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
+        "../../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
     );
 
     #[test]

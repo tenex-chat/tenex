@@ -497,7 +497,7 @@ mod tests {
     };
     use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
     use crate::ral_scheduler::RalScheduler;
-    use crate::worker_completion::WorkerCompletionDispatchInput;
+    use crate::worker_completion::plan::WorkerCompletionDispatchInput;
     use crate::worker_injection_queue::{
         WorkerDelegationCompletionInjection, WorkerInjectionEnqueueInput, WorkerInjectionRole,
         enqueue_worker_injection, replay_worker_injection_queue,
@@ -1179,12 +1179,14 @@ mod tests {
         }
     }
 
-    fn result_context() -> crate::worker_result::WorkerResultTransitionContext {
+    fn result_context() -> crate::worker_completion::result::WorkerResultTransitionContext {
         result_context_for("worker-alpha")
     }
 
-    fn result_context_for(worker_id: &str) -> crate::worker_result::WorkerResultTransitionContext {
-        crate::worker_result::WorkerResultTransitionContext {
+    fn result_context_for(
+        worker_id: &str,
+    ) -> crate::worker_completion::result::WorkerResultTransitionContext {
+        crate::worker_completion::result::WorkerResultTransitionContext {
             worker_id: worker_id.to_string(),
             claim_token: "claim-alpha".to_string(),
             journal_sequence: 200,

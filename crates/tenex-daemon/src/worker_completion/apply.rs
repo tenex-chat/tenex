@@ -7,7 +7,7 @@ use crate::dispatch_queue::{
     replay_dispatch_queue,
 };
 use crate::ral_journal::{RalJournalError, append_ral_journal_record_with_resequence};
-use crate::worker_completion::WorkerCompletionPlan;
+use crate::worker_completion::plan::WorkerCompletionPlan;
 use crate::worker_launch_lock::{
     WorkerLaunchLockError, WorkerLaunchLocks, release_worker_launch_locks,
 };
