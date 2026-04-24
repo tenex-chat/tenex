@@ -289,6 +289,27 @@ pub fn plan_dispatch_queue_lease(
     ))
 }
 
+pub fn plan_dispatch_queue_requeue(
+    state: &DispatchQueueState,
+    input: DispatchQueueLifecycleInput,
+) -> DispatchQueueResult<DispatchQueueRecord> {
+    ensure_next_sequence(state, input.sequence)?;
+    let latest = latest_record_or_error(state, &input.dispatch_id)?;
+
+    if latest.status != DispatchQueueStatus::Leased {
+        return Err(DispatchQueueError::DispatchNotLeased {
+            dispatch_id: input.dispatch_id,
+            status: latest.status,
+        });
+    }
+
+    Ok(build_lifecycle_record(
+        latest,
+        input,
+        DispatchQueueStatus::Queued,
+    ))
+}
+
 pub fn plan_dispatch_queue_terminal(
     state: &DispatchQueueState,
     input: DispatchQueueLifecycleInput,
@@ -704,6 +725,25 @@ mod tests {
             }
             other => panic!("expected terminal cancellation rejection, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn plan_dispatch_queue_requeue_moves_leased_dispatch_back_to_queue() {
+        let state = DispatchQueueState {
+            last_sequence: 2,
+            queued: Vec::new(),
+            leased: vec![build_record(2, "dispatch-1", DispatchQueueStatus::Leased)],
+            terminal: Vec::new(),
+        };
+
+        let record =
+            plan_dispatch_queue_requeue(&state, lifecycle_input("dispatch-1", 3, "requeue"))
+                .expect("requeue must plan");
+
+        assert_eq!(record.dispatch_id, "dispatch-1");
+        assert_eq!(record.sequence, 3);
+        assert_eq!(record.status, DispatchQueueStatus::Queued);
+        assert_eq!(record.correlation_id, "requeue");
     }
 
     fn build_record(

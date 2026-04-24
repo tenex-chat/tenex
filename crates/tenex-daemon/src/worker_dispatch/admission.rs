@@ -42,6 +42,7 @@ pub struct AdmittedWorkerDispatch {
 pub enum WorkerDispatchAdmissionBlockedReason {
     NoQueuedDispatches,
     AllQueuedDispatchesBlockedByConcurrency,
+    SelectedDispatchBlockedByLaunchLock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,6 +371,111 @@ mod tests {
     }
 
     #[test]
+    fn skips_same_conversation_candidate_and_admits_next_available_dispatch() {
+        let blocked = dispatch_record_with_conversation(
+            1,
+            "dispatch-blocked",
+            "project-a",
+            "agent-a",
+            "conversation-a",
+        );
+        let allowed = dispatch_record_with_conversation(
+            2,
+            "dispatch-allowed",
+            "project-a",
+            "agent-a",
+            "conversation-b",
+        );
+        let state = DispatchQueueState {
+            last_sequence: 2,
+            queued: vec![allowed.clone(), blocked],
+            leased: Vec::new(),
+            terminal: Vec::new(),
+        };
+        let active_workers = [active_worker_with_conversation(
+            "worker-a",
+            Some("dispatch-active"),
+            "project-a",
+            "agent-a",
+            "conversation-a",
+        )];
+
+        let plan = plan_worker_dispatch_admission(input(
+            &state,
+            &active_workers,
+            &[],
+            WorkerConcurrencyLimits::default(),
+            3,
+        ))
+        .expect("admission must skip same-conversation candidate");
+
+        match plan {
+            WorkerDispatchAdmissionPlan::Admitted(admitted) => {
+                assert_eq!(admitted.selected_dispatch, allowed);
+                assert_eq!(admitted.leased_record.dispatch_id, "dispatch-allowed");
+            }
+            other => panic!("expected admitted plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reports_same_conversation_leased_dispatch_as_blocked_candidate() {
+        let queued = dispatch_record_with_conversation(
+            1,
+            "dispatch-queued",
+            "project-a",
+            "agent-a",
+            "conversation-a",
+        );
+        let leased = dispatch_record_with_conversation(
+            2,
+            "dispatch-leased",
+            "project-a",
+            "agent-a",
+            "conversation-a",
+        )
+        .with_status(DispatchQueueStatus::Leased);
+        let state = DispatchQueueState {
+            last_sequence: 2,
+            queued: vec![queued],
+            leased: vec![leased],
+            terminal: Vec::new(),
+        };
+
+        let plan = plan_worker_dispatch_admission(input(
+            &state,
+            &[],
+            &[],
+            WorkerConcurrencyLimits::default(),
+            3,
+        ))
+        .expect("same-conversation leased dispatch must block admission");
+
+        assert_eq!(
+            plan,
+            WorkerDispatchAdmissionPlan::NotAdmitted {
+                reason:
+                    WorkerDispatchAdmissionBlockedReason::AllQueuedDispatchesBlockedByConcurrency,
+                blocked_candidates: vec![WorkerDispatchAdmissionBlockedCandidate {
+                    dispatch_id: "dispatch-queued".to_string(),
+                    reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                        project_id: "project-a".to_string(),
+                        agent_pubkey: "agent-a".to_string(),
+                        conversation_id: "conversation-a".to_string(),
+                        dispatch_id: Some("dispatch-leased".to_string()),
+                        worker_id: None,
+                    },
+                    counts: WorkerConcurrencyCounts {
+                        global: 1,
+                        project: 1,
+                        agent: 1,
+                    },
+                }],
+            }
+        );
+    }
+
+    #[test]
     fn propagates_lease_planning_errors_for_allowed_candidate() {
         let state = DispatchQueueState {
             last_sequence: 2,
@@ -424,6 +530,22 @@ mod tests {
         project_id: &str,
         agent_pubkey: &str,
     ) -> DispatchQueueRecord {
+        dispatch_record_with_conversation(
+            sequence,
+            dispatch_id,
+            project_id,
+            agent_pubkey,
+            "conversation-a",
+        )
+    }
+
+    fn dispatch_record_with_conversation(
+        sequence: u64,
+        dispatch_id: &str,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+    ) -> DispatchQueueRecord {
         build_dispatch_queue_record(DispatchQueueRecordParams {
             sequence,
             timestamp: 1_710_000_000_000 + sequence,
@@ -432,7 +554,7 @@ mod tests {
             ral: DispatchRalIdentity {
                 project_id: project_id.to_string(),
                 agent_pubkey: agent_pubkey.to_string(),
-                conversation_id: "conversation-a".to_string(),
+                conversation_id: conversation_id.to_string(),
                 ral_number: 7,
             },
             triggering_event_id: format!("event-{sequence}"),
@@ -447,11 +569,28 @@ mod tests {
         project_id: &str,
         agent_pubkey: &str,
     ) -> ActiveWorkerConcurrencySnapshot {
+        active_worker_with_conversation(
+            worker_id,
+            dispatch_id,
+            project_id,
+            agent_pubkey,
+            "conversation-a",
+        )
+    }
+
+    fn active_worker_with_conversation(
+        worker_id: &str,
+        dispatch_id: Option<&str>,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+    ) -> ActiveWorkerConcurrencySnapshot {
         ActiveWorkerConcurrencySnapshot {
             worker_id: worker_id.to_string(),
             dispatch_id: dispatch_id.map(str::to_string),
             project_id: project_id.to_string(),
             agent_pubkey: agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
         }
     }
 

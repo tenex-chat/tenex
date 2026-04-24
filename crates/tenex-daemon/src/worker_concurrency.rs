@@ -7,6 +7,7 @@ pub struct WorkerConcurrencyTarget {
     pub dispatch_id: String,
     pub project_id: String,
     pub agent_pubkey: String,
+    pub conversation_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +16,7 @@ pub struct ActiveWorkerConcurrencySnapshot {
     pub dispatch_id: Option<String>,
     pub project_id: String,
     pub agent_pubkey: String,
+    pub conversation_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +24,7 @@ pub struct ActiveDispatchConcurrencySnapshot {
     pub dispatch_id: String,
     pub project_id: String,
     pub agent_pubkey: String,
+    pub conversation_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -63,6 +66,13 @@ pub enum WorkerConcurrencyBlockReason {
         dispatch_id: String,
         worker_id: String,
     },
+    ConversationAlreadyActive {
+        project_id: String,
+        agent_pubkey: String,
+        conversation_id: String,
+        dispatch_id: Option<String>,
+        worker_id: Option<String>,
+    },
     GlobalLimitReached {
         limit: u64,
     },
@@ -83,6 +93,7 @@ impl WorkerConcurrencyTarget {
             dispatch_id: dispatch.dispatch_id.clone(),
             project_id: dispatch.ral.project_id.clone(),
             agent_pubkey: dispatch.ral.agent_pubkey.clone(),
+            conversation_id: dispatch.ral.conversation_id.clone(),
         }
     }
 }
@@ -93,6 +104,7 @@ impl ActiveDispatchConcurrencySnapshot {
             dispatch_id: dispatch.dispatch_id.clone(),
             project_id: dispatch.ral.project_id.clone(),
             agent_pubkey: dispatch.ral.agent_pubkey.clone(),
+            conversation_id: dispatch.ral.conversation_id.clone(),
         }
     }
 }
@@ -110,6 +122,42 @@ pub fn plan_worker_concurrency(input: WorkerConcurrencyPlanInput<'_>) -> WorkerC
             reason: WorkerConcurrencyBlockReason::CandidateAlreadyActive {
                 dispatch_id: input.target.dispatch_id.clone(),
                 worker_id: worker.worker_id.clone(),
+            },
+            counts,
+        };
+    }
+
+    if let Some(worker) = input.active_workers.iter().find(|worker| {
+        worker.dispatch_id.as_deref() != Some(input.target.dispatch_id.as_str())
+            && worker.project_id == input.target.project_id
+            && worker.agent_pubkey == input.target.agent_pubkey
+            && worker.conversation_id == input.target.conversation_id
+    }) {
+        return WorkerConcurrencyDecision::Blocked {
+            reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                project_id: input.target.project_id.clone(),
+                agent_pubkey: input.target.agent_pubkey.clone(),
+                conversation_id: input.target.conversation_id.clone(),
+                dispatch_id: worker.dispatch_id.clone(),
+                worker_id: Some(worker.worker_id.clone()),
+            },
+            counts,
+        };
+    }
+
+    if let Some(dispatch) = input.active_dispatches.iter().find(|dispatch| {
+        dispatch.dispatch_id != input.target.dispatch_id
+            && dispatch.project_id == input.target.project_id
+            && dispatch.agent_pubkey == input.target.agent_pubkey
+            && dispatch.conversation_id == input.target.conversation_id
+    }) {
+        return WorkerConcurrencyDecision::Blocked {
+            reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                project_id: input.target.project_id.clone(),
+                agent_pubkey: input.target.agent_pubkey.clone(),
+                conversation_id: input.target.conversation_id.clone(),
+                dispatch_id: Some(dispatch.dispatch_id.clone()),
+                worker_id: None,
             },
             counts,
         };
@@ -479,6 +527,85 @@ mod tests {
     }
 
     #[test]
+    fn blocks_when_conversation_namespace_is_already_active_on_worker() {
+        let target =
+            target_with_conversation("dispatch-target", "project-a", "agent-a", "conversation-a");
+        let decision = plan_worker_concurrency(input(
+            &target,
+            &[worker_with_conversation(
+                "worker-a",
+                Some("dispatch-a"),
+                "project-a",
+                "agent-a",
+                "conversation-a",
+            )],
+            &[],
+            WorkerConcurrencyLimits {
+                global: Some(10),
+                per_project: Some(10),
+                per_agent: Some(10),
+            },
+        ));
+
+        assert_eq!(
+            decision,
+            WorkerConcurrencyDecision::Blocked {
+                reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                    project_id: "project-a".to_string(),
+                    agent_pubkey: "agent-a".to_string(),
+                    conversation_id: "conversation-a".to_string(),
+                    dispatch_id: Some("dispatch-a".to_string()),
+                    worker_id: Some("worker-a".to_string()),
+                },
+                counts: WorkerConcurrencyCounts {
+                    global: 1,
+                    project: 1,
+                    agent: 1,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn blocks_when_conversation_namespace_is_already_leased() {
+        let target =
+            target_with_conversation("dispatch-target", "project-a", "agent-a", "conversation-a");
+        let decision = plan_worker_concurrency(input(
+            &target,
+            &[],
+            &[active_dispatch_with_conversation(
+                "dispatch-a",
+                "project-a",
+                "agent-a",
+                "conversation-a",
+            )],
+            WorkerConcurrencyLimits {
+                global: Some(10),
+                per_project: Some(10),
+                per_agent: Some(10),
+            },
+        ));
+
+        assert_eq!(
+            decision,
+            WorkerConcurrencyDecision::Blocked {
+                reason: WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                    project_id: "project-a".to_string(),
+                    agent_pubkey: "agent-a".to_string(),
+                    conversation_id: "conversation-a".to_string(),
+                    dispatch_id: Some("dispatch-a".to_string()),
+                    worker_id: None,
+                },
+                counts: WorkerConcurrencyCounts {
+                    global: 1,
+                    project: 1,
+                    agent: 1,
+                },
+            }
+        );
+    }
+
+    #[test]
     fn builds_target_and_active_dispatch_snapshot_from_dispatch_record() {
         let dispatch = build_dispatch_queue_record(DispatchQueueRecordParams {
             sequence: 1,
@@ -498,7 +625,7 @@ mod tests {
 
         assert_eq!(
             WorkerConcurrencyTarget::from_dispatch(&dispatch),
-            target("dispatch-a", "project-a", "agent-a")
+            target_with_conversation("dispatch-a", "project-a", "agent-a", "conversation-a")
         );
         assert_eq!(
             ActiveDispatchConcurrencySnapshot::from_dispatch(&dispatch),
@@ -521,10 +648,20 @@ mod tests {
     }
 
     fn target(dispatch_id: &str, project_id: &str, agent_pubkey: &str) -> WorkerConcurrencyTarget {
+        target_with_conversation(dispatch_id, project_id, agent_pubkey, "conversation-target")
+    }
+
+    fn target_with_conversation(
+        dispatch_id: &str,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+    ) -> WorkerConcurrencyTarget {
         WorkerConcurrencyTarget {
             dispatch_id: dispatch_id.to_string(),
             project_id: project_id.to_string(),
             agent_pubkey: agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
         }
     }
 
@@ -534,11 +671,28 @@ mod tests {
         project_id: &str,
         agent_pubkey: &str,
     ) -> ActiveWorkerConcurrencySnapshot {
+        worker_with_conversation(
+            worker_id,
+            dispatch_id,
+            project_id,
+            agent_pubkey,
+            "conversation-a",
+        )
+    }
+
+    fn worker_with_conversation(
+        worker_id: &str,
+        dispatch_id: Option<&str>,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+    ) -> ActiveWorkerConcurrencySnapshot {
         ActiveWorkerConcurrencySnapshot {
             worker_id: worker_id.to_string(),
             dispatch_id: dispatch_id.map(str::to_string),
             project_id: project_id.to_string(),
             agent_pubkey: agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
         }
     }
 
@@ -547,10 +701,20 @@ mod tests {
         project_id: &str,
         agent_pubkey: &str,
     ) -> ActiveDispatchConcurrencySnapshot {
+        active_dispatch_with_conversation(dispatch_id, project_id, agent_pubkey, "conversation-a")
+    }
+
+    fn active_dispatch_with_conversation(
+        dispatch_id: &str,
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+    ) -> ActiveDispatchConcurrencySnapshot {
         ActiveDispatchConcurrencySnapshot {
             dispatch_id: dispatch_id.to_string(),
             project_id: project_id.to_string(),
             agent_pubkey: agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
         }
     }
 }

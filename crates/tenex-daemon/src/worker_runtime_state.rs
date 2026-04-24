@@ -4,11 +4,13 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use crate::ral_journal::RalJournalIdentity;
-use crate::worker_lifecycle::abort::{WorkerAbortDecisionInput, WorkerAbortProcessStatus, WorkerAbortSignal};
 use crate::worker_concurrency::{
     ActiveDispatchConcurrencySnapshot, ActiveWorkerConcurrencySnapshot,
 };
 use crate::worker_heartbeat::WorkerHeartbeatSnapshot;
+use crate::worker_lifecycle::abort::{
+    WorkerAbortDecisionInput, WorkerAbortProcessStatus, WorkerAbortSignal,
+};
 use crate::worker_process::AgentWorkerReady;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,6 +304,7 @@ impl ActiveWorkerRuntimeSnapshot {
             dispatch_id: Some(self.dispatch_id.clone()),
             project_id: self.identity.project_id.clone(),
             agent_pubkey: self.identity.agent_pubkey.clone(),
+            conversation_id: self.identity.conversation_id.clone(),
         }
     }
 
@@ -310,6 +313,7 @@ impl ActiveWorkerRuntimeSnapshot {
             dispatch_id: self.dispatch_id.clone(),
             project_id: self.identity.project_id.clone(),
             agent_pubkey: self.identity.agent_pubkey.clone(),
+            conversation_id: self.identity.conversation_id.clone(),
         }
     }
 
@@ -553,12 +557,14 @@ mod tests {
                     dispatch_id: Some("dispatch-a".to_string()),
                     project_id: "project-a".to_string(),
                     agent_pubkey: "agent-a".to_string(),
+                    conversation_id: "conversation-a".to_string(),
                 },
                 ActiveWorkerConcurrencySnapshot {
                     worker_id: "worker-b".to_string(),
                     dispatch_id: Some("dispatch-b".to_string()),
                     project_id: "project-b".to_string(),
                     agent_pubkey: "agent-b".to_string(),
+                    conversation_id: "conversation-a".to_string(),
                 },
             ]
         );
@@ -569,11 +575,13 @@ mod tests {
                     dispatch_id: "dispatch-a".to_string(),
                     project_id: "project-a".to_string(),
                     agent_pubkey: "agent-a".to_string(),
+                    conversation_id: "conversation-a".to_string(),
                 },
                 ActiveDispatchConcurrencySnapshot {
                     dispatch_id: "dispatch-b".to_string(),
                     project_id: "project-b".to_string(),
                     agent_pubkey: "agent-b".to_string(),
+                    conversation_id: "conversation-a".to_string(),
                 },
             ]
         );

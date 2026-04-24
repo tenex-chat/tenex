@@ -19,6 +19,7 @@ use crate::ral_journal::{RalJournalError, RalPendingDelegation};
 use crate::ral_lock::RalLockInfo;
 use crate::ral_scheduler::RalScheduler;
 use crate::worker_completion::plan::WorkerCompletionDispatchInput;
+use crate::worker_completion::result::WorkerResultTransitionContext;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::admission::{
     AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
@@ -29,6 +30,7 @@ use crate::worker_dispatch::admission_start::{
     StartedWorkerDispatchAdmission, WorkerDispatchAdmissionLaunchContext,
     WorkerDispatchAdmissionStartError, WorkerDispatchAdmissionStartOutcome,
     WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputSource,
+    dispatch_start_is_launch_lock_conflict, rollback_dispatch_lease_to_queued,
 };
 use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_dispatch::input::{
@@ -38,15 +40,14 @@ use crate::worker_dispatch::start::{WorkerDispatchStartInput, start_lock_scoped_
 use crate::worker_dispatch::tick::{
     WorkerDispatchTickError, WorkerDispatchTickInput, apply_worker_dispatch_tick,
 };
-use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_lifecycle::launch::{WorkerLaunchPlanInput, plan_worker_launch};
 use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
-use crate::worker_completion::result::WorkerResultTransitionContext;
 use crate::worker_runtime_state::{
     SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch, WorkerRuntimeState,
 };
+use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_session::session_loop::{
     WorkerSessionLoopError, WorkerSessionLoopInput, WorkerSessionLoopOutcome,
     run_worker_session_loop,
@@ -231,6 +232,7 @@ where
 /// Returned by [`admit_one_worker_dispatch_from_filesystem`]: either an
 /// admitted + launched dispatch ready to run its session, or a reason the
 /// caller cannot admit right now.
+#[derive(Debug)]
 pub enum AdmitWorkerDispatchOutcome<S> {
     Admitted(StartedWorkerDispatchAdmission<S>),
     NotAdmitted {
@@ -351,7 +353,20 @@ where
         })?
     };
 
-    Ok(AdmitWorkerDispatchOutcome::Admitted(started))
+    match started {
+        StartAdmittedWorkerDispatchOutcome::Started(started) => {
+            Ok(AdmitWorkerDispatchOutcome::Admitted(started))
+        }
+        StartAdmittedWorkerDispatchOutcome::DeferredByLaunchLock => {
+            tracing::debug!(
+                "worker dispatch deferred because the conversation launch lock is already held"
+            );
+            Ok(AdmitWorkerDispatchOutcome::NotAdmitted {
+                reason: WorkerDispatchAdmissionBlockedReason::SelectedDispatchBlockedByLaunchLock,
+                blocked_candidates: Vec::new(),
+            })
+        }
+    }
     // _dispatch_lock released here; the session runs without holding the lock
 }
 
@@ -534,10 +549,18 @@ struct StartAdmittedWorkerDispatchInput<'a> {
     started_at: u64,
 }
 
+enum StartAdmittedWorkerDispatchOutcome<S> {
+    Started(StartedWorkerDispatchAdmission<S>),
+    DeferredByLaunchLock,
+}
+
 fn start_admitted_worker_dispatch<S>(
     spawner: &mut S,
     input: StartAdmittedWorkerDispatchInput<'_>,
-) -> Result<StartedWorkerDispatchAdmission<S::Session>, WorkerDispatchAdmissionStartError<S::Session>>
+) -> Result<
+    StartAdmittedWorkerDispatchOutcome<S::Session>,
+    WorkerDispatchAdmissionStartError<S::Session>,
+>
 where
     S: WorkerDispatchSpawner,
 {
@@ -597,7 +620,7 @@ where
         },
     )?;
 
-    let started = start_lock_scoped_worker_dispatch(
+    let started = match start_lock_scoped_worker_dispatch(
         spawner,
         WorkerDispatchStartInput {
             daemon_dir,
@@ -610,11 +633,35 @@ where
             },
             worker_config,
         },
-    )
-    .map_err(|source| WorkerDispatchAdmissionStartError::DispatchStart {
-        context: Box::new(context.clone()),
-        source: Box::new(source),
-    })?;
+    ) {
+        Ok(started) => started,
+        Err(source) => {
+            if let Err(rollback_source) = rollback_dispatch_lease_to_queued(
+                daemon_dir,
+                &context.admission.leased_record,
+                execute_timestamp,
+                format!(
+                    "dispatch-start:{}:requeue",
+                    context.admission.leased_record.dispatch_id
+                ),
+            ) {
+                return Err(WorkerDispatchAdmissionStartError::DispatchStartRollback {
+                    context: Box::new(context.clone()),
+                    start_source: Box::new(source),
+                    rollback_source: Box::new(rollback_source),
+                });
+            }
+
+            if dispatch_start_is_launch_lock_conflict(&source) {
+                return Ok(StartAdmittedWorkerDispatchOutcome::DeferredByLaunchLock);
+            }
+
+            return Err(WorkerDispatchAdmissionStartError::DispatchStart {
+                context: Box::new(context.clone()),
+                source: Box::new(source),
+            });
+        }
+    };
 
     let runtime_started = WorkerRuntimeStartedDispatch::from_ready(
         &started.dispatch.ready,
@@ -625,11 +672,13 @@ where
     );
 
     match runtime_state.register_started_dispatch(runtime_started.clone()) {
-        Ok(()) => Ok(StartedWorkerDispatchAdmission {
-            context,
-            runtime_started,
-            started,
-        }),
+        Ok(()) => Ok(StartAdmittedWorkerDispatchOutcome::Started(
+            StartedWorkerDispatchAdmission {
+                context,
+                runtime_started,
+                started,
+            },
+        )),
         Err(source) => Err(WorkerDispatchAdmissionStartError::RuntimeRegister {
             context: Box::new(StartedWorkerDispatchAdmission {
                 context,
@@ -1073,7 +1122,14 @@ mod tests {
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalError, RalJournalEvent, RalJournalIdentity,
         RalJournalRecord, RalReplayStatus, append_ral_journal_record, replay_ral_journal,
     };
-    use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
+    use crate::ral_lock::{
+        build_ral_lock_info, ral_allocation_lock_path, read_ral_lock_info, release_ral_lock,
+        try_acquire_ral_lock,
+    };
+    use crate::worker_completion::flow::{
+        WorkerTerminalFlowError, WorkerTerminalFlowPlanningError,
+    };
+    use crate::worker_completion::result::WorkerResultError;
     use crate::worker_dispatch::admission::WorkerDispatchAdmissionBlockedReason;
     use crate::worker_dispatch::admission_start::WorkerDispatchAdmissionStartError;
     use crate::worker_dispatch::execution::{
@@ -1085,6 +1141,7 @@ mod tests {
         write_create_or_compare_equal,
     };
     use crate::worker_dispatch::start::WorkerDispatchStartError;
+    use crate::worker_lifecycle::launch::plan_ral_allocation_lock_scope;
     use crate::worker_lifecycle::launch_lock::release_worker_launch_locks;
     use crate::worker_message_flow::WorkerMessageFlowError;
     use crate::worker_process::{
@@ -1096,8 +1153,6 @@ mod tests {
         AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
         AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolConfig, encode_agent_worker_protocol_frame,
     };
-    use crate::worker_completion::flow::{WorkerTerminalFlowError, WorkerTerminalFlowPlanningError};
-    use crate::worker_completion::result::WorkerResultError;
     use crate::worker_session::session_loop::WorkerSessionLoopError;
     use crate::worker_session::session_loop::WorkerSessionLoopFinalReason;
     use serde_json::{Value, json};
@@ -1751,6 +1806,144 @@ mod tests {
     }
 
     #[test]
+    fn returns_not_admitted_without_leasing_when_same_conversation_worker_is_active() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch_with("dispatch-beta", "event-beta", &daemon_dir);
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::new(),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
+        runtime_state
+            .lock()
+            .unwrap()
+            .register_started_dispatch(WorkerRuntimeStartedDispatch {
+                worker_id: "worker-alpha".to_string(),
+                pid: 777,
+                dispatch_id: "dispatch-active".to_string(),
+                identity: identity(),
+                claim_token: "claim-active".to_string(),
+                started_at: 1_710_000_700_500,
+            })
+            .expect("active worker must register");
+        let worker_config = worker_config();
+
+        let outcome = admit_one_worker_dispatch_from_filesystem(
+            &mut spawner,
+            &daemon_dir,
+            &runtime_state,
+            WorkerConcurrencyLimits::default(),
+            1_710_000_700_600,
+            "conversation-active",
+            build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
+            worker_command(),
+            &worker_config,
+        )
+        .expect("active conversation must defer without error");
+
+        match outcome {
+            AdmitWorkerDispatchOutcome::NotAdmitted {
+                reason,
+                blocked_candidates,
+            } => {
+                assert_eq!(
+                    reason,
+                    WorkerDispatchAdmissionBlockedReason::AllQueuedDispatchesBlockedByConcurrency
+                );
+                assert_eq!(blocked_candidates.len(), 1);
+                assert_eq!(blocked_candidates[0].dispatch_id, "dispatch-beta");
+                assert_eq!(
+                    blocked_candidates[0].reason,
+                    crate::worker_concurrency::WorkerConcurrencyBlockReason::ConversationAlreadyActive {
+                        project_id: identity().project_id,
+                        agent_pubkey: identity().agent_pubkey,
+                        conversation_id: identity().conversation_id,
+                        dispatch_id: Some("dispatch-active".to_string()),
+                        worker_id: Some("worker-alpha".to_string()),
+                    }
+                );
+            }
+            AdmitWorkerDispatchOutcome::Admitted(_) => {
+                panic!("expected same-conversation dispatch to remain blocked")
+            }
+        }
+        assert!(sent_messages.lock().expect("sent message lock").is_empty());
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(queue.last_sequence, 1);
+        assert_eq!(queue.queued.len(), 1);
+        assert!(queue.leased.is_empty());
+        assert_eq!(queue.queued[0].dispatch_id, "dispatch-beta");
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
+    fn returns_not_admitted_and_requeues_when_launch_lock_is_already_held() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        seed_dispatch_input(&daemon_dir);
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::new(),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
+        let worker_config = worker_config();
+        let other_owner = build_ral_lock_info(200, "host-beta", 1_710_000_700_500);
+        let allocation_path =
+            ral_allocation_lock_path(&daemon_dir, &plan_ral_allocation_lock_scope(&identity()))
+                .expect("allocation lock path must build");
+        let busy_lock =
+            try_acquire_ral_lock(&allocation_path, &other_owner).expect("busy lock must acquire");
+
+        let outcome = admit_one_worker_dispatch_from_filesystem(
+            &mut spawner,
+            &daemon_dir,
+            &runtime_state,
+            WorkerConcurrencyLimits {
+                global: None,
+                per_project: None,
+                per_agent: None,
+            },
+            1_710_000_700_600,
+            "launch-lock-held",
+            build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
+            worker_command(),
+            &worker_config,
+        )
+        .expect("launch lock conflict should defer, not fail");
+
+        match outcome {
+            AdmitWorkerDispatchOutcome::NotAdmitted {
+                reason,
+                blocked_candidates,
+            } => {
+                assert_eq!(
+                    reason,
+                    WorkerDispatchAdmissionBlockedReason::SelectedDispatchBlockedByLaunchLock
+                );
+                assert!(blocked_candidates.is_empty());
+            }
+            AdmitWorkerDispatchOutcome::Admitted(_) => {
+                panic!("expected launch-lock deferral, got admitted dispatch")
+            }
+        }
+        assert!(sent_messages.lock().expect("sent message lock").is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
+
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(queue.last_sequence, 3);
+        assert_eq!(queue.queued.len(), 1);
+        assert!(queue.leased.is_empty());
+
+        release_ral_lock(&busy_lock).expect("busy lock must release");
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     #[ignore = "requires Bun and repo TypeScript dependencies"]
     fn bun_agent_worker_real_bun_runtime_spine_round_trips_filesystem_state() {
         let daemon_dir = unique_temp_daemon_dir();
@@ -2038,6 +2231,14 @@ mod tests {
             WorkerDispatchAdmissionStartError::DispatchStart { source, .. } => {
                 format!("dispatch start: {}", format_dispatch_start_error(*source))
             }
+            WorkerDispatchAdmissionStartError::DispatchStartRollback {
+                start_source,
+                rollback_source,
+                ..
+            } => format!(
+                "dispatch start rollback: start={}; rollback={rollback_source}",
+                format_dispatch_start_error(*start_source)
+            ),
             WorkerDispatchAdmissionStartError::RuntimeRegister { source, .. } => {
                 format!("runtime registration: {source}")
             }
@@ -2120,6 +2321,10 @@ mod tests {
     }
 
     fn seed_queued_dispatch(daemon_dir: &Path) {
+        seed_queued_dispatch_with("dispatch-alpha", "event-alpha", daemon_dir);
+    }
+
+    fn seed_queued_dispatch_with(dispatch_id: &str, triggering_event_id: &str, daemon_dir: &Path) {
         let ral_identity = identity();
         append_dispatch_queue_record(
             daemon_dir,
@@ -2127,14 +2332,14 @@ mod tests {
                 sequence: 1,
                 timestamp: 1_710_000_700_001,
                 correlation_id: "queue-dispatch-alpha".to_string(),
-                dispatch_id: "dispatch-alpha".to_string(),
+                dispatch_id: dispatch_id.to_string(),
                 ral: DispatchRalIdentity {
                     project_id: ral_identity.project_id,
                     agent_pubkey: ral_identity.agent_pubkey,
                     conversation_id: ral_identity.conversation_id,
                     ral_number: ral_identity.ral_number,
                 },
-                triggering_event_id: "event-alpha".to_string(),
+                triggering_event_id: triggering_event_id.to_string(),
                 claim_token: "claim-alpha".to_string(),
                 status: DispatchQueueStatus::Queued,
             }),

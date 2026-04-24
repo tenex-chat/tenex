@@ -346,8 +346,9 @@ mod tests {
         }
         assert_eq!(spawner.spawn_calls.len(), 1);
         let queue = replay_dispatch_queue(&daemon_dir).expect("queue must replay");
-        assert_eq!(queue.queued.len(), 0);
-        assert_eq!(queue.leased.len(), 1);
+        assert_eq!(queue.last_sequence, 3);
+        assert_eq!(queue.queued.len(), 1);
+        assert_eq!(queue.leased.len(), 0);
         cleanup_temp_dir(&daemon_dir);
     }
 
