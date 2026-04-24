@@ -25,13 +25,13 @@ use crate::worker_message::{
     WorkerControlTelemetryKind, WorkerMessageAction, WorkerMessageError, WorkerMessagePlan,
     WorkerPublishedMode, WorkerStreamTelemetryKind, plan_worker_message_handling,
 };
-use crate::worker_nip46_publish_flow::{
-    WorkerNip46PublishFlowError, WorkerNip46PublishFlowInput, WorkerNip46PublishFlowOutcome,
-    handle_worker_nip46_publish_request,
-};
-use crate::worker_publish_flow::{
+use crate::worker_publish::flow::{
     WorkerPublishFlowError, WorkerPublishFlowInput, WorkerPublishFlowOutcome,
     handle_worker_publish_request,
+};
+use crate::worker_publish::nip46_flow::{
+    WorkerNip46PublishFlowError, WorkerNip46PublishFlowInput, WorkerNip46PublishFlowOutcome,
+    handle_worker_nip46_publish_request,
 };
 use crate::worker_result::WorkerResultTransitionContext;
 use crate::worker_runtime_state::{
@@ -695,7 +695,7 @@ mod tests {
     use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
     use crate::worker_launch_lock::acquire_worker_launch_locks;
     use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
-    use crate::worker_publish_flow::WorkerPublishResultDelivery;
+    use crate::worker_publish::flow::WorkerPublishResultDelivery;
     use crate::worker_runtime_state::{SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch};
     use serde_json::json;
     use std::error::Error;

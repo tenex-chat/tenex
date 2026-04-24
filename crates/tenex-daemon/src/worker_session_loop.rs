@@ -21,7 +21,7 @@ use crate::worker_protocol::{
     AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolError, decode_agent_worker_protocol_frame,
     validate_agent_worker_protocol_message,
 };
-use crate::worker_publish_flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
+use crate::worker_publish::flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
 use crate::worker_stop_request::take_worker_stop_request;
 

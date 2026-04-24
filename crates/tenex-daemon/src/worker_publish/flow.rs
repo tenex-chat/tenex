@@ -8,7 +8,7 @@ use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_message::{
     WorkerMessageAction, WorkerMessageError, WorkerMessagePlan, plan_worker_message_handling,
 };
-use crate::worker_publish::{
+use crate::worker_publish::acceptance::{
     WorkerPublishAcceptance, WorkerPublishAcceptanceInput, WorkerPublishError,
     accept_worker_publish_and_build_result,
 };
@@ -159,9 +159,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const STREAM_TEXT_DELTA_FIXTURE: &str =
-        include_str!("../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
+        include_str!("../../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
-        "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
+        "../../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
     );
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 

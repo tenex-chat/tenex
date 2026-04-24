@@ -155,7 +155,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const STREAM_TEXT_DELTA_FIXTURE: &str =
-        include_str!("../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
+        include_str!("../../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
