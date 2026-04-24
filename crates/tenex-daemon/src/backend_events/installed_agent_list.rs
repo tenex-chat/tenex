@@ -118,7 +118,10 @@ pub fn encode_agent_config<S: BackendSigner>(
     })
 }
 
-fn validate_non_empty(block: &'static str, values: &[String]) -> Result<(), AgentConfigEncodeError> {
+fn validate_non_empty(
+    block: &'static str,
+    values: &[String],
+) -> Result<(), AgentConfigEncodeError> {
     for (index, value) in values.iter().enumerate() {
         if value.is_empty() {
             return Err(AgentConfigEncodeError::EmptySlug { block, index });
@@ -153,12 +156,7 @@ fn agent_config_tags(inputs: &AgentConfigInputs<'_>) -> Vec<Vec<String>> {
         inputs.available_skills,
         inputs.active_skills,
     );
-    emit_slug_block(
-        &mut tags,
-        "mcp",
-        inputs.available_mcps,
-        inputs.active_mcps,
-    );
+    emit_slug_block(&mut tags, "mcp", inputs.available_mcps, inputs.active_mcps);
     tags
 }
 
@@ -299,16 +297,28 @@ mod tests {
                 ],
                 vec!["p".to_string(), owner_a.clone()],
                 vec!["p".to_string(), owner_b.clone()],
-                vec!["model".to_string(), "opus".to_string(), "active".to_string()],
+                vec![
+                    "model".to_string(),
+                    "opus".to_string(),
+                    "active".to_string()
+                ],
                 vec!["model".to_string(), "sonnet".to_string()],
                 vec![
                     "skill".to_string(),
                     "read-access".to_string(),
                     "active".to_string()
                 ],
-                vec!["skill".to_string(), "shell".to_string(), "active".to_string()],
+                vec![
+                    "skill".to_string(),
+                    "shell".to_string(),
+                    "active".to_string()
+                ],
                 vec!["skill".to_string(), "write-access".to_string()],
-                vec!["mcp".to_string(), "github".to_string(), "active".to_string()],
+                vec![
+                    "mcp".to_string(),
+                    "github".to_string(),
+                    "active".to_string()
+                ],
                 vec!["mcp".to_string(), "jira".to_string()],
             ]
         );
@@ -363,8 +373,19 @@ mod tests {
         };
 
         let event = encode_agent_config(&inputs, &signer).expect("encode");
-        let model_tag = event.tags.iter().find(|t| t.first().map(String::as_str) == Some("model")).expect("model tag");
-        assert_eq!(model_tag, &vec!["model".to_string(), "opus".to_string(), "active".to_string()]);
+        let model_tag = event
+            .tags
+            .iter()
+            .find(|t| t.first().map(String::as_str) == Some("model"))
+            .expect("model tag");
+        assert_eq!(
+            model_tag,
+            &vec![
+                "model".to_string(),
+                "opus".to_string(),
+                "active".to_string()
+            ]
+        );
         assert_eq!(model_tag.len(), 3);
         assert!(model_tag.get(3).is_none());
     }

@@ -121,4 +121,3 @@ fn enqueue_backend_signed_event<S: BackendSigner>(
         timeout_ms: context.timeout_ms,
     })
 }
-

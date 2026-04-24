@@ -113,7 +113,9 @@ pub fn read_cache(
                 source,
             })
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(AgentConfigPublishCache::empty()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Ok(AgentConfigPublishCache::empty())
+        }
         Err(source) => Err(AgentConfigPublishCacheError::Read { path, source }),
     }
 }

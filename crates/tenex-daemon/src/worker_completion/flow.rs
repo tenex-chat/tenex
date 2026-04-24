@@ -194,8 +194,12 @@ mod tests {
     };
     use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
     use crate::ral_scheduler::RalScheduler;
-    use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
-    use crate::worker_lifecycle::launch_lock::{acquire_worker_launch_locks, release_worker_launch_locks};
+    use crate::worker_lifecycle::launch::{
+        RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan,
+    };
+    use crate::worker_lifecycle::launch_lock::{
+        acquire_worker_launch_locks, release_worker_launch_locks,
+    };
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;

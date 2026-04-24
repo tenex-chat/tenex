@@ -219,8 +219,13 @@ fn publish_agent_configs<S: crate::backend_events::heartbeat::BackendSigner>(
     agent_inventory: &AgentInventoryReport,
     signer: &S,
     sequence_base: u64,
-) -> Result<(Vec<BackendPublishRuntimeOutcome>, Vec<BackendAgentConfigSkip>), BackendStatusRuntimeError>
-{
+) -> Result<
+    (
+        Vec<BackendPublishRuntimeOutcome>,
+        Vec<BackendAgentConfigSkip>,
+    ),
+    BackendStatusRuntimeError,
+> {
     let mut outcomes = Vec::with_capacity(agent_inventory.active_agents.len());
     let mut skipped = Vec::new();
     // Cache of the last 34011 content hash we published per agent. Kind
@@ -263,8 +268,7 @@ fn publish_agent_configs<S: crate::backend_events::heartbeat::BackendSigner>(
         outcomes.push(outcome);
     }
     if cache_dirty {
-        if let Err(error) =
-            crate::agent_config_publish_cache::write_cache(input.daemon_dir, &cache)
+        if let Err(error) = crate::agent_config_publish_cache::write_cache(input.daemon_dir, &cache)
         {
             tracing::warn!(
                 error = %error,

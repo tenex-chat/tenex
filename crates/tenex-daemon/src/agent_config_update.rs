@@ -211,8 +211,7 @@ mod tests {
         serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("parse")
     }
 
-    const AGENT_PUBKEY: &str =
-        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    const AGENT_PUBKEY: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 
     #[test]
     fn writes_model_tools_skills_and_mcp_to_default_block() {

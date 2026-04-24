@@ -61,7 +61,11 @@ pub fn print_daemon_ready(
     telegram_enabled: bool,
     max_concurrent_workers: Option<u64>,
 ) {
-    let nostr = if nostr_enabled { "nostr on" } else { "nostr off" };
+    let nostr = if nostr_enabled {
+        "nostr on"
+    } else {
+        "nostr off"
+    };
     let telegram = if telegram_enabled {
         "telegram on"
     } else {
@@ -176,8 +180,7 @@ pub fn report_publish_backlog(pending_before: usize, drained: usize, pending_aft
     let was_over = last_reported >= PUBLISH_BACKLOG_THRESHOLD;
 
     if over {
-        let moved_enough = !was_over
-            || (pending_after as i64 - last_reported as i64).abs() >= 10;
+        let moved_enough = !was_over || (pending_after as i64 - last_reported as i64).abs() >= 10;
         if moved_enough {
             let delta = pending_after as i64 - pending_before as i64;
             let trend = if delta < 0 {

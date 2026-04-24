@@ -96,9 +96,7 @@ pub fn process_relay_subscription_frame(
         } => Ok(ignored(
             "ok",
             None,
-            format!(
-                "relay acknowledged event {event_id} accepted={accepted} message={message:?}"
-            ),
+            format!("relay acknowledged event {event_id} accepted={accepted} message={message:?}"),
         )),
     }
 }

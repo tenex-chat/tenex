@@ -74,7 +74,9 @@ mod tests {
         RalLockError, build_ral_lock_info, ral_allocation_lock_path, ral_state_lock_path,
         read_ral_lock_info,
     };
-    use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
+    use crate::worker_lifecycle::launch::{
+        RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan,
+    };
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};

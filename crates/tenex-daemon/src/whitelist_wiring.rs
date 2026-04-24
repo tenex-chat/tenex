@@ -297,4 +297,3 @@ pub fn reload_whitelist_wiring(
 ) -> Result<ReloadOutcome, ReloadError> {
     reload_whitelist_from_handle(tenex_base_dir, &wiring.reload_handle())
 }
-

@@ -7,9 +7,9 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::project_status_agent_sources::{
-    agent_file_path, read_optional_text_file, ProjectStatusAgentSourceError,
+    ProjectStatusAgentSourceError, agent_file_path, read_optional_text_file,
 };
-use crate::project_status_sources::{read_global_llm_config, ProjectStatusSourceError};
+use crate::project_status_sources::{ProjectStatusSourceError, read_global_llm_config};
 
 pub const MCP_FILE_NAME: &str = "mcp.json";
 
@@ -300,8 +300,7 @@ mod tests {
         dir
     }
 
-    const AGENT_PUBKEY: &str =
-        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    const AGENT_PUBKEY: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 
     fn write_agent(base: &Path, pubkey: &str, body: serde_json::Value) {
         let dir = base.join("agents");
@@ -356,12 +355,13 @@ mod tests {
         );
         // Active skills are included in available even though no dir was
         // created for them.
-        assert!(snapshot.available_skills.contains(&"read-access".to_string()));
-        assert!(snapshot.available_skills.contains(&"shell".to_string()));
-        assert_eq!(
-            snapshot.active_mcps,
-            BTreeSet::from(["github".to_string()])
+        assert!(
+            snapshot
+                .available_skills
+                .contains(&"read-access".to_string())
         );
+        assert!(snapshot.available_skills.contains(&"shell".to_string()));
+        assert_eq!(snapshot.active_mcps, BTreeSet::from(["github".to_string()]));
         assert_eq!(
             snapshot.available_mcps,
             vec!["github".to_string(), "jira".to_string()]

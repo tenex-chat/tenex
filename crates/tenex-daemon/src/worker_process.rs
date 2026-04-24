@@ -9,13 +9,13 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_protocol::{
     AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES, AGENT_WORKER_MAX_FRAME_BYTES,
     AgentWorkerShutdownMessageInput, WorkerProtocolConfig, WorkerProtocolError,
     build_agent_worker_shutdown_message, decode_agent_worker_protocol_frame,
     encode_agent_worker_protocol_frame, validate_worker_protocol_config,
 };
+use crate::worker_session::frame_pump::WorkerFrameReceiver;
 
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 

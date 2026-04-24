@@ -196,10 +196,7 @@ mod tests {
                 .expect("agent-config record must exist");
 
         assert_eq!(&heartbeat_record.event.id, heartbeat_event_id);
-        assert_eq!(
-            &agent_config_record.event.id,
-            first_agent_config_event_id
-        );
+        assert_eq!(&agent_config_record.event.id, first_agent_config_event_id);
 
         cleanup_temp_dir(tenex_base_dir);
     }

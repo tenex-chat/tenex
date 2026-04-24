@@ -278,10 +278,10 @@ mod tests {
         assert_eq!(event.tags[2], vec!["p".to_string(), extra_owner]);
         // 24010 no longer carries model/tool/skill/mcp tags.
         assert!(
-            event
-                .tags
-                .iter()
-                .all(|tag| !matches!(tag.first().map(String::as_str), Some("model" | "tool" | "skill" | "mcp"))),
+            event.tags.iter().all(|tag| !matches!(
+                tag.first().map(String::as_str),
+                Some("model" | "tool" | "skill" | "mcp")
+            )),
             "24010 must not contain model/tool/skill/mcp tags"
         );
         verify_signed_event(event).expect("signature must verify");

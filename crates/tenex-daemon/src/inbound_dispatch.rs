@@ -584,12 +584,16 @@ mod tests {
             "inbound-dispatch-test@0",
         );
 
-        let conversation_file = metadata_path.join("conversations").join("conversation-alpha.json");
+        let conversation_file = metadata_path
+            .join("conversations")
+            .join("conversation-alpha.json");
         let conversation: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(&conversation_file).expect("conversation file must exist"),
         )
         .expect("conversation file must parse");
-        let messages = conversation["messages"].as_array().expect("messages must be array");
+        let messages = conversation["messages"]
+            .as_array()
+            .expect("messages must be array");
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["eventId"], "event-alpha");
         assert_eq!(messages[0]["content"], "hello");

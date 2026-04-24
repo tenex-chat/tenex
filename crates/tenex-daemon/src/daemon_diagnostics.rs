@@ -364,12 +364,11 @@ mod tests {
         TelegramOutboxRecord, delivered_telegram_outbox_record_path,
         failed_telegram_outbox_record_path, pending_telegram_outbox_record_path,
     };
-    use crate::worker_lifecycle::abort::WorkerAbortSignal;
     use crate::worker_dispatch::execution::{
         BootedWorkerDispatch, WorkerDispatchSession, WorkerDispatchSpawner,
     };
-    use crate::worker_session::frame_pump::WorkerFrameReceiver;
     use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
+    use crate::worker_lifecycle::abort::WorkerAbortSignal;
     use crate::worker_message_flow::WorkerMessagePublishContext;
     use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig, AgentWorkerReady};
     use crate::worker_protocol::{
@@ -381,7 +380,10 @@ mod tests {
     use crate::worker_runtime_state::{
         SharedWorkerRuntimeState, WorkerRuntimeGracefulSignal, WorkerRuntimeStartedDispatch,
     };
-    use crate::worker_session::session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
+    use crate::worker_session::frame_pump::WorkerFrameReceiver;
+    use crate::worker_session::session_loop::{
+        WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome,
+    };
     use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::error::Error;

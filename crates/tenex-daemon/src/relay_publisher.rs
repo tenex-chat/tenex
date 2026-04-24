@@ -311,8 +311,8 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
     }
 }
 
-fn spawn_owned_runtime(
-) -> Result<(TokioRuntimeHandle, OwnedRelayPublisherRuntime), RelayPublisherStartError> {
+fn spawn_owned_runtime()
+-> Result<(TokioRuntimeHandle, OwnedRelayPublisherRuntime), RelayPublisherStartError> {
     let (handle_tx, handle_rx) = std_mpsc::channel();
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let thread = thread::spawn(move || {
@@ -570,12 +570,8 @@ async fn publish_event_over_socket(
                             });
                         }
                         if resend_event_after_auth {
-                            send_socket_text(
-                                socket,
-                                build_event_message(event)?,
-                                response_timeout,
-                            )
-                            .await?;
+                            send_socket_text(socket, build_event_message(event)?, response_timeout)
+                                .await?;
                             resend_event_after_auth = false;
                         }
                         continue;
@@ -780,8 +776,8 @@ mod tests {
     use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
     use serde_json::json;
     use std::fs;
-    use std::net::TcpStream as StdTcpStream;
     use std::net::TcpListener;
+    use std::net::TcpStream as StdTcpStream;
     use std::path::PathBuf;
     use std::sync::mpsc;
     use std::thread;
