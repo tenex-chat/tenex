@@ -2,34 +2,83 @@
 
 **Last updated:** 2026-04-24  
 **Active branch:** `rust-agent-worker-publishing`  
-**Audited commit:** `e37a4342`
+**Audited commit:** `c9442522`
 
 ## Work in flight
 
-- **Backend-event publish path simplification** — agent timed out with zero commits, work lost. Needs re-dispatch with updated context, but the baseline just shifted significantly (tokio async runtime, persistent WebSocket, kind 34011 per-agent config) and the design premise may need re-examination. **Deferred** until we re-read the new architecture.
+- **Post-plan cleanup only** — the daemon-internal async-runtime migration is operationally landed on this branch. Remaining work is now cleanup and follow-on scope, not the original runtime migration itself:
+  - bounded owned-runtime fallback helpers still exist for standalone/test paths
+  - `daemon-control` JSON snapshot failures are outside the e2e harness sweep and still need a separate cleanup pass
+  - broader Rust-vs-Bun migration work remains around TS runtime coupling, real-client verification, and product acceptance gates
 
-## Real daemon bugs surfaced by e2e scenarios (2026-04-24)
+## Latest daemon e2e suite (2026-04-24)
 
-Two production bugs surfaced by scenario 102 (SIGKILL mid-stream crash-restart), both directly relevant to milestone M9 gate "No stuck active RALs after restarts":
+Full isolated harness run on this branch:
 
-### Bug 1: Orphan reconciliation never runs at daemon startup (M9 gate blocker)
+- Command: `scripts/e2e/run.sh --jobs 2 scripts/e2e/scenarios/*.sh`
+- Result: `total=18 pass=17 fail=0 skip=1 unknown=0`
+- Intentional skip: `55_active_parent_receives_via_injection.sh` still documents a bash/harness limitation, not a daemon regression
+- Restart coverage is green:
+  - `101_graceful_restart_no_stuck_ral.sh`
+  - `102_sigkill_mid_stream_crash_restart.sh`
+- Delegation coverage is green:
+  - `02_delegation_a_to_b_to_a.sh`
+  - `53_three_hop_delegation.sh`
+- Queueing / concurrency / hot-reload coverage is green:
+  - `21_agent_hot_reload.sh`
+  - `31_concurrent_enqueue_under_flock.sh`
+  - `32_redispatch_sequence_under_lock.sh`
+  - `33_per_agent_concurrency_cap.sh`
+  - `36_triggering_event_dedup.sh`
+  - `37_dispatch_input_mismatch.sh`
 
-- `crates/tenex-daemon/src/worker_lifecycle/startup_recovery.rs` defines `plan_worker_startup_recovery` + `recover_worker_startup`
-- The code is tested (3 unit tests pass) but **has zero production callers**. `grep` across `daemon_foreground.rs`, `daemon_loop.rs`, `bin/daemon.rs` confirms the production startup path never invokes reconciliation.
-- Consequence: after SIGKILL, `Claimed`/`Allocated` RALs remain in the journal with no matching worker. New allocations for the same identity are blocked on the active-triggering-event check and the namespace's active_ral_count continues to grow.
-- Scenario 101 (graceful SIGTERM) doesn't expose this because graceful shutdown terminates workers cleanly before the daemon exits.
-- **Fix**: call `recover_worker_startup` from the daemon's foreground startup path after `replay_ral_journal` and before accepting inbound events. Append the produced `Crashed` records to the journal. Next step: dispatch a tight-scoped fix agent.
+## Recently resolved daemon issues
 
-### Bug 2: Static subscription filters empty when whitelist empty at restart
+The following issues were real on earlier 2026-04-24 snapshots but are no longer accurate on the current audited commit:
 
-- `crates/tenex-daemon/src/subscription_filters.rs:93-107` — `build_static_filters` returns an empty `Vec<NostrFilter>` when `whitelisted_pubkeys.is_empty()`.
-- Consequence: after a crash restart, until the daemon receives a fresh kind:14199 whitelist event, it subscribes to **nothing**. Inbound kind:1 messages during this window are ignored because the project isn't in the in-memory ProjectEventIndex.
-- Less severe than Bug 1 (the daemon recovers once a whitelist event lands), but it's a real bootstrap gap.
-- **Fix**: rebuild whitelist state from persisted filesystem state at startup (whitelist pubkeys are already recoverable from `$TENEX_BASE_DIR/daemon/acl/` or equivalent durable source), OR issue an initial unfiltered subscription to historical kind:31933 + kind:14199 before the whitelist is populated.
+- **Startup orphan recovery is wired into production startup**
+  - `recover_worker_startup` is now called from `crates/tenex-daemon/src/bin/daemon.rs`
+  - crash-restart scenario `102_sigkill_mid_stream_crash_restart.sh` passes end to end
+- **Restart-time subscription/bootstrap behavior is no longer a red e2e gate**
+  - boot/restart scenarios `01`, `11`, `12`, `14`, `101`, and `102` all pass in the latest suite
+- **Mid-stream redirect / duplicate-start handling is hardened**
+  - same-conversation redirects inject into the live worker instead of starting a duplicate session
+  - launch-lock conflicts defer cleanly instead of failing the daemon tick
+  - dispatch leases are rolled back to `queued` on post-lease launch failure
+- **Filesystem restart admission now uses the validated admission/start path**
+  - `37_dispatch_input_mismatch.sh` now passes reliably by holding the allocation lock until restart, then asserting the corrupted sidecar is rejected before launch
+
+## E2E Matrix
+
+<!-- e2e-matrix:start -->
+_Last run: 2026-04-24T17:52:18Z · branch `rust-agent-worker-publishing` · commit `c9442522fd62` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
+
+| scenario | status | last_run | duration | known-issues |
+|---|---|---|---|---|
+| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-24T17:50:54Z | 3s |  |
+| 02_delegation_a_to_b_to_a.sh | pass | 2026-04-24T17:51:37Z | 13s |  |
+| 101_graceful_restart_no_stuck_ral.sh | pass | 2026-04-24T16:15:35Z | 16s |  |
+| 102_sigkill_mid_stream_crash_restart.sh | pass | 2026-04-24T16:15:40Z | 10s | passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies |
+| 11_boot_gates_dispatch.sh | pass | 2026-04-24T17:52:18Z | 13s |  |
+| 12_boot_activates_dispatch.sh | pass | 2026-04-24T16:15:58Z | 18s |  |
+| 13_boot_is_idempotent.sh | pass | 2026-04-24T16:16:01Z | 13s |  |
+| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T16:16:33Z | 35s |  |
+| 15_boot_event_reordering.sh | pass | 2026-04-24T16:16:20Z | 19s | newer 31933 wins; older discarded; boot succeeded; no crash |
+| 21_agent_hot_reload.sh | pass | 2026-04-24T16:16:26Z | 6s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
+| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T16:16:26Z | 0s |  |
+| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-24T16:16:27Z | 1s | ral journal resequenced correctly under concurrent inbound+completion writers |
+| 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T16:16:51Z | 24s |  |
+| 36_triggering_event_dedup.sh | pass | 2026-04-24T16:17:10Z | 36s |  |
+| 37_dispatch_input_mismatch.sh | pass | 2026-04-24T16:17:19Z | 28s |  |
+| 39_ral_number_exhaustion.sh | fail | 2026-04-24T07:11:50Z | 38s |  |
+| 43_ral_status_transitions.sh | pass | 2026-04-24T16:17:22Z | 12s | ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed |
+| 53_three_hop_delegation.sh | pass | 2026-04-24T16:17:33Z | 14s | all six Phase B assertions held: A->B->C chain + unwind both verified |
+| 55_active_parent_receives_via_injection.sh | skip | 2026-04-24T16:17:22Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
+<!-- e2e-matrix:end -->
 
 ## TL;DR
 
-Rust already owns the daemon control plane on this branch. Bun remains the bounded worker execution layer plus shared runtime contracts.
+Rust already owns the daemon control plane on this branch, and the daemon-internal async-runtime migration plan is operationally landed on `rust-agent-worker-publishing`. Bun remains the bounded worker execution layer plus shared runtime contracts.
 
 The important status update is that the old TypeScript daemon surface is already structurally gone at `HEAD`:
 
@@ -50,7 +99,7 @@ The remaining blockers are no longer "delete the TS daemon tree". The remaining 
 | --- | --- | --- |
 | Daemon control plane | Rust-owned | `crates/tenex-daemon/src/daemon_foreground.rs`, `daemon_loop.rs`, `daemon_maintenance.rs`, `inbound_dispatch.rs`, `publish_outbox.rs`, `relay_publisher.rs` |
 | Backend/status publishing | Rust-owned | `crates/tenex-daemon/src/project_status_runtime.rs`, backend status/tick modules documented in `MODULE_INVENTORY.md` |
-| Telegram daemon-side runtime | Rust slices present | `crates/tenex-daemon/src/telegram/inbound.rs`, `telegram/ingress_runtime.rs`, `telegram/chat_context.rs` |
+| Telegram daemon-side runtime | Rust-owned production path | `crates/tenex-daemon/src/telegram/gateway.rs`, `telegram/inbound.rs`, `telegram/ingress_runtime.rs`, `telegram/chat_context.rs` |
 | TypeScript package entrypoint | internal-only | `src/index.ts` exits with "Use the Rust TENEX binary" |
 | Old TS daemon tree | removed | no `src/daemon/**` files at `HEAD` |
 | Old TS command tree | removed | no `src/commands/**` files at `HEAD` |
@@ -61,7 +110,7 @@ The remaining blockers are no longer "delete the TS daemon tree". The remaining 
 | Milestone | State at `HEAD` | Notes |
 | --- | --- | --- |
 | M0-M7 | effectively landed | worker protocol, Rust daemon spine, filesystem/RAL authority, Rust publishing, and status slices are present in-tree |
-| M8 transport/runtime | partially landed, still gated | Rust Telegram and daemon transport slices exist, but acceptance gates remain open |
+| M8 transport/runtime | daemon-internal runtime migration landed; product acceptance still gated | Tokio-owned relay, subscription, foreground, worker-session, Telegram, and whitelist wiring are live on this branch, but release gates remain around acceptance, real-client verification, and performance/correlation |
 | M9 structural TS daemon deletion | materially landed | old `src/daemon` and `src/commands` surfaces are gone |
 | Release-ready complete migration | not yet | remaining gates are transport, restart, real-client, correlation, rollback, perf, and runtime-coupling cleanup |
 

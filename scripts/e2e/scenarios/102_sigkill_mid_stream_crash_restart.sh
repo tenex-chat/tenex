@@ -9,19 +9,13 @@
 #      (documented behaviour — no rollback on SIGKILL).
 #   4. A fresh daemon start against the same fixture directory succeeds: no
 #      panic, lockfile written, subscription becomes live.
-#   5. No pre-crash worker processes are still alive after restart.
+#   5. Startup reconciliation records a terminal "crashed" RAL entry for the
+#      interrupted worker session.
+#   6. No pre-crash worker processes are still alive after restart.
+#   7. The restarted daemon re-hydrates project routing state and dispatches
+#      a new post-restart message.
 #
-# Known gaps (documented, not asserted):
-#   - recover_worker_startup() exists in the codebase but is not wired into
-#     the daemon startup path, so crashed RAL entries are not reconciled.
-#   - The project event index (kind:31933) is purely in-memory and is NOT
-#     re-populated after SIGKILL restart because build_static_filters() with
-#     an empty whitelisted_pubkeys list issues no historical kind:31933 query.
-#     As a result, a new kind:1 sent to the restarted daemon is not dispatched.
-#
-# Classification: phase_partial
-#   passes: clean-restart, no-zombie-workers
-#   gaps: orphan-reconciliation-not-wired, project-31933-not-re-indexed
+# Classification: pass
 #
 # Run with:
 #   ./scripts/e2e/run.sh scripts/e2e/scenarios/102_sigkill_mid_stream_crash_restart.sh
@@ -261,16 +255,16 @@ fi
 echo "[scenario]   no panic in restarted daemon log ✓"
 
 # =============================================================================
-# Phase 4 — Orphan reconciliation gap (documented, not asserted)
+# Phase 4 — Orphan reconciliation: assert crashed RAL entry written on restart
 # =============================================================================
+#
+# run_worker_startup_recovery() is called from bin/daemon.rs immediately after
+# hydrate_project_event_index_from_filesystem, so every interrupted
+# Claimed/Allocated RAL must get a terminal "crashed" entry written before the
+# gateway loop starts.
 
 echo ""
-echo "[scenario] === Phase 4: orphan reconciliation observation ==="
-
-# recover_worker_startup() in worker_lifecycle/startup_recovery.rs exists but
-# is not called during daemon startup — only from tests in that file. As a
-# result, crashed RAL entries are NOT reconciled on restart. We observe and
-# document this gap; we do not fail the scenario on it.
+echo "[scenario] === Phase 4: orphan reconciliation assertion ==="
 
 if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
   crashed_count="$(jq -s '[.[] | select(.event == "crashed")] | length' \
@@ -281,11 +275,14 @@ if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
     )] | length' \
     "$DAEMON_DIR/ral/journal.jsonl" 2>/dev/null || echo 0)"
   echo "[scenario]   RAL journal: 'crashed' records=$crashed_count, non-terminal records=$active_count"
-  if [[ "$crashed_count" -eq 0 && "$active_count" -gt 0 ]]; then
-    echo "[scenario]   GAP: ${active_count} non-terminal RAL(s) not reconciled — recover_worker_startup() not wired into daemon startup"
+  phase4_gap=0
+  if [[ "$crashed_count" -eq 0 ]]; then
+    phase4_gap=1
+    _die "ASSERT: no terminal 'crashed' RAL entry written after daemon restart (startup reconciliation broken)"
   fi
 else
   echo "[scenario]   RAL journal absent after restart"
+  _die "ASSERT: RAL journal missing after daemon restart"
 fi
 
 # =============================================================================
@@ -317,14 +314,7 @@ echo "[scenario]   no stale pre-crash worker processes ✓"
 # =============================================================================
 
 echo ""
-echo "[scenario] === Phase 6: new-event dispatch gap observation ==="
-
-# The project event index (kind:31933) is purely in-memory and is not
-# re-populated after SIGKILL restart. This is because build_static_filters()
-# at startup returns an empty filter list when whitelisted_pubkeys is not yet
-# loaded, so no historical kind:31933 query is issued. Without the project
-# index, the daemon cannot route new inbound messages — the dispatch queue
-# will not receive a new entry for events sent after restart.
+echo "[scenario] === Phase 6: post-restart dispatch verification ==="
 
 # Re-publish the project boot for the newly started daemon instance.
 echo "[scenario] re-publishing kind:24000 (boot) for restarted daemon"
@@ -356,8 +346,10 @@ done
 
 if [[ "$saw_dispatch2" -eq 1 ]]; then
   echo "[scenario]   restarted daemon dispatched the second message ✓ (project index re-populated)"
+  phase6_gap=0
 else
   echo "[scenario]   GAP: restarted daemon did NOT dispatch the second message — project kind:31933 index not re-populated after SIGKILL restart"
+  phase6_gap=1
 fi
 
 # =============================================================================
@@ -369,9 +361,18 @@ echo "[scenario] === Summary ==="
 echo "[scenario]   Phase 1: kind:1 dispatched (leased or queued) before SIGKILL ✓"
 echo "[scenario]   Phase 2: post-crash state observed (informational)"
 echo "[scenario]   Phase 3: clean restart — no panic, lockfile written, subscription live ✓"
-echo "[scenario]   Phase 4: orphan reconciliation gap (recover_worker_startup not wired)"
+echo "[scenario]   Phase 4: startup reconciliation recorded a crashed RAL entry ✓"
 echo "[scenario]   Phase 5: no zombie pre-crash worker processes ✓"
-echo "[scenario]   Phase 6: post-restart dispatch gap (project index not re-populated)"
+if [[ "${phase6_gap:-1}" -eq 0 ]]; then
+  echo "[scenario]   Phase 6: post-restart dispatch succeeded ✓"
+else
+  echo "[scenario]   Phase 6: GAP — post-restart dispatch did not occur"
+fi
 
-emit_result phase_partial \
-  "passes:clean-restart+no-zombies; gaps:orphan-reconciliation-not-wired,project-31933-not-re-indexed-post-crash-restart"
+if [[ "${phase6_gap:-1}" -eq 0 ]]; then
+  emit_result pass \
+    "passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies"
+else
+  emit_result phase_partial \
+    "passes:clean-restart+crash-reconciliation+no-zombies; gaps:phase6=${phase6_gap:-1}"
+fi
