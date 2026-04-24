@@ -262,6 +262,8 @@ export function createMockToolContext(
                 tagValue: (tagName: string) => (tagName === "d" ? "mock-project" : undefined),
                 tagId: () => "31933:mock-project-pubkey:mock-project",
             },
+            agents: new Map([[agent.pubkey, agent]]),
+            getProjectAgentRuntimeInfo: () => [],
             getAgentByPubkey: (pubkey: string) => (pubkey === agent.pubkey ? agent : undefined),
         } as any,
         triggeringEnvelope: mockEvent,

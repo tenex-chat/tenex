@@ -11,6 +11,7 @@ import { trace } from "@opentelemetry/api";
 import { teamService } from "@/services/teams";
 import type { TeamContext } from "@/prompts/fragments/types";
 import { render as renderTeamsContext } from "@/prompts/fragments/teams-context";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 
 /**
  * CompiledMessage - A message with optional prompt lineage metadata.
@@ -29,6 +30,7 @@ export interface MessageCompilerContext {
     projectBasePath?: string;
     workingDirectory?: string;
     currentBranch?: string;
+    projectContext?: Pick<ProjectContext, "promptCompilerRegistry" | "getProjectAgentRuntimeInfo">;
     availableAgents?: AgentInstance[];
     agentRuntimeInfo?: ProjectAgentRuntimeInfo[];
     pendingDelegations: PendingDelegation[];
@@ -120,6 +122,7 @@ export class MessageCompiler {
 
         const systemPromptMessages = await buildSystemPromptMessages({
             ...enrichedContext,
+            projectContext: context.projectContext,
             agentCategory: context.agent.category,
         });
         activeSpan?.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });

@@ -22,15 +22,6 @@ mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages: buildSystemPromptMessagesMock,
 }));
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagValue: mock(() => "project-1"),
-        },
-        agents: new Map(),
-    })),
-}));
-
 mock.module("@/tools/registry", () => ({
     getToolsObject: getToolsObjectMock,
 }));

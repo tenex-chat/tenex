@@ -3,21 +3,17 @@ import { createMockAgent, createMockConversationStore, createMockInboundEnvelope
 import type { MCPManager } from "@/services/mcp/MCPManager";
 
 const mockConversationStore = createMockConversationStore({ id: "conversation-mcp-context" });
-const getProjectContextMock = mock(() => ({
+const projectContext = {
     project: {
         dTag: "project-1",
         tagValue: mock((name: string) => (name === "d" ? "project-1" : undefined)),
     },
-}));
+} as any;
 
 mock.module("@/conversations/ConversationStore", () => ({
     ConversationStore: {
         getOrLoad: mock(() => mockConversationStore),
     },
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: getProjectContextMock,
 }));
 
 mock.module("@/conversations/executionTime", () => ({
@@ -69,6 +65,7 @@ describe("AgentExecutor MCP context propagation", () => {
         const context: ExecutionContext & { ralNumber: number } = {
             agent,
             conversationId: "conversation-mcp-context",
+            projectContext,
             projectBasePath: "/tmp/project",
             workingDirectory: "/tmp/project",
             currentBranch: "main",

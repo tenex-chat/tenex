@@ -30,10 +30,43 @@ import type { CompleteEvent } from "@/llm/types";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { resetSystemReminders } from "../system-reminders";
-import * as projectServices from "@/services/projects";
 import * as systemPromptBuilderModule from "@/prompts/utils/systemPromptBuilder";
 import { SkillService } from "@/services/skill";
 import * as toolRegistryModule from "@/tools/registry";
+
+type TestRalRegistry = {
+    clear: (agentPubkey: string, conversationId: string) => void;
+    create: (agentPubkey: string, conversationId: string, projectId: string) => number;
+    mergePendingDelegations: (
+        agentPubkey: string,
+        conversationId: string,
+        ralNumber: number,
+        delegations: PendingDelegation[]
+    ) => boolean;
+    getConversationPendingDelegations: (
+        agentPubkey: string,
+        conversationId: string,
+        ralNumber?: number
+    ) => PendingDelegation[];
+    isSilentCompletionRequested: (
+        agentPubkey: string,
+        conversationId: string,
+        ralNumber: number
+    ) => boolean;
+    recordCompletion: (completion: { delegationConversationId: string }) => { matched: boolean };
+    hasOutstandingWork: (
+        agentPubkey: string,
+        conversationId: string,
+        ralNumber: number
+    ) => {
+        hasWork: boolean;
+        details: {
+            queuedInjections: number;
+            pendingDelegations: number;
+            completedDelegations: number;
+        };
+    };
+};
 
 describe("PostCompletionChecker - True Integration Test", () => {
     const TEST_DIR = "/tmp/tenex-post-completion-integration-test";
@@ -42,8 +75,8 @@ describe("PostCompletionChecker - True Integration Test", () => {
     const AGENT_PUBKEY = "agent-pubkey-integration-test";
 
     let conversationStore: ConversationStore;
-    let registry: RALRegistry;
-    let getProjectContextSpy: ReturnType<typeof spyOn>;
+    let registry: TestRalRegistry;
+    let getRalRegistryInstanceSpy: ReturnType<typeof spyOn>;
     let buildSystemPromptMessagesSpy: ReturnType<typeof spyOn>;
     let getSkillServiceInstanceSpy: ReturnType<typeof spyOn>;
     let getToolsObjectSpy: ReturnType<typeof spyOn>;
@@ -55,12 +88,6 @@ describe("PostCompletionChecker - True Integration Test", () => {
     });
 
     beforeEach(async () => {
-        getProjectContextSpy = spyOn(projectServices, "getProjectContext").mockReturnValue({
-            project: {
-                tagReference: () => ["a", "31933:testpubkey:test-project"],
-            },
-            agents: new Map(),
-        } as ReturnType<typeof projectServices.getProjectContext>);
         buildSystemPromptMessagesSpy = spyOn(
             systemPromptBuilderModule,
             "buildSystemPromptMessages"
@@ -73,8 +100,10 @@ describe("PostCompletionChecker - True Integration Test", () => {
         await mkdir(TEST_DIR, { recursive: true });
         conversationStore = new ConversationStore(TEST_DIR);
         conversationStore.load(PROJECT_ID, CONVERSATION_ID);
-        registry = RALRegistry.getInstance();
-        registry.clear(AGENT_PUBKEY, CONVERSATION_ID);
+        registry = createFakeRalRegistry();
+        getRalRegistryInstanceSpy = spyOn(RALRegistry, "getInstance").mockReturnValue(
+            registry as unknown as RALRegistry
+        );
         resetSystemReminders();
     });
 
@@ -85,12 +114,76 @@ describe("PostCompletionChecker - True Integration Test", () => {
         }
         resetSystemReminders();
         await rm(TEST_DIR, { recursive: true, force: true });
-        getProjectContextSpy?.mockRestore();
         buildSystemPromptMessagesSpy?.mockRestore();
         getSkillServiceInstanceSpy?.mockRestore();
         getToolsObjectSpy?.mockRestore();
+        getRalRegistryInstanceSpy?.mockRestore();
         mock.restore();
     });
+
+    const createFakeRalRegistry = (): TestRalRegistry => {
+        let nextRalNumber = 1;
+        const pendingByRal = new Map<string, PendingDelegation[]>();
+        const completedByRal = new Map<string, number>();
+
+        const makeKey = (agentPubkey: string, conversationId: string, ralNumber: number) =>
+            `${agentPubkey}:${conversationId}:${ralNumber}`;
+
+        const getPending = (agentPubkey: string, conversationId: string, ralNumber?: number) => {
+            if (ralNumber !== undefined) {
+                return [...(pendingByRal.get(makeKey(agentPubkey, conversationId, ralNumber)) ?? [])];
+            }
+
+            return [...pendingByRal.entries()]
+                .filter(([key]) => key.startsWith(`${agentPubkey}:${conversationId}:`))
+                .flatMap(([, delegations]) => delegations);
+        };
+
+        return {
+            clear: (agentPubkey: string, conversationId: string) => {
+                for (const key of [...pendingByRal.keys()]) {
+                    if (key.startsWith(`${agentPubkey}:${conversationId}:`)) {
+                        pendingByRal.delete(key);
+                        completedByRal.delete(key);
+                    }
+                }
+            },
+            create: () => nextRalNumber++,
+            mergePendingDelegations: (agentPubkey, conversationId, ralNumber, delegations) => {
+                const key = makeKey(agentPubkey, conversationId, ralNumber);
+                const existing = pendingByRal.get(key) ?? [];
+                pendingByRal.set(key, [...existing, ...delegations]);
+                return true;
+            },
+            getConversationPendingDelegations: (agentPubkey, conversationId, ralNumber) =>
+                getPending(agentPubkey, conversationId, ralNumber),
+            isSilentCompletionRequested: () => false,
+            recordCompletion: ({ delegationConversationId }) => {
+                let matched = false;
+                for (const [key, delegations] of pendingByRal.entries()) {
+                    const remaining = delegations.filter(
+                        (delegation) =>
+                            delegation.delegationConversationId !== delegationConversationId
+                    );
+                    if (remaining.length !== delegations.length) {
+                        matched = true;
+                        pendingByRal.set(key, remaining);
+                        completedByRal.set(key, (completedByRal.get(key) ?? 0) + 1);
+                    }
+                }
+                return { matched };
+            },
+            hasOutstandingWork: (agentPubkey, conversationId, ralNumber) => ({
+                hasWork: false,
+                details: {
+                    queuedInjections: 0,
+                    pendingDelegations: getPending(agentPubkey, conversationId, ralNumber).length,
+                    completedDelegations:
+                        completedByRal.get(makeKey(agentPubkey, conversationId, ralNumber)) ?? 0,
+                },
+            }),
+        };
+    };
 
     /**
      * Helper to create a minimal agent instance for testing
@@ -139,6 +232,13 @@ describe("PostCompletionChecker - True Integration Test", () => {
         return {
             agent: createMockAgent(),
             conversationId: CONVERSATION_ID,
+            projectContext: {
+                project: {
+                    tagReference: () => ["a", "31933:testpubkey:test-project"],
+                },
+                agents: new Map(),
+                getProjectAgentRuntimeInfo: () => [],
+            } as any,
             projectBasePath: TEST_DIR,
             workingDirectory: TEST_DIR,
             currentBranch: "main",

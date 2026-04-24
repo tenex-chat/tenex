@@ -8,6 +8,7 @@ import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublish
 import type { CompleteEvent } from "@/llm/types";
 import type { LLMRequestAnalysisSeed } from "@/llm/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import type { ToolRegistryContext } from "@/tools/types";
 import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 
@@ -24,6 +25,7 @@ import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provide
 export interface ExecutionContext {
     agent: AgentInstance;
     conversationId: string;
+    projectContext: ProjectContext;
     projectBasePath: string;
     workingDirectory: string;
     currentBranch: string;

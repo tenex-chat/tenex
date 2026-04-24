@@ -122,6 +122,7 @@ export async function executeAgentWorkerRequest(
             const executionContext = await createExecutionContext({
                 agent,
                 conversationId: message.conversationId,
+                projectContext,
                 projectBasePath: message.projectBasePath,
                 triggeringEnvelope: message.triggeringEnvelope,
                 isDelegationCompletion: message.executionFlags.isDelegationCompletion,

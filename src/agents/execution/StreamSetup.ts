@@ -9,7 +9,6 @@
 import { config as configService, type MetaModelResolutionResult } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SkillService, type SkillToolPermissions, loadAllSkillTools } from "@/services/skill";
-import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject, HOME_FS_FALLBACKS } from "@/tools/registry";
 import { logger } from "@/utils/logger";
@@ -73,7 +72,7 @@ export async function setupStreamExecution(
     const triggeringPrincipalId =
         context.triggeringEnvelope.principal.linkedPubkey ?? context.triggeringEnvelope.principal.id;
 
-    const projectContext = getProjectContext();
+    const projectContext = context.projectContext;
     const skillLookupContext = {
         agentPubkey: context.agent.pubkey,
         projectPath: context.projectBasePath || undefined,
@@ -302,6 +301,7 @@ export async function setupStreamExecution(
         conversationId: context.conversationId,
         agent: context.agent,
         conversationStore,
+        projectDTag: projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
     });
 
     if (contextManagement) {
@@ -337,8 +337,9 @@ export async function setupStreamExecution(
         projectBasePath: context.projectBasePath,
         workingDirectory: context.workingDirectory,
         currentBranch: context.currentBranch,
-        availableAgents: Array.from(projectContext.agents.values()),
-        agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo(),
+        projectContext,
+        availableAgents: Array.from(projectContext.agents?.values?.() ?? []),
+        agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo?.(),
         pendingDelegations,
         completedDelegations,
         ralNumber,

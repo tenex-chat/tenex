@@ -13,13 +13,6 @@ const fetchSkillsMock = mock(async (skillIds: string[]) => ({
 }));
 const listAvailableSkillsMock = mock(async () => []);
 const loadAllSkillToolsMock = mock(() => ({}));
-const getProjectContextMock = mock(() => ({
-    project: {
-        dTag: "project-1",
-        tagValue: (name: string) => (name === "d" ? "project-1" : undefined),
-    },
-    agents: new Map(),
-}));
 const buildPromptHistoryMessagesMock = mock(() => ({
     messages: [],
     didMutateHistory: false,
@@ -50,10 +43,6 @@ mock.module("@/services/skill", () => ({
         }),
     },
     loadAllSkillTools: loadAllSkillToolsMock,
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: getProjectContextMock,
 }));
 
 mock.module("@/services/ConfigService", () => ({
@@ -98,6 +87,46 @@ mock.module(requestPreparationModulePath, () => ({
     prepareLLMRequest: prepareLLMRequestMock,
 }));
 
+mock.module("@/utils/logger", () => ({
+    logger: {
+        warn: mock(() => undefined),
+        info: mock(() => undefined),
+        debug: mock(() => undefined),
+        writeToWarnLog: mock(() => undefined),
+    },
+}));
+
+mock.module("@opentelemetry/api", () => ({
+    SpanStatusCode: {
+        OK: 1,
+        ERROR: 2,
+    },
+    trace: {
+        getActiveSpan: () => undefined,
+        getTracer: () => ({
+            startActiveSpan: async (
+                _name: string,
+                callback: (span: {
+                    addEvent: () => void;
+                    setAttribute: () => void;
+                    setAttributes: () => void;
+                    setStatus: () => void;
+                    recordException: () => void;
+                    end: () => void;
+                }) => Promise<unknown>
+            ) =>
+                await callback({
+                    addEvent: () => undefined,
+                    setAttribute: () => undefined,
+                    setAttributes: () => undefined,
+                    setStatus: () => undefined,
+                    recordException: () => undefined,
+                    end: () => undefined,
+                }),
+        }),
+    },
+}));
+
 let createPrepareStep: typeof import("../StreamCallbacks").createPrepareStep;
 let conversationStore: ReturnType<typeof createConversationStoreStub>;
 
@@ -114,7 +143,6 @@ describe("StreamCallbacks blocked skills", () => {
         listAvailableSkillsMock.mockClear();
         fetchSkillsMock.mockClear();
         loadAllSkillToolsMock.mockClear();
-        getProjectContextMock.mockClear();
         buildPromptHistoryMessagesMock.mockClear();
         prepareLLMRequestMock.mockClear();
         messageSyncerSpy.mockClear();
@@ -237,6 +265,7 @@ function createConversationStoreStub() {
         getSelfAppliedSkillIds: mock(() => [] as string[]),
         getMetaModelVariantOverride: mock(() => undefined as string | undefined),
         getContextManagementReminderState: mock(() => undefined),
+        isAgentPromptHistoryCacheAnchored: mock(() => false),
         save: mock(async () => undefined),
     };
 }
@@ -262,6 +291,14 @@ function createRuntimeContext(overrides: {
             createLLMService: mock(() => llmService),
         },
         conversationId: "conversation-1",
+        projectContext: {
+            project: {
+                dTag: "project-1",
+                tagValue: (name: string) => (name === "d" ? "project-1" : undefined),
+            },
+            agents: new Map(),
+            getProjectAgentRuntimeInfo: () => [],
+        },
         projectBasePath: "/tmp/project",
         workingDirectory: "/tmp/project",
         currentBranch: "main",

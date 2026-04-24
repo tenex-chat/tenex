@@ -12,7 +12,6 @@ import {
 import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
 import type { Tool as CoreTool } from "ai";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext } from "@/services/projects";
 import { getToolsObject } from "@/tools/registry";
 import type { FullRuntimeContext } from "./types";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
@@ -57,19 +56,20 @@ export function wrapToolsWithSupervision(
                     const conversationStore = context.conversationStore;
 
                     // Reuse cached system prompt from initial compilation when available
-                    const projectContext = getProjectContext();
+                    const projectContext = context.projectContext;
 
                     const systemPrompt = context.cachedSystemPrompt
                         ?? (await buildSystemPromptMessages({
                             agent: context.agent,
                             project: projectContext.project,
+                            projectContext,
                             conversation,
                             triggeringEnvelope: context.triggeringEnvelope,
                             projectBasePath: context.projectBasePath,
                             workingDirectory: context.workingDirectory,
                             currentBranch: context.currentBranch,
-                            availableAgents: Array.from(projectContext.agents.values()),
-                            agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo(),
+                            availableAgents: Array.from(projectContext.agents?.values?.() ?? []),
+                            agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo?.(),
                         })).map(m => m.message.content).join("\n\n");
 
                     // Build conversation history from ConversationStore.

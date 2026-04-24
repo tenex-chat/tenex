@@ -179,6 +179,7 @@ describeIntegration("MessageSyncer E2E - Tool Error Handling", () => {
             return await createExecutionContext({
                 agent: testAgent,
                 conversationId,
+                projectContext,
                 projectBasePath: projectPath,
                 triggeringEnvelope: event,
             });

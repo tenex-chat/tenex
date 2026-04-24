@@ -40,18 +40,6 @@ mock.module("@/services/LLMOperationsRegistry", () => ({
     },
 }));
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            dTag: "project-1",
-            tagValue: mock((name: string) => (name === "d" ? "project-1" : undefined)),
-        },
-        projectOwnerPubkey: "f".repeat(64),
-        mcpManager: undefined,
-        agents: new Map(),
-    })),
-}));
-
 mock.module("@/services/ral", () => ({
     RALRegistry: {
         getInstance: () => ({
@@ -136,8 +124,33 @@ mock.module("@/utils/logger", () => ({
 }));
 
 mock.module("@opentelemetry/api", () => ({
+    SpanStatusCode: {
+        OK: 1,
+        ERROR: 2,
+    },
     trace: {
         getActiveSpan: () => undefined,
+        getTracer: () => ({
+            startActiveSpan: async (
+                _name: string,
+                callback: (span: {
+                    addEvent: () => void;
+                    setAttribute: () => void;
+                    setAttributes: () => void;
+                    setStatus: () => void;
+                    recordException: () => void;
+                    end: () => void;
+                }) => Promise<unknown>
+            ) =>
+                await callback({
+                    addEvent: () => undefined,
+                    setAttribute: () => undefined,
+                    setAttributes: () => undefined,
+                    setStatus: () => undefined,
+                    recordException: () => undefined,
+                    end: () => undefined,
+                }),
+        }),
     },
 }));
 
@@ -169,6 +182,7 @@ function createTestContext(
             setMetaModelVariantOverride: mock(() => undefined),
             clearMetaModelVariantOverride: mock(() => undefined),
             getFirstUserMessage: mock(() => undefined),
+            isAgentPromptHistoryCacheAnchored: mock(() => false),
             save: mock(async () => undefined),
         },
         overrides.conversationStoreOverrides ?? {}

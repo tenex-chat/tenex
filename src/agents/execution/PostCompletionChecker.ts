@@ -15,7 +15,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { CompleteEvent } from "@/llm/types";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import type { FullRuntimeContext } from "./types";
@@ -104,7 +103,7 @@ export async function checkPostCompletion(
     }
 
     // Build supervision context
-    const projectContext = getProjectContext();
+    const projectContext = context.projectContext;
 
     // Get tool calls from conversation store
     const storeMessages = conversationStore?.getAllMessages() || [];
@@ -124,18 +123,19 @@ export async function checkPostCompletion(
             ? (await buildSystemPromptMessages({
                 agent,
                 project: projectContext.project,
+                projectContext,
                 conversation,
                 triggeringEnvelope: context.triggeringEnvelope,
                 projectBasePath: context.projectBasePath,
                 workingDirectory: context.workingDirectory,
                 currentBranch: context.currentBranch,
-                availableAgents: Array.from(projectContext.agents.values()),
-                agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo(),
+                availableAgents: Array.from(projectContext.agents?.values?.() ?? []),
+                agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo?.(),
             })).map(m => m.message.content).join("\n\n")
             : "");
 
     // Update known agent slugs for delegation heuristic
-    updateKnownAgentSlugs(Array.from(projectContext.agents.values()).map(a => a.slug));
+    updateKnownAgentSlugs(Array.from(projectContext.agents?.values?.() ?? []).map(a => a.slug));
 
     // Build conversation history
     const conversationMessages = conversationStore

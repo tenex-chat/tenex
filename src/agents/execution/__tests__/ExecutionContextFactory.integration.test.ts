@@ -20,6 +20,12 @@ describe("ExecutionContextFactory Integration", () => {
     let testRepoPath: string;
     let mockAgent: AgentInstance;
     let mockCoordinator: ConversationCoordinator;
+    const projectContext = {
+        project: {
+            dTag: "test-project",
+            tagValue: (tag: string) => (tag === "d" ? "test-project" : undefined),
+        },
+    } as any;
 
     beforeEach(async () => {
         // Create temporary test repo (normal git repo, not bare)
@@ -71,6 +77,7 @@ describe("ExecutionContextFactory Integration", () => {
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
+            projectContext,
             projectBasePath: testRepoPath,
             triggeringEnvelope: event,
         });
@@ -95,6 +102,7 @@ describe("ExecutionContextFactory Integration", () => {
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
+            projectContext,
             projectBasePath: testRepoPath,
             triggeringEnvelope: event,
         });
@@ -114,6 +122,7 @@ describe("ExecutionContextFactory Integration", () => {
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
+            projectContext,
             projectBasePath: testRepoPath,
             triggeringEnvelope: event,
         });
@@ -145,6 +154,7 @@ describe("ExecutionContextFactory Integration", () => {
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
+            projectContext,
             projectBasePath: testRepoPath,
             triggeringEnvelope: event,
         });
@@ -170,6 +180,7 @@ describe("ExecutionContextFactory Integration", () => {
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
+            projectContext,
             projectBasePath: testRepoPath,
             triggeringEnvelope: event,
         });
@@ -196,6 +207,7 @@ describe("ExecutionContextFactory Integration", () => {
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation-123",
+            projectContext,
             projectBasePath: testRepoPath,
             triggeringEnvelope: event,
             agentPublisher: mockPublisher as any,

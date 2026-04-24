@@ -5,7 +5,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { ProjectAgentRuntimeInfo } from "@/services/projects/ProjectContext";
-import { getProjectContext } from "@/services/projects";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { SchedulerService } from "@/services/scheduling";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -51,6 +51,7 @@ export interface BuildSystemPromptOptions {
     currentBranch?: string;
 
     // Optional runtime data
+    projectContext?: Pick<ProjectContext, "promptCompilerRegistry" | "getProjectAgentRuntimeInfo">;
     availableAgents?: AgentInstance[];
     agentRuntimeInfo?: ProjectAgentRuntimeInfo[];
     /** Whether to include environment-variables fragment. Defaults to true. */
@@ -177,6 +178,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         projectBasePath,
         workingDirectory,
         currentBranch,
+        projectContext,
         availableAgents = [],
         agentRuntimeInfo,
         conversation,
@@ -195,23 +197,22 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     const environmentVariablesAvailable = environmentVariablesAvailableOption ?? !isOrchestrator;
 
     const baseAgentInstructions = agent.instructions || "";
-    const context = getProjectContext();
     const effectiveAgentRuntimeInfo =
         agentRuntimeInfo ??
-        (typeof context.getProjectAgentRuntimeInfo === "function"
-            ? context.getProjectAgentRuntimeInfo()
+        (typeof projectContext?.getProjectAgentRuntimeInfo === "function"
+            ? projectContext.getProjectAgentRuntimeInfo()
             : undefined);
     const rawDTag = project.dTag;
     const dTag: ProjectDTag | undefined = rawDTag ? createProjectDTag(rawDTag) : undefined;
-    const effectiveAgentInstructions = context.promptCompilerRegistry
-        ? context.promptCompilerRegistry.getEffectiveInstructionsSync(agent.pubkey, baseAgentInstructions)
+    const effectiveAgentInstructions = projectContext?.promptCompilerRegistry
+        ? projectContext.promptCompilerRegistry.getEffectiveInstructionsSync(agent.pubkey, baseAgentInstructions)
         : baseAgentInstructions;
 
     logger.debug("✅ Retrieved Effective Agent Instructions (sync)", {
         agentName: agent.name,
         baseInstructionsLength: baseAgentInstructions.length,
         effectiveInstructionsLength: effectiveAgentInstructions.length,
-        usedPromptCompilerRegistry: !!context.promptCompilerRegistry,
+        usedPromptCompilerRegistry: !!projectContext?.promptCompilerRegistry,
     });
 
     // Create an agent copy with Effective Agent Instructions (if available)

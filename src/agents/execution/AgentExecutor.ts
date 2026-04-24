@@ -34,7 +34,6 @@ import {
 import { shortenConversationId, shortenOptionalConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
-import { getProjectContext } from "@/services/projects";
 import { createProjectDTag } from "@/types/project-ids";
 import { RALRegistry } from "@/services/ral";
 import { getIdentityService } from "@/services/identity";
@@ -125,10 +124,13 @@ export class AgentExecutor {
         initialPrompt: string,
         originalEvent: NDKEvent,
         conversationHistory: ModelMessage[] = [],
-        projectPath?: string
+        projectPath?: string,
+        projectContext?: ToolRegistryContext["projectContext"]
     ): Promise<LLMCompletionRequest> {
         const triggeringEnvelope = new NostrInboundAdapter().toEnvelope(originalEvent);
-        const projectContext = getProjectContext();
+        if (!projectContext) {
+            throw new Error("prepareLLMRequest requires explicit projectContext");
+        }
         const context: ToolRegistryContext = {
             agent: agent as ToolRegistryContext["agent"],
             triggeringEnvelope,
@@ -182,8 +184,7 @@ export class AgentExecutor {
             runWithSystemReminderContext(async () => {
                 try {
                     // Get project ID for multi-project isolation in daemon mode
-                    const projectCtx = getProjectContext();
-                    const dTagValue = projectCtx.project.tagValue("d");
+                    const dTagValue = context.projectContext.project.tagValue("d");
                     if (!dTagValue) {
                         throw new Error("Project missing d-tag");
                     }
@@ -335,7 +336,6 @@ export class AgentExecutor {
         const toolTracker = new ToolExecutionTracker();
         const agentPublisher = this.publisherFactory(context.agent);
         const conversationStore = ConversationStore.getOrLoad(context.conversationId);
-        const projectContext = getProjectContext();
 
         logger.debug("[AgentExecutor] Created runtime publisher", {
             agent: context.agent.slug,
@@ -359,7 +359,7 @@ export class AgentExecutor {
             ralNumber: context.ralNumber,
             conversationStore,
             getConversation: () => conversationStore,
-            projectContext,
+            projectContext: context.projectContext,
             mcpManager: context.mcpManager,
             agentExecutor: this,
             isDelegationCompletion: context.isDelegationCompletion,

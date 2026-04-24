@@ -31,6 +31,12 @@ describe("ExecutionContextFactory", () => {
     });
 
     const projectBasePath = "/test/project";
+    const projectContext = {
+        project: {
+            dTag: "test-project",
+            tagValue: (tag: string) => (tag === "d" ? "test-project" : undefined),
+        },
+    } as any;
 
     // Store original functions for restoration
     const originalListWorktrees = worktreeModule.listWorktrees;
@@ -80,6 +86,7 @@ describe("ExecutionContextFactory", () => {
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
+                projectContext,
                 projectBasePath,
                 triggeringEnvelope: eventWithBranch,
             });
@@ -110,6 +117,7 @@ describe("ExecutionContextFactory", () => {
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
+                projectContext,
                 projectBasePath,
                 triggeringEnvelope: eventWithBranch,
             });
@@ -128,6 +136,7 @@ describe("ExecutionContextFactory", () => {
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
+                projectContext,
                 projectBasePath,
                 triggeringEnvelope: mockEvent,
             });
@@ -148,6 +157,7 @@ describe("ExecutionContextFactory", () => {
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
+                projectContext,
                 projectBasePath,
                 triggeringEnvelope: mockEvent,
                 agentPublisher: mockPublisher as any,
@@ -175,6 +185,7 @@ describe("ExecutionContextFactory", () => {
                 const context = await createExecutionContext({
                     agent: mockAgent,
                     conversationId: "test-conversation",
+                    projectContext,
                     projectBasePath,
                     triggeringEnvelope: mockEvent,
                 });
@@ -196,6 +207,7 @@ describe("ExecutionContextFactory", () => {
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
+                projectContext,
                 projectBasePath,
                 triggeringEnvelope: mockEvent,
             });

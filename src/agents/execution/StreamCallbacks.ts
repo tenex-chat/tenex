@@ -167,18 +167,8 @@ export function createPrepareStep(
 
     preparedStepCache.set(0, { request: initialRequest });
 
-    // Import project context lazily to avoid circular dependencies
-    let projectContextModulePromise: Promise<typeof import("@/services/projects")> | null = null;
-    const loadProjectContextModule = async (): Promise<typeof import("@/services/projects")> => {
-        if (!projectContextModulePromise) {
-            projectContextModulePromise = import("@/services/projects");
-        }
-        return projectContextModulePromise;
-    };
-
     return async (step: StepData) => {
-        const { getProjectContext } = await loadProjectContextModule();
-        const projectContext = getProjectContext();
+        const projectContext = context.projectContext;
         const skillLookupContext = {
             agentPubkey: context.agent.pubkey,
             projectPath: context.projectBasePath || undefined,
@@ -381,8 +371,9 @@ export function createPrepareStep(
                 projectBasePath: context.projectBasePath,
                 workingDirectory: context.workingDirectory,
                 currentBranch: context.currentBranch,
-                availableAgents: Array.from(projectContext.agents.values()),
-                agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo(),
+                projectContext,
+                availableAgents: Array.from(projectContext.agents?.values?.() ?? []),
+                agentRuntimeInfo: projectContext.getProjectAgentRuntimeInfo?.(),
                 pendingDelegations,
                 completedDelegations,
                 ralNumber,

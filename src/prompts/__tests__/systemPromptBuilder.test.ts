@@ -23,10 +23,6 @@ mock.module("@/prompts/core/PromptBuilder", () => ({
     PromptBuilder: MockPromptBuilder,
 }));
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => currentProjectContext,
-}));
-
 mock.module("@/services/rag/RAGService", () => ({
     RAGService: {
         getInstance: () => ({
@@ -76,6 +72,14 @@ describe("systemPromptBuilder", () => {
     let agent: AgentInstance;
     let project: NDKProject;
     let conversation: any;
+    const buildPrompt = (overrides: Record<string, unknown> = {}) =>
+        buildSystemPromptMessages({
+            agent,
+            project,
+            conversation,
+            projectContext: currentProjectContext,
+            ...overrides,
+        });
 
     beforeEach(() => {
         addedFragments.length = 0;
@@ -119,11 +123,7 @@ describe("systemPromptBuilder", () => {
             },
         };
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
-        });
+        await buildPrompt();
 
         expect(getEffectiveInstructionsSync).toHaveBeenCalledWith(
             agent.pubkey,
@@ -141,11 +141,7 @@ describe("systemPromptBuilder", () => {
     it("falls back to base instructions when no runtime registry exists", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
-        });
+        await buildPrompt();
 
         const agentIdentityFragment = addedFragments.find(
             (fragment) => fragment.id === "agent-identity"
@@ -157,11 +153,7 @@ describe("systemPromptBuilder", () => {
     it("does not add cross-project fragments to the main prompt", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
-        });
+        await buildPrompt();
 
         expect(addedFragments.some((fragment) => fragment.id === "meta-project-context")).toBe(false);
     });
@@ -169,20 +161,13 @@ describe("systemPromptBuilder", () => {
     it("only adds no-response guidance for Telegram-triggered turns", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
-        });
+        await buildPrompt();
 
         expect(addedFragments.some((fragment) => fragment.id === "no-response-guidance")).toBe(false);
 
         addedFragments.length = 0;
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
+        await buildPrompt({
             triggeringEnvelope: {
                 transport: "telegram",
             } as any,
@@ -194,10 +179,7 @@ describe("systemPromptBuilder", () => {
     it("includes domain-expert-guidance fragment for domain-expert agents", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
+        await buildPrompt({
             agentCategory: "domain-expert",
         });
 
@@ -210,10 +192,7 @@ describe("systemPromptBuilder", () => {
         for (const category of ["orchestrator", "worker"] as const) {
             addedFragments.length = 0;
 
-            await buildSystemPromptMessages({
-                agent,
-                project,
-                conversation,
+            await buildPrompt({
                 agentCategory: category,
             });
 
@@ -224,11 +203,7 @@ describe("systemPromptBuilder", () => {
     it("does not include domain-expert-guidance fragment when agentCategory is undefined", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
-        });
+        await buildPrompt();
 
         expect(addedFragments.some((fragment) => fragment.id === "domain-expert-guidance")).toBe(false);
     });
@@ -236,10 +211,7 @@ describe("systemPromptBuilder", () => {
     it("includes orchestrator-delegation-guidance fragment for orchestrator agents", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
+        await buildPrompt({
             agentCategory: "orchestrator",
         });
 
@@ -252,10 +224,7 @@ describe("systemPromptBuilder", () => {
         for (const category of ["worker", "reviewer", "domain-expert", undefined] as const) {
             addedFragments.length = 0;
 
-            await buildSystemPromptMessages({
-                agent,
-                project,
-                conversation,
+            await buildPrompt({
                 agentCategory: category,
             });
 
@@ -266,10 +235,7 @@ describe("systemPromptBuilder", () => {
     it("does not include delegation-tips or todo-before-delegation for domain-expert agents", async () => {
         currentProjectContext = {};
 
-        await buildSystemPromptMessages({
-            agent,
-            project,
-            conversation,
+        await buildPrompt({
             agentCategory: "domain-expert",
         });
 
@@ -283,10 +249,7 @@ describe("systemPromptBuilder", () => {
         for (const category of ["worker", "orchestrator", "reviewer", undefined] as const) {
             addedFragments.length = 0;
 
-            await buildSystemPromptMessages({
-                agent,
-                project,
-                conversation,
+            await buildPrompt({
                 agentCategory: category,
             });
 

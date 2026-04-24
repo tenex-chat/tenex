@@ -3,6 +3,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { listWorktrees, createWorktree } from "@/utils/git/worktree";
 import { getCurrentBranchWithFallback, readCurrentBranchFromGitDir } from "@/utils/git/initializeGitRepo";
 import { shortenConversationId } from "@/utils/conversation-id";
@@ -25,6 +26,7 @@ const tracer = trace.getTracer("tenex.execution-context");
 export async function createExecutionContext(params: {
     agent: AgentInstance;
     conversationId: string;
+    projectContext: ProjectContext;
     /**
      * Project directory (normal git repository root).
      * Example: ~/tenex/{dTag}
@@ -153,6 +155,7 @@ export async function createExecutionContext(params: {
             return {
                 agent: params.agent,
                 conversationId: params.conversationId,
+                projectContext: params.projectContext,
                 projectBasePath: params.projectBasePath,
                 workingDirectory,
                 currentBranch,

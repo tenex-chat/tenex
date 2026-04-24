@@ -24,7 +24,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import {
@@ -55,17 +54,15 @@ export interface ExecutionContextManagement {
 function createSummarizationModel(options: {
     conversationId: string;
     agent: AgentInstance;
+    projectDTag?: string;
 }): LanguageModel | undefined {
     try {
         const configName = configService.getSummarizationModelName();
-        const projectContext = isProjectContextInitialized()
-            ? getProjectContext()
-            : undefined;
         const llmService = configService.createLLMService(configName, {
             agentName: "context-summarizer",
             agentSlug: "context-summarizer",
             conversationId: options.conversationId,
-            projectId: projectContext?.project.dTag ?? projectContext?.project.tagValue("d"),
+            projectId: options.projectDTag,
         });
         return llmService.createLanguageModel();
     } catch {
@@ -170,6 +167,7 @@ function createConversationContextManagementRuntime(options: {
     conversationStore: ConversationStore;
     conversationId: string;
     agent: AgentInstance;
+    projectDTag?: string;
 }): {
     runtime: ContextManagementRuntime;
 } {
@@ -185,6 +183,7 @@ function createConversationContextManagementRuntime(options: {
     const summarizationModel = createSummarizationModel({
         conversationId: options.conversationId,
         agent: options.agent,
+        projectDTag: options.projectDTag,
     });
 
     if (settings.strategies.compaction) {
@@ -287,6 +286,7 @@ export function createExecutionContextManagement(options: {
     conversationId: string;
     agent: AgentInstance;
     conversationStore: ConversationStore;
+    projectDTag?: string;
 }): ExecutionContextManagement | undefined {
     const settings = getContextManagementSettings();
 
@@ -316,6 +316,7 @@ export function createExecutionContextManagement(options: {
         conversationStore: options.conversationStore,
         conversationId: options.conversationId,
         agent: options.agent,
+        projectDTag: options.projectDTag,
     });
     const optionalTools = runtime.optionalTools as unknown as Record<string, AISdkTool>;
 
