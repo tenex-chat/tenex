@@ -1,12 +1,11 @@
 //! Concurrency invariants defended by recent daemon fixes.
 //!
-//! Each test below targets one of the four most-recent concurrency-focused
-//! commits. These invariants cannot be observed from the bash e2e harness
-//! because they require inspecting internal state (Arc identity, atomic
-//! reservation windows, claim-token uniqueness) under true concurrent load:
+//! Each test below targets one of the concurrency-focused commits. These
+//! invariants cannot be observed from the bash e2e harness because they
+//! require inspecting internal state (atomic reservation windows,
+//! claim-token uniqueness, sequence-number resequencing) under true
+//! concurrent load:
 //!
-//! * `ProjectEventIndex` singleton sharing (commit 2a0e32a2):
-//!   [`project_event_index_is_shared_singleton_across_paths`].
 //! * RAL journal resequence under the append lock (commit d8c8238f):
 //!   [`ral_journal_resequences_concurrent_appends_under_append_lock`].
 //! * Publish-result sequence drawn from a shared `Arc<AtomicU64>` (commit
@@ -18,143 +17,37 @@
 //! The tests deliberately call only the crate's public API. None of the
 //! private `#[cfg(test)]` helpers inside individual modules are touched, so
 //! accidental widening of visibility here would be a code-review signal.
+//!
+//! The `ProjectEventIndex` singleton-sharing invariant (commit 2a0e32a2)
+//! is not exercised here. The only faithful in-process expression of that
+//! invariant would stand up the full daemon ingress/routing/gateway wiring
+//! (relay sockets, signers, filesystem state), which this integration
+//! target does not own. Instead, the contract is enforced statically by
+//! the type signatures: every subsystem that handles the index takes
+//! `Arc<Mutex<ProjectEventIndex>>` by parameter, never constructs its
+//! own. The relevant call sites are
+//! `daemon_foreground::DaemonForegroundInput::project_event_index`,
+//! `daemon_loop::DaemonLoopInput::project_event_index`,
+//! `nostr_subscription_gateway::GatewayRouteInput::project_event_index`,
+//! and `subscription_runtime::SubscriptionRuntimeInput::project_event_index`.
+//! A regression introducing a fresh `ProjectEventIndex::new()` on any of
+//! those paths would either change those signatures (a code-review signal)
+//! or leave the existing `Arc` handle unreferenced (a `cargo clippy`
+//! signal).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 use tempfile::TempDir;
 
-use tenex_daemon::nostr_classification::KIND_PROJECT;
-use tenex_daemon::nostr_event::SignedNostrEvent;
-use tenex_daemon::project_event_index::ProjectEventIndex;
 use tenex_daemon::ral_journal::{
     RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
     RalJournalReplay, RalReplayEntry, RalReplayStatus, RalTerminalSummary,
     append_ral_journal_record_with_resequence, read_ral_journal_records,
 };
 use tenex_daemon::ral_scheduler::RalScheduler;
-
-/// Builds a kind-31933 `SignedNostrEvent` carrying the supplied `d` tag. The
-/// event is not cryptographically valid — `ProjectEventIndex::upsert` only
-/// looks at `kind`, `pubkey`, `created_at`, and the `d` tag, so a stub
-/// signature is sufficient for the singleton-sharing invariant.
-fn project_stub_event(owner_pubkey: &str, d_tag: &str, created_at: u64) -> SignedNostrEvent {
-    SignedNostrEvent {
-        id: format!("event-{owner_pubkey}-{d_tag}-{created_at}"),
-        pubkey: owner_pubkey.to_string(),
-        created_at,
-        kind: KIND_PROJECT,
-        tags: vec![vec!["d".to_string(), d_tag.to_string()]],
-        content: String::new(),
-        sig: "0".repeat(128),
-    }
-}
-
-/// Defends commit 2a0e32a2. Proves that when the ingress path, the routing
-/// path, and a subscription-gateway path all hold clones of the same
-/// `Arc<Mutex<ProjectEventIndex>>`:
-///
-/// 1. They are literally the same allocation (`Arc::ptr_eq`).
-/// 2. An upsert on any one handle is immediately observable via the others
-///    — there is no second, stale copy to race against.
-///
-/// A regression where, for example, the gateway constructed its own
-/// `ProjectEventIndex::new()` instead of cloning the shared Arc would fail
-/// both the identity check and the observation check.
-#[test]
-fn project_event_index_is_shared_singleton_across_paths() {
-    let shared = Arc::new(Mutex::new(ProjectEventIndex::new()));
-
-    // Three subsystems each receive a clone of the SAME Arc, the way the
-    // daemon wires ingress, routing, and the subscription gateway after
-    // commit 2a0e32a2.
-    let ingress_handle = Arc::clone(&shared);
-    let routing_handle = Arc::clone(&shared);
-    let gateway_handle = Arc::clone(&shared);
-
-    // Identity check: all three must be the same underlying allocation.
-    assert!(
-        Arc::ptr_eq(&ingress_handle, &routing_handle),
-        "ingress and routing must share the same ProjectEventIndex Arc"
-    );
-    assert!(
-        Arc::ptr_eq(&ingress_handle, &gateway_handle),
-        "ingress and gateway must share the same ProjectEventIndex Arc"
-    );
-    assert!(
-        Arc::ptr_eq(&routing_handle, &gateway_handle),
-        "routing and gateway must share the same ProjectEventIndex Arc"
-    );
-
-    // Observation check: upserts on the ingress handle become immediately
-    // visible on routing and gateway handles without any explicit
-    // propagation.
-    let owner_pubkey = "a".repeat(64);
-    let ingress_upserted = ingress_handle
-        .lock()
-        .expect("ingress lock must not be poisoned")
-        .upsert(project_stub_event(
-            &owner_pubkey,
-            "proj-shared",
-            1_700_000_000,
-        ));
-    assert!(ingress_upserted, "first upsert must record the event");
-
-    let routing_sees = routing_handle
-        .lock()
-        .expect("routing lock must not be poisoned")
-        .get(&owner_pubkey, "proj-shared")
-        .map(|event| event.id.clone());
-    assert_eq!(
-        routing_sees.as_deref(),
-        Some(&*format!("event-{owner_pubkey}-proj-shared-1700000000")),
-        "routing must observe the event upserted via the ingress Arc"
-    );
-
-    let gateway_report = gateway_handle
-        .lock()
-        .expect("gateway lock must not be poisoned")
-        .descriptors_report("/workspace/projects");
-    assert_eq!(
-        gateway_report.descriptors.len(),
-        1,
-        "gateway descriptors_report must reflect the upsert"
-    );
-    assert_eq!(gateway_report.descriptors[0].project_d_tag, "proj-shared");
-
-    // A newer upsert via the gateway handle must be visible via ingress,
-    // closing the loop on bidirectional propagation.
-    let gateway_upserted = gateway_handle
-        .lock()
-        .expect("gateway lock must not be poisoned")
-        .upsert(project_stub_event(
-            &owner_pubkey,
-            "proj-shared",
-            1_700_000_500,
-        ));
-    assert!(
-        gateway_upserted,
-        "later created_at must replace the earlier entry"
-    );
-    let ingress_observes_newer = ingress_handle
-        .lock()
-        .expect("ingress lock must not be poisoned")
-        .get(&owner_pubkey, "proj-shared")
-        .map(|event| event.created_at);
-    assert_eq!(
-        ingress_observes_newer,
-        Some(1_700_000_500),
-        "ingress must observe the update from the gateway handle"
-    );
-
-    // Strong count is 4 (the original + three clones) iff no subsystem
-    // dropped its handle. Any regression that replaced a clone with a fresh
-    // Arc construction would leave this at 1..=3 with three other
-    // independent indexes in play.
-    assert_eq!(Arc::strong_count(&shared), 4);
-}
 
 /// Defends commit d8c8238f. `append_ral_journal_record_with_resequence`
 /// rewrites `record.sequence` to `last_sequence + 1` under the append lock,
@@ -344,37 +237,36 @@ fn allocated_replay_entry(identity: RalJournalIdentity, sequence: u64) -> RalRep
 /// `RalScheduler::claim(..., None)` mints a fresh token through
 /// `mint_claim_token`, which blends a process-global `AtomicU64` counter,
 /// a nanosecond timestamp, and per-identity inputs into a SHA-256 digest.
-/// Concurrent minting across distinct identities must always yield
-/// pairwise-distinct claim tokens.
+/// The critical case is concurrent minting *for the same identity with
+/// the same worker id*: all identity-derived hash inputs collide, so the
+/// only sources of uniqueness are the `AtomicU64` counter and the
+/// nanosecond timestamp.
 ///
-/// A regression that removed the `AtomicU64` counter or the timestamp —
-/// leaving only the identity-and-worker inputs — would collapse the token
-/// space for threads that hit the same nanosecond, producing collisions.
+/// `RalScheduler::claim` takes `&self` and does not mutate state — it only
+/// returns the `Claimed` event for the caller to persist. That means
+/// threads racing the same identity all reach `mint_claim_token` with
+/// identical inputs, so token uniqueness must come entirely from the
+/// mint-internal entropy.
+///
+/// A regression that removed the `AtomicU64` counter — leaving only the
+/// nanosecond timestamp — would collide whenever two threads on the same
+/// core hit the same nanosecond. A regression that removed both would
+/// produce hard-duplicate tokens and fail immediately.
 #[test]
 fn ral_claim_tokens_are_pairwise_unique_under_concurrent_minting() {
-    const THREAD_COUNT: usize = 16;
+    const THREAD_COUNT: usize = 32;
 
-    // Pre-allocate THREAD_COUNT distinct identities inside the scheduler
-    // state. Each thread claims a different identity; the claim call is
-    // `&self`, so the shared `Arc<RalScheduler>` is safe to share across
-    // threads.
-    let mut states = HashMap::with_capacity(THREAD_COUNT);
-    let identities: Vec<RalJournalIdentity> = (0..THREAD_COUNT)
-        .map(|index| RalJournalIdentity {
-            project_id: "project-claim".to_string(),
-            agent_pubkey: format!("{:064x}", 1u64 + index as u64),
-            conversation_id: format!("conversation-{index}"),
-            ral_number: 1,
-        })
-        .collect();
-    for (index, identity) in identities.iter().enumerate() {
-        states.insert(
-            identity.clone(),
-            allocated_replay_entry(identity.clone(), index as u64 + 1),
-        );
-    }
+    // Single identity, allocated and unclaimed. All threads contend for it.
+    let identity = RalJournalIdentity {
+        project_id: "project-claim".to_string(),
+        agent_pubkey: "a".repeat(64),
+        conversation_id: "conversation-shared".to_string(),
+        ral_number: 1,
+    };
+    let mut states = std::collections::HashMap::with_capacity(1);
+    states.insert(identity.clone(), allocated_replay_entry(identity.clone(), 1));
     let replay = RalJournalReplay {
-        last_sequence: THREAD_COUNT as u64,
+        last_sequence: 1,
         states,
     };
     let scheduler = Arc::new(RalScheduler::from_replay(&replay));
@@ -382,14 +274,19 @@ fn ral_claim_tokens_are_pairwise_unique_under_concurrent_minting() {
     let barrier = Arc::new(Barrier::new(THREAD_COUNT));
     let mut handles = Vec::with_capacity(THREAD_COUNT);
 
-    for (index, identity) in identities.into_iter().enumerate() {
+    // Every thread claims the SAME identity with the SAME worker_id, so
+    // every identity-derived input to `mint_claim_token` is byte-identical
+    // across threads. Uniqueness can only come from the AtomicU64 counter
+    // and the nanosecond timestamp inside the mint.
+    for _ in 0..THREAD_COUNT {
         let scheduler = Arc::clone(&scheduler);
         let barrier = Arc::clone(&barrier);
+        let identity = identity.clone();
         handles.push(thread::spawn(move || {
             barrier.wait();
             let claim = scheduler
-                .claim(&identity, format!("worker-{index}"), None)
-                .expect("allocated identity must be claimable");
+                .claim(&identity, "worker-shared", None)
+                .expect("allocated identity must be claimable; claim is &self");
             claim.claim_token
         }));
     }
@@ -403,7 +300,8 @@ fn ral_claim_tokens_are_pairwise_unique_under_concurrent_minting() {
     assert_eq!(
         unique.len(),
         tokens.len(),
-        "claim tokens must be pairwise distinct across concurrent minting; got {tokens:?}"
+        "claim tokens must be pairwise distinct when {THREAD_COUNT} threads \
+         mint for the same identity+worker; got {tokens:?}"
     );
 
     // Every token must have the `claim_` prefix carried by the current
