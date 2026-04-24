@@ -8,16 +8,19 @@
 #   1. Publish a kind:31933 with a FUTURE created_at (the "project update" /
 #      newer revision). Daemon ingests it into ProjectEventIndex.
 #   2. Publish a kind:31933 with an OLDER created_at for the same d-tag. Per
-#      addressable-event rules (ProjectEventIndex::upsert) the older event must
-#      be discarded — the index already holds a newer revision.
+#      addressable-event rules (ProjectEventIndex::upsert) the in-memory index
+#      discards the older event. The daemon still logs "project_updated" (the
+#      disk agent-index write happens regardless of upsert result), but the
+#      relay retains only the newer revision — the authoritative consistency
+#      check is what the relay stores, not the log count.
 #   3. Publish kind:24000 to boot the project so the daemon reaches a stable
 #      booted state.
 #
 # Expected observable outcomes:
 #   1. Daemon does NOT crash (process is still alive throughout).
 #   2. The newer 31933 is accepted: daemon logs "project_updated" for it.
-#   3. The older 31933 is ignored at the index level: daemon does NOT log a
-#      second "project_updated" for the same d-tag (the upsert is a no-op).
+#   3. Relay retains only the newer kind:31933 (addressable-event semantics:
+#      highest created_at per (author, d-tag) wins).
 #   4. Boot (kind:24000) succeeds: "project_booted" appears in daemon log
 #      and a kind:24010 is published within the periodic tick window.
 #
@@ -119,27 +122,23 @@ echo "[scenario]   older 31933 id=$older_id created_at=$ts_older"
 sleep 3
 
 post_updated_count="$(grep -c '"code":"project_updated"' "$DAEMON_DIR/daemon.log" 2>/dev/null || echo 0)"
-echo "[scenario]   daemon log project_updated count after older 31933: $post_updated_count"
+echo "[scenario]   daemon log project_updated count after older 31933: $post_updated_count (informational)"
 
-# The older event must NOT cause an additional project_updated log line — the
-# upsert is a no-op because the index already holds a newer created_at.
-if [[ "$post_updated_count" -gt "$pre_updated_count" ]]; then
-  echo "[scenario] WARN: older 31933 triggered an additional project_updated (count went $pre_updated_count -> $post_updated_count)"
-  echo "[scenario] This means the index accepted an older revision — verifying it retained the newer event via the relay..."
-
-  # Even if the daemon briefly logged the older event, the authoritative check
-  # is what the relay stores. For kind:31933 (addressable), the relay itself
-  # enforces that only the highest created_at is kept per d-tag.
-  relay_project="$(nak req -k 31933 -d "$PROJECT_D_TAG" -a "$USER_PUBKEY" \
-    --limit 1 --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-  relay_created_at="$(printf '%s' "$relay_project" | jq -r '.created_at // empty' 2>/dev/null || true)"
-  echo "[scenario]   relay stored 31933 created_at=$relay_created_at (expected=$ts_newer)"
-  if [[ "$relay_created_at" != "$ts_newer" ]]; then
-    emit_result fail "relay discarded newer 31933 in favour of older one (got created_at=$relay_created_at want=$ts_newer)"
-    exit 1
-  fi
-  echo "[scenario]   relay correctly retains the newer revision ✓"
+# The daemon's nostr_ingress always calls handle_project_nostr_event and logs
+# "project_updated" regardless of whether the ProjectEventIndex upsert is a
+# no-op (the disk write happens unconditionally). So a second project_updated
+# log line is expected. The authoritative consistency check is the relay: for
+# addressable events (kind 31933) the relay keeps only the event with the
+# highest created_at per (author, d-tag).
+relay_project="$(nak req -k 31933 -d "$PROJECT_D_TAG" -a "$USER_PUBKEY" \
+  --limit 1 --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+relay_created_at="$(printf '%s' "$relay_project" | jq -r '.created_at // empty' 2>/dev/null || true)"
+echo "[scenario]   relay stored 31933 created_at=$relay_created_at (expected=$ts_newer)"
+if [[ "$relay_created_at" != "$ts_newer" ]]; then
+  emit_result fail "relay discarded newer 31933 in favour of older one (got created_at=$relay_created_at want=$ts_newer)"
+  exit 1
 fi
+echo "[scenario]   relay correctly retains the newer revision ✓"
 
 # ── Phase 3: daemon is still alive ───────────────────────────────────────────
 echo "[scenario] phase 3: checking daemon process is still alive"
@@ -150,18 +149,40 @@ fi
 echo "[scenario]   daemon still running (pid $HARNESS_DAEMON_PID) ✓"
 
 # ── Phase 4: boot the project via kind:24000 ─────────────────────────────────
-echo "[scenario] phase 4: publishing kind:24000 to boot the project"
-boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
-boot_id="$(printf '%s' "$boot_evt" | jq -r .id)"
-echo "[scenario]   boot event id=$boot_id"
+# The older 31933 triggers an in-session subscription refresh on the daemon.
+# Publishing the boot event immediately after the refresh risks landing in
+# Khatru's (REQ-sent, addListener-pending) window and being lost. To avoid
+# this race, we use a publish-and-poll loop: publish the boot event, poll for
+# the project_booted log line, and if it doesn't appear, republish (since the
+# daemon may have reconnected and re-subscribed). This is robust to both the
+# subscription-refresh window and relay reconnect cycles.
+echo "[scenario] phase 4: polling-boot kind:24000 for project $PROJECT_D_TAG"
+boot_deadline=$(( $(date +%s) + 60 ))
+saw_boot=0
+attempt=0
+while [[ $(date +%s) -lt $boot_deadline ]]; do
+  attempt=$(( attempt + 1 ))
+  boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot-attempt-$attempt" "a=$PROJECT_A_TAG" 2>/dev/null || true)"
+  boot_id="$(printf '%s' "$boot_evt" | jq -r '.id // empty' 2>/dev/null || true)"
+  [[ -n "$boot_id" ]] && echo "[scenario]   boot attempt #$attempt id=$boot_id"
 
-echo "[scenario]   waiting 8s for boot + first periodic project-status publish"
-sleep 8
+  # Poll for project_booted up to 10s per attempt before republishing.
+  poll_deadline=$(( $(date +%s) + 10 ))
+  while [[ $(date +%s) -lt $poll_deadline ]]; do
+    if [[ -f "$DAEMON_DIR/daemon.log" ]] && \
+       grep -q '"code":"project_booted"' "$DAEMON_DIR/daemon.log" 2>/dev/null; then
+      saw_boot=1
+      break 2
+    fi
+    sleep 0.5
+  done
 
-# Assertion: daemon logged project_booted.
-if ! grep -q '"code":"project_booted"' "$DAEMON_DIR/daemon.log"; then
+  [[ $(date +%s) -ge $boot_deadline ]] && break
+done
+
+if [[ "$saw_boot" -ne 1 ]]; then
   tail -40 "$DAEMON_DIR/daemon.log" >&2 || true
-  emit_result fail "daemon.log has no project_booted line after boot event"
+  emit_result fail "daemon.log has no project_booted line after boot event (tried $attempt time(s))"
   exit 1
 fi
 if ! grep '"code":"project_booted"' "$DAEMON_DIR/daemon.log" | grep -q "$PROJECT_D_TAG"; then
@@ -169,6 +190,9 @@ if ! grep '"code":"project_booted"' "$DAEMON_DIR/daemon.log" | grep -q "$PROJECT
   exit 1
 fi
 echo "[scenario]   project_booted logged for our d-tag ✓"
+
+# Allow the periodic maintenance tick to publish the project-status (kind:24010).
+sleep 8
 
 # Assertion: daemon published kind:24010 for the project a-tag.
 events_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \

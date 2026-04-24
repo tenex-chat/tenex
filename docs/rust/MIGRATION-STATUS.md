@@ -109,20 +109,22 @@ Regenerated automatically by `scripts/e2e/run.sh` after every run. Do not edit
 between the delimiters — changes will be overwritten.
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T07:22:14Z · branch `rust-agent-worker-publishing` · commit `db9d3a66e1d7` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T08:03:04Z · branch `rust-agent-worker-publishing` · commit `dcacba34e1c9` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
-| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-24T06:53:24Z | 3s |  |
-| 11_boot_gates_dispatch.sh | pass | 2026-04-24T07:05:05Z | 13s |  |
-| 12_boot_activates_dispatch.sh | pass | 2026-04-24T07:05:24Z | 19s |  |
-| 13_boot_is_idempotent.sh | pass | 2026-04-24T07:05:39Z | 15s |  |
-| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T07:06:15Z | 36s |  |
-| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T07:10:21Z | 0s |  |
-| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-24T07:22:14Z | 0s | ral journal resequenced correctly under concurrent inbound+completion writers |
-| 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T07:10:21Z | 0s |  |
-| 36_triggering_event_dedup.sh | pass | 2026-04-24T07:10:44Z | 23s |  |
-| 37_dispatch_input_mismatch.sh | fail | 2026-04-24T07:11:12Z | 28s |  |
+| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-24T07:55:08Z | 7s |  |
+| 02_delegation_a_to_b_to_a.sh | pass | 2026-04-24T07:56:14Z | 66s |  |
+| 11_boot_gates_dispatch.sh | pass | 2026-04-24T07:56:39Z | 25s |  |
+| 12_boot_activates_dispatch.sh | pass | 2026-04-24T07:57:05Z | 26s |  |
+| 13_boot_is_idempotent.sh | pass | 2026-04-24T07:57:28Z | 23s |  |
+| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T07:58:13Z | 45s |  |
+| 15_boot_event_reordering.sh | pass | 2026-04-24T08:03:04Z | 20s | newer 31933 wins; older discarded; boot succeeded; no crash |
+| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T07:58:57Z | 0s |  |
+| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-24T07:58:59Z | 2s | ral journal resequenced correctly under concurrent inbound+completion writers |
+| 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T07:59:45Z | 46s |  |
+| 36_triggering_event_dedup.sh | fail | 2026-04-24T08:00:16Z | 31s |  |
+| 37_dispatch_input_mismatch.sh | fail | 2026-04-24T08:00:48Z | 32s |  |
 | 39_ral_number_exhaustion.sh | fail | 2026-04-24T07:11:50Z | 38s |  |
 <!-- e2e-matrix:end -->
 
