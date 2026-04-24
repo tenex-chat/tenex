@@ -142,8 +142,9 @@ boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 boot_id="$(printf '%s' "$boot_evt" | jq -r .id)"
 echo "[scenario]   boot event id=$boot_id"
 
-echo "[scenario] waiting 8s for daemon to process boot and publish kind:24010..."
-sleep 8
+echo "[scenario] waiting for daemon to process boot and publish kind:24010..."
+await_kind_event 24010 "" "$BACKEND_PUBKEY" 30 >/dev/null \
+  || _die "ASSERT: daemon never published kind:24010 within 30s"
 
 echo "[scenario] querying for kind:24010 from backend..."
 events_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
@@ -161,9 +162,6 @@ if ! printf '%s\n' "$events_24010" | jq -se --arg a "$PROJECT_A_TAG" \
   _die "ASSERT: kind:24010 events on relay don't reference our project"
 fi
 echo "[scenario]   24010 status published for our project ✓ (proves boot was recorded)"
-
-echo "[scenario] waiting 5s for project-agent membership to hydrate..."
-sleep 5
 
 _queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
 _saw_dispatch=0
