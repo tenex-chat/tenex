@@ -126,6 +126,24 @@ where
     let booted_project_descriptor_report =
         filter_booted_project_descriptors(&project_descriptor_report, &project_boot_state);
     let projects = backend_events_projects_from_descriptors(&booted_project_descriptor_report);
+    tracing::info!(
+        target: "tenex_daemon::daemon_maintenance::project_status_filter",
+        index_descriptor_count = project_descriptor_report.descriptors.len(),
+        boot_state_count = project_boot_state.projects.len(),
+        booted_descriptor_count = booted_project_descriptor_report.descriptors.len(),
+        resulting_projects = projects.len(),
+        index_coordinates = ?project_descriptor_report
+            .descriptors
+            .iter()
+            .map(|d| format!("{}:{}", &d.project_owner_pubkey[..8.min(d.project_owner_pubkey.len())], d.project_d_tag))
+            .collect::<Vec<_>>(),
+        boot_coordinates = ?project_boot_state
+            .projects
+            .iter()
+            .map(|p| format!("{}:{}", &p.project_owner_pubkey[..8.min(p.project_owner_pubkey.len())], p.project_d_tag))
+            .collect::<Vec<_>>(),
+        "project-status filter trace"
+    );
     let canceled_unbooted_project_statuses =
         cancel_pending_unbooted_project_statuses(input.daemon_dir, &project_boot_state)?;
     let mut scheduler = read_periodic_scheduler_state(input.daemon_dir)?;
