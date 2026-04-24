@@ -1,7 +1,8 @@
 import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { logger } from "@/utils/logger";
 
-type AgentResolutionProjectContext = Pick<ProjectContext, "getProjectAgentRuntimeInfo" | "agentRegistry">;
+type AgentResolutionProjectContext = Pick<ProjectContext, "agentRegistry"> &
+    Partial<Pick<ProjectContext, "getProjectAgentRuntimeInfo">>;
 
 /**
  * Result of resolving an agent slug
