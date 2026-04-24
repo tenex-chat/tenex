@@ -21,6 +21,7 @@ use tenex_daemon::daemon_loop::{
 use tenex_daemon::daemon_maintenance::DaemonMaintenanceOutcome;
 use tenex_daemon::daemon_maintenance::{NoTelegramPublisher, WithTelegramPublisher};
 use tenex_daemon::daemon_shell::DaemonShell;
+use tenex_daemon::nip46::protocol::NIP46_KIND;
 use tenex_daemon::nostr_subscription_gateway::{
     DEFAULT_RELAY_READ_TIMEOUT, NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
     NostrSubscriptionGatewaySupervisor, NostrSubscriptionObserver, NostrSubscriptionRelayError,
@@ -29,7 +30,6 @@ use tenex_daemon::nostr_subscription_gateway::{
 use tenex_daemon::nostr_subscription_tick::{
     NostrSubscriptionTickDiagnostics, NostrSubscriptionTickDispatch,
 };
-use tenex_daemon::nip46::protocol::NIP46_KIND;
 use tenex_daemon::project_agent_whitelist::ingress::WhitelistIngress;
 use tenex_daemon::project_agent_whitelist::snapshot_state::PROJECT_AGENT_SNAPSHOT_KIND;
 use tenex_daemon::project_boot_state::ProjectBootState;
@@ -157,7 +157,8 @@ impl std::error::Error for CliError {}
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    let result = match tokio::task::spawn_blocking(move || run_cli(args)).await {
+    let runtime_handle = tokio::runtime::Handle::current();
+    let result = match tokio::task::spawn_blocking(move || run_cli(args, runtime_handle)).await {
         Ok(result) => result,
         Err(error) => Err(runtime_error(format!(
             "failed to join daemon CLI task: {error}"
@@ -173,7 +174,7 @@ async fn main() {
     }
 }
 
-fn run_cli<I, S>(args: I) -> Result<String, CliError>
+fn run_cli<I, S>(args: I, runtime_handle: tokio::runtime::Handle) -> Result<String, CliError>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
@@ -188,7 +189,10 @@ where
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ProcessSignalAwareSleeper;
     let mut stop_signal = ProcessSignalStopSignal;
-    let publisher = Arc::new(Mutex::new(actual_relay_publisher(&options)?));
+    let publisher = Arc::new(Mutex::new(actual_relay_publisher(
+        &options,
+        &runtime_handle,
+    )?));
 
     let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
         .map_err(|error| runtime_error(error.to_string()))?;
@@ -637,7 +641,10 @@ fn daemon_writer_version() -> String {
     format!("tenex-daemon@{}", env!("CARGO_PKG_VERSION"))
 }
 
-fn actual_relay_publisher(options: &DaemonCliOptions) -> Result<NostrRelayPublisher, CliError> {
+fn actual_relay_publisher(
+    options: &DaemonCliOptions,
+    runtime_handle: &tokio::runtime::Handle,
+) -> Result<NostrRelayPublisher, CliError> {
     let (tenex_base_dir, _) = resolve_daemon_paths(options)?;
     let backend_config =
         read_backend_config(&tenex_base_dir).map_err(|error| runtime_error(error.to_string()))?;
@@ -649,10 +656,12 @@ fn actual_relay_publisher(options: &DaemonCliOptions) -> Result<NostrRelayPublis
     let auth_signer = backend_config
         .backend_signer()
         .map_err(|error| runtime_error(error.to_string()))?;
-    Ok(NostrRelayPublisher::with_auth_signer(
+    NostrRelayPublisher::spawn_on_runtime_with_auth_signer(
         relay_config,
         auth_signer,
-    ))
+        runtime_handle.clone(),
+    )
+    .map_err(|error| runtime_error(error.to_string()))
 }
 
 fn validate_iterations(options: &DaemonCliOptions) -> Result<(), CliError> {

@@ -238,8 +238,20 @@ impl fmt::Display for CliError {
 
 impl std::error::Error for CliError {}
 
-fn main() {
-    match run_cli(env::args().skip(1)) {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let runtime_handle = tokio::runtime::Handle::current();
+    let result =
+        match tokio::task::spawn_blocking(move || run_cli_with_runtime(args, runtime_handle)).await
+        {
+            Ok(result) => result,
+            Err(error) => Err(runtime_error(format!(
+                "failed to join daemon-control CLI task: {error}"
+            ))),
+        };
+
+    match result {
         Ok(output) => println!("{output}"),
         Err(error) => {
             eprintln!("{error}");
@@ -254,6 +266,17 @@ where
     S: Into<String>,
 {
     let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| runtime_error(error.to_string()))?;
+    run_cli_with_runtime(args, runtime.handle().clone())
+}
+
+fn run_cli_with_runtime(
+    args: Vec<String>,
+    runtime_handle: tokio::runtime::Handle,
+) -> Result<String, CliError> {
     let options = parse_daemon_control_args(&args)?;
 
     match options.command {
@@ -298,7 +321,7 @@ where
                 .map_err(|error| runtime_error(error.to_string()))
         }
         DaemonControlCommand::DaemonForeground => {
-            let diagnostics = run_daemon_foreground(&options)?;
+            let diagnostics = run_daemon_foreground(&options, &runtime_handle)?;
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
@@ -506,6 +529,7 @@ fn run_daemon_maintenance(
 
 fn run_daemon_foreground(
     options: &DaemonControlCliOptions,
+    runtime_handle: &tokio::runtime::Handle,
 ) -> Result<DaemonForegroundDiagnostics, CliError> {
     let iterations = options
         .iterations
@@ -521,9 +545,10 @@ fn run_daemon_foreground(
         Duration::from_millis(DEFAULT_FOREGROUND_RELAY_TIMEOUT_MS),
     )
     .map_err(|error| runtime_error(error.to_string()))?;
-    let publisher = std::sync::Arc::new(std::sync::Mutex::new(NostrRelayPublisher::new(
-        relay_config,
-    )));
+    let publisher = std::sync::Arc::new(std::sync::Mutex::new(
+        NostrRelayPublisher::spawn_on_runtime(relay_config, runtime_handle.clone())
+            .map_err(|error| runtime_error(error.to_string()))?,
+    ));
     let shell = DaemonShell::new(&options.daemon_dir);
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
