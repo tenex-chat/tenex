@@ -288,9 +288,7 @@ where
 
     let lease_sequence = next_sequence(dispatch_state.last_sequence, "dispatch queue")?;
     let (active_workers, active_dispatches) = {
-        let guard = runtime_state
-            .lock()
-            .expect("runtime state mutex poisoned");
+        let guard = runtime_state.lock().expect("runtime state mutex poisoned");
         (
             guard.to_active_worker_concurrency_snapshots(),
             guard.to_active_dispatch_concurrency_snapshots(),
@@ -330,9 +328,7 @@ where
     let launch_input = read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
 
     let started = {
-        let mut runtime_guard = runtime_state
-            .lock()
-            .expect("runtime state mutex poisoned");
+        let mut runtime_guard = runtime_state.lock().expect("runtime state mutex poisoned");
         start_admitted_worker_dispatch(
             spawner,
             StartAdmittedWorkerDispatchInput {
@@ -1332,7 +1328,13 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_none()
+        );
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1379,7 +1381,13 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_none()
+        );
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1447,7 +1455,13 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_none()
+        );
 
         release_worker_launch_locks(locks).expect("locks must release");
         cleanup_temp_dir(daemon_dir);
@@ -1537,7 +1551,13 @@ mod tests {
                 .iter()
                 .any(|message| message["type"] == "execute")
         );
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_none()
+        );
 
         cleanup_temp_dir(daemon_dir);
     }

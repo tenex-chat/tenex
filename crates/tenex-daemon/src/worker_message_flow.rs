@@ -221,7 +221,9 @@ where
                         message_type: message_plan.metadata.message_type.clone(),
                     })?;
             ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
-            let result_sequence = publish.result_sequence_source.fetch_add(1, Ordering::Relaxed);
+            let result_sequence = publish
+                .result_sequence_source
+                .fetch_add(1, Ordering::Relaxed);
             let outcome = handle_worker_publish_request(
                 session,
                 WorkerPublishFlowInput {
@@ -895,7 +897,13 @@ mod tests {
                 .expect("pending publish record must read")
                 .is_some()
         );
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_some());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_some()
+        );
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -1057,7 +1065,13 @@ mod tests {
             error,
             WorkerMessageFlowError::MissingTerminalContext { .. }
         ));
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_some());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_some()
+        );
         assert!(session.sent_messages.is_empty());
         assert!(!daemon_dir.exists());
     }

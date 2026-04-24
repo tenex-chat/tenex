@@ -13,9 +13,9 @@ use crate::daemon_loop::{
     run_daemon_tick_loop_from_filesystem, run_daemon_tick_loop_until_stopped_from_filesystem,
     run_daemon_tick_loop_until_stopped_from_filesystem_with_worker,
 };
-use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
 use crate::daemon_maintenance::TelegramMaintenancePublisher;
 use crate::daemon_shell::{DaemonShell, DaemonShellError, DaemonShellStopMode};
+use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
 use crate::process_liveness::ProcessLivenessProbe;
 use crate::project_boot_state::ProjectBootState;
 use crate::project_event_index::ProjectEventIndex;
@@ -370,7 +370,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_runtime_state::new_shared_worker_runtime_state;
     use crate::backend_config::backend_config_path;
     use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
@@ -403,6 +402,7 @@ mod tests {
         AGENT_WORKER_STREAM_BATCH_MS, AgentWorkerExecutionFlags, WorkerProtocolConfig,
         encode_agent_worker_protocol_frame,
     };
+    use crate::worker_runtime_state::new_shared_worker_runtime_state;
     use crate::worker_session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};

@@ -251,10 +251,10 @@ where
     // after and the OS reaps them.
     drop(whitelist_wiring);
 
-    let diagnostics = diagnostics_result?;
+    diagnostics_result?;
     emit_shutdown_status("shutdown complete");
     tracing::info!("tenex-daemon stopped");
-    serde_json::to_string_pretty(&diagnostics).map_err(|error| runtime_error(error.to_string()))
+    Ok(String::new())
 }
 
 /// Wiring for the NIP-46 + kind-14199 whitelist reconciler.

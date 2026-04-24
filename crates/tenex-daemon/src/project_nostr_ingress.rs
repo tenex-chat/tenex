@@ -295,8 +295,7 @@ mod tests {
 
         let index_path = base.join("agents").join("index.json");
         assert!(index_path.exists());
-        let json: Value =
-            serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
+        let json: Value = serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
         assert!(json["bySlug"].is_object());
         assert!(json["byEventId"].is_object());
         let by_project = &json["byProject"]["my-project"];

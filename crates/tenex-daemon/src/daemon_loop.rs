@@ -424,10 +424,7 @@ where
     // up their completions via drain_finished().
     let mut admitted_this_tick = 0usize;
     let final_not_admitted: DaemonWorkerRuntimeOutcome = loop {
-        let correlation_id = format!(
-            "{}:admission-{}",
-            worker.correlation_id, admitted_this_tick
-        );
+        let correlation_id = format!("{}:admission-{}", worker.correlation_id, admitted_this_tick);
         let admission = admit_one_worker_dispatch_from_filesystem(
             spawner,
             daemon_dir,
@@ -449,14 +446,14 @@ where
                 let daemon_dir_owned: PathBuf = daemon_dir.to_path_buf();
                 let runtime_state_clone = worker.runtime_state.clone();
                 let publisher_for_thread = Arc::clone(publisher);
-                let publish_ctx = worker.publish_result_sequence.as_ref().map(
-                    |source| WorkerMessagePublishContext {
+                let publish_ctx = worker.publish_result_sequence.as_ref().map(|source| {
+                    WorkerMessagePublishContext {
                         accepted_at: now_ms,
                         result_sequence_source: source.clone(),
                         result_timestamp: now_ms,
                         telegram_egress: None,
-                    },
-                );
+                    }
+                });
                 let telegram_egress_clone = telegram_egress.clone();
                 let operations_status_tenex_base_dir: PathBuf = tenex_base_dir.to_path_buf();
                 let operations_status_pubkeys = operations_status_project_owner_pubkeys.clone();
@@ -469,20 +466,18 @@ where
                 let worker_id_for_thread = worker_id.clone();
                 let handle = std::thread::spawn(move || {
                     let publisher_for_live = Arc::clone(&publisher_for_thread);
-                    let mut live_publish_maintenance =
-                        move |daemon_dir: &Path, now: u64| {
-                            let mut guard = publisher_for_live
-                                .lock()
-                                .expect("publisher mutex poisoned");
-                            maintain_publish_runtime(PublishRuntimeMaintainInput {
-                                daemon_dir,
-                                publisher: &mut *guard,
-                                now,
-                                retry_policy,
-                            })
-                            .map(|_| ())
-                            .map_err(|source| source.to_string())
-                        };
+                    let mut live_publish_maintenance = move |daemon_dir: &Path, now: u64| {
+                        let mut guard =
+                            publisher_for_live.lock().expect("publisher mutex poisoned");
+                        maintain_publish_runtime(PublishRuntimeMaintainInput {
+                            daemon_dir,
+                            publisher: &mut *guard,
+                            now,
+                            retry_policy,
+                        })
+                        .map(|_| ())
+                        .map_err(|source| source.to_string())
+                    };
                     let operations_status = DaemonWorkerOperationsStatusRuntimeInput {
                         tenex_base_dir: operations_status_tenex_base_dir.as_path(),
                         project_owner_pubkeys: &operations_status_pubkeys,
@@ -588,12 +583,8 @@ fn log_daemon_tick_publish_summary(
         .descriptors
         .len();
     let project_status_count = maintenance.backend_events.tick.project_statuses.len();
-    let worker_outcome: Option<Vec<&'static str>> = worker_runtime.map(|outcomes| {
-        outcomes
-            .iter()
-            .map(worker_runtime_outcome_label)
-            .collect()
-    });
+    let worker_outcome: Option<Vec<&'static str>> =
+        worker_runtime.map(|outcomes| outcomes.iter().map(worker_runtime_outcome_label).collect());
     let publish_pending_before = publish_outbox.diagnostics_before.pending_count;
     let publish_failed_before = publish_outbox.diagnostics_before.failed_count;
     let publish_requeued_count = publish_outbox.requeued.len();
@@ -973,7 +964,6 @@ fn project_boot_state_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_runtime_state::new_shared_worker_runtime_state;
     use crate::backend_config::backend_config_path;
     use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::dispatch_queue::{
@@ -1003,6 +993,7 @@ mod tests {
         AGENT_WORKER_STREAM_BATCH_MS, AgentWorkerExecutionFlags, WorkerProtocolConfig,
         encode_agent_worker_protocol_frame,
     };
+    use crate::worker_runtime_state::new_shared_worker_runtime_state;
     use crate::worker_session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
@@ -1011,8 +1002,8 @@ mod tests {
     use std::fmt;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Barrier;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1518,10 +1509,12 @@ mod tests {
         .expect("tick must succeed; admission is synchronous and session errors detach");
 
         // Tick admitted the session (and reports NoQueuedDispatches next).
-        assert!(outcome.worker_runtime.iter().any(|o| matches!(
-            o,
-            DaemonWorkerRuntimeOutcome::SessionAdmitted { .. }
-        )));
+        assert!(
+            outcome
+                .worker_runtime
+                .iter()
+                .any(|o| matches!(o, DaemonWorkerRuntimeOutcome::SessionAdmitted { .. }))
+        );
         // The spawned session thread errors out asynchronously; join it and
         // assert the failure is reported.
         let session_outcomes = session_registry.join_all();
@@ -2064,11 +2057,7 @@ mod tests {
     }
 
     impl BarrierGatedSession {
-        fn new(
-            worker_id: &'static str,
-            barrier: Arc<Barrier>,
-            frames: Vec<Vec<u8>>,
-        ) -> Self {
+        fn new(worker_id: &'static str, barrier: Arc<Barrier>, frames: Vec<Vec<u8>>) -> Self {
             Self {
                 worker_id,
                 barrier,

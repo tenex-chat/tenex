@@ -509,8 +509,7 @@ mod tests {
     };
     use crate::worker_protocol::{WorkerProtocolFixture, encode_agent_worker_protocol_frame};
     use crate::worker_runtime_state::{
-        SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch,
-        new_shared_worker_runtime_state,
+        SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch, new_shared_worker_runtime_state,
     };
     use serde_json::{Value, json};
     use std::collections::VecDeque;
@@ -635,7 +634,13 @@ mod tests {
             outcome.final_reason,
             WorkerSessionLoopFinalReason::TerminalResultHandled
         );
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_none()
+        );
         assert!(worker.sent_messages.is_empty());
 
         cleanup_temp_dir(daemon_dir);
@@ -654,8 +659,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let runtime_state =
-            runtime_state_for("worker-alpha", identity_with_agent(&fixture.pubkey));
+        let runtime_state = runtime_state_for("worker-alpha", identity_with_agent(&fixture.pubkey));
         let maintenance_calls = std::cell::Cell::new(0_u64);
         let mut live_publish_maintenance = |daemon_dir_seen: &Path, now_seen: u64| {
             assert_eq!(daemon_dir_seen, daemon_dir.as_path());
@@ -673,9 +677,9 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence_source: std::sync::Arc::new(
-                        std::sync::atomic::AtomicU64::new(900),
-                    ),
+                    result_sequence_source: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+                        900,
+                    )),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
@@ -696,7 +700,13 @@ mod tests {
         assert_eq!(worker.sent_messages[0]["type"], "publish_result");
         assert_eq!(worker.sent_messages[0]["status"], "accepted");
         assert_eq!(maintenance_calls.get(), 1);
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_some());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_some()
+        );
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -732,9 +742,9 @@ mod tests {
                 observed_at: 1_710_000_403_000,
                 publish: Some(WorkerMessagePublishContext {
                     accepted_at: 1_710_001_000_100,
-                    result_sequence_source: std::sync::Arc::new(
-                        std::sync::atomic::AtomicU64::new(900),
-                    ),
+                    result_sequence_source: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+                        900,
+                    )),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
                 }),
@@ -765,7 +775,13 @@ mod tests {
                 .expect("pending outbox must read")
                 .is_some()
         );
-        assert!(runtime_state.lock().unwrap().get_worker("worker-alpha").is_none());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_none()
+        );
 
         let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
         let entry = ral
@@ -1018,7 +1034,13 @@ mod tests {
             outcome.final_reason,
             WorkerSessionLoopFinalReason::TerminalResultHandled
         );
-        assert!(runtime_state.lock().unwrap().get_worker(&worker_id).is_none());
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker(&worker_id)
+                .is_none()
+        );
 
         let status = worker
             .process
@@ -1057,7 +1079,10 @@ mod tests {
         }
     }
 
-    fn runtime_state_for(worker_id: &str, identity: RalJournalIdentity) -> SharedWorkerRuntimeState {
+    fn runtime_state_for(
+        worker_id: &str,
+        identity: RalJournalIdentity,
+    ) -> SharedWorkerRuntimeState {
         let state = new_shared_worker_runtime_state();
         state
             .lock()

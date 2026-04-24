@@ -368,8 +368,7 @@ fn inspect_caches(options: &DaemonControlCliOptions) -> Result<CachesDiagnostics
 fn inspect_nostr_subscription_plan(
     options: &DaemonControlCliOptions,
 ) -> Result<NostrSubscriptionPlanDiagnostics, CliError> {
-    let project_event_index =
-        std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
         tenex_base_dir: &options.tenex_base_dir,
         since: options.since,
@@ -489,8 +488,7 @@ fn run_backend_events_periodic_tick(
 fn run_daemon_maintenance(
     options: &DaemonControlCliOptions,
 ) -> Result<DaemonMaintenanceDiagnostics, CliError> {
-    let project_event_index =
-        std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
     let diagnostics = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
         tenex_base_dir: &options.tenex_base_dir,
         daemon_dir: &options.daemon_dir,
@@ -524,12 +522,13 @@ fn run_daemon_foreground(
         Duration::from_millis(DEFAULT_FOREGROUND_RELAY_TIMEOUT_MS),
     )
     .map_err(|error| runtime_error(error.to_string()))?;
-    let publisher = std::sync::Arc::new(std::sync::Mutex::new(NostrRelayPublisher::new(relay_config)));
+    let publisher = std::sync::Arc::new(std::sync::Mutex::new(NostrRelayPublisher::new(
+        relay_config,
+    )));
     let shell = DaemonShell::new(&options.daemon_dir);
     let mut clock = SystemDaemonMaintenanceLoopClock;
     let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
-    let project_event_index =
-        std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
+    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
     let report = run_daemon_foreground_from_filesystem(
         &shell,
         DaemonForegroundInput {

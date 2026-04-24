@@ -44,10 +44,7 @@ impl WorkerSessionRegistry {
     /// returns true, converting each into its `DaemonWorkerRuntimeOutcome`.
     /// Threads still running stay in the registry.
     pub fn drain_finished(&self) -> Vec<DaemonWorkerRuntimeOutcome> {
-        let mut guard = self
-            .inner
-            .lock()
-            .expect("session registry mutex poisoned");
+        let mut guard = self.inner.lock().expect("session registry mutex poisoned");
         let (finished, still_running): (Vec<_>, Vec<_>) = std::mem::take(&mut *guard)
             .into_iter()
             .partition(|session| session.handle.is_finished());
@@ -71,10 +68,7 @@ impl WorkerSessionRegistry {
     /// left running after the daemon stops.
     pub fn join_all(&self) -> Vec<DaemonWorkerRuntimeOutcome> {
         let sessions: Vec<SessionJoinHandle> = {
-            let mut guard = self
-                .inner
-                .lock()
-                .expect("session registry mutex poisoned");
+            let mut guard = self.inner.lock().expect("session registry mutex poisoned");
             std::mem::take(&mut *guard)
         };
         sessions

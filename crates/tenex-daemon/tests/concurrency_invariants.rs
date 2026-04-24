@@ -264,7 +264,10 @@ fn ral_claim_tokens_are_pairwise_unique_under_concurrent_minting() {
         ral_number: 1,
     };
     let mut states = std::collections::HashMap::with_capacity(1);
-    states.insert(identity.clone(), allocated_replay_entry(identity.clone(), 1));
+    states.insert(
+        identity.clone(),
+        allocated_replay_entry(identity.clone(), 1),
+    );
     let replay = RalJournalReplay {
         last_sequence: 1,
         states,

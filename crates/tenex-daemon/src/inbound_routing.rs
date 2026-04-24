@@ -14,8 +14,7 @@ use crate::project_status_agent_sources::{
     read_project_status_agent_sources,
 };
 use crate::project_status_descriptors::{
-    ProjectStatusDescriptorError, ProjectStatusDescriptorReport,
-    ProjectStatusDescriptorSkippedFile,
+    ProjectStatusDescriptorError, ProjectStatusDescriptorReport, ProjectStatusDescriptorSkippedFile,
 };
 use crate::routing::extract_project_d_tag_from_address;
 

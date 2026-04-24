@@ -265,8 +265,7 @@ impl AgentWorkerProcess {
             .take()
             .ok_or(WorkerProcessError::MissingPipe("stderr"))?;
 
-        let channel =
-            AgentWorkerChannel::new(Box::new(stdin), Box::new(stdout), Box::new(stderr));
+        let channel = AgentWorkerChannel::new(Box::new(stdin), Box::new(stdout), Box::new(stderr));
         let mut process = AgentWorkerProcess { child, channel };
 
         let ready = match process.channel.read_ready(config.boot_timeout) {
@@ -553,8 +552,8 @@ mod tests {
     };
     use crate::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
     use crate::worker_protocol::{
-        AGENT_WORKER_PROTOCOL_ENCODING, AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
-        AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolFixture,
+        AGENT_WORKER_PROTOCOL_ENCODING, AGENT_WORKER_PROTOCOL_VERSION,
+        AGENT_WORKER_STREAM_BATCH_MAX_BYTES, AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolFixture,
     };
     use serde_json::json;
     use std::fs;
@@ -2047,8 +2046,7 @@ mod tests {
                 io::pipe().expect("stdin pipe must open");
             let (daemon_stdout_reader, worker_stdout_writer) =
                 io::pipe().expect("stdout pipe must open");
-            let (daemon_stderr_reader, _stderr_writer) =
-                io::pipe().expect("stderr pipe must open");
+            let (daemon_stderr_reader, _stderr_writer) = io::pipe().expect("stderr pipe must open");
 
             let worker = thread::spawn(move || {
                 run_in_process_protocol_probe(worker_stdin_reader, worker_stdout_writer)

@@ -210,9 +210,7 @@ mod tests {
         index.upsert(project_event("2", &owner_a, "alpha", 1_000, &[]));
         index.upsert(project_event("3", &owner_a, "beta", 1_000, &[]));
 
-        let descriptors = index
-            .descriptors_report("/workspace/projects")
-            .descriptors;
+        let descriptors = index.descriptors_report("/workspace/projects").descriptors;
         let coords: Vec<_> = descriptors
             .iter()
             .map(|d| (d.project_owner_pubkey.clone(), d.project_d_tag.clone()))
@@ -235,9 +233,7 @@ mod tests {
         let agent = "d".repeat(64);
         index.upsert(project_event("1", &owner, "demo", 1, &[&manager, &agent]));
 
-        let descriptor = &index
-            .descriptors_report("/workspace/projects")
-            .descriptors[0];
+        let descriptor = &index.descriptors_report("/workspace/projects").descriptors[0];
         assert_eq!(
             descriptor.project_manager_pubkey.as_deref(),
             Some(manager.as_str())

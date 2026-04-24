@@ -21,9 +21,7 @@ use crate::periodic_tick_state::{
 };
 use crate::project_boot_state::{BootedProjectsState, is_project_booted};
 use crate::project_event_index::ProjectEventIndex;
-use crate::project_status_descriptors::{
-    ProjectStatusDescriptor, ProjectStatusDescriptorReport,
-};
+use crate::project_status_descriptors::{ProjectStatusDescriptor, ProjectStatusDescriptorReport};
 use crate::publish_outbox::{
     PublishOutboxCancellationOutcome, PublishOutboxError,
     cancel_pending_publish_outbox_records_matching,
