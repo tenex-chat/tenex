@@ -978,11 +978,15 @@ mod tests {
     use crate::daemon_maintenance::NoTelegramPublisher;
     use crate::dispatch_queue::{
         DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
-        append_dispatch_queue_record, build_dispatch_queue_record,
+        append_dispatch_queue_record, build_dispatch_queue_record, replay_dispatch_queue,
     };
     use crate::nostr_event::SignedNostrEvent;
     use crate::publish_outbox::{
         PublishRelayError, PublishRelayReport, PublishRelayResult, inspect_publish_outbox,
+    };
+    use crate::ral_journal::{
+        RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
+        RalReplayStatus, append_ral_journal_record, replay_ral_journal,
     };
     use crate::ral_lock::build_ral_lock_info;
     use crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason;
@@ -997,7 +1001,9 @@ mod tests {
         AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,
         AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
         AGENT_WORKER_STREAM_BATCH_MS, AgentWorkerExecutionFlags, WorkerProtocolConfig,
+        encode_agent_worker_protocol_frame,
     };
+    use crate::worker_session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
     use std::collections::VecDeque;
@@ -1006,6 +1012,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Barrier;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1453,8 +1460,27 @@ mod tests {
     #[test]
     fn filesystem_tick_with_worker_drains_publish_outbox_after_worker_runtime_error() {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
-        seed_queued_dispatch(&fixture.daemon_dir);
-        seed_dispatch_input(&fixture.daemon_dir);
+        let scenario = DispatchScenario {
+            project_id: "project-alpha",
+            agent_pubkey: TEST_AGENT_PUBKEY.to_string(),
+            conversation_id: "conversation-alpha",
+            ral_number: 7,
+            dispatch_id: "dispatch-alpha",
+            dispatch_sequence: 1,
+            dispatch_timestamp: 1_710_000_700_001,
+            correlation_id: "queue-dispatch-alpha",
+            triggering_event_id: "event-alpha",
+            claim_token: "claim-alpha",
+            worker_id: "worker-alpha",
+            ral_alloc_sequence: 1,
+            ral_alloc_timestamp: 1_710_000_700_001,
+            ral_alloc_correlation_id: "ral-alloc-alpha",
+            ral_claim_sequence: 2,
+            ral_claim_timestamp: 1_710_000_700_002,
+            ral_claim_correlation_id: "ral-claim-alpha",
+        };
+        seed_queued_dispatch_for(&fixture.daemon_dir, &scenario);
+        seed_dispatch_input_for(&fixture.daemon_dir, &scenario);
         let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = ProtocolErrorSpawner::default();
@@ -1781,90 +1807,6 @@ mod tests {
         }
     }
 
-    fn seed_queued_dispatch(daemon_dir: &Path) {
-        append_dispatch_queue_record(
-            daemon_dir,
-            &build_dispatch_queue_record(DispatchQueueRecordParams {
-                sequence: 1,
-                timestamp: 1_710_000_700_001,
-                correlation_id: "queue-dispatch-alpha".to_string(),
-                dispatch_id: "dispatch-alpha".to_string(),
-                ral: DispatchRalIdentity {
-                    project_id: "project-alpha".to_string(),
-                    agent_pubkey: TEST_AGENT_PUBKEY.to_string(),
-                    conversation_id: "conversation-alpha".to_string(),
-                    ral_number: 7,
-                },
-                triggering_event_id: "event-alpha".to_string(),
-                claim_token: "claim-alpha".to_string(),
-                status: DispatchQueueStatus::Queued,
-            }),
-        )
-        .expect("queued dispatch must append");
-    }
-
-    fn seed_dispatch_input(daemon_dir: &Path) {
-        write_create_or_compare_equal(
-            daemon_dir,
-            &WorkerDispatchInput::from_execute_fields(WorkerDispatchInputFromExecuteFields {
-                dispatch_id: "dispatch-alpha".to_string(),
-                source_type: WorkerDispatchInputSourceType::Nostr,
-                writer: WorkerDispatchInputWriterMetadata {
-                    writer: "daemon_loop_test".to_string(),
-                    writer_version: "daemon-loop-test@0".to_string(),
-                    timestamp: 1_710_000_700_030,
-                },
-                execute_fields: WorkerDispatchExecuteFields {
-                    worker_id: Some("worker-alpha".to_string()),
-                    triggering_event_id: "event-alpha".to_string(),
-                    project_base_path: "/sidecar/repo".to_string(),
-                    metadata_path: "/sidecar/repo/.tenex/project.json".to_string(),
-                    triggering_envelope: triggering_envelope("event-alpha"),
-                    execution_flags: AgentWorkerExecutionFlags {
-                        is_delegation_completion: false,
-                        has_pending_delegations: false,
-                        pending_delegation_ids: Vec::new(),
-                        debug: false,
-                    },
-                },
-                source_metadata: Some(json!({ "eventId": "event-alpha" })),
-            }),
-        )
-        .expect("dispatch input sidecar must write");
-    }
-
-    fn triggering_envelope(event_id: &str) -> Value {
-        json!({
-            "transport": "nostr",
-            "principal": {
-                "id": "nostr:owner-a",
-                "transport": "nostr",
-                "kind": "human"
-            },
-            "channel": {
-                "id": "conversation:conversation-alpha",
-                "transport": "nostr",
-                "kind": "conversation"
-            },
-            "message": {
-                "id": event_id,
-                "transport": "nostr",
-                "nativeId": event_id
-            },
-            "recipients": [
-                {
-                    "id": "nostr:agent-a",
-                    "transport": "nostr",
-                    "kind": "agent"
-                }
-            ],
-            "content": "hello",
-            "occurredAt": 1_710_001_000_000u64,
-            "capabilities": ["reply"],
-            "metadata": {}
-        })
-    }
-
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1881,5 +1823,523 @@ mod tests {
         let keypair = Keypair::from_secret_key(&secp, &secret);
         let (xonly, _) = keypair.x_only_public_key();
         hex::encode(xonly.serialize())
+    }
+
+    /// One independent `(RAL identity, dispatch, worker)` tuple used to seed
+    /// the filesystem fixtures for a concurrent-session test.
+    #[derive(Debug, Clone)]
+    struct DispatchScenario {
+        project_id: &'static str,
+        agent_pubkey: String,
+        conversation_id: &'static str,
+        ral_number: u64,
+        dispatch_id: &'static str,
+        dispatch_sequence: u64,
+        dispatch_timestamp: u64,
+        correlation_id: &'static str,
+        triggering_event_id: &'static str,
+        claim_token: &'static str,
+        worker_id: &'static str,
+        ral_alloc_sequence: u64,
+        ral_alloc_timestamp: u64,
+        ral_alloc_correlation_id: &'static str,
+        ral_claim_sequence: u64,
+        ral_claim_timestamp: u64,
+        ral_claim_correlation_id: &'static str,
+    }
+
+    impl DispatchScenario {
+        fn ral_identity(&self) -> RalJournalIdentity {
+            RalJournalIdentity {
+                project_id: self.project_id.to_string(),
+                agent_pubkey: self.agent_pubkey.clone(),
+                conversation_id: self.conversation_id.to_string(),
+                ral_number: self.ral_number,
+            }
+        }
+    }
+
+    fn seed_queued_dispatch_for(daemon_dir: &Path, scenario: &DispatchScenario) {
+        append_dispatch_queue_record(
+            daemon_dir,
+            &build_dispatch_queue_record(DispatchQueueRecordParams {
+                sequence: scenario.dispatch_sequence,
+                timestamp: scenario.dispatch_timestamp,
+                correlation_id: scenario.correlation_id.to_string(),
+                dispatch_id: scenario.dispatch_id.to_string(),
+                ral: DispatchRalIdentity {
+                    project_id: scenario.project_id.to_string(),
+                    agent_pubkey: scenario.agent_pubkey.clone(),
+                    conversation_id: scenario.conversation_id.to_string(),
+                    ral_number: scenario.ral_number,
+                },
+                triggering_event_id: scenario.triggering_event_id.to_string(),
+                claim_token: scenario.claim_token.to_string(),
+                status: DispatchQueueStatus::Queued,
+            }),
+        )
+        .expect("queued dispatch must append");
+    }
+
+    fn seed_dispatch_input_for(daemon_dir: &Path, scenario: &DispatchScenario) {
+        write_create_or_compare_equal(
+            daemon_dir,
+            &WorkerDispatchInput::from_execute_fields(WorkerDispatchInputFromExecuteFields {
+                dispatch_id: scenario.dispatch_id.to_string(),
+                source_type: WorkerDispatchInputSourceType::Nostr,
+                writer: WorkerDispatchInputWriterMetadata {
+                    writer: "daemon_loop_test".to_string(),
+                    writer_version: "daemon-loop-test@0".to_string(),
+                    timestamp: scenario.dispatch_timestamp + 29,
+                },
+                execute_fields: WorkerDispatchExecuteFields {
+                    worker_id: Some(scenario.worker_id.to_string()),
+                    triggering_event_id: scenario.triggering_event_id.to_string(),
+                    project_base_path: "/sidecar/repo".to_string(),
+                    metadata_path: "/sidecar/repo/.tenex/project.json".to_string(),
+                    triggering_envelope: triggering_envelope_for(scenario),
+                    execution_flags: AgentWorkerExecutionFlags {
+                        is_delegation_completion: false,
+                        has_pending_delegations: false,
+                        pending_delegation_ids: Vec::new(),
+                        debug: false,
+                    },
+                },
+                source_metadata: Some(json!({ "eventId": scenario.triggering_event_id })),
+            }),
+        )
+        .expect("dispatch input sidecar must write");
+    }
+
+    fn seed_claimed_ral_for(daemon_dir: &Path, scenario: &DispatchScenario) {
+        append_ral_journal_record(
+            daemon_dir,
+            &RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "daemon-loop-test@0",
+                scenario.ral_alloc_sequence,
+                scenario.ral_alloc_timestamp,
+                scenario.ral_alloc_correlation_id,
+                RalJournalEvent::Allocated {
+                    identity: scenario.ral_identity(),
+                    triggering_event_id: Some(scenario.triggering_event_id.to_string()),
+                },
+            ),
+        )
+        .expect("allocated RAL record must append");
+        append_ral_journal_record(
+            daemon_dir,
+            &RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "daemon-loop-test@0",
+                scenario.ral_claim_sequence,
+                scenario.ral_claim_timestamp,
+                scenario.ral_claim_correlation_id,
+                RalJournalEvent::Claimed {
+                    identity: scenario.ral_identity(),
+                    worker_id: scenario.worker_id.to_string(),
+                    claim_token: scenario.claim_token.to_string(),
+                },
+            ),
+        )
+        .expect("claimed RAL record must append");
+    }
+
+    fn triggering_envelope_for(scenario: &DispatchScenario) -> Value {
+        let native_id = scenario.triggering_event_id;
+        json!({
+            "transport": "nostr",
+            "principal": {
+                "id": format!("nostr:owner-{}", scenario.project_id),
+                "transport": "nostr",
+                "kind": "human"
+            },
+            "channel": {
+                "id": format!("conversation:{}", scenario.conversation_id),
+                "transport": "nostr",
+                "kind": "conversation"
+            },
+            "message": {
+                "id": native_id,
+                "transport": "nostr",
+                "nativeId": native_id
+            },
+            "recipients": [
+                {
+                    "id": format!("nostr:agent-{}", scenario.agent_pubkey),
+                    "transport": "nostr",
+                    "kind": "agent"
+                }
+            ],
+            "content": "hello",
+            "occurredAt": 1_710_001_000_000u64,
+            "capabilities": ["reply"],
+            "metadata": {}
+        })
+    }
+
+    fn heartbeat_message_for(scenario: &DispatchScenario) -> Value {
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "heartbeat",
+            "correlationId": format!("{}-heartbeat", scenario.worker_id),
+            "sequence": 20,
+            "timestamp": 1_710_001_000_100_u64,
+            "projectId": scenario.project_id,
+            "agentPubkey": scenario.agent_pubkey,
+            "conversationId": scenario.conversation_id,
+            "ralNumber": scenario.ral_number,
+            "state": "streaming",
+            "activeToolCount": 0,
+            "accumulatedRuntimeMs": 700_u64,
+        })
+    }
+
+    fn complete_message_for(scenario: &DispatchScenario) -> Value {
+        json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "complete",
+            "correlationId": format!("{}-complete", scenario.worker_id),
+            "sequence": 21,
+            "timestamp": 1_710_001_000_200_u64,
+            "projectId": scenario.project_id,
+            "agentPubkey": scenario.agent_pubkey,
+            "conversationId": scenario.conversation_id,
+            "ralNumber": scenario.ral_number,
+            "finalRalState": "completed",
+            "publishedUserVisibleEvent": true,
+            "pendingDelegationsRemain": false,
+            "accumulatedRuntimeMs": 900_u64,
+            "finalEventIds": [format!("event-published-{}", scenario.dispatch_id)],
+            "keepWorkerWarm": false,
+        })
+    }
+
+    fn frame_for(message: &Value) -> Vec<u8> {
+        encode_agent_worker_protocol_frame(message).expect("worker frame must encode")
+    }
+
+    /// Spawner that returns two distinct `BarrierGatedSession` instances wired
+    /// to the same `Arc<Barrier>`. The first call each session makes to
+    /// `receive_worker_frame` waits at the barrier, so both session threads
+    /// must be running concurrently before either one can progress past its
+    /// first frame — proving the tick really did launch them in parallel.
+    struct BarrierGatedSpawner {
+        sessions: VecDeque<BarrierGatedSession>,
+        spawn_calls: usize,
+    }
+
+    impl BarrierGatedSpawner {
+        fn new(sessions: Vec<BarrierGatedSession>) -> Self {
+            Self {
+                sessions: VecDeque::from(sessions),
+                spawn_calls: 0,
+            }
+        }
+    }
+
+    impl WorkerDispatchSpawner for BarrierGatedSpawner {
+        type Session = BarrierGatedSession;
+        type Error = BarrierGatedWorkerError;
+
+        fn spawn_worker(
+            &mut self,
+            _command: &AgentWorkerCommand,
+            _config: &AgentWorkerProcessConfig,
+        ) -> Result<BootedWorkerDispatch<Self::Session>, Self::Error> {
+            self.spawn_calls += 1;
+            let session = self.sessions.pop_front().ok_or(BarrierGatedWorkerError(
+                "spawn_worker called more times than prepared sessions",
+            ))?;
+            let ready = ready_message(session.worker_id);
+            Ok(BootedWorkerDispatch { ready, session })
+        }
+    }
+
+    struct BarrierGatedSession {
+        worker_id: &'static str,
+        barrier: Arc<Barrier>,
+        barrier_fired: bool,
+        frames: VecDeque<Vec<u8>>,
+    }
+
+    impl BarrierGatedSession {
+        fn new(
+            worker_id: &'static str,
+            barrier: Arc<Barrier>,
+            frames: Vec<Vec<u8>>,
+        ) -> Self {
+            Self {
+                worker_id,
+                barrier,
+                barrier_fired: false,
+                frames: VecDeque::from(frames),
+            }
+        }
+    }
+
+    impl WorkerDispatchSession for BarrierGatedSession {
+        type Error = BarrierGatedWorkerError;
+
+        fn send_worker_message(&mut self, _message: &Value) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl WorkerFrameReceiver for BarrierGatedSession {
+        type Error = BarrierGatedWorkerError;
+
+        fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
+            if !self.barrier_fired {
+                self.barrier_fired = true;
+                self.barrier.wait();
+            }
+            self.frames
+                .pop_front()
+                .ok_or(BarrierGatedWorkerError("no more frames queued"))
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct BarrierGatedWorkerError(&'static str);
+
+    impl fmt::Display for BarrierGatedWorkerError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
+    impl StdError for BarrierGatedWorkerError {}
+
+    #[test]
+    fn filesystem_tick_admits_two_concurrent_worker_sessions_to_completion() {
+        let fixture = TickFilesystemFixture::new("daemon-loop-worker-concurrent", 0x08);
+
+        let alpha = DispatchScenario {
+            project_id: "project-alpha",
+            agent_pubkey: TEST_AGENT_PUBKEY.to_string(),
+            conversation_id: "conversation-alpha",
+            ral_number: 7,
+            dispatch_id: "dispatch-alpha",
+            dispatch_sequence: 1,
+            dispatch_timestamp: 1_710_000_800_001,
+            correlation_id: "queue-dispatch-alpha",
+            triggering_event_id: "event-alpha",
+            claim_token: "claim-alpha",
+            worker_id: "worker-alpha",
+            ral_alloc_sequence: 1,
+            ral_alloc_timestamp: 1_710_000_700_001,
+            ral_alloc_correlation_id: "ral-alloc-alpha",
+            ral_claim_sequence: 2,
+            ral_claim_timestamp: 1_710_000_700_002,
+            ral_claim_correlation_id: "ral-claim-alpha",
+        };
+        let beta = DispatchScenario {
+            project_id: "project-beta",
+            agent_pubkey: pubkey_hex(0x09),
+            conversation_id: "conversation-beta",
+            ral_number: 13,
+            dispatch_id: "dispatch-beta",
+            dispatch_sequence: 2,
+            dispatch_timestamp: 1_710_000_800_002,
+            correlation_id: "queue-dispatch-beta",
+            triggering_event_id: "event-beta",
+            claim_token: "claim-beta",
+            worker_id: "worker-beta",
+            ral_alloc_sequence: 3,
+            ral_alloc_timestamp: 1_710_000_700_003,
+            ral_alloc_correlation_id: "ral-alloc-beta",
+            ral_claim_sequence: 4,
+            ral_claim_timestamp: 1_710_000_700_004,
+            ral_claim_correlation_id: "ral-claim-beta",
+        };
+
+        // Seed RAL first (allocated + claimed for each identity), then the
+        // queued dispatches, then the dispatch-input sidecars — matching the
+        // order the production ingress path writes these records.
+        seed_claimed_ral_for(&fixture.daemon_dir, &alpha);
+        seed_claimed_ral_for(&fixture.daemon_dir, &beta);
+        seed_queued_dispatch_for(&fixture.daemon_dir, &alpha);
+        seed_queued_dispatch_for(&fixture.daemon_dir, &beta);
+        seed_dispatch_input_for(&fixture.daemon_dir, &alpha);
+        seed_dispatch_input_for(&fixture.daemon_dir, &beta);
+
+        // Shared barrier: both spawned session threads park on their first
+        // receive_worker_frame call and only unblock once both have reached
+        // it. If admission were serialized (admit-run-complete-admit), thread
+        // two would never get spawned before thread one exited and the
+        // barrier would deadlock the test.
+        let barrier = Arc::new(Barrier::new(2));
+        let alpha_frames = vec![
+            frame_for(&heartbeat_message_for(&alpha)),
+            frame_for(&complete_message_for(&alpha)),
+        ];
+        let beta_frames = vec![
+            frame_for(&heartbeat_message_for(&beta)),
+            frame_for(&complete_message_for(&beta)),
+        ];
+        let mut spawner = BarrierGatedSpawner::new(vec![
+            BarrierGatedSession::new(alpha.worker_id, Arc::clone(&barrier), alpha_frames),
+            BarrierGatedSession::new(beta.worker_id, Arc::clone(&barrier), beta_frames),
+        ]);
+
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
+        let mut telegram_publisher = NoTelegramPublisher;
+        let runtime_state = new_shared_worker_runtime_state();
+        let worker_config = AgentWorkerProcessConfig::default();
+        let session_registry = WorkerSessionRegistry::new();
+
+        let outcome = run_daemon_tick_once_from_filesystem_with_worker(
+            DaemonMaintenanceInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                now_ms: 1_710_001_000_000,
+                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
+                project_event_index: Arc::clone(&fixture.project_event_index),
+                heartbeat_latch: None,
+            },
+            DaemonWorkerTickInput {
+                runtime_state: runtime_state.clone(),
+                limits: WorkerConcurrencyLimits {
+                    global: Some(4),
+                    per_project: None,
+                    per_agent: None,
+                },
+                correlation_id: "daemon-loop-worker-concurrent".to_string(),
+                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                command: AgentWorkerCommand::new("bun"),
+                worker_config: &worker_config,
+                writer_version: "daemon-loop-test@0".to_string(),
+                resolved_pending_delegations: Vec::new(),
+                publish_result_sequence: None,
+                session_registry: session_registry.clone(),
+                max_frames: 4,
+            },
+            &mut spawner,
+            &publisher,
+            PublishOutboxRetryPolicy::default(),
+            &mut telegram_publisher,
+        )
+        .expect("concurrent-session tick must succeed");
+
+        // The tick must admit both dispatches synchronously. Exactly two
+        // SessionAdmitted entries (one per dispatch) with distinct
+        // dispatch_id/worker_id pairs, followed by a terminal
+        // NotAdmitted{NoQueuedDispatches}.
+        let admitted: Vec<(&String, &String)> = outcome
+            .worker_runtime
+            .iter()
+            .filter_map(|runtime_outcome| match runtime_outcome {
+                DaemonWorkerRuntimeOutcome::SessionAdmitted {
+                    dispatch_id,
+                    worker_id,
+                } => Some((dispatch_id, worker_id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(admitted.len(), 2, "tick must admit both dispatches");
+        let dispatch_ids: std::collections::BTreeSet<&str> = admitted
+            .iter()
+            .map(|(dispatch_id, _)| dispatch_id.as_str())
+            .collect();
+        let worker_ids: std::collections::BTreeSet<&str> = admitted
+            .iter()
+            .map(|(_, worker_id)| worker_id.as_str())
+            .collect();
+        assert_eq!(
+            dispatch_ids,
+            ["dispatch-alpha", "dispatch-beta"].into_iter().collect()
+        );
+        assert_eq!(
+            worker_ids,
+            ["worker-alpha", "worker-beta"].into_iter().collect()
+        );
+        assert!(matches!(
+            outcome.worker_runtime.last(),
+            Some(DaemonWorkerRuntimeOutcome::NotAdmitted {
+                reason: WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
+                ..
+            })
+        ));
+        assert_eq!(spawner.spawn_calls, 2);
+
+        // Join both detached session threads and assert each finished with a
+        // clean TerminalResultHandled completion keyed to its own
+        // dispatch_id/worker_id.
+        let session_outcomes = session_registry.join_all();
+        assert_eq!(session_outcomes.len(), 2);
+        let mut completed: Vec<(String, String)> = session_outcomes
+            .iter()
+            .map(|runtime_outcome| match runtime_outcome {
+                DaemonWorkerRuntimeOutcome::SessionCompleted {
+                    dispatch_id,
+                    worker_id,
+                    session,
+                } => {
+                    assert_eq!(
+                        *session,
+                        WorkerSessionLoopOutcome {
+                            frame_count: 2,
+                            final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
+                        }
+                    );
+                    (dispatch_id.clone(), worker_id.clone())
+                }
+                other => panic!("expected SessionCompleted, got {other:?}"),
+            })
+            .collect();
+        completed.sort();
+        assert_eq!(
+            completed,
+            vec![
+                ("dispatch-alpha".to_string(), "worker-alpha".to_string()),
+                ("dispatch-beta".to_string(), "worker-beta".to_string()),
+            ]
+        );
+
+        // Terminal filesystem state: both dispatches landed in the queue as
+        // Completed with distinct sequence numbers.
+        let queue = replay_dispatch_queue(&fixture.daemon_dir).expect("dispatch queue must replay");
+        assert!(queue.queued.is_empty());
+        assert!(queue.leased.is_empty());
+        let terminal_by_dispatch: std::collections::BTreeMap<String, u64> = queue
+            .terminal
+            .iter()
+            .map(|record| {
+                assert_eq!(record.status, DispatchQueueStatus::Completed);
+                (record.dispatch_id.clone(), record.sequence)
+            })
+            .collect();
+        assert_eq!(terminal_by_dispatch.len(), 2);
+        let terminal_sequences: std::collections::BTreeSet<u64> =
+            terminal_by_dispatch.values().copied().collect();
+        assert_eq!(
+            terminal_sequences.len(),
+            2,
+            "terminal dispatch sequences must be distinct"
+        );
+
+        // RAL journal: each identity replays to Completed with a distinct
+        // journal sequence for its Completed record.
+        let ral = replay_ral_journal(&fixture.daemon_dir).expect("RAL journal must replay");
+        let alpha_state = ral
+            .states
+            .get(&alpha.ral_identity())
+            .expect("alpha RAL state must exist");
+        let beta_state = ral
+            .states
+            .get(&beta.ral_identity())
+            .expect("beta RAL state must exist");
+        assert_eq!(alpha_state.status, RalReplayStatus::Completed);
+        assert_eq!(beta_state.status, RalReplayStatus::Completed);
+        // The last_sequence on each replay entry reflects its terminal
+        // Completed record; they must be distinct.
+        assert_ne!(
+            alpha_state.last_sequence, beta_state.last_sequence,
+            "alpha and beta completion sequences must be distinct"
+        );
+
+        // Both detached threads released their runtime-state entries cleanly.
+        assert_eq!(runtime_state.lock().unwrap().len(), 0);
     }
 }
