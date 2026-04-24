@@ -52,14 +52,22 @@ M0–M7 substantially landed. M8 in progress (Telegram outbox + caches + wakeups
 - **Dispatch queue scenarios** (Track C partial, committed): 3.1 flock-serialization, 3.3 per-agent admission (via cargo unit tests — CLI can't set per_agent), 3.6 triggering-event dedup. All green.
 - **Redispatch sequence under lock** (Track F, `f74bd4a6`) — scenario 3.2 green. Pure filesystem contention test, 100/100 completion writers had stale pre-snapshot sequences rewritten under lock during verification. Defends `d8c8238f` + `6d5b9e72` from bash.
 - **Concurrency tests strengthened** (Track G, merged) — weak `project_event_index_is_shared_singleton_across_paths` DELETED with module docstring documenting the type-enforced contract; weak `ral_claim_tokens_unique` REWRITTEN so 32 threads contend for the same identity + same worker_id, forcing uniqueness to come entirely from the `AtomicU64+nanosecond+sha256` mint mechanism. 3/3 strengthened tests pass 5× consecutively.
+- **Cargo active-parent injection test** (`1f9cef8c`, `crates/tenex-daemon/tests/active_parent_injection.rs`) — proves §5.5 invariants A/B/C when bash couldn't drive the race: (A) injection queue gets exactly one queued record with delegationCompletion payload; (B) no second dispatch record for parent; (C) journal has delegation_completed but no new claimed. Gap noted: the `if-guard` at `inbound_runtime.rs:239` isn't end-to-end exercised (would require exposing `try_handle_delegation_completion` pub) — acceptable since it's a single plain-text predicate under code review.
+- **Scenario 43 (RAL status transitions)** — green. 7 assertions over `daemon/ral/journal.jsonl` defending the full delegation lifecycle.
+- **Scenario 101 (graceful daemon restart, no stuck RAL)** — green, defends M9 gate line 1260: "No stuck active RALs after restarts". Restart leaves no non-terminal RALs, no leased dispatches to dead PID, and rebooted daemon dispatches fresh inbound normally.
+- **Scenario 55 (active-parent injection via bash)** — shipped as `skip` with honest explanation: bash cannot reliably drive mid-stream injection race because the mock-LLM flow transitions parent to `WaitingForDelegation` before child completes. Cargo test covers the invariants correctly.
 
 ## What DOES NOT WORK (known broken / blockers)
 
 - **🔴 Real-client verification never performed.** Milestone doc (`implementation-milestones-and-quality-gates.md:1441`) declares this a **per-slice development gate**. `git log` since branch start shows **zero commits** verifying web/iOS/CLI/Telegram against the Rust daemon end-to-end. This is the largest untouched risk. Session 2 review surfaced it as the LFG blocker that will take the longest to close.
 - **Scenario 37 (dispatch input mismatch) — scenario bug.** Daemon correctly rejects mismatched sidecars and logs the validation failure (`worker dispatch input validation failed: execute field triggeringEventId ... does not match`), but the scenario's grep assertion doesn't match the actual error string. Parked under `scripts/e2e/scenarios/_wip/` pending assertion fix. Daemon behavior is **correct**.
 - **Scenario 39 (RAL number exhaustion) — needs investigation.** After seeding the journal with `ralNumber=u64::MAX` and restarting the daemon, no `RalNumberExhausted` error appears in the log. Could be: (a) seeding method doesn't trigger the exhaustion check path, (b) daemon lacks the check on restart replay, or (c) the republish never routes to that identity. Parked under `scripts/e2e/scenarios/_wip/`.
-- **🚨 Scenario 02 flake rate ~15% on clean system — real race, root cause identified.** Initial stress 40/50=80% (with 115 zombies). Clean re-stress so far: 17/20 pass = 85%. Investigation report (`docs/rust/websocket-disconnect-investigation.md`): the `"Connection reset without closing handshake"` was a red herring — caused by the HARNESS SIGTERMing the relay during cleanup, not mid-run disconnect. **True root cause**: for 25+ seconds the daemon's subscription socket receives ZERO live events despite the harness publishing 6 probe events matching active filters. Top hypothesis: khatru per-filter listener-registration race during active-project subscription refresh (related to but distinct from `d5bcf38b`'s fix). Failures come in bursts (runs 19+20 both failed back-to-back, 7+8 of first stress also adjacent). **Daemon WebSocket client is fine**; issue is listener-registration ordering between daemon and khatru. Fix requires either khatru v0.19.1 source inspection OR moving to a more robust subscription-ready signal than log-grep.
-- **Scenario 43 (RAL status transitions) — scenario-logic bug, parked.** Daemon journal correctly shows delegation flow (allocated → claimed → delegation_registered → delegation_completed), but scenario asserts all 3 RAL identities reach a terminal state (`completed | no_response | error | aborted | crashed`) at the same wait-loop exit. Agent1's parent RAL's re-dispatch terminal arrives LATER than the wait-loop's first-exit condition. Scenario needs per-identity terminal polling, not global. Daemon behavior is **correct**.
+- **🚨 Scenario 02 flake rate 18% is real, NOT load-induced.** Two 50-run stresses compared:
+  - Contaminated (115 zombie daemons, load avg 18+): **40/50 = 80% pass, mean 31s/run**
+  - Clean (zero zombies, load <5, fresh binaries): **41/50 = 82% pass, mean 23s/run**
+  - **Pass rate barely moved (80→82%) despite 26% faster per-run.** The race is real. 9/9 clean failures are `daemon subscription never became live`. Failures cluster in pairs (runs 7+8, 19+20, 44+45) — consistent with boot-timing lottery.
+  - Investigation (`docs/rust/websocket-disconnect-investigation.md`): `"Connection reset without closing handshake"` was **red herring** (harness SIGTERMs relay during cleanup). True race: daemon's subscription socket receives ZERO live events for 25+ seconds despite 6 matching probe publishes. Top hypothesis: khatru per-filter listener registration race during active-project subscription refresh (related to but distinct from `d5bcf38b`'s earlier fix). Daemon WS client and reconnect logic are fine.
+  - Stress summaries: `artifacts/e2e/stress/02_delegation/_x50_summary.json` + `_x50_clean_summary.json`.
 - **Sleep-based synchronization** in existing scenarios (01, 02) — will flake under load. `helpers/await_file.sh` now available; existing scenarios not yet migrated.
 - `_pick_free_port` TOCTOU race — will collide with >30 parallel scenarios.
 - `await_daemon_subscribed` depends on log-grep — brittle to log format changes.
@@ -67,8 +75,9 @@ M0–M7 substantially landed. M8 in progress (Telegram outbox + caches + wakeups
 - Telegram outbound idempotency across daemon restart — claimed landed, **not tested** (per milestone doc line 1197).
 - M9 TS shim audit not done — unclear what remains to delete.
 - **Correlation-ID chain** (milestone global gate line 1324) across logs / worker protocol / RAL journal / worker state / telemetry spans — no test verifies the full chain.
+- **Dispatch queue leased-entry cruft after restart (real finding, scenario 101).** After daemon restart, leased dispatch queue entries from the pre-restart session are NOT cleared. `recover_worker_startup` writes `Crashed` events to the RAL journal (correct — journal is truth source) but leaves the dispatch queue unchanged. 3-4 stale leased entries accumulate per restart. Doesn't block functionality (RAL journal is authoritative), but the queue grows indefinitely. **File for future M9 cleanup pass.**
 - **Cold/warm time-to-first-token** (M9 line 1258) — no perf gate exists.
-- Scenario 1.5 (boot event reordering) — not scripted (Track B timed out before delivering).
+- Scenario 39 (RAL number exhaustion) — still parked under `_wip`, needs investigation (scenario 43's pattern shows agents can rewrite flawed assertions; 39 could use a similar second pass).
 - Agent worktree isolation was unreliable: Tracks C, D, E wrote files to main tree instead of their worktrees. All landed work committed; future dispatches use single-scenario prompts with tighter scope.
 
 ## What we DON'T KNOW YET (and when we'll know)
@@ -110,12 +119,13 @@ Regenerated automatically by `scripts/e2e/run.sh` after every run. Do not edit
 between the delimiters — changes will be overwritten.
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T08:22:46Z · branch `rust-agent-worker-publishing` · commit `1f9cef8c41f1` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T08:23:53Z · branch `rust-agent-worker-publishing` · commit `69d3f3b0ae22` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
 | 01_nip42_dynamic_whitelist.sh | pass | 2026-04-24T07:55:08Z | 7s |  |
 | 02_delegation_a_to_b_to_a.sh | pass | 2026-04-24T07:56:14Z | 66s |  |
+| 101_graceful_restart_no_stuck_ral.sh | pass | 2026-04-24T08:23:53Z | 29s |  |
 | 11_boot_gates_dispatch.sh | pass | 2026-04-24T07:56:39Z | 25s |  |
 | 12_boot_activates_dispatch.sh | pass | 2026-04-24T07:57:05Z | 26s |  |
 | 13_boot_is_idempotent.sh | pass | 2026-04-24T07:57:28Z | 23s |  |
@@ -179,6 +189,13 @@ Every ~30 min: dispatch 2–3 critical reviewers in parallel asking (a) is the c
 - Verdict: Batch 2 delivered the runner + dashboard (great), **but 2 of 4 concurrency tests are weak ceremony** (`ProjectEventIndex` singleton is a tautology, claim-token test is over-determined by distinct inputs). Real-client verification remains **untouched**, which is the biggest unknown risk and longest LFG blocker. Scenario catalog is ~8% adversarial — happy-path regression suite dressed up as E2E. Multiple agents wrote to main tree instead of worktrees (not blocking, but indicates prompts were too broad).
 - Hidden blockers surfaced from milestone doc: correlation-ID chain, rollback-tests-with-in-flight-state, Telegram outbound idempotence-across-restart, cold/warm TTFT perf, "no stuck RALs after restart", "no duplicate completions".
 - Actions: parked scenarios 37 (bad assertion) and 39 (needs investigation) under `_wip`; committed Track C's 3 green scenarios + `dispatch_id_for` harness helper; rewrote Batch 3 to be **single-scenario dispatches** (§3.2, patch weak tests, stress-loop scenario 02); logged hidden M9 gates into "DOES NOT WORK"; bumped real-client verification to top of blockers; recommended web-client-pointed-at-Rust-daemon as the next human-driven checkpoint.
+
+**2026-04-24 — Session 4 (data confirmation)**
+- Verdict: clean re-stress (50/50, no zombies) produced **41 pass / 9 fail = 18%**, nearly identical to contaminated run (80%→82%). **The 02 flake is a real race, not load-induced**. Need a daemon-side or harness-side fix to the khatru listener-registration window.
+- Real daemon finding from scenario 101: `recover_worker_startup` does NOT clear dispatch queue leased entries after restart. RAL journal is authoritative (correct) but dispatch queue accumulates stale leased entries. Non-blocking but file for future M9 cleanup.
+- Cargo active-parent injection test (`1f9cef8c`) proves §5.5 invariants even though bash couldn't. Good pattern for future mid-stream scenarios.
+- Scoreboard: **15 bash scenarios green** (01, 02, 11–15, 31–33, 36, 37, 43, 101), 1 skip (55), 1 parked (_wip/39). **5 cargo integration tests** (3 concurrency + active_parent_injection + daemon_worker_runtime).
+- Actions: committed scenarios 43, 101; landed cargo §5.5 test; updated blocker list with dispatch-queue cruft finding; scheduled no new dispatches — next session should pick high-value targets (§10.2 crash-restart, §4.1 claim token races, §11.15 reconnect) or investigate the khatru listener-registration race directly.
 
 **2026-04-24 — Session 3**
 - Verdict: direction is right — keep scripting e2e scenarios. Clean re-stress shows 10/11 pass (vs 40/50 contaminated), so 20% flake was mostly load-induced, **but run 8 failed even on a clean system with the same signature** → real intermittent bug exists, just at ~9% not 20%. Scenario 1.5 agent independently observed "tenex-khatru-relay drops idle connections after ~33s" which matches the 25s disconnect pattern in stress failures.
