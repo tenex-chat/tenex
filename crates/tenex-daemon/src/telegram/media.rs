@@ -292,6 +292,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn downloads_file_and_stores_under_unique_id() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let get_file_body = serde_json::json!({
@@ -353,6 +354,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn reuses_existing_file_when_expected_size_matches() {
         let tmp = tempfile::tempdir().expect("tempdir");
         // Seed a cached file.
@@ -384,6 +386,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn re_downloads_when_cached_file_size_differs_from_expected() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let media_dir_path = media_dir(tmp.path());
@@ -440,6 +443,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn get_file_missing_path_returns_error() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let body = serde_json::json!({

@@ -35,3 +35,10 @@ indexmap = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+# Enables tests that bind real TCP sockets (WebSocket mock relays, HTTP mock
+# servers). Default `cargo test` skips them; full run:
+#     cargo test --features integration
+#     cargo nextest run --features integration --profile integration
+integration = []

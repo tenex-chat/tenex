@@ -805,6 +805,7 @@ mod tests {
     const AUTH_CHALLENGE: &str = "subscription-auth-challenge-01";
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn relay_once_sends_req_consumes_event_and_closes_subscription() {
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
@@ -872,6 +873,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn relay_once_authenticates_and_resubscribes_after_auth_challenge() {
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();

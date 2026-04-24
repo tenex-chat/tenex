@@ -1,0 +1,21 @@
+# cargo-nextest configuration.
+#
+# Default `cargo nextest run` runs only fast tests. Heavy TCP-binding tests
+# (WebSocket mock relays, HTTP mock servers) are skipped via the `integration`
+# cargo feature and `#[cfg_attr(not(feature = "integration"), ignore)]`. To
+# include them:
+#
+#     cargo nextest run --features integration
+#
+# Install: `cargo install cargo-nextest --locked`.
+
+[profile.default]
+# Flag tests that exceed 5s; kill after 60s. Fast tests are sub-second; this
+# protects against accidental hangs without interfering with legitimate work.
+slow-timeout = { period = "5s", terminate-after = 12 }
+fail-fast = false
+
+[profile.integration]
+# TCP-binding tests use 2-10s read timeouts internally, so allow more slack.
+slow-timeout = { period = "15s", terminate-after = 8 }
+fail-fast = false

@@ -443,6 +443,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn html_text_success_returns_delivered() {
         let body = serde_json::json!({
             "ok": true,
@@ -471,6 +472,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn html_parse_failure_retries_as_plain_text() {
         let script = vec![
             ScriptedResponse {
@@ -516,6 +518,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn html_retry_failure_surfaces_retry_error() {
         let script = vec![
             ScriptedResponse {
@@ -551,6 +554,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn plain_text_success_does_not_send_html() {
         let body = serde_json::json!({
             "ok": true,
@@ -574,6 +578,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn ask_error_success_delivered() {
         let body = serde_json::json!({
             "ok": true,
@@ -595,6 +600,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn reserved_voice_success_uses_send_voice_endpoint() {
         let tempdir = tempfile::tempdir().expect("tempdir");
         let voice_path = tempdir.path().join("voice.ogg");
@@ -626,6 +632,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn reserved_voice_missing_file_is_permanent() {
         let server = MockServer::start(vec![]);
         let mut publisher = publisher_for(&server.url);
@@ -641,6 +648,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn reserved_voice_relative_path_rejected_without_io() {
         let server = MockServer::start(vec![]);
         let mut publisher = publisher_for(&server.url);
@@ -660,6 +668,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn outbox_drain_round_trip_delivers_pending_record() {
         use crate::telegram_outbox::{
             TelegramDeliveryPayload, TelegramDeliveryReason, TelegramDeliveryRequest,
@@ -712,6 +721,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn outbox_drain_retryable_then_requeue_then_delivered() {
         use crate::telegram_outbox::{
             TelegramDeliveryPayload, TelegramDeliveryReason, TelegramDeliveryRequest,
@@ -787,6 +797,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn outbox_drain_permanent_failure_stays_failed() {
         use crate::telegram_outbox::{
             TelegramDeliveryPayload, TelegramDeliveryReason, TelegramDeliveryRequest,

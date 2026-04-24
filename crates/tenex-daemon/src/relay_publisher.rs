@@ -497,6 +497,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn publishes_exact_signed_event_and_reports_relay_ok() {
         let fixture = signed_event_fixture();
         let response = json!(["OK", fixture.signed.id, true, "stored"]);
@@ -525,6 +526,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn reports_relay_rejection_without_changing_event_identity() {
         let fixture = signed_event_fixture();
         let response = json!([
@@ -555,6 +557,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn publishes_after_nip42_auth_challenge_with_configured_signer() {
         let fixture = signed_event_fixture();
         let signer = HexBackendSigner::from_private_key_hex(&fixture.secret_key_hex)
@@ -616,6 +619,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn rejects_auth_challenge_without_configured_signer() {
         let fixture = signed_event_fixture();
         let mock_relay = AuthChallengeOnlyMockRelay::start();
@@ -639,6 +643,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn drains_outbox_through_real_websocket_relay_publisher() {
         let fixture = signed_event_fixture();
         let daemon_dir = unique_temp_daemon_dir();

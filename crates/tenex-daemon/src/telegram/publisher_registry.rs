@@ -375,6 +375,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn deliver_routes_to_the_matching_bot_publisher() {
         let alpha_pubkey = pubkey_of(0xAA);
         let beta_pubkey = pubkey_of(0xBB);
@@ -452,6 +453,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn outbox_drain_routes_records_to_owning_publisher() {
         use crate::telegram_outbox::{
             TelegramDeliveryRequest, accept_telegram_delivery_request,

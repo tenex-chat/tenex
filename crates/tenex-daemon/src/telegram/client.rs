@@ -1066,6 +1066,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_html_encodes_html_parse_mode() {
         let body = serde_json::json!({
             "ok": true,
@@ -1108,6 +1109,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_plain_omits_parse_mode() {
         let body = serde_json::json!({
             "ok": true,
@@ -1138,6 +1140,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_surfaces_html_parse_error() {
         let body = serde_json::json!({
             "ok": false,
@@ -1166,6 +1169,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_rate_limited_includes_retry_after() {
         let body = serde_json::json!({
             "ok": false,
@@ -1206,6 +1210,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_unauthorized_maps_to_invalid_token() {
         let body = serde_json::json!({
             "ok": false,
@@ -1234,6 +1239,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_chat_not_found_is_permanent() {
         let body = serde_json::json!({
             "ok": false,
@@ -1261,6 +1267,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_bot_blocked_is_permanent() {
         let body = serde_json::json!({
             "ok": false,
@@ -1288,6 +1295,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_message_server_error_is_retryable() {
         let body = serde_json::json!({
             "ok": false,
@@ -1315,6 +1323,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn send_voice_multipart_upload_includes_expected_fields() {
         let tempdir = tempfile::tempdir().expect("tempdir");
         let voice_path = tempdir.path().join("sample.ogg");
@@ -1385,6 +1394,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn get_me_decodes_bot_identity() {
         let body = serde_json::json!({
             "ok": true,
@@ -1405,6 +1415,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn get_updates_encodes_allowed_updates_as_json() {
         let body = serde_json::json!({
             "ok": true,
@@ -1431,6 +1442,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn edit_message_text_serializes_inline_keyboard_and_chat_id() {
         let body = serde_json::json!({
             "ok": true,
@@ -1470,6 +1482,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn answer_callback_query_includes_show_alert_when_set() {
         let body = serde_json::json!({ "ok": true, "result": true }).to_string();
         let server = MockHttpServer::start(200, body);
@@ -1490,6 +1503,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn answer_callback_query_omits_show_alert_when_false() {
         let body = serde_json::json!({ "ok": true, "result": true }).to_string();
         let server = MockHttpServer::start(200, body);
@@ -1508,6 +1522,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
     fn network_timeout_maps_to_retryable_timeout() {
         // Bind to a port that we never answer on. A short timeout triggers
         // a reqwest timeout, which classifies as a retryable Timeout.
