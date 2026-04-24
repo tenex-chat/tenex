@@ -1,14 +1,19 @@
-use std::collections::{HashMap, HashSet};
-use std::net::TcpStream;
+use std::collections::HashSet;
+use std::io;
+use std::net::TcpStream as StdTcpStream;
+use std::sync::{Arc, mpsc as std_mpsc};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tracing;
-
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use thiserror::Error;
-use tungstenite::WebSocket;
-use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Message, connect};
+use tokio::net::TcpStream as TokioTcpStream;
+use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioRuntimeHandle};
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::timeout;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tungstenite::Message;
 use url::Url;
 
 use crate::backend_events::heartbeat::BackendSigner;
@@ -27,6 +32,16 @@ pub enum RelayPublisherConfigError {
     InvalidRelayUrl { url: String },
     #[error("at least one relay url is required")]
     EmptyRelayList,
+}
+
+#[derive(Debug, Error)]
+pub enum RelayPublisherStartError {
+    #[error("failed to build relay publisher runtime: {0}")]
+    RuntimeBuild(#[source] io::Error),
+    #[error("relay publisher runtime thread exited before initialization")]
+    RuntimeThreadExited,
+    #[error("failed to initialize relay publisher runtime: {0}")]
+    RuntimeBootstrap(#[source] std_mpsc::RecvError),
 }
 
 #[derive(Debug, Error)]
@@ -104,59 +119,133 @@ impl RelayPublisherConfig {
     }
 }
 
-type RelaySocket = WebSocket<MaybeTlsStream<TcpStream>>;
+type RelaySocket = WebSocketStream<MaybeTlsStream<TokioTcpStream>>;
+type SharedAuthSigner = Arc<dyn RelayAuthSigner + Send + Sync>;
 
-/// Persistent WebSocket to a single relay, reused across publishes.
-///
-/// Opening a fresh WebSocket (TCP + TLS + HTTP upgrade + possibly NIP-42
-/// AUTH) takes ~600-1000ms on a remote relay; publishing the EVENT frame
-/// and reading the OK takes ~50ms. Reusing the socket across publishes
-/// eliminates the handshake cost per publish.
 struct RelaySession {
     socket: RelaySocket,
 }
 
 impl RelaySession {
-    fn open(relay_url: &str, response_timeout: Duration) -> Result<Self, RelayPublishError> {
+    async fn open(relay_url: &str, response_timeout: Duration) -> Result<Self, RelayPublishError> {
         validate_relay_url(relay_url).map_err(|_| RelayPublishError::InvalidRelayUrl {
             url: relay_url.to_string(),
         })?;
-        let (mut socket, _) = connect(relay_url)?;
-        set_stream_timeouts(socket.get_mut(), response_timeout);
+        let (socket, _) = timeout(response_timeout, connect_async(relay_url))
+            .await
+            .map_err(|_| relay_timeout_error("timed out opening relay websocket"))??;
         Ok(Self { socket })
+    }
+}
+
+struct RelayPublishCommand {
+    event: SignedNostrEvent,
+    response_tx: oneshot::Sender<PublishRelayResult>,
+}
+
+struct RelayCommandHandle {
+    relay_url: String,
+    command_tx: mpsc::Sender<RelayPublishCommand>,
+}
+
+struct OwnedRelayPublisherRuntime {
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for OwnedRelayPublisherRuntime {
+    fn drop(&mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
 pub struct NostrRelayPublisher {
     config: RelayPublisherConfig,
-    auth_signer: Option<Box<dyn RelayAuthSigner + Send + Sync>>,
-    /// One persistent WebSocket per relay URL, lazily opened on first
-    /// publish and re-opened on socket failure.
-    sessions: HashMap<String, RelaySession>,
+    relay_handles: Vec<RelayCommandHandle>,
+    _owned_runtime: Option<OwnedRelayPublisherRuntime>,
 }
 
 impl NostrRelayPublisher {
     pub fn new(config: RelayPublisherConfig) -> Self {
-        Self {
-            config,
-            auth_signer: None,
-            sessions: HashMap::new(),
-        }
+        Self::spawn_with_owned_runtime(config, None)
+            .expect("tokio relay publisher runtime must start")
     }
 
     pub fn with_auth_signer<S>(config: RelayPublisherConfig, auth_signer: S) -> Self
     where
         S: RelayAuthSigner + Send + Sync + 'static,
     {
-        Self {
+        Self::spawn_with_owned_runtime(config, Some(Arc::new(auth_signer)))
+            .expect("tokio relay publisher runtime with auth signer must start")
+    }
+
+    pub fn spawn_on_runtime(
+        config: RelayPublisherConfig,
+        runtime_handle: TokioRuntimeHandle,
+    ) -> Result<Self, RelayPublisherStartError> {
+        Self::spawn_on_runtime_with_shared_signer(config, None, runtime_handle, None)
+    }
+
+    pub fn spawn_on_runtime_with_auth_signer<S>(
+        config: RelayPublisherConfig,
+        auth_signer: S,
+        runtime_handle: TokioRuntimeHandle,
+    ) -> Result<Self, RelayPublisherStartError>
+    where
+        S: RelayAuthSigner + Send + Sync + 'static,
+    {
+        Self::spawn_on_runtime_with_shared_signer(
             config,
-            auth_signer: Some(Box::new(auth_signer)),
-            sessions: HashMap::new(),
-        }
+            Some(Arc::new(auth_signer)),
+            runtime_handle,
+            None,
+        )
     }
 
     pub fn config(&self) -> &RelayPublisherConfig {
         &self.config
+    }
+
+    fn spawn_with_owned_runtime(
+        config: RelayPublisherConfig,
+        auth_signer: Option<SharedAuthSigner>,
+    ) -> Result<Self, RelayPublisherStartError> {
+        let (runtime_handle, owned_runtime) = spawn_owned_runtime()?;
+        Self::spawn_on_runtime_with_shared_signer(
+            config,
+            auth_signer,
+            runtime_handle,
+            Some(owned_runtime),
+        )
+    }
+
+    fn spawn_on_runtime_with_shared_signer(
+        config: RelayPublisherConfig,
+        auth_signer: Option<SharedAuthSigner>,
+        runtime_handle: TokioRuntimeHandle,
+        owned_runtime: Option<OwnedRelayPublisherRuntime>,
+    ) -> Result<Self, RelayPublisherStartError> {
+        let mut relay_handles = Vec::with_capacity(config.relay_urls.len());
+
+        for relay_url in &config.relay_urls {
+            relay_handles.push(spawn_relay_worker(
+                relay_url.clone(),
+                config.response_timeout,
+                auth_signer.clone(),
+                &runtime_handle,
+            ));
+        }
+
+        Ok(Self {
+            config,
+            relay_handles,
+            _owned_runtime: owned_runtime,
+        })
     }
 }
 
@@ -180,26 +269,42 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
         &mut self,
         event: &SignedNostrEvent,
     ) -> Result<PublishRelayReport, PublishRelayError> {
-        // Snapshot the relay URLs so we can iterate without holding an
-        // immutable borrow on self while we mutate the session map.
-        let relay_urls: Vec<String> = self.config.relay_urls.clone();
-        let mut relay_results = Vec::with_capacity(relay_urls.len());
+        let mut relay_results = Vec::with_capacity(self.relay_handles.len());
 
-        for relay_url in &relay_urls {
+        for relay_handle in &self.relay_handles {
             let _span = tracing::debug_span!(
                 "nostr.publish",
-                relay_url = %relay_url,
+                relay_url = %relay_handle.relay_url,
                 event_id = %event.id,
                 event_kind = event.kind,
             )
             .entered();
             tracing::info!(
-                relay_url = %relay_url,
+                relay_url = %relay_handle.relay_url,
                 event_id = %event.id,
                 event_kind = event.kind,
                 "publishing nostr event to relay"
             );
-            let result = self.publish_on_persistent_socket(relay_url, event);
+            let (response_tx, response_rx) = oneshot::channel();
+            let command = RelayPublishCommand {
+                event: event.clone(),
+                response_tx,
+            };
+            let result = match relay_handle.command_tx.blocking_send(command) {
+                Ok(()) => match response_rx.blocking_recv() {
+                    Ok(result) => result,
+                    Err(_) => PublishRelayResult {
+                        relay_url: relay_handle.relay_url.clone(),
+                        accepted: false,
+                        message: Some("relay worker dropped publish response".to_string()),
+                    },
+                },
+                Err(_) => PublishRelayResult {
+                    relay_url: relay_handle.relay_url.clone(),
+                    accepted: false,
+                    message: Some("relay worker is not accepting publish requests".to_string()),
+                },
+            };
             relay_results.push(result);
         }
 
@@ -207,87 +312,161 @@ impl PublishOutboxRelayPublisher for NostrRelayPublisher {
     }
 }
 
-impl NostrRelayPublisher {
-    fn publish_on_persistent_socket(
-        &mut self,
-        relay_url: &str,
-        event: &SignedNostrEvent,
-    ) -> PublishRelayResult {
-        // Attempt once on the existing (or newly-opened) session.
-        match self.try_publish(relay_url, event) {
-            Ok(result) => {
-                if result.accepted {
-                    tracing::info!(relay_url = %relay_url, event_id = %event.id, "nostr event published");
-                } else {
-                    tracing::warn!(
-                        relay_url = %relay_url,
-                        event_id = %event.id,
-                        message = ?result.message,
-                        "nostr event rejected by relay"
-                    );
-                }
-                result
+fn spawn_owned_runtime(
+) -> Result<(TokioRuntimeHandle, OwnedRelayPublisherRuntime), RelayPublisherStartError> {
+    let (handle_tx, handle_rx) = std_mpsc::channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let thread = thread::spawn(move || {
+        let runtime = match TokioRuntimeBuilder::new_multi_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = handle_tx.send(Err(error));
+                return;
             }
-            Err(error) if is_transport_error(&error) => {
-                // Socket-level failure. Drop the session and try once more
-                // with a freshly-opened connection before giving up.
+        };
+        let handle = runtime.handle().clone();
+        if handle_tx.send(Ok(handle)).is_err() {
+            return;
+        }
+        runtime.block_on(async move {
+            let _ = shutdown_rx.await;
+        });
+    });
+
+    let runtime_handle = handle_rx
+        .recv()
+        .map_err(RelayPublisherStartError::RuntimeBootstrap)?
+        .map_err(RelayPublisherStartError::RuntimeBuild)?;
+
+    Ok((
+        runtime_handle,
+        OwnedRelayPublisherRuntime {
+            shutdown_tx: Some(shutdown_tx),
+            thread: Some(thread),
+        },
+    ))
+}
+
+fn spawn_relay_worker(
+    relay_url: String,
+    response_timeout: Duration,
+    auth_signer: Option<SharedAuthSigner>,
+    runtime_handle: &TokioRuntimeHandle,
+) -> RelayCommandHandle {
+    let (command_tx, command_rx) = mpsc::channel(16);
+    let task_relay_url = relay_url.clone();
+    runtime_handle.spawn(async move {
+        run_relay_worker(task_relay_url, response_timeout, auth_signer, command_rx).await;
+    });
+
+    RelayCommandHandle {
+        relay_url,
+        command_tx,
+    }
+}
+
+async fn run_relay_worker(
+    relay_url: String,
+    response_timeout: Duration,
+    auth_signer: Option<SharedAuthSigner>,
+    mut command_rx: mpsc::Receiver<RelayPublishCommand>,
+) {
+    let mut session = None;
+
+    while let Some(command) = command_rx.recv().await {
+        let result = publish_on_persistent_socket(
+            &relay_url,
+            response_timeout,
+            &command.event,
+            auth_signer
+                .as_ref()
+                .map(|signer| signer.as_ref() as &(dyn RelayAuthSigner + Send + Sync)),
+            &mut session,
+        )
+        .await;
+        let _ = command.response_tx.send(result);
+    }
+}
+
+async fn publish_on_persistent_socket(
+    relay_url: &str,
+    response_timeout: Duration,
+    event: &SignedNostrEvent,
+    auth_signer: Option<&(dyn RelayAuthSigner + Send + Sync)>,
+    session: &mut Option<RelaySession>,
+) -> PublishRelayResult {
+    match try_publish(relay_url, response_timeout, event, auth_signer, session).await {
+        Ok(result) => {
+            if result.accepted {
+                tracing::info!(relay_url = %relay_url, event_id = %event.id, "nostr event published");
+            } else {
                 tracing::warn!(
                     relay_url = %relay_url,
                     event_id = %event.id,
-                    error = %error,
-                    "nostr publish transport error, reconnecting"
+                    message = ?result.message,
+                    "nostr event rejected by relay"
                 );
-                self.sessions.remove(relay_url);
-                match self.try_publish(relay_url, event) {
-                    Ok(result) => {
-                        if result.accepted {
-                            tracing::info!(relay_url = %relay_url, event_id = %event.id, "nostr event published after reconnect");
-                        }
-                        result
+            }
+            result
+        }
+        Err(error) if is_transport_error(&error) => {
+            tracing::warn!(
+                relay_url = %relay_url,
+                event_id = %event.id,
+                error = %error,
+                "nostr publish transport error, reconnecting"
+            );
+            *session = None;
+            match try_publish(relay_url, response_timeout, event, auth_signer, session).await {
+                Ok(result) => {
+                    if result.accepted {
+                        tracing::info!(relay_url = %relay_url, event_id = %event.id, "nostr event published after reconnect");
                     }
-                    Err(error) => {
-                        self.sessions.remove(relay_url);
-                        tracing::warn!(relay_url = %relay_url, event_id = %event.id, error = %error, "nostr publish failed after reconnect");
-                        PublishRelayResult {
-                            relay_url: relay_url.to_string(),
-                            accepted: false,
-                            message: Some(error.to_string()),
-                        }
+                    result
+                }
+                Err(error) => {
+                    *session = None;
+                    tracing::warn!(relay_url = %relay_url, event_id = %event.id, error = %error, "nostr publish failed after reconnect");
+                    PublishRelayResult {
+                        relay_url: relay_url.to_string(),
+                        accepted: false,
+                        message: Some(error.to_string()),
                     }
                 }
             }
-            Err(error) => {
-                tracing::warn!(relay_url = %relay_url, event_id = %event.id, error = %error, "nostr publish failed");
-                PublishRelayResult {
-                    relay_url: relay_url.to_string(),
-                    accepted: false,
-                    message: Some(error.to_string()),
-                }
+        }
+        Err(error) => {
+            tracing::warn!(relay_url = %relay_url, event_id = %event.id, error = %error, "nostr publish failed");
+            PublishRelayResult {
+                relay_url: relay_url.to_string(),
+                accepted: false,
+                message: Some(error.to_string()),
             }
         }
     }
+}
 
-    fn try_publish(
-        &mut self,
-        relay_url: &str,
-        event: &SignedNostrEvent,
-    ) -> Result<PublishRelayResult, RelayPublishError> {
-        let response_timeout = self.config.response_timeout;
-        let auth_signer = self
-            .auth_signer
-            .as_ref()
-            .map(|signer| signer.as_ref() as &dyn RelayAuthSigner);
-
-        if !self.sessions.contains_key(relay_url) {
-            let session = RelaySession::open(relay_url, response_timeout)?;
-            self.sessions.insert(relay_url.to_string(), session);
-        }
-        let session = self
-            .sessions
-            .get_mut(relay_url)
-            .expect("session just inserted");
-        publish_event_over_socket(&mut session.socket, relay_url, event, auth_signer)
+async fn try_publish(
+    relay_url: &str,
+    response_timeout: Duration,
+    event: &SignedNostrEvent,
+    auth_signer: Option<&(dyn RelayAuthSigner + Send + Sync)>,
+    session: &mut Option<RelaySession>,
+) -> Result<PublishRelayResult, RelayPublishError> {
+    if session.is_none() {
+        *session = Some(RelaySession::open(relay_url, response_timeout).await?);
     }
+    let relay_session = session
+        .as_mut()
+        .expect("relay session must exist before publish");
+    publish_event_over_socket(
+        &mut relay_session.socket,
+        relay_url,
+        event,
+        auth_signer,
+        response_timeout,
+    )
+    .await
 }
 
 /// Classify errors that indicate the socket itself is no longer usable
@@ -312,28 +491,42 @@ pub fn publish_signed_event_to_relay_with_auth_signer(
     relay_url: &str,
     event: &SignedNostrEvent,
     response_timeout: Duration,
-    auth_signer: Option<&dyn RelayAuthSigner>,
+    auth_signer: Option<&(dyn RelayAuthSigner + Send + Sync)>,
 ) -> Result<PublishRelayResult, RelayPublishError> {
-    let mut session = RelaySession::open(relay_url, response_timeout)?;
-    publish_event_over_socket(&mut session.socket, relay_url, event, auth_signer)
+    let runtime = TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| RelayPublishError::WebSocket(tungstenite::Error::Io(error)))?;
+    runtime.block_on(async {
+        let mut session = RelaySession::open(relay_url, response_timeout).await?;
+        publish_event_over_socket(
+            &mut session.socket,
+            relay_url,
+            event,
+            auth_signer,
+            response_timeout,
+        )
+        .await
+    })
 }
 
 /// Send one EVENT over an already-open WebSocket and wait for the OK.
-/// Handles NIP-42 AUTH challenges inline. Returns `Err(WebSocket | ClosedBeforeOk)`
-/// if the socket itself fails; the caller is responsible for dropping the
-/// session in that case and retrying with a fresh connection.
-fn publish_event_over_socket(
+/// Handles NIP-42 AUTH challenges inline. Returns `Err(WebSocket | ClosedBeforeOk)` if the
+/// socket itself fails; the caller is responsible for dropping the session in that case and
+/// retrying with a fresh connection.
+async fn publish_event_over_socket(
     socket: &mut RelaySocket,
     relay_url: &str,
     event: &SignedNostrEvent,
-    auth_signer: Option<&dyn RelayAuthSigner>,
+    auth_signer: Option<&(dyn RelayAuthSigner + Send + Sync)>,
+    response_timeout: Duration,
 ) -> Result<PublishRelayResult, RelayPublishError> {
-    socket.send(Message::text(build_event_message(event)?))?;
+    send_socket_text(socket, build_event_message(event)?, response_timeout).await?;
     let mut pending_auth_event_ids = HashSet::new();
     let mut resend_event_after_auth = false;
 
     loop {
-        let message = socket.read()?;
+        let message = read_socket_message(socket, response_timeout, &event.id).await?;
         match message {
             Message::Text(text) => {
                 let value: Value = serde_json::from_str(text.as_str())?;
@@ -347,7 +540,8 @@ fn publish_event_over_socket(
                         now_unix_secs(),
                     )?;
                     pending_auth_event_ids.insert(auth_event.id.clone());
-                    socket.send(Message::text(build_auth_message(&auth_event)?))?;
+                    send_socket_text(socket, build_auth_message(&auth_event)?, response_timeout)
+                        .await?;
                     resend_event_after_auth = true;
                     continue;
                 }
@@ -377,7 +571,12 @@ fn publish_event_over_socket(
                             });
                         }
                         if resend_event_after_auth {
-                            socket.send(Message::text(build_event_message(event)?))?;
+                            send_socket_text(
+                                socket,
+                                build_event_message(event)?,
+                                response_timeout,
+                            )
+                            .await?;
                             resend_event_after_auth = false;
                         }
                         continue;
@@ -397,6 +596,41 @@ fn publish_event_over_socket(
             Message::Binary(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {}
         }
     }
+}
+
+async fn send_socket_text(
+    socket: &mut RelaySocket,
+    payload: String,
+    response_timeout: Duration,
+) -> Result<(), RelayPublishError> {
+    timeout(response_timeout, socket.send(Message::text(payload)))
+        .await
+        .map_err(|_| relay_timeout_error("timed out writing websocket frame"))??;
+    Ok(())
+}
+
+async fn read_socket_message(
+    socket: &mut RelaySocket,
+    response_timeout: Duration,
+    event_id: &str,
+) -> Result<Message, RelayPublishError> {
+    let message = timeout(response_timeout, socket.next())
+        .await
+        .map_err(|_| relay_timeout_error("timed out waiting for relay response"))?;
+    match message {
+        Some(Ok(message)) => Ok(message),
+        Some(Err(error)) => Err(RelayPublishError::WebSocket(error)),
+        None => Err(RelayPublishError::ClosedBeforeOk {
+            event_id: event_id.to_string(),
+        }),
+    }
+}
+
+fn relay_timeout_error(message: &str) -> RelayPublishError {
+    RelayPublishError::WebSocket(tungstenite::Error::Io(io::Error::new(
+        io::ErrorKind::TimedOut,
+        message.to_string(),
+    )))
 }
 
 pub fn build_event_message(event: &SignedNostrEvent) -> Result<String, serde_json::Error> {
@@ -532,20 +766,6 @@ fn validate_relay_url(relay_url: &str) -> Result<(), RelayPublisherConfigError> 
         });
     }
     Ok(())
-}
-
-fn set_stream_timeouts(stream: &mut MaybeTlsStream<TcpStream>, timeout: Duration) {
-    match stream {
-        MaybeTlsStream::Plain(tcp_stream) => {
-            let _ = tcp_stream.set_read_timeout(Some(timeout));
-            let _ = tcp_stream.set_write_timeout(Some(timeout));
-        }
-        MaybeTlsStream::Rustls(tls_stream) => {
-            let _ = tls_stream.sock.set_read_timeout(Some(timeout));
-            let _ = tls_stream.sock.set_write_timeout(Some(timeout));
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]
@@ -976,7 +1196,7 @@ mod tests {
         }
     }
 
-    fn read_mock_relay_json_message(websocket: &mut tungstenite::WebSocket<TcpStream>) -> Value {
+    fn read_mock_relay_json_message(websocket: &mut tungstenite::WebSocket<StdTcpStream>) -> Value {
         let message = websocket.read().expect("mock relay must read message");
         serde_json::from_str(message.to_text().expect("mock relay message must be text"))
             .expect("mock relay message must be json")

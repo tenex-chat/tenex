@@ -1522,6 +1522,7 @@ dependencies = [
  "bech32",
  "chacha20",
  "dialoguer",
+ "futures-util",
  "getrandom 0.3.4",
  "hex",
  "hkdf",
