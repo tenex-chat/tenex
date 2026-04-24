@@ -109,7 +109,7 @@ Regenerated automatically by `scripts/e2e/run.sh` after every run. Do not edit
 between the delimiters — changes will be overwritten.
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T08:03:27Z · branch `rust-agent-worker-publishing` · commit `dcacba34e1c9` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T08:10:14Z · branch `rust-agent-worker-publishing` · commit `f9542684e3d5` · total=1 pass=0 fail=0 skip=1 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
@@ -126,6 +126,7 @@ _Last run: 2026-04-24T08:03:27Z · branch `rust-agent-worker-publishing` · comm
 | 36_triggering_event_dedup.sh | fail | 2026-04-24T08:00:16Z | 31s |  |
 | 37_dispatch_input_mismatch.sh | fail | 2026-04-24T08:00:48Z | 32s |  |
 | 39_ral_number_exhaustion.sh | fail | 2026-04-24T07:11:50Z | 38s |  |
+| 55_active_parent_receives_via_injection.sh | skip | 2026-04-24T08:10:14Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
 <!-- e2e-matrix:end -->
 
 ## Active orchestration
