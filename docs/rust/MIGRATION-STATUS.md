@@ -2,17 +2,19 @@
 
 **Last updated:** 2026-04-24 (late session)  
 **Active branch:** `rust-agent-worker-publishing`  
-**Audited commit:** `2b2f4db1`
+**Audited commit:** `d265e49b`
 
 ## Work in flight
 
-- **Backend-event publish path simplification** — first agent attempt killed mid-flight after writing to the main checkout instead of its worktree; partial WIP stashed (broken-build state). To re-dispatch with explicit pwd-isolation guard and the 24133 NIP-46 bunker-reply nuance flagged by the feedback critic.
-- **Tokio finishing pieces (whitelist_wiring → tokio tasks, async session loop, publish_outbox_wake)** — was bundled into the contaminated commit `4555db58`, since reverted via `ee79842f`. Coherent work but caused a Phase-5 regression in scenario 101 because the new tokio session lifecycle didn't decrement the active-worker counter on completion, leaving admission permanently rejecting `not_admitted`. To re-dispatch in scoped chunks with an explicit "must not regress 101 or 21" gate.
-- **`scenario 39` RAL exhaustion** — still parked in `_wip/`; journal seed format mismatch, never re-investigated.
+- **Backend-event publish path simplification** — second dispatch in flight in worktree with explicit pwd-isolation guard and the 24133 NIP-46 bunker-reply nuance flagged for verification before removal.
+- **Tokio finishing pieces (b)+(c) — async session loop + publish_outbox_wake** — design landed at `docs/plans/2026-04-24-tokio-finishing-design.md`. The new design eliminates the registry's `Option<RuntimeHandle>` field that caused last attempt's 101 regression: `spawn_blocking` uses ambient runtime, `JoinHandle::blocking_join()` joins from sync context. Will dispatch as a single commit after backend-publish lands and stabilizes.
 
-## Recent cleanups landed this session
+## Recent cleanups + landings this session
 
 - **`WorkerConcurrencyLimits` deleted entirely (`2b2f4db1`)** — global/per-project/per-agent caps were either unwired in production or judged unnecessary by the user. Removed the struct, planner, `--max-concurrent-workers` CLI flag, `DEFAULT_MAX_CONCURRENT_WORKERS`, the admission concurrency check, scenario `33_per_agent_concurrency_cap.sh`, and ~540 lines of related code. Deduplication checks (`CandidateAlreadyActive`, `ConversationAlreadyActive`) retained as `check_worker_dispatch_dedup` — those are correctness, not capping.
+- **Bug 1 orphan recovery wiring restored (`8708a88d`)** — was first added in the contaminated `4555db58` (then reverted with the rest). Re-applied as a focused commit. Scenario 102 SIGKILL-restart now records `crashed` records on startup; remaining 102 failures are the pre-existing khatru subscription-registration race.
+- **Tokio finishing piece (a) (`c4fb798c`)** — whitelist reconciler + agent inventory poller now run as tokio tasks with explicit `watch::Sender<bool>` shutdown signal. NIP-46 sign body wraps in `spawn_blocking` to avoid starving the runtime. New gate test asserts both tasks exit within 1 s of shutdown. 994 lib tests + 13 daemon bin tests pass; scenario 101 = 4/5 with the known khatru flake.
+- **Scenario 39 RAL exhaustion unparked (`d265e49b`)** — three real script bugs found: assertion was grepping the cargo stdout log instead of the daemon's tracing JSON log, the republished priming event was being silently dropped by the second daemon's relay subscription `since` filter, and the 24010 wait was a fixed sleep-then-check that flaked on slow runs. All fixed; scenario passes 4 consecutive runs.
 
 ## Latest daemon e2e suite (2026-04-24)
 
