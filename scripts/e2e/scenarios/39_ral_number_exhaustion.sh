@@ -102,12 +102,19 @@ await_daemon_subscribed 45 || _die "daemon subscription never became live"
 
 boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 echo "[scenario] boot event id=$(printf '%s' "$boot_evt" | jq -r .id)"
-sleep 8
 
-if [[ -z "$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
-          "$HARNESS_RELAY_URL" 2>/dev/null || true)" ]]; then
+deadline=$(( $(date +%s) + 60 ))
+while [[ $(date +%s) -lt $deadline ]]; do
+  if [[ -n "$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
+              "$HARNESS_RELAY_URL" 2>/dev/null || true)" ]]; then
+    echo "[scenario] daemon published kind:24010 ✓"
+    break
+  fi
+  sleep 2
+done
+if [[ $(date +%s) -ge $deadline ]]; then
   tail -40 "$HARNESS_DAEMON_LOG" >&2 || true
-  _die "ASSERT: daemon never published kind:24010"
+  _die "ASSERT: daemon never published kind:24010 within 60s"
 fi
 sleep 5
 
@@ -216,7 +223,8 @@ rm -rf "$DAEMON_DIR/workers/dispatch-inputs"
 echo "[scenario] queue + dispatch-inputs wiped; journal seeded"
 
 # --- Step C: restart daemon and publish an inbound that hits the namespace ---
-log_bytes_before="$(wc -c < "$HARNESS_DAEMON_LOG" 2>/dev/null || echo 0)"
+daemon_json_log="$DAEMON_DIR/daemon.log"
+log_bytes_before="$(wc -c < "$daemon_json_log" 2>/dev/null || echo 0)"
 
 echo "[scenario] restarting daemon"
 start_daemon
@@ -226,31 +234,42 @@ await_daemon_subscribed 45 || _die "daemon subscription never became live after 
 sleep 5
 
 # The routing derives conversation_id from the inbound envelope's identity.
-# Because our priming message id is different from the next publish's id, the
-# daemon will derive a DIFFERENT conversation_id for the new publish. The
-# seeded u64::MAX allocation is namespaced on the priming conversation_id,
-# so a new message with a new id will fall into a fresh namespace.
+# For a top-level event (no reply), conversation_id = the event's own id. For a
+# reply event (e-tag referencing a known event), the daemon looks up which
+# conversation already contains that referenced event and routes to that
+# conversation.
 #
-# To force the same namespace we republish the ORIGINAL priming event (same
-# id, same signature) via nak event-on-stdin. The daemon has no subscription-
-# level id dedup (verified by grep), so it flows into the ingress again.
-echo "[scenario] republishing priming event id=$first_msg_id to hit exhausted namespace"
-printf '%s' "$first_evt" | nak event "$HARNESS_RELAY_URL" >/dev/null 2>&1 || true
+# We cannot republish the original priming event because the second daemon's
+# subscription has a `since` filter set to its startup time, and the old event
+# pre-dates that filter. Khatru will not re-deliver stored events outside the
+# since window.
+#
+# Instead, publish a FRESH kind:1 reply that references first_msg_id via an
+# e-tag. The daemon finds the existing conversation file for first_msg_id and
+# assigns conversation_id = first_msg_id — exactly the exhausted namespace.
+# The fresh event passes the since filter and enters the ingress normally.
+echo "[scenario] publishing fresh reply to priming event to hit exhausted namespace"
+publish_event_as "$USER_NSEC" 1 \
+  "follow-up to exhaustion test" \
+  "p=$AGENT1_PUBKEY" "a=$PROJECT_A_TAG" \
+  "e=$first_msg_id" >/dev/null
 
-# Give the daemon several reconnect cycles (the scheduler error currently
-# bubbles up to the subscription loop as a disconnect-and-retry). Each
-# attempt should log the error.
+# The scheduler error (RalNumberExhausted) propagates up through
+# enqueue_inbound_dispatch -> resolve_and_enqueue_inbound_dispatch ->
+# NostrSubscriptionTickError -> NostrSubscriptionRelayError and causes the
+# relay session to disconnect and reconnect. Each reconnect attempt will log
+# the error in the daemon JSON log at $DAEMON_DIR/daemon.log.
 echo "[scenario] waiting 15s for the daemon to hit RalNumberExhausted"
 sleep 15
 
 # --- Assertions --------------------------------------------------------------
-tail_log="$(tail -c +$((log_bytes_before + 1)) "$HARNESS_DAEMON_LOG" 2>/dev/null || true)"
+tail_log="$(tail -c +$((log_bytes_before + 1)) "$daemon_json_log" 2>/dev/null || true)"
 
 if printf '%s\n' "$tail_log" | \
-     grep -Eq 'RalNumberExhausted|ral_number_exhausted|RAL number exhausted|ral number exhausted'; then
+     grep -Eq 'RAL number space exhausted'; then
   echo "[scenario]   RalNumberExhausted error observed in daemon log ✓"
 else
-  echo "[scenario] daemon log (post-restart tail):"
+  echo "[scenario] daemon log (post-restart tail, $daemon_json_log):"
   printf '%s\n' "$tail_log" | tail -80 >&2 || true
   _die "ASSERT: expected RalNumberExhausted error in daemon log"
 fi
