@@ -50,6 +50,10 @@ use tenex_daemon::whitelist_wiring::{
     WhitelistReloadHandle, build_whitelist_wiring, reload_whitelist_from_handle,
 };
 use tenex_daemon::worker_dispatch::execution::AgentWorkerProcessDispatchSpawner;
+use tenex_daemon::worker_lifecycle::startup_recovery::{
+    WorkerStartupRecoveryInput, WorkerStartupRecoveryLiveWorkers, WorkerStartupRecoveryOutcome,
+    recover_worker_startup,
+};
 use tenex_daemon::worker_process::{
     AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
 };
@@ -201,6 +205,7 @@ where
     let project_event_index = Arc::new(Mutex::new(
         tenex_daemon::project_event_index::ProjectEventIndex::new(),
     ));
+    run_worker_startup_recovery(&daemon_dir)?;
 
     // While the daemon is running, a dedicated thread watches for SIGHUP
     // (via the global reload flag set by `request_daemon_reload`) and
@@ -317,6 +322,30 @@ where
     emit_shutdown_status("shutdown complete");
     tracing::info!("tenex-daemon stopped");
     Ok(String::new())
+}
+
+fn run_worker_startup_recovery(daemon_dir: &Path) -> Result<(), CliError> {
+    match recover_worker_startup(WorkerStartupRecoveryInput {
+        daemon_dir: daemon_dir.to_path_buf(),
+        live_workers: WorkerStartupRecoveryLiveWorkers::from_worker_ids(
+            std::iter::empty::<String>(),
+        ),
+        timestamp: current_unix_time_ms(),
+        correlation_id: "daemon-startup-recovery".to_string(),
+        writer_version: daemon_writer_version(),
+    }) {
+        Ok(WorkerStartupRecoveryOutcome::NoOrphans { .. }) => Ok(()),
+        Ok(WorkerStartupRecoveryOutcome::Applied { applied, .. }) => {
+            tracing::warn!(
+                reconciled = applied.actions.len(),
+                "reconciled orphaned worker claims during daemon startup"
+            );
+            Ok(())
+        }
+        Err(error) => Err(runtime_error(format!(
+            "worker startup recovery failed: {error}"
+        ))),
+    }
 }
 
 /// Spawn the SIGHUP reload watcher. The thread exits when
