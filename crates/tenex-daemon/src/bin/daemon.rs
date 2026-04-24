@@ -195,6 +195,14 @@ where
 
     let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
         .map_err(|error| runtime_error(error.to_string()))?;
+    if let Some(wiring) = &whitelist_wiring {
+        let owners = wiring
+            .reconciler_owners
+            .read()
+            .expect("reconciler owners lock must not be poisoned")
+            .clone();
+        tenex_daemon::daemon_whitelist_store::write_daemon_whitelist(&daemon_dir, &owners);
+    }
     let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
     let project_event_index = Arc::new(Mutex::new(
         tenex_daemon::project_event_index::ProjectEventIndex::new(),
@@ -360,11 +368,14 @@ fn start_nostr_subscription_supervisor_from_options(
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
+    let persisted_whitelist =
+        tenex_daemon::daemon_whitelist_store::read_daemon_whitelist(&daemon_dir);
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
         tenex_base_dir: &tenex_base_dir,
         since: Some(current_unix_time_ms() / 1_000),
         lesson_definition_ids: &[],
         project_event_index: &project_event_index,
+        persisted_whitelist: &persisted_whitelist,
     })
     .map_err(|error| runtime_error(format!("nostr subscription plan failed: {error}")))?;
     if plan.relay_urls.is_empty() || plan.filters.is_empty() {

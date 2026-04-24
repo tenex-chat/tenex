@@ -31,6 +31,7 @@ pub mod daemon_maintenance;
 pub mod daemon_readiness;
 pub mod daemon_shell;
 pub mod daemon_status;
+pub mod daemon_whitelist_store;
 pub mod daemon_worker_runtime;
 pub mod dispatch_queue;
 pub mod filesystem_state;

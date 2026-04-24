@@ -396,6 +396,7 @@ fn inspect_nostr_subscription_plan(
         since: options.since,
         lesson_definition_ids: &options.lesson_definition_ids,
         project_event_index: &project_event_index,
+        persisted_whitelist: &[],
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 
