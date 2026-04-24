@@ -2,7 +2,6 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import type { LessonComment } from "@/events/LessonComment";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
 import { shortenEventId } from "@/utils/conversation-id";
@@ -184,11 +183,6 @@ export class ProjectContext {
      * Key: agent pubkey, Value: array of comments (limited to most recent 100 per agent)
      */
     public readonly agentComments: Map<string, LessonComment[]>;
-
-    /**
-     * MCP manager for this project's MCP tool access
-     */
-    public mcpManager?: MCPManager;
 
     /**
      * Project-scoped registry for prompt compilers.

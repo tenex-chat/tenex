@@ -78,7 +78,6 @@ export async function executeAgentWorkerRequest(
 
     const projectContext = new ProjectContext(project, agentRegistry);
     const mcpManager = dependencies.createMcpManager?.() ?? new MCPManager();
-    projectContext.mcpManager = mcpManager;
 
     const agentPubkeys = Array.from(projectContext.agents.values()).map(
         (candidate) => candidate.pubkey

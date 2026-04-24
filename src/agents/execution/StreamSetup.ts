@@ -196,7 +196,7 @@ export async function setupStreamExecution(
 
     // Build MCP config from project's running MCP servers so agent providers can
     // spawn their own instances of external MCP servers when supported.
-    const projectMcpServers = projectContext.mcpManager?.getServerConfigs() ?? {};
+    const projectMcpServers = context.mcpManager?.getServerConfigs() ?? {};
     const mcpConfig = Object.keys(projectMcpServers).length > 0
         ? { enabled: true, servers: projectMcpServers }
         : undefined;
