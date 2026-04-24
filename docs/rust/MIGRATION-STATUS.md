@@ -204,8 +204,68 @@ Every ~30 min: dispatch 2–3 critical reviewers in parallel asking (a) is the c
 - Zero-coverage sections ranked by "prove production-ready": §10.1/10.3/10.4 (crash recovery) > §5.5/5.7 (injection, deferred completion) > §4.1/4.6 (claim tokens, stale lock) > §11.15 (relay reconnect) > §2.1 (add agent).
 - Actions: dispatched §5.5 (active-parent injection) and §4.3 (RAL status transitions) as next scenarios; queued §11.15 for after WS investigation lands; kept clean re-stress running as the threshold for retiring the 20% flake flag (success = ≥45/50 AND no `Connection reset` in any clean-run daemon log).
 
+## TS master changes to incorporate before merge
+
+The following commits landed in `master` while `rust-agent-worker-publishing` was open. They must be rebased/merged in and any Rust counterparts updated before this branch merges.
+
+### Group 1 — Protocol/kind changes (Rust must mirror)
+
+| Commit | Change | Rust action required |
+|--------|--------|---------------------|
+| `0d41924d` | Remove kind 24001 agent create request handling from TS daemon | `crates/tenex-daemon/src/nostr_classification.rs` still defines `KIND_TENEX_AGENT_CREATE = 24001` and `agent_install.rs` still emits/handles it in tests. Audit and remove. |
+| `5e092d76` | Delete `SystemPubkeyListService` — daemon no longer syncs a whitelist file | Rust `project_status_snapshot.rs` + `daemon_maintenance.rs` carry `whitelisted_pubkeys` fields that track NIP-42 whitelist state differently (per-publish not file-sync). Verify no Rust path is still expecting a file-synced whitelist from TS; document the distinction. |
+
+### Group 2 — Agent data model (storage shape changed)
+
+| Commit | Change | Rust action required |
+|--------|--------|---------------------|
+| `477ad466` | Remove per-project agent config overrides — deleted `ConfigResolver.ts`, shrank `AgentStorage.ts` by ~2k lines, removed `project-scoped-config.ts` test entirely | Rust `agent_config_update.rs` reads/writes agent JSON. Per-project config blocks (`projectOverrides`, `AgentProjectConfig`) are gone from the TS schema. Audit `agent_config_update.rs` and the Rust agent storage structs for any surviving per-project fields; remove them or they will silently diverge from what TS agents expect. |
+
+### Group 3 — Agent behavior policy (Rust dispatch must know)
+
+| Commit | Change | Rust action required |
+|--------|--------|---------------------|
+| `80dea913` | Worker agents now restricted to `ask` + `delegate_followup` only — `delegate` and `delegate_crossproject` stripped at tool-normalization time | ✅ **ALREADY ON BRANCH** (confirmed at position 5 from HEAD). No action needed. |
+
+### Group 4 — Dependency / build changes
+
+| Commit | Change | Rust action required |
+|--------|--------|---------------------|
+| `52453a6e` | `ai-sdk-fs-tools` 0.5.0 → 0.6.1 (dotfile fix in `fs_glob`) | Bring `package.json` + `pnpm-lock.yaml` change in. |
+| `dac76e2e` | Remove LanceDB vector store | ✅ **DONE** (`d7bf0095`) — `LanceDBProvider.ts` deleted, all references removed across RAG/embedding/search services, `@lancedb/lancedb` removed from `package.json`, 23 tests green. |
+
+### Group 5 — New worker-execution-path features (workers call these; Rust starts them)
+
+| Commit | Change | Rust action required |
+|--------|--------|---------------------|
+| `b58bfd6c` | Add proactive context discovery (`ContextDiscoveryService`, `context-management` command, new config field in `ConfigService`) — runs at `StreamSetup` time for every agent turn | Rust daemon spawns TS workers and passes the execution environment. The new `contextDiscovery` config field must round-trip correctly through any daemon→worker startup message or agent config JSON. Audit `daemon_worker_runtime.rs` / `worker_dispatch` to confirm new config keys pass through opaquely. |
+| `66440196` | Conversation embedding overhaul: schema bumped 2→3 (built-in skills bundled), new `EventLoopMonitor`, `EmbeddingProvider` rewrite | The data-migration to v3 (`2-to-3.ts`) must run on any environment that has this branch's Rust daemon. Ensure migration runs on startup before workers begin. No Rust change unless Rust reads embedding DB directly (it doesn't currently). |
+| `03085e93` + `9461db91` + `6f82588b` | Report skill: replace `publish.js` script with `report_publish.ts` AI SDK tool; auto-derive project a-tag from context | `report_publish.ts` is a new tool that workers call. Must be merged into the branch so workers running under the Rust daemon have access to it. |
+| `61ffa00d` | `project_list` tool: simplified agent format, fuzzy search, `ToolOutputTruncation` | Agents depend on this tool's output shape. Bring in so workers see the correct format. |
+
+### Group 6 — Bug fixes in worker execution path
+
+| Commit | Change | Rust action required |
+|--------|--------|---------------------|
+| `57fe9eba` | `shell.ts`: kill entire process group on timeout (not just the parent) | Merge directly — workers the Rust daemon spawns can leak shell subprocesses without this. |
+| `cd86a13c` | `SkillToolLoader.ts`: fix built-in skill discovery | Merge directly — without this, workers running under Rust daemon may silently load zero built-in skills. |
+| `c427ecc4` | Prevent agents under self-delegation from self-delegating again (`tools/registry.ts`) | Merge — affects any agent turn the Rust daemon dispatches. |
+| `cf38cacb` | `--only` flag: suppress scheduled conversation auto-starts | TS behavioral fix; bring in to keep scheduler semantics consistent. |
+
+### Group 7 — Test infrastructure
+
+| Commit | Change | Rust action required |
+|--------|--------|---------------------|
+| `50ea0ea1` | `test-setup.ts`: reset all singletons + module-level state between tests | Without this, TS tests on this branch will have cross-test contamination. Merge first before running the full test suite. |
+| `af481640` | Fix OpenTelemetry span lifecycle + test isolation | Merge. |
+| `bbfa25d9` | NDK test mock: add `.pool` and `.debug` properties | Merge — TS tests that touch NDK will fail without it. |
+| `02411494` | Annotate `createPrompt` return type (TS2883 fix) | Merge. |
+
+---
+
 ## Blockers for master merge (ranked by estimated time-to-close)
 
+0. **Incorporate 19 master commits** — while this branch was open, `master` received protocol changes (kind 24001 removal, per-project config removal, worker delegation restrictions), dependency updates (ai-sdk-fs-tools 0.6.1, LanceDB removed), new worker-path features (context discovery, embeddings v3, report_publish tool), and test-infrastructure fixes. These must be rebased/merged and Rust counterparts updated before any LFG gate makes sense. See **"TS master changes to incorporate before merge"** section above for the full breakdown.
 1. **Real-client verification** (web / iOS / Telegram) against Rust daemon — zero evidence it's been done; milestone says this is a per-slice gate that has been ignored. **Requires human** because clients live in sibling repos, not this one. CLI smoke via in-tree tool implementations is achievable and queued.
 2. **M8 tools need Rust replacement** before M9 can delete any daemon TS: `src/tools/implementations/project_list.ts`, `delegate_crossproject.ts`, `send_message.ts` all call `getDaemon()`; they keep all 14 TS daemon files alive.
 3. **M8 Telegram inbound adapter** — not written.
@@ -218,6 +278,7 @@ Every ~30 min: dispatch 2–3 critical reviewers in parallel asking (a) is the c
 
 ## Release criteria — LFG! readiness checklist
 
+- [ ] All 19 TS master commits incorporated (see "TS master changes" section); Rust counterparts updated (kind 24001 removed, per-project agent config fields purged, worker category policy verified)
 - [ ] M8 fully landed (Telegram inbound adapter + real-client fixture)
 - [ ] M9 complete (all TS daemon code deleted, no feature flags, no shims)
 - [ ] All M0–M8 quality gates green in CI

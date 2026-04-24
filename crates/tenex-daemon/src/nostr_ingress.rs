@@ -6,11 +6,14 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::agent_config_update::{
-    AgentConfigUpdateError, AgentConfigUpdateOutcome, AgentConfigUpdateScope,
-    apply_agent_config_update,
+    AgentConfigUpdateError, AgentConfigUpdateOutcome, apply_agent_config_update,
 };
 use crate::agent_install::{AgentInstallError, AgentInstallOutcome, install_agent_from_nostr};
 use crate::backend_config::{BackendConfigError, read_backend_config};
+use crate::backend_event_publish::{
+    BackendEventPublishContext, BackendEventPublishError, publish_backend_agent_config,
+};
+use crate::backend_events::installed_agent_list::AgentConfigInputs;
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
     resolve_and_enqueue_inbound_dispatch,
@@ -18,9 +21,9 @@ use crate::inbound_runtime::{
 use crate::nostr_classification::{DaemonNostrEventClass, classify_for_daemon};
 use crate::nostr_event::SignedNostrEvent;
 use crate::nostr_inbound::signed_event_to_inbound_envelope;
+use crate::per_agent_config_snapshot::{AgentConfigSnapshotError, build_agent_config_snapshot};
 use crate::project_boot_state::{
     ProjectBootOutcome, ProjectBootState, ProjectBootStateError, extract_project_boot_reference,
-    is_project_booted,
 };
 use crate::project_event_index::ProjectEventIndex;
 use crate::project_nostr_ingress::{
@@ -28,10 +31,6 @@ use crate::project_nostr_ingress::{
 };
 use crate::project_repository_init::{
     ProjectRepositoryInitError, ensure_project_repository_on_boot,
-};
-use crate::project_status_descriptors::{ProjectStatusDescriptor, ProjectStatusDescriptorError};
-use crate::project_status_runtime::{
-    ProjectStatusRuntimeError, ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
 use crate::worker_stop_request::{WorkerStopRequest, write_worker_stop_request};
 
@@ -64,11 +63,10 @@ pub enum NostrIngressOutcome {
     AgentConfigUpdated {
         class: DaemonNostrEventClass,
         config_update: AgentConfigUpdateOutcome,
-        /// Project d-tags for which a fresh kind 24010 project-status event was
-        /// enqueued in response to this config update. Empty when the update
-        /// was a no-op, when no boot state was supplied, or when no booted
-        /// project matched the update scope.
-        republished_projects: Vec<String>,
+        /// Event id of the freshly-enqueued per-agent 24011 publish. `None`
+        /// when the update was a no-op or when the agent snapshot could not
+        /// be built (e.g. the agent file was removed concurrently).
+        republished_agent_event_id: Option<String>,
     },
     AgentInstalled {
         class: DaemonNostrEventClass,
@@ -106,14 +104,10 @@ pub enum NostrIngressError {
     ProjectRepositoryInit(#[from] ProjectRepositoryInitError),
     #[error("failed to apply agent config update: {0}")]
     AgentConfigUpdate(#[from] AgentConfigUpdateError),
-    #[error("failed to enumerate project descriptors for status republish: {0}")]
-    ProjectDescriptors(#[from] ProjectStatusDescriptorError),
-    #[error("failed to republish project status for {project_d_tag}: {source}")]
-    ProjectStatusRepublish {
-        project_d_tag: String,
-        #[source]
-        source: ProjectStatusRuntimeError,
-    },
+    #[error("failed to build per-agent snapshot for republish: {0}")]
+    AgentConfigSnapshot(#[from] AgentConfigSnapshotError),
+    #[error("failed to publish per-agent 24011: {0}")]
+    AgentConfigPublish(#[from] BackendEventPublishError),
     #[error("failed to write stop request to filesystem: {0}")]
     StopRequest(#[from] io::Error),
     #[error("failed to install agent from Nostr: {0}")]
@@ -208,15 +202,15 @@ pub fn process_verified_nostr_event(
     if class == DaemonNostrEventClass::ConfigUpdate {
         let agents_dir = input.tenex_base_dir.join("agents");
         let config_update = apply_agent_config_update(&agents_dir, input.event)?;
-        let republished_projects = if config_update.file_changed {
-            republish_project_status_after_config_update(&input, &config_update.scope)?
+        let republished_agent_event_id = if config_update.file_changed {
+            republish_agent_config_after_update(&input, &config_update.agent_pubkey)?
         } else {
-            Vec::new()
+            None
         };
         return Ok(NostrIngressOutcome::AgentConfigUpdated {
             class,
             config_update,
-            republished_projects,
+            republished_agent_event_id,
         });
     }
 
@@ -247,98 +241,58 @@ pub fn process_verified_nostr_event(
     Ok(NostrIngressOutcome::Routed { class, inbound })
 }
 
-/// Immediately publishes a fresh kind 24010 project-status event for every
-/// booted project affected by an agent-config update. A project-scoped update
-/// targets a single project; a global update fans out to every booted project.
-/// Returns the project d-tags that were republished, in filesystem order.
-///
-/// When the session has no boot state handle, no republish happens — the
-/// daemon cannot safely enqueue project-status events before the project boot
-/// gate has observed the project.
-fn republish_project_status_after_config_update(
+/// Immediately publishes a fresh kind 24011 per-agent config event for the
+/// agent whose config was just updated. Returns the event id of the publish,
+/// or `None` if the agent's snapshot could not be built (missing file, etc.)
+/// — in that case the config file change is still persisted, the event will
+/// be republished on the next periodic backend-status tick.
+fn republish_agent_config_after_update(
     input: &NostrIngressInput<'_>,
-    scope: &AgentConfigUpdateScope,
-) -> Result<Vec<String>, NostrIngressError> {
-    let Some(boot_state_handle) = input.project_boot_state else {
-        return Ok(Vec::new());
+    agent_pubkey: &str,
+) -> Result<Option<String>, NostrIngressError> {
+    let snapshot = match build_agent_config_snapshot(input.tenex_base_dir, agent_pubkey) {
+        Ok(snapshot) => snapshot,
+        Err(AgentConfigSnapshotError::AgentFileNotFound { .. }) => return Ok(None),
+        Err(error) => return Err(error.into()),
     };
-    let boot_snapshot = boot_state_handle
-        .lock()
-        .expect("project boot state mutex must not be poisoned")
-        .snapshot();
-
     let config = read_backend_config(input.tenex_base_dir)?;
-    let projects_base = config
-        .projects_base
-        .as_deref()
-        .unwrap_or("/tmp/tenex-projects");
-    let descriptor_report = input
-        .project_event_index
-        .lock()
-        .expect("project event index mutex must not be poisoned")
-        .descriptors_report(projects_base);
-
+    let signer = config.backend_signer()?;
     let accepted_at = input.timestamp;
     let request_timestamp = input.timestamp;
     let created_at = accepted_at / 1_000;
-
-    let mut republished = Vec::new();
-    for descriptor in descriptor_report.descriptors {
-        if !scope_matches_descriptor(scope, &descriptor) {
-            continue;
-        }
-        if !is_project_booted(
-            &boot_snapshot,
-            &descriptor.project_owner_pubkey,
-            &descriptor.project_d_tag,
-        ) {
-            continue;
-        }
-        let project_base_path = descriptor.project_base_path.as_deref().map(Path::new);
-        let worktrees_vec = project_base_path
-            .map(crate::project_worktrees::read_project_worktrees)
-            .unwrap_or_default();
-        let worktrees_slice: Option<&[String]> = if worktrees_vec.is_empty() {
-            None
-        } else {
-            Some(&worktrees_vec)
-        };
-        publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
-            tenex_base_dir: input.tenex_base_dir,
+    let request_id = format!(
+        "nostr-ingress:agent-config:{}:{}",
+        snapshot.agent_pubkey, created_at
+    );
+    let outcome = publish_backend_agent_config(
+        BackendEventPublishContext {
             daemon_dir: input.daemon_dir,
-            created_at,
             accepted_at,
+            request_id: &request_id,
+            request_sequence: 1,
             request_timestamp,
-            project_owner_pubkey: &descriptor.project_owner_pubkey,
-            project_d_tag: &descriptor.project_d_tag,
-            project_manager_pubkey: descriptor.project_manager_pubkey.as_deref(),
-            project_base_path,
-            agents: None,
-            worktrees: worktrees_slice,
-        })
-        .map_err(|source| NostrIngressError::ProjectStatusRepublish {
-            project_d_tag: descriptor.project_d_tag.clone(),
-            source,
-        })?;
-        republished.push(descriptor.project_d_tag);
-    }
-    Ok(republished)
-}
-
-fn scope_matches_descriptor(
-    scope: &AgentConfigUpdateScope,
-    descriptor: &ProjectStatusDescriptor,
-) -> bool {
-    match scope {
-        AgentConfigUpdateScope::Global => true,
-        AgentConfigUpdateScope::Project {
-            project_owner_pubkey,
-            project_d_tag,
-        } => {
-            descriptor.project_owner_pubkey == *project_owner_pubkey
-                && descriptor.project_d_tag == *project_d_tag
-        }
-    }
+            correlation_id: &request_id,
+            project_id: "agent-config",
+            conversation_id: &snapshot.agent_pubkey,
+            ral_number: 0,
+            wait_for_relay_ok: false,
+            timeout_ms: 30_000,
+        },
+        AgentConfigInputs {
+            created_at,
+            agent_pubkey: &snapshot.agent_pubkey,
+            agent_slug: &snapshot.agent_slug,
+            owner_pubkeys: &config.whitelisted_pubkeys,
+            available_models: &snapshot.available_models,
+            active_models: &snapshot.active_model_set,
+            available_skills: &snapshot.available_skills,
+            active_skills: &snapshot.active_skills,
+            available_mcps: &snapshot.available_mcps,
+            active_mcps: &snapshot.active_mcps,
+        },
+        &signer,
+    )?;
+    Ok(Some(outcome.record.event.id))
 }
 
 fn handle_stop_command(
@@ -502,7 +456,9 @@ mod tests {
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
         let agent_pubkey = pubkey_hex(0x21);
+        write_backend_config(base_dir, Path::new("/repo"));
         write_agent(base_dir, &agent_pubkey, "alpha-agent");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
         let project_event_index = fresh_project_event_index();
 
         let event = signed_event(
@@ -529,7 +485,7 @@ mod tests {
         let NostrIngressOutcome::AgentConfigUpdated {
             class,
             config_update,
-            republished_projects,
+            republished_agent_event_id,
         } = outcome
         else {
             panic!("expected agent config updated outcome");
@@ -539,10 +495,11 @@ mod tests {
         assert_eq!(config_update.model, "anthropic:claude-opus-4-7");
         assert!(config_update.file_changed);
         assert!(
-            republished_projects.is_empty(),
-            "no boot state supplied so no republish should happen"
+            republished_agent_event_id.is_some(),
+            "per-agent 24011 must be republished after a config change"
         );
 
+        let _ = republished_agent_event_id;
         let stored: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(base_dir.join("agents").join(format!("{agent_pubkey}.json")))
                 .expect("agent file must read"),

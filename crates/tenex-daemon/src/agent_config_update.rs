@@ -6,27 +6,17 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::nostr_classification::KIND_PROJECT;
 use crate::nostr_event::SignedNostrEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentConfigUpdateOutcome {
     pub agent_pubkey: String,
-    pub scope: AgentConfigUpdateScope,
     pub model: String,
     pub tools: Vec<String>,
+    pub skills: Vec<String>,
+    pub mcp_access: Vec<String>,
     pub file_changed: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum AgentConfigUpdateScope {
-    Global,
-    Project {
-        project_owner_pubkey: String,
-        project_d_tag: String,
-    },
 }
 
 #[derive(Debug, Error)]
@@ -35,8 +25,6 @@ pub enum AgentConfigUpdateError {
     MissingAgentPubkey,
     #[error("agent config update event missing `model` tag")]
     MissingModel,
-    #[error("agent config update `a` tag `{reference}` is malformed")]
-    MalformedProjectATag { reference: String },
     #[error("agent file {path:?} not found for pubkey {pubkey}")]
     AgentFileNotFound { path: PathBuf, pubkey: String },
     #[error("agent file {path:?} has non-object root")]
@@ -47,6 +35,10 @@ pub enum AgentConfigUpdateError {
     Json(#[from] serde_json::Error),
 }
 
+/// Apply a kind 24020 agent-config-update event to the agent's JSON file.
+/// Writes `model`, `tools`, `skills`, and `mcpAccess` to the `default` block.
+/// Strips any legacy `projectOverrides` field on write (per-project overrides
+/// were removed from the protocol).
 pub fn apply_agent_config_update(
     agents_dir: impl AsRef<Path>,
     event: &SignedNostrEvent,
@@ -54,8 +46,9 @@ pub fn apply_agent_config_update(
     let agents_dir = agents_dir.as_ref();
     let agent_pubkey = extract_agent_pubkey(event)?;
     let model = extract_model(event)?;
-    let tools = extract_tools(event);
-    let scope = extract_scope(event)?;
+    let tools = extract_tag_values(event, "tool");
+    let skills = extract_tag_values(event, "skill");
+    let mcp_access = extract_tag_values(event, "mcp");
 
     let agent_file = agents_dir.join(format!("{agent_pubkey}.json"));
     let content = match fs::read_to_string(&agent_file) {
@@ -78,14 +71,10 @@ pub fn apply_agent_config_update(
         unreachable!("document is an object");
     };
 
-    match &scope {
-        AgentConfigUpdateScope::Global => {
-            apply_global_update(root, &model, &tools);
-        }
-        AgentConfigUpdateScope::Project { project_d_tag, .. } => {
-            apply_project_update(root, project_d_tag, &model, &tools);
-        }
-    }
+    apply_default_update(root, &model, &tools, &skills, &mcp_access);
+    // Strip any legacy per-project override block on first write; the concept
+    // is gone from the protocol and must not linger in storage.
+    root.remove("projectOverrides");
 
     let changed = document != before;
     if changed {
@@ -94,9 +83,10 @@ pub fn apply_agent_config_update(
 
     Ok(AgentConfigUpdateOutcome {
         agent_pubkey,
-        scope,
         model,
         tools,
+        skills,
+        mcp_access,
         file_changed: changed,
     })
 }
@@ -129,13 +119,13 @@ fn extract_model(event: &SignedNostrEvent) -> Result<String, AgentConfigUpdateEr
     Err(AgentConfigUpdateError::MissingModel)
 }
 
-fn extract_tools(event: &SignedNostrEvent) -> Vec<String> {
+fn extract_tag_values(event: &SignedNostrEvent, name: &str) -> Vec<String> {
     event
         .tags
         .iter()
         .filter_map(|tag| {
-            if tag.first().map(String::as_str) == Some("tool") {
-                tag.get(1).cloned()
+            if tag.first().map(String::as_str) == Some(name) {
+                tag.get(1).filter(|v| !v.is_empty()).cloned()
             } else {
                 None
             }
@@ -143,99 +133,20 @@ fn extract_tools(event: &SignedNostrEvent) -> Vec<String> {
         .collect()
 }
 
-fn extract_scope(
-    event: &SignedNostrEvent,
-) -> Result<AgentConfigUpdateScope, AgentConfigUpdateError> {
-    for tag in &event.tags {
-        if tag.first().map(String::as_str) != Some("a") {
-            continue;
-        }
-        let Some(reference) = tag.get(1) else {
-            continue;
-        };
-        if !reference.starts_with("31933:") {
-            continue;
-        }
-        let (owner, d_tag) = parse_project_reference(reference)?;
-        return Ok(AgentConfigUpdateScope::Project {
-            project_owner_pubkey: owner,
-            project_d_tag: d_tag,
-        });
-    }
-    Ok(AgentConfigUpdateScope::Global)
-}
-
-fn parse_project_reference(reference: &str) -> Result<(String, String), AgentConfigUpdateError> {
-    let mut parts = reference.splitn(3, ':');
-    let malformed = || AgentConfigUpdateError::MalformedProjectATag {
-        reference: reference.to_string(),
-    };
-    let kind = parts.next().ok_or_else(malformed)?;
-    if kind != KIND_PROJECT.to_string() {
-        return Err(malformed());
-    }
-    let owner = parts.next().ok_or_else(malformed)?;
-    let d_tag = parts.next().ok_or_else(malformed)?;
-    if owner.is_empty() || d_tag.is_empty() {
-        return Err(malformed());
-    }
-    Ok((owner.to_string(), d_tag.to_string()))
-}
-
-fn apply_global_update(root: &mut Map<String, Value>, model: &str, tools: &[String]) {
-    let default = ensure_object(root, "default");
-    default.insert("model".to_string(), Value::String(model.to_string()));
-    write_tools_field(default, tools);
-    if default.is_empty() {
-        root.remove("default");
-    }
-}
-
-fn apply_project_update(
+fn apply_default_update(
     root: &mut Map<String, Value>,
-    project_d_tag: &str,
     model: &str,
     tools: &[String],
+    skills: &[String],
+    mcp_access: &[String],
 ) {
-    let default_model = root
-        .get("default")
-        .and_then(Value::as_object)
-        .and_then(|default| default.get("model"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let default_tools = root
-        .get("default")
-        .and_then(Value::as_object)
-        .and_then(|default| default.get("tools"))
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let project_overrides = ensure_object(root, "projectOverrides");
-    let override_entry = ensure_object(project_overrides, project_d_tag);
-
-    if default_model.as_deref() == Some(model) {
-        override_entry.remove("model");
-    } else {
-        override_entry.insert("model".to_string(), Value::String(model.to_string()));
-    }
-
-    if tools == default_tools.as_slice() {
-        override_entry.remove("tools");
-    } else {
-        write_tools_field(override_entry, tools);
-    }
-
-    if override_entry.is_empty() {
-        project_overrides.remove(project_d_tag);
-    }
-    if project_overrides.is_empty() {
-        root.remove("projectOverrides");
+    let default = ensure_object(root, "default");
+    default.insert("model".to_string(), Value::String(model.to_string()));
+    write_string_array_field(default, "tools", tools);
+    write_string_array_field(default, "skills", skills);
+    write_string_array_field(default, "mcpAccess", mcp_access);
+    if default.is_empty() {
+        root.remove("default");
     }
 }
 
@@ -249,13 +160,13 @@ fn ensure_object<'a>(map: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<
     }
 }
 
-fn write_tools_field(map: &mut Map<String, Value>, tools: &[String]) {
-    if tools.is_empty() {
-        map.remove("tools");
+fn write_string_array_field(map: &mut Map<String, Value>, key: &str, values: &[String]) {
+    if values.is_empty() {
+        map.remove(key);
     } else {
         map.insert(
-            "tools".to_string(),
-            Value::Array(tools.iter().map(|t| Value::String(t.clone())).collect()),
+            key.to_string(),
+            Value::Array(values.iter().map(|v| Value::String(v.clone())).collect()),
         );
     }
 }
@@ -300,10 +211,11 @@ mod tests {
         serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("parse")
     }
 
-    const AGENT_PUBKEY: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    const AGENT_PUBKEY: &str =
+        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 
     #[test]
-    fn global_update_sets_default_model_and_tools() {
+    fn writes_model_tools_skills_and_mcp_to_default_block() {
         let dir = tempdir().expect("tempdir");
         let agents_dir = dir.path();
         let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
@@ -312,139 +224,68 @@ mod tests {
             json!({
                 "slug": "alpha",
                 "status": "active",
-                "nsec": "nsec1xxx",
-                "default": {
-                    "model": "anthropic:claude-sonnet-4-5",
-                },
+                "default": {"model": "anthropic:claude-sonnet-4-5"},
             }),
         );
 
         let event = signed_event(vec![
             vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-opus-4-7"],
+            vec!["model", "opus"],
             vec!["tool", "web_search"],
-            vec!["tool", "bash"],
+            vec!["skill", "read-access"],
+            vec!["skill", "shell"],
+            vec!["mcp", "github"],
         ]);
 
         let outcome = apply_agent_config_update(agents_dir, &event).expect("apply");
         assert_eq!(outcome.agent_pubkey, AGENT_PUBKEY);
-        assert_eq!(outcome.scope, AgentConfigUpdateScope::Global);
-        assert_eq!(outcome.model, "anthropic:claude-opus-4-7");
+        assert_eq!(outcome.model, "opus");
+        assert_eq!(outcome.tools, vec!["web_search".to_string()]);
         assert_eq!(
-            outcome.tools,
-            vec!["web_search".to_string(), "bash".to_string()]
+            outcome.skills,
+            vec!["read-access".to_string(), "shell".to_string()]
         );
+        assert_eq!(outcome.mcp_access, vec!["github".to_string()]);
         assert!(outcome.file_changed);
 
         let stored = read_agent(&agent_file);
-        assert_eq!(stored["default"]["model"], "anthropic:claude-opus-4-7");
-        assert_eq!(stored["default"]["tools"], json!(["web_search", "bash"]));
-        assert_eq!(stored["slug"], "alpha");
-        assert_eq!(stored["status"], "active");
-        assert_eq!(stored["nsec"], "nsec1xxx");
-    }
-
-    #[test]
-    fn global_update_creates_default_block_when_missing() {
-        let dir = tempdir().expect("tempdir");
-        let agents_dir = dir.path();
-        let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
-        write_agent(
-            &agent_file,
-            json!({
-                "slug": "alpha",
-                "status": "active",
-            }),
-        );
-
-        let event = signed_event(vec![
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-opus-4-7"],
-        ]);
-
-        let outcome = apply_agent_config_update(agents_dir, &event).expect("apply");
-        assert!(outcome.file_changed);
-
-        let stored = read_agent(&agent_file);
-        assert_eq!(stored["default"]["model"], "anthropic:claude-opus-4-7");
-        assert!(stored["default"].get("tools").is_none());
-    }
-
-    #[test]
-    fn global_update_with_empty_tools_clears_tools_field() {
-        let dir = tempdir().expect("tempdir");
-        let agents_dir = dir.path();
-        let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
-        write_agent(
-            &agent_file,
-            json!({
-                "slug": "alpha",
-                "default": {
-                    "model": "anthropic:claude-sonnet-4-5",
-                    "tools": ["web_search"],
-                },
-            }),
-        );
-
-        let event = signed_event(vec![
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-sonnet-4-5"],
-        ]);
-
-        apply_agent_config_update(agents_dir, &event).expect("apply");
-
-        let stored = read_agent(&agent_file);
-        assert!(stored["default"].get("tools").is_none());
-    }
-
-    #[test]
-    fn project_scoped_update_writes_to_project_overrides() {
-        let dir = tempdir().expect("tempdir");
-        let agents_dir = dir.path();
-        let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
-        write_agent(
-            &agent_file,
-            json!({
-                "slug": "alpha",
-                "default": {
-                    "model": "anthropic:claude-sonnet-4-5",
-                    "tools": ["web_search"],
-                },
-            }),
-        );
-
-        let event = signed_event(vec![
-            vec!["a", "31933:owner-pubkey:demo-project"],
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-opus-4-7"],
-            vec!["tool", "bash"],
-        ]);
-
-        let outcome = apply_agent_config_update(agents_dir, &event).expect("apply");
-        assert_eq!(
-            outcome.scope,
-            AgentConfigUpdateScope::Project {
-                project_owner_pubkey: "owner-pubkey".to_string(),
-                project_d_tag: "demo-project".to_string(),
-            }
-        );
-
-        let stored = read_agent(&agent_file);
-        assert_eq!(
-            stored["projectOverrides"]["demo-project"]["model"],
-            "anthropic:claude-opus-4-7"
-        );
-        assert_eq!(
-            stored["projectOverrides"]["demo-project"]["tools"],
-            json!(["bash"])
-        );
-        // defaults preserved untouched
-        assert_eq!(stored["default"]["model"], "anthropic:claude-sonnet-4-5");
+        assert_eq!(stored["default"]["model"], "opus");
         assert_eq!(stored["default"]["tools"], json!(["web_search"]));
+        assert_eq!(stored["default"]["skills"], json!(["read-access", "shell"]));
+        assert_eq!(stored["default"]["mcpAccess"], json!(["github"]));
     }
 
     #[test]
-    fn project_scoped_update_dedups_against_defaults() {
+    fn strips_legacy_project_overrides_on_write() {
+        let dir = tempdir().expect("tempdir");
+        let agents_dir = dir.path();
+        let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
+        write_agent(
+            &agent_file,
+            json!({
+                "slug": "alpha",
+                "default": {"model": "opus"},
+                "projectOverrides": {
+                    "demo-project": {"model": "sonnet", "skills": ["legacy"]}
+                }
+            }),
+        );
+
+        let event = signed_event(vec![vec!["p", AGENT_PUBKEY], vec!["model", "haiku"]]);
+
+        let outcome = apply_agent_config_update(agents_dir, &event).expect("apply");
+        assert!(outcome.file_changed);
+
+        let stored = read_agent(&agent_file);
+        assert_eq!(stored["default"]["model"], "haiku");
+        assert!(
+            stored.get("projectOverrides").is_none(),
+            "projectOverrides must be stripped on write"
+        );
+    }
+
+    #[test]
+    fn empty_tag_values_clear_the_corresponding_field() {
         let dir = tempdir().expect("tempdir");
         let agents_dir = dir.path();
         let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
@@ -453,34 +294,25 @@ mod tests {
             json!({
                 "slug": "alpha",
                 "default": {
-                    "model": "anthropic:claude-sonnet-4-5",
+                    "model": "opus",
                     "tools": ["web_search"],
-                },
-                "projectOverrides": {
-                    "demo-project": {
-                        "model": "openai:gpt-5",
-                        "tools": ["bash"],
-                    }
+                    "skills": ["old"],
+                    "mcpAccess": ["github"]
                 }
             }),
         );
 
-        let event = signed_event(vec![
-            vec!["a", "31933:owner-pubkey:demo-project"],
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-sonnet-4-5"],
-            vec!["tool", "web_search"],
-        ]);
-
+        let event = signed_event(vec![vec!["p", AGENT_PUBKEY], vec!["model", "opus"]]);
         apply_agent_config_update(agents_dir, &event).expect("apply");
 
         let stored = read_agent(&agent_file);
-        assert!(stored.get("projectOverrides").is_none());
-        assert_eq!(stored["default"]["model"], "anthropic:claude-sonnet-4-5");
+        assert!(stored["default"].get("tools").is_none());
+        assert!(stored["default"].get("skills").is_none());
+        assert!(stored["default"].get("mcpAccess").is_none());
     }
 
     #[test]
-    fn project_scoped_update_keeps_unrelated_project_overrides() {
+    fn no_op_update_does_not_rewrite_file() {
         let dir = tempdir().expect("tempdir");
         let agents_dir = dir.path();
         let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
@@ -488,34 +320,34 @@ mod tests {
             &agent_file,
             json!({
                 "slug": "alpha",
-                "default": {
-                    "model": "anthropic:claude-sonnet-4-5",
-                },
-                "projectOverrides": {
-                    "other-project": {
-                        "model": "openai:gpt-5",
-                    }
-                }
+                "default": {"model": "opus"}
             }),
         );
 
+        let event = signed_event(vec![vec!["p", AGENT_PUBKEY], vec!["model", "opus"]]);
+        let outcome = apply_agent_config_update(agents_dir, &event).expect("apply");
+        assert!(!outcome.file_changed);
+    }
+
+    #[test]
+    fn empty_single_element_tool_tag_is_ignored() {
+        let dir = tempdir().expect("tempdir");
+        let agents_dir = dir.path();
+        let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
+        write_agent(
+            &agent_file,
+            json!({"slug": "alpha", "default": {"model": "opus"}}),
+        );
+        // The TUI sometimes sends a placeholder ["tool"] with no value. That
+        // must not register as "add empty tool".
         let event = signed_event(vec![
-            vec!["a", "31933:owner-pubkey:demo-project"],
             vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-opus-4-7"],
+            vec!["model", "opus"],
+            vec!["tool"],
         ]);
-
-        apply_agent_config_update(agents_dir, &event).expect("apply");
-
-        let stored = read_agent(&agent_file);
-        assert_eq!(
-            stored["projectOverrides"]["other-project"]["model"],
-            "openai:gpt-5"
-        );
-        assert_eq!(
-            stored["projectOverrides"]["demo-project"]["model"],
-            "anthropic:claude-opus-4-7"
-        );
+        let outcome = apply_agent_config_update(agents_dir, &event).expect("apply");
+        assert!(outcome.tools.is_empty());
+        assert!(!outcome.file_changed);
     }
 
     #[test]
@@ -531,17 +363,12 @@ mod tests {
                 "nsec": "nsec1xxx",
                 "name": "Alpha",
                 "isPM": true,
-                "pmOverrides": {"demo-project": true},
                 "telegram": {"botToken": "abc"},
-                "default": {"model": "anthropic:claude-sonnet-4-5"},
+                "default": {"model": "sonnet"}
             }),
         );
 
-        let event = signed_event(vec![
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-opus-4-7"],
-        ]);
-
+        let event = signed_event(vec![vec!["p", AGENT_PUBKEY], vec!["model", "opus"]]);
         apply_agent_config_update(agents_dir, &event).expect("apply");
 
         let stored = read_agent(&agent_file);
@@ -550,14 +377,13 @@ mod tests {
         assert_eq!(stored["nsec"], "nsec1xxx");
         assert_eq!(stored["name"], "Alpha");
         assert_eq!(stored["isPM"], true);
-        assert_eq!(stored["pmOverrides"]["demo-project"], true);
         assert_eq!(stored["telegram"]["botToken"], "abc");
     }
 
     #[test]
     fn missing_p_tag_errors() {
         let dir = tempdir().expect("tempdir");
-        let event = signed_event(vec![vec!["model", "anthropic:claude-opus-4-7"]]);
+        let event = signed_event(vec![vec!["model", "opus"]]);
         let error = apply_agent_config_update(dir.path(), &event).expect_err("must error");
         assert!(matches!(error, AgentConfigUpdateError::MissingAgentPubkey));
     }
@@ -573,10 +399,7 @@ mod tests {
     #[test]
     fn missing_agent_file_errors() {
         let dir = tempdir().expect("tempdir");
-        let event = signed_event(vec![
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-opus-4-7"],
-        ]);
+        let event = signed_event(vec![vec!["p", AGENT_PUBKEY], vec!["model", "opus"]]);
         let error = apply_agent_config_update(dir.path(), &event).expect_err("must error");
         match error {
             AgentConfigUpdateError::AgentFileNotFound { pubkey, .. } => {
@@ -584,45 +407,5 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
-    }
-
-    #[test]
-    fn malformed_project_a_tag_errors() {
-        let dir = tempdir().expect("tempdir");
-        let agents_dir = dir.path();
-        let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
-        write_agent(&agent_file, json!({"slug": "alpha"}));
-        let event = signed_event(vec![
-            vec!["a", "31933:"],
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-opus-4-7"],
-        ]);
-        let error = apply_agent_config_update(agents_dir, &event).expect_err("must error");
-        assert!(matches!(
-            error,
-            AgentConfigUpdateError::MalformedProjectATag { .. }
-        ));
-    }
-
-    #[test]
-    fn no_op_update_does_not_rewrite_file() {
-        let dir = tempdir().expect("tempdir");
-        let agents_dir = dir.path();
-        let agent_file = agents_dir.join(format!("{AGENT_PUBKEY}.json"));
-        write_agent(
-            &agent_file,
-            json!({
-                "slug": "alpha",
-                "default": {"model": "anthropic:claude-sonnet-4-5"},
-            }),
-        );
-
-        let event = signed_event(vec![
-            vec!["p", AGENT_PUBKEY],
-            vec!["model", "anthropic:claude-sonnet-4-5"],
-        ]);
-
-        let outcome = apply_agent_config_update(agents_dir, &event).expect("apply");
-        assert!(!outcome.file_changed);
     }
 }

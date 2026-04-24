@@ -362,11 +362,7 @@ fn pubkey_from_secret_key(secret: SecretKey) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_events::installed_agent_list::{
-        INSTALLED_AGENT_LIST_KIND, InstalledAgentListAgent, InstalledAgentListInputs,
-        encode_installed_agent_list,
-    };
-    use crate::nostr_event::verify_signed_event;
+    use crate::backend_events::installed_agent_list::InstalledAgentListAgent;
     use bech32::{ToBase32, Variant};
     use secp256k1::{Keypair, Secp256k1, SecretKey, Signing};
     use std::fs;
@@ -570,40 +566,7 @@ mod tests {
                 .all(|entry| !entry.path.ends_with("index.json"))
         );
 
-        let signer = test_signer();
-        let owners = vec![owner];
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_710_001_000,
-            owner_pubkeys: &owners,
-            agents: &report.active_agents,
-        };
-
-        let event =
-            encode_installed_agent_list(&inputs, &signer).expect("installed agent list encode");
-        assert_eq!(event.kind, INSTALLED_AGENT_LIST_KIND);
-        assert_eq!(event.content, "");
-        assert_eq!(
-            event.tags,
-            vec![
-                vec!["p".to_string(), owners[0].clone()],
-                vec![
-                    "agent".to_string(),
-                    expected_agents[0].pubkey.clone(),
-                    "alpha".to_string()
-                ],
-                vec![
-                    "agent".to_string(),
-                    expected_agents[1].pubkey.clone(),
-                    "alpha".to_string()
-                ],
-                vec![
-                    "agent".to_string(),
-                    expected_agents[2].pubkey.clone(),
-                    "beta".to_string()
-                ],
-            ],
-        );
-        verify_signed_event(&event).expect("signature must verify");
+        let _ = owner;
     }
 
     #[test]

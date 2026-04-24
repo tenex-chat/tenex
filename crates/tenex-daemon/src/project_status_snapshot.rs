@@ -1,6 +1,5 @@
 use crate::backend_events::project_status::{
-    ProjectStatusAgent, ProjectStatusInputs, ProjectStatusMcpServer, ProjectStatusModel,
-    ProjectStatusScheduledTask, ProjectStatusSkill, ProjectStatusTool,
+    ProjectStatusAgent, ProjectStatusInputs, ProjectStatusScheduledTask,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,10 +10,6 @@ pub struct ProjectStatusSnapshot {
     pub whitelisted_pubkeys: Vec<String>,
     pub project_manager_pubkey: Option<String>,
     pub agents: Vec<ProjectStatusAgent>,
-    pub models: Vec<ProjectStatusModel>,
-    pub tools: Vec<ProjectStatusTool>,
-    pub skills: Vec<ProjectStatusSkill>,
-    pub mcp_servers: Vec<ProjectStatusMcpServer>,
     pub worktrees: Vec<String>,
     pub scheduled_tasks: Vec<ProjectStatusScheduledTask>,
 }
@@ -28,10 +23,6 @@ impl ProjectStatusSnapshot {
         whitelisted_pubkeys: Vec<String>,
         project_manager_pubkey: Option<String>,
         agents: Vec<ProjectStatusAgent>,
-        models: Vec<ProjectStatusModel>,
-        tools: Vec<ProjectStatusTool>,
-        skills: Vec<ProjectStatusSkill>,
-        mcp_servers: Vec<ProjectStatusMcpServer>,
         worktrees: Vec<String>,
         scheduled_tasks: Vec<ProjectStatusScheduledTask>,
     ) -> Self {
@@ -42,10 +33,6 @@ impl ProjectStatusSnapshot {
             whitelisted_pubkeys,
             project_manager_pubkey,
             agents,
-            models,
-            tools,
-            skills,
-            mcp_servers,
             worktrees,
             scheduled_tasks,
         }
@@ -59,10 +46,6 @@ impl ProjectStatusSnapshot {
             whitelisted_pubkeys: &self.whitelisted_pubkeys,
             project_manager_pubkey: self.project_manager_pubkey.as_deref(),
             agents: &self.agents,
-            models: &self.models,
-            tools: &self.tools,
-            skills: &self.skills,
-            mcp_servers: &self.mcp_servers,
             worktrees: &self.worktrees,
             scheduled_tasks: &self.scheduled_tasks,
         }
@@ -168,22 +151,6 @@ mod tests {
                 pubkey: worker.clone(),
                 slug: "worker".to_string(),
             }],
-            vec![ProjectStatusModel {
-                slug: "model-alpha".to_string(),
-                agents: vec!["worker".to_string()],
-            }],
-            vec![ProjectStatusTool {
-                name: "shell".to_string(),
-                agents: vec!["worker".to_string()],
-            }],
-            vec![ProjectStatusSkill {
-                id: "skill-build".to_string(),
-                agents: vec!["worker".to_string()],
-            }],
-            vec![ProjectStatusMcpServer {
-                slug: "github".to_string(),
-                agents: vec!["worker".to_string()],
-            }],
             vec!["main".to_string()],
             vec![ProjectStatusScheduledTask {
                 id: "task-1".to_string(),
@@ -206,26 +173,6 @@ mod tests {
                 vec!["p".to_string(), owner.clone()],
                 vec!["p".to_string(), extra_whitelisted],
                 vec!["agent".to_string(), worker.clone(), "worker".to_string(),],
-                vec![
-                    "model".to_string(),
-                    "model-alpha".to_string(),
-                    "worker".to_string(),
-                ],
-                vec![
-                    "tool".to_string(),
-                    "shell".to_string(),
-                    "worker".to_string()
-                ],
-                vec![
-                    "skill".to_string(),
-                    "skill-build".to_string(),
-                    "worker".to_string(),
-                ],
-                vec![
-                    "mcp".to_string(),
-                    "github".to_string(),
-                    "worker".to_string()
-                ],
                 vec!["branch".to_string(), "main".to_string()],
                 vec![
                     "scheduled-task".to_string(),

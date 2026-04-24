@@ -73,7 +73,9 @@ pub struct BackendEventsTickBackendStatusOutcome {
     /// `None` when the heartbeat latch observed a matching kind 14199 and
     /// gated the heartbeat for this tick.
     pub heartbeat_event_id: Option<String>,
-    pub installed_agent_list_event_id: String,
+    /// One event id per installed agent — kind 24011 is now published
+    /// per-agent, one signed event per installed agent.
+    pub agent_config_event_ids: Vec<String>,
     pub enqueued_event_count: usize,
 }
 
@@ -229,9 +231,14 @@ pub fn tick_backend_events_for_due_tasks(
             .heartbeat
             .as_ref()
             .map(|heartbeat| heartbeat.record.event.id.clone());
+        let agent_config_event_ids: Vec<String> = outcome
+            .agent_configs
+            .iter()
+            .map(|publish| publish.record.event.id.clone())
+            .collect();
         let enqueued_event_count = usize::from(outcome.backend_profile.is_some())
             + usize::from(outcome.heartbeat.is_some())
-            + 1;
+            + agent_config_event_ids.len();
         Some(BackendEventsTickBackendStatusOutcome {
             task_name: BACKEND_STATUS_TICK_TASK_NAME.to_string(),
             backend_profile_event_id: outcome
@@ -239,7 +246,7 @@ pub fn tick_backend_events_for_due_tasks(
                 .as_ref()
                 .map(|profile| profile.record.event.id.clone()),
             heartbeat_event_id,
-            installed_agent_list_event_id: outcome.installed_agent_list.record.event.id,
+            agent_config_event_ids,
             enqueued_event_count,
         })
     } else {
@@ -496,7 +503,8 @@ mod tests {
             .backend_status
             .as_ref()
             .expect("backend status must publish");
-        assert_eq!(backend_status.enqueued_event_count, 2);
+        // 1 heartbeat + 1 per-agent 24011 per installed agent (2 agents).
+        assert_eq!(backend_status.enqueued_event_count, 3);
         assert_eq!(outcome.project_statuses.len(), 1);
         assert_eq!(outcome.project_statuses[0].project_d_tag, "demo-project");
         assert_eq!(outcome.project_statuses[0].enqueued_event_count, 1);
@@ -510,12 +518,13 @@ mod tests {
         let heartbeat = read_pending_publish_outbox_record(&daemon_dir, heartbeat_event_id)
             .expect("heartbeat record read must succeed")
             .expect("heartbeat record must exist");
-        let installed = read_pending_publish_outbox_record(
-            &daemon_dir,
-            &backend_status.installed_agent_list_event_id,
-        )
-        .expect("installed-agent-list record read must succeed")
-        .expect("installed-agent-list record must exist");
+        let first_agent_config = backend_status
+            .agent_config_event_ids
+            .first()
+            .expect("per-agent 24011 must publish");
+        let installed = read_pending_publish_outbox_record(&daemon_dir, first_agent_config)
+            .expect("agent-config record read must succeed")
+            .expect("agent-config record must exist");
         let project_status = read_pending_publish_outbox_record(
             &daemon_dir,
             &outcome.project_statuses[0].project_status_event_id,
@@ -590,16 +599,16 @@ mod tests {
             backend_status.heartbeat_event_id.is_none(),
             "heartbeat must be gated when latch is stopped"
         );
-        assert!(!backend_status.installed_agent_list_event_id.is_empty());
-        assert_eq!(backend_status.enqueued_event_count, 1);
+        assert!(!backend_status.agent_config_event_ids.is_empty());
 
-        // Installed-agent-list is still persisted to the publish outbox.
-        let installed = read_pending_publish_outbox_record(
-            &daemon_dir,
-            &backend_status.installed_agent_list_event_id,
-        )
-        .expect("installed-agent-list record read must succeed")
-        .expect("installed-agent-list record must exist");
+        // Per-agent 24011s are still persisted to the publish outbox.
+        let first_agent_config = backend_status
+            .agent_config_event_ids
+            .first()
+            .expect("per-agent 24011 must publish");
+        let installed = read_pending_publish_outbox_record(&daemon_dir, first_agent_config)
+            .expect("agent-config record read must succeed")
+            .expect("agent-config record must exist");
         assert_eq!(installed.event.kind, INSTALLED_AGENT_LIST_KIND);
 
         cleanup_temp_dir(tenex_base_dir);

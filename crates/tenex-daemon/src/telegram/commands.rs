@@ -1142,17 +1142,12 @@ fn load_current_agent_snapshot(
     Ok(AgentSnapshot { model, tools })
 }
 
-fn available_project_tools(tenex_base_dir: &Path, project_d_tag: &str) -> Vec<String> {
-    use crate::project_status_agent_sources::read_project_status_agent_sources;
-    match read_project_status_agent_sources(tenex_base_dir, project_d_tag) {
-        Ok(report) => {
-            let mut tools: Vec<String> = report.tools.into_iter().map(|t| t.name).collect();
-            tools.sort();
-            tools.dedup();
-            tools
-        }
-        Err(_) => Vec::new(),
-    }
+fn available_project_tools(_tenex_base_dir: &Path, _project_d_tag: &str) -> Vec<String> {
+    // Tools are no longer surfaced through project-status events, and
+    // per-project tool aggregation has been removed from the daemon. The
+    // Telegram "tools" config session therefore shows an empty list until a
+    // replacement tool-discovery mechanism lands.
+    Vec::new()
 }
 
 fn publish_agent_config_update<C, S>(

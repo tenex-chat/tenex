@@ -1,8 +1,5 @@
 import { agentStorage, createStoredAgent, type StoredAgent } from "@/agents/AgentStorage";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
-import { initNDK } from "@/nostr/ndkClient";
-import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
-import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 export interface ProvisionedAgentResult {
@@ -21,23 +18,8 @@ export interface CreateLocalAgentInput {
     tools?: string[] | null;
 }
 
-async function publishInstalledAgentsInventory(): Promise<void> {
-    const publisher = new InstalledAgentListService();
-    try {
-        await initNDK();
-        await publisher.publishImmediately();
-    } catch (error) {
-        logger.warn("[AgentProvisioningService] Failed to publish installed-agent inventory", {
-            error: error instanceof Error ? error.message : String(error),
-        });
-    }
-}
-
 export async function createLocalAgent(
-    input: CreateLocalAgentInput,
-    options?: {
-        publishInventory?: boolean;
-    }
+    input: CreateLocalAgentInput
 ): Promise<ProvisionedAgentResult> {
     await agentStorage.initialize();
 
@@ -56,11 +38,6 @@ export async function createLocalAgent(
     });
 
     await agentStorage.saveAgent(storedAgent);
-
-    if (options?.publishInventory !== false) {
-        await publishInstalledAgentsInventory();
-    }
-
     return {
         storedAgent,
         pubkey: signer.pubkey,
@@ -71,7 +48,6 @@ export async function createLocalAgent(
 export async function deleteStoredAgent(
     pubkey: string,
     options?: {
-        publishInventory?: boolean;
         quiet?: boolean;
     }
 ): Promise<boolean> {
@@ -85,10 +61,5 @@ export async function deleteStoredAgent(
     await agentStorage.deleteAgent(pubkey, {
         quiet: options?.quiet,
     });
-
-    if (options?.publishInventory !== false) {
-        await publishInstalledAgentsInventory();
-    }
-
     return true;
 }

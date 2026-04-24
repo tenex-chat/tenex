@@ -17,30 +17,6 @@ pub struct ProjectStatusAgent {
     pub slug: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectStatusModel {
-    pub slug: String,
-    pub agents: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectStatusTool {
-    pub name: String,
-    pub agents: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectStatusSkill {
-    pub id: String,
-    pub agents: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectStatusMcpServer {
-    pub slug: String,
-    pub agents: Vec<String>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectStatusScheduledTaskKind {
     Cron,
@@ -73,10 +49,6 @@ pub struct ProjectStatusInputs<'a> {
     pub whitelisted_pubkeys: &'a [String],
     pub project_manager_pubkey: Option<&'a str>,
     pub agents: &'a [ProjectStatusAgent],
-    pub models: &'a [ProjectStatusModel],
-    pub tools: &'a [ProjectStatusTool],
-    pub skills: &'a [ProjectStatusSkill],
-    pub mcp_servers: &'a [ProjectStatusMcpServer],
     pub worktrees: &'a [String],
     pub scheduled_tasks: &'a [ProjectStatusScheduledTask],
 }
@@ -95,36 +67,6 @@ pub enum ProjectStatusEncodeError {
     InvalidAgentPubkey { index: usize, reason: String },
     #[error("project-status agent slug at index {index} is empty")]
     EmptyAgentSlug { index: usize },
-    #[error("project-status model slug at index {index} is empty")]
-    EmptyModelSlug { index: usize },
-    #[error("project-status model agent slug at model {model_index}, agent {agent_index} is empty")]
-    EmptyModelAgentSlug {
-        model_index: usize,
-        agent_index: usize,
-    },
-    #[error("project-status tool name at index {index} is empty")]
-    EmptyToolName { index: usize },
-    #[error("project-status tool agent slug at tool {tool_index}, agent {agent_index} is empty")]
-    EmptyToolAgentSlug {
-        tool_index: usize,
-        agent_index: usize,
-    },
-    #[error("project-status skill id at index {index} is empty")]
-    EmptySkillId { index: usize },
-    #[error("project-status skill agent slug at skill {skill_index}, agent {agent_index} is empty")]
-    EmptySkillAgentSlug {
-        skill_index: usize,
-        agent_index: usize,
-    },
-    #[error("project-status mcp server slug at index {index} is empty")]
-    EmptyMcpServerSlug { index: usize },
-    #[error(
-        "project-status mcp server agent slug at server {server_index}, agent {agent_index} is empty"
-    )]
-    EmptyMcpServerAgentSlug {
-        server_index: usize,
-        agent_index: usize,
-    },
     #[error("project-status worktree branch at index {index} is empty")]
     EmptyWorktreeBranch { index: usize },
     #[error("project-status scheduled task id at index {index} is empty")]
@@ -219,64 +161,6 @@ fn validate_inputs(inputs: &ProjectStatusInputs<'_>) -> Result<(), ProjectStatus
         }
     }
 
-    for (model_index, model) in inputs.models.iter().enumerate() {
-        if model.slug.is_empty() {
-            return Err(ProjectStatusEncodeError::EmptyModelSlug { index: model_index });
-        }
-        for (agent_index, agent) in model.agents.iter().enumerate() {
-            if agent.is_empty() {
-                return Err(ProjectStatusEncodeError::EmptyModelAgentSlug {
-                    model_index,
-                    agent_index,
-                });
-            }
-        }
-    }
-
-    for (tool_index, tool) in inputs.tools.iter().enumerate() {
-        if tool.name.is_empty() {
-            return Err(ProjectStatusEncodeError::EmptyToolName { index: tool_index });
-        }
-        for (agent_index, agent) in tool.agents.iter().enumerate() {
-            if agent.is_empty() {
-                return Err(ProjectStatusEncodeError::EmptyToolAgentSlug {
-                    tool_index,
-                    agent_index,
-                });
-            }
-        }
-    }
-
-    for (skill_index, skill) in inputs.skills.iter().enumerate() {
-        if skill.id.is_empty() {
-            return Err(ProjectStatusEncodeError::EmptySkillId { index: skill_index });
-        }
-        for (agent_index, agent) in skill.agents.iter().enumerate() {
-            if agent.is_empty() {
-                return Err(ProjectStatusEncodeError::EmptySkillAgentSlug {
-                    skill_index,
-                    agent_index,
-                });
-            }
-        }
-    }
-
-    for (server_index, server) in inputs.mcp_servers.iter().enumerate() {
-        if server.slug.is_empty() {
-            return Err(ProjectStatusEncodeError::EmptyMcpServerSlug {
-                index: server_index,
-            });
-        }
-        for (agent_index, agent) in server.agents.iter().enumerate() {
-            if agent.is_empty() {
-                return Err(ProjectStatusEncodeError::EmptyMcpServerAgentSlug {
-                    server_index,
-                    agent_index,
-                });
-            }
-        }
-    }
-
     for (index, branch) in inputs.worktrees.iter().enumerate() {
         if branch.is_empty() {
             return Err(ProjectStatusEncodeError::EmptyWorktreeBranch { index });
@@ -327,30 +211,6 @@ fn project_status_tags(inputs: &ProjectStatusInputs<'_>) -> Vec<Vec<String>> {
         if inputs.project_manager_pubkey == Some(agent.pubkey.as_str()) {
             tag.push("pm".to_string());
         }
-        tags.push(tag);
-    }
-
-    for model in inputs.models {
-        let mut tag = vec!["model".to_string(), model.slug.clone()];
-        tag.extend(model.agents.iter().cloned());
-        tags.push(tag);
-    }
-
-    for tool in inputs.tools {
-        let mut tag = vec!["tool".to_string(), tool.name.clone()];
-        tag.extend(tool.agents.iter().cloned());
-        tags.push(tag);
-    }
-
-    for skill in inputs.skills {
-        let mut tag = vec!["skill".to_string(), skill.id.clone()];
-        tag.extend(skill.agents.iter().cloned());
-        tags.push(tag);
-    }
-
-    for server in inputs.mcp_servers {
-        let mut tag = vec!["mcp".to_string(), server.slug.clone()];
-        tag.extend(server.agents.iter().cloned());
         tags.push(tag);
     }
 
@@ -455,10 +315,6 @@ mod tests {
         whitelisted_pubkeys: &'a [String],
         project_manager_pubkey: Option<&'a str>,
         agents: &'a [ProjectStatusAgent],
-        models: &'a [ProjectStatusModel],
-        tools: &'a [ProjectStatusTool],
-        skills: &'a [ProjectStatusSkill],
-        mcp_servers: &'a [ProjectStatusMcpServer],
         worktrees: &'a [String],
         scheduled_tasks: &'a [ProjectStatusScheduledTask],
     ) -> ProjectStatusInputs<'a> {
@@ -469,10 +325,6 @@ mod tests {
             whitelisted_pubkeys,
             project_manager_pubkey,
             agents,
-            models,
-            tools,
-            skills,
-            mcp_servers,
             worktrees,
             scheduled_tasks,
         }
@@ -496,22 +348,6 @@ mod tests {
                 slug: "manager".to_string(),
             },
         ];
-        let models = vec![ProjectStatusModel {
-            slug: "anthropic".to_string(),
-            agents: vec!["manager".to_string(), "worker".to_string()],
-        }];
-        let tools = vec![ProjectStatusTool {
-            name: "shell".to_string(),
-            agents: vec!["worker".to_string()],
-        }];
-        let skills = vec![ProjectStatusSkill {
-            id: "skill-build".to_string(),
-            agents: vec!["manager".to_string()],
-        }];
-        let mcp_servers = vec![ProjectStatusMcpServer {
-            slug: "github".to_string(),
-            agents: vec!["worker".to_string()],
-        }];
         let worktrees = vec!["main".to_string(), "feature/rust".to_string()];
         let scheduled_tasks = vec![
             ProjectStatusScheduledTask {
@@ -537,10 +373,6 @@ mod tests {
             &whitelisted,
             Some(&manager),
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &worktrees,
             &scheduled_tasks,
         );
@@ -563,27 +395,6 @@ mod tests {
                     manager.clone(),
                     "manager".to_string(),
                     "pm".to_string(),
-                ],
-                vec![
-                    "model".to_string(),
-                    "anthropic".to_string(),
-                    "manager".to_string(),
-                    "worker".to_string(),
-                ],
-                vec![
-                    "tool".to_string(),
-                    "shell".to_string(),
-                    "worker".to_string()
-                ],
-                vec![
-                    "skill".to_string(),
-                    "skill-build".to_string(),
-                    "manager".to_string(),
-                ],
-                vec![
-                    "mcp".to_string(),
-                    "github".to_string(),
-                    "worker".to_string()
                 ],
                 vec!["branch".to_string(), "main".to_string()],
                 vec!["branch".to_string(), "feature/rust".to_string()],
@@ -627,10 +438,6 @@ mod tests {
         let project_tag = project_tag(&owner);
         let whitelisted: Vec<String> = Vec::new();
         let agents: Vec<ProjectStatusAgent> = Vec::new();
-        let models: Vec<ProjectStatusModel> = Vec::new();
-        let tools: Vec<ProjectStatusTool> = Vec::new();
-        let skills: Vec<ProjectStatusSkill> = Vec::new();
-        let mcp_servers: Vec<ProjectStatusMcpServer> = Vec::new();
         let worktrees: Vec<String> = Vec::new();
         let scheduled_tasks: Vec<ProjectStatusScheduledTask> = Vec::new();
         let inputs = default_inputs(
@@ -639,10 +446,6 @@ mod tests {
             &whitelisted,
             None,
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &worktrees,
             &scheduled_tasks,
         );
@@ -663,10 +466,6 @@ mod tests {
         let project_tag = project_tag(&owner);
         let whitelisted = vec![pubkey_hex(0x03)];
         let agents: Vec<ProjectStatusAgent> = Vec::new();
-        let models: Vec<ProjectStatusModel> = Vec::new();
-        let tools: Vec<ProjectStatusTool> = Vec::new();
-        let skills: Vec<ProjectStatusSkill> = Vec::new();
-        let mcp_servers: Vec<ProjectStatusMcpServer> = Vec::new();
         let worktrees: Vec<String> = Vec::new();
         let scheduled_tasks: Vec<ProjectStatusScheduledTask> = Vec::new();
         let inputs = default_inputs(
@@ -675,10 +474,6 @@ mod tests {
             &whitelisted,
             None,
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &worktrees,
             &scheduled_tasks,
         );
@@ -696,10 +491,6 @@ mod tests {
         let project_tag = vec!["e".to_string(), "not-a-project-ref".to_string()];
         let whitelisted: Vec<String> = Vec::new();
         let agents: Vec<ProjectStatusAgent> = Vec::new();
-        let models: Vec<ProjectStatusModel> = Vec::new();
-        let tools: Vec<ProjectStatusTool> = Vec::new();
-        let skills: Vec<ProjectStatusSkill> = Vec::new();
-        let mcp_servers: Vec<ProjectStatusMcpServer> = Vec::new();
         let worktrees: Vec<String> = Vec::new();
         let scheduled_tasks: Vec<ProjectStatusScheduledTask> = Vec::new();
         let inputs = default_inputs(
@@ -708,10 +499,6 @@ mod tests {
             &whitelisted,
             None,
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &worktrees,
             &scheduled_tasks,
         );
@@ -721,17 +508,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_owner_whitelist_manager_and_agent_pubkeys() {
+    fn rejects_invalid_pubkeys() {
         let signer = test_signer();
         let owner = pubkey_hex(0x02);
         let project_tag = project_tag(&owner);
         let valid_whitelist = vec![pubkey_hex(0x03)];
         let empty: Vec<String> = Vec::new();
         let agents: Vec<ProjectStatusAgent> = Vec::new();
-        let models: Vec<ProjectStatusModel> = Vec::new();
-        let tools: Vec<ProjectStatusTool> = Vec::new();
-        let skills: Vec<ProjectStatusSkill> = Vec::new();
-        let mcp_servers: Vec<ProjectStatusMcpServer> = Vec::new();
         let scheduled_tasks: Vec<ProjectStatusScheduledTask> = Vec::new();
 
         let invalid_owner_inputs = default_inputs(
@@ -740,10 +523,6 @@ mod tests {
             &valid_whitelist,
             None,
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &empty,
             &scheduled_tasks,
         );
@@ -759,10 +538,6 @@ mod tests {
             &invalid_whitelist,
             None,
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &empty,
             &scheduled_tasks,
         );
@@ -777,10 +552,6 @@ mod tests {
             &valid_whitelist,
             Some("not-a-pubkey"),
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &empty,
             &scheduled_tasks,
         );
@@ -799,10 +570,6 @@ mod tests {
             &valid_whitelist,
             None,
             &invalid_agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &empty,
             &scheduled_tasks,
         );
@@ -813,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_required_status_fields() {
+    fn rejects_empty_agent_slug_and_scheduled_task_fields() {
         let signer = test_signer();
         let owner = pubkey_hex(0x02);
         let project_tag = project_tag(&owner);
@@ -823,10 +590,6 @@ mod tests {
             pubkey: pubkey_hex(0x03),
             slug: String::new(),
         }];
-        let models: Vec<ProjectStatusModel> = Vec::new();
-        let tools: Vec<ProjectStatusTool> = Vec::new();
-        let skills: Vec<ProjectStatusSkill> = Vec::new();
-        let mcp_servers: Vec<ProjectStatusMcpServer> = Vec::new();
         let scheduled_tasks: Vec<ProjectStatusScheduledTask> = Vec::new();
 
         let empty_agent_slug_inputs = default_inputs(
@@ -835,10 +598,6 @@ mod tests {
             &whitelisted,
             None,
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &empty,
             &scheduled_tasks,
         );
@@ -848,29 +607,6 @@ mod tests {
         ));
 
         let agents: Vec<ProjectStatusAgent> = Vec::new();
-        let models = vec![ProjectStatusModel {
-            slug: String::new(),
-            agents: Vec::new(),
-        }];
-        let empty_model_slug_inputs = default_inputs(
-            &project_tag,
-            &owner,
-            &whitelisted,
-            None,
-            &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
-            &empty,
-            &scheduled_tasks,
-        );
-        assert!(matches!(
-            encode_project_status(&empty_model_slug_inputs, &signer),
-            Err(ProjectStatusEncodeError::EmptyModelSlug { index: 0 })
-        ));
-
-        let models: Vec<ProjectStatusModel> = Vec::new();
         let scheduled_tasks = vec![ProjectStatusScheduledTask {
             id: "task".to_string(),
             title: "title".to_string(),
@@ -885,10 +621,6 @@ mod tests {
             &whitelisted,
             None,
             &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
             &empty,
             &scheduled_tasks,
         );
@@ -896,128 +628,5 @@ mod tests {
             encode_project_status(&empty_schedule_inputs, &signer),
             Err(ProjectStatusEncodeError::EmptyScheduledTaskSchedule { index: 0 })
         ));
-    }
-
-    #[test]
-    fn backend_project_status_fixture_matches_canonical_signature_and_tag_order() {
-        let fixture: crate::nostr_event::Nip01EventFixture = serde_json::from_str(include_str!(
-            "../../../../src/test-utils/fixtures/backend-events/project-status.compat.json"
-        ))
-        .expect("fixture must parse");
-        let signer = test_signer();
-        let owner = pubkey_hex(0x02);
-        let project_tag = project_tag(&owner);
-        let whitelisted = vec![pubkey_hex(0x03)];
-        let agent = ProjectStatusAgent {
-            pubkey: pubkey_hex(0x04),
-            slug: "worker".to_string(),
-        };
-        let agents = [agent];
-        let model = ProjectStatusModel {
-            slug: "anthropic".to_string(),
-            agents: vec!["worker".to_string()],
-        };
-        let models = [model];
-        let tool = ProjectStatusTool {
-            name: "shell".to_string(),
-            agents: vec!["worker".to_string()],
-        };
-        let tools = [tool];
-        let skill = ProjectStatusSkill {
-            id: "skill-build".to_string(),
-            agents: vec!["worker".to_string()],
-        };
-        let skills = [skill];
-        let mcp_server = ProjectStatusMcpServer {
-            slug: "github".to_string(),
-            agents: vec!["worker".to_string()],
-        };
-        let mcp_servers = [mcp_server];
-        let worktrees = vec!["main".to_string()];
-        let scheduled_tasks = vec![ProjectStatusScheduledTask {
-            id: "task-1".to_string(),
-            title: "Nightly build".to_string(),
-            schedule: "0 1 * * *".to_string(),
-            target_agent: "worker".to_string(),
-            kind: ProjectStatusScheduledTaskKind::Cron,
-            last_run: Some(1_699_999_999),
-        }];
-        let inputs = default_inputs(
-            &project_tag,
-            &owner,
-            &whitelisted,
-            None,
-            &agents,
-            &models,
-            &tools,
-            &skills,
-            &mcp_servers,
-            &worktrees,
-            &scheduled_tasks,
-        );
-
-        assert_eq!(fixture.name, "backend-project-status-basic");
-        assert_eq!(
-            fixture.description,
-            "Canonical backend project-status fixture for kind 24010."
-        );
-        assert_eq!(fixture.secret_key_hex, TEST_SECRET_KEY_HEX);
-        assert_eq!(fixture.pubkey, signer.xonly_pubkey_hex());
-        assert_eq!(fixture.normalized, fixture.signed.normalized());
-        assert_eq!(fixture.signed.tags, fixture.normalized.tags);
-        assert_eq!(
-            fixture.signed.tags,
-            vec![
-                project_tag.clone(),
-                vec!["p".to_string(), owner.clone()],
-                vec!["p".to_string(), whitelisted[0].clone()],
-                vec![
-                    "agent".to_string(),
-                    agents[0].pubkey.clone(),
-                    agents[0].slug.clone(),
-                ],
-                vec![
-                    "model".to_string(),
-                    models[0].slug.clone(),
-                    "worker".to_string()
-                ],
-                vec![
-                    "tool".to_string(),
-                    tools[0].name.clone(),
-                    "worker".to_string()
-                ],
-                vec![
-                    "skill".to_string(),
-                    skills[0].id.clone(),
-                    "worker".to_string()
-                ],
-                vec![
-                    "mcp".to_string(),
-                    mcp_servers[0].slug.clone(),
-                    "worker".to_string()
-                ],
-                vec!["branch".to_string(), worktrees[0].clone()],
-                vec![
-                    "scheduled-task".to_string(),
-                    scheduled_tasks[0].id.clone(),
-                    scheduled_tasks[0].title.clone(),
-                    scheduled_tasks[0].schedule.clone(),
-                    scheduled_tasks[0].target_agent.clone(),
-                    "cron".to_string(),
-                    "1699999999".to_string(),
-                ],
-            ]
-        );
-
-        let event = encode_project_status(&inputs, &signer).expect("encode project status");
-        assert_eq!(event, fixture.signed);
-        assert_eq!(
-            canonical_payload(&fixture.normalized).expect("canonical payload"),
-            fixture.canonical_payload
-        );
-        assert_eq!(event.id, fixture.event_hash);
-        assert_eq!(event.id, fixture.signed.id);
-
-        verify_signed_event(&fixture.signed).expect("fixture signature must verify");
     }
 }

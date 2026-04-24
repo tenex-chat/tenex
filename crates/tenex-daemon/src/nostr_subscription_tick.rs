@@ -326,7 +326,7 @@ fn dispatch_diagnostic(
         NostrIngressOutcome::AgentConfigUpdated {
             class,
             config_update,
-            republished_projects,
+            republished_agent_event_id,
         } => NostrSubscriptionTickDispatch::Ignored {
             frame_index,
             event_id,
@@ -336,10 +336,10 @@ fn dispatch_diagnostic(
                 "agent_config_update_noop".to_string()
             },
             detail: format!(
-                "agent {} config update applied (changed={}, republished_projects={})",
+                "agent {} config update applied (changed={}, republished={})",
                 config_update.agent_pubkey,
                 config_update.file_changed,
-                republished_projects.len()
+                republished_agent_event_id.is_some()
             ),
             class: Some(class),
             project_id: None,
@@ -403,8 +403,7 @@ fn frame_event_kind(frame: &RelaySubscriptionFrame) -> Option<u64> {
         RelaySubscriptionFrame::Eose { .. }
         | RelaySubscriptionFrame::Notice { .. }
         | RelaySubscriptionFrame::Closed { .. }
-        | RelaySubscriptionFrame::Auth { .. }
-        | RelaySubscriptionFrame::Ok { .. } => None,
+        | RelaySubscriptionFrame::Auth { .. } => None,
     }
 }
 
@@ -414,8 +413,7 @@ fn frame_event_pubkey(frame: &RelaySubscriptionFrame) -> Option<String> {
         RelaySubscriptionFrame::Eose { .. }
         | RelaySubscriptionFrame::Notice { .. }
         | RelaySubscriptionFrame::Closed { .. }
-        | RelaySubscriptionFrame::Auth { .. }
-        | RelaySubscriptionFrame::Ok { .. } => None,
+        | RelaySubscriptionFrame::Auth { .. } => None,
     }
 }
 

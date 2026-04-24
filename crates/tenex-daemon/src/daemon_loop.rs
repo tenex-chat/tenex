@@ -1315,17 +1315,17 @@ mod tests {
                 format!("project-status:{}:demo-project", fixture.owner_pubkey),
             ]
         );
-        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 3);
-        assert_eq!(tick.publish_outbox.drained.len(), 3);
+        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 2);
+        assert_eq!(tick.publish_outbox.drained.len(), 2);
         assert_eq!(tick.publish_outbox.diagnostics_after.pending_count, 0);
-        assert_eq!(tick.publish_outbox.diagnostics_after.published_count, 3);
-        assert_eq!(publisher.lock().unwrap().event_ids.len(), 3);
+        assert_eq!(tick.publish_outbox.diagnostics_after.published_count, 2);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 2);
         assert!(sleeper.sleeps_ms.is_empty());
 
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
-        assert_eq!(publish_outbox.published_count, 3);
+        assert_eq!(publish_outbox.published_count, 2);
     }
 
     #[test]
@@ -1356,8 +1356,8 @@ mod tests {
         .expect("filesystem tick loop must record retryable publish failures");
 
         let tick = &outcome.steps[0].maintenance_outcome;
-        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 3);
-        assert_eq!(tick.publish_outbox.drained.len(), 3);
+        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 2);
+        assert_eq!(tick.publish_outbox.drained.len(), 2);
         assert!(
             tick.publish_outbox
                 .drained
@@ -1365,10 +1365,10 @@ mod tests {
                 .all(|drain| drain.status == crate::publish_outbox::PublishOutboxStatus::Failed)
         );
         assert_eq!(tick.publish_outbox.diagnostics_after.pending_count, 0);
-        assert_eq!(tick.publish_outbox.diagnostics_after.failed_count, 3);
+        assert_eq!(tick.publish_outbox.diagnostics_after.failed_count, 2);
         assert_eq!(
             tick.publish_outbox.diagnostics_after.retryable_failed_count,
-            3
+            2
         );
         assert_eq!(tick.publish_outbox.diagnostics_after.retry_due_count, 0);
         assert!(
@@ -1379,13 +1379,13 @@ mod tests {
                 .and_then(|failure| failure.next_attempt_at)
                 .is_some()
         );
-        assert_eq!(publisher.lock().unwrap().publish_attempts, 3);
+        assert_eq!(publisher.lock().unwrap().publish_attempts, 2);
         assert!(sleeper.sleeps_ms.is_empty());
 
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
-        assert_eq!(publish_outbox.failed_count, 3);
-        assert_eq!(publish_outbox.retryable_failed_count, 3);
+        assert_eq!(publish_outbox.failed_count, 2);
+        assert_eq!(publish_outbox.retryable_failed_count, 2);
     }
 
     #[test]
@@ -1442,10 +1442,10 @@ mod tests {
             }
         ));
         assert_eq!(spawner.spawn_calls, 0);
-        assert_eq!(outcome.publish_outbox.diagnostics_before.pending_count, 3);
-        assert_eq!(outcome.publish_outbox.drained.len(), 3);
+        assert_eq!(outcome.publish_outbox.diagnostics_before.pending_count, 2);
+        assert_eq!(outcome.publish_outbox.drained.len(), 2);
         assert_eq!(outcome.publish_outbox.diagnostics_after.pending_count, 0);
-        assert_eq!(publisher.lock().unwrap().event_ids.len(), 3);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 2);
     }
 
     #[test]
@@ -1525,11 +1525,11 @@ mod tests {
         ));
         assert_eq!(spawner.spawn_calls, 1);
         // Publish outbox drain still runs before the tick returns.
-        assert_eq!(publisher.lock().unwrap().event_ids.len(), 3);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 2);
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
-        assert_eq!(publish_outbox.published_count, 3);
+        assert_eq!(publish_outbox.published_count, 2);
     }
 
     #[derive(Debug)]

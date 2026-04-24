@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use secp256k1::XOnlyPublicKey;
@@ -9,63 +9,89 @@ use crate::nostr_event::{
     NormalizedNostrEvent, NostrEventError, SignedNostrEvent, canonical_payload, event_hash_hex,
 };
 
-pub const INSTALLED_AGENT_LIST_KIND: u64 = 24011;
+/// Kind 24011 is now a **per-agent** configuration event (not the old
+/// "installed agent list" single event). One event per installed agent,
+/// signed by the backend, listing the agent's available and active
+/// models / skills / mcp servers. Ephemeral: relays don't store it; clients
+/// receive fresh snapshots on each periodic tick and on every 24020 ingest.
+pub const AGENT_CONFIG_KIND: u64 = 24011;
 
+/// Back-compat alias. The legacy name is preserved because several call sites
+/// and fixtures refer to the kind by its former symbolic name.
+pub const INSTALLED_AGENT_LIST_KIND: u64 = AGENT_CONFIG_KIND;
+
+/// A `(pubkey, slug)` pair describing one installed agent. Lives here for
+/// historical reasons — callers across the daemon (agent inventory,
+/// per-agent publish fan-out, project-status agent list) pass this shape
+/// around.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledAgentListAgent {
     pub pubkey: String,
     pub slug: String,
 }
 
-pub struct InstalledAgentListInputs<'a> {
+pub struct AgentConfigInputs<'a> {
     pub created_at: u64,
+    pub agent_pubkey: &'a str,
+    pub agent_slug: &'a str,
     pub owner_pubkeys: &'a [String],
-    pub agents: &'a [InstalledAgentListAgent],
+    pub available_models: &'a [String],
+    pub active_models: &'a BTreeSet<String>,
+    pub available_skills: &'a [String],
+    pub active_skills: &'a BTreeSet<String>,
+    pub available_mcps: &'a [String],
+    pub active_mcps: &'a BTreeSet<String>,
 }
 
 #[derive(Debug, Error)]
-pub enum InstalledAgentListEncodeError {
-    #[error("installed-agent-list owner pubkey at index {index} is invalid: {reason}")]
+pub enum AgentConfigEncodeError {
+    #[error("agent-config agent pubkey is invalid: {reason}")]
+    InvalidAgentPubkey { reason: String },
+    #[error("agent-config agent slug is empty")]
+    EmptyAgentSlug,
+    #[error("agent-config owner pubkey at index {index} is invalid: {reason}")]
     InvalidOwnerPubkey { index: usize, reason: String },
-    #[error("installed-agent-list agent pubkey at index {index} is invalid: {reason}")]
-    InvalidAgentPubkey { index: usize, reason: String },
-    #[error("installed-agent-list agent slug at index {index} is empty")]
-    EmptyAgentSlug { index: usize },
-    #[error("installed-agent-list canonicalization failed: {0}")]
+    #[error("agent-config {block} entry at index {index} is empty")]
+    EmptySlug { block: &'static str, index: usize },
+    #[error("agent-config canonicalization failed: {0}")]
     Canonicalize(#[from] NostrEventError),
-    #[error("installed-agent-list signing failed: {0}")]
+    #[error("agent-config signing failed: {0}")]
     Sign(#[from] secp256k1::Error),
 }
 
-pub fn encode_installed_agent_list<S: BackendSigner>(
-    inputs: &InstalledAgentListInputs<'_>,
+/// Back-compat alias so callers migrating from the old module still compile
+/// while the TS side is being updated. Delete once every caller has moved to
+/// `AgentConfigEncodeError`.
+pub type InstalledAgentListEncodeError = AgentConfigEncodeError;
+
+pub fn encode_agent_config<S: BackendSigner>(
+    inputs: &AgentConfigInputs<'_>,
     signer: &S,
-) -> Result<SignedNostrEvent, InstalledAgentListEncodeError> {
+) -> Result<SignedNostrEvent, AgentConfigEncodeError> {
+    validate_xonly_pubkey_hex(inputs.agent_pubkey).map_err(|err| {
+        AgentConfigEncodeError::InvalidAgentPubkey {
+            reason: err.to_string(),
+        }
+    })?;
+    if inputs.agent_slug.is_empty() {
+        return Err(AgentConfigEncodeError::EmptyAgentSlug);
+    }
     for (index, pubkey) in inputs.owner_pubkeys.iter().enumerate() {
         validate_xonly_pubkey_hex(pubkey).map_err(|err| {
-            InstalledAgentListEncodeError::InvalidOwnerPubkey {
+            AgentConfigEncodeError::InvalidOwnerPubkey {
                 index,
                 reason: err.to_string(),
             }
         })?;
     }
-
-    for (index, agent) in inputs.agents.iter().enumerate() {
-        if agent.slug.is_empty() {
-            return Err(InstalledAgentListEncodeError::EmptyAgentSlug { index });
-        }
-        validate_xonly_pubkey_hex(&agent.pubkey).map_err(|err| {
-            InstalledAgentListEncodeError::InvalidAgentPubkey {
-                index,
-                reason: err.to_string(),
-            }
-        })?;
-    }
+    validate_non_empty("model", inputs.available_models)?;
+    validate_non_empty("skill", inputs.available_skills)?;
+    validate_non_empty("mcp", inputs.available_mcps)?;
 
     let signer_pubkey = signer.xonly_pubkey_hex();
-    let tags = installed_agent_list_tags(inputs);
+    let tags = agent_config_tags(inputs);
     let normalized = NormalizedNostrEvent {
-        kind: INSTALLED_AGENT_LIST_KIND,
+        kind: AGENT_CONFIG_KIND,
         content: String::new(),
         tags: tags.clone(),
         pubkey: Some(signer_pubkey.clone()),
@@ -81,33 +107,72 @@ pub fn encode_installed_agent_list<S: BackendSigner>(
         id,
         pubkey: signer_pubkey,
         created_at: inputs.created_at,
-        kind: INSTALLED_AGENT_LIST_KIND,
+        kind: AGENT_CONFIG_KIND,
         tags,
         content: String::new(),
         sig,
     })
 }
 
-fn installed_agent_list_tags(inputs: &InstalledAgentListInputs<'_>) -> Vec<Vec<String>> {
-    let mut tags = Vec::with_capacity(inputs.owner_pubkeys.len() + inputs.agents.len());
+fn validate_non_empty(block: &'static str, values: &[String]) -> Result<(), AgentConfigEncodeError> {
+    for (index, value) in values.iter().enumerate() {
+        if value.is_empty() {
+            return Err(AgentConfigEncodeError::EmptySlug { block, index });
+        }
+    }
+    Ok(())
+}
+
+fn agent_config_tags(inputs: &AgentConfigInputs<'_>) -> Vec<Vec<String>> {
+    let mut tags = Vec::new();
+    tags.push(vec![
+        "agent".to_string(),
+        inputs.agent_pubkey.to_string(),
+        inputs.agent_slug.to_string(),
+    ]);
     for pubkey in inputs.owner_pubkeys {
         tags.push(vec!["p".to_string(), pubkey.clone()]);
     }
-
-    let mut agents: Vec<&InstalledAgentListAgent> = inputs.agents.iter().collect();
-    agents.sort_by(|left, right| match left.slug.cmp(&right.slug) {
-        Ordering::Equal => left.pubkey.cmp(&right.pubkey),
-        order => order,
-    });
-
-    for agent in agents {
-        tags.push(vec![
-            "agent".to_string(),
-            agent.pubkey.clone(),
-            agent.slug.clone(),
-        ]);
-    }
+    emit_slug_block(
+        &mut tags,
+        "model",
+        inputs.available_models,
+        inputs.active_models,
+    );
+    emit_slug_block(
+        &mut tags,
+        "skill",
+        inputs.available_skills,
+        inputs.active_skills,
+    );
+    emit_slug_block(
+        &mut tags,
+        "mcp",
+        inputs.available_mcps,
+        inputs.active_mcps,
+    );
     tags
+}
+
+fn emit_slug_block(
+    tags: &mut Vec<Vec<String>>,
+    name: &str,
+    available: &[String],
+    active: &BTreeSet<String>,
+) {
+    // Emit entries alphabetically by slug, preserving the user-specified
+    // "active" marker. Active and inactive entries are interleaved by slug;
+    // the marker is what distinguishes them.
+    let mut sorted: Vec<&String> = available.iter().collect();
+    sorted.sort();
+    sorted.dedup();
+    for slug in sorted {
+        let mut tag = vec![name.to_string(), slug.clone()];
+        if active.contains(slug) {
+            tag.push("active".to_string());
+        }
+        tags.push(tag);
+    }
 }
 
 fn validate_xonly_pubkey_hex(value: &str) -> Result<(), secp256k1::Error> {
@@ -180,203 +245,190 @@ mod tests {
         hex::encode(xonly.serialize())
     }
 
-    fn agent(fill_byte: u8, slug: &str) -> InstalledAgentListAgent {
-        InstalledAgentListAgent {
-            pubkey: pubkey_hex(fill_byte),
-            slug: slug.to_string(),
-        }
-    }
-
     #[test]
-    fn encodes_installed_agent_list_with_canonical_id_and_valid_signature() {
+    fn encodes_per_agent_event_with_active_markers_and_sorted_blocks() {
         let signer = test_signer();
-        let owners = vec![pubkey_hex(0x02), pubkey_hex(0x03)];
-        let alpha_later_pubkey = agent(0x08, "alpha");
-        let alpha_earlier_pubkey = agent(0x07, "alpha");
-        let beta = agent(0x06, "beta");
-        let agents = vec![
-            beta.clone(),
-            alpha_later_pubkey.clone(),
-            alpha_earlier_pubkey.clone(),
-        ];
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_700_000_000,
-            owner_pubkeys: &owners,
-            agents: &agents,
-        };
-
-        let event =
-            encode_installed_agent_list(&inputs, &signer).expect("encode installed agent list");
-
-        let mut expected_agents = agents.clone();
-        expected_agents.sort_by(|left, right| match left.slug.cmp(&right.slug) {
-            Ordering::Equal => left.pubkey.cmp(&right.pubkey),
-            order => order,
-        });
-        let mut expected_tags = vec![
-            vec!["p".to_string(), owners[0].clone()],
-            vec!["p".to_string(), owners[1].clone()],
-        ];
-        expected_tags.extend(expected_agents.iter().map(|agent| {
-            vec![
-                "agent".to_string(),
-                agent.pubkey.clone(),
-                agent.slug.clone(),
-            ]
-        }));
-
-        assert_eq!(event.kind, 24011);
-        assert_eq!(event.content, "");
-        assert_eq!(event.tags, expected_tags);
-        assert_eq!(event.pubkey, signer.xonly_pubkey_hex());
-        assert_eq!(event.created_at, 1_700_000_000);
-
-        let expected_canonical = canonical_payload(&NormalizedNostrEvent {
-            kind: event.kind,
-            content: event.content.clone(),
-            tags: event.tags.clone(),
-            pubkey: Some(event.pubkey.clone()),
-            created_at: Some(event.created_at),
-        })
-        .expect("canonical payload");
-        assert_eq!(event.id, event_hash_hex(&expected_canonical));
-        verify_signed_event(&event).expect("signature must verify");
-    }
-
-    #[test]
-    fn preserves_owner_pubkey_order_and_duplicates_for_typescript_compatibility() {
-        let signer = test_signer();
+        let agent_pubkey = pubkey_hex(0x04);
         let owner_a = pubkey_hex(0x02);
         let owner_b = pubkey_hex(0x03);
-        let owners = vec![owner_b.clone(), owner_a.clone(), owner_b.clone()];
-        let agents: Vec<InstalledAgentListAgent> = Vec::new();
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_700_000_001,
+        let owners = vec![owner_a.clone(), owner_b.clone()];
+        let available_models = vec!["opus".to_string(), "sonnet".to_string()];
+        let active_models: BTreeSet<String> = BTreeSet::from(["opus".to_string()]);
+        let available_skills = vec![
+            "read-access".to_string(),
+            "shell".to_string(),
+            "write-access".to_string(),
+        ];
+        let active_skills: BTreeSet<String> =
+            BTreeSet::from(["read-access".to_string(), "shell".to_string()]);
+        let available_mcps = vec!["github".to_string(), "jira".to_string()];
+        let active_mcps: BTreeSet<String> = BTreeSet::from(["github".to_string()]);
+
+        let inputs = AgentConfigInputs {
+            created_at: 1_700_000_000,
+            agent_pubkey: &agent_pubkey,
+            agent_slug: "worker",
             owner_pubkeys: &owners,
-            agents: &agents,
+            available_models: &available_models,
+            active_models: &active_models,
+            available_skills: &available_skills,
+            active_skills: &active_skills,
+            available_mcps: &available_mcps,
+            active_mcps: &active_mcps,
         };
 
-        let event =
-            encode_installed_agent_list(&inputs, &signer).expect("encode installed agent list");
+        let event = encode_agent_config(&inputs, &signer).expect("encode");
 
+        assert_eq!(event.kind, AGENT_CONFIG_KIND);
         assert_eq!(
             event.tags,
             vec![
+                vec![
+                    "agent".to_string(),
+                    agent_pubkey.clone(),
+                    "worker".to_string()
+                ],
+                vec!["p".to_string(), owner_a.clone()],
                 vec!["p".to_string(), owner_b.clone()],
-                vec!["p".to_string(), owner_a],
-                vec!["p".to_string(), owner_b],
-            ],
+                vec!["model".to_string(), "opus".to_string(), "active".to_string()],
+                vec!["model".to_string(), "sonnet".to_string()],
+                vec![
+                    "skill".to_string(),
+                    "read-access".to_string(),
+                    "active".to_string()
+                ],
+                vec!["skill".to_string(), "shell".to_string(), "active".to_string()],
+                vec!["skill".to_string(), "write-access".to_string()],
+                vec!["mcp".to_string(), "github".to_string(), "active".to_string()],
+                vec!["mcp".to_string(), "jira".to_string()],
+            ]
         );
         verify_signed_event(&event).expect("signature must verify");
     }
 
     #[test]
-    fn allows_empty_inventory() {
+    fn encodes_minimal_event_with_no_available_entries() {
         let signer = test_signer();
-        let owners: Vec<String> = Vec::new();
-        let agents: Vec<InstalledAgentListAgent> = Vec::new();
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_700_000_002,
-            owner_pubkeys: &owners,
-            agents: &agents,
+        let agent_pubkey = pubkey_hex(0x04);
+        let inputs = AgentConfigInputs {
+            created_at: 1_700_000_000,
+            agent_pubkey: &agent_pubkey,
+            agent_slug: "worker",
+            owner_pubkeys: &[],
+            available_models: &[],
+            active_models: &BTreeSet::new(),
+            available_skills: &[],
+            active_skills: &BTreeSet::new(),
+            available_mcps: &[],
+            active_mcps: &BTreeSet::new(),
         };
 
-        let event =
-            encode_installed_agent_list(&inputs, &signer).expect("encode installed agent list");
-
-        assert_eq!(event.kind, INSTALLED_AGENT_LIST_KIND);
-        assert_eq!(event.tags, Vec::<Vec<String>>::new());
-        assert_eq!(event.content, "");
-        verify_signed_event(&event).expect("signature must verify");
-    }
-
-    #[test]
-    fn canonical_payload_is_deterministic_for_fixed_inputs() {
-        let signer = test_signer();
-        let owners = vec![pubkey_hex(0x02), pubkey_hex(0x03)];
-        let agents = vec![agent(0x05, "beta"), agent(0x04, "alpha")];
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_700_000_003,
-            owner_pubkeys: &owners,
-            agents: &agents,
-        };
-
-        let first =
-            encode_installed_agent_list(&inputs, &signer).expect("first installed list encode");
-        let second =
-            encode_installed_agent_list(&inputs, &signer).expect("second installed list encode");
-
+        let event = encode_agent_config(&inputs, &signer).expect("encode");
         assert_eq!(
-            canonical_payload(&first.normalized()).expect("first canonical payload"),
-            canonical_payload(&second.normalized()).expect("second canonical payload"),
+            event.tags,
+            vec![vec![
+                "agent".to_string(),
+                agent_pubkey,
+                "worker".to_string()
+            ]]
         );
-        assert_eq!(first.id, second.id);
+        verify_signed_event(&event).expect("signature must verify");
     }
 
     #[test]
-    fn rejects_malformed_owner_pubkey_hex() {
+    fn active_marker_only_at_index_2() {
         let signer = test_signer();
-        let owners = vec!["not-a-valid-pubkey".to_string()];
-        let agents: Vec<InstalledAgentListAgent> = Vec::new();
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_700_000_004,
-            owner_pubkeys: &owners,
-            agents: &agents,
+        let agent_pubkey = pubkey_hex(0x04);
+        let available = vec!["opus".to_string()];
+        let active: BTreeSet<String> = BTreeSet::from(["opus".to_string()]);
+        let inputs = AgentConfigInputs {
+            created_at: 1_700_000_000,
+            agent_pubkey: &agent_pubkey,
+            agent_slug: "worker",
+            owner_pubkeys: &[],
+            available_models: &available,
+            active_models: &active,
+            available_skills: &[],
+            active_skills: &BTreeSet::new(),
+            available_mcps: &[],
+            active_mcps: &BTreeSet::new(),
         };
 
-        let err =
-            encode_installed_agent_list(&inputs, &signer).expect_err("must reject owner pubkey");
-        match err {
-            InstalledAgentListEncodeError::InvalidOwnerPubkey { index, .. } => {
-                assert_eq!(index, 0);
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let event = encode_agent_config(&inputs, &signer).expect("encode");
+        let model_tag = event.tags.iter().find(|t| t.first().map(String::as_str) == Some("model")).expect("model tag");
+        assert_eq!(model_tag, &vec!["model".to_string(), "opus".to_string(), "active".to_string()]);
+        assert_eq!(model_tag.len(), 3);
+        assert!(model_tag.get(3).is_none());
     }
 
     #[test]
-    fn rejects_malformed_agent_pubkey_hex() {
+    fn inactive_entry_has_no_third_element() {
         let signer = test_signer();
-        let owners: Vec<String> = Vec::new();
-        let agents = vec![InstalledAgentListAgent {
-            pubkey: "not-a-valid-pubkey".to_string(),
-            slug: "alpha".to_string(),
-        }];
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_700_000_005,
-            owner_pubkeys: &owners,
-            agents: &agents,
+        let agent_pubkey = pubkey_hex(0x04);
+        let available = vec!["opus".to_string(), "sonnet".to_string()];
+        let active: BTreeSet<String> = BTreeSet::from(["opus".to_string()]);
+        let inputs = AgentConfigInputs {
+            created_at: 1_700_000_000,
+            agent_pubkey: &agent_pubkey,
+            agent_slug: "worker",
+            owner_pubkeys: &[],
+            available_models: &available,
+            active_models: &active,
+            available_skills: &[],
+            active_skills: &BTreeSet::new(),
+            available_mcps: &[],
+            active_mcps: &BTreeSet::new(),
         };
 
-        let err =
-            encode_installed_agent_list(&inputs, &signer).expect_err("must reject agent pubkey");
-        match err {
-            InstalledAgentListEncodeError::InvalidAgentPubkey { index, .. } => {
-                assert_eq!(index, 0);
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let event = encode_agent_config(&inputs, &signer).expect("encode");
+        let sonnet_tag = event
+            .tags
+            .iter()
+            .find(|t| t.get(1).map(String::as_str) == Some("sonnet"))
+            .expect("sonnet tag");
+        assert_eq!(sonnet_tag.len(), 2);
+    }
+
+    #[test]
+    fn rejects_invalid_agent_pubkey() {
+        let signer = test_signer();
+        let inputs = AgentConfigInputs {
+            created_at: 1_700_000_000,
+            agent_pubkey: "not-a-pubkey",
+            agent_slug: "worker",
+            owner_pubkeys: &[],
+            available_models: &[],
+            active_models: &BTreeSet::new(),
+            available_skills: &[],
+            active_skills: &BTreeSet::new(),
+            available_mcps: &[],
+            active_mcps: &BTreeSet::new(),
+        };
+        assert!(matches!(
+            encode_agent_config(&inputs, &signer),
+            Err(AgentConfigEncodeError::InvalidAgentPubkey { .. })
+        ));
     }
 
     #[test]
     fn rejects_empty_agent_slug() {
         let signer = test_signer();
-        let owners: Vec<String> = Vec::new();
-        let agents = vec![InstalledAgentListAgent {
-            pubkey: pubkey_hex(0x04),
-            slug: String::new(),
-        }];
-        let inputs = InstalledAgentListInputs {
-            created_at: 1_700_000_006,
-            owner_pubkeys: &owners,
-            agents: &agents,
+        let agent_pubkey = pubkey_hex(0x04);
+        let inputs = AgentConfigInputs {
+            created_at: 1_700_000_000,
+            agent_pubkey: &agent_pubkey,
+            agent_slug: "",
+            owner_pubkeys: &[],
+            available_models: &[],
+            active_models: &BTreeSet::new(),
+            available_skills: &[],
+            active_skills: &BTreeSet::new(),
+            available_mcps: &[],
+            active_mcps: &BTreeSet::new(),
         };
-
-        let err =
-            encode_installed_agent_list(&inputs, &signer).expect_err("must reject empty slug");
-        match err {
-            InstalledAgentListEncodeError::EmptyAgentSlug { index } => assert_eq!(index, 0),
-            other => panic!("unexpected error: {other:?}"),
-        }
+        assert!(matches!(
+            encode_agent_config(&inputs, &signer),
+            Err(AgentConfigEncodeError::EmptyAgentSlug)
+        ));
     }
 }

@@ -476,7 +476,7 @@ mod tests {
 
         let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
-        assert_eq!(publish_outbox.pending_count, 3);
+        assert_eq!(publish_outbox.pending_count, 2);
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
@@ -700,7 +700,9 @@ mod tests {
         );
         let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
-        assert_eq!(publish_outbox.pending_count, 2);
+        // Unbooted fixture has no installed agents, so only the heartbeat
+        // enqueues (per-agent 24011 publishes require installed agents).
+        assert_eq!(publish_outbox.pending_count, 1);
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }

@@ -9,15 +9,13 @@ use crate::backend_config::{BackendConfigError, BackendConfigSnapshot, read_back
 use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_project_status,
 };
-use crate::backend_events::project_status::{ProjectStatusAgent, ProjectStatusModel};
+use crate::backend_events::project_status::ProjectStatusAgent;
 use crate::project_status_agent_sources::{
-    ProjectStatusAgentSourceError, ProjectStatusAgentSourceOptions, ProjectStatusAgentSourceReport,
-    read_project_status_agent_sources_with_options,
+    ProjectStatusAgentSourceError, ProjectStatusAgentSourceReport,
+    read_project_status_agent_sources,
 };
 use crate::project_status_snapshot::ProjectStatusSnapshot;
-use crate::project_status_sources::{
-    GlobalLlmConfig, ProjectStatusSourceError, read_global_llm_config, read_project_scheduled_tasks,
-};
+use crate::project_status_sources::{ProjectStatusSourceError, read_project_scheduled_tasks};
 use crate::project_worktrees::read_project_worktrees;
 use crate::publish_runtime::BackendPublishRuntimeOutcome;
 
@@ -45,8 +43,6 @@ pub struct ProjectStatusRuntimeOutcome {
     pub config: BackendConfigSnapshot,
     pub agent_inventory: AgentInventoryReport,
     pub project_agent_sources: ProjectStatusAgentSourceReport,
-    pub llm_model_keys: Vec<String>,
-    pub global_default_model: Option<String>,
     pub scheduled_tasks: Vec<crate::backend_events::project_status::ProjectStatusScheduledTask>,
     pub snapshot: ProjectStatusSnapshot,
     pub project_status: BackendPublishRuntimeOutcome,
@@ -72,18 +68,8 @@ pub fn publish_project_status_from_filesystem(
     let config = read_backend_config(input.tenex_base_dir)?;
     let signer = config.backend_signer()?;
     let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
-    let project_agent_sources = read_project_status_agent_sources_with_options(
-        input.tenex_base_dir,
-        input.project_d_tag,
-        ProjectStatusAgentSourceOptions {
-            project_base_path: input.project_base_path,
-            ..ProjectStatusAgentSourceOptions::default()
-        },
-    )?;
-    let GlobalLlmConfig {
-        model_keys: llm_model_keys,
-        default_model: global_default_model,
-    } = read_global_llm_config(input.tenex_base_dir)?;
+    let project_agent_sources =
+        read_project_status_agent_sources(input.tenex_base_dir, input.project_d_tag)?;
     let scheduled_tasks = read_project_scheduled_tasks(input.tenex_base_dir, input.project_d_tag)?;
     let project_tag =
         ProjectStatusSnapshot::project_a_tag(input.project_owner_pubkey, input.project_d_tag);
@@ -119,14 +105,6 @@ pub fn publish_project_status_from_filesystem(
         config.whitelisted_pubkeys.clone(),
         input.project_manager_pubkey.map(str::to_string),
         agents,
-        project_status_models(
-            &llm_model_keys,
-            global_default_model.as_deref(),
-            &project_agent_sources,
-        ),
-        project_agent_sources.tools.clone(),
-        project_agent_sources.skills.clone(),
-        project_agent_sources.mcp_servers.clone(),
         worktrees,
         scheduled_tasks.clone(),
     );
@@ -155,8 +133,6 @@ pub fn publish_project_status_from_filesystem(
         config,
         agent_inventory,
         project_agent_sources,
-        llm_model_keys,
-        global_default_model,
         scheduled_tasks,
         snapshot,
         project_status,
@@ -175,51 +151,6 @@ fn project_status_correlation_id(project_d_tag: &str) -> String {
     format!("project-status:{project_d_tag}")
 }
 
-fn project_status_models(
-    llm_model_keys: &[String],
-    global_default_model: Option<&str>,
-    project_agent_sources: &ProjectStatusAgentSourceReport,
-) -> Vec<ProjectStatusModel> {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    let llm_keys_set: BTreeSet<&str> = llm_model_keys.iter().map(String::as_str).collect();
-
-    let mut model_to_agents: BTreeMap<&str, BTreeSet<String>> = llm_model_keys
-        .iter()
-        .map(|key| (key.as_str(), BTreeSet::new()))
-        .collect();
-
-    let mut unassigned: BTreeSet<String> = project_agent_sources
-        .agents
-        .iter()
-        .map(|a| a.slug.clone())
-        .collect();
-
-    for model in &project_agent_sources.models {
-        if llm_keys_set.contains(model.slug.as_str()) {
-            let entry = model_to_agents.entry(model.slug.as_str()).or_default();
-            for slug in &model.agents {
-                entry.insert(slug.clone());
-                unassigned.remove(slug.as_str());
-            }
-        }
-    }
-
-    if let Some(default) = global_default_model {
-        if let Some(entry) = model_to_agents.get_mut(default) {
-            entry.extend(unassigned);
-        }
-    }
-
-    model_to_agents
-        .into_iter()
-        .map(|(slug, agents)| ProjectStatusModel {
-            slug: slug.to_string(),
-            agents: agents.into_iter().collect(),
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +160,6 @@ mod tests {
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
-    use std::process::{Command, Stdio};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -259,7 +189,7 @@ mod tests {
     fn write_agent(agents_dir: &Path, pubkey: &str, slug: &str) {
         fs::write(
             agents_dir.join(format!("{pubkey}.json")),
-            format!(r#"{{"slug":"{slug}"}}"#),
+            format!(r#"{{"slug":"{slug}","status":"active"}}"#),
         )
         .expect("write agent inventory file");
     }
@@ -296,22 +226,10 @@ mod tests {
         let alpha = pubkey_hex(0x05);
         let beta = pubkey_hex(0x06);
         let manager = beta.clone();
-        let project_tag = ProjectStatusSnapshot::project_a_tag(&owner, "demo-project");
 
         write_config(&tenex_base_dir, &[&owner, &extra_owner]);
         write_agent(&agents_dir, &beta, "beta");
         write_agent(&agents_dir, &alpha, "alpha");
-        fs::write(
-            tenex_base_dir.join("llms.json"),
-            r#"{
-                "configurations": {
-                    "zeta": { "provider": "openai", "model": "gpt-4o" },
-                    "alpha": { "provider": "anthropic", "model": "claude-3.5-sonnet" }
-                },
-                "default": "zeta"
-            }"#,
-        )
-        .expect("write llms");
         fs::write(
             schedules_dir.join("schedules.json"),
             r#"[
@@ -322,13 +240,6 @@ mod tests {
                     "prompt": "Run the beta follow-up",
                     "targetAgentSlug": "beta",
                     "type": "oneoff"
-                },
-                {
-                    "id": "task-alpha",
-                    "title": "",
-                    "schedule": "0 1 * * *",
-                    "prompt": "Run the alpha report",
-                    "targetAgentSlug": "alpha"
                 }
             ]"#,
         )
@@ -355,362 +266,30 @@ mod tests {
             vec![owner.clone(), extra_owner.clone()]
         );
         assert_eq!(outcome.agent_inventory.active_agents.len(), 2);
-        assert_eq!(
-            outcome.llm_model_keys,
-            vec!["alpha".to_string(), "zeta".to_string()]
-        );
-        assert_eq!(outcome.scheduled_tasks.len(), 2);
-        assert_eq!(outcome.snapshot.project_tag, project_tag.clone());
+        assert_eq!(outcome.scheduled_tasks.len(), 1);
         assert_eq!(outcome.snapshot.worktrees, worktrees);
 
         let event = &outcome.project_status.record.event;
         assert_eq!(event.kind, PROJECT_STATUS_KIND);
         assert_eq!(event.content, "");
-        assert_eq!(event.tags[0], project_tag);
+        let expected_project_tag = ProjectStatusSnapshot::project_a_tag(&owner, "demo-project");
+        assert_eq!(event.tags[0], expected_project_tag);
         assert_eq!(event.tags[1], vec!["p".to_string(), owner.clone()]);
         assert_eq!(event.tags[2], vec!["p".to_string(), extra_owner]);
-        assert_eq!(
-            event.tags[3],
-            vec!["agent".to_string(), alpha.clone(), "alpha".to_string()]
-        );
-        assert_eq!(
-            event.tags[4],
-            vec![
-                "agent".to_string(),
-                beta.clone(),
-                "beta".to_string(),
-                "pm".to_string(),
-            ]
-        );
-        assert_eq!(
-            event.tags[5],
-            vec!["model".to_string(), "alpha".to_string()]
-        );
-        assert_eq!(event.tags[6], vec!["model".to_string(), "zeta".to_string()]);
-        assert_eq!(
-            event.tags[7],
-            vec!["branch".to_string(), "main".to_string()]
-        );
-        assert_eq!(
-            event.tags[8],
-            vec!["branch".to_string(), "feature/rust".to_string()]
-        );
-        assert_eq!(
-            event.tags[9],
-            vec![
-                "scheduled-task".to_string(),
-                "task-alpha".to_string(),
-                "Run the alpha report".to_string(),
-                "0 1 * * *".to_string(),
-                "alpha".to_string(),
-                "cron".to_string(),
-                "".to_string(),
-            ]
-        );
-        assert_eq!(
-            event.tags[10],
-            vec![
-                "scheduled-task".to_string(),
-                "task-beta".to_string(),
-                "Beta follow-up".to_string(),
-                "2026-04-22T12:00:00Z".to_string(),
-                "beta".to_string(),
-                "oneoff".to_string(),
-                "".to_string(),
-            ]
+        // 24010 no longer carries model/tool/skill/mcp tags.
+        assert!(
+            event
+                .tags
+                .iter()
+                .all(|tag| !matches!(tag.first().map(String::as_str), Some("model" | "tool" | "skill" | "mcp"))),
+            "24010 must not contain model/tool/skill/mcp tags"
         );
         verify_signed_event(event).expect("signature must verify");
-        assert_eq!(
-            outcome.project_status.record.request.request_id,
-            "project-status:demo-project:1710001100"
-        );
-        assert_eq!(outcome.project_status.record.accepted_at, 1_710_001_100_100);
-        assert_eq!(
-            outcome.project_status.record.request.request_timestamp,
-            1_710_001_100_050
-        );
-        assert_eq!(
-            outcome.project_status.record.request.project_id,
-            "demo-project"
-        );
-        assert_eq!(
-            outcome.project_status.record.request.conversation_id,
-            "demo-project"
-        );
 
         let persisted = read_pending_publish_outbox_record(&daemon_dir, &event.id)
             .expect("pending record read must succeed")
             .expect("pending project status record must exist");
         assert_eq!(persisted, outcome.project_status.record);
-
-        let _ = fs::remove_dir_all(tenex_base_dir);
-        let _ = fs::remove_dir_all(daemon_dir);
-    }
-
-    #[test]
-    fn publishes_project_status_with_project_scoped_agent_details_from_filesystem() {
-        let tenex_base_dir = unique_temp_dir("project-status-runtime-agent-sources-base");
-        let daemon_dir = unique_temp_dir("project-status-runtime-agent-sources-daemon");
-        let agents_dir = agents_dir(&tenex_base_dir);
-        let project_dir = tenex_base_dir.join("projects").join("demo-project");
-
-        fs::create_dir_all(&agents_dir).expect("create agents dir");
-        fs::create_dir_all(&daemon_dir).expect("create daemon dir");
-        fs::create_dir_all(&project_dir).expect("create project dir");
-
-        let owner = pubkey_hex(0x02);
-        let worker = pubkey_hex(0x05);
-        let outside = pubkey_hex(0x06);
-
-        write_config(&tenex_base_dir, &[&owner]);
-        fs::write(
-            agents_dir.join("index.json"),
-            format!(
-                r#"{{
-                    "byProject": {{
-                        "demo-project": ["{worker}"],
-                        "other-project": ["{outside}"]
-                    }}
-                }}"#
-            ),
-        )
-        .expect("write agent index");
-        fs::write(
-            agents_dir.join(format!("{worker}.json")),
-            r#"{
-                "slug": "worker",
-                "default": {
-                    "model": "alpha",
-                    "tools": ["shell", "ask", "todo_write"],
-                    "skills": ["skill-a", "skill-blocked"],
-                    "blockedSkills": ["skill-blocked"],
-                    "mcpAccess": ["github"]
-                }
-            }"#,
-        )
-        .expect("write worker agent");
-        write_agent(&agents_dir, &outside, "outside");
-        fs::write(
-            tenex_base_dir.join("llms.json"),
-            r#"{
-                "configurations": {
-                    "alpha": { "provider": "anthropic", "model": "claude-3.5-sonnet" },
-                    "beta": { "provider": "openai", "model": "gpt-4o" }
-                },
-                "default": "alpha"
-            }"#,
-        )
-        .expect("write llms");
-        fs::write(
-            tenex_base_dir.join("mcp.json"),
-            r#"{"enabled": true, "servers": {"github": {"command": "npx", "args": []}}}"#,
-        )
-        .expect("write mcp");
-
-        let empty_worktrees: Vec<String> = Vec::new();
-        let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
-            tenex_base_dir: &tenex_base_dir,
-            daemon_dir: &daemon_dir,
-            created_at: 1_710_001_300,
-            accepted_at: 1_710_001_300_100,
-            request_timestamp: 1_710_001_300_050,
-            project_owner_pubkey: &owner,
-            project_d_tag: "demo-project",
-            project_manager_pubkey: None,
-            project_base_path: None,
-            agents: None,
-            worktrees: Some(&empty_worktrees),
-        })
-        .expect("project status publish must succeed");
-
-        assert!(outcome.project_agent_sources.skipped_files.is_empty());
-        assert_eq!(outcome.agent_inventory.active_agents.len(), 2);
-        assert_eq!(
-            outcome.snapshot.agents,
-            vec![ProjectStatusAgent {
-                pubkey: worker.clone(),
-                slug: "worker".to_string(),
-            }]
-        );
-        assert_eq!(
-            outcome.snapshot.models,
-            vec![
-                ProjectStatusModel {
-                    slug: "alpha".to_string(),
-                    agents: vec!["worker".to_string()],
-                },
-                ProjectStatusModel {
-                    slug: "beta".to_string(),
-                    agents: Vec::new(),
-                },
-            ]
-        );
-        assert_eq!(outcome.snapshot.tools[0].name, "shell");
-        assert_eq!(outcome.snapshot.tools[0].agents, vec!["worker".to_string()]);
-        assert_eq!(outcome.snapshot.skills[0].id, "skill-a");
-        assert_eq!(
-            outcome.snapshot.skills[0].agents,
-            vec!["worker".to_string()]
-        );
-        assert_eq!(outcome.snapshot.mcp_servers[0].slug, "github");
-        assert_eq!(
-            outcome.snapshot.mcp_servers[0].agents,
-            vec!["worker".to_string()]
-        );
-
-        let event_tags = &outcome.project_status.record.event.tags;
-        assert!(event_tags.contains(&vec!["agent".to_string(), worker, "worker".to_string()]));
-        assert!(
-            !event_tags
-                .iter()
-                .any(|tag| tag.get(2) == Some(&"outside".to_string()))
-        );
-        assert!(event_tags.contains(&vec![
-            "model".to_string(),
-            "alpha".to_string(),
-            "worker".to_string()
-        ]));
-        assert!(event_tags.contains(&vec![
-            "tool".to_string(),
-            "shell".to_string(),
-            "worker".to_string()
-        ]));
-        assert!(event_tags.contains(&vec![
-            "skill".to_string(),
-            "skill-a".to_string(),
-            "worker".to_string()
-        ]));
-        assert!(event_tags.contains(&vec![
-            "mcp".to_string(),
-            "github".to_string(),
-            "worker".to_string()
-        ]));
-
-        let _ = fs::remove_dir_all(tenex_base_dir);
-        let _ = fs::remove_dir_all(daemon_dir);
-    }
-
-    #[test]
-    fn derives_worktrees_from_project_base_path_when_runtime_input_has_no_worktrees() {
-        let tenex_base_dir = unique_temp_dir("project-status-runtime-worktrees-base");
-        let daemon_dir = unique_temp_dir("project-status-runtime-worktrees-daemon");
-        let agents_dir = agents_dir(&tenex_base_dir);
-        let project_base_path = unique_temp_dir("project-status-runtime-worktrees-repo");
-
-        fs::create_dir_all(&agents_dir).expect("create agents dir");
-        fs::create_dir_all(&daemon_dir).expect("create daemon dir");
-        fs::create_dir_all(&project_base_path).expect("create project repo dir");
-        let status = Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(&project_base_path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .expect("git init must run");
-        assert!(status.success(), "git init must succeed");
-
-        let owner = pubkey_hex(0x07);
-        write_config(&tenex_base_dir, &[&owner]);
-
-        let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
-            tenex_base_dir: &tenex_base_dir,
-            daemon_dir: &daemon_dir,
-            created_at: 1_710_001_200,
-            accepted_at: 1_710_001_200_100,
-            request_timestamp: 1_710_001_200_050,
-            project_owner_pubkey: &owner,
-            project_d_tag: "demo-project",
-            project_manager_pubkey: None,
-            project_base_path: Some(&project_base_path),
-            agents: None,
-            worktrees: None,
-        })
-        .expect("project status publish must succeed");
-
-        assert_eq!(outcome.snapshot.worktrees, vec!["main".to_string()]);
-        assert!(
-            outcome
-                .project_status
-                .record
-                .event
-                .tags
-                .iter()
-                .any(|tag| tag == &vec!["branch".to_string(), "main".to_string()])
-        );
-
-        let _ = fs::remove_dir_all(tenex_base_dir);
-        let _ = fs::remove_dir_all(daemon_dir);
-        let _ = fs::remove_dir_all(project_base_path);
-    }
-
-    #[test]
-    fn agents_without_model_are_assigned_to_global_default() {
-        let tenex_base_dir = unique_temp_dir("project-status-runtime-default-model-base");
-        let daemon_dir = unique_temp_dir("project-status-runtime-default-model-daemon");
-        let agents_dir = agents_dir(&tenex_base_dir);
-        let project_dir = tenex_base_dir.join("projects").join("demo-project");
-
-        fs::create_dir_all(&agents_dir).expect("create agents dir");
-        fs::create_dir_all(&daemon_dir).expect("create daemon dir");
-        fs::create_dir_all(&project_dir).expect("create project dir");
-
-        let owner = pubkey_hex(0x02);
-        let worker_a = pubkey_hex(0x05);
-        let worker_b = pubkey_hex(0x06);
-
-        write_config(&tenex_base_dir, &[&owner]);
-        fs::write(
-            agents_dir.join("index.json"),
-            format!(r#"{{ "byProject": {{ "demo-project": ["{worker_a}", "{worker_b}"] }} }}"#),
-        )
-        .expect("write index");
-        fs::write(
-            agents_dir.join(format!("{worker_a}.json")),
-            r#"{ "slug": "worker-a", "default": { "model": "specific" } }"#,
-        )
-        .expect("write worker-a");
-        fs::write(
-            agents_dir.join(format!("{worker_b}.json")),
-            r#"{ "slug": "worker-b" }"#,
-        )
-        .expect("write worker-b (no model)");
-        fs::write(
-            tenex_base_dir.join("llms.json"),
-            r#"{ "configurations": { "specific": {}, "default-model": {} }, "default": "default-model" }"#,
-        )
-        .expect("write llms");
-
-        let outcome = publish_project_status_from_filesystem(ProjectStatusRuntimeInput {
-            tenex_base_dir: &tenex_base_dir,
-            daemon_dir: &daemon_dir,
-            created_at: 1_710_002_000,
-            accepted_at: 1_710_002_000_100,
-            request_timestamp: 1_710_002_000_050,
-            project_owner_pubkey: &owner,
-            project_d_tag: "demo-project",
-            project_manager_pubkey: None,
-            project_base_path: None,
-            agents: None,
-            worktrees: Some(&[]),
-        })
-        .expect("publish must succeed");
-
-        assert_eq!(
-            outcome.global_default_model,
-            Some("default-model".to_string())
-        );
-
-        let event_tags = &outcome.project_status.record.event.tags;
-        assert!(event_tags.contains(&vec![
-            "model".to_string(),
-            "specific".to_string(),
-            "worker-a".to_string(),
-        ]));
-        assert!(event_tags.contains(&vec![
-            "model".to_string(),
-            "default-model".to_string(),
-            "worker-b".to_string(),
-        ]));
 
         let _ = fs::remove_dir_all(tenex_base_dir);
         let _ = fs::remove_dir_all(daemon_dir);

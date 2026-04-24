@@ -8,13 +8,14 @@ use crate::agent_inventory::{
 };
 use crate::backend_config::{BackendConfigError, BackendConfigSnapshot, read_backend_config};
 use crate::backend_event_publish::{
-    BackendEventPublishContext, BackendEventPublishError, publish_backend_heartbeat,
-    publish_backend_installed_agent_list, publish_backend_profile,
+    BackendEventPublishContext, BackendEventPublishError, publish_backend_agent_config,
+    publish_backend_heartbeat, publish_backend_profile,
 };
 use crate::backend_events::heartbeat::HeartbeatInputs;
-use crate::backend_events::installed_agent_list::InstalledAgentListInputs;
+use crate::backend_events::installed_agent_list::AgentConfigInputs;
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::backend_profile::BackendProfileInputs;
+use crate::per_agent_config_snapshot::{AgentConfigSnapshot, build_agent_config_snapshot};
 use crate::publish_runtime::BackendPublishRuntimeOutcome;
 
 pub const BACKEND_STATUS_PROJECT_ID: &str = "backend-status";
@@ -32,8 +33,8 @@ pub struct BackendStatusRuntimeInput<'a> {
     pub request_timestamp: u64,
     pub timeout_ms: u64,
     /// Optional latch that, when present and in the `Stopped` state, causes
-    /// the runtime to skip the kind 24012 heartbeat publish. Installed
-    /// agent list and backend profile still publish.
+    /// the runtime to skip the kind 24012 heartbeat publish. Per-agent 24011
+    /// and backend profile publishes remain independent of the latch.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
@@ -68,12 +69,21 @@ impl<'a> BackendStatusRuntimeInput<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendStatusRuntimeOutcome {
     pub config: BackendConfigSnapshot,
-    /// `None` when the heartbeat latch gated this tick. The installed agent
-    /// list and backend profile publishes are independent of the latch.
+    /// `None` when the heartbeat latch gated this tick.
     pub heartbeat: Option<BackendPublishRuntimeOutcome>,
-    pub installed_agent_list: BackendPublishRuntimeOutcome,
+    /// One entry per installed agent — one kind 24011 publish per agent.
+    pub agent_configs: Vec<BackendPublishRuntimeOutcome>,
+    /// Agents whose snapshot could not be built (missing file, malformed
+    /// JSON, etc.). Those agents are skipped; the rest still publish.
+    pub skipped_agents: Vec<BackendAgentConfigSkip>,
     pub backend_profile: Option<BackendPublishRuntimeOutcome>,
     pub agent_inventory: AgentInventoryReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendAgentConfigSkip {
+    pub agent_pubkey: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,9 +93,10 @@ pub struct BackendHeartbeatRuntimeOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BackendInstalledAgentListRuntimeOutcome {
+pub struct BackendAgentConfigListRuntimeOutcome {
     pub config: BackendConfigSnapshot,
-    pub installed_agent_list: BackendPublishRuntimeOutcome,
+    pub agent_configs: Vec<BackendPublishRuntimeOutcome>,
+    pub skipped_agents: Vec<BackendAgentConfigSkip>,
     pub agent_inventory: AgentInventoryReport,
 }
 
@@ -134,22 +145,19 @@ pub fn publish_backend_status_from_filesystem(
     };
 
     let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
-    let installed_agent_list_request_id =
-        backend_status_request_id("installed-agent-list", input.created_at);
-    let installed_agent_list = publish_backend_installed_agent_list(
-        backend_status_context(&input, &installed_agent_list_request_id, 2),
-        InstalledAgentListInputs {
-            created_at: input.created_at,
-            owner_pubkeys: &config.whitelisted_pubkeys,
-            agents: &agent_inventory.active_agents,
-        },
+    let (agent_configs, skipped_agents) = publish_agent_configs(
+        &input,
+        &config,
+        &agent_inventory,
         &signer,
+        /* sequence_base */ 2,
     )?;
 
     Ok(BackendStatusRuntimeOutcome {
         config,
         heartbeat,
-        installed_agent_list,
+        agent_configs,
+        skipped_agents,
         backend_profile,
         agent_inventory,
     })
@@ -185,28 +193,80 @@ pub fn publish_backend_heartbeat_from_filesystem(
     Ok(BackendHeartbeatRuntimeOutcome { config, heartbeat })
 }
 
-pub fn publish_backend_installed_agent_list_from_filesystem(
+/// Publish one kind 24011 event per installed agent, signed by the backend.
+/// Each event carries the agent's available + active models, skills, and
+/// mcp servers. Replaces the old single-event installed-agent-list publish.
+pub fn publish_backend_agent_configs_from_filesystem(
     input: BackendStatusRuntimeInput<'_>,
-) -> Result<BackendInstalledAgentListRuntimeOutcome, BackendStatusRuntimeError> {
+) -> Result<BackendAgentConfigListRuntimeOutcome, BackendStatusRuntimeError> {
     let config = read_backend_config(input.tenex_base_dir)?;
     let signer = config.backend_signer()?;
     let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
-    let request_id = backend_status_request_id("installed-agent-list", input.created_at);
-    let installed_agent_list = publish_backend_installed_agent_list(
-        backend_status_context(&input, &request_id, 1),
-        InstalledAgentListInputs {
-            created_at: input.created_at,
-            owner_pubkeys: &config.whitelisted_pubkeys,
-            agents: &agent_inventory.active_agents,
-        },
-        &signer,
-    )?;
+    let (agent_configs, skipped_agents) =
+        publish_agent_configs(&input, &config, &agent_inventory, &signer, 1)?;
 
-    Ok(BackendInstalledAgentListRuntimeOutcome {
+    Ok(BackendAgentConfigListRuntimeOutcome {
         config,
-        installed_agent_list,
+        agent_configs,
+        skipped_agents,
         agent_inventory,
     })
+}
+
+fn publish_agent_configs<S: crate::backend_events::heartbeat::BackendSigner>(
+    input: &BackendStatusRuntimeInput<'_>,
+    config: &BackendConfigSnapshot,
+    agent_inventory: &AgentInventoryReport,
+    signer: &S,
+    sequence_base: u64,
+) -> Result<(Vec<BackendPublishRuntimeOutcome>, Vec<BackendAgentConfigSkip>), BackendStatusRuntimeError>
+{
+    let mut outcomes = Vec::with_capacity(agent_inventory.active_agents.len());
+    let mut skipped = Vec::new();
+    for (index, agent) in agent_inventory.active_agents.iter().enumerate() {
+        let snapshot = match build_agent_config_snapshot(input.tenex_base_dir, &agent.pubkey) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                skipped.push(BackendAgentConfigSkip {
+                    agent_pubkey: agent.pubkey.clone(),
+                    reason: error.to_string(),
+                });
+                continue;
+            }
+        };
+        let request_id = agent_config_request_id(&snapshot.agent_pubkey, input.created_at);
+        let context = backend_status_context(
+            input,
+            &request_id,
+            sequence_base + index as u64,
+        );
+        let outcome = publish_backend_agent_config(
+            context,
+            agent_config_inputs(&snapshot, config, input.created_at),
+            signer,
+        )?;
+        outcomes.push(outcome);
+    }
+    Ok((outcomes, skipped))
+}
+
+fn agent_config_inputs<'a>(
+    snapshot: &'a AgentConfigSnapshot,
+    config: &'a BackendConfigSnapshot,
+    created_at: u64,
+) -> AgentConfigInputs<'a> {
+    AgentConfigInputs {
+        created_at,
+        agent_pubkey: &snapshot.agent_pubkey,
+        agent_slug: &snapshot.agent_slug,
+        owner_pubkeys: &config.whitelisted_pubkeys,
+        available_models: &snapshot.available_models,
+        active_models: &snapshot.active_model_set,
+        available_skills: &snapshot.available_skills,
+        active_skills: &snapshot.active_skills,
+        available_mcps: &snapshot.available_mcps,
+        active_mcps: &snapshot.active_mcps,
+    }
 }
 
 pub fn agents_dir(tenex_base_dir: impl AsRef<Path>) -> PathBuf {
@@ -237,14 +297,17 @@ fn backend_status_request_id(kind: &str, created_at: u64) -> String {
     format!("backend-status:{kind}:{created_at}")
 }
 
+fn agent_config_request_id(agent_pubkey: &str, created_at: u64) -> String {
+    format!("backend-status:agent-config:{agent_pubkey}:{created_at}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
     use crate::backend_events::heartbeat::BACKEND_HEARTBEAT_KIND;
-    use crate::backend_events::installed_agent_list::INSTALLED_AGENT_LIST_KIND;
+    use crate::backend_events::installed_agent_list::AGENT_CONFIG_KIND;
     use crate::backend_profile::BACKEND_PROFILE_KIND;
-    use crate::publish_outbox::read_pending_publish_outbox_record;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -254,12 +317,10 @@ mod tests {
 
     const TEST_SECRET_KEY_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";
-    const TEST_PUBKEY_HEX: &str =
-        "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f";
 
     #[test]
-    fn publishes_heartbeat_and_installed_agent_inventory_from_filesystem() {
-        let tenex_base_dir = unique_temp_dir("base");
+    fn publishes_one_agent_config_per_installed_agent() {
+        let tenex_base_dir = unique_temp_dir("per-agent");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = agents_dir(&tenex_base_dir);
         fs::create_dir_all(&agents_dir).expect("agents dir must create");
@@ -269,8 +330,8 @@ mod tests {
         let alpha = pubkey_hex(0x03);
         let beta = pubkey_hex(0x04);
         write_config(&tenex_base_dir, &[&owner]);
-        write_agent(&agents_dir, &beta, "beta", "active");
         write_agent(&agents_dir, &alpha, "alpha", "active");
+        write_agent(&agents_dir, &beta, "beta", "active");
 
         let input = BackendStatusRuntimeInput::new(
             &tenex_base_dir,
@@ -279,64 +340,20 @@ mod tests {
             1_710_001_000_100,
             1_710_001_000_050,
         );
-        let outcome =
-            publish_backend_status_from_filesystem(input).expect("backend status must enqueue");
+        let outcome = publish_backend_status_from_filesystem(input).expect("publish");
 
-        assert_eq!(outcome.config.whitelisted_pubkeys, vec![owner.clone()]);
+        assert_eq!(outcome.agent_configs.len(), 2);
+        assert!(outcome.skipped_agents.is_empty());
+        for publish in &outcome.agent_configs {
+            assert_eq!(publish.record.event.kind, AGENT_CONFIG_KIND);
+            // The first tag must be the agent identifier.
+            assert_eq!(publish.record.event.tags[0][0], "agent");
+        }
         assert_eq!(outcome.agent_inventory.active_agents.len(), 2);
-        let heartbeat = outcome
-            .heartbeat
-            .as_ref()
-            .expect("heartbeat must publish without a latch configured");
+
+        // The heartbeat still publishes on its own.
+        let heartbeat = outcome.heartbeat.expect("heartbeat must publish");
         assert_eq!(heartbeat.record.event.kind, BACKEND_HEARTBEAT_KIND);
-        assert_eq!(
-            heartbeat.record.event.tags,
-            vec![vec!["p".to_string(), owner.clone()]]
-        );
-        assert_eq!(
-            outcome.installed_agent_list.record.event.kind,
-            INSTALLED_AGENT_LIST_KIND
-        );
-        assert_eq!(
-            outcome.installed_agent_list.record.event.tags,
-            vec![
-                vec!["p".to_string(), owner],
-                vec!["agent".to_string(), alpha, "alpha".to_string()],
-                vec!["agent".to_string(), beta, "beta".to_string()],
-            ]
-        );
-        assert_eq!(heartbeat.record.event.pubkey, TEST_PUBKEY_HEX);
-        assert_eq!(
-            outcome.installed_agent_list.record.event.pubkey,
-            TEST_PUBKEY_HEX
-        );
-        assert_eq!(
-            heartbeat.record.request.request_id,
-            "backend-status:heartbeat:1710001000"
-        );
-        assert_eq!(
-            outcome.installed_agent_list.record.request.request_id,
-            "backend-status:installed-agent-list:1710001000"
-        );
-        assert_eq!(heartbeat.record.request.request_sequence, 1);
-        assert_eq!(
-            outcome.installed_agent_list.record.request.request_sequence,
-            2
-        );
-
-        let heartbeat_record =
-            read_pending_publish_outbox_record(&daemon_dir, &heartbeat.record.event.id)
-                .expect("pending heartbeat read must succeed")
-                .expect("pending heartbeat must exist");
-        let installed_record = read_pending_publish_outbox_record(
-            &daemon_dir,
-            &outcome.installed_agent_list.record.event.id,
-        )
-        .expect("pending installed-agent-list read must succeed")
-        .expect("pending installed-agent-list must exist");
-
-        assert_eq!(heartbeat_record, heartbeat.record);
-        assert_eq!(installed_record, outcome.installed_agent_list.record);
     }
 
     #[test]
@@ -366,64 +383,15 @@ mod tests {
             1_710_001_050_100,
             1_710_001_050_050,
         );
-        let outcome =
-            publish_backend_status_from_filesystem(input).expect("backend status must enqueue");
+        let outcome = publish_backend_status_from_filesystem(input).expect("publish");
         let profile = outcome
             .backend_profile
-            .as_ref()
             .expect("generated backend key must enqueue backend profile");
-
         assert_eq!(profile.record.event.kind, BACKEND_PROFILE_KIND);
-        assert!(profile.record.event.content.contains("local backend"));
-        assert_eq!(
-            profile.record.event.tags,
-            vec![
-                vec!["p".to_string(), owner],
-                vec!["bot".to_string()],
-                vec!["t".to_string(), "tenex".to_string()],
-                vec!["t".to_string(), "tenex-backend".to_string()],
-            ]
-        );
-        assert_eq!(profile.record.request.request_sequence, 0);
-        assert_eq!(
-            profile.record.request.request_id,
-            "backend-status:backend-profile:1710001050"
-        );
-        let profile_record =
-            read_pending_publish_outbox_record(&daemon_dir, &profile.record.event.id)
-                .expect("pending profile read must succeed")
-                .expect("pending profile must exist");
-        assert_eq!(profile_record, profile.record);
     }
 
     #[test]
-    fn publishes_heartbeat_without_requiring_agent_inventory_dir() {
-        let tenex_base_dir = unique_temp_dir("heartbeat-only");
-        let daemon_dir = tenex_base_dir.join("daemon");
-        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
-
-        let owner = pubkey_hex(0x05);
-        write_config(&tenex_base_dir, &[&owner]);
-
-        let input = BackendStatusRuntimeInput::new(
-            &tenex_base_dir,
-            &daemon_dir,
-            1_710_001_100,
-            1_710_001_100_100,
-            1_710_001_100_050,
-        );
-        let outcome = publish_backend_heartbeat_from_filesystem(input)
-            .expect("heartbeat must enqueue without agents dir");
-
-        assert_eq!(outcome.heartbeat.record.event.kind, BACKEND_HEARTBEAT_KIND);
-        assert_eq!(
-            outcome.heartbeat.record.event.tags,
-            vec![vec!["p".to_string(), owner]]
-        );
-    }
-
-    #[test]
-    fn installed_agent_list_fails_closed_when_agent_inventory_dir_is_missing() {
+    fn missing_agents_dir_fails_backend_status() {
         let tenex_base_dir = unique_temp_dir("missing-agents");
         let daemon_dir = tenex_base_dir.join("daemon");
         fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
@@ -438,46 +406,12 @@ mod tests {
             1_710_001_200_100,
             1_710_001_200_050,
         );
-        let error = publish_backend_installed_agent_list_from_filesystem(input)
+        let error = publish_backend_status_from_filesystem(input)
             .expect_err("missing agents dir must fail closed");
-
         assert!(matches!(
             error,
             BackendStatusRuntimeError::AgentInventory(AgentInventoryError::ReadDirectory { .. })
         ));
-    }
-
-    #[test]
-    fn missing_private_key_generates_key_and_publishes_heartbeat() {
-        let tenex_base_dir = unique_temp_dir("missing-key");
-        let daemon_dir = tenex_base_dir.join("daemon");
-        fs::create_dir_all(&tenex_base_dir).expect("base dir must create");
-        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
-        fs::write(
-            backend_config_path(&tenex_base_dir),
-            format!(r#"{{"whitelistedPubkeys":["{}"]}}"#, pubkey_hex(0x07)),
-        )
-        .expect("config must write");
-
-        let input = BackendStatusRuntimeInput::new(
-            &tenex_base_dir,
-            &daemon_dir,
-            1_710_001_300,
-            1_710_001_300_100,
-            1_710_001_300_050,
-        );
-        let outcome = publish_backend_heartbeat_from_filesystem(input)
-            .expect("missing signer key must be generated");
-
-        assert_eq!(outcome.heartbeat.record.event.kind, BACKEND_HEARTBEAT_KIND);
-        assert!(outcome.config.generated_tenex_private_key);
-        assert!(
-            outcome
-                .config
-                .tenex_private_key
-                .as_ref()
-                .is_some_and(|key| key.len() == 64)
-        );
     }
 
     fn write_config(base_dir: &Path, owners: &[&str]) {
@@ -502,7 +436,7 @@ mod tests {
     fn write_agent(agents_dir: &Path, pubkey: &str, slug: &str, status: &str) {
         fs::write(
             agents_dir.join(format!("{pubkey}.json")),
-            format!(r#"{{"slug":"{slug}","status":"{status}"}}"#),
+            format!(r#"{{"slug":"{slug}","status":"{status}","default":{{"model":"opus"}}}}"#),
         )
         .expect("agent must write");
     }

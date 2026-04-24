@@ -52,6 +52,7 @@ pub mod nostr_subscription_tick;
 pub mod operations_status_runtime;
 pub mod periodic_tick;
 pub mod periodic_tick_state;
+pub mod per_agent_config_snapshot;
 pub mod process_liveness;
 pub mod project_agent_whitelist;
 pub mod project_boot_state;

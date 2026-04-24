@@ -190,7 +190,9 @@ mod tests {
             first.tick.due_task_names,
             vec!["backend-status".to_string()]
         );
-        assert_eq!(first.publish_outbox_after.pending_count, 2);
+        // No agents installed in this fixture, so only the heartbeat
+        // enqueues. Per-agent 24011 publishes depend on installed agents.
+        assert_eq!(first.publish_outbox_after.pending_count, 1);
         assert_eq!(
             first.persisted_scheduler_snapshot.tasks[0].next_due_at,
             1_710_001_030
@@ -211,7 +213,7 @@ mod tests {
 
         assert!(second.registered.registered_task_names.is_empty());
         assert!(second.tick.due_task_names.is_empty());
-        assert_eq!(second.publish_outbox_after.pending_count, 2);
+        assert_eq!(second.publish_outbox_after.pending_count, 1);
         assert_eq!(
             second.persisted_scheduler_snapshot.tasks[0].next_due_at,
             1_710_001_030

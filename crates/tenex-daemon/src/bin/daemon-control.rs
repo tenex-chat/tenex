@@ -144,7 +144,7 @@ struct BackendEventsEnqueueStatusDiagnostics {
     active_agent_count: usize,
     skipped_agent_file_count: usize,
     heartbeat_event_id: String,
-    installed_agent_list_event_id: String,
+    agent_config_event_ids: Vec<String>,
     publish_outbox_after: PublishOutboxDiagnostics,
 }
 
@@ -162,7 +162,6 @@ struct BackendEventsEnqueueProjectStatusDiagnostics {
     backend_pubkey: String,
     owner_pubkey_count: usize,
     active_agent_count: usize,
-    llm_model_count: usize,
     scheduled_task_count: usize,
     worktree_count: usize,
     project_status_event_id: String,
@@ -619,7 +618,6 @@ fn enqueue_backend_events_project_status(
         backend_pubkey: outcome.project_status.record.event.pubkey.clone(),
         owner_pubkey_count: outcome.config.whitelisted_pubkeys.len(),
         active_agent_count: outcome.agent_inventory.active_agents.len(),
-        llm_model_count: outcome.llm_model_keys.len(),
         scheduled_task_count: outcome.scheduled_tasks.len(),
         worktree_count: outcome.snapshot.worktrees.len(),
         project_status_event_id: outcome.project_status.record.event.id,
@@ -661,7 +659,11 @@ fn enqueue_backend_events_status(
         active_agent_count: outcome.agent_inventory.active_agents.len(),
         skipped_agent_file_count: outcome.agent_inventory.skipped_files.len(),
         heartbeat_event_id: heartbeat.record.event.id,
-        installed_agent_list_event_id: outcome.installed_agent_list.record.event.id,
+        agent_config_event_ids: outcome
+            .agent_configs
+            .into_iter()
+            .map(|p| p.record.event.id)
+            .collect(),
         publish_outbox_after,
     })
 }
