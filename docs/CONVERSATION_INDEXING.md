@@ -114,7 +114,7 @@ ConversationEmbeddingService (builds documents)
   ↓
 RAGService (stores in vector DB)
   ↓
-Vector Store (LanceDB/Qdrant/SQLite-vec)
+Vector Store (SQLite-vec/Qdrant)
 ```
 
 ### Key Files
@@ -141,7 +141,7 @@ Vector Store (LanceDB/Qdrant/SQLite-vec)
 
 3. Verify daemon is running:
    ```bash
-   daemon-control status --daemon-dir "$TENEX_BASE_DIR/daemon"
+   tenex daemon-status
    ```
 
 ### Search results are stale
@@ -156,6 +156,9 @@ tenex doctor conversations reindex --confirm
 ### Embedding provider errors
 
 Check your LLM provider configuration:
+```bash
+tenex config providers
+```
 
 Ensure you have:
 - Valid API keys
@@ -172,8 +175,9 @@ Indexing embeds full conversation transcripts. For large histories:
 ## Configuration
 
 Embedding settings are configured via:
-- TENEX provider/config files under the global TENEX config directory
-- the Rust setup/configuration surfaces when provisioning a new environment
+```bash
+tenex config embed
+```
 
 Supported providers:
 - OpenAI (text-embedding-3-small, text-embedding-3-large)
@@ -181,6 +185,6 @@ Supported providers:
 - OpenRouter (various models)
 - Local providers (via MCP)
 
-Vector store configured via environment or config:
-- `TENEX_VECTOR_STORE`: `lancedb` (default), `qdrant`, or `sqlite-vec`
-- `TENEX_QDRANT_URL`: Qdrant server URL (if using Qdrant)
+Vector store configuration is read from the `vectorStore` field in `embed.json`:
+- `provider`: `sqlite-vec` (default) or `qdrant`
+- `url`: Qdrant server URL (if using Qdrant)

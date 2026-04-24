@@ -42,6 +42,8 @@ The goal is **always** the right long-term, sustainable, idiomatic, coherent fix
 
 ### Layer Hierarchy (Dependencies Flow DOWN Only)
 ```
+Layer 4: commands/ daemon/ event-handler/
+    ↓
 Layer 3: services/ agents/ conversations/ tools/
     ↓
 Layer 2: llm/ nostr/ prompts/ events/
@@ -58,9 +60,9 @@ Layer 0: lib/  ← ZERO TENEX imports
 | Layer | Can Import | Cannot Import |
 |-------|------------|---------------|
 | `lib/` | Node built-ins, npm only | ANY `@/` imports |
-| `utils/` | `lib/` | `services/`, `agents/`, `conversations/`, `tools/` |
-| `services/` | `utils/`, `lib/`, `llm/`, `nostr/` | Rust entrypoints |
-| `agents/`, `conversations/`, `tools/` | `services/`, `utils/`, `lib/`, `llm/`, `nostr/`, `prompts/`, `events/` | Rust entrypoints |
+| `utils/` | `lib/` | `services/`, `agents/`, `commands/` |
+| `services/` | `utils/`, `lib/`, `llm/`, `nostr/` | `commands/`, `daemon/`, `event-handler/` |
+| `commands/` | Everything below | N/A |
 
 ### Services Organization
 ```
@@ -189,7 +191,7 @@ export const rag_search = tool({
 // WRONG: Tool implements business logic directly
 export const rag_search = tool({
   execute: async ({ query }) => {
-    const db = await lancedb.connect();
+    const db = await connectVectorStore();
     // ... 100 lines of implementation
   }
 });

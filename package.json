@@ -55,7 +55,6 @@
     "@ai-sdk/devtools": "^0.0.15",
     "@ai-sdk/openai": "^3.0.53",
     "@huggingface/transformers": "^3.8.1",
-    "@lancedb/lancedb": "^0.27.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@nostr-dev-kit/ndk": "3.0.3",
     "@openrouter/ai-sdk-provider": "^2.8.0",

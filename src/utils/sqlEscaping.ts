@@ -1,12 +1,11 @@
 /**
- * SQL escaping utilities for LanceDB metadata LIKE queries.
+ * SQL escaping utilities for metadata LIKE queries.
  *
  * Shared across all RAG query builders (project filters, agent stats, etc.)
  * to ensure consistent escaping of user-supplied values in SQL LIKE patterns.
  *
- * IMPORTANT: DataFusion (used by LanceDB) has NO default escape character.
- * Backslash-based escapes only work when paired with an ESCAPE '\\' clause.
- * See: https://github.com/apache/datafusion/issues/13291
+ * Backslash-based escapes only work consistently when paired with an
+ * ESCAPE '\\' clause.
  */
 
 /**
@@ -24,7 +23,7 @@ export const SQL_LIKE_ESCAPE_CLAUSE = "ESCAPE '\\\\'";
  * and LIKE wildcards (%, _).
  *
  * The returned value MUST be used together with {@link SQL_LIKE_ESCAPE_CLAUSE}
- * so that DataFusion recognises the backslash as the escape character.
+ * so that the SQL engine recognises the backslash as the escape character.
  *
  * @param value - Raw string to escape (e.g. a project ID or agent pubkey).
  * @returns Escaped string safe for interpolation into a LIKE pattern.

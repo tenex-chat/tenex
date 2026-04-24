@@ -20,8 +20,9 @@ import { logger } from "@/utils/logger";
  *
  * v1: metadata-only (title + summary + lastUserMessage) — original format
  * v2: full conversation transcript (XML) — enables semantic search over full content
+ * v3: bounded transcript chunks — avoids provider payload limits for long conversations
  */
-export const EMBEDDING_CONTENT_VERSION = "v2";
+export const EMBEDDING_CONTENT_VERSION = "v3";
 
 export class IndexingStateManager {
     private readonly baseDir: string;
@@ -103,7 +104,8 @@ export class IndexingStateManager {
         basePath: string,
         projectId: ProjectDTag,
         conversationId: string,
-        noContent = false
+        noContent = false,
+        documentIds: string[] = []
     ): void {
         const result = this.calculateMetadataHash(basePath, projectId, conversationId);
         if (!result) {
@@ -116,7 +118,12 @@ export class IndexingStateManager {
             lastIndexedAt: Date.now(),
             noContent,
             contentVersion: EMBEDDING_CONTENT_VERSION,
+            documentIds,
         });
+    }
+
+    public getIndexedDocumentIds(projectId: ProjectDTag, conversationId: string): string[] {
+        return this.getCatalog(projectId).getEmbeddingState(conversationId)?.documentIds ?? [];
     }
 
     public clearState(projectId: ProjectDTag, conversationId: string): void {

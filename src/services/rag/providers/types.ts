@@ -32,8 +32,8 @@ export interface VectorSearchResult {
  * Configuration for vector store provider selection.
  */
 export interface VectorStoreConfig {
-    provider: "lancedb" | "sqlite-vec" | "qdrant";
-    /** Custom data directory (LanceDB, SQLite-vec) */
+    provider: "sqlite-vec" | "qdrant";
+    /** Custom data directory (SQLite-vec) */
     path?: string;
     /** Server URL (Qdrant) */
     url?: string;
@@ -42,7 +42,7 @@ export interface VectorStoreConfig {
 }
 
 export const DEFAULT_VECTOR_STORE_CONFIG: VectorStoreConfig = {
-    provider: "lancedb",
+    provider: "sqlite-vec",
 };
 
 /**
@@ -64,6 +64,7 @@ export interface VectorStore {
     deleteCollection(name: string): Promise<void>;
     listCollections(): Promise<string[]>;
     collectionExists(name: string): Promise<boolean>;
+    getCollectionDimensions(name: string): Promise<number | null>;
 
     // -- Document operations --
 

@@ -87,6 +87,16 @@ const DEFAULT_CONFIG: EmbeddingConfig = {
     model: "Xenova/all-MiniLM-L6-v2",
 };
 
+const SUPPORTED_VECTOR_STORE_PROVIDERS = ["sqlite-vec", "qdrant"] as const;
+
+function isSupportedVectorStoreProvider(
+    provider: string
+): provider is (typeof SUPPORTED_VECTOR_STORE_PROVIDERS)[number] {
+    return SUPPORTED_VECTOR_STORE_PROVIDERS.includes(
+        provider as (typeof SUPPORTED_VECTOR_STORE_PROVIDERS)[number]
+    );
+}
+
 /**
  * Base URLs for known OpenAI-compatible providers
  */
@@ -138,7 +148,7 @@ export async function createEmbeddingProvider(
     // All other providers are treated as OpenAI-compatible
     if (!embeddingConfig.apiKey) {
         throw new Error(
-            `API key required for ${embeddingConfig.provider}. Configure embeddings in the TENEX config files before indexing.`
+            `API key required for ${embeddingConfig.provider}. Configure with 'tenex config embed'.`
         );
     }
 
@@ -322,7 +332,7 @@ function resolveProjectBase(options?: EmbeddingConfigOptions): string | undefine
 /**
  * Load vector store configuration from embed.json.
  * Reads the `vectorStore` field from the first embed.json found.
- * Defaults to LanceDB if not configured.
+ * Defaults to SQLite-vec if not configured.
  */
 export async function loadVectorStoreConfig(
     options?: EmbeddingConfigOptions
@@ -340,7 +350,13 @@ export async function loadVectorStoreConfig(
             if (rawConfig && typeof rawConfig === "object" && "vectorStore" in rawConfig) {
                 const vs = rawConfig.vectorStore as Record<string, unknown>;
                 if (vs && typeof vs.provider === "string") {
-                    const provider = vs.provider as "lancedb" | "sqlite-vec" | "qdrant";
+                    if (!isSupportedVectorStoreProvider(vs.provider)) {
+                        throw new Error(
+                            `Unsupported vector store provider '${vs.provider}'. Supported providers: ${SUPPORTED_VECTOR_STORE_PROVIDERS.join(", ")}`
+                        );
+                    }
+
+                    const provider = vs.provider;
                     logger.debug(`Loaded vector store config: ${provider}`);
                     return {
                         provider,
@@ -352,9 +368,15 @@ export async function loadVectorStoreConfig(
             }
         }
 
-        logger.debug("No vector store configuration found, using defaults (lancedb)");
+        logger.debug("No vector store configuration found, using defaults (sqlite-vec)");
         return DEFAULT_VECTOR_STORE_CONFIG;
     } catch (error) {
+        if (
+            error instanceof Error &&
+            error.message.startsWith("Unsupported vector store provider")
+        ) {
+            throw error;
+        }
         logger.warn("Failed to load vector store configuration, using defaults", { error });
         return DEFAULT_VECTOR_STORE_CONFIG;
     }

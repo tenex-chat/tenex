@@ -41,7 +41,17 @@ function stringToQdrantId(id: string): string {
 /**
  * Reverse mapping is stored in payload to allow retrieval of original IDs
  */
-function createPointFromDocument(doc: StoredDocument) {
+function createPointFromDocument(doc: StoredDocument): {
+    id: string;
+    vector: number[];
+    payload: {
+        originalId: string;
+        content: string;
+        metadata: string;
+        timestamp: number;
+        source: string;
+    };
+} {
     return {
         id: stringToQdrantId(doc.id),
         vector: doc.vector,
@@ -174,6 +184,24 @@ export class QdrantProvider implements VectorStore {
             return true;
         } catch {
             return false;
+        }
+    }
+
+    async getCollectionDimensions(name: string): Promise<number | null> {
+        const client = this.ensureClient();
+
+        try {
+            const collection = await client.getCollection(name);
+            const vectorsConfig = collection.config?.params?.vectors;
+
+            if (typeof vectorsConfig === "object" && vectorsConfig !== null && "size" in vectorsConfig) {
+                const size = vectorsConfig.size;
+                return typeof size === "number" ? size : null;
+            }
+
+            return null;
+        } catch {
+            return null;
         }
     }
 

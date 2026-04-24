@@ -2,7 +2,7 @@
  * RAGCollectionRegistry - Tracks collection metadata for scope-aware search.
  *
  * Stores scope, project, and agent metadata for each RAG collection as a
- * JSON sidecar file alongside the LanceDB data directory. This enables
+ * JSON sidecar file alongside the RAG data directory. This enables
  * rag_search() to automatically include only relevant collections based on
  * the agent's context (global, project, personal).
  *

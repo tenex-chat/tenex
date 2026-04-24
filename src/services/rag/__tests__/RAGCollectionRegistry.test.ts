@@ -17,25 +17,25 @@ import { RAGCollectionRegistry } from "../RAGCollectionRegistry";
 
 describe("RAGCollectionRegistry", () => {
     let tempDir: string;
-    let lanceDir: string;
-    const origEnv = process.env.LANCEDB_DATA_DIR;
+    let ragDir: string;
+    const origEnv = process.env.RAG_DATA_DIR;
 
     beforeEach(() => {
         RAGCollectionRegistry.resetInstance();
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rag-registry-test-"));
-        lanceDir = path.join(tempDir, "lancedb");
-        fs.mkdirSync(lanceDir, { recursive: true });
+        ragDir = path.join(tempDir, "rag");
+        fs.mkdirSync(ragDir, { recursive: true });
         // Point RAGCollectionRegistry to our temp directory via env var
-        process.env.LANCEDB_DATA_DIR = lanceDir;
+        process.env.RAG_DATA_DIR = ragDir;
     });
 
     afterEach(() => {
         RAGCollectionRegistry.resetInstance();
         // Restore env
         if (origEnv === undefined) {
-            process.env.LANCEDB_DATA_DIR = undefined;
+            process.env.RAG_DATA_DIR = undefined;
         } else {
-            process.env.LANCEDB_DATA_DIR = origEnv;
+            process.env.RAG_DATA_DIR = origEnv;
         }
         fs.rmSync(tempDir, { recursive: true, force: true });
     });

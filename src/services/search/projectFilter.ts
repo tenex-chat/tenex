@@ -14,7 +14,7 @@ import { PROJECT_ID_KEYS } from "@/utils/metadataKeys";
 import { SQL_LIKE_ESCAPE_CLAUSE, escapeSqlLikeValue } from "@/utils/sqlEscaping";
 
 /**
- * Build a SQL prefilter string for project isolation in LanceDB queries.
+ * Build a SQL prefilter string for project isolation in vector-store queries.
  *
  * Matches documents where metadata contains EITHER:
  *   - "projectId":"<id>" (canonical camelCase, used by specialized services)

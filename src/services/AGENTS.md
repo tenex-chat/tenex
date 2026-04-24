@@ -9,24 +9,29 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `PubkeyService.ts` — Pubkey caching/lookup
 - `LLMOperationsRegistry.ts` — Request throttling
 - `CooldownRegistry.ts` — Cooldown tracking
+- `OwnerAgentListService.ts` — Owner-agent list management
+- `AgentDefinitionMonitor.ts` — Agent definition monitoring
 
 ## Subdirectories
 
+- `dispatch/` — Chat routing, delegation handling (`AgentDispatchService`, `AgentRouter`)
 - `ral/` — Request-Agent Lifecycle state (`RALRegistry`)
-- `rag/` — LanceDB document ingestion and querying
+- `rag/` — Vector-store document ingestion and querying
 - `mcp/` — MCP server lifecycle management (`MCPManager` is single source of truth)
 - `agents/` — NDK agent discovery
 - `projects/` — Project context management
 - `embedding/` — Embedding provider wrappers
 - `scheduling/` — Cron-like scheduling
-- `status/` — Read-side project/backend status helpers
+- `status/` — Progress event broadcasting
 - `skill/` — Skill management and resolution
 - `prompt-compiler/` — Lesson + comment synthesis
 - `search/` — Unified search
 - `config/` — Config subsystem
 - `trust-pubkeys/`, `pubkey-gate/` — Trust and access control
 - `nip46/` — NIP-46 remote signing
+- `apns/` — Apple Push Notifications
 - `image/` — Image processing
+- `intervention/` — Human intervention handling
 - `event-context/` — Event context resolution
 - `heuristics/` — Behavioral heuristics
 - `storage/` — Storage abstractions
