@@ -3,8 +3,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,11 +21,6 @@ use tenex_daemon::daemon_loop::{
 use tenex_daemon::daemon_maintenance::DaemonMaintenanceOutcome;
 use tenex_daemon::daemon_maintenance::{NoTelegramPublisher, WithTelegramPublisher};
 use tenex_daemon::daemon_shell::DaemonShell;
-use tenex_daemon::nip46::client::PublishOutboxHandle;
-use tenex_daemon::nip46::outbox_adapter::PublishOutboxAdapter;
-use tenex_daemon::nip46::pending::PendingNip46Requests;
-use tenex_daemon::nip46::protocol::NIP46_KIND;
-use tenex_daemon::nip46::registry::NIP46Registry;
 use tenex_daemon::nostr_subscription_gateway::{
     DEFAULT_RELAY_READ_TIMEOUT, NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
     NostrSubscriptionGatewaySupervisor, NostrSubscriptionObserver, NostrSubscriptionRelayError,
@@ -35,15 +29,11 @@ use tenex_daemon::nostr_subscription_gateway::{
 use tenex_daemon::nostr_subscription_tick::{
     NostrSubscriptionTickDiagnostics, NostrSubscriptionTickDispatch,
 };
+use tenex_daemon::nip46::protocol::NIP46_KIND;
 use tenex_daemon::project_agent_whitelist::ingress::WhitelistIngress;
-use tenex_daemon::project_agent_whitelist::reconciler::{ReconcilerDeps, run_reconciler_loop};
 use tenex_daemon::project_agent_whitelist::snapshot_state::PROJECT_AGENT_SNAPSHOT_KIND;
-use tenex_daemon::project_agent_whitelist::snapshot_state::SnapshotState;
-use tenex_daemon::project_agent_whitelist::trigger_source::AgentInventoryPoller;
 use tenex_daemon::project_boot_state::ProjectBootState;
-use tenex_daemon::publish_outbox::{
-    PublishOutboxMaintenanceReport, cancel_pending_publish_outbox_records_matching,
-};
+use tenex_daemon::publish_outbox::PublishOutboxMaintenanceReport;
 use tenex_daemon::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
 use tenex_daemon::subscription_runtime::{
@@ -55,6 +45,9 @@ use tenex_daemon::telegram::gateway::{
 };
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::telemetry;
+use tenex_daemon::whitelist_wiring::{
+    WhitelistReloadHandle, build_whitelist_wiring, reload_whitelist_from_handle,
+};
 use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
 use tenex_daemon::worker_dispatch::execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{
@@ -71,9 +64,7 @@ const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
 const WORKER_ENGINE_ENV: &str = "TENEX_AGENT_WORKER_ENGINE";
 const AGENT_WORKER_ENGINE: &str = "agent";
-const WHITELIST_RECONCILER_DEBOUNCE: Duration = Duration::from_secs(5);
-const WHITELIST_RECONCILER_IDLE_RETRY: Duration = Duration::from_secs(300);
-const WHITELIST_POLLER_INTERVAL: Duration = Duration::from_secs(2);
+const RELOAD_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const SHUTDOWN_SLEEP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SHUTDOWN_REQUESTED_MESSAGE: &[u8] =
     b"\nTENEX daemon: shutdown requested; finishing current work and stopping gateways.\n";
@@ -164,7 +155,8 @@ where
     let mut stop_signal = ProcessSignalStopSignal;
     let publisher = Arc::new(Mutex::new(actual_relay_publisher(&options)?));
 
-    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)?;
+    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+        .map_err(|error| runtime_error(error.to_string()))?;
     let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
     let project_event_index = Arc::new(Mutex::new(
         tenex_daemon::project_event_index::ProjectEventIndex::new(),
@@ -257,72 +249,6 @@ where
     Ok(String::new())
 }
 
-/// Wiring for the NIP-46 + kind-14199 whitelist reconciler.
-///
-/// Holds the shared `Arc<_>` handles used by the subscription gateway
-/// ingress, the heartbeat latch gate on the backend-events tick, and the
-/// background supervisor threads (reconciler + agent-inventory poller)
-/// that drive the outbound 14199 publishes.
-///
-/// The `reconciler_owners` and `poller_owners` handles are the same
-/// `Arc<RwLock<Vec<String>>>` passed to `ReconcilerDeps` and
-/// `AgentInventoryPoller`; SIGHUP-driven config reload swaps both in place
-/// without restarting the supervisor threads.
-struct WhitelistWiring {
-    ingress: Arc<WhitelistIngress>,
-    heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
-    nip46_registry: Arc<NIP46Registry>,
-    reconciler_owners: Arc<RwLock<Vec<String>>>,
-    poller_owners: Arc<RwLock<Vec<String>>>,
-    /// Kept alive so that dropping the wiring closes the channel and exits
-    /// the reconciler loop on shutdown.
-    _trigger_tx: Sender<String>,
-    _reconciler_thread: JoinHandle<()>,
-    _poller_thread: JoinHandle<()>,
-}
-
-/// Sharable bundle of the reload-relevant handles inside
-/// [`WhitelistWiring`]. Cloning the bundle clones `Arc`s, so the reload
-/// watcher thread can hold its own copy without preventing shutdown.
-#[derive(Clone)]
-struct WhitelistReloadHandle {
-    heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
-    nip46_registry: Arc<NIP46Registry>,
-    reconciler_owners: Arc<RwLock<Vec<String>>>,
-    poller_owners: Arc<RwLock<Vec<String>>>,
-}
-
-impl WhitelistWiring {
-    fn reload_handle(&self) -> WhitelistReloadHandle {
-        WhitelistReloadHandle {
-            heartbeat_latch: Arc::clone(&self.heartbeat_latch),
-            nip46_registry: Arc::clone(&self.nip46_registry),
-            reconciler_owners: Arc::clone(&self.reconciler_owners),
-            poller_owners: Arc::clone(&self.poller_owners),
-        }
-    }
-}
-
-/// Outcome reported by [`reload_whitelist_wiring`]. Exposes enough to log the
-/// reload at `info!` and lets tests assert that the swap happened.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ReloadOutcome {
-    previous_owner_count: usize,
-    new_owner_count: usize,
-    nip46_clients_cleared: bool,
-}
-
-#[derive(Debug, thiserror::Error)]
-enum ReloadError {
-    #[error("reload config read failed: {0}")]
-    Config(String),
-}
-
-/// Poll interval for the SIGHUP reload watcher thread. Short enough that a
-/// SIGHUP arriving while the daemon is otherwise idle is picked up within a
-/// human-perceptible delay, long enough that the watcher does not burn CPU.
-const RELOAD_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(250);
-
 /// Spawn the SIGHUP reload watcher. The thread exits when
 /// `DAEMON_STOP_REQUESTED` is set.
 fn spawn_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) -> JoinHandle<()> {
@@ -355,192 +281,6 @@ fn run_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) {
         }
         thread::sleep(RELOAD_WATCHER_POLL_INTERVAL);
     }
-}
-
-/// Re-read `config.json`, clear the NIP-46 client cache, and swap the
-/// whitelisted owner sets in the reconciler, the agent inventory poller, and
-/// the heartbeat latch — all without restarting any supervisor thread. The
-/// heartbeat latch's own `replace_owners` preserves a latched `Stopped`
-/// state: owners that have already sent a stop snapshot stay stopped even
-/// when the whitelist changes.
-///
-/// The daemon binary reaches this entry point through the SIGHUP-driven
-/// watcher thread via `reload_whitelist_from_handle`; this wrapper is kept
-/// for tests that want to drive the reload synchronously from a single
-/// owning `WhitelistWiring` handle.
-#[cfg(test)]
-fn reload_whitelist_wiring(
-    tenex_base_dir: &Path,
-    wiring: &WhitelistWiring,
-) -> Result<ReloadOutcome, ReloadError> {
-    reload_whitelist_from_handle(tenex_base_dir, &wiring.reload_handle())
-}
-
-fn reload_whitelist_from_handle(
-    tenex_base_dir: &Path,
-    handle: &WhitelistReloadHandle,
-) -> Result<ReloadOutcome, ReloadError> {
-    let config = read_backend_config(tenex_base_dir)
-        .map_err(|error| ReloadError::Config(error.to_string()))?;
-    let new_owners = config.whitelisted_pubkeys;
-
-    let previous_owner_count = handle
-        .reconciler_owners
-        .read()
-        .expect("reconciler owners lock must not be poisoned")
-        .len();
-
-    handle.nip46_registry.reload();
-
-    {
-        let mut guard = handle
-            .reconciler_owners
-            .write()
-            .expect("reconciler owners lock must not be poisoned");
-        *guard = new_owners.clone();
-    }
-    {
-        let mut guard = handle
-            .poller_owners
-            .write()
-            .expect("poller owners lock must not be poisoned");
-        *guard = new_owners.clone();
-    }
-    {
-        let mut latch = handle
-            .heartbeat_latch
-            .lock()
-            .expect("heartbeat latch lock must not be poisoned");
-        latch.replace_owners(new_owners.clone());
-    }
-
-    let new_owner_count = new_owners.len();
-    tracing::info!(
-        previous_owner_count,
-        new_owner_count,
-        "whitelist wiring reloaded after SIGHUP"
-    );
-
-    Ok(ReloadOutcome {
-        previous_owner_count,
-        new_owner_count,
-        nip46_clients_cleared: true,
-    })
-}
-
-fn build_whitelist_wiring(
-    tenex_base_dir: &Path,
-    daemon_dir: &Path,
-) -> Result<Option<WhitelistWiring>, CliError> {
-    let config =
-        read_backend_config(tenex_base_dir).map_err(|error| runtime_error(error.to_string()))?;
-    if config.whitelisted_pubkeys.is_empty() {
-        tracing::info!(
-            "no whitelisted pubkeys configured; skipping NIP-46 + 14199 reconciler wiring"
-        );
-        return Ok(None);
-    }
-
-    let backend_signer = Arc::new(
-        config
-            .backend_signer()
-            .map_err(|error| runtime_error(error.to_string()))?,
-    );
-    let backend_pubkey = backend_signer.pubkey_hex().to_string();
-    cancel_stale_nip46_publish_requests(daemon_dir, &backend_pubkey)?;
-
-    let pending = PendingNip46Requests::default();
-    let outbox_adapter = Arc::new(PublishOutboxAdapter::new(daemon_dir.to_path_buf()));
-    let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = outbox_adapter;
-
-    let nip46_registry = Arc::new(NIP46Registry::new(
-        Arc::clone(&backend_signer),
-        pending,
-        Arc::clone(&outbox_handle),
-    ));
-
-    let snapshot_state = Arc::new(SnapshotState::default());
-    let heartbeat_latch = Arc::new(Mutex::new(BackendHeartbeatLatchPlanner::new(
-        backend_pubkey.clone(),
-        config.whitelisted_pubkeys.clone(),
-    )));
-
-    let (trigger_tx, trigger_rx) = channel::<String>();
-    let reconciler_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
-    let poller_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
-    let ingress = Arc::new(WhitelistIngress {
-        snapshot_state: Arc::clone(&snapshot_state),
-        heartbeat_latch: Arc::clone(&heartbeat_latch),
-        owners: Arc::clone(&reconciler_owners),
-        reconciler_trigger: trigger_tx.clone(),
-        nip46_registry: Arc::clone(&nip46_registry),
-    });
-
-    let default_relay = config
-        .effective_relay_urls()
-        .first()
-        .cloned()
-        .unwrap_or_default();
-    let reconciler_deps = ReconcilerDeps {
-        tenex_base_dir: tenex_base_dir.to_path_buf(),
-        backend_pubkey,
-        owners: Arc::clone(&reconciler_owners),
-        snapshot_state,
-        nip46_registry: Arc::clone(&nip46_registry),
-        nip46_config: config.nip46.clone(),
-        default_relay,
-        outbox: outbox_handle,
-        debounce: WHITELIST_RECONCILER_DEBOUNCE,
-        idle_retry: WHITELIST_RECONCILER_IDLE_RETRY,
-    };
-
-    let reconciler_thread = thread::Builder::new()
-        .name("whitelist-reconciler".to_string())
-        .spawn(move || run_reconciler_loop(reconciler_deps, trigger_rx))
-        .map_err(|error| runtime_error(format!("reconciler thread spawn failed: {error}")))?;
-
-    let poller = AgentInventoryPoller {
-        tenex_base_dir: tenex_base_dir.to_path_buf(),
-        owners: Arc::clone(&poller_owners),
-        interval: WHITELIST_POLLER_INTERVAL,
-        trigger_tx: trigger_tx.clone(),
-    };
-    let poller_thread = thread::Builder::new()
-        .name("whitelist-poller".to_string())
-        .spawn(move || poller.run_forever())
-        .map_err(|error| runtime_error(format!("poller thread spawn failed: {error}")))?;
-
-    Ok(Some(WhitelistWiring {
-        ingress,
-        heartbeat_latch,
-        nip46_registry,
-        reconciler_owners,
-        poller_owners,
-        _trigger_tx: trigger_tx,
-        _reconciler_thread: reconciler_thread,
-        _poller_thread: poller_thread,
-    }))
-}
-
-fn cancel_stale_nip46_publish_requests(
-    daemon_dir: &Path,
-    backend_pubkey: &str,
-) -> Result<(), CliError> {
-    let cancelled = cancel_pending_publish_outbox_records_matching(daemon_dir, |record| {
-        record.event.kind == NIP46_KIND
-            && record.event.pubkey == backend_pubkey
-            && record.request.request_id.starts_with("nip46:")
-    })
-    .map_err(|error| runtime_error(error.to_string()))?;
-
-    if !cancelled.is_empty() {
-        tracing::warn!(
-            cancelled_count = cancelled.len(),
-            "cancelled stale pending NIP-46 publish requests from previous daemon session"
-        );
-    }
-
-    Ok(())
 }
 
 fn start_nostr_subscription_supervisor_from_options(
@@ -1118,6 +858,7 @@ mod tests {
     use tenex_daemon::daemon_loop::NeverStopDaemonMaintenanceLoop;
     use tenex_daemon::nostr_event::SignedNostrEvent;
     use tenex_daemon::publish_outbox::{PublishRelayError, PublishRelayReport, PublishRelayResult};
+    use tenex_daemon::whitelist_wiring::reload_whitelist_wiring;
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     const TEST_SECRET_KEY_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";
@@ -1694,6 +1435,7 @@ mod tests {
         use std::collections::BTreeSet;
         use std::str::FromStr;
         use std::sync::Mutex as StdMutex;
+        use std::sync::RwLock;
         use std::sync::mpsc as std_mpsc;
         use std::thread as std_thread;
         use std::time::Instant;

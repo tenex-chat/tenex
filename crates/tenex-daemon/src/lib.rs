@@ -88,6 +88,7 @@ pub mod subscription_runtime;
 pub mod telegram;
 pub mod telegram_outbox;
 pub mod telemetry;
+pub mod whitelist_wiring;
 pub mod worker_completion;
 pub mod worker_concurrency;
 pub mod worker_diagnostics;
