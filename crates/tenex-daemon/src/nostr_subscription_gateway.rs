@@ -671,6 +671,7 @@ async fn refresh_subscription_filters(
         since,
         lesson_definition_ids: &[],
         project_event_index: input.project_event_index,
+        persisted_whitelist: &[],
     })?;
     if refreshed.filters.is_empty() || refreshed.filters == *active_filters {
         return Ok(());

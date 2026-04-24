@@ -1,30 +1,44 @@
-//! Shared registry of spawned session threads.
+//! Shared registry of spawned session work.
 //!
-//! The daemon tick detaches each admitted dispatch onto its own OS thread and
-//! pushes the `JoinHandle` here. A later tick polls this registry for finished
-//! handles, drains their terminal outcomes, and reports them. At shutdown, the
-//! loop driver joins any still-running handles so nothing is lost.
+//! Production uses Tokio tasks so worker sessions no longer require one OS
+//! thread apiece. Sync tests and non-runtime callers can still fall back to
+//! detached threads.
 
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
+use tokio::runtime::Handle as TokioRuntimeHandle;
+use tokio::task::JoinHandle as TokioJoinHandle;
+
 use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
 
-/// A single spawned session thread plus enough identity to describe it in
-/// logs and error outcomes if the thread panics.
 #[derive(Debug)]
-pub struct SessionJoinHandle {
-    pub dispatch_id: String,
-    pub worker_id: String,
-    pub handle: JoinHandle<DaemonWorkerRuntimeOutcome>,
+pub enum SessionJoinHandle {
+    Thread {
+        dispatch_id: String,
+        worker_id: String,
+        handle: JoinHandle<DaemonWorkerRuntimeOutcome>,
+    },
+    Tokio {
+        dispatch_id: String,
+        worker_id: String,
+        handle: TokioJoinHandle<DaemonWorkerRuntimeOutcome>,
+    },
 }
 
-/// Clone-friendly wrapper around the shared registry of in-flight session
-/// threads. The tick loop clones this into each tick; the loop driver holds
-/// it for shutdown-time joining.
+impl SessionJoinHandle {
+    fn is_finished(&self) -> bool {
+        match self {
+            Self::Thread { handle, .. } => handle.is_finished(),
+            Self::Tokio { handle, .. } => handle.is_finished(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WorkerSessionRegistry {
     inner: Arc<Mutex<Vec<SessionJoinHandle>>>,
+    runtime_handle: Option<TokioRuntimeHandle>,
 }
 
 impl WorkerSessionRegistry {
@@ -32,7 +46,17 @@ impl WorkerSessionRegistry {
         Self::default()
     }
 
-    /// Register a newly spawned session thread.
+    pub fn new_on_runtime(runtime_handle: TokioRuntimeHandle) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Vec::new())),
+            runtime_handle: Some(runtime_handle),
+        }
+    }
+
+    pub fn runtime_handle(&self) -> Option<TokioRuntimeHandle> {
+        self.runtime_handle.clone()
+    }
+
     pub fn push(&self, session: SessionJoinHandle) {
         self.inner
             .lock()
@@ -40,32 +64,19 @@ impl WorkerSessionRegistry {
             .push(session);
     }
 
-    /// Remove and join every session thread whose `JoinHandle::is_finished()`
-    /// returns true, converting each into its `DaemonWorkerRuntimeOutcome`.
-    /// Threads still running stay in the registry.
     pub fn drain_finished(&self) -> Vec<DaemonWorkerRuntimeOutcome> {
         let mut guard = self.inner.lock().expect("session registry mutex poisoned");
         let (finished, still_running): (Vec<_>, Vec<_>) = std::mem::take(&mut *guard)
             .into_iter()
-            .partition(|session| session.handle.is_finished());
+            .partition(SessionJoinHandle::is_finished);
         *guard = still_running;
         drop(guard);
         finished
             .into_iter()
-            .map(|session| match session.handle.join() {
-                Ok(outcome) => outcome,
-                Err(_) => DaemonWorkerRuntimeOutcome::SessionFailed {
-                    dispatch_id: session.dispatch_id,
-                    worker_id: session.worker_id,
-                    error: "session thread panicked".to_string(),
-                },
-            })
+            .map(|session| self.join_session(session))
             .collect()
     }
 
-    /// Take every session thread out of the registry and join it, blocking
-    /// until each returns. Used at loop shutdown to make sure no session is
-    /// left running after the daemon stops.
     pub fn join_all(&self) -> Vec<DaemonWorkerRuntimeOutcome> {
         let sessions: Vec<SessionJoinHandle> = {
             let mut guard = self.inner.lock().expect("session registry mutex poisoned");
@@ -73,18 +84,10 @@ impl WorkerSessionRegistry {
         };
         sessions
             .into_iter()
-            .map(|session| match session.handle.join() {
-                Ok(outcome) => outcome,
-                Err(_) => DaemonWorkerRuntimeOutcome::SessionFailed {
-                    dispatch_id: session.dispatch_id,
-                    worker_id: session.worker_id,
-                    error: "session thread panicked".to_string(),
-                },
-            })
+            .map(|session| self.join_session(session))
             .collect()
     }
 
-    /// Current number of registered (possibly finished) session threads.
     pub fn len(&self) -> usize {
         self.inner
             .lock()
@@ -94,5 +97,51 @@ impl WorkerSessionRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    fn join_session(&self, session: SessionJoinHandle) -> DaemonWorkerRuntimeOutcome {
+        match session {
+            SessionJoinHandle::Thread {
+                dispatch_id,
+                worker_id,
+                handle,
+            } => match handle.join() {
+                Ok(outcome) => outcome,
+                Err(_) => session_failed(dispatch_id, worker_id, "session thread panicked"),
+            },
+            SessionJoinHandle::Tokio {
+                dispatch_id,
+                worker_id,
+                handle,
+            } => {
+                let Some(runtime_handle) = self.runtime_handle.as_ref() else {
+                    return session_failed(
+                        dispatch_id,
+                        worker_id,
+                        "session task finished without a runtime handle",
+                    );
+                };
+                match runtime_handle.block_on(async { handle.await }) {
+                    Ok(outcome) => outcome,
+                    Err(error) => session_failed(
+                        dispatch_id,
+                        worker_id,
+                        &format!("session task failed: {error}"),
+                    ),
+                }
+            }
+        }
+    }
+}
+
+fn session_failed(
+    dispatch_id: String,
+    worker_id: String,
+    error: &str,
+) -> DaemonWorkerRuntimeOutcome {
+    DaemonWorkerRuntimeOutcome::SessionFailed {
+        dispatch_id,
+        worker_id,
+        error: error.to_string(),
     }
 }

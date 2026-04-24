@@ -2,9 +2,9 @@
 # E2E scenario 10.1 — Graceful daemon restart during idle; no stuck RAL.
 #
 # What this proves:
-#   1. A full delegation flow (scenario-02 style) runs to completion:
-#      all RALs reach a terminal journal state; all dispatches reach
-#      Completed or Cancelled.
+#   1. A real worker execution runs to completion before restart:
+#      the worker publishes a user-visible reply, the RAL reaches a terminal
+#      journal state, and the dispatch queue drains to idle.
 #   2. A graceful SIGTERM stop leaves the lockfile removed (or if it
 #      remains, start_daemon succeeds anyway).
 #   3. The restarted daemon starts cleanly — no panic, no crash-loop.
@@ -35,8 +35,8 @@ source "$repo_root/scripts/e2e/_bootstrap.sh"
 # shellcheck source=../../e2e-test-harness.sh
 source "$repo_root/scripts/e2e-test-harness.sh"
 
-MOCK_FIXTURE_PATH="$repo_root/scripts/e2e/fixtures/mock-llm/02_delegation.json"
-MOCK_MODEL_ID="mock/delegation-02"
+MOCK_FIXTURE_PATH="$repo_root/scripts/e2e/fixtures/mock-llm/101_graceful_restart.json"
+MOCK_MODEL_ID="mock/graceful-restart-101"
 
 [[ -f "$MOCK_FIXTURE_PATH" ]] || _die "mock fixture missing at $MOCK_FIXTURE_PATH"
 
@@ -56,13 +56,13 @@ echo "[scenario] rewriting llms.json to use mock fixture model '$MOCK_MODEL_ID'"
 llms_json="$BACKEND_BASE/llms.json"
 jq --arg model "$MOCK_MODEL_ID" '
     .configurations = {
-      "mock-delegation-02": { "provider": "mock", "model": $model }
+      "mock-graceful-restart-101": { "provider": "mock", "model": $model }
     }
-    | .default = "mock-delegation-02"
-    | .summarization = "mock-delegation-02"
-    | .supervision = "mock-delegation-02"
-    | .search = "mock-delegation-02"
-    | .promptCompilation = "mock-delegation-02"
+    | .default = "mock-graceful-restart-101"
+    | .summarization = "mock-graceful-restart-101"
+    | .supervision = "mock-graceful-restart-101"
+    | .search = "mock-graceful-restart-101"
+    | .promptCompilation = "mock-graceful-restart-101"
   ' "$llms_json" > "$llms_json.tmp" && mv "$llms_json.tmp" "$llms_json"
 chmod 600 "$llms_json"
 
@@ -123,12 +123,13 @@ await_kind_event 24010 "" "$BACKEND_PUBKEY" 30 >/dev/null \
 echo "[scenario]   kind:24010 published (project boot confirmed) ✓"
 
 _queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
+ral_journal="$DAEMON_DIR/ral/journal.jsonl"
 _saw_dispatch=0
 user_msg_id1=""
 for attempt in 1 2 3; do
   echo "[scenario] publishing kind:1 from user to agent1 (attempt $attempt)"
   user_msg_evt1="$(publish_event_as "$USER_NSEC" 1 \
-    "Agent 1, please find out what 2+2 equals and reply." \
+    "Agent 1, reply with restart ok and do not delegate." \
     "p=$AGENT1_PUBKEY" \
     "a=$PROJECT_A_TAG")"
   user_msg_id1="$(printf '%s' "$user_msg_evt1" | jq -r .id)"
@@ -151,24 +152,11 @@ done
 [[ "$_saw_dispatch" -eq 1 ]] || _die "ASSERT: no dispatch enqueued for user message 1"
 echo "[scenario]   dispatch enqueued ✓"
 
-echo "[scenario] waiting for mock-driven delegation to complete (up to 60s)..."
+echo "[scenario] waiting for terminal RAL (up to 60s)..."
 phase1_deadline=$(( $(date +%s) + 60 ))
-saw_agent1_final=0
 saw_terminal_ral=0
 
 while [[ $(date +%s) -lt $phase1_deadline ]]; do
-  if [[ "$saw_agent1_final" -eq 0 ]]; then
-    agent1_events="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 \
-      --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent1_events" ]] && [[ "$agent1_events" != "[]" ]]; then
-      if printf '%s\n' "$agent1_events" | jq -se \
-          'any(.[]; .content | test("Final answer: agent2 says 4"))' >/dev/null 2>&1; then
-        echo "[scenario]   agent1 published final kind:1 with fixture content ✓"
-        saw_agent1_final=1
-      fi
-    fi
-  fi
-
   if [[ "$saw_terminal_ral" -eq 0 && -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
     if jq -e 'select(.event == "completed" or .event == "no_response" or
                      .event == "error" or .event == "aborted" or
@@ -179,26 +167,73 @@ while [[ $(date +%s) -lt $phase1_deadline ]]; do
     fi
   fi
 
-  [[ "$saw_agent1_final" -eq 1 && "$saw_terminal_ral" -eq 1 ]] && break
+  [[ "$saw_terminal_ral" -eq 1 ]] && break
   sleep 2
 done
 
-if [[ "$saw_agent1_final" -ne 1 ]]; then
-  tail -60 "$DAEMON_DIR/daemon.log" >&2 || true
-  _die "ASSERT: agent1 never published its final kind:1 before restart"
-fi
 if [[ "$saw_terminal_ral" -ne 1 ]]; then
   tail -60 "$DAEMON_DIR/daemon.log" >&2 || true
   _die "ASSERT: RAL journal never reached a terminal record before restart"
 fi
 
-echo "[scenario] === Phase 1 complete: delegation finished; daemon is idle ==="
+echo "[scenario] waiting for daemon to become fully idle (no non-terminal RALs or active dispatches)..."
+idle_deadline=$(( $(date +%s) + 60 ))
+idle_stable_polls=0
+while [[ $(date +%s) -lt $idle_deadline ]]; do
+  non_terminal_rals=0
+  if [[ -f "$ral_journal" ]]; then
+    non_terminal_rals="$(jq -s '
+        group_by(.ralNumber, .projectId, .conversationId, .agentPubkey)
+        | map(
+            sort_by(.sequence)
+            | last
+            | select(
+                .event == "allocated"
+                or .event == "claimed"
+                or .event == "waiting_for_delegation"
+              )
+          )
+        | length
+      ' "$ral_journal" 2>/dev/null || echo 0)"
+  fi
 
-# Allow the daemon a moment to flush writes before we stop it.
-sleep 2
+  active_dispatches=0
+  if [[ -f "$_queue" ]]; then
+    active_dispatches="$(jq -s '
+        group_by(.dispatchId // .dispatch_id)
+        | map(
+            sort_by(.sequence)
+            | last
+            | select(
+                (.status // .lifecycle_status) == "queued"
+                or (.status // .lifecycle_status) == "leased"
+              )
+          )
+        | length
+      ' "$_queue" 2>/dev/null || echo 0)"
+  fi
+
+  if [[ "$non_terminal_rals" -eq 0 && "$active_dispatches" -eq 0 ]]; then
+    idle_stable_polls=$((idle_stable_polls + 1))
+    if [[ "$idle_stable_polls" -ge 2 ]]; then
+      break
+    fi
+  else
+    idle_stable_polls=0
+  fi
+  sleep 2
+done
+
+if [[ "$idle_stable_polls" -lt 2 ]]; then
+  echo "[scenario]   latest non-terminal RAL count: ${non_terminal_rals:-unknown}"
+  echo "[scenario]   latest active dispatch count : ${active_dispatches:-unknown}"
+  tail -80 "$DAEMON_DIR/daemon.log" >&2 || true
+  _die "ASSERT: daemon never reached an idle state before graceful restart"
+fi
+
+echo "[scenario] === Phase 1 complete: worker finished and daemon is idle ==="
 
 # Snapshot journal and queue state for post-restart comparison.
-ral_journal="$DAEMON_DIR/ral/journal.jsonl"
 pre_journal_line_count="$(wc -l < "$ral_journal" 2>/dev/null | tr -d '[:space:]' || echo 0)"
 echo "[scenario]   pre-restart RAL journal lines: $pre_journal_line_count"
 

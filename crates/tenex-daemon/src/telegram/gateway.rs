@@ -1,9 +1,12 @@
-//! Long-poll gateway supervisor: one `std::thread` per configured bot token.
+//! Long-poll gateway supervisor.
 //!
-//! Each thread loops `getUpdates(offset, timeout, allowed_updates)` against
-//! the Bot API, refreshes the durable chat-context snapshot, records the
-//! sender as a seen participant, downloads any media attachment, then hands
-//! the raw Bot API update off to
+//! Production wiring runs one Tokio task per configured bot token and pushes
+//! the blocking Bot API calls onto the runtime's blocking pool. The legacy
+//! thread-backed supervisor remains available for unit tests and narrow
+//! synchronous callers. Each bot loop calls `getUpdates(offset, timeout,
+//! allowed_updates)` against the Bot API, refreshes the durable chat-context
+//! snapshot, records the sender as a seen participant, downloads any media
+//! attachment, then hands the raw Bot API update off to
 //! [`crate::telegram::ingress_runtime::process_telegram_update`] which
 //! normalises, authorises and enqueues the inbound dispatch.
 //!
@@ -39,6 +42,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use thiserror::Error;
+use tokio::runtime::Handle as TokioRuntimeHandle;
+use tokio::sync::watch;
 use tracing;
 
 use crate::backend_events::heartbeat::BackendSigner;
@@ -306,6 +311,31 @@ impl Drop for TelegramGatewaySupervisor {
     }
 }
 
+#[derive(Debug)]
+pub struct AsyncTelegramGatewaySupervisor {
+    stop: watch::Sender<bool>,
+    handles: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl AsyncTelegramGatewaySupervisor {
+    pub fn request_stop(&self) {
+        let _ = self.stop.send(true);
+    }
+
+    pub async fn join(mut self) {
+        let handles = std::mem::take(&mut self.handles);
+        for handle in handles {
+            let _ = handle.await;
+        }
+    }
+}
+
+impl Drop for AsyncTelegramGatewaySupervisor {
+    fn drop(&mut self) {
+        let _ = self.stop.send(true);
+    }
+}
+
 /// Launch one poll thread per configured bot token.
 ///
 /// The supervisor owns every thread handle. Network errors inside an
@@ -356,6 +386,57 @@ where
         handles.push(handle);
     }
     Ok(TelegramGatewaySupervisor { handles, stop_flag })
+}
+
+pub fn start_telegram_gateway_on_runtime<O>(
+    config: GatewayConfig,
+    observer: O,
+    runtime_handle: &TokioRuntimeHandle,
+) -> Result<AsyncTelegramGatewaySupervisor, GatewayStartError>
+where
+    O: IngressObserver + 'static,
+{
+    if config.bots.is_empty() {
+        return Err(GatewayStartError::NoBots);
+    }
+    let observer: Arc<dyn IngressObserver> = Arc::new(observer);
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let mut handles = Vec::with_capacity(config.bots.len());
+
+    for bot in &config.bots {
+        let api_base_url = bot.api_base_url.clone();
+        let mut client_config = TelegramBotClientConfig::new(bot.bot_token.clone())
+            .with_http_timeout(Duration::from_secs(
+                config.long_poll_timeout_seconds.saturating_add(10),
+            ));
+        if let Some(base_url) = api_base_url {
+            client_config = client_config.with_api_base_url(base_url);
+        }
+        let client = TelegramBotClient::new(client_config)?;
+        let api = Arc::new(TelegramClientGatewayApi::new(client));
+        handles.push(runtime_handle.spawn(run_gateway_loop_async(
+            bot.clone(),
+            api,
+            observer.clone(),
+            stop_rx.clone(),
+            GatewayThreadConfig {
+                tenex_base_dir: config.tenex_base_dir.clone(),
+                daemon_dir: config.daemon_dir.clone(),
+                data_dir: config.data_dir.clone(),
+                writer_version: config.writer_version.clone(),
+                long_poll_timeout_seconds: config.long_poll_timeout_seconds,
+                poll_limit: config.poll_limit,
+                chat_context_api_sync_ttl_ms: config.chat_context_api_sync_ttl_ms,
+                signer: config.signer.clone(),
+                project_event_index: config.project_event_index.clone(),
+            },
+        )));
+    }
+
+    Ok(AsyncTelegramGatewaySupervisor {
+        stop: stop_tx,
+        handles,
+    })
 }
 
 #[derive(Clone)]
@@ -446,12 +527,7 @@ fn run_gateway_loop<A>(
                 "callback_query".to_string(),
             ]),
         };
-        let _poll_span = tracing::debug_span!(
-            "telegram.poll",
-            bot = %bot.label,
-            offset = ?next_offset
-        )
-        .entered();
+        tracing::debug!(bot = %bot.label, offset = ?next_offset, "polling telegram updates");
         match api.get_updates(params) {
             Ok(updates) => {
                 backoff = INITIAL_ERROR_BACKOFF;
@@ -488,9 +564,141 @@ fn run_gateway_loop<A>(
                 backoff = next_backoff(backoff);
             }
         }
-        drop(_poll_span);
     }
     tracing::info!(bot = %bot.label, "telegram gateway thread stopped");
+}
+
+async fn run_gateway_loop_async<A>(
+    bot: GatewayBot,
+    api: Arc<A>,
+    observer: Arc<dyn IngressObserver>,
+    mut stop: watch::Receiver<bool>,
+    config: GatewayThreadConfig,
+) where
+    A: GatewayBotApi + 'static,
+{
+    tracing::info!(bot = %bot.label, agent_pubkey = %bot.agent_pubkey, "telegram gateway task started");
+
+    let identity = match blocking_bot_call({
+        let api = Arc::clone(&api);
+        move || api.get_me()
+    })
+    .await
+    {
+        Ok(identity) => identity,
+        Err(TelegramClientError::InvalidToken) => {
+            log_invalid_token(&bot.label);
+            return;
+        }
+        Err(error) => {
+            log_bot_warning(
+                &bot.label,
+                &format!("getMe failed, continuing with placeholder: {error}"),
+            );
+            BotIdentity {
+                id: 0,
+                username: None,
+            }
+        }
+    };
+
+    let mut next_offset = match skip_backlog_async(
+        &bot.label,
+        Arc::clone(&api),
+        config.poll_limit,
+        &mut stop,
+    )
+    .await
+    {
+        Ok(offset) => offset,
+        Err(BacklogSkipError::InvalidToken) => {
+            log_invalid_token(&bot.label);
+            return;
+        }
+        Err(BacklogSkipError::Client(error)) => {
+            log_bot_warning(
+                &bot.label,
+                &format!("backlog skip failed, starting from None: {error}"),
+            );
+            None
+        }
+        Err(BacklogSkipError::Stopped) => return,
+    };
+
+    let mut backoff = INITIAL_ERROR_BACKOFF;
+
+    while !*stop.borrow() {
+        let params = GetUpdatesParams {
+            offset: next_offset,
+            timeout_seconds: Some(config.long_poll_timeout_seconds),
+            limit: Some(config.poll_limit),
+            allowed_updates: Some(vec![
+                "message".to_string(),
+                "edited_message".to_string(),
+                "callback_query".to_string(),
+            ]),
+        };
+        tracing::debug!(bot = %bot.label, offset = ?next_offset, "polling telegram updates");
+        match blocking_bot_call({
+            let api = Arc::clone(&api);
+            let params = params.clone();
+            move || api.get_updates(params)
+        })
+        .await
+        {
+            Ok(updates) => {
+                backoff = INITIAL_ERROR_BACKOFF;
+                let count = updates.len();
+                if count > 0 {
+                    tracing::debug!(bot = %bot.label, update_count = count, "telegram updates received");
+                }
+                for update in updates {
+                    let update_id = update.update_id;
+                    tracing::debug!(bot = %bot.label, update_id = update_id, "processing telegram update");
+                    let bot_for_task = bot.clone();
+                    let identity_for_task = identity.clone();
+                    let api_for_task = Arc::clone(&api);
+                    let observer_for_task = Arc::clone(&observer);
+                    let config_for_task = config.clone();
+                    let update_for_task = update.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        process_one(
+                            &bot_for_task,
+                            &identity_for_task,
+                            &update_for_task,
+                            &api_for_task,
+                            &observer_for_task,
+                            &config_for_task,
+                        );
+                    })
+                    .await;
+                    next_offset = Some(update_id.saturating_add(1));
+                    if *stop.borrow() {
+                        break;
+                    }
+                }
+            }
+            Err(TelegramClientError::InvalidToken) => {
+                log_invalid_token(&bot.label);
+                return;
+            }
+            Err(error) => {
+                if !*stop.borrow() {
+                    tracing::warn!(
+                        bot = %bot.label,
+                        backoff_secs = backoff.as_secs(),
+                        error = %error,
+                        "telegram getUpdates failed, backing off"
+                    );
+                }
+                if !sleep_with_stop_async(&mut stop, backoff).await {
+                    break;
+                }
+                backoff = next_backoff(backoff);
+            }
+        }
+    }
+    tracing::info!(bot = %bot.label, "telegram gateway task stopped");
 }
 
 #[derive(Debug)]
@@ -545,6 +753,69 @@ where
     }
 }
 
+async fn skip_backlog_async<A>(
+    label: &str,
+    api: Arc<A>,
+    limit: u32,
+    stop: &mut watch::Receiver<bool>,
+) -> Result<Option<i64>, BacklogSkipError>
+where
+    A: GatewayBotApi + 'static,
+{
+    let mut next_offset: Option<i64> = None;
+    let mut skipped = 0usize;
+    loop {
+        if *stop.borrow() {
+            return Err(BacklogSkipError::Stopped);
+        }
+        let updates = blocking_bot_call({
+            let api = Arc::clone(&api);
+            move || {
+                api.get_updates(GetUpdatesParams {
+                    offset: next_offset,
+                    timeout_seconds: Some(0),
+                    limit: Some(limit),
+                    allowed_updates: Some(vec![
+                        "message".to_string(),
+                        "edited_message".to_string(),
+                        "callback_query".to_string(),
+                    ]),
+                })
+            }
+        })
+        .await
+        .map_err(|error| match error {
+            TelegramClientError::InvalidToken => BacklogSkipError::InvalidToken,
+            other => BacklogSkipError::Client(other),
+        })?;
+        if updates.is_empty() {
+            if skipped > 0 {
+                tracing::info!(bot = %label, skipped_updates = skipped, "telegram backlog skipped");
+            }
+            return Ok(next_offset);
+        }
+        for update in updates {
+            skipped = skipped.saturating_add(1);
+            next_offset = Some(update.update_id.saturating_add(1));
+        }
+    }
+}
+
+async fn blocking_bot_call<T, F>(operation: F) -> Result<T, TelegramClientError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, TelegramClientError> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(operation).await {
+        Ok(result) => result,
+        Err(error) => Err(TelegramClientError::ApiError {
+            error_code: 0,
+            description: format!("telegram blocking task failed: {error}"),
+            retry_after: None,
+        }),
+    }
+}
+
 fn next_backoff(current: Duration) -> Duration {
     let doubled = current.saturating_mul(2);
     if doubled > MAX_ERROR_BACKOFF {
@@ -572,6 +843,32 @@ fn sleep_with_stop(stop_flag: &AtomicBool, duration: Duration) -> bool {
         remaining = remaining.saturating_sub(step);
     }
     !stop_flag.load(Ordering::SeqCst)
+}
+
+async fn sleep_with_stop_async(stop: &mut watch::Receiver<bool>, duration: Duration) -> bool {
+    let mut remaining = duration;
+    while remaining > Duration::ZERO {
+        if *stop.borrow() {
+            return false;
+        }
+        let step = if remaining > STOP_POLL_INTERVAL {
+            STOP_POLL_INTERVAL
+        } else {
+            remaining
+        };
+        tokio::select! {
+            changed = stop.changed() => {
+                let _ = changed;
+                if *stop.borrow() {
+                    return false;
+                }
+            }
+            _ = tokio::time::sleep(step) => {
+                remaining = remaining.saturating_sub(step);
+            }
+        }
+    }
+    !*stop.borrow()
 }
 
 /// Process a single update end-to-end: refresh the chat context, record the

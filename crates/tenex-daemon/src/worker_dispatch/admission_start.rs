@@ -247,37 +247,39 @@ where
         launch_plan,
     };
 
-    let _dispatch_lock = acquire_dispatch_queue_lock(daemon_dir).map_err(|source| {
-        WorkerDispatchAdmissionStartError::LeaseAppend {
+    {
+        let _dispatch_lock = acquire_dispatch_queue_lock(daemon_dir).map_err(|source| {
+            WorkerDispatchAdmissionStartError::LeaseAppend {
+                context: Box::new(context.clone()),
+                source: Box::new(source),
+            }
+        })?;
+        let current_dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
+            WorkerDispatchAdmissionStartError::LeaseAppend {
+                context: Box::new(context.clone()),
+                source: Box::new(source),
+            }
+        })?;
+        context.admission.leased_record = plan_dispatch_queue_lease(
+            &current_dispatch_state,
+            DispatchQueueLifecycleInput {
+                dispatch_id: context.admission.selected_dispatch.dispatch_id.clone(),
+                sequence: current_dispatch_state.last_sequence + 1,
+                timestamp: lease_timestamp,
+                correlation_id: lease_correlation_id.clone(),
+            },
+        )
+        .map_err(|source| WorkerDispatchAdmissionStartError::LeaseAppend {
             context: Box::new(context.clone()),
             source: Box::new(source),
-        }
-    })?;
-    let current_dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
-        WorkerDispatchAdmissionStartError::LeaseAppend {
-            context: Box::new(context.clone()),
-            source: Box::new(source),
-        }
-    })?;
-    context.admission.leased_record = plan_dispatch_queue_lease(
-        &current_dispatch_state,
-        DispatchQueueLifecycleInput {
-            dispatch_id: context.admission.selected_dispatch.dispatch_id.clone(),
-            sequence: current_dispatch_state.last_sequence + 1,
-            timestamp: lease_timestamp,
-            correlation_id: lease_correlation_id.clone(),
-        },
-    )
-    .map_err(|source| WorkerDispatchAdmissionStartError::LeaseAppend {
-        context: Box::new(context.clone()),
-        source: Box::new(source),
-    })?;
-    append_dispatch_queue_record(daemon_dir, &context.admission.leased_record).map_err(
-        |source| WorkerDispatchAdmissionStartError::LeaseAppend {
-            context: Box::new(context.clone()),
-            source: Box::new(source),
-        },
-    )?;
+        })?;
+        append_dispatch_queue_record(daemon_dir, &context.admission.leased_record).map_err(
+            |source| WorkerDispatchAdmissionStartError::LeaseAppend {
+                context: Box::new(context.clone()),
+                source: Box::new(source),
+            },
+        )?;
+    }
 
     let started = match start_lock_scoped_worker_dispatch(
         spawner,

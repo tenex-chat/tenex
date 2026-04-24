@@ -7,10 +7,7 @@ use tracing;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::dispatch_queue::{
-    DispatchQueueError, DispatchQueueRecord, acquire_dispatch_queue_lock,
-    append_dispatch_queue_record, replay_dispatch_queue,
-};
+use crate::dispatch_queue::{DispatchQueueError, replay_dispatch_queue};
 use crate::operations_status_runtime::{
     OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE, OperationsStatusPublishConversationInput,
     OperationsStatusRuntimeError, publish_operations_status_conversation,
@@ -22,35 +19,28 @@ use crate::worker_completion::plan::WorkerCompletionDispatchInput;
 use crate::worker_completion::result::WorkerResultTransitionContext;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::admission::{
-    AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
-    WorkerDispatchAdmissionBlockedReason, WorkerDispatchAdmissionError,
-    WorkerDispatchAdmissionInput, WorkerDispatchAdmissionPlan, plan_worker_dispatch_admission,
+    WorkerDispatchAdmissionBlockedCandidate, WorkerDispatchAdmissionBlockedReason,
+    WorkerDispatchAdmissionError,
 };
 use crate::worker_dispatch::admission_start::{
-    StartedWorkerDispatchAdmission, WorkerDispatchAdmissionLaunchContext,
-    WorkerDispatchAdmissionStartError, WorkerDispatchAdmissionStartOutcome,
-    WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputSource,
-    dispatch_start_is_launch_lock_conflict, rollback_dispatch_lease_to_queued,
+    StartedWorkerDispatchAdmission, WorkerDispatchAdmissionStartError,
+    WorkerDispatchAdmissionStartOutcome, WorkerDispatchExplicitLaunchInput,
+    WorkerDispatchLaunchInputError, WorkerDispatchLaunchInputSource,
+    apply_worker_dispatch_admission_start,
 };
 use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
-use crate::worker_dispatch::input::{
-    WorkerDispatchInputError, read_optional as read_optional_worker_dispatch_input,
-};
-use crate::worker_dispatch::start::{WorkerDispatchStartInput, start_lock_scoped_worker_dispatch};
+use crate::worker_dispatch::input::WorkerDispatchInputError;
 use crate::worker_dispatch::tick::{
     WorkerDispatchTickError, WorkerDispatchTickInput, apply_worker_dispatch_tick,
 };
-use crate::worker_lifecycle::launch::{WorkerLaunchPlanInput, plan_worker_launch};
 use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
-use crate::worker_runtime_state::{
-    SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch, WorkerRuntimeState,
-};
+use crate::worker_runtime_state::{SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch};
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_session::session_loop::{
     WorkerSessionLoopError, WorkerSessionLoopInput, WorkerSessionLoopOutcome,
-    run_worker_session_loop,
+    run_worker_session_loop, run_worker_session_loop_async,
 };
 use crate::worker_telegram_egress::WorkerTelegramEgressContext;
 
@@ -114,7 +104,7 @@ pub struct DaemonWorkerOperationsStatusRuntimeInput<'a> {
 }
 
 pub struct DaemonWorkerLivePublishMaintenance<'a> {
-    pub maintain: &'a mut dyn FnMut(&Path, u64) -> Result<(), String>,
+    pub maintain: &'a mut (dyn FnMut(&Path, u64) -> Result<(), String> + Send),
 }
 
 impl std::fmt::Debug for DaemonWorkerLivePublishMaintenance<'_> {
@@ -265,15 +255,6 @@ where
         + WorkerDispatchSession<Error = <S::Session as WorkerFrameReceiver>::Error>
         + 'static,
 {
-    // Hold the dispatch queue lock for the entire read-compute-write-lease cycle so the
-    // background subscription thread cannot write a QUEUED record between the read and the
-    // lease write, which would produce duplicate sequence numbers in the JSONL file.
-    let _dispatch_lock = acquire_dispatch_queue_lock(daemon_dir).map_err(|source| {
-        DaemonWorkerRuntimeError::DispatchReplay {
-            source: Box::new(source),
-        }
-    })?;
-
     let dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
         DaemonWorkerRuntimeError::DispatchReplay {
             source: Box::new(source),
@@ -288,30 +269,40 @@ where
         });
     }
 
-    let lease_sequence = next_sequence(dispatch_state.last_sequence, "dispatch queue")?;
-    let (active_workers, active_dispatches) = {
-        let guard = runtime_state.lock().expect("runtime state mutex poisoned");
-        (
-            guard.to_active_worker_concurrency_snapshots(),
-            guard.to_active_dispatch_concurrency_snapshots(),
+    let started = {
+        let mut runtime_guard = runtime_state.lock().expect("runtime state mutex poisoned");
+        apply_worker_dispatch_admission_start(
+            spawner,
+            crate::worker_dispatch::admission_start::WorkerDispatchAdmissionStartInput {
+                daemon_dir,
+                dispatch_state: &dispatch_state,
+                runtime_state: &mut runtime_guard,
+                limits,
+                lease_sequence: next_sequence(dispatch_state.last_sequence, "dispatch queue")?,
+                lease_timestamp: now_ms,
+                lease_correlation_id: format!("{correlation_id}:lease"),
+                execute_sequence: 1,
+                execute_timestamp: now_ms,
+                launch_input: WorkerDispatchLaunchInputSource::FilesystemSidecarRequired,
+                lock_owner,
+                command,
+                worker_config,
+                started_at: now_ms,
+            },
         )
+        .map_err(map_admission_start_error)?
     };
-    let admission = plan_worker_dispatch_admission(WorkerDispatchAdmissionInput {
-        dispatch_state: &dispatch_state,
-        active_workers: &active_workers,
-        active_dispatches: &active_dispatches,
-        limits,
-        sequence: lease_sequence,
-        timestamp: now_ms,
-        correlation_id: format!("{correlation_id}:lease"),
-    })
-    .map_err(|source| DaemonWorkerRuntimeError::DispatchAdmission {
-        source: Box::new(source),
-    })?;
 
-    let admitted = match admission {
-        WorkerDispatchAdmissionPlan::Admitted(admitted) => *admitted,
-        WorkerDispatchAdmissionPlan::NotAdmitted {
+    match started {
+        WorkerDispatchAdmissionStartOutcome::Started(started) => {
+            tracing::info!(
+                dispatch_id = %started.context.admission.selected_dispatch.dispatch_id,
+                agent_pubkey = %started.context.admission.selected_dispatch.ral.agent_pubkey,
+                "worker dispatch admitted, spawning"
+            );
+            Ok(AdmitWorkerDispatchOutcome::Admitted(*started))
+        }
+        WorkerDispatchAdmissionStartOutcome::NotAdmitted {
             reason,
             blocked_candidates,
         } => {
@@ -321,53 +312,7 @@ where
                 blocked_candidates,
             });
         }
-    };
-    tracing::info!(
-        dispatch_id = %admitted.selected_dispatch.dispatch_id,
-        agent_pubkey = %admitted.selected_dispatch.ral.agent_pubkey,
-        "worker dispatch admitted, spawning"
-    );
-    let launch_input = read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
-
-    let started = {
-        let mut runtime_guard = runtime_state.lock().expect("runtime state mutex poisoned");
-        start_admitted_worker_dispatch(
-            spawner,
-            StartAdmittedWorkerDispatchInput {
-                daemon_dir,
-                runtime_state: &mut runtime_guard,
-                admitted,
-                execute_sequence: 1,
-                execute_timestamp: now_ms,
-                launch_input,
-                lock_owner,
-                command,
-                worker_config,
-                started_at: now_ms,
-            },
-        )
-        .map_err(|source| DaemonWorkerRuntimeError::DispatchTick {
-            source: Box::new(WorkerDispatchTickError::AdmissionStart {
-                source: Box::new(source),
-            }),
-        })?
-    };
-
-    match started {
-        StartAdmittedWorkerDispatchOutcome::Started(started) => {
-            Ok(AdmitWorkerDispatchOutcome::Admitted(started))
-        }
-        StartAdmittedWorkerDispatchOutcome::DeferredByLaunchLock => {
-            tracing::debug!(
-                "worker dispatch deferred because the conversation launch lock is already held"
-            );
-            Ok(AdmitWorkerDispatchOutcome::NotAdmitted {
-                reason: WorkerDispatchAdmissionBlockedReason::SelectedDispatchBlockedByLaunchLock,
-                blocked_candidates: Vec::new(),
-            })
-        }
     }
-    // _dispatch_lock released here; the session runs without holding the lock
 }
 
 pub fn run_daemon_worker_runtime_once_from_filesystem<S>(
@@ -535,219 +480,57 @@ where
     }
 }
 
-#[derive(Debug)]
-struct StartAdmittedWorkerDispatchInput<'a> {
-    daemon_dir: &'a Path,
-    runtime_state: &'a mut WorkerRuntimeState,
-    admitted: AdmittedWorkerDispatch,
-    execute_sequence: u64,
-    execute_timestamp: u64,
-    launch_input: WorkerDispatchExplicitLaunchInput,
-    lock_owner: RalLockInfo,
-    command: AgentWorkerCommand,
-    worker_config: &'a AgentWorkerProcessConfig,
-    started_at: u64,
-}
-
-enum StartAdmittedWorkerDispatchOutcome<S> {
-    Started(StartedWorkerDispatchAdmission<S>),
-    DeferredByLaunchLock,
-}
-
-fn start_admitted_worker_dispatch<S>(
-    spawner: &mut S,
-    input: StartAdmittedWorkerDispatchInput<'_>,
-) -> Result<
-    StartAdmittedWorkerDispatchOutcome<S::Session>,
-    WorkerDispatchAdmissionStartError<S::Session>,
->
-where
-    S: WorkerDispatchSpawner,
-{
-    let StartAdmittedWorkerDispatchInput {
-        daemon_dir,
-        runtime_state,
-        admitted,
-        execute_sequence,
-        execute_timestamp,
-        launch_input,
-        lock_owner,
-        command,
-        worker_config,
-        started_at,
-    } = input;
-
-    let delegation_snapshot = crate::ral_scheduler::RalScheduler::from_daemon_dir(daemon_dir)
-        .map(|scheduler| {
-            scheduler.delegation_snapshot_for(
-                &admitted.leased_record.ral.project_id,
-                &admitted.leased_record.ral.agent_pubkey,
-                &admitted.leased_record.ral.conversation_id,
-            )
-        })
-        .map_err(
-            |source| WorkerDispatchAdmissionStartError::DelegationSnapshot {
-                admission: Box::new(admitted.clone()),
-                source: Box::new(source),
-            },
-        )?;
-
-    let launch_plan = plan_worker_launch(WorkerLaunchPlanInput {
-        dispatch: &admitted.leased_record,
-        identity: &ral_identity_from_dispatch(&admitted.leased_record),
-        sequence: execute_sequence,
-        timestamp: execute_timestamp,
-        project_base_path: launch_input.project_base_path.clone(),
-        metadata_path: launch_input.metadata_path.clone(),
-        triggering_envelope: launch_input.triggering_envelope.clone(),
-        execution_flags: launch_input.execution_flags.clone(),
-        delegation_snapshot,
-    })
-    .map_err(|source| WorkerDispatchAdmissionStartError::LaunchPlan {
-        admission: Box::new(admitted.clone()),
-        source: Box::new(source),
-    })?;
-
-    let context = WorkerDispatchAdmissionLaunchContext {
-        admission: admitted,
-        launch_plan,
-    };
-
-    append_dispatch_queue_record(daemon_dir, &context.admission.leased_record).map_err(
-        |source| WorkerDispatchAdmissionStartError::LeaseAppend {
-            context: Box::new(context.clone()),
-            source: Box::new(source),
-        },
-    )?;
-
-    let started = match start_lock_scoped_worker_dispatch(
-        spawner,
-        WorkerDispatchStartInput {
-            daemon_dir,
-            launch_plan: &context.launch_plan,
-            lock_owner: &lock_owner,
-            command: if let Some(worker_id) = launch_input.worker_id.as_deref() {
-                command.env("TENEX_AGENT_WORKER_ID", worker_id)
-            } else {
-                command
-            },
-            worker_config,
-        },
-    ) {
-        Ok(started) => started,
-        Err(source) => {
-            if let Err(rollback_source) = rollback_dispatch_lease_to_queued(
-                daemon_dir,
-                &context.admission.leased_record,
-                execute_timestamp,
-                format!(
-                    "dispatch-start:{}:requeue",
-                    context.admission.leased_record.dispatch_id
-                ),
-            ) {
-                return Err(WorkerDispatchAdmissionStartError::DispatchStartRollback {
-                    context: Box::new(context.clone()),
-                    start_source: Box::new(source),
-                    rollback_source: Box::new(rollback_source),
-                });
-            }
-
-            if dispatch_start_is_launch_lock_conflict(&source) {
-                return Ok(StartAdmittedWorkerDispatchOutcome::DeferredByLaunchLock);
-            }
-
-            return Err(WorkerDispatchAdmissionStartError::DispatchStart {
-                context: Box::new(context.clone()),
-                source: Box::new(source),
-            });
-        }
-    };
-
-    let runtime_started = WorkerRuntimeStartedDispatch::from_ready(
-        &started.dispatch.ready,
-        context.admission.leased_record.dispatch_id.clone(),
-        ral_identity_from_dispatch(&context.admission.leased_record),
-        context.admission.leased_record.claim_token.clone(),
-        started_at,
-    );
-
-    match runtime_state.register_started_dispatch(runtime_started.clone()) {
-        Ok(()) => Ok(StartAdmittedWorkerDispatchOutcome::Started(
-            StartedWorkerDispatchAdmission {
-                context,
-                runtime_started,
-                started,
-            },
-        )),
-        Err(source) => Err(WorkerDispatchAdmissionStartError::RuntimeRegister {
-            context: Box::new(StartedWorkerDispatchAdmission {
-                context,
-                runtime_started,
-                started,
-            }),
-            source: Box::new(source),
-        }),
-    }
-}
-
-fn read_worker_dispatch_launch_input<S, E>(
-    daemon_dir: &Path,
-    dispatch: &DispatchQueueRecord,
-) -> Result<WorkerDispatchExplicitLaunchInput, DaemonWorkerRuntimeError<S, E>>
+fn map_admission_start_error<S, E>(
+    error: WorkerDispatchAdmissionStartError<S>,
+) -> DaemonWorkerRuntimeError<S, E>
 where
     S: 'static,
     E: Error + Send + Sync + 'static,
 {
-    let input = read_optional_worker_dispatch_input(daemon_dir, &dispatch.dispatch_id)
-        .map_err(|source| DaemonWorkerRuntimeError::DispatchInput {
-            dispatch_id: dispatch.dispatch_id.clone(),
-            source: Box::new(source),
-        })?
-        .ok_or_else(|| DaemonWorkerRuntimeError::MissingDispatchInput {
-            dispatch_id: dispatch.dispatch_id.clone(),
-        })?;
-
-    if input.dispatch_id != dispatch.dispatch_id {
-        return Err(DaemonWorkerRuntimeError::DispatchInputMismatch {
-            expected_dispatch_id: dispatch.dispatch_id.clone(),
-            actual_dispatch_id: input.dispatch_id,
-        });
-    }
-
-    let fields = input.resolved_execute_fields().map_err(|source| {
-        DaemonWorkerRuntimeError::DispatchInput {
-            dispatch_id: dispatch.dispatch_id.clone(),
-            source: Box::new(WorkerDispatchInputError::Validation(source)),
+    match error {
+        WorkerDispatchAdmissionStartError::Admission { source } => {
+            DaemonWorkerRuntimeError::DispatchAdmission { source }
         }
-    })?;
-
-    if fields.triggering_event_id != dispatch.triggering_event_id {
-        return Err(
-            DaemonWorkerRuntimeError::DispatchInputTriggeringEventMismatch {
-                dispatch_id: dispatch.dispatch_id.clone(),
-                expected_triggering_event_id: dispatch.triggering_event_id.clone(),
-                actual_triggering_event_id: fields.triggering_event_id,
+        WorkerDispatchAdmissionStartError::LaunchInput { source, .. } => match *source {
+            WorkerDispatchLaunchInputError::MissingFilesystemDispatchInput { dispatch_id } => {
+                DaemonWorkerRuntimeError::MissingDispatchInput { dispatch_id }
+            }
+            WorkerDispatchLaunchInputError::DispatchIdMismatch {
+                expected_dispatch_id,
+                actual_dispatch_id,
+            } => DaemonWorkerRuntimeError::DispatchInputMismatch {
+                expected_dispatch_id,
+                actual_dispatch_id,
             },
-        );
-    }
-
-    Ok(WorkerDispatchExplicitLaunchInput {
-        worker_id: fields.worker_id,
-        project_base_path: fields.project_base_path,
-        metadata_path: fields.metadata_path,
-        triggering_envelope: fields.triggering_envelope,
-        execution_flags: fields.execution_flags,
-    })
-}
-
-fn ral_identity_from_dispatch(
-    dispatch: &DispatchQueueRecord,
-) -> crate::ral_journal::RalJournalIdentity {
-    crate::ral_journal::RalJournalIdentity {
-        project_id: dispatch.ral.project_id.clone(),
-        agent_pubkey: dispatch.ral.agent_pubkey.clone(),
-        conversation_id: dispatch.ral.conversation_id.clone(),
-        ral_number: dispatch.ral.ral_number,
+            WorkerDispatchLaunchInputError::TriggeringEventMismatch {
+                dispatch_id,
+                expected_triggering_event_id,
+                actual_triggering_event_id,
+            } => DaemonWorkerRuntimeError::DispatchInputTriggeringEventMismatch {
+                dispatch_id,
+                expected_triggering_event_id,
+                actual_triggering_event_id,
+            },
+            WorkerDispatchLaunchInputError::Read {
+                dispatch_id,
+                source,
+            } => DaemonWorkerRuntimeError::DispatchInput {
+                dispatch_id,
+                source: Box::new(source),
+            },
+            WorkerDispatchLaunchInputError::Invalid {
+                dispatch_id,
+                source,
+            } => DaemonWorkerRuntimeError::DispatchInput {
+                dispatch_id,
+                source: Box::new(WorkerDispatchInputError::Validation(source)),
+            },
+        },
+        other => DaemonWorkerRuntimeError::DispatchTick {
+            source: Box::new(WorkerDispatchTickError::AdmissionStart {
+                source: Box::new(other),
+            }),
+        },
     }
 }
 
@@ -863,6 +646,65 @@ where
     )
 }
 
+pub async fn run_started_worker_session_from_filesystem_async<S>(
+    daemon_dir: &Path,
+    runtime_state: &SharedWorkerRuntimeState,
+    frame_observed_at: u64,
+    publish: Option<WorkerMessagePublishContext<'_>>,
+    telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
+    operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
+    live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
+    terminal: DaemonWorkerFilesystemTerminalInput,
+    max_frames: u64,
+    started: StartedWorkerDispatchAdmission<S>,
+) -> Result<
+    DaemonWorkerRuntimeOutcome,
+    DaemonWorkerRuntimeError<S, <S as WorkerFrameReceiver>::Error>,
+>
+where
+    S: WorkerFrameReceiver
+        + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>
+        + Send
+        + 'static,
+{
+    let scheduler = RalScheduler::from_daemon_dir(daemon_dir).map_err(|source| {
+        DaemonWorkerRuntimeError::RalScheduler {
+            source: Box::new(source),
+        }
+    })?;
+    let dispatch_state = replay_dispatch_queue(daemon_dir).map_err(|source| {
+        DaemonWorkerRuntimeError::DispatchReplay {
+            source: Box::new(source),
+        }
+    })?;
+
+    let terminal = DaemonWorkerTerminalRuntimeInput {
+        journal_sequence: next_sequence(scheduler.state().last_sequence, "RAL journal")?,
+        journal_timestamp: terminal.timestamp,
+        writer_version: terminal.writer_version,
+        resolved_pending_delegations: terminal.resolved_pending_delegations,
+        dispatch_sequence: next_sequence(dispatch_state.last_sequence, "dispatch queue")?,
+        dispatch_timestamp: terminal.timestamp,
+        dispatch_correlation_id: terminal.dispatch_correlation_id,
+    };
+
+    run_started_worker_session_with_state_async(
+        daemon_dir,
+        runtime_state,
+        frame_observed_at,
+        publish,
+        telegram_egress,
+        operations_status,
+        live_publish_maintenance,
+        terminal,
+        max_frames,
+        started,
+        &scheduler,
+        &dispatch_state,
+    )
+    .await
+}
+
 fn run_started_worker_session_with_state<S>(
     daemon_dir: &Path,
     runtime_state: &SharedWorkerRuntimeState,
@@ -897,12 +739,6 @@ where
         .unwrap_or_else(|| terminal.resolved_pending_delegations.clone());
     let mut session = started.started.dispatch.session;
 
-    let _session_span = tracing::info_span!(
-        "worker.session",
-        dispatch_id = %dispatch_id,
-        worker_id = %worker_id,
-    )
-    .entered();
     let tenex_base_dir = operations_status.as_ref().map(|o| o.tenex_base_dir);
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
     crate::stdout_status::print_agent_started(
@@ -984,6 +820,167 @@ where
     // Ensure the worker is removed from runtime state before snapshotting. Normal terminal
     // handling in the session loop already removes it; on error paths it may still be
     // registered, and we must not leak it into the conversation snapshot.
+    let remaining_pubkeys = {
+        let mut guard = runtime_state.lock().expect("runtime state mutex poisoned");
+        let _ = guard.remove_terminal_worker(&worker_id);
+        guard.agent_pubkeys_for_conversation(
+            &started.runtime_started.identity.project_id,
+            &started.runtime_started.identity.conversation_id,
+        )
+    };
+    let cleanup_now_ms = crate::daemon_loop::current_unix_time_ms();
+    let (cleanup_variant, cleanup_pubkeys): (&str, &[String]) = if remaining_pubkeys.is_empty() {
+        ("cleanup", &[])
+    } else {
+        ("active", &remaining_pubkeys)
+    };
+    let cleanup_result = publish_worker_operations_status(
+        daemon_dir,
+        cleanup_now_ms,
+        &started.runtime_started.identity,
+        operations_status.as_ref(),
+        cleanup_variant,
+        OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE.saturating_add(1),
+        cleanup_pubkeys,
+    );
+
+    let session = session_result.map_err(|source| DaemonWorkerRuntimeError::SessionLoop {
+        source: Box::new(source),
+    })?;
+    cleanup_result.map_err(|source| DaemonWorkerRuntimeError::OperationsStatus {
+        source: Box::new(source),
+    })?;
+    run_live_publish_maintenance(&mut live_publish_maintenance, daemon_dir, frame_observed_at)
+        .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
+
+    tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session completed");
+    crate::stdout_status::print_agent_stopped(
+        &project_id,
+        &agent_pubkey,
+        &worker_id,
+        tenex_base_dir,
+    );
+    Ok(DaemonWorkerRuntimeOutcome::SessionCompleted {
+        dispatch_id,
+        worker_id,
+        session,
+    })
+}
+
+async fn run_started_worker_session_with_state_async<S>(
+    daemon_dir: &Path,
+    runtime_state: &SharedWorkerRuntimeState,
+    frame_observed_at: u64,
+    publish: Option<WorkerMessagePublishContext<'_>>,
+    telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
+    operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
+    mut live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
+    terminal: DaemonWorkerTerminalRuntimeInput,
+    max_frames: u64,
+    started: StartedWorkerDispatchAdmission<S>,
+    scheduler: &RalScheduler,
+    dispatch_state: &crate::dispatch_queue::DispatchQueueState,
+) -> Result<
+    DaemonWorkerRuntimeOutcome,
+    DaemonWorkerRuntimeError<S, <S as WorkerFrameReceiver>::Error>,
+>
+where
+    S: WorkerFrameReceiver
+        + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>
+        + Send
+        + 'static,
+{
+    let worker_id = started.runtime_started.worker_id.clone();
+    let dispatch_id = started.context.admission.leased_record.dispatch_id.clone();
+    let claim_token = started.context.admission.leased_record.claim_token.clone();
+    let project_id = started.runtime_started.identity.project_id.clone();
+    let agent_pubkey = started.runtime_started.identity.agent_pubkey.clone();
+    let resolved_pending_delegations = scheduler
+        .entry(&started.runtime_started.identity)
+        .map(|entry| entry.pending_delegations.clone())
+        .filter(|pending| !pending.is_empty())
+        .unwrap_or_else(|| terminal.resolved_pending_delegations.clone());
+    let mut session = started.started.dispatch.session;
+
+    let tenex_base_dir = operations_status.as_ref().map(|o| o.tenex_base_dir);
+    tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session started");
+    crate::stdout_status::print_agent_started(
+        &project_id,
+        &agent_pubkey,
+        &worker_id,
+        tenex_base_dir,
+    );
+
+    let active_pubkeys = runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
+        .agent_pubkeys_for_conversation(
+            &started.runtime_started.identity.project_id,
+            &started.runtime_started.identity.conversation_id,
+        );
+    let active_now_ms = crate::daemon_loop::current_unix_time_ms();
+    publish_worker_operations_status(
+        daemon_dir,
+        active_now_ms,
+        &started.runtime_started.identity,
+        operations_status.as_ref(),
+        "active",
+        OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE,
+        &active_pubkeys,
+    )
+    .map_err(|source| DaemonWorkerRuntimeError::OperationsStatus {
+        source: Box::new(source),
+    })?;
+    run_live_publish_maintenance(&mut live_publish_maintenance, daemon_dir, frame_observed_at)
+        .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
+
+    let publish = publish.map(|mut publish| {
+        publish.telegram_egress =
+            telegram_egress
+                .as_ref()
+                .map(|telegram| WorkerTelegramEgressContext {
+                    data_dir: telegram.data_dir.as_path(),
+                    backend_pubkey: telegram.backend_pubkey.as_str(),
+                    writer_version: telegram.writer_version.as_str(),
+                });
+        publish
+    });
+
+    let session_result = run_worker_session_loop_async(
+        &mut session,
+        WorkerSessionLoopInput {
+            daemon_dir,
+            runtime_state,
+            worker_id: &worker_id,
+            observed_at: frame_observed_at,
+            publish,
+            nip46_publish: None,
+            live_publish_maintenance: live_publish_maintenance
+                .as_mut()
+                .map(|maintenance| &mut *maintenance.maintain as _),
+            terminal: Some(WorkerMessageTerminalContext {
+                scheduler,
+                dispatch_state,
+                result_context: WorkerResultTransitionContext {
+                    worker_id: worker_id.clone(),
+                    claim_token,
+                    journal_sequence: terminal.journal_sequence,
+                    journal_timestamp: terminal.journal_timestamp,
+                    writer_version: terminal.writer_version,
+                    resolved_pending_delegations,
+                },
+                dispatch: Some(WorkerCompletionDispatchInput {
+                    dispatch_id: dispatch_id.clone(),
+                    sequence: terminal.dispatch_sequence,
+                    timestamp: terminal.dispatch_timestamp,
+                    correlation_id: terminal.dispatch_correlation_id,
+                }),
+                locks: started.started.locks,
+            }),
+            max_frames,
+        },
+    )
+    .await;
     let remaining_pubkeys = {
         let mut guard = runtime_state.lock().expect("runtime state mutex poisoned");
         let _ = guard.remove_terminal_worker(&worker_id);
@@ -1138,7 +1135,7 @@ mod tests {
     use crate::worker_dispatch::input::{
         WorkerDispatchExecuteFields, WorkerDispatchInput, WorkerDispatchInputFromExecuteFields,
         WorkerDispatchInputSourceType, WorkerDispatchInputWriterMetadata,
-        write_create_or_compare_equal,
+        worker_dispatch_input_path, write_create_or_compare_equal,
     };
     use crate::worker_dispatch::start::WorkerDispatchStartError;
     use crate::worker_lifecycle::launch::plan_ral_allocation_lock_scope;
@@ -1257,11 +1254,16 @@ mod tests {
 
     impl WorkerFrameReceiver for RecordingSession {
         type Error = FakeWorkerError;
+        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             self.incoming_frames
                 .pop_front()
                 .ok_or(FakeWorkerError("missing worker frame"))
+        }
+
+        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
+            std::future::ready(self.receive_worker_frame())
         }
     }
 
@@ -1944,6 +1946,56 @@ mod tests {
     }
 
     #[test]
+    fn filesystem_admission_rejects_triggering_event_mismatch_before_launch() {
+        let daemon_dir = unique_temp_daemon_dir();
+        seed_claimed_ral(&daemon_dir);
+        seed_queued_dispatch(&daemon_dir);
+        seed_dispatch_input_with_triggering_event(&daemon_dir, "event-mismatch");
+        let sent_messages = Arc::new(Mutex::new(Vec::new()));
+        let mut spawner = RecordingSpawner {
+            incoming_frames: VecDeque::new(),
+            sent_messages: Arc::clone(&sent_messages),
+        };
+        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
+        let worker_config = worker_config();
+
+        let error = admit_one_worker_dispatch_from_filesystem(
+            &mut spawner,
+            &daemon_dir,
+            &runtime_state,
+            WorkerConcurrencyLimits::default(),
+            1_710_000_700_600,
+            "dispatch-input-mismatch",
+            build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
+            worker_command(),
+            &worker_config,
+        )
+        .expect_err("mismatched dispatch sidecar must block launch");
+
+        match error {
+            DaemonWorkerRuntimeError::DispatchInputTriggeringEventMismatch {
+                dispatch_id,
+                expected_triggering_event_id,
+                actual_triggering_event_id,
+            } => {
+                assert_eq!(dispatch_id, "dispatch-alpha");
+                assert_eq!(expected_triggering_event_id, "event-alpha");
+                assert_eq!(actual_triggering_event_id, "event-mismatch");
+            }
+            other => panic!("expected triggering-event mismatch, got {other:?}"),
+        }
+        assert!(sent_messages.lock().expect("sent message lock").is_empty());
+        assert!(runtime_state.lock().unwrap().is_empty());
+
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(queue.last_sequence, 1);
+        assert_eq!(queue.queued.len(), 1);
+        assert!(queue.leased.is_empty());
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     #[ignore = "requires Bun and repo TypeScript dependencies"]
     fn bun_agent_worker_real_bun_runtime_spine_round_trips_filesystem_state() {
         let daemon_dir = unique_temp_daemon_dir();
@@ -2350,6 +2402,27 @@ mod tests {
     fn seed_dispatch_input(daemon_dir: &Path) {
         write_create_or_compare_equal(daemon_dir, &dispatch_input())
             .expect("dispatch input sidecar must write");
+    }
+
+    fn seed_dispatch_input_with_triggering_event(daemon_dir: &Path, triggering_event_id: &str) {
+        let mut input = dispatch_input();
+        let fields = input
+            .execute_fields
+            .as_mut()
+            .expect("dispatch input fields");
+        fields.triggering_event_id = triggering_event_id.to_string();
+        fields.triggering_envelope["message"]["nativeId"] = json!(triggering_event_id);
+        let path = worker_dispatch_input_path(daemon_dir, &input.dispatch_id);
+        fs::create_dir_all(path.parent().expect("dispatch input parent"))
+            .expect("dispatch input parent dir must create");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&input).expect("dispatch input json must serialize")
+            ),
+        )
+        .expect("dispatch input sidecar must rewrite");
     }
 
     fn dispatch_input() -> WorkerDispatchInput {

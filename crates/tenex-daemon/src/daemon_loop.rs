@@ -21,12 +21,13 @@ use crate::daemon_worker_runtime::{
     DaemonWorkerLivePublishMaintenance, DaemonWorkerOperationsStatusRuntimeInput,
     DaemonWorkerRuntimeOutcome, DaemonWorkerTelegramEgressRuntimeInput,
     admit_one_worker_dispatch_from_filesystem, run_started_worker_session_from_filesystem,
+    run_started_worker_session_from_filesystem_async,
 };
 use crate::project_boot_state::{BootedProjectsState, ProjectBootState};
 use crate::project_event_index::ProjectEventIndex;
 use crate::publish_outbox::{
     PublishOutboxError, PublishOutboxMaintenanceReport, PublishOutboxRelayPublisher,
-    PublishOutboxRetryPolicy,
+    PublishOutboxRetryPolicy, inspect_publish_outbox,
 };
 use crate::publish_runtime::{PublishRuntimeMaintainInput, maintain_publish_runtime};
 use crate::ral_journal::RalPendingDelegation;
@@ -145,6 +146,12 @@ pub struct DaemonTickWithWorkerOutcome {
     /// and are reported in a subsequent tick or at loop shutdown.
     pub worker_runtime: Vec<DaemonWorkerRuntimeOutcome>,
     pub publish_outbox: PublishOutboxMaintenanceReport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaemonTickPublishMode {
+    InlineDrain,
+    NotifyOnly,
 }
 
 #[derive(Debug, Error)]
@@ -395,6 +402,35 @@ where
         + 'static,
     <S::Session as WorkerFrameReceiver>::Error: Send,
 {
+    run_daemon_tick_once_from_filesystem_with_worker_in_mode(
+        input,
+        worker,
+        spawner,
+        publisher,
+        retry_policy,
+        DaemonTickPublishMode::InlineDrain,
+        telegram_publisher,
+    )
+}
+
+pub fn run_daemon_tick_once_from_filesystem_with_worker_in_mode<P, S>(
+    input: DaemonMaintenanceInput<'_>,
+    worker: DaemonWorkerTickInput<'_>,
+    spawner: &mut S,
+    publisher: &Arc<Mutex<P>>,
+    retry_policy: PublishOutboxRetryPolicy,
+    publish_mode: DaemonTickPublishMode,
+    telegram_publisher: &mut dyn TelegramMaintenancePublisher,
+) -> Result<DaemonTickWithWorkerOutcome, DaemonTickWithWorkerError>
+where
+    P: PublishOutboxRelayPublisher + Send + 'static,
+    S: WorkerDispatchSpawner,
+    S::Session: WorkerFrameReceiver
+        + WorkerDispatchSession<Error = <S::Session as WorkerFrameReceiver>::Error>
+        + Send
+        + 'static,
+    <S::Session as WorkerFrameReceiver>::Error: Send,
+{
     let daemon_dir = input.daemon_dir;
     let tenex_base_dir = input.tenex_base_dir;
     let now_ms = input.now_ms;
@@ -464,65 +500,148 @@ where
                 let max_frames = worker.max_frames;
                 let dispatch_id_for_thread = dispatch_id.clone();
                 let worker_id_for_thread = worker_id.clone();
-                let handle = std::thread::spawn(move || {
-                    let publisher_for_live = Arc::clone(&publisher_for_thread);
-                    let mut live_publish_maintenance = move |daemon_dir: &Path, now: u64| {
-                        let mut guard =
-                            publisher_for_live.lock().expect("publisher mutex poisoned");
-                        maintain_publish_runtime(PublishRuntimeMaintainInput {
-                            daemon_dir,
-                            publisher: &mut *guard,
-                            now,
-                            retry_policy,
-                        })
-                        .map(|_| ())
-                        .map_err(|source| source.to_string())
-                    };
-                    let operations_status = DaemonWorkerOperationsStatusRuntimeInput {
-                        tenex_base_dir: operations_status_tenex_base_dir.as_path(),
-                        project_owner_pubkeys: &operations_status_pubkeys,
-                    };
-                    let result = run_started_worker_session_from_filesystem(
-                        daemon_dir_owned.as_path(),
-                        &runtime_state_clone,
-                        now_ms,
-                        publish_ctx,
-                        telegram_egress_clone,
-                        Some(operations_status),
-                        Some(DaemonWorkerLivePublishMaintenance {
-                            maintain: &mut live_publish_maintenance,
-                        }),
-                        DaemonWorkerFilesystemTerminalInput {
-                            timestamp: now_ms,
-                            writer_version,
-                            resolved_pending_delegations,
-                            dispatch_correlation_id,
-                        },
-                        max_frames,
-                        started,
-                    );
-                    match result {
-                        Ok(outcome) => outcome,
-                        Err(source) => {
-                            tracing::error!(
-                                error = %source,
-                                dispatch_id = %dispatch_id_for_thread,
-                                worker_id = %worker_id_for_thread,
-                                "detached session thread returned error"
-                            );
-                            DaemonWorkerRuntimeOutcome::SessionFailed {
-                                dispatch_id: dispatch_id_for_thread,
-                                worker_id: worker_id_for_thread,
-                                error: source.to_string(),
+                let live_publish_mode = publish_mode;
+                let runtime_handle = worker.session_registry.runtime_handle();
+                if let Some(runtime_handle) = runtime_handle {
+                    let handle = runtime_handle.spawn(async move {
+                        let mut live_publish_maintenance =
+                            move |daemon_dir: &Path, now: u64| match live_publish_mode {
+                                DaemonTickPublishMode::InlineDrain => {
+                                    let publisher_for_live = Arc::clone(&publisher_for_thread);
+                                    let mut guard = publisher_for_live
+                                        .lock()
+                                        .expect("publisher mutex poisoned");
+                                    maintain_publish_runtime(PublishRuntimeMaintainInput {
+                                        daemon_dir,
+                                        publisher: &mut *guard,
+                                        now,
+                                        retry_policy,
+                                    })
+                                    .map(|_| ())
+                                    .map_err(|source| source.to_string())
+                                }
+                                DaemonTickPublishMode::NotifyOnly => {
+                                    crate::publish_outbox_wake::request_drain();
+                                    let _ = (daemon_dir, now);
+                                    Ok(())
+                                }
+                            };
+                        let operations_status = DaemonWorkerOperationsStatusRuntimeInput {
+                            tenex_base_dir: operations_status_tenex_base_dir.as_path(),
+                            project_owner_pubkeys: &operations_status_pubkeys,
+                        };
+                        let result = run_started_worker_session_from_filesystem_async(
+                            daemon_dir_owned.as_path(),
+                            &runtime_state_clone,
+                            now_ms,
+                            publish_ctx,
+                            telegram_egress_clone,
+                            Some(operations_status),
+                            Some(DaemonWorkerLivePublishMaintenance {
+                                maintain: &mut live_publish_maintenance,
+                            }),
+                            DaemonWorkerFilesystemTerminalInput {
+                                timestamp: now_ms,
+                                writer_version,
+                                resolved_pending_delegations,
+                                dispatch_correlation_id,
+                            },
+                            max_frames,
+                            started,
+                        )
+                        .await;
+                        match result {
+                            Ok(outcome) => outcome,
+                            Err(source) => {
+                                tracing::error!(
+                                    error = %source,
+                                    dispatch_id = %dispatch_id_for_thread,
+                                    worker_id = %worker_id_for_thread,
+                                    "detached session task returned error"
+                                );
+                                DaemonWorkerRuntimeOutcome::SessionFailed {
+                                    dispatch_id: dispatch_id_for_thread,
+                                    worker_id: worker_id_for_thread,
+                                    error: source.to_string(),
+                                }
                             }
                         }
-                    }
-                });
-                worker.session_registry.push(SessionJoinHandle {
-                    dispatch_id: dispatch_id.clone(),
-                    worker_id: worker_id.clone(),
-                    handle,
-                });
+                    });
+                    worker.session_registry.push(SessionJoinHandle::Tokio {
+                        dispatch_id: dispatch_id.clone(),
+                        worker_id: worker_id.clone(),
+                        handle,
+                    });
+                } else {
+                    let handle = std::thread::spawn(move || {
+                        let mut live_publish_maintenance =
+                            move |daemon_dir: &Path, now: u64| match live_publish_mode {
+                                DaemonTickPublishMode::InlineDrain => {
+                                    let publisher_for_live = Arc::clone(&publisher_for_thread);
+                                    let mut guard = publisher_for_live
+                                        .lock()
+                                        .expect("publisher mutex poisoned");
+                                    maintain_publish_runtime(PublishRuntimeMaintainInput {
+                                        daemon_dir,
+                                        publisher: &mut *guard,
+                                        now,
+                                        retry_policy,
+                                    })
+                                    .map(|_| ())
+                                    .map_err(|source| source.to_string())
+                                }
+                                DaemonTickPublishMode::NotifyOnly => {
+                                    crate::publish_outbox_wake::request_drain();
+                                    let _ = (daemon_dir, now);
+                                    Ok(())
+                                }
+                            };
+                        let operations_status = DaemonWorkerOperationsStatusRuntimeInput {
+                            tenex_base_dir: operations_status_tenex_base_dir.as_path(),
+                            project_owner_pubkeys: &operations_status_pubkeys,
+                        };
+                        let result = run_started_worker_session_from_filesystem(
+                            daemon_dir_owned.as_path(),
+                            &runtime_state_clone,
+                            now_ms,
+                            publish_ctx,
+                            telegram_egress_clone,
+                            Some(operations_status),
+                            Some(DaemonWorkerLivePublishMaintenance {
+                                maintain: &mut live_publish_maintenance,
+                            }),
+                            DaemonWorkerFilesystemTerminalInput {
+                                timestamp: now_ms,
+                                writer_version,
+                                resolved_pending_delegations,
+                                dispatch_correlation_id,
+                            },
+                            max_frames,
+                            started,
+                        );
+                        match result {
+                            Ok(outcome) => outcome,
+                            Err(source) => {
+                                tracing::error!(
+                                    error = %source,
+                                    dispatch_id = %dispatch_id_for_thread,
+                                    worker_id = %worker_id_for_thread,
+                                    "detached session thread returned error"
+                                );
+                                DaemonWorkerRuntimeOutcome::SessionFailed {
+                                    dispatch_id: dispatch_id_for_thread,
+                                    worker_id: worker_id_for_thread,
+                                    error: source.to_string(),
+                                }
+                            }
+                        }
+                    });
+                    worker.session_registry.push(SessionJoinHandle::Thread {
+                        dispatch_id: dispatch_id.clone(),
+                        worker_id: worker_id.clone(),
+                        handle,
+                    });
+                }
                 worker_runtime.push(DaemonWorkerRuntimeOutcome::SessionAdmitted {
                     dispatch_id,
                     worker_id,
@@ -541,17 +660,23 @@ where
         }
     };
     worker_runtime.push(final_not_admitted);
-    let publish_outbox = {
-        let mut guard = publisher
-            .lock()
-            .expect("publisher mutex poisoned; another thread panicked while publishing");
-        maintain_publish_runtime(PublishRuntimeMaintainInput {
-            daemon_dir,
-            publisher: &mut *guard,
-            now: now_ms,
-            retry_policy,
-        })?
-        .maintenance_report
+    let publish_outbox = match publish_mode {
+        DaemonTickPublishMode::InlineDrain => {
+            let mut guard = publisher
+                .lock()
+                .expect("publisher mutex poisoned; another thread panicked while publishing");
+            maintain_publish_runtime(PublishRuntimeMaintainInput {
+                daemon_dir,
+                publisher: &mut *guard,
+                now: now_ms,
+                retry_policy,
+            })?
+            .maintenance_report
+        }
+        DaemonTickPublishMode::NotifyOnly => {
+            crate::publish_outbox_wake::request_drain();
+            inspection_only_publish_outbox_report(daemon_dir, now_ms)?
+        }
     };
     log_daemon_tick_publish_summary(
         "daemon worker tick",
@@ -565,6 +690,19 @@ where
         maintenance,
         worker_runtime,
         publish_outbox,
+    })
+}
+
+fn inspection_only_publish_outbox_report(
+    daemon_dir: &Path,
+    now_ms: u64,
+) -> Result<PublishOutboxMaintenanceReport, PublishOutboxError> {
+    let diagnostics = inspect_publish_outbox(daemon_dir, now_ms)?;
+    Ok(PublishOutboxMaintenanceReport {
+        diagnostics_before: diagnostics.clone(),
+        requeued: Vec::new(),
+        drained: Vec::new(),
+        diagnostics_after: diagnostics,
     })
 }
 
@@ -1703,9 +1841,14 @@ mod tests {
 
     impl WorkerFrameReceiver for EmptyQueueSession {
         type Error = EmptyQueueWorkerError;
+        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             panic!("empty queue session should not receive frames");
+        }
+
+        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
+            std::future::ready(self.receive_worker_frame())
         }
     }
 
@@ -1759,11 +1902,16 @@ mod tests {
 
     impl WorkerFrameReceiver for ProtocolErrorSession {
         type Error = ProtocolErrorWorkerError;
+        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             self.frames
                 .pop_front()
                 .ok_or(ProtocolErrorWorkerError("missing worker frame"))
+        }
+
+        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
+            std::future::ready(self.receive_worker_frame())
         }
     }
 
@@ -2096,6 +2244,7 @@ mod tests {
 
     impl WorkerFrameReceiver for BarrierGatedSession {
         type Error = BarrierGatedWorkerError;
+        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             if !self.barrier_fired {
@@ -2105,6 +2254,10 @@ mod tests {
             self.frames
                 .pop_front()
                 .ok_or(BarrierGatedWorkerError("no more frames queued"))
+        }
+
+        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
+            std::future::ready(self.receive_worker_frame())
         }
     }
 

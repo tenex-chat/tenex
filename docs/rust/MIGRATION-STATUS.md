@@ -51,7 +51,7 @@ The following issues were real on earlier 2026-04-24 snapshots but are no longer
 ## E2E Matrix
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T17:52:18Z · branch `rust-agent-worker-publishing` · commit `c9442522fd62` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T18:04:38Z · branch `rust-agent-worker-publishing` · commit `88949ecd03d5` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
@@ -60,15 +60,15 @@ _Last run: 2026-04-24T17:52:18Z · branch `rust-agent-worker-publishing` · comm
 | 101_graceful_restart_no_stuck_ral.sh | pass | 2026-04-24T16:15:35Z | 16s |  |
 | 102_sigkill_mid_stream_crash_restart.sh | pass | 2026-04-24T16:15:40Z | 10s | passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies |
 | 11_boot_gates_dispatch.sh | pass | 2026-04-24T17:52:18Z | 13s |  |
-| 12_boot_activates_dispatch.sh | pass | 2026-04-24T16:15:58Z | 18s |  |
-| 13_boot_is_idempotent.sh | pass | 2026-04-24T16:16:01Z | 13s |  |
-| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T16:16:33Z | 35s |  |
-| 15_boot_event_reordering.sh | pass | 2026-04-24T16:16:20Z | 19s | newer 31933 wins; older discarded; boot succeeded; no crash |
-| 21_agent_hot_reload.sh | pass | 2026-04-24T16:16:26Z | 6s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
-| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T16:16:26Z | 0s |  |
-| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-24T16:16:27Z | 1s | ral journal resequenced correctly under concurrent inbound+completion writers |
-| 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T16:16:51Z | 24s |  |
-| 36_triggering_event_dedup.sh | pass | 2026-04-24T16:17:10Z | 36s |  |
+| 12_boot_activates_dispatch.sh | pass | 2026-04-24T17:53:22Z | 20s |  |
+| 13_boot_is_idempotent.sh | pass | 2026-04-24T17:54:06Z | 13s |  |
+| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T17:56:04Z | 36s |  |
+| 15_boot_event_reordering.sh | pass | 2026-04-24T18:00:05Z | 20s | newer 31933 wins; older discarded; boot succeeded; no crash |
+| 21_agent_hot_reload.sh | pass | 2026-04-24T18:02:26Z | 8s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
+| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T18:02:31Z | 0s |  |
+| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-24T17:58:49Z | 0s | ral journal resequenced correctly under concurrent inbound+completion writers |
+| 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T18:03:50Z | 1s |  |
+| 36_triggering_event_dedup.sh | pass | 2026-04-24T18:04:38Z | 23s |  |
 | 37_dispatch_input_mismatch.sh | pass | 2026-04-24T16:17:19Z | 28s |  |
 | 39_ral_number_exhaustion.sh | fail | 2026-04-24T07:11:50Z | 38s |  |
 | 43_ral_status_transitions.sh | pass | 2026-04-24T16:17:22Z | 12s | ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed |
