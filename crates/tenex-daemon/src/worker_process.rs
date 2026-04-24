@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -125,11 +125,119 @@ pub struct BootedAgentWorkerProcess {
     pub process: AgentWorkerProcess,
 }
 
-pub struct AgentWorkerProcess {
-    child: Child,
-    stdin: Option<ChildStdin>,
+/// Protocol-level I/O bound to a worker's stdio streams.
+///
+/// Owns the stdin writer, the background stdout frame reader, and the
+/// background stderr collector. Independent of whether the worker is a real
+/// subprocess — `AgentWorkerProcess` wraps this plus a `Child` handle.
+pub(crate) struct AgentWorkerChannel {
+    stdin: Option<Box<dyn Write + Send>>,
     frames: mpsc::Receiver<WorkerProcessResult<Vec<u8>>>,
     stderr: Arc<Mutex<String>>,
+}
+
+impl AgentWorkerChannel {
+    pub(crate) fn new(
+        stdin: Box<dyn Write + Send>,
+        stdout: Box<dyn Read + Send>,
+        stderr: Box<dyn Read + Send>,
+    ) -> Self {
+        Self {
+            stdin: Some(stdin),
+            frames: spawn_stdout_reader(stdout),
+            stderr: spawn_stderr_collector(stderr),
+        }
+    }
+
+    pub(crate) fn send_message(&mut self, value: &Value) -> WorkerProcessResult<()> {
+        let frame = encode_agent_worker_protocol_frame(value)?;
+        let stdin = self.stdin.as_mut().ok_or(WorkerProcessError::StdinClosed)?;
+        stdin.write_all(&frame)?;
+        stdin.flush()?;
+        Ok(())
+    }
+
+    pub(crate) fn request_shutdown(
+        &mut self,
+        correlation_id: &str,
+        sequence: u64,
+        timestamp: u64,
+        reason: &str,
+        force_kill_timeout_ms: u64,
+    ) -> WorkerProcessResult<()> {
+        let message = build_agent_worker_shutdown_message(AgentWorkerShutdownMessageInput {
+            correlation_id: correlation_id.to_string(),
+            sequence,
+            timestamp,
+            reason: reason.to_string(),
+            force_kill_timeout_ms,
+        })?;
+        self.send_message(&message)
+    }
+
+    pub(crate) fn close_stdin(&mut self) {
+        self.stdin = None;
+    }
+
+    pub(crate) fn next_message(&mut self, timeout: Duration) -> WorkerProcessResult<Value> {
+        let frame = self.next_frame_timeout(timeout)?;
+        Ok(decode_agent_worker_protocol_frame(&frame)?)
+    }
+
+    pub(crate) fn stderr_snapshot(&self) -> String {
+        self.stderr
+            .lock()
+            .map(|stderr| stderr.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn next_frame_blocking(&mut self) -> WorkerProcessResult<Vec<u8>> {
+        match self.frames.recv() {
+            Ok(frame) => frame,
+            Err(_) => Err(WorkerProcessError::MessageChannelClosed {
+                stderr: self.stderr_snapshot(),
+            }),
+        }
+    }
+
+    fn next_frame_timeout(&mut self, timeout: Duration) -> WorkerProcessResult<Vec<u8>> {
+        match self.frames.recv_timeout(timeout) {
+            Ok(frame) => frame,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(WorkerProcessError::MessageTimeout {
+                timeout_ms: duration_millis(timeout),
+                stderr: self.stderr_snapshot(),
+            }),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(WorkerProcessError::MessageChannelClosed {
+                    stderr: self.stderr_snapshot(),
+                })
+            }
+        }
+    }
+
+    fn read_ready(&mut self, timeout: Duration) -> WorkerProcessResult<AgentWorkerReady> {
+        let frame = match self.frames.recv_timeout(timeout) {
+            Ok(frame) => frame?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(WorkerProcessError::BootTimeout {
+                    timeout_ms: duration_millis(timeout),
+                    stderr: self.stderr_snapshot(),
+                });
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(WorkerProcessError::MessageChannelClosed {
+                    stderr: self.stderr_snapshot(),
+                });
+            }
+        };
+
+        parse_ready_message(decode_agent_worker_protocol_frame(&frame)?)
+    }
+}
+
+pub struct AgentWorkerProcess {
+    child: Child,
+    channel: AgentWorkerChannel,
 }
 
 impl AgentWorkerProcess {
@@ -157,16 +265,11 @@ impl AgentWorkerProcess {
             .take()
             .ok_or(WorkerProcessError::MissingPipe("stderr"))?;
 
-        let stderr = spawn_stderr_collector(stderr);
-        let frames = spawn_stdout_reader(stdout);
-        let mut process = AgentWorkerProcess {
-            child,
-            stdin: Some(stdin),
-            frames,
-            stderr,
-        };
+        let channel =
+            AgentWorkerChannel::new(Box::new(stdin), Box::new(stdout), Box::new(stderr));
+        let mut process = AgentWorkerProcess { child, channel };
 
-        let ready = match process.read_ready(config.boot_timeout) {
+        let ready = match process.channel.read_ready(config.boot_timeout) {
             Ok(ready) => ready,
             Err(error) => {
                 let _ = process.kill();
@@ -178,11 +281,7 @@ impl AgentWorkerProcess {
     }
 
     pub fn send_message(&mut self, value: &Value) -> WorkerProcessResult<()> {
-        let frame = encode_agent_worker_protocol_frame(value)?;
-        let stdin = self.stdin.as_mut().ok_or(WorkerProcessError::StdinClosed)?;
-        stdin.write_all(&frame)?;
-        stdin.flush()?;
-        Ok(())
+        self.channel.send_message(value)
     }
 
     pub fn request_shutdown(
@@ -193,23 +292,21 @@ impl AgentWorkerProcess {
         reason: &str,
         force_kill_timeout_ms: u64,
     ) -> WorkerProcessResult<()> {
-        let message = build_agent_worker_shutdown_message(AgentWorkerShutdownMessageInput {
-            correlation_id: correlation_id.to_string(),
+        self.channel.request_shutdown(
+            correlation_id,
             sequence,
             timestamp,
-            reason: reason.to_string(),
+            reason,
             force_kill_timeout_ms,
-        })?;
-        self.send_message(&message)
+        )
     }
 
     pub fn close_stdin(&mut self) {
-        self.stdin = None;
+        self.channel.close_stdin();
     }
 
     pub fn next_message(&mut self, timeout: Duration) -> WorkerProcessResult<Value> {
-        let frame = self.next_frame_timeout(timeout)?;
-        Ok(decode_agent_worker_protocol_frame(&frame)?)
+        self.channel.next_message(timeout)
     }
 
     pub fn wait_for_exit(&mut self, timeout: Duration) -> WorkerProcessResult<ExitStatus> {
@@ -240,53 +337,7 @@ impl AgentWorkerProcess {
     }
 
     pub fn stderr_snapshot(&self) -> String {
-        self.stderr
-            .lock()
-            .map(|stderr| stderr.clone())
-            .unwrap_or_default()
-    }
-
-    fn next_frame_timeout(&mut self, timeout: Duration) -> WorkerProcessResult<Vec<u8>> {
-        match self.frames.recv_timeout(timeout) {
-            Ok(frame) => frame,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(WorkerProcessError::MessageTimeout {
-                timeout_ms: duration_millis(timeout),
-                stderr: self.stderr_snapshot(),
-            }),
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err(WorkerProcessError::MessageChannelClosed {
-                    stderr: self.stderr_snapshot(),
-                })
-            }
-        }
-    }
-
-    fn next_frame_blocking(&mut self) -> WorkerProcessResult<Vec<u8>> {
-        match self.frames.recv() {
-            Ok(frame) => frame,
-            Err(_) => Err(WorkerProcessError::MessageChannelClosed {
-                stderr: self.stderr_snapshot(),
-            }),
-        }
-    }
-
-    fn read_ready(&mut self, timeout: Duration) -> WorkerProcessResult<AgentWorkerReady> {
-        let frame = match self.frames.recv_timeout(timeout) {
-            Ok(frame) => frame?,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                return Err(WorkerProcessError::BootTimeout {
-                    timeout_ms: duration_millis(timeout),
-                    stderr: self.stderr_snapshot(),
-                });
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(WorkerProcessError::MessageChannelClosed {
-                    stderr: self.stderr_snapshot(),
-                });
-            }
-        };
-
-        parse_ready_message(decode_agent_worker_protocol_frame(&frame)?)
+        self.channel.stderr_snapshot()
     }
 }
 
@@ -309,7 +360,7 @@ impl WorkerFrameReceiver for AgentWorkerProcess {
     type Error = WorkerProcessError;
 
     fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
-        self.next_frame_blocking()
+        self.channel.next_frame_blocking()
     }
 }
 
@@ -501,7 +552,10 @@ mod tests {
         read_pending_publish_outbox_record, read_published_publish_outbox_record,
     };
     use crate::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
-    use crate::worker_protocol::{AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolFixture};
+    use crate::worker_protocol::{
+        AGENT_WORKER_PROTOCOL_ENCODING, AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
+        AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolFixture,
+    };
     use serde_json::json;
     use std::fs;
     use std::net::TcpListener;
@@ -597,7 +651,85 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    fn protocol_probe_round_trips_over_in_process_pipes() {
+        let fake = InProcessProtocolProbeFake::start();
+        let InProcessProtocolProbeFake {
+            mut channel,
+            ready,
+            worker,
+        } = fake;
+
+        assert_eq!(ready.protocol.version, AGENT_WORKER_PROTOCOL_VERSION);
+        assert!(ready.worker_id.starts_with("protocol-probe-"));
+
+        channel
+            .send_message(&json!({
+                "version": AGENT_WORKER_PROTOCOL_VERSION,
+                "type": "ping",
+                "correlationId": "rust_probe",
+                "sequence": 10,
+                "timestamp": 1710000700100_u64,
+                "timeoutMs": 5000,
+            }))
+            .expect("ping must send");
+
+        let pong = channel
+            .next_message(Duration::from_secs(1))
+            .expect("pong must arrive");
+        assert_eq!(pong.get("type").and_then(Value::as_str), Some("pong"));
+        assert_eq!(
+            pong.get("correlationId").and_then(Value::as_str),
+            Some("rust_probe")
+        );
+        assert_eq!(
+            pong.get("replyingToSequence").and_then(Value::as_u64),
+            Some(10)
+        );
+
+        channel
+            .request_shutdown("rust_probe", 11, 1710000700200, "rust probe complete", 5000)
+            .expect("shutdown must send");
+        channel.close_stdin();
+
+        worker
+            .join()
+            .expect("in-process probe thread must join")
+            .expect("in-process probe must exit cleanly");
+    }
+
+    #[test]
+    fn protocol_probe_surface_boot_timeout_when_fake_stays_silent() {
+        let (stdin_reader, stdin_writer) = io::pipe().expect("stdin pipe");
+        let (stdout_reader, stdout_writer) = io::pipe().expect("stdout pipe");
+        let (stderr_reader, stderr_writer) = io::pipe().expect("stderr pipe");
+
+        let mut channel = AgentWorkerChannel::new(
+            Box::new(stdin_writer),
+            Box::new(stdout_reader),
+            Box::new(stderr_reader),
+        );
+
+        let err = channel
+            .read_ready(Duration::from_millis(50))
+            .expect_err("silent fake must cause boot timeout");
+        match err {
+            WorkerProcessError::BootTimeout { timeout_ms, .. } => assert_eq!(timeout_ms, 50),
+            other => panic!("expected BootTimeout, got {other:?}"),
+        }
+
+        // Dropping these here keeps the worker-side pipe ends alive long enough
+        // that the read_ready above cannot observe EOF and race the boot-timeout
+        // assertion.
+        drop(stdin_reader);
+        drop(stdout_writer);
+        drop(stderr_writer);
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(feature = "integration"),
+        ignore = "requires Bun and repo TypeScript dependencies"
+    )]
     fn bun_protocol_probe_round_trips_over_stdio() {
         let bun = std::env::var("BUN_BIN").unwrap_or_else(|_| "bun".to_string());
         let command = bun_protocol_probe_command(&repo_root(), bun);
@@ -647,7 +779,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    #[cfg_attr(
+        not(feature = "integration"),
+        ignore = "requires Bun and repo TypeScript dependencies"
+    )]
     fn bun_agent_worker_mock_execution_round_trips_over_stdio() {
         let fixture: WorkerProtocolFixture =
             serde_json::from_str(WORKER_PROTOCOL_FIXTURE).expect("fixture must parse");
@@ -716,7 +851,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    #[cfg_attr(
+        not(feature = "integration"),
+        ignore = "requires Bun and repo TypeScript dependencies"
+    )]
     fn bun_agent_worker_real_tool_execution_round_trips_filesystem_state() {
         let fixture = FilesystemBackedAgentFixture::create()
             .expect("filesystem-backed agent fixture must be created");
@@ -824,7 +962,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    #[cfg_attr(
+        not(feature = "integration"),
+        ignore = "requires Bun and repo TypeScript dependencies"
+    )]
     fn bun_agent_worker_publish_requests_relay_through_rust_outbox() {
         let fixture = FilesystemBackedAgentFixture::create()
             .expect("filesystem-backed agent fixture must be created");
@@ -943,7 +1084,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    #[cfg_attr(
+        not(feature = "integration"),
+        ignore = "requires Bun and repo TypeScript dependencies"
+    )]
     fn bun_agent_worker_real_non_initial_ral_round_trips_filesystem_state() {
         let mut fixture = FilesystemBackedAgentFixture::create()
             .expect("filesystem-backed agent fixture must be created");
@@ -1018,7 +1162,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    #[cfg_attr(
+        not(feature = "integration"),
+        ignore = "requires Bun and repo TypeScript dependencies"
+    )]
     fn bun_agent_worker_real_delegation_reports_waiting_state() {
         let mut fixture = FilesystemBackedAgentFixture::create()
             .expect("filesystem-backed agent fixture must be created");
@@ -1151,7 +1298,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires Bun and repo TypeScript dependencies"]
+    #[cfg_attr(
+        not(feature = "integration"),
+        ignore = "requires Bun and repo TypeScript dependencies"
+    )]
     fn bun_agent_worker_real_no_response_reports_terminal_state() {
         let mut fixture = FilesystemBackedAgentFixture::create()
             .expect("filesystem-backed agent fixture must be created");
@@ -1876,5 +2026,133 @@ mod tests {
 
     fn path_string(path: &Path) -> String {
         path.to_string_lossy().into_owned()
+    }
+
+    /// In-process stand-in for `tools/rust-migration/protocol-probe-worker.ts`.
+    ///
+    /// Runs the probe's ready/ping/pong/shutdown state machine on a background
+    /// thread connected to an `AgentWorkerChannel` through OS pipes. The
+    /// daemon-side `AgentWorkerChannel` is indistinguishable from one wired to
+    /// a real subprocess, exercising the same protocol handshake, framing, and
+    /// shutdown paths without booting a TypeScript runtime.
+    struct InProcessProtocolProbeFake {
+        channel: AgentWorkerChannel,
+        ready: AgentWorkerReady,
+        worker: thread::JoinHandle<Result<(), String>>,
+    }
+
+    impl InProcessProtocolProbeFake {
+        fn start() -> Self {
+            let (worker_stdin_reader, daemon_stdin_writer) =
+                io::pipe().expect("stdin pipe must open");
+            let (daemon_stdout_reader, worker_stdout_writer) =
+                io::pipe().expect("stdout pipe must open");
+            let (daemon_stderr_reader, _stderr_writer) =
+                io::pipe().expect("stderr pipe must open");
+
+            let worker = thread::spawn(move || {
+                run_in_process_protocol_probe(worker_stdin_reader, worker_stdout_writer)
+            });
+
+            let mut channel = AgentWorkerChannel::new(
+                Box::new(daemon_stdin_writer),
+                Box::new(daemon_stdout_reader),
+                Box::new(daemon_stderr_reader),
+            );
+            let ready = channel
+                .read_ready(Duration::from_secs(1))
+                .expect("in-process probe ready must arrive");
+
+            Self {
+                channel,
+                ready,
+                worker,
+            }
+        }
+    }
+
+    fn run_in_process_protocol_probe(
+        mut stdin: io::PipeReader,
+        mut stdout: io::PipeWriter,
+    ) -> Result<(), String> {
+        let mut sequence = 0_u64;
+        let mut next_sequence = || {
+            sequence += 1;
+            sequence
+        };
+
+        let ready = json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "ready",
+            "correlationId": "worker_boot",
+            "sequence": next_sequence(),
+            "timestamp": 1_710_000_700_000_u64,
+            "workerId": format!("protocol-probe-{}", std::process::id()),
+            "pid": u64::from(std::process::id()),
+            "protocol": {
+                "version": AGENT_WORKER_PROTOCOL_VERSION,
+                "encoding": AGENT_WORKER_PROTOCOL_ENCODING,
+                "maxFrameBytes": AGENT_WORKER_MAX_FRAME_BYTES,
+                "streamBatchMs": AGENT_WORKER_STREAM_BATCH_MS,
+                "streamBatchMaxBytes": AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
+            },
+        });
+        write_probe_frame(&mut stdout, &ready)?;
+
+        loop {
+            let message = match read_agent_worker_protocol_message(&mut stdin) {
+                Ok(message) => message,
+                Err(WorkerProcessError::Io(error))
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::UnexpectedEof | io::ErrorKind::BrokenPipe
+                    ) =>
+                {
+                    return Err("daemon closed stdin before sending shutdown".to_string());
+                }
+                Err(error) => return Err(format!("probe read failed: {error}")),
+            };
+
+            let message_type = message
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "probe message missing type".to_string())?;
+
+            match message_type {
+                "ping" => {
+                    let correlation_id = message
+                        .get("correlationId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "ping missing correlationId".to_string())?
+                        .to_string();
+                    let replying_to_sequence = message
+                        .get("sequence")
+                        .and_then(Value::as_u64)
+                        .ok_or_else(|| "ping missing sequence".to_string())?;
+                    let pong = json!({
+                        "version": AGENT_WORKER_PROTOCOL_VERSION,
+                        "type": "pong",
+                        "correlationId": correlation_id,
+                        "sequence": next_sequence(),
+                        "timestamp": 1_710_000_700_100_u64,
+                        "replyingToSequence": replying_to_sequence,
+                    });
+                    write_probe_frame(&mut stdout, &pong)?;
+                }
+                "shutdown" => return Ok(()),
+                other => return Err(format!("unexpected probe message type: {other}")),
+            }
+        }
+    }
+
+    fn write_probe_frame(stdout: &mut io::PipeWriter, value: &Value) -> Result<(), String> {
+        let frame = encode_agent_worker_protocol_frame(value)
+            .map_err(|error| format!("probe frame encode failed: {error}"))?;
+        stdout
+            .write_all(&frame)
+            .map_err(|error| format!("probe stdout write failed: {error}"))?;
+        stdout
+            .flush()
+            .map_err(|error| format!("probe stdout flush failed: {error}"))
     }
 }
