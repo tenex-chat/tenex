@@ -117,4 +117,21 @@ export interface MockLLMConfig {
           }
         | MockLLMResponse
     >;
+    /**
+     * When true, the mock throws on any request that fails to match a scripted
+     * response. Used by deterministic E2E fixtures so a missing trigger surfaces
+     * immediately instead of silently returning a default reply.
+     */
+    strict?: boolean;
+    /**
+     * Human-readable fixture identifier, used in error messages when strict
+     * mode fires.
+     */
+    fixtureLabel?: string;
+    /**
+     * Required model ID for this fixture. MockProvider throws at createModel
+     * time if the caller asks for a different ID, catching llms.json drift at
+     * worker boot instead of silently at assertion time.
+     */
+    expectedModelId?: string;
 }

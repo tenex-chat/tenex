@@ -7,7 +7,9 @@ import type {
     LanguageModelV3Usage,
     ProviderV3,
 } from "@ai-sdk/provider";
+import { readFileSync } from "node:fs";
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
+import { parseMockFixture } from "@/test-utils/mock-llm/parseMockFixture";
 import type { MockLLMConfig, MockMessage, MockToolCall } from "@/test-utils/mock-llm/types";
 import { logger } from "@/utils/logger";
 import { MockLanguageModelV3 } from "ai/test";
@@ -75,14 +77,65 @@ const toMockMessages = (prompt: LanguageModelV3CallOptions["prompt"]): MockMessa
 };
 
 /**
+ * Reads the fixture file referenced by `TENEX_MOCK_LLM_FIXTURE` and parses it
+ * into a strict {@link MockLLMConfig}. Returns `undefined` if the env var is
+ * not set; any other failure (missing file, malformed JSON, invalid shape)
+ * throws so worker boot fails loudly instead of falling back to a default
+ * mock.
+ */
+export function loadMockFixtureFromEnv(): MockLLMConfig | undefined {
+    const fixturePath = process.env.TENEX_MOCK_LLM_FIXTURE;
+    if (!fixturePath) return undefined;
+
+    let raw: string;
+    try {
+        raw = readFileSync(fixturePath, "utf8");
+    } catch (error) {
+        throw new Error(
+            `[MockProvider] TENEX_MOCK_LLM_FIXTURE points at ${fixturePath} but the file could not be read`,
+            { cause: error }
+        );
+    }
+
+    let json: unknown;
+    try {
+        json = JSON.parse(raw);
+    } catch (error) {
+        throw new Error(
+            `[MockProvider] TENEX_MOCK_LLM_FIXTURE=${fixturePath} does not contain valid JSON`,
+            { cause: error }
+        );
+    }
+
+    const config = parseMockFixture(json);
+    logger.info(
+        `[MockProvider] Loaded mock fixture ${config.fixtureLabel} (expectedModelId=${config.expectedModelId}, responses=${config.responses?.length ?? 0}) from ${fixturePath}`
+    );
+    return config;
+}
+
+/**
  * Creates a mock provider that integrates MockLLMService with AI SDK
  * This allows us to use the mock service through the standard LLMServiceFactory
  */
 export function createMockProvider(config?: MockLLMConfig): ProviderV3 {
-    const mockService = new MockLLMService(config);
+    // Env-var fixture overrides the caller-supplied config so scenarios can
+    // point the daemon at a scripted response set without threading a bespoke
+    // config through the registry.
+    const effectiveConfig: MockLLMConfig = loadMockFixtureFromEnv() ?? config ?? {};
+    const mockService = new MockLLMService(effectiveConfig);
 
     // Create a factory function that returns a language model
     const createLanguageModel = (modelId: string): LanguageModelV3 => {
+        if (
+            effectiveConfig.expectedModelId &&
+            modelId !== effectiveConfig.expectedModelId
+        ) {
+            throw new Error(
+                `[MockProvider] Fixture '${effectiveConfig.fixtureLabel ?? "unknown"}' expects modelId='${effectiveConfig.expectedModelId}' but caller requested '${modelId}'. ` +
+                    "Update the scenario's llms.json to match, or the fixture's expectedModelId."
+            );
+        }
         logger.info(`[MockProvider] Creating language model for: ${modelId}`);
 
         const doGenerate: LanguageModelV3["doGenerate"] = async (options) => {
