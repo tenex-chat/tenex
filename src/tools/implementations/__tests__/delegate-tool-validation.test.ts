@@ -91,6 +91,7 @@ describe("Delegation tools - Self-delegation validation", () => {
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
+        projectContext: createMockProjectContext(),
         getConversation: () => ({
             getRootEventId: () => conversationId,
             getTodos: () => hasTodos ? [defaultTodo] : [],
@@ -114,6 +115,7 @@ describe("Delegation tools - Self-delegation validation", () => {
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
+        projectContext: createMockProjectContext(),
         getConversation: () => null,
     });
 
@@ -305,6 +307,7 @@ describe("Delegation tools - RAL isolation", () => {
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
+        projectContext: createMockProjectContext(),
         getConversation: () => ({
             getRootEventId: () => conversationId,
             getTodos: () => hasTodos ? [defaultTodo] : [],
@@ -455,6 +458,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
             projectBasePath: "/tmp/test",
             workingDirectory: "/tmp/test",
             currentBranch: "main",
+            projectContext: createMockProjectContext(),
             getConversation: () => ({
                 getRootEventId: () => conversationId,
                 getTodos: () => hasTodos ? [defaultTodo] : [],
@@ -635,6 +639,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             projectBasePath: "/tmp/test",
             workingDirectory: "/tmp/test",
             currentBranch: "main",
+            projectContext: createMockProjectContext(),
             getConversation: () => mockConversation as any,
         };
     };
@@ -822,6 +827,7 @@ describe("delegate_followup - ID handling", () => {
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
+        projectContext: createMockProjectContext(),
         getConversation: () => ({
             getRootEventId: () => conversationId,
             getTodos: () => [],

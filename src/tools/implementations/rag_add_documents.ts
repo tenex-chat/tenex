@@ -10,7 +10,6 @@ import {
     expandPathFromContext,
     formatUnresolvedPathVariablesError,
 } from "@/tools/utils/path-expansion";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -407,16 +406,9 @@ function computeBaseProvenance(context: ToolExecutionContext): DocumentMetadata 
     // Auto-inject projectId if available (uses NIP-33 address format)
     // NOTE: Must use camelCase "projectId" to match buildProjectFilter() and
     // all specialized indexing flows (conversation embeddings, lessons, and generic RAG ingestion)
-    if (isProjectContextInitialized()) {
-        try {
-            const projectCtx = getProjectContext();
-            const projectId = projectCtx.project.tagId();
-            if (projectId) {
-                provenance.projectId = projectId;
-            }
-        } catch {
-            // Project context not available - skip projectId injection
-        }
+    const projectId = context.projectContext.project.tagId();
+    if (projectId) {
+        provenance.projectId = projectId;
     }
 
     return provenance;

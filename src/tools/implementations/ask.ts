@@ -1,5 +1,4 @@
 import type { ToolExecutionContext } from "@/tools/types";
-import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -166,8 +165,7 @@ function isDirectHumanTrigger(context: ToolExecutionContext, ownerPubkey: string
 async function executeAsk(input: AskInput, context: ToolExecutionContext): Promise<AskOutput> {
   const { title, context: askContext, questions } = input;
 
-  const projectCtx = getProjectContext();
-  const ownerPubkey = projectCtx?.project?.pubkey;
+  const ownerPubkey = context.projectContext.project.pubkey;
 
   if (!ownerPubkey) {
     throw new Error("No project owner configured - cannot determine who to ask");

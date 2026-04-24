@@ -13,7 +13,6 @@
  */
 import type { ToolExecutionContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { getProjectContext } from "@/services/projects";
 import { SkillIdentifierResolver } from "@/services/skill";
 import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
@@ -102,13 +101,8 @@ async function executeDelegate(
   let availableTeamNames: string[] = [];
 
   if (!pubkey) {
-    let projectId: string | undefined;
-    try {
-      const projectContext = getProjectContext();
-      projectId = projectContext.project?.dTag ?? projectContext.project?.tagValue?.("d");
-    } catch {
-      projectId = undefined;
-    }
+    const projectId =
+      context.projectContext.project.dTag ?? context.projectContext.project.tagValue("d");
 
     availableTeamNames = await teamService.getTeamNames(projectId);
     const matchedTeamName = availableTeamNames.find(
@@ -146,14 +140,8 @@ async function executeDelegate(
   // use case and cannot create an infinite loop the way A→B→C→A would.
   const isSelfDelegation = pubkey === context.agent.pubkey;
   if (!isSelfDelegation && delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
-    let targetName = pubkey.substring(0, 8);
-    try {
-      const projectContext = getProjectContext();
-      const targetAgent = projectContext.getAgentByPubkey?.(pubkey);
-      targetName = targetAgent?.slug || targetName;
-    } catch {
-      // Project context is optional for this tool path.
-    }
+    const targetAgent = context.projectContext.getAgentByPubkey(pubkey);
+    const targetName = targetAgent?.slug || pubkey.substring(0, 8);
 
     const chainDisplay = delegationChain.map((e) => e.displayName).join(" → ");
 

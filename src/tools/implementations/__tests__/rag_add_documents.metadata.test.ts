@@ -3,7 +3,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import * as projectsModule from "@/services/projects";
 import { RAGService } from "@/services/rag/RAGService";
 import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import type { ToolExecutionContext } from "@/tools/types";
@@ -38,12 +37,15 @@ const createMockContext = (): ToolExecutionContext => ({
     workingDirectory: "/test/working/dir",
     conversationId: "test-conv-id",
     conversation: {} as any,
+    projectContext: {
+        project: {
+            tagId: () => "31933:test-pubkey:test-project",
+        },
+    } as any,
 });
 
 describe("rag_add_documents metadata handling", () => {
     const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
-    let isProjectContextInitializedSpy: ReturnType<typeof spyOn>;
-    let getProjectContextSpy: ReturnType<typeof spyOn>;
     let getInstanceSpy: ReturnType<typeof spyOn>;
     let tempDir: string;
 
@@ -51,15 +53,6 @@ describe("rag_add_documents metadata handling", () => {
         captureAddDocuments = async () => {};
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-rag-add-docs-"));
         process.env.TENEX_BASE_DIR = tempDir;
-        isProjectContextInitializedSpy = spyOn(
-            projectsModule,
-            "isProjectContextInitialized"
-        ).mockReturnValue(false as never);
-        getProjectContextSpy = spyOn(projectsModule, "getProjectContext").mockImplementation(
-            () => {
-                throw new Error("Not initialized");
-            }
-        );
         getInstanceSpy = spyOn(RAGService, "getInstance").mockReturnValue({
             addDocuments: (collection: string, docs: unknown[]) =>
                 captureAddDocuments(collection, docs),
@@ -74,8 +67,6 @@ describe("rag_add_documents metadata handling", () => {
         }
 
         await fs.rm(tempDir, { recursive: true, force: true });
-        isProjectContextInitializedSpy?.mockRestore();
-        getProjectContextSpy?.mockRestore();
         getInstanceSpy?.mockRestore();
     });
 

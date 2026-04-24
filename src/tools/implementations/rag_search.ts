@@ -10,7 +10,6 @@
  */
 
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { bootstrapSearchProviders, UnifiedSearchService } from "@/services/search";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -57,23 +56,7 @@ async function executeRAGSearch(
 ): Promise<Record<string, unknown>> {
     const { query, prompt, limit = 10, collections } = input;
 
-    // Get project ID for scoping
-    let projectId: string;
-    if (isProjectContextInitialized()) {
-        try {
-            projectId = getProjectContext().project.tagId();
-        } catch {
-            return {
-                success: false,
-                error: "Project context not available. Cannot perform project-scoped search.",
-            };
-        }
-    } else {
-        return {
-            success: false,
-            error: "Project context not initialized. Cannot perform project-scoped search.",
-        };
-    }
+    const projectId = context.projectContext.project.tagId();
 
     logger.info("🔍 [RAGSearch] Executing unified search", {
         query,

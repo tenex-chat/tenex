@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ConversationToolContext } from "@/tools/types";
-import * as projectServices from "@/services/projects";
 import { SkillService } from "@/services/skill/SkillService";
 import { SkillWhitelistService } from "@/services/skill";
 import { createSkillsSetTool } from "../skills_set";
@@ -46,7 +45,6 @@ describe("skills_set tool", () => {
     const mockGetSelfAppliedSkillIds = mock();
     let whitelistServiceSpy: ReturnType<typeof spyOn>;
     let skillServiceSpy: ReturnType<typeof spyOn>;
-    let projectContextSpy: ReturnType<typeof spyOn>;
 
     const createMockContext = (): ConversationToolContext => ({
         agent: {
@@ -72,6 +70,12 @@ describe("skills_set tool", () => {
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
+        projectContext: {
+            project: {
+                dTag: PROJECT_DTAG,
+                tagValue: mock(() => PROJECT_DTAG),
+            },
+        } as any,
         getConversation: () => ({
             getRootEventId: () => "mock-root-event-id",
         }) as any,
@@ -90,12 +94,6 @@ describe("skills_set tool", () => {
             listAvailableSkills: mockListAvailableSkills,
         } as never);
         whitelistServiceSpy = spyOn(SkillWhitelistService.getInstance(), "getWhitelistedSkills").mockReturnValue([]);
-        projectContextSpy = spyOn(projectServices, "getProjectContext").mockReturnValue({
-            project: {
-                dTag: PROJECT_DTAG,
-                tagValue: mock(() => PROJECT_DTAG),
-            },
-        } as never);
         mockFetchSkills.mockClear();
         mockListAvailableSkills.mockClear();
         mockSetSelfAppliedSkills.mockClear();
@@ -107,7 +105,6 @@ describe("skills_set tool", () => {
     afterEach(() => {
         skillServiceSpy?.mockRestore();
         whitelistServiceSpy?.mockRestore();
-        projectContextSpy?.mockRestore();
         mock.restore();
     });
 

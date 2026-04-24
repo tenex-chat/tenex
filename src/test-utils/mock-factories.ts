@@ -255,6 +255,15 @@ export function createMockToolContext(
         projectBasePath: "/mock/project",
         workingDirectory: "/mock/project",
         currentBranch: "main",
+        projectContext: {
+            project: {
+                pubkey: "mock-project-pubkey",
+                dTag: "mock-project",
+                tagValue: (tagName: string) => (tagName === "d" ? "mock-project" : undefined),
+                tagId: () => "31933:mock-project-pubkey:mock-project",
+            },
+            getAgentByPubkey: (pubkey: string) => (pubkey === agent.pubkey ? agent : undefined),
+        } as any,
         triggeringEnvelope: mockEvent,
         agentPublisher: mockPublisher as AgentPublisher,
         ralNumber: 1,

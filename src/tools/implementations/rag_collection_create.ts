@@ -1,7 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { RAGService } from "@/services/rag/RAGService";
 import { RAGCollectionRegistry } from "@/services/rag/RAGCollectionRegistry";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
 import { tool } from "ai";
@@ -47,14 +46,7 @@ async function executeCreateCollection(
 
     // Register in the collection registry with scope metadata
     const registry = RAGCollectionRegistry.getInstance();
-    let projectId: string | undefined;
-    if (isProjectContextInitialized()) {
-        try {
-            projectId = getProjectContext().project.tagId();
-        } catch {
-            // Project context not available — no projectId
-        }
-    }
+    const projectId = context.projectContext.project.tagId();
 
     registry.register(name, {
         scope,

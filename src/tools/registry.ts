@@ -7,7 +7,6 @@
 import { config as configService } from "@/services/ConfigService";
 import { isMetaModelConfiguration } from "@/services/config/types";
 import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { SkillToolPermissions } from "@/services/skill";
 import { isOnlyToolMode } from "@/services/skill";
 import type { Tool as CoreTool } from "ai";
@@ -347,10 +346,10 @@ export function getToolsObject(
     if (
         hasConversation &&
         "agent" in context &&
-        context.agent?.telegram?.botToken &&
-        isProjectContextInitialized()
+        context.agent?.telegram?.botToken
     ) {
-        const projectId = getProjectContext().project.dTag ?? getProjectContext().project.tagValue("d");
+        const projectId =
+            context.projectContext.project.dTag ?? context.projectContext.project.tagValue("d");
         const hasTelegramBindings = Boolean(
             projectId &&
             context.agent.pubkey &&

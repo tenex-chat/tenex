@@ -4,7 +4,6 @@ import { homedir } from "node:os";
 import type { AISdkTool, ConversationToolContext } from "@/tools/types";
 import { SkillService } from "@/services/skill/SkillService";
 import { renderSkill } from "@/agents/execution/skill-reminder-renderers";
-import { getProjectContext } from "@/services/projects";
 import { getAgentHomeDirectory } from "@/lib/agent-home";
 import {
     buildExpandedBlockedSet,
@@ -107,12 +106,13 @@ export function createSkillsSetTool(context: ConversationToolContext): AISdkTool
 
             // Validate add IDs against available skills
             const skillService = SkillService.getInstance();
-            const projectContext = getProjectContext();
             const skillLookupContext = {
                 agentPubkey,
                 projectPath: context.projectBasePath || undefined,
                 projectDTag:
-                    projectContext.project.dTag || projectContext.project.tagValue("d") || undefined,
+                    context.projectContext.project.dTag ||
+                    context.projectContext.project.tagValue("d") ||
+                    undefined,
             };
             const availableSkills = await skillService.listAvailableSkills(skillLookupContext);
             const availableSkillMap = buildSkillAliasMap(availableSkills);

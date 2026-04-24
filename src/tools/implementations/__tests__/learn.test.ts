@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import * as projectsModule from "@/services/projects";
 import type { ToolExecutionContext } from "@/tools/types";
 
 // Use object to hold mock functions so we can swap them
@@ -55,6 +54,11 @@ describe("Learn Tool", () => {
             projectBasePath: "/tmp/test",
             workingDirectory: "/tmp/test",
             currentBranch: "main",
+            projectContext: {
+                project: {
+                    tagId: () => "31933:test-pubkey:project",
+                },
+            } as any,
             getConversation: () => ({
                 getRootEventId: () => "mock-root-event-id",
             }) as any,
@@ -66,10 +70,6 @@ describe("Learn Tool", () => {
         ragMocks.listCollections.mockReset().mockResolvedValue([]);
         ragMocks.createCollection.mockReset().mockResolvedValue(undefined);
         ragMocks.addDocuments.mockReset().mockResolvedValue(undefined);
-        spyOn(projectsModule, "isProjectContextInitialized").mockReturnValue(false);
-        spyOn(projectsModule, "getProjectContext").mockImplementation(() => {
-            throw new Error("Not initialized");
-        });
     });
 
     afterEach(() => {
