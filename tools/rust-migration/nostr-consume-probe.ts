@@ -1,11 +1,9 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { getEventHash, verifyEvent, type Event as NostrEvent } from "nostr-tools";
-import { classifyForDaemon } from "@/nostr/AgentEventDecoder";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 
 interface ProbeResult {
     id: string;
-    classification: string;
     envelopeMessageId: string;
 }
 
@@ -95,12 +93,8 @@ function consumeEvent(event: NostrEvent): ProbeResult {
     }
 
     const ndkEvent = toNdkEvent(event);
-    const classification = classifyForDaemon(ndkEvent);
     const envelope = new NostrInboundAdapter().toEnvelope(ndkEvent);
 
-    if (classification !== "conversation") {
-        throw new Error(`event ${event.id} classified as ${classification}, expected conversation`);
-    }
     if (envelope.message.nativeId !== event.id) {
         throw new Error(`event ${event.id} produced envelope native id ${envelope.message.nativeId}`);
     }
@@ -116,7 +110,6 @@ function consumeEvent(event: NostrEvent): ProbeResult {
 
     return {
         id: event.id,
-        classification,
         envelopeMessageId: envelope.message.id,
     };
 }
