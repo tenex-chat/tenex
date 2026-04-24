@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::worker_launch::WorkerLaunchPlan;
+use crate::worker_lifecycle::launch::WorkerLaunchPlan;
 use crate::worker_process::AgentWorkerCommand;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub fn plan_worker_dispatch_spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope};
+    use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope};
     use crate::worker_process::bun_agent_worker_command;
     use serde_json::json;
     use std::path::{Path, PathBuf};

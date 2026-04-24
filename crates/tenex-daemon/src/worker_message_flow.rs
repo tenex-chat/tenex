@@ -20,7 +20,7 @@ use crate::worker_heartbeat::{
     WorkerHeartbeatContext, WorkerHeartbeatError, WorkerHeartbeatSnapshot,
     plan_worker_heartbeat_snapshot,
 };
-use crate::worker_launch_lock::WorkerLaunchLocks;
+use crate::worker_lifecycle::launch_lock::WorkerLaunchLocks;
 use crate::worker_message::{
     WorkerControlTelemetryKind, WorkerMessageAction, WorkerMessageError, WorkerMessagePlan,
     WorkerPublishedMode, WorkerStreamTelemetryKind, plan_worker_message_handling,
@@ -692,8 +692,8 @@ mod tests {
     };
     use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
     use crate::ral_scheduler::RalScheduler;
-    use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
-    use crate::worker_launch_lock::acquire_worker_launch_locks;
+    use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
+    use crate::worker_lifecycle::launch_lock::acquire_worker_launch_locks;
     use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
     use crate::worker_publish::flow::WorkerPublishResultDelivery;
     use crate::worker_runtime_state::{SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch};

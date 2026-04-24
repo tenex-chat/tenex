@@ -32,7 +32,7 @@ use crate::project_nostr_ingress::{
 use crate::project_repository_init::{
     ProjectRepositoryInitError, ensure_project_repository_on_boot,
 };
-use crate::worker_stop_request::{WorkerStopRequest, write_worker_stop_request};
+use crate::worker_lifecycle::stop_request::{WorkerStopRequest, write_worker_stop_request};
 
 #[derive(Debug, Clone, Copy)]
 pub struct NostrIngressInput<'a> {

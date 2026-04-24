@@ -354,7 +354,7 @@ fn worker_state_mismatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_abort::WorkerAbortSignal;
+    use crate::worker_lifecycle::abort::WorkerAbortSignal;
     use crate::worker_heartbeat::WorkerHeartbeatState;
     use crate::worker_protocol::{
         AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,

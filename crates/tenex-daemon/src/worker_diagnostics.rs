@@ -7,7 +7,7 @@ use crate::publish_outbox::{
     PublishOutboxDiagnostics, PublishOutboxFailureDiagnostic, PublishOutboxPendingDiagnostic,
 };
 use crate::ral_journal::RalJournalIdentity;
-use crate::worker_abort::WorkerAbortSignal;
+use crate::worker_lifecycle::abort::WorkerAbortSignal;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_heartbeat::{
     WorkerHeartbeatFreshness, WorkerHeartbeatFreshnessConfig, WorkerHeartbeatSnapshot,

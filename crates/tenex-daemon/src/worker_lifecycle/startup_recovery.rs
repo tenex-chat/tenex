@@ -7,7 +7,7 @@ use crate::ral_journal::RalJournalError;
 use crate::ral_scheduler::{
     RalOrphanReconciliationInput, RalOrphanReconciliationPlan, RalScheduler, RalSchedulerError,
 };
-use crate::worker_recovery_apply::{
+use crate::worker_lifecycle::recovery_apply::{
     AppliedWorkerOrphanReconciliation, WorkerOrphanReconciliationApplyInput,
     WorkerRecoveryApplyError, apply_worker_orphan_reconciliation,
 };

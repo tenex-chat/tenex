@@ -8,8 +8,8 @@ use crate::worker_dispatch::execution::{
     start_worker_dispatch,
 };
 use crate::worker_dispatch::spawn::plan_worker_dispatch_spawn;
-use crate::worker_launch::WorkerLaunchPlan;
-use crate::worker_launch_lock::{
+use crate::worker_lifecycle::launch::WorkerLaunchPlan;
+use crate::worker_lifecycle::launch_lock::{
     WorkerLaunchLockError, WorkerLaunchLocks, acquire_worker_launch_locks,
     release_worker_launch_locks,
 };
@@ -88,7 +88,7 @@ mod tests {
     use crate::worker_dispatch::execution::{
         BootedWorkerDispatch, WorkerDispatchExecutionError, WorkerDispatchSession,
     };
-    use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope};
+    use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope};
     use crate::worker_process::{AgentWorkerProcessConfig, AgentWorkerReady};
     use crate::worker_protocol::{
         AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,

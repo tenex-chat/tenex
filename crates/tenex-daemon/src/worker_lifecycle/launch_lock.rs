@@ -5,7 +5,7 @@ use crate::ral_lock::{
     RalLockError, RalLockHandle, RalLockInfo, ral_allocation_lock_path, ral_state_lock_path,
     release_ral_lock, try_acquire_ral_lock,
 };
-use crate::worker_launch::WorkerLaunchPlan;
+use crate::worker_lifecycle::launch::WorkerLaunchPlan;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct WorkerLaunchLocks {
@@ -74,7 +74,7 @@ mod tests {
         RalLockError, build_ral_lock_info, ral_allocation_lock_path, ral_state_lock_path,
         read_ral_lock_info,
     };
-    use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
+    use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};

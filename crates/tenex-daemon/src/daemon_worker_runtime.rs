@@ -39,7 +39,7 @@ use crate::worker_dispatch::tick::{
     WorkerDispatchTickError, WorkerDispatchTickInput, apply_worker_dispatch_tick,
 };
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
-use crate::worker_launch::{WorkerLaunchPlanInput, plan_worker_launch};
+use crate::worker_lifecycle::launch::{WorkerLaunchPlanInput, plan_worker_launch};
 use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
@@ -1085,7 +1085,7 @@ mod tests {
         write_create_or_compare_equal,
     };
     use crate::worker_dispatch::start::WorkerDispatchStartError;
-    use crate::worker_launch_lock::release_worker_launch_locks;
+    use crate::worker_lifecycle::launch_lock::release_worker_launch_locks;
     use crate::worker_message_flow::WorkerMessageFlowError;
     use crate::worker_process::{
         AgentWorkerProcess, AgentWorkerReady, WorkerProcessError, bun_agent_worker_command,

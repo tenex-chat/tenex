@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::filesystem_state::{LockInfo, build_lock_info};
 use crate::ral_journal::ral_dir;
-use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope};
+use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope};
 
 pub const RAL_LOCKS_DIR_NAME: &str = "locks";
 pub const RAL_ALLOCATION_LOCK_PREFIX: &str = "alloc";

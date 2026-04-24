@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::worker_abort::DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS;
+use crate::worker_lifecycle::abort::DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS;
 use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_injection_queue::{
@@ -23,7 +23,7 @@ use crate::worker_protocol::{
 };
 use crate::worker_publish::flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
-use crate::worker_stop_request::take_worker_stop_request;
+use crate::worker_lifecycle::stop_request::take_worker_stop_request;
 
 pub struct WorkerSessionLoopInput<'a> {
     pub daemon_dir: &'a Path,
@@ -502,8 +502,8 @@ mod tests {
         WorkerDelegationCompletionInjection, WorkerInjectionEnqueueInput, WorkerInjectionRole,
         enqueue_worker_injection, replay_worker_injection_queue,
     };
-    use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
-    use crate::worker_launch_lock::acquire_worker_launch_locks;
+    use crate::worker_lifecycle::launch::{RalAllocationLockScope, RalStateLockScope, WorkerLaunchPlan};
+    use crate::worker_lifecycle::launch_lock::acquire_worker_launch_locks;
     use crate::worker_process::{
         AgentWorkerProcess, AgentWorkerProcessConfig, bun_agent_worker_command,
     };

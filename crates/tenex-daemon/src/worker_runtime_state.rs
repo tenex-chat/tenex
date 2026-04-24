@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use crate::ral_journal::RalJournalIdentity;
-use crate::worker_abort::{WorkerAbortDecisionInput, WorkerAbortProcessStatus, WorkerAbortSignal};
+use crate::worker_lifecycle::abort::{WorkerAbortDecisionInput, WorkerAbortProcessStatus, WorkerAbortSignal};
 use crate::worker_concurrency::{
     ActiveDispatchConcurrencySnapshot, ActiveWorkerConcurrencySnapshot,
 };
