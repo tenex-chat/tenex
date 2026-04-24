@@ -4,7 +4,7 @@ use std::path::Path;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::worker_dispatch_execution::WorkerDispatchSession;
+use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_message::{
     WorkerMessageAction, WorkerMessageError, WorkerMessagePlan, plan_worker_message_handling,
 };

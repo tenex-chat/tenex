@@ -56,7 +56,7 @@ use tenex_daemon::telegram::gateway::{
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::telemetry;
 use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
-use tenex_daemon::worker_dispatch_execution::AgentWorkerProcessDispatchSpawner;
+use tenex_daemon::worker_dispatch::execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_process::{
     AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
 };

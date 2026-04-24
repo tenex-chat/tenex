@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::worker_dispatch_input::{
+use crate::worker_dispatch::input::{
     WORKER_DISPATCH_INPUTS_DIR_NAME, WorkerDispatchExecuteFields, WorkerDispatchInput,
     WorkerDispatchInputError, WorkerDispatchInputFromExecuteFields, WorkerDispatchInputSourceType,
     WorkerDispatchInputValidationError, WorkerDispatchInputWriterMetadata,

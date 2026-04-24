@@ -21,7 +21,7 @@ use crate::ral_scheduler::{
     RalNamespace, RalResumeDispatchPreparation, RalResumeDispatchPreparationInput, RalScheduler,
     RalSchedulerError,
 };
-use crate::worker_dispatch_input::{
+use crate::worker_dispatch::input::{
     WorkerDispatchExecuteFields, WorkerDispatchInput, WorkerDispatchInputError,
     WorkerDispatchInputFromExecuteFields, WorkerDispatchInputSourceType,
     WorkerDispatchInputWriterMetadata, worker_dispatch_input_path, write_create_or_compare_equal,
@@ -500,7 +500,7 @@ mod tests {
         RalTerminalSummary, append_ral_journal_record, read_ral_journal_records,
         replay_ral_journal,
     };
-    use crate::worker_dispatch_input::read_optional as read_worker_dispatch_input;
+    use crate::worker_dispatch::input::read_optional as read_worker_dispatch_input;
     use serde_json::{Value, json};
     use std::fs;
     use std::path::Path;

@@ -3,7 +3,7 @@ use std::error::Error;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::worker_dispatch_spawn::WorkerDispatchSpawnPlan;
+use crate::worker_dispatch::spawn::WorkerDispatchSpawnPlan;
 use crate::worker_process::{
     AgentWorkerCommand, AgentWorkerProcess, AgentWorkerProcessConfig, AgentWorkerReady,
     WorkerProcessError,
@@ -134,7 +134,7 @@ pub fn validate_worker_dispatch_execute_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_dispatch_spawn::WorkerDispatchSpawnPlan;
+    use crate::worker_dispatch::spawn::WorkerDispatchSpawnPlan;
     use crate::worker_process::AgentWorkerCommand;
     use crate::worker_protocol::{
         AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,

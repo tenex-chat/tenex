@@ -12,17 +12,17 @@ use crate::dispatch_queue::{
 use crate::ral_journal::RalJournalIdentity;
 use crate::ral_lock::RalLockInfo;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
-use crate::worker_dispatch_admission::{
+use crate::worker_dispatch::admission::{
     AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
     WorkerDispatchAdmissionBlockedReason, WorkerDispatchAdmissionError,
     WorkerDispatchAdmissionInput, WorkerDispatchAdmissionPlan, plan_worker_dispatch_admission,
 };
-use crate::worker_dispatch_execution::WorkerDispatchSpawner;
-use crate::worker_dispatch_input::{
+use crate::worker_dispatch::execution::WorkerDispatchSpawner;
+use crate::worker_dispatch::input::{
     WorkerDispatchInput, WorkerDispatchInputError, WorkerDispatchInputValidationError,
     read_optional as read_optional_worker_dispatch_input,
 };
-use crate::worker_dispatch_start::{
+use crate::worker_dispatch::start::{
     LockScopedStartedWorkerDispatch, WorkerDispatchStartError, WorkerDispatchStartInput,
     start_lock_scoped_worker_dispatch,
 };
@@ -541,7 +541,7 @@ mod tests {
         ScheduledTaskDispatchInput, ScheduledTaskDispatchTaskDiagnosticMetadata,
         ScheduledTaskDispatchTaskKind, write_create_or_compare_equal,
     };
-    use crate::worker_dispatch_execution::{
+    use crate::worker_dispatch::execution::{
         BootedWorkerDispatch, WorkerDispatchSession, WorkerDispatchSpawner,
     };
     use crate::worker_launch_lock::release_worker_launch_locks;

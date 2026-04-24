@@ -311,7 +311,7 @@ mod tests {
         RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalEvent, RalJournalIdentity,
         RalJournalRecord, RalPendingDelegation, RalTerminalSummary, append_ral_journal_record,
     };
-    use crate::worker_dispatch_input::read_optional as read_worker_dispatch_input;
+    use crate::worker_dispatch::input::read_optional as read_worker_dispatch_input;
     use crate::worker_injection_queue::replay_worker_injection_queue;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;

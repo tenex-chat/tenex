@@ -374,7 +374,7 @@ mod tests {
     use super::*;
     use crate::dispatch_queue::replay_dispatch_queue;
     use crate::inbound_runtime::InboundRuntimeOutcome;
-    use crate::worker_dispatch_input::{
+    use crate::worker_dispatch::input::{
         WorkerDispatchInputSourceType, read_optional as read_worker_dispatch_input,
     };
     use secp256k1::{Keypair, Secp256k1, SecretKey};

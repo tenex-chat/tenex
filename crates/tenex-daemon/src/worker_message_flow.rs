@@ -15,7 +15,7 @@ use crate::ral_journal::{
 };
 use crate::ral_scheduler::RalScheduler;
 use crate::worker_completion::WorkerCompletionDispatchInput;
-use crate::worker_dispatch_execution::WorkerDispatchSession;
+use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_heartbeat::{
     WorkerHeartbeatContext, WorkerHeartbeatError, WorkerHeartbeatSnapshot,
     plan_worker_heartbeat_snapshot,

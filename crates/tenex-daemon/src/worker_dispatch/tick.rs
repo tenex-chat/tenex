@@ -5,12 +5,12 @@ use thiserror::Error;
 use crate::dispatch_queue::{DispatchQueueError, replay_dispatch_queue};
 use crate::ral_lock::RalLockInfo;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
-use crate::worker_dispatch_admission_start::{
+use crate::worker_dispatch::admission_start::{
     WorkerDispatchAdmissionStartError, WorkerDispatchAdmissionStartInput,
     WorkerDispatchAdmissionStartOutcome, WorkerDispatchLaunchInputSource,
     apply_worker_dispatch_admission_start,
 };
-use crate::worker_dispatch_execution::WorkerDispatchSpawner;
+use crate::worker_dispatch::execution::WorkerDispatchSpawner;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_runtime_state::WorkerRuntimeState;
 
@@ -99,8 +99,8 @@ mod tests {
         ScheduledTaskDispatchInput, ScheduledTaskDispatchTaskDiagnosticMetadata,
         ScheduledTaskDispatchTaskKind, write_create_or_compare_equal,
     };
-    use crate::worker_dispatch_admission_start::WorkerDispatchExplicitLaunchInput;
-    use crate::worker_dispatch_execution::{
+    use crate::worker_dispatch::admission_start::WorkerDispatchExplicitLaunchInput;
+    use crate::worker_dispatch::execution::{
         BootedWorkerDispatch, WorkerDispatchSession, WorkerDispatchSpawner,
     };
     use crate::worker_process::{AgentWorkerCommand, AgentWorkerReady};
@@ -289,7 +289,7 @@ mod tests {
         assert!(matches!(
             outcome,
             WorkerDispatchAdmissionStartOutcome::NotAdmitted {
-                reason: crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
+                reason: crate::worker_dispatch::admission::WorkerDispatchAdmissionBlockedReason::NoQueuedDispatches,
                 blocked_candidates,
             } if blocked_candidates.is_empty()
         ));
@@ -337,7 +337,7 @@ mod tests {
                     );
                     assert!(matches!(
                         *source,
-                        crate::worker_dispatch_start::WorkerDispatchStartError::Dispatch(_)
+                        crate::worker_dispatch::start::WorkerDispatchStartError::Dispatch(_)
                     ));
                 }
                 other => panic!("expected dispatch start error, got {other:?}"),

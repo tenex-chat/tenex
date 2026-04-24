@@ -3,7 +3,7 @@ use std::error::Error;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::worker_dispatch_execution::WorkerDispatchSession;
+use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_message_flow::{
     WorkerMessageFlowError, WorkerMessageFlowInput, WorkerMessageFlowOutcome,
     handle_worker_message_flow,
@@ -103,7 +103,7 @@ where
 mod tests {
     use super::*;
     use crate::nostr_event::Nip01EventFixture;
-    use crate::worker_dispatch_execution::WorkerDispatchSession;
+    use crate::worker_dispatch::execution::WorkerDispatchSession;
     use crate::worker_message_flow::{
         WorkerMessageFlowInput, WorkerMessageFlowOutcome, WorkerMessagePublishContext,
     };

@@ -23,7 +23,7 @@ use crate::publish_outbox::PublishOutboxRelayPublisher;
 use crate::publish_outbox::PublishOutboxRetryPolicy;
 use crate::ral_journal::RalPendingDelegation;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
-use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpawner};
+use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_frame_pump::WorkerFrameReceiver;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
@@ -388,9 +388,9 @@ mod tests {
         RalReplayStatus, append_ral_journal_record, replay_ral_journal,
     };
     use crate::ral_lock::RalLockOwnerProcessStatus;
-    use crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason;
-    use crate::worker_dispatch_execution::BootedWorkerDispatch;
-    use crate::worker_dispatch_input::{
+    use crate::worker_dispatch::admission::WorkerDispatchAdmissionBlockedReason;
+    use crate::worker_dispatch::execution::BootedWorkerDispatch;
+    use crate::worker_dispatch::input::{
         WorkerDispatchExecuteFields, WorkerDispatchInput, WorkerDispatchInputFromExecuteFields,
         WorkerDispatchInputSourceType, WorkerDispatchInputWriterMetadata,
         write_create_or_compare_equal,

@@ -3,11 +3,11 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::ral_lock::RalLockInfo;
-use crate::worker_dispatch_execution::{
+use crate::worker_dispatch::execution::{
     StartedWorkerDispatch, WorkerDispatchExecutionError, WorkerDispatchSpawner,
     start_worker_dispatch,
 };
-use crate::worker_dispatch_spawn::plan_worker_dispatch_spawn;
+use crate::worker_dispatch::spawn::plan_worker_dispatch_spawn;
 use crate::worker_launch::WorkerLaunchPlan;
 use crate::worker_launch_lock::{
     WorkerLaunchLockError, WorkerLaunchLocks, acquire_worker_launch_locks,
@@ -85,7 +85,7 @@ mod tests {
         RalLockError, build_ral_lock_info, ral_allocation_lock_path, ral_state_lock_path,
         read_ral_lock_info, release_ral_lock, try_acquire_ral_lock,
     };
-    use crate::worker_dispatch_execution::{
+    use crate::worker_dispatch::execution::{
         BootedWorkerDispatch, WorkerDispatchExecutionError, WorkerDispatchSession,
     };
     use crate::worker_launch::{RalAllocationLockScope, RalStateLockScope};

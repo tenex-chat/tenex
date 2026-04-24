@@ -12,7 +12,7 @@ use crate::publish_outbox::{
     BackendPublishOutboxInput, PublishOutboxError, PublishOutboxRecord,
     accept_backend_signed_publish_event,
 };
-use crate::worker_dispatch_execution::WorkerDispatchSession;
+use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
 
 #[derive(Debug)]

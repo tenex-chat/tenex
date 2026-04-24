@@ -20,22 +20,22 @@ use crate::ral_lock::RalLockInfo;
 use crate::ral_scheduler::RalScheduler;
 use crate::worker_completion::WorkerCompletionDispatchInput;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
-use crate::worker_dispatch_admission::{
+use crate::worker_dispatch::admission::{
     AdmittedWorkerDispatch, WorkerDispatchAdmissionBlockedCandidate,
     WorkerDispatchAdmissionBlockedReason, WorkerDispatchAdmissionError,
     WorkerDispatchAdmissionInput, WorkerDispatchAdmissionPlan, plan_worker_dispatch_admission,
 };
-use crate::worker_dispatch_admission_start::{
+use crate::worker_dispatch::admission_start::{
     StartedWorkerDispatchAdmission, WorkerDispatchAdmissionLaunchContext,
     WorkerDispatchAdmissionStartError, WorkerDispatchAdmissionStartOutcome,
     WorkerDispatchExplicitLaunchInput, WorkerDispatchLaunchInputSource,
 };
-use crate::worker_dispatch_execution::{WorkerDispatchSession, WorkerDispatchSpawner};
-use crate::worker_dispatch_input::{
+use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
+use crate::worker_dispatch::input::{
     WorkerDispatchInputError, read_optional as read_optional_worker_dispatch_input,
 };
-use crate::worker_dispatch_start::{WorkerDispatchStartInput, start_lock_scoped_worker_dispatch};
-use crate::worker_dispatch_tick::{
+use crate::worker_dispatch::start::{WorkerDispatchStartInput, start_lock_scoped_worker_dispatch};
+use crate::worker_dispatch::tick::{
     WorkerDispatchTickError, WorkerDispatchTickInput, apply_worker_dispatch_tick,
 };
 use crate::worker_frame_pump::WorkerFrameReceiver;
@@ -1074,17 +1074,17 @@ mod tests {
         RalJournalRecord, RalReplayStatus, append_ral_journal_record, replay_ral_journal,
     };
     use crate::ral_lock::{build_ral_lock_info, read_ral_lock_info};
-    use crate::worker_dispatch_admission::WorkerDispatchAdmissionBlockedReason;
-    use crate::worker_dispatch_admission_start::WorkerDispatchAdmissionStartError;
-    use crate::worker_dispatch_execution::{
+    use crate::worker_dispatch::admission::WorkerDispatchAdmissionBlockedReason;
+    use crate::worker_dispatch::admission_start::WorkerDispatchAdmissionStartError;
+    use crate::worker_dispatch::execution::{
         AgentWorkerProcessDispatchSpawner, BootedWorkerDispatch, WorkerDispatchExecutionError,
     };
-    use crate::worker_dispatch_input::{
+    use crate::worker_dispatch::input::{
         WorkerDispatchExecuteFields, WorkerDispatchInput, WorkerDispatchInputFromExecuteFields,
         WorkerDispatchInputSourceType, WorkerDispatchInputWriterMetadata,
         write_create_or_compare_equal,
     };
-    use crate::worker_dispatch_start::WorkerDispatchStartError;
+    use crate::worker_dispatch::start::WorkerDispatchStartError;
     use crate::worker_launch_lock::release_worker_launch_locks;
     use crate::worker_message_flow::WorkerMessageFlowError;
     use crate::worker_process::{

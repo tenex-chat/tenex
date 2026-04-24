@@ -365,7 +365,7 @@ mod tests {
         failed_telegram_outbox_record_path, pending_telegram_outbox_record_path,
     };
     use crate::worker_abort::WorkerAbortSignal;
-    use crate::worker_dispatch_execution::{
+    use crate::worker_dispatch::execution::{
         BootedWorkerDispatch, WorkerDispatchSession, WorkerDispatchSpawner,
     };
     use crate::worker_frame_pump::WorkerFrameReceiver;
