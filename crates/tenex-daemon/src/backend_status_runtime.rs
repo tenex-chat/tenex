@@ -223,7 +223,16 @@ fn publish_agent_configs<S: crate::backend_events::heartbeat::BackendSigner>(
 {
     let mut outcomes = Vec::with_capacity(agent_inventory.active_agents.len());
     let mut skipped = Vec::new();
-    for (index, agent) in agent_inventory.active_agents.iter().enumerate() {
+    // Cache of the last 34011 content hash we published per agent. Kind
+    // 34011 is addressable — the relay stores one event per agent — so
+    // we only need to republish when the effective config actually
+    // differs from what we last sent. In steady state this path emits
+    // zero events.
+    let mut cache = crate::agent_config_publish_cache::read_cache(input.daemon_dir)
+        .unwrap_or_else(|_| crate::agent_config_publish_cache::AgentConfigPublishCache::empty());
+    let mut cache_dirty = false;
+    let mut next_sequence = sequence_base;
+    for agent in agent_inventory.active_agents.iter() {
         let snapshot = match build_agent_config_snapshot(input.tenex_base_dir, &agent.pubkey) {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -234,18 +243,34 @@ fn publish_agent_configs<S: crate::backend_events::heartbeat::BackendSigner>(
                 continue;
             }
         };
-        let request_id = agent_config_request_id(&snapshot.agent_pubkey, input.created_at);
-        let context = backend_status_context(
-            input,
-            &request_id,
-            sequence_base + index as u64,
+        let hash = crate::agent_config_publish_cache::snapshot_hash(
+            &snapshot,
+            &config.whitelisted_pubkeys,
         );
+        if cache.is_fresh(&snapshot.agent_pubkey, &hash) {
+            continue;
+        }
+        let request_id = agent_config_request_id(&snapshot.agent_pubkey, input.created_at);
+        let context = backend_status_context(input, &request_id, next_sequence);
+        next_sequence += 1;
         let outcome = publish_backend_agent_config(
             context,
             agent_config_inputs(&snapshot, config, input.created_at),
             signer,
         )?;
+        cache.record_published(&snapshot.agent_pubkey, &hash, input.accepted_at);
+        cache_dirty = true;
         outcomes.push(outcome);
+    }
+    if cache_dirty {
+        if let Err(error) =
+            crate::agent_config_publish_cache::write_cache(input.daemon_dir, &cache)
+        {
+            tracing::warn!(
+                error = %error,
+                "failed to persist agent config publish cache; next tick will republish the same diffs"
+            );
+        }
     }
     Ok((outcomes, skipped))
 }
@@ -346,8 +371,9 @@ mod tests {
         assert!(outcome.skipped_agents.is_empty());
         for publish in &outcome.agent_configs {
             assert_eq!(publish.record.event.kind, AGENT_CONFIG_KIND);
-            // The first tag must be the agent identifier.
-            assert_eq!(publish.record.event.tags[0][0], "agent");
+            // First tag is the addressable `d` tag, then `agent`.
+            assert_eq!(publish.record.event.tags[0][0], "d");
+            assert_eq!(publish.record.event.tags[1][0], "agent");
         }
         assert_eq!(outcome.agent_inventory.active_agents.len(), 2);
 

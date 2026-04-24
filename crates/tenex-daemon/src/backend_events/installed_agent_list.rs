@@ -9,15 +9,19 @@ use crate::nostr_event::{
     NormalizedNostrEvent, NostrEventError, SignedNostrEvent, canonical_payload, event_hash_hex,
 };
 
-/// Kind 24011 is now a **per-agent** configuration event (not the old
-/// "installed agent list" single event). One event per installed agent,
-/// signed by the backend, listing the agent's available and active
-/// models / skills / mcp servers. Ephemeral: relays don't store it; clients
-/// receive fresh snapshots on each periodic tick and on every 24020 ingest.
-pub const AGENT_CONFIG_KIND: u64 = 24011;
+/// Kind 34011 is an **addressable** per-agent configuration event. One
+/// stored event per (backend_pubkey, 34011, d-tag=agent_pubkey) tuple on
+/// the relay — new publishes replace the prior event for the same
+/// coordinate. Signed by the backend; lists the agent's available and
+/// active models / skills / mcp servers.
+///
+/// The daemon republishes only when the effective config actually changes
+/// (content hash diff). See `agent_config_publish_cache`.
+pub const AGENT_CONFIG_KIND: u64 = 34011;
 
-/// Back-compat alias. The legacy name is preserved because several call sites
-/// and fixtures refer to the kind by its former symbolic name.
+/// Legacy symbolic name kept for two commits while TS consumers migrate to
+/// the 34011 kind constant. Points at `AGENT_CONFIG_KIND`; remove once no
+/// caller references it.
 pub const INSTALLED_AGENT_LIST_KIND: u64 = AGENT_CONFIG_KIND;
 
 /// A `(pubkey, slug)` pair describing one installed agent. Lives here for
@@ -125,6 +129,10 @@ fn validate_non_empty(block: &'static str, values: &[String]) -> Result<(), Agen
 
 fn agent_config_tags(inputs: &AgentConfigInputs<'_>) -> Vec<Vec<String>> {
     let mut tags = Vec::new();
+    // NIP-01 addressable event identifier. Relays dedupe on this value per
+    // (author_pubkey, kind, d-tag); new publishes replace the prior event
+    // for the same agent.
+    tags.push(vec!["d".to_string(), inputs.agent_pubkey.to_string()]);
     tags.push(vec![
         "agent".to_string(),
         inputs.agent_pubkey.to_string(),
@@ -283,6 +291,7 @@ mod tests {
         assert_eq!(
             event.tags,
             vec![
+                vec!["d".to_string(), agent_pubkey.clone()],
                 vec![
                     "agent".to_string(),
                     agent_pubkey.clone(),
@@ -326,11 +335,10 @@ mod tests {
         let event = encode_agent_config(&inputs, &signer).expect("encode");
         assert_eq!(
             event.tags,
-            vec![vec![
-                "agent".to_string(),
-                agent_pubkey,
-                "worker".to_string()
-            ]]
+            vec![
+                vec!["d".to_string(), agent_pubkey.clone()],
+                vec!["agent".to_string(), agent_pubkey, "worker".to_string()]
+            ]
         );
         verify_signed_event(&event).expect("signature must verify");
     }

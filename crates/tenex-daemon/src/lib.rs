@@ -5,6 +5,7 @@
     clippy::type_complexity
 )]
 
+pub mod agent_config_publish_cache;
 pub mod agent_config_update;
 pub mod agent_definition_watcher;
 pub mod agent_install;

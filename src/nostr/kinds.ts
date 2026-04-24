@@ -28,7 +28,7 @@ export const NDKKind = {
     TenexBootProject: 24000 as BaseNDKKind, // Boot project via a-tag
     TenexAgentCreate: 24001 as BaseNDKKind, // Request backend-side agent creation/install
     TenexProjectStatus: 24010 as BaseNDKKind,
-    TenexAgentConfig: 24011 as BaseNDKKind, // Per-agent configuration (model/skills/mcp) — one event per agent
+    TenexAgentConfig: 34011 as BaseNDKKind, // Per-agent configuration (model/skills/mcp), addressable — `d` tag = agent pubkey
     TenexBackendHeartbeat: 24012 as BaseNDKKind, // Backend whitelist request (ephemeral, p-tags owner)
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
     TenexAgentDelete: 24030 as BaseNDKKind, // Agent deletion from projects or globally

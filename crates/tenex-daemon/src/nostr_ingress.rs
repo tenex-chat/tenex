@@ -269,6 +269,20 @@ fn republish_agent_config_after_update(
         Err(error) => return Err(error.into()),
     };
     let config = read_backend_config(input.tenex_base_dir)?;
+    let hash = crate::agent_config_publish_cache::snapshot_hash(
+        &snapshot,
+        &config.whitelisted_pubkeys,
+    );
+
+    let mut cache = crate::agent_config_publish_cache::read_cache(input.daemon_dir)
+        .unwrap_or_else(|_| crate::agent_config_publish_cache::AgentConfigPublishCache::empty());
+    if cache.is_fresh(&snapshot.agent_pubkey, &hash) {
+        // Content hash matches the last event we published for this
+        // agent; kind 34011 is addressable so the relay still has it.
+        // Skip the publish.
+        return Ok(None);
+    }
+
     let signer = config.backend_signer()?;
     let accepted_at = input.timestamp;
     let request_timestamp = input.timestamp;
@@ -305,6 +319,16 @@ fn republish_agent_config_after_update(
         },
         &signer,
     )?;
+    cache.record_published(&snapshot.agent_pubkey, &hash, accepted_at);
+    // Writing the cache is best-effort — on disk failure the next
+    // ingress just republishes. Worth logging but not worth aborting.
+    if let Err(error) = crate::agent_config_publish_cache::write_cache(input.daemon_dir, &cache) {
+        tracing::warn!(
+            agent_pubkey = %snapshot.agent_pubkey,
+            error = %error,
+            "failed to persist agent config publish cache; next ingress will republish"
+        );
+    }
     Ok(Some(outcome.record.event.id))
 }
 
