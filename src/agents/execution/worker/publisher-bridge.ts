@@ -29,7 +29,6 @@ import { getEventHash } from "nostr-tools";
 import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
 
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
-type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_result" }>;
 type PublishRequestMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_request" }>;
 
 interface WorkerProtocolPublisherOptions {
@@ -38,15 +37,10 @@ interface WorkerProtocolPublisherOptions {
     emit: AgentWorkerProtocolEmit;
     execution: ExecuteMessage;
     executionState?: WorkerProtocolPublisherExecutionState;
-    publishResults?: WorkerProtocolPublishResultSource;
 }
 
 export interface WorkerProtocolPublisherExecutionState {
     silentCompletionRequested: boolean;
-}
-
-export interface WorkerProtocolPublishResultSource {
-    waitForPublishResult(requestId: string, timeoutMs: number): Promise<PublishResultMessage>;
 }
 
 export function createWorkerProtocolPublisherFactory(
@@ -361,9 +355,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
     ): Promise<void> {
         try {
             const event = this.encoder.encodeStreamTextDelta(intent, context);
-            await this.signAndEmit(event, "stream_text_delta", {
-                waitForRelayOk: false,
-            });
+            await this.signAndEmit(event, "stream_text_delta", { waitForRelayOk: false });
         } catch {
             // Stream deltas are best-effort live updates; final kind:1 snapshots carry the durable result.
         }
@@ -464,34 +456,27 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         });
     }
 
-    /**
-     * Sign the already-encoded event, emit a `publish_request` frame, and await
-     * the daemon's `publish_result` for acceptance. Returns a PublishedMessageRef
-     * with the envelope derived from the signed event.
-     */
     private async signAndEmit(
         event: NDKEvent,
         runtimeEventClass: PublishRequestMessage["runtimeEventClass"],
         options?: {
             conversationVariant?: PublishRequestMessage["conversationVariant"];
             outputTransport?: PublishedMessageRef["transport"];
-            waitForRelayOk?: boolean;
             timeoutMs?: number;
+            waitForRelayOk?: boolean;
         }
     ): Promise<PublishedMessageRef> {
         injectTraceContext(event);
         await this.options.agent.sign(event);
         const signedEvent = requireSignedPublishEvent(event, this.options.agent.pubkey);
-        const eventId = signedEvent.id;
-        const requestId = `publish-${eventId}`;
-        const waitForRelayOk = options?.waitForRelayOk ?? true;
+        const requestId = `publish-${signedEvent.id}`;
 
         await this.options.emit({
             type: "publish_request",
             correlationId: this.options.execution.correlationId,
             ...this.identity(),
             requestId,
-            waitForRelayOk,
+            waitForRelayOk: options?.waitForRelayOk ?? true,
             timeoutMs: options?.timeoutMs ?? 30_000,
             runtimeEventClass,
             ...(options?.conversationVariant
@@ -499,13 +484,6 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
                 : {}),
             event: signedEvent,
         });
-        await this.waitForPublishAcceptance(
-            requestId,
-            eventId,
-            waitForRelayOk
-                ? this.options.publishResults?.waitForPublishResult(requestId, 30_000)
-                : undefined
-        );
 
         return this.toPublishedMessageRef(event, options?.outputTransport);
     }
@@ -521,30 +499,6 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             envelope,
             ...(event.id ? { encodedId: event.encode() } : {}),
         };
-    }
-
-    private async waitForPublishAcceptance(
-        requestId: string,
-        eventId: string,
-        publishResult: Promise<PublishResultMessage> | undefined
-    ): Promise<void> {
-        if (!publishResult) {
-            return;
-        }
-
-        const result = await publishResult;
-        if (result.status === "accepted" || result.status === "published") {
-            if (!result.eventIds.includes(eventId)) {
-                throw new Error(
-                    `Publish result for ${requestId} did not include signed event id ${eventId}`
-                );
-            }
-            return;
-        }
-
-        const errorMessage =
-            result.error?.message ?? `Publish request ${requestId} ended with ${result.status}`;
-        throw new Error(errorMessage);
     }
 
     private identity(): {

@@ -390,32 +390,14 @@ export class AgentEventEncoder {
         event.tag(["llm-ral", context.ralNumber.toString()]);
     }
 
-    /**
-     * Encode an error intent into an error event.
-     * Error events act as finalization: they have p-tag (triggers notification) and status=completed.
-     */
     encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent();
-        event.kind = NDKKind.Text; // kind:1 - unified conversation format
+        event.kind = NDKKind.Text;
         event.content = intent.message;
 
-        // Add conversation tags
         this.addConversationTags(event, context);
 
-        // Mark as error
         event.tag(["error", intent.errorType || "system"]);
-
-        // Error events are finalization events - notify the user
-        const recipientPubkey = context.triggeringEnvelope.principal.linkedPubkey;
-        if (recipientPubkey) {
-            event.tag(["p", recipientPubkey]);
-        } else {
-            logger.warn("Error event published without recipient p-tag", {
-                conversationId: shortenOptionalConversationId(context.conversationId),
-                triggeringPrincipalId: context.triggeringEnvelope.principal.id,
-                transport: context.triggeringEnvelope.transport,
-            });
-        }
         event.tag(["status", "completed"]);
 
         // Add standard metadata

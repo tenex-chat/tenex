@@ -25,11 +25,9 @@ import type {
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type PingMessage = Extract<AgentWorkerProtocolMessage, { type: "ping" }>;
 type InjectMessage = Extract<AgentWorkerProtocolMessage, { type: "inject" }>;
-type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_result" }>;
 
 class AgentWorkerSession {
     private sequence = 0;
-    private readonly publishResults = new PublishResultCoordinator();
     private readonly nip46Results = new Nip46PublishCoordinator();
     private readonly protocolSink = createProtocolStdoutSink();
     private readonly emit: AgentWorkerProtocolEmit = async (message) => {
@@ -103,7 +101,6 @@ class AgentWorkerSession {
 
                 const nextExecution = this.handleIncomingMessage(result.iteration.value);
                 if (nextExecution === "shutdown") {
-                    this.publishResults.rejectAll(new Error("worker shutdown requested"));
                     this.nip46Results.rejectAll(new Error("worker shutdown requested"));
                     return;
                 }
@@ -121,7 +118,6 @@ class AgentWorkerSession {
 
             const nextExecution = this.handleIncomingMessage(result.value);
             if (nextExecution === "shutdown") {
-                this.publishResults.rejectAll(new Error("worker shutdown requested"));
                 return;
             }
             activeExecution = nextExecution;
@@ -133,11 +129,6 @@ class AgentWorkerSession {
     ): Promise<boolean> | "shutdown" | undefined {
         if (message.type === "ping") {
             void this.handlePing(message);
-            return undefined;
-        }
-
-        if (message.type === "publish_result") {
-            this.publishResults.resolve(message);
             return undefined;
         }
 
@@ -251,9 +242,7 @@ class AgentWorkerSession {
 
         if (engine === "agent") {
             try {
-                const result = await executeAgentWorkerRequest(message, this.emit, {
-                    publishResults: this.publishResults,
-                });
+                const result = await executeAgentWorkerRequest(message, this.emit);
 
                 const terminalBase = {
                     correlationId: message.correlationId,
@@ -371,55 +360,6 @@ class AgentWorkerSession {
     private nextSequence(): number {
         this.sequence += 1;
         return this.sequence;
-    }
-}
-
-class PublishResultCoordinator {
-    private readonly bufferedResults = new Map<string, PublishResultMessage>();
-    private readonly waiters = new Map<
-        string,
-        {
-            resolve: (message: PublishResultMessage) => void;
-            reject: (error: Error) => void;
-            timeout: ReturnType<typeof setTimeout>;
-        }
-    >();
-
-    waitForPublishResult(requestId: string, timeoutMs: number): Promise<PublishResultMessage> {
-        const bufferedResult = this.bufferedResults.get(requestId);
-        if (bufferedResult) {
-            this.bufferedResults.delete(requestId);
-            return Promise.resolve(bufferedResult);
-        }
-
-        return new Promise<PublishResultMessage>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                this.waiters.delete(requestId);
-                reject(new Error(`Timed out waiting for publish_result ${requestId}`));
-            }, timeoutMs);
-
-            this.waiters.set(requestId, { resolve, reject, timeout });
-        });
-    }
-
-    resolve(message: PublishResultMessage): void {
-        const waiter = this.waiters.get(message.requestId);
-        if (!waiter) {
-            this.bufferedResults.set(message.requestId, message);
-            return;
-        }
-
-        clearTimeout(waiter.timeout);
-        this.waiters.delete(message.requestId);
-        waiter.resolve(message);
-    }
-
-    rejectAll(error: Error): void {
-        for (const [requestId, waiter] of this.waiters) {
-            clearTimeout(waiter.timeout);
-            this.waiters.delete(requestId);
-            waiter.reject(error);
-        }
     }
 }
 

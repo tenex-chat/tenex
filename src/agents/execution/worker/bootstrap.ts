@@ -48,7 +48,6 @@ export interface AgentWorkerBootstrapDependencies {
     createExecutor?: (
         options: ConstructorParameters<typeof AgentExecutor>[0]
     ) => AgentWorkerExecutor;
-    publishResults?: Parameters<typeof createWorkerProtocolPublisherFactory>[0]["publishResults"];
 }
 
 export async function executeAgentWorkerRequest(
@@ -101,7 +100,6 @@ export async function executeAgentWorkerRequest(
             emit,
             execution: message,
             executionState: publisherExecutionState,
-            publishResults: dependencies.publishResults,
             projectContext,
         }),
     };
