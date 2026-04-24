@@ -1,6 +1,7 @@
 use std::fmt;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
+
+use tokio::sync::mpsc;
 
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::nip46::protocol::NIP46_KIND;
@@ -19,7 +20,7 @@ pub struct WhitelistIngress {
     pub snapshot_state: Arc<SnapshotState>,
     pub heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
     pub owners: Arc<RwLock<Vec<String>>>,
-    pub reconciler_trigger: Sender<String>,
+    pub reconciler_trigger: mpsc::Sender<String>,
     pub nip46_registry: Arc<NIP46Registry>,
 }
 
@@ -36,7 +37,7 @@ impl WhitelistIngress {
         match event.kind {
             PROJECT_AGENT_SNAPSHOT_KIND => {
                 if self.snapshot_state.observe(event) {
-                    let _ = self.reconciler_trigger.send(event.pubkey.clone());
+                    let _ = self.reconciler_trigger.try_send(event.pubkey.clone());
                 }
                 if let Ok(mut latch) = self.heartbeat_latch.lock() {
                     latch.observe_signed_event(event);
@@ -62,7 +63,7 @@ impl WhitelistIngress {
             .expect("whitelist owners lock must not be poisoned")
             .clone();
         for owner in owners {
-            let _ = self.reconciler_trigger.send(owner);
+            let _ = self.reconciler_trigger.try_send(owner);
         }
     }
 }
@@ -71,8 +72,8 @@ impl WhitelistIngress {
 mod tests {
     use super::*;
     use std::str::FromStr;
-    use std::sync::mpsc::{self, TryRecvError};
     use std::time::Duration;
+    use tokio::sync::mpsc as tokio_mpsc;
 
     use secp256k1::{Keypair, Secp256k1, SecretKey};
 
@@ -170,8 +171,8 @@ mod tests {
         heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
         registry: Arc<NIP46Registry>,
         owners: Vec<String>,
-    ) -> (WhitelistIngress, mpsc::Receiver<String>) {
-        let (tx, rx) = mpsc::channel();
+    ) -> (WhitelistIngress, tokio_mpsc::Receiver<String>) {
+        let (tx, rx) = tokio_mpsc::channel(64);
         (
             WhitelistIngress {
                 snapshot_state,
@@ -182,6 +183,17 @@ mod tests {
             },
             rx,
         )
+    }
+
+    fn recv_with_timeout(
+        rx: &mut tokio_mpsc::Receiver<String>,
+        timeout: Duration,
+    ) -> Option<String> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime builds");
+        rt.block_on(async { tokio::time::timeout(timeout, rx.recv()).await.ok().flatten() })
     }
 
     #[test]
@@ -198,7 +210,7 @@ mod tests {
             vec![owner.xonly_hex.clone()],
         )));
 
-        let (ingress, rx) = ingress_with(
+        let (ingress, mut rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -227,7 +239,7 @@ mod tests {
         assert_eq!(snapshot_state.p_tags_for(&owner.xonly_hex), Some(expected));
 
         assert_eq!(
-            rx.recv_timeout(Duration::from_millis(100))
+            recv_with_timeout(&mut rx, Duration::from_millis(100))
                 .expect("reconciler must receive trigger"),
             owner.xonly_hex
         );
@@ -250,7 +262,7 @@ mod tests {
             Vec::<String>::new(),
         )));
 
-        let (ingress, rx) = ingress_with(
+        let (ingress, mut rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -271,7 +283,7 @@ mod tests {
         ingress.handle_event(&event);
 
         assert!(snapshot_state.p_tags_for(&stranger.xonly_hex).is_none());
-        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
@@ -302,8 +314,8 @@ mod tests {
         )));
 
         let (ingress, _rx) = ingress_with(
-            Arc::clone(&snapshot_state),
-            Arc::clone(&heartbeat_latch),
+            snapshot_state,
+            heartbeat_latch,
             Arc::clone(&registry),
             vec![owner.xonly_hex.clone()],
         );
@@ -332,7 +344,7 @@ mod tests {
             vec![owner.xonly_hex.clone()],
         )));
 
-        let (ingress, rx) = ingress_with(
+        let (ingress, mut rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -350,7 +362,7 @@ mod tests {
         ingress.handle_event(&event);
 
         assert!(snapshot_state.p_tags_for(&owner.xonly_hex).is_none());
-        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        assert!(rx.try_recv().is_err());
         assert_eq!(
             heartbeat_latch.lock().unwrap().state(),
             BackendHeartbeatLatchState::Active
@@ -368,7 +380,7 @@ mod tests {
             Vec::<String>::new(),
         )));
 
-        let (ingress, rx) = ingress_with(
+        let (ingress, mut rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -385,13 +397,13 @@ mod tests {
 
         ingress.handle_event(&event);
         assert_eq!(
-            rx.recv_timeout(Duration::from_millis(100))
+            recv_with_timeout(&mut rx, Duration::from_millis(100))
                 .expect("first event must trigger reconciler"),
             owner.xonly_hex
         );
 
         ingress.handle_event(&event);
-        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
@@ -407,7 +419,7 @@ mod tests {
             vec![owner_a.xonly_hex.clone(), owner_b.xonly_hex.clone()],
         )));
 
-        let (ingress, rx) = ingress_with(
+        let (ingress, mut rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -418,9 +430,9 @@ mod tests {
         assert!(snapshot_state.is_catchup_complete());
 
         let mut triggered = vec![
-            rx.recv_timeout(Duration::from_millis(100))
+            recv_with_timeout(&mut rx, Duration::from_millis(100))
                 .expect("owner a trigger"),
-            rx.recv_timeout(Duration::from_millis(100))
+            recv_with_timeout(&mut rx, Duration::from_millis(100))
                 .expect("owner b trigger"),
         ];
         triggered.sort();
@@ -429,6 +441,6 @@ mod tests {
         assert_eq!(triggered, expected);
 
         ingress.handle_eose();
-        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        assert!(rx.try_recv().is_err());
     }
 }

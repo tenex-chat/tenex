@@ -1,10 +1,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
-use std::thread;
 use std::time::Duration;
 
+use tokio::sync::{mpsc, watch};
 use tracing::debug;
 
 use crate::agent_inventory::read_project_index_agent_pubkeys;
@@ -25,7 +24,7 @@ pub struct AgentInventoryPoller {
     pub tenex_base_dir: PathBuf,
     pub owners: Arc<RwLock<Vec<String>>>,
     pub interval: Duration,
-    pub trigger_tx: Sender<String>,
+    pub trigger_tx: mpsc::Sender<String>,
 }
 
 impl AgentInventoryPoller {
@@ -60,7 +59,7 @@ impl AgentInventoryPoller {
             .expect("agent inventory owners lock must not be poisoned")
             .clone();
         for owner in &owners_snapshot {
-            if let Err(err) = self.trigger_tx.send(owner.clone()) {
+            if let Err(err) = self.trigger_tx.try_send(owner.clone()) {
                 debug!(
                     owner = %owner,
                     error = %err,
@@ -72,13 +71,20 @@ impl AgentInventoryPoller {
         true
     }
 
-    /// Blocking loop: read the inventory, fire triggers on change, sleep for
-    /// `self.interval`, repeat.
-    pub fn run_forever(self) {
+    /// Async loop: read the inventory, fire triggers on change, sleep for
+    /// `self.interval`, repeat. Exits when `shutdown_rx` receives `true`.
+    pub async fn run_forever(self, mut shutdown_rx: watch::Receiver<bool>) {
         let mut last_seen: Option<BTreeSet<String>> = None;
         loop {
             self.run_once(&mut last_seen);
-            thread::sleep(self.interval);
+            tokio::select! {
+                _ = tokio::time::sleep(self.interval) => {}
+                result = shutdown_rx.changed() => {
+                    if result.is_ok() && *shutdown_rx.borrow() {
+                        return;
+                    }
+                }
+            }
         }
     }
 
@@ -103,8 +109,8 @@ mod tests {
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
     use std::path::Path;
-    use std::sync::mpsc;
     use tempfile::tempdir;
+    use tokio::sync::mpsc as tokio_mpsc;
 
     fn pubkey_hex(fill_byte: u8) -> String {
         let secret_bytes = [fill_byte; 32];
@@ -129,7 +135,7 @@ mod tests {
         .expect("agent file must write");
     }
 
-    fn drain(rx: &mpsc::Receiver<String>) -> Vec<String> {
+    fn drain(rx: &mut tokio_mpsc::Receiver<String>) -> Vec<String> {
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {
             out.push(msg);
@@ -137,7 +143,11 @@ mod tests {
         out
     }
 
-    fn poller(base_dir: PathBuf, owners: Vec<String>, tx: Sender<String>) -> AgentInventoryPoller {
+    fn poller(
+        base_dir: PathBuf,
+        owners: Vec<String>,
+        tx: tokio_mpsc::Sender<String>,
+    ) -> AgentInventoryPoller {
         AgentInventoryPoller {
             tenex_base_dir: base_dir,
             owners: Arc::new(RwLock::new(owners)),
@@ -156,12 +166,12 @@ mod tests {
         write_agent(&base_dir, &agent_b, "beta");
 
         let owner = pubkey_hex(0x11);
-        let (tx, rx) = mpsc::channel();
+        let (tx, mut rx) = tokio_mpsc::channel(64);
         let poller = poller(base_dir, vec![owner.clone()], tx);
 
         let mut last_seen = None;
         assert!(poller.run_once(&mut last_seen));
-        assert_eq!(drain(&rx), vec![owner]);
+        assert_eq!(drain(&mut rx), vec![owner]);
 
         let expected: BTreeSet<String> = [agent_a, agent_b].into_iter().collect();
         assert_eq!(last_seen, Some(expected));
@@ -177,15 +187,15 @@ mod tests {
         write_agent(&base_dir, &agent_b, "beta");
 
         let owner = pubkey_hex(0x11);
-        let (tx, rx) = mpsc::channel();
+        let (tx, mut rx) = tokio_mpsc::channel(64);
         let poller = poller(base_dir, vec![owner], tx);
 
         let mut last_seen = None;
         assert!(poller.run_once(&mut last_seen));
-        let _ = drain(&rx);
+        let _ = drain(&mut rx);
 
         assert!(!poller.run_once(&mut last_seen));
-        assert!(drain(&rx).is_empty());
+        assert!(drain(&mut rx).is_empty());
     }
 
     #[test]
@@ -196,18 +206,18 @@ mod tests {
         write_agent(&base_dir, &agent_a, "alpha");
 
         let owner = pubkey_hex(0x11);
-        let (tx, rx) = mpsc::channel();
+        let (tx, mut rx) = tokio_mpsc::channel(64);
         let poller = poller(base_dir.clone(), vec![owner.clone()], tx);
 
         let mut last_seen = None;
         assert!(poller.run_once(&mut last_seen));
-        let _ = drain(&rx);
+        let _ = drain(&mut rx);
 
         let agent_b = pubkey_hex(0x22);
         write_agent(&base_dir, &agent_b, "beta");
 
         assert!(poller.run_once(&mut last_seen));
-        assert_eq!(drain(&rx), vec![owner]);
+        assert_eq!(drain(&mut rx), vec![owner]);
     }
 
     #[test]
@@ -220,18 +230,18 @@ mod tests {
         write_agent(&base_dir, &agent_b, "beta");
 
         let owner = pubkey_hex(0x11);
-        let (tx, rx) = mpsc::channel();
+        let (tx, mut rx) = tokio_mpsc::channel(64);
         let poller = poller(base_dir.clone(), vec![owner.clone()], tx);
 
         let mut last_seen = None;
         assert!(poller.run_once(&mut last_seen));
-        let _ = drain(&rx);
+        let _ = drain(&mut rx);
 
         fs::remove_file(base_dir.join("agents").join(format!("{agent_b}.json")))
             .expect("agent file must delete");
 
         assert!(poller.run_once(&mut last_seen));
-        assert_eq!(drain(&rx), vec![owner]);
+        assert_eq!(drain(&mut rx), vec![owner]);
     }
 
     #[test]
@@ -243,12 +253,12 @@ mod tests {
 
         let owner_one = pubkey_hex(0x11);
         let owner_two = pubkey_hex(0x12);
-        let (tx, rx) = mpsc::channel();
+        let (tx, mut rx) = tokio_mpsc::channel(64);
         let poller = poller(base_dir, vec![owner_one.clone(), owner_two.clone()], tx);
 
         let mut last_seen = None;
         assert!(poller.run_once(&mut last_seen));
-        assert_eq!(drain(&rx), vec![owner_one, owner_two]);
+        assert_eq!(drain(&mut rx), vec![owner_one, owner_two]);
     }
 
     /// When the `agents/` directory is missing, the poller reports an empty
@@ -262,15 +272,15 @@ mod tests {
         let base_dir = temp_dir.path().to_path_buf();
 
         let owner = pubkey_hex(0x11);
-        let (tx, rx) = mpsc::channel();
+        let (tx, mut rx) = tokio_mpsc::channel(64);
         let poller = poller(base_dir, vec![owner.clone()], tx);
 
         let mut last_seen = None;
         assert!(poller.run_once(&mut last_seen));
-        assert_eq!(drain(&rx), vec![owner]);
+        assert_eq!(drain(&mut rx), vec![owner]);
         assert_eq!(last_seen, Some(BTreeSet::new()));
 
         assert!(!poller.run_once(&mut last_seen));
-        assert!(drain(&rx).is_empty());
+        assert!(drain(&mut rx).is_empty());
     }
 }

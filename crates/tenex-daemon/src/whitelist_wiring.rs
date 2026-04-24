@@ -12,10 +12,11 @@
 //! binary because it reads process-global signal-driven atomics.
 
 use std::path::Path;
-use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 use thiserror::Error;
 
@@ -47,10 +48,6 @@ pub enum WhitelistWiringError {
     BackendSigner(String),
     #[error("stale NIP-46 publish cancellation failed: {0}")]
     CancelStaleNip46(String),
-    #[error("reconciler thread spawn failed: {0}")]
-    ReconcilerSpawn(String),
-    #[error("poller thread spawn failed: {0}")]
-    PollerSpawn(String),
 }
 
 /// Wiring bundle kept alive for the life of the daemon process.
@@ -70,11 +67,12 @@ pub struct WhitelistWiring {
     pub nip46_registry: Arc<NIP46Registry>,
     pub reconciler_owners: Arc<RwLock<Vec<String>>>,
     pub poller_owners: Arc<RwLock<Vec<String>>>,
-    /// Kept alive so that dropping the wiring closes the channel and exits
-    /// the reconciler loop on shutdown.
-    _trigger_tx: Sender<String>,
-    _reconciler_thread: JoinHandle<()>,
-    _poller_thread: JoinHandle<()>,
+    /// Kept alive so that the trigger channel stays open while the wiring lives.
+    _trigger_tx: mpsc::Sender<String>,
+    /// Signals both tasks to exit gracefully on shutdown.
+    pub shutdown_tx: watch::Sender<bool>,
+    pub reconciler_task: JoinHandle<()>,
+    pub poller_task: JoinHandle<()>,
 }
 
 /// Sharable bundle of the reload-relevant handles inside
@@ -117,6 +115,7 @@ pub enum ReloadError {
 pub fn build_whitelist_wiring(
     tenex_base_dir: &Path,
     daemon_dir: &Path,
+    runtime_handle: &tokio::runtime::Handle,
 ) -> Result<Option<WhitelistWiring>, WhitelistWiringError> {
     let config = read_backend_config(tenex_base_dir)
         .map_err(|error| WhitelistWiringError::BackendConfig(error.to_string()))?;
@@ -151,7 +150,10 @@ pub fn build_whitelist_wiring(
         config.whitelisted_pubkeys.clone(),
     )));
 
-    let (trigger_tx, trigger_rx) = channel::<String>();
+    let (trigger_tx, trigger_rx) = mpsc::channel::<String>(256);
+    let (shutdown_tx, shutdown_rx_reconciler) = watch::channel(false);
+    let shutdown_rx_poller = shutdown_tx.subscribe();
+
     let reconciler_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
     let poller_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
     let ingress = Arc::new(WhitelistIngress {
@@ -180,10 +182,8 @@ pub fn build_whitelist_wiring(
         idle_retry: WHITELIST_RECONCILER_IDLE_RETRY,
     };
 
-    let reconciler_thread = thread::Builder::new()
-        .name("whitelist-reconciler".to_string())
-        .spawn(move || run_reconciler_loop(reconciler_deps, trigger_rx))
-        .map_err(|error| WhitelistWiringError::ReconcilerSpawn(error.to_string()))?;
+    let reconciler_task =
+        runtime_handle.spawn(run_reconciler_loop(reconciler_deps, trigger_rx, shutdown_rx_reconciler));
 
     let poller = AgentInventoryPoller {
         tenex_base_dir: tenex_base_dir.to_path_buf(),
@@ -191,10 +191,7 @@ pub fn build_whitelist_wiring(
         interval: WHITELIST_POLLER_INTERVAL,
         trigger_tx: trigger_tx.clone(),
     };
-    let poller_thread = thread::Builder::new()
-        .name("whitelist-poller".to_string())
-        .spawn(move || poller.run_forever())
-        .map_err(|error| WhitelistWiringError::PollerSpawn(error.to_string()))?;
+    let poller_task = runtime_handle.spawn(poller.run_forever(shutdown_rx_poller));
 
     Ok(Some(WhitelistWiring {
         ingress,
@@ -203,8 +200,9 @@ pub fn build_whitelist_wiring(
         reconciler_owners,
         poller_owners,
         _trigger_tx: trigger_tx,
-        _reconciler_thread: reconciler_thread,
-        _poller_thread: poller_thread,
+        shutdown_tx,
+        reconciler_task,
+        poller_task,
     }))
 }
 
@@ -296,4 +294,75 @@ pub fn reload_whitelist_wiring(
     wiring: &WhitelistWiring,
 ) -> Result<ReloadOutcome, ReloadError> {
     reload_whitelist_from_handle(tenex_base_dir, &wiring.reload_handle())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    const TEST_SECRET_KEY_HEX: &str =
+        "0101010101010101010101010101010101010101010101010101010101010101";
+
+    fn write_backend_config(tenex_base_dir: &Path, owners: &[String]) {
+        let daemon_dir = tenex_base_dir.join("daemon");
+        let agents_dir = tenex_base_dir.join("agents");
+        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
+        let owners_json = serde_json::to_string(owners).expect("owners must serialize");
+        fs::write(
+            tenex_base_dir.join("config.json"),
+            format!(
+                r#"{{
+                    "whitelistedPubkeys": {owners_json},
+                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
+                    "relays": ["wss://relay.one"]
+                }}"#
+            ),
+        )
+        .expect("config must write");
+    }
+
+    fn owner_pubkey() -> String {
+        use secp256k1::{Keypair, Secp256k1, SecretKey};
+        let secret = SecretKey::from_byte_array([0x02_u8; 32]).expect("valid secret");
+        let secp = Secp256k1::new();
+        let keypair = Keypair::from_secret_key(&secp, &secret);
+        let (xonly, _) = keypair.x_only_public_key();
+        hex::encode(xonly.serialize())
+    }
+
+    /// Proves that the abandoned-thread regression is fixed: constructing a
+    /// WhitelistWiring, sending `true` on the shutdown channel, and awaiting
+    /// both task handles completes within 1 second without either task
+    /// blocking.
+    #[tokio::test]
+    async fn shutdown_tx_causes_both_tasks_to_exit_within_one_second() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tenex_base_dir = std::env::temp_dir()
+            .join(format!("tenex-wiring-shutdown-{nanos}-{}", std::process::id()));
+        let daemon_dir = tenex_base_dir.join("daemon");
+
+        let owner = owner_pubkey();
+        write_backend_config(&tenex_base_dir, &[owner]);
+
+        let runtime_handle = tokio::runtime::Handle::current();
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
+            .expect("wiring must build")
+            .expect("non-empty whitelist must produce wiring");
+
+        wiring.shutdown_tx.send(true).expect("shutdown send must succeed");
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            let _ = wiring.reconciler_task.await;
+            let _ = wiring.poller_task.await;
+        })
+        .await
+        .expect("both tasks must exit within 1 second of shutdown signal");
+
+        fs::remove_dir_all(&tenex_base_dir).ok();
+    }
 }

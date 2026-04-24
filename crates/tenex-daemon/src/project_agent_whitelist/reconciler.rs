@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use tokio::sync::{mpsc, watch};
 
 use tracing::warn;
 
@@ -52,6 +53,23 @@ pub struct ReconcilerDeps {
     pub outbox: Arc<dyn PublishOutboxHandle + Send + Sync>,
     pub debounce: Duration,
     pub idle_retry: Duration,
+}
+
+impl Clone for ReconcilerDeps {
+    fn clone(&self) -> Self {
+        Self {
+            tenex_base_dir: self.tenex_base_dir.clone(),
+            backend_pubkey: self.backend_pubkey.clone(),
+            owners: Arc::clone(&self.owners),
+            snapshot_state: Arc::clone(&self.snapshot_state),
+            nip46_registry: Arc::clone(&self.nip46_registry),
+            nip46_config: self.nip46_config.clone(),
+            default_relay: self.default_relay.clone(),
+            outbox: Arc::clone(&self.outbox),
+            debounce: self.debounce,
+            idle_retry: self.idle_retry,
+        }
+    }
 }
 
 pub fn reconcile_owner(
@@ -124,54 +142,76 @@ fn desired_p_tags(
     desired
 }
 
-pub fn run_reconciler_loop(deps: ReconcilerDeps, trigger_rx: Receiver<String>) {
+pub async fn run_reconciler_loop(
+    deps: ReconcilerDeps,
+    mut trigger_rx: mpsc::Receiver<String>,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
     let mut deadlines: BTreeMap<String, Instant> = BTreeMap::new();
 
     loop {
         let next_deadline = deadlines.values().copied().min();
+        let wake_in = match next_deadline {
+            None => deps.idle_retry,
+            Some(deadline) => deadline
+                .saturating_duration_since(Instant::now())
+                .min(deps.idle_retry),
+        };
 
-        let recv_result = match next_deadline {
-            None => trigger_rx
-                .recv()
-                .map_err(|_| RecvTimeoutError::Disconnected),
-            Some(deadline) => {
-                let wake_in = deadline
-                    .saturating_duration_since(Instant::now())
-                    .min(deps.idle_retry);
-                trigger_rx.recv_timeout(wake_in)
+        let trigger = tokio::select! {
+            msg = trigger_rx.recv() => match msg {
+                Some(owner) => Some(owner),
+                None => return,
+            },
+            _ = tokio::time::sleep(wake_in) => None,
+            result = shutdown_rx.changed() => {
+                if result.is_ok() && *shutdown_rx.borrow() {
+                    return;
+                }
+                continue;
             }
         };
 
-        match recv_result {
-            Ok(owner) => {
-                deadlines.insert(owner, Instant::now() + deps.debounce);
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                let now = Instant::now();
-                let due_owners: Vec<String> = deadlines
-                    .iter()
-                    .filter(|(_, deadline)| **deadline <= now)
-                    .map(|(owner, _)| owner.clone())
-                    .collect();
+        if let Some(owner) = trigger {
+            deadlines.insert(owner, Instant::now() + deps.debounce);
+            continue;
+        }
 
-                for owner in due_owners {
-                    match reconcile_owner(&deps, &owner) {
-                        Ok(ReconcileOutcome::NoChange) | Ok(ReconcileOutcome::Published { .. }) => {
-                            deadlines.remove(&owner);
-                        }
-                        Err(err) => {
-                            warn!(
-                                owner = %owner,
-                                error = %err,
-                                "reconcile_owner failed; rescheduling"
-                            );
-                            deadlines.insert(owner, Instant::now() + deps.idle_retry);
-                        }
-                    }
+        let now = Instant::now();
+        let due_owners: Vec<String> = deadlines
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now)
+            .map(|(owner, _)| owner.clone())
+            .collect();
+
+        for owner in due_owners {
+            let deps_clone = deps.clone();
+            let owner_clone = owner.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                reconcile_owner(&deps_clone, &owner_clone)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(ReconcileOutcome::NoChange)) | Ok(Ok(ReconcileOutcome::Published { .. })) => {
+                    deadlines.remove(&owner);
                 }
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                return;
+                Ok(Err(err)) => {
+                    warn!(
+                        owner = %owner,
+                        error = %err,
+                        "reconcile_owner failed; rescheduling"
+                    );
+                    deadlines.insert(owner, Instant::now() + deps.idle_retry);
+                }
+                Err(join_err) => {
+                    warn!(
+                        owner = %owner,
+                        error = %join_err,
+                        "reconcile_owner task panicked; rescheduling"
+                    );
+                    deadlines.insert(owner, Instant::now() + deps.idle_retry);
+                }
             }
         }
     }
@@ -199,8 +239,9 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::mpsc;
     use std::thread::{self, JoinHandle};
+    use tokio::sync::mpsc as tokio_mpsc;
+    use tokio::sync::watch as tokio_watch;
 
     const BACKEND_SECRET_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";
@@ -762,8 +803,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn run_reconciler_loop_debounces_multiple_triggers_into_single_reconcile() {
+    #[tokio::test]
+    async fn run_reconciler_loop_debounces_multiple_triggers_into_single_reconcile() {
         let temp = unique_temp_dir("debounce");
         fs::create_dir_all(&temp).expect("temp dir");
         let agents = agents_dir(&temp);
@@ -809,18 +850,16 @@ mod tests {
             1,
         );
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = tokio_mpsc::channel(16);
+        let (shutdown_tx, shutdown_rx) = tokio_watch::channel(false);
         let owner_for_loop = owner.xonly_hex.clone();
-        tx.send(owner_for_loop.clone()).unwrap();
-        tx.send(owner_for_loop.clone()).unwrap();
-        tx.send(owner_for_loop.clone()).unwrap();
+        tx.send(owner_for_loop.clone()).await.unwrap();
+        tx.send(owner_for_loop.clone()).await.unwrap();
+        tx.send(owner_for_loop.clone()).await.unwrap();
 
-        let loop_handle = thread::spawn(move || {
-            run_reconciler_loop(deps, rx);
-        });
+        let loop_handle = tokio::spawn(run_reconciler_loop(deps, rx, shutdown_rx));
 
-        // Wait for the final 14199 to land in the outbox, then close the
-        // trigger sender so the loop exits cleanly.
+        // Wait for the final 14199 to land in the outbox, then shut down.
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let final_landed = outbox
@@ -834,10 +873,10 @@ mod tests {
                 Instant::now() < deadline,
                 "timed out waiting for 14199 publication"
             );
-            thread::sleep(Duration::from_millis(5));
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        drop(tx);
-        loop_handle.join().expect("loop thread joins");
+        shutdown_tx.send(true).unwrap();
+        loop_handle.await.expect("loop task joins");
         completer.join().expect("bunker thread");
 
         let sign_requests = outbox
@@ -855,8 +894,8 @@ mod tests {
         assert_eq!(final_events, 1);
     }
 
-    #[test]
-    fn run_reconciler_loop_reschedules_on_sign_error() {
+    #[tokio::test]
+    async fn run_reconciler_loop_reschedules_on_sign_error() {
         let temp = unique_temp_dir("reschedule");
         fs::create_dir_all(&temp).expect("temp dir");
         let agents = agents_dir(&temp);
@@ -963,12 +1002,11 @@ mod tests {
                 .expect("approve dispatch");
         });
 
-        let (tx, rx) = mpsc::channel();
-        tx.send(owner.xonly_hex.clone()).unwrap();
+        let (tx, rx) = tokio_mpsc::channel(16);
+        let (shutdown_tx, shutdown_rx) = tokio_watch::channel(false);
+        tx.send(owner.xonly_hex.clone()).await.unwrap();
 
-        let loop_handle = thread::spawn(move || {
-            run_reconciler_loop(deps, rx);
-        });
+        let loop_handle = tokio::spawn(run_reconciler_loop(deps, rx, shutdown_rx));
 
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -983,10 +1021,10 @@ mod tests {
                 Instant::now() < deadline,
                 "timed out waiting for final 14199 publication after retry"
             );
-            thread::sleep(Duration::from_millis(10));
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        drop(tx);
-        loop_handle.join().expect("loop thread joins");
+        shutdown_tx.send(true).unwrap();
+        loop_handle.await.expect("loop task joins");
         completer.join().expect("bunker thread");
 
         let final_events = outbox

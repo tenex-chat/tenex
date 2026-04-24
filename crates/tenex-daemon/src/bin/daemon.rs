@@ -191,7 +191,7 @@ where
         &runtime_handle,
     )?));
 
-    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
         .map_err(|error| runtime_error(error.to_string()))?;
     if let Some(wiring) = &whitelist_wiring {
         let owners = wiring
@@ -311,11 +311,14 @@ where
         emit_shutdown_status("stopping reload watcher");
         let _ = watcher.join();
     }
-    // Dropping the whitelist wiring closes the reconciler trigger channel,
-    // which causes `run_reconciler_loop` to exit. The supervisor threads
-    // detach here; on a clean shutdown the main thread exits immediately
-    // after and the OS reaps them.
-    drop(whitelist_wiring);
+    // Signal the whitelist tasks to exit and wait for both to finish cleanly.
+    if let Some(wiring) = whitelist_wiring {
+        let _ = wiring.shutdown_tx.send(true);
+        runtime_handle.block_on(async {
+            let _ = wiring.reconciler_task.await;
+            let _ = wiring.poller_task.await;
+        });
+    }
 
     diagnostics_result?;
     SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_COMPLETE, Ordering::SeqCst);
@@ -1511,8 +1514,8 @@ mod tests {
         hex::encode(xonly.serialize())
     }
 
-    #[test]
-    fn build_whitelist_wiring_returns_none_when_no_whitelisted_pubkeys() {
+    #[tokio::test]
+    async fn build_whitelist_wiring_returns_none_when_no_whitelisted_pubkeys() {
         let tenex_base_dir = unique_temp_dir("whitelist-wiring-empty");
         let daemon_dir = tenex_base_dir.join("daemon");
         fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
@@ -1528,15 +1531,16 @@ mod tests {
         )
         .expect("config must write");
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+        let runtime_handle = tokio::runtime::Handle::current();
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
             .expect("wiring construction must succeed");
         assert!(wiring.is_none());
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
 
-    #[test]
-    fn build_whitelist_wiring_constructs_ingress_and_latch_for_whitelisted_owner() {
+    #[tokio::test]
+    async fn build_whitelist_wiring_constructs_ingress_and_latch_for_whitelisted_owner() {
         use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchState;
 
         let tenex_base_dir = unique_temp_dir("whitelist-wiring-full");
@@ -1557,7 +1561,8 @@ mod tests {
         )
         .expect("config must write");
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+        let runtime_handle = tokio::runtime::Handle::current();
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
             .expect("wiring construction must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -1572,10 +1577,10 @@ mod tests {
         // subscription gateway config.
         let _cloned_ingress = Arc::clone(&wiring.ingress);
 
-        // Dropping the wiring closes the trigger channel and exits the
-        // supervisor threads; no assertions required, but we verify the
-        // destructor runs cleanly without blocking on tests.
-        drop(wiring);
+        // Signal shutdown and await both tasks to confirm clean exit.
+        let _ = wiring.shutdown_tx.send(true);
+        let _ = wiring.reconciler_task.await;
+        let _ = wiring.poller_task.await;
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
@@ -1609,6 +1614,7 @@ mod tests {
             since: Some(1_710_001_000),
             lesson_definition_ids: &[],
             project_event_index: &project_event_index,
+            persisted_whitelist: &[],
         })
         .expect("subscription plan must build");
 
@@ -1642,8 +1648,8 @@ mod tests {
         .expect("config must write");
     }
 
-    #[test]
-    fn reload_whitelist_wiring_swaps_reconciler_owners_and_clears_registry() {
+    #[tokio::test]
+    async fn reload_whitelist_wiring_swaps_reconciler_owners_and_clears_registry() {
         use tenex_daemon::backend_config::Nip46Config;
 
         let tenex_base_dir = unique_temp_dir("reload-swap");
@@ -1657,7 +1663,8 @@ mod tests {
         let owner_new_b = pubkey_hex(0x33);
         write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+        let runtime_handle = tokio::runtime::Handle::current();
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
             .expect("wiring build must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -1717,12 +1724,14 @@ mod tests {
             "reload must drop the previously-cached NIP-46 client"
         );
 
-        drop(wiring);
+        let _ = wiring.shutdown_tx.send(true);
+        let _ = wiring.reconciler_task.await;
+        let _ = wiring.poller_task.await;
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
 
-    #[test]
-    fn reload_whitelist_wiring_keeps_latch_stopped_if_previously_stopped() {
+    #[tokio::test]
+    async fn reload_whitelist_wiring_keeps_latch_stopped_if_previously_stopped() {
         use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchState;
         use tenex_daemon::nip46::protocol::NIP46_KIND;
         use tenex_daemon::nostr_event::SignedNostrEvent;
@@ -1737,7 +1746,8 @@ mod tests {
         let owner_new = pubkey_hex(0x55);
         write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
+        let runtime_handle = tokio::runtime::Handle::current();
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
             .expect("wiring build must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -1785,17 +1795,18 @@ mod tests {
         assert!(!latch.contains_owner(&owner_initial));
         drop(latch);
 
-        drop(wiring);
+        let _ = wiring.shutdown_tx.send(true);
+        let _ = wiring.reconciler_task.await;
+        let _ = wiring.poller_task.await;
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
 
-    #[test]
-    fn run_reconciler_loop_picks_up_new_owners_on_reload() {
+    #[tokio::test]
+    async fn run_reconciler_loop_picks_up_new_owners_on_reload() {
         use std::collections::BTreeSet;
         use std::str::FromStr;
         use std::sync::Mutex as StdMutex;
         use std::sync::RwLock;
-        use std::sync::mpsc as std_mpsc;
         use std::thread as std_thread;
         use std::time::Instant;
 
@@ -2017,8 +2028,9 @@ mod tests {
             idle_retry: Duration::from_millis(200),
         };
 
-        let (trigger_tx, trigger_rx) = std_mpsc::channel::<String>();
-        let loop_handle = std_thread::spawn(move || run_reconciler_loop(deps, trigger_rx));
+        let (trigger_tx, trigger_rx) = tokio::sync::mpsc::channel::<String>(256);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let loop_handle = tokio::spawn(run_reconciler_loop(deps, trigger_rx, shutdown_rx));
 
         // Mock bunker driving both owners: sign whichever `sign_event`
         // request lands in the outbox next.
@@ -2098,7 +2110,7 @@ mod tests {
 
         // First reconcile owner_a — it's in the owners list.
         trigger_tx
-            .send(owner_a.xonly_hex.clone())
+            .try_send(owner_a.xonly_hex.clone())
             .expect("trigger owner_a");
         let wait_until = Instant::now() + Duration::from_secs(5);
         loop {
@@ -2114,7 +2126,7 @@ mod tests {
                 Instant::now() < wait_until,
                 "timed out waiting for owner_a 14199 publication"
             );
-            std_thread::sleep(Duration::from_millis(10));
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
         // SIGHUP-style swap: replace the reconciler's owners set with [owner_b].
@@ -2127,7 +2139,7 @@ mod tests {
         // the `owners` list, but if the shared set were the source of truth
         // for other supervisors, this is now the only configured owner.
         trigger_tx
-            .send(owner_b.xonly_hex.clone())
+            .try_send(owner_b.xonly_hex.clone())
             .expect("trigger owner_b");
         let wait_until = Instant::now() + Duration::from_secs(5);
         loop {
@@ -2143,11 +2155,11 @@ mod tests {
                 Instant::now() < wait_until,
                 "timed out waiting for owner_b 14199 publication after reload"
             );
-            std_thread::sleep(Duration::from_millis(10));
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
-        drop(trigger_tx);
-        loop_handle.join().expect("reconciler loop joins");
+        shutdown_tx.send(true).unwrap();
+        loop_handle.await.expect("reconciler loop joins");
         bunker_handle.join().expect("bunker joins");
 
         let final_events: Vec<String> = outbox
