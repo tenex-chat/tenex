@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::io;
-use std::net::TcpStream as StdTcpStream;
 use std::sync::{Arc, mpsc as std_mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -781,6 +780,7 @@ mod tests {
     use crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION;
     use serde_json::json;
     use std::fs;
+    use std::net::TcpStream as StdTcpStream;
     use std::net::TcpListener;
     use std::path::PathBuf;
     use std::sync::mpsc;
