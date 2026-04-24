@@ -89,6 +89,17 @@ pub fn process_relay_subscription_frame(
             None,
             format!("relay requested auth challenge: {challenge}"),
         )),
+        RelaySubscriptionFrame::Ok {
+            event_id,
+            accepted,
+            message,
+        } => Ok(ignored(
+            "ok",
+            None,
+            format!(
+                "relay acknowledged event {event_id} accepted={accepted} message={message:?}"
+            ),
+        )),
     }
 }
 

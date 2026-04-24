@@ -64,7 +64,9 @@ fn frame_subscription_id(frame: &RelaySubscriptionFrame) -> Option<&str> {
         | RelaySubscriptionFrame::Closed {
             subscription_id, ..
         } => Some(subscription_id),
-        RelaySubscriptionFrame::Notice { .. } | RelaySubscriptionFrame::Auth { .. } => None,
+        RelaySubscriptionFrame::Notice { .. }
+        | RelaySubscriptionFrame::Auth { .. }
+        | RelaySubscriptionFrame::Ok { .. } => None,
     }
 }
 

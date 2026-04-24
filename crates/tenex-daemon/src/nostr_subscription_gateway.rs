@@ -924,22 +924,20 @@ mod tests {
         })
         .expect("relay subscription must authenticate and drain");
 
-        assert_eq!(diagnostics.raw_message_count, 3);
+        assert_eq!(diagnostics.raw_message_count, 4);
         assert_eq!(diagnostics.processed_events.len(), 1);
         assert_eq!(diagnostics.processed_events[0].event_id, event.id);
-        assert_eq!(diagnostics.ignored_frames.len(), 2);
-        assert!(
-            diagnostics
-                .ignored_frames
-                .iter()
-                .any(|frame| frame.code == "auth")
-        );
-        assert!(
-            diagnostics
-                .ignored_frames
-                .iter()
-                .any(|frame| frame.code == "eose")
-        );
+        assert_eq!(diagnostics.ignored_frames.len(), 3);
+        for code in ["auth", "ok", "eose"] {
+            assert!(
+                diagnostics
+                    .ignored_frames
+                    .iter()
+                    .any(|frame| frame.code == code),
+                "expected ignored frame with code {code:?}, got {:?}",
+                diagnostics.ignored_frames
+            );
+        }
 
         let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert_eq!(queue.queued.len(), 1);
@@ -1099,6 +1097,23 @@ mod tests {
                     ))
                     .expect("mock relay must send AUTH challenge");
                 let auth = read_mock_relay_json_message(&mut websocket);
+                let auth_event_id = auth
+                    .get(1)
+                    .and_then(|value| value.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .expect("mock relay auth frame must carry signed event with id");
+                websocket
+                    .send(Message::text(
+                        serde_json::to_string(&json!([
+                            "OK",
+                            auth_event_id,
+                            true,
+                            "mock relay authenticated"
+                        ]))
+                        .expect("OK frame must serialize"),
+                    ))
+                    .expect("mock relay must acknowledge AUTH with OK");
                 let retried_req = read_mock_relay_json_message(&mut websocket);
                 for frame in frames_to_send {
                     websocket

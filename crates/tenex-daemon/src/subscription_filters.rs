@@ -73,6 +73,11 @@ pub enum RelaySubscriptionFrame {
     Auth {
         challenge: String,
     },
+    Ok {
+        event_id: String,
+        accepted: bool,
+        message: String,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -230,6 +235,14 @@ pub fn parse_relay_subscription_message(
         }),
         "AUTH" => Ok(RelaySubscriptionFrame::Auth {
             challenge: required_string(frame, 1, "AUTH challenge")?,
+        }),
+        "OK" => Ok(RelaySubscriptionFrame::Ok {
+            event_id: required_string(frame, 1, "OK event id")?,
+            accepted: frame
+                .get(2)
+                .and_then(Value::as_bool)
+                .ok_or_else(|| invalid_frame("missing OK accepted flag"))?,
+            message: optional_string(frame, 3).unwrap_or_default(),
         }),
         other => Err(invalid_frame(format!("unsupported frame type: {other}"))),
     }
@@ -486,6 +499,31 @@ mod tests {
             parse_relay_subscription_message(r#"["AUTH","challenge"]"#).expect("AUTH"),
             RelaySubscriptionFrame::Auth {
                 challenge: "challenge".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_relay_subscription_message(r#"["OK","abc",true,"stored"]"#).expect("OK accepted"),
+            RelaySubscriptionFrame::Ok {
+                event_id: "abc".to_string(),
+                accepted: true,
+                message: "stored".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_relay_subscription_message(r#"["OK","abc",false,"rate-limited"]"#)
+                .expect("OK rejected"),
+            RelaySubscriptionFrame::Ok {
+                event_id: "abc".to_string(),
+                accepted: false,
+                message: "rate-limited".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_relay_subscription_message(r#"["OK","abc",true]"#).expect("OK without message"),
+            RelaySubscriptionFrame::Ok {
+                event_id: "abc".to_string(),
+                accepted: true,
+                message: String::new(),
             }
         );
     }
