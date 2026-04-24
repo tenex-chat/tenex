@@ -1,26 +1,33 @@
-//! Shared registry of spawned session threads.
+//! Shared registry of spawned session tasks.
 //!
-//! The daemon tick detaches each admitted dispatch onto its own OS thread and
-//! pushes the `JoinHandle` here. A later tick polls this registry for finished
-//! handles, drains their terminal outcomes, and reports them. At shutdown, the
-//! loop driver joins any still-running handles so nothing is lost.
+//! The daemon tick detaches each admitted dispatch onto its own blocking task
+//! and pushes the `JoinHandle` here. A later tick polls this registry for
+//! finished handles, drains their terminal outcomes, and reports them. At
+//! shutdown, the loop driver joins any still-running handles so nothing is
+//! lost.
+//!
+//! `drain_finished` and `join_all` join tokio `JoinHandle`s from a sync
+//! context via `Handle::current().block_on(...)`. Both methods **must** be
+//! called from a blocking context (e.g., inside `tokio::task::spawn_blocking`)
+//! where `Handle::current()` is available but blocking the thread is permitted.
 
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+
+use tokio::task::JoinHandle as TokioJoinHandle;
 
 use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
 
-/// A single spawned session thread plus enough identity to describe it in
-/// logs and error outcomes if the thread panics.
+/// A single spawned session task plus enough identity to describe it in
+/// logs and error outcomes if the task panics.
 #[derive(Debug)]
 pub struct SessionJoinHandle {
     pub dispatch_id: String,
     pub worker_id: String,
-    pub handle: JoinHandle<DaemonWorkerRuntimeOutcome>,
+    pub handle: TokioJoinHandle<DaemonWorkerRuntimeOutcome>,
 }
 
 /// Clone-friendly wrapper around the shared registry of in-flight session
-/// threads. The tick loop clones this into each tick; the loop driver holds
+/// tasks. The tick loop clones this into each tick; the loop driver holds
 /// it for shutdown-time joining.
 #[derive(Debug, Clone, Default)]
 pub struct WorkerSessionRegistry {
@@ -32,7 +39,7 @@ impl WorkerSessionRegistry {
         Self::default()
     }
 
-    /// Register a newly spawned session thread.
+    /// Register a newly spawned session task.
     pub fn push(&self, session: SessionJoinHandle) {
         self.inner
             .lock()
@@ -40,9 +47,14 @@ impl WorkerSessionRegistry {
             .push(session);
     }
 
-    /// Remove and join every session thread whose `JoinHandle::is_finished()`
+    /// Remove and join every session task whose `JoinHandle::is_finished()`
     /// returns true, converting each into its `DaemonWorkerRuntimeOutcome`.
-    /// Threads still running stay in the registry.
+    /// Tasks still running stay in the registry.
+    ///
+    /// When finished tasks are present, this must be called from a blocking
+    /// context (inside `tokio::task::spawn_blocking`) where
+    /// `tokio::runtime::Handle::current()` is available. If the registry is
+    /// empty, this is always safe to call from any context.
     pub fn drain_finished(&self) -> Vec<DaemonWorkerRuntimeOutcome> {
         let mut guard = self.inner.lock().expect("session registry mutex poisoned");
         let (finished, still_running): (Vec<_>, Vec<_>) = std::mem::take(&mut *guard)
@@ -50,35 +62,48 @@ impl WorkerSessionRegistry {
             .partition(|session| session.handle.is_finished());
         *guard = still_running;
         drop(guard);
+        if finished.is_empty() {
+            return Vec::new();
+        }
+        let rt_handle = tokio::runtime::Handle::current();
         finished
             .into_iter()
-            .map(|session| match session.handle.join() {
+            .map(|session| match rt_handle.block_on(session.handle) {
                 Ok(outcome) => outcome,
                 Err(_) => DaemonWorkerRuntimeOutcome::SessionFailed {
                     dispatch_id: session.dispatch_id,
                     worker_id: session.worker_id,
-                    error: "session thread panicked".to_string(),
+                    error: "session task panicked".to_string(),
                 },
             })
             .collect()
     }
 
-    /// Take every session thread out of the registry and join it, blocking
+    /// Take every session task out of the registry and join it, blocking
     /// until each returns. Used at loop shutdown to make sure no session is
     /// left running after the daemon stops.
+    ///
+    /// When tasks are present, this must be called from a blocking context
+    /// (inside `tokio::task::spawn_blocking`) where
+    /// `tokio::runtime::Handle::current()` is available. If the registry is
+    /// empty, this is always safe to call from any context.
     pub fn join_all(&self) -> Vec<DaemonWorkerRuntimeOutcome> {
         let sessions: Vec<SessionJoinHandle> = {
             let mut guard = self.inner.lock().expect("session registry mutex poisoned");
             std::mem::take(&mut *guard)
         };
+        if sessions.is_empty() {
+            return Vec::new();
+        }
+        let rt_handle = tokio::runtime::Handle::current();
         sessions
             .into_iter()
-            .map(|session| match session.handle.join() {
+            .map(|session| match rt_handle.block_on(session.handle) {
                 Ok(outcome) => outcome,
                 Err(_) => DaemonWorkerRuntimeOutcome::SessionFailed {
                     dispatch_id: session.dispatch_id,
                     worker_id: session.worker_id,
-                    error: "session thread panicked".to_string(),
+                    error: "session task panicked".to_string(),
                 },
             })
             .collect()

@@ -413,6 +413,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio;
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -805,64 +806,85 @@ mod tests {
         seed_queued_dispatch(&fixture.daemon_dir);
         seed_dispatch_input(&fixture.daemon_dir);
         let shell = test_shell(&fixture.daemon_dir);
-        let mut clock = RecordingClock {
-            now_ms_values: VecDeque::from(vec![1_710_000_700_000, 1_710_000_700_030]),
-            observed_now_ms_values: Vec::new(),
-        };
-        let mut sleeper = RecordingSleeper::default();
-        let mut stop_signal = StopAfterChecks {
-            checks: 0,
-            stop_on_or_after: 2,
-        };
         let sent_messages = Arc::new(Mutex::new(Vec::new()));
-        let mut spawner = RecordingWorkerSpawner {
-            incoming_frames: VecDeque::from([
-                frame_for(&heartbeat_message()),
-                frame_for(&complete_message(vec!["published-event-id".to_string()])),
-            ]),
-            sent_messages: Arc::clone(&sent_messages),
-            spawn_calls: 0,
-        };
         let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
-        let mut telegram_publisher = NoTelegramPublisher;
         let runtime_state = new_shared_worker_runtime_state();
-        let worker_config = AgentWorkerProcessConfig::default();
         let project_event_index = Arc::new(Mutex::new(ProjectEventIndex::new()));
 
-        let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
-            &shell,
-            DaemonForegroundStoppableInput {
-                tenex_base_dir: &fixture.tenex_base_dir,
-                max_iterations: None,
-                sleep_ms: 25,
-                retry_policy: PublishOutboxRetryPolicy::default(),
-                project_boot_state: empty_project_boot_state(),
-                project_event_index: Arc::clone(&project_event_index),
-                heartbeat_latch: None,
-            },
-            DaemonForegroundWorkerInput {
-                runtime_state: runtime_state.clone(),
-                correlation_id_prefix: "foreground-worker-dispatch-test".to_string(),
-                command: AgentWorkerCommand::new("bun"),
-                worker_config: &worker_config,
-                writer_version: "foreground-worker-test@0".to_string(),
-                resolved_pending_delegations: Vec::new(),
-                publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
-                max_frames: 4,
-                session_registry: WorkerSessionRegistry::new(),
-            },
-            &mut clock,
-            &mut sleeper,
-            &mut stop_signal,
-            &mut spawner,
-            &publisher,
-            &mut telegram_publisher,
-        )
-        .expect("foreground worker runner must complete queued dispatch");
+        let tenex_base_dir = fixture.tenex_base_dir.clone();
+        let sent_messages_clone = Arc::clone(&sent_messages);
+        let publisher_clone = Arc::clone(&publisher);
+        let runtime_state_clone = runtime_state.clone();
+        let project_event_index_clone = Arc::clone(&project_event_index);
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime must build");
+        let (report, spawner) = rt
+            .block_on(async {
+                tokio::task::spawn_blocking(move || {
+                    let worker_config = AgentWorkerProcessConfig::default();
+                    let mut clock = RecordingClock {
+                        now_ms_values: VecDeque::from(vec![
+                            1_710_000_700_000,
+                            1_710_000_700_030,
+                        ]),
+                        observed_now_ms_values: Vec::new(),
+                    };
+                    let mut sleeper = RecordingSleeper::default();
+                    let mut stop_signal = StopAfterChecks {
+                        checks: 0,
+                        stop_on_or_after: 2,
+                    };
+                    let mut spawner = RecordingWorkerSpawner {
+                        incoming_frames: VecDeque::from([
+                            frame_for(&heartbeat_message()),
+                            frame_for(&complete_message(vec!["published-event-id".to_string()])),
+                        ]),
+                        sent_messages: sent_messages_clone,
+                        spawn_calls: 0,
+                    };
+                    let mut telegram_publisher = NoTelegramPublisher;
+                    let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
+                        &shell,
+                        DaemonForegroundStoppableInput {
+                            tenex_base_dir: &tenex_base_dir,
+                            max_iterations: None,
+                            sleep_ms: 25,
+                            retry_policy: PublishOutboxRetryPolicy::default(),
+                            project_boot_state: empty_project_boot_state(),
+                            project_event_index: project_event_index_clone,
+                            heartbeat_latch: None,
+                        },
+                        DaemonForegroundWorkerInput {
+                            runtime_state: runtime_state_clone,
+                            correlation_id_prefix: "foreground-worker-dispatch-test".to_string(),
+                            command: AgentWorkerCommand::new("bun"),
+                            worker_config: &worker_config,
+                            writer_version: "foreground-worker-test@0".to_string(),
+                            resolved_pending_delegations: Vec::new(),
+                            publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
+                            max_frames: 4,
+                            session_registry: WorkerSessionRegistry::new(),
+                        },
+                        &mut clock,
+                        &mut sleeper,
+                        &mut stop_signal,
+                        &mut spawner,
+                        &publisher_clone,
+                        &mut telegram_publisher,
+                    )
+                    .expect("foreground worker runner must complete queued dispatch");
+                    (report, spawner)
+                })
+                .await
+                .expect("spawn_blocking must not panic")
+            });
 
         assert_eq!(spawner.spawn_calls, 1);
         assert_eq!(report.tick_loop.steps.len(), 1);
-        // First tick admits the queued dispatch; since the session thread is
+        // First tick admits the queued dispatch; since the session task is
         // detached, the tick returns before it finishes. Admission is all
         // the per-tick outcome carries.
         let tick_outcomes = &report.tick_loop.steps[0].maintenance_outcome.worker_runtime;
@@ -874,7 +896,7 @@ mod tests {
             )),
             "expected SessionAdmitted for dispatch-alpha, got {tick_outcomes:?}"
         );
-        // The session thread is joined at loop shutdown and its terminal
+        // The session task is joined at loop shutdown and its terminal
         // outcome lands in shutdown_completions.
         assert_eq!(
             report.shutdown_completions,

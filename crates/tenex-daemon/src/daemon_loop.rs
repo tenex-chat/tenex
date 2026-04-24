@@ -460,7 +460,7 @@ where
                 let max_frames = worker.max_frames;
                 let dispatch_id_for_thread = dispatch_id.clone();
                 let worker_id_for_thread = worker_id.clone();
-                let handle = std::thread::spawn(move || {
+                let handle = tokio::task::spawn_blocking(move || {
                     let publisher_for_live = Arc::clone(&publisher_for_thread);
                     let mut live_publish_maintenance = move |daemon_dir: &Path, now: u64| {
                         let mut guard =
@@ -497,14 +497,14 @@ where
                         max_frames,
                         started,
                     );
-                    match result {
+                    let outcome = match result {
                         Ok(outcome) => outcome,
                         Err(source) => {
                             tracing::error!(
                                 error = %source,
                                 dispatch_id = %dispatch_id_for_thread,
                                 worker_id = %worker_id_for_thread,
-                                "detached session thread returned error"
+                                "detached session task returned error"
                             );
                             DaemonWorkerRuntimeOutcome::SessionFailed {
                                 dispatch_id: dispatch_id_for_thread,
@@ -512,7 +512,9 @@ where
                                 error: source.to_string(),
                             }
                         }
-                    }
+                    };
+                    crate::foreground_wake::request_wake();
+                    outcome
                 });
                 worker.session_registry.push(SessionJoinHandle {
                     dispatch_id: dispatch_id.clone(),
@@ -1018,6 +1020,7 @@ mod tests {
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio;
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     const TEST_SECRET_KEY_HEX: &str =
@@ -1485,39 +1488,63 @@ mod tests {
         seed_queued_dispatch_for(&fixture.daemon_dir, &scenario);
         seed_dispatch_input_for(&fixture.daemon_dir, &scenario);
         let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
-        let mut telegram_publisher = NoTelegramPublisher;
-        let mut spawner = ProtocolErrorSpawner::default();
         let runtime_state = new_shared_worker_runtime_state();
-        let worker_config = AgentWorkerProcessConfig::default();
         let session_registry = WorkerSessionRegistry::new();
 
-        let outcome = run_daemon_tick_once_from_filesystem_with_worker(
-            DaemonMaintenanceInput {
-                tenex_base_dir: &fixture.tenex_base_dir,
-                daemon_dir: &fixture.daemon_dir,
-                now_ms: 1_710_001_000_000,
-                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
-                project_event_index: Arc::clone(&fixture.project_event_index),
-                heartbeat_latch: None,
-            },
-            DaemonWorkerTickInput {
-                runtime_state: runtime_state.clone(),
-                correlation_id: "daemon-loop-worker-error-drain".to_string(),
-                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
-                command: AgentWorkerCommand::new("bun"),
-                worker_config: &worker_config,
-                writer_version: "daemon-loop-test@0".to_string(),
-                resolved_pending_delegations: Vec::new(),
-                publish_result_sequence: None,
-                session_registry: session_registry.clone(),
-                max_frames: 1,
-            },
-            &mut spawner,
-            &publisher,
-            PublishOutboxRetryPolicy::default(),
-            &mut telegram_publisher,
-        )
-        .expect("tick must succeed; admission is synchronous and session errors detach");
+        let tenex_base_dir = fixture.tenex_base_dir.clone();
+        let daemon_dir = fixture.daemon_dir.clone();
+        let project_boot_state = project_boot_state_snapshot(&fixture.project_boot_state);
+        let project_event_index = Arc::clone(&fixture.project_event_index);
+        let publisher_clone = Arc::clone(&publisher);
+        let session_registry_clone = session_registry.clone();
+        let runtime_state_clone = runtime_state.clone();
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime must build");
+        let (outcome, spawner, session_outcomes) = rt
+            .block_on(async {
+                tokio::task::spawn_blocking(move || {
+                    let worker_config = AgentWorkerProcessConfig::default();
+                    let mut spawner = ProtocolErrorSpawner::default();
+                    let mut telegram_publisher = NoTelegramPublisher;
+                    let outcome = run_daemon_tick_once_from_filesystem_with_worker(
+                        DaemonMaintenanceInput {
+                            tenex_base_dir: &tenex_base_dir,
+                            daemon_dir: &daemon_dir,
+                            now_ms: 1_710_001_000_000,
+                            project_boot_state,
+                            project_event_index,
+                            heartbeat_latch: None,
+                        },
+                        DaemonWorkerTickInput {
+                            runtime_state: runtime_state_clone,
+                            correlation_id: "daemon-loop-worker-error-drain".to_string(),
+                            lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                            command: AgentWorkerCommand::new("bun"),
+                            worker_config: &worker_config,
+                            writer_version: "daemon-loop-test@0".to_string(),
+                            resolved_pending_delegations: Vec::new(),
+                            publish_result_sequence: None,
+                            session_registry: session_registry_clone.clone(),
+                            max_frames: 1,
+                        },
+                        &mut spawner,
+                        &publisher_clone,
+                        PublishOutboxRetryPolicy::default(),
+                        &mut telegram_publisher,
+                    )
+                    .expect(
+                        "tick must succeed; admission is synchronous and session errors detach",
+                    );
+                    // Join sessions inside the blocking context where Handle::current() is valid.
+                    let session_outcomes = session_registry_clone.join_all();
+                    (outcome, spawner, session_outcomes)
+                })
+                .await
+                .expect("spawn_blocking must not panic")
+            });
 
         // Tick admitted the session (and reports NoQueuedDispatches next).
         assert!(
@@ -1526,9 +1553,8 @@ mod tests {
                 .iter()
                 .any(|o| matches!(o, DaemonWorkerRuntimeOutcome::SessionAdmitted { .. }))
         );
-        // The spawned session thread errors out asynchronously; join it and
+        // The spawned session task errors out asynchronously; join it and
         // assert the failure is reported.
-        let session_outcomes = session_registry.join_all();
         assert_eq!(session_outcomes.len(), 1);
         assert!(matches!(
             session_outcomes[0],
@@ -2164,10 +2190,10 @@ mod tests {
         seed_dispatch_input_for(&fixture.daemon_dir, &alpha);
         seed_dispatch_input_for(&fixture.daemon_dir, &beta);
 
-        // Shared barrier: both spawned session threads park on their first
+        // Shared barrier: both spawned session tasks park on their first
         // receive_worker_frame call and only unblock once both have reached
-        // it. If admission were serialized (admit-run-complete-admit), thread
-        // two would never get spawned before thread one exited and the
+        // it. If admission were serialized (admit-run-complete-admit), task
+        // two would never get spawned before task one exited and the
         // barrier would deadlock the test.
         let barrier = Arc::new(Barrier::new(2));
         let alpha_frames = vec![
@@ -2178,44 +2204,67 @@ mod tests {
             frame_for(&heartbeat_message_for(&beta)),
             frame_for(&complete_message_for(&beta)),
         ];
-        let mut spawner = BarrierGatedSpawner::new(vec![
+        let spawner = BarrierGatedSpawner::new(vec![
             BarrierGatedSession::new(alpha.worker_id, Arc::clone(&barrier), alpha_frames),
             BarrierGatedSession::new(beta.worker_id, Arc::clone(&barrier), beta_frames),
         ]);
 
         let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
-        let mut telegram_publisher = NoTelegramPublisher;
         let runtime_state = new_shared_worker_runtime_state();
-        let worker_config = AgentWorkerProcessConfig::default();
         let session_registry = WorkerSessionRegistry::new();
 
-        let outcome = run_daemon_tick_once_from_filesystem_with_worker(
-            DaemonMaintenanceInput {
-                tenex_base_dir: &fixture.tenex_base_dir,
-                daemon_dir: &fixture.daemon_dir,
-                now_ms: 1_710_001_000_000,
-                project_boot_state: project_boot_state_snapshot(&fixture.project_boot_state),
-                project_event_index: Arc::clone(&fixture.project_event_index),
-                heartbeat_latch: None,
-            },
-            DaemonWorkerTickInput {
-                runtime_state: runtime_state.clone(),
-                correlation_id: "daemon-loop-worker-concurrent".to_string(),
-                lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
-                command: AgentWorkerCommand::new("bun"),
-                worker_config: &worker_config,
-                writer_version: "daemon-loop-test@0".to_string(),
-                resolved_pending_delegations: Vec::new(),
-                publish_result_sequence: None,
-                session_registry: session_registry.clone(),
-                max_frames: 4,
-            },
-            &mut spawner,
-            &publisher,
-            PublishOutboxRetryPolicy::default(),
-            &mut telegram_publisher,
-        )
-        .expect("concurrent-session tick must succeed");
+        let tenex_base_dir = fixture.tenex_base_dir.clone();
+        let daemon_dir = fixture.daemon_dir.clone();
+        let project_boot_state = project_boot_state_snapshot(&fixture.project_boot_state);
+        let project_event_index = Arc::clone(&fixture.project_event_index);
+        let publisher_clone = Arc::clone(&publisher);
+        let session_registry_clone = session_registry.clone();
+        let runtime_state_clone = runtime_state.clone();
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime must build");
+        let (outcome, spawner, session_outcomes) = rt
+            .block_on(async {
+                tokio::task::spawn_blocking(move || {
+                    let worker_config = AgentWorkerProcessConfig::default();
+                    let mut spawner = spawner;
+                    let mut telegram_publisher = NoTelegramPublisher;
+                    let outcome = run_daemon_tick_once_from_filesystem_with_worker(
+                        DaemonMaintenanceInput {
+                            tenex_base_dir: &tenex_base_dir,
+                            daemon_dir: &daemon_dir,
+                            now_ms: 1_710_001_000_000,
+                            project_boot_state,
+                            project_event_index,
+                            heartbeat_latch: None,
+                        },
+                        DaemonWorkerTickInput {
+                            runtime_state: runtime_state_clone,
+                            correlation_id: "daemon-loop-worker-concurrent".to_string(),
+                            lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                            command: AgentWorkerCommand::new("bun"),
+                            worker_config: &worker_config,
+                            writer_version: "daemon-loop-test@0".to_string(),
+                            resolved_pending_delegations: Vec::new(),
+                            publish_result_sequence: None,
+                            session_registry: session_registry_clone.clone(),
+                            max_frames: 4,
+                        },
+                        &mut spawner,
+                        &publisher_clone,
+                        PublishOutboxRetryPolicy::default(),
+                        &mut telegram_publisher,
+                    )
+                    .expect("concurrent-session tick must succeed");
+                    // Join sessions inside the blocking context where Handle::current() is valid.
+                    let session_outcomes = session_registry_clone.join_all();
+                    (outcome, spawner, session_outcomes)
+                })
+                .await
+                .expect("spawn_blocking must not panic")
+            });
 
         // The tick must admit both dispatches synchronously. Exactly two
         // SessionAdmitted entries (one per dispatch) with distinct
@@ -2258,10 +2307,9 @@ mod tests {
         ));
         assert_eq!(spawner.spawn_calls, 2);
 
-        // Join both detached session threads and assert each finished with a
+        // Join both detached session tasks and assert each finished with a
         // clean TerminalResultHandled completion keyed to its own
         // dispatch_id/worker_id.
-        let session_outcomes = session_registry.join_all();
         assert_eq!(session_outcomes.len(), 2);
         let mut completed: Vec<(String, String)> = session_outcomes
             .iter()
@@ -2334,7 +2382,160 @@ mod tests {
             "alpha and beta completion sequences must be distinct"
         );
 
-        // Both detached threads released their runtime-state entries cleanly.
+        // Both detached tasks released their runtime-state entries cleanly.
         assert_eq!(runtime_state.lock().unwrap().len(), 0);
+    }
+
+    /// Regression gate for the `Option<TokioRuntimeHandle>` design that broke
+    /// scenario 101 Phase 5. That bug caused sessions spawned through
+    /// construction paths that called `WorkerSessionRegistry::new()` (not
+    /// `new_on_runtime`) to fall back to `std::thread::spawn`, leaving
+    /// `drain_finished` returning `SessionFailed` before `remove_terminal_worker`
+    /// ran, leaving the admission in-flight counter permanently wrong.
+    ///
+    /// The new design eliminates all construction-site decisions: every
+    /// `WorkerSessionRegistry::new()` call site produces the same struct, and
+    /// sessions always run as `tokio::task::spawn_blocking`. This test verifies:
+    ///
+    /// 1. A session spawned through the production tick path returns
+    ///    `SessionCompleted` (not `SessionFailed`) when the worker sends a
+    ///    complete frame and `drain_finished` surfaces that outcome.
+    /// 2. `SharedWorkerRuntimeState` is empty after `drain_finished` returns,
+    ///    proving `remove_terminal_worker` ran inside the task before the
+    ///    handle's `is_finished()` returned true.
+    #[test]
+    fn drain_finished_returns_session_completed_and_runtime_state_is_clear() {
+        let scenario = DispatchScenario {
+            project_id: "project-alpha",
+            agent_pubkey: TEST_AGENT_PUBKEY.to_string(),
+            conversation_id: "conversation-alpha",
+            ral_number: 7,
+            dispatch_id: "dispatch-drain-gate",
+            dispatch_sequence: 1,
+            dispatch_timestamp: 1_710_000_700_001,
+            correlation_id: "queue-dispatch-drain-gate",
+            triggering_event_id: "event-drain-gate",
+            claim_token: "claim-drain-gate",
+            worker_id: "worker-drain-gate",
+            ral_alloc_sequence: 1,
+            ral_alloc_timestamp: 1_710_000_700_001,
+            ral_alloc_correlation_id: "ral-alloc-drain-gate",
+            ral_claim_sequence: 2,
+            ral_claim_timestamp: 1_710_000_700_002,
+            ral_claim_correlation_id: "ral-claim-drain-gate",
+        };
+
+        let fixture = TickFilesystemFixture::new("daemon-loop-drain-gate", 0x0A);
+        seed_claimed_ral_for(&fixture.daemon_dir, &scenario);
+        seed_queued_dispatch_for(&fixture.daemon_dir, &scenario);
+        seed_dispatch_input_for(&fixture.daemon_dir, &scenario);
+
+        // Single-count barrier fires immediately — no coordination needed.
+        let barrier = Arc::new(Barrier::new(1));
+        let frames = vec![
+            frame_for(&heartbeat_message_for(&scenario)),
+            frame_for(&complete_message_for(&scenario)),
+        ];
+        let spawner = BarrierGatedSpawner::new(vec![BarrierGatedSession::new(
+            scenario.worker_id,
+            Arc::clone(&barrier),
+            frames,
+        )]);
+
+        let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
+        let runtime_state = new_shared_worker_runtime_state();
+        let session_registry = WorkerSessionRegistry::new();
+
+        let tenex_base_dir = fixture.tenex_base_dir.clone();
+        let daemon_dir = fixture.daemon_dir.clone();
+        let project_boot_state = project_boot_state_snapshot(&fixture.project_boot_state);
+        let project_event_index = Arc::clone(&fixture.project_event_index);
+        let publisher_clone = Arc::clone(&publisher);
+        let session_registry_clone = session_registry.clone();
+        let runtime_state_clone = runtime_state.clone();
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime must build");
+
+        let (drain_outcomes, runtime_len) = rt.block_on(async {
+            tokio::task::spawn_blocking(move || {
+                let worker_config = AgentWorkerProcessConfig::default();
+                let mut spawner = spawner;
+                let mut telegram_publisher = NoTelegramPublisher;
+                let tick_outcome = run_daemon_tick_once_from_filesystem_with_worker(
+                    DaemonMaintenanceInput {
+                        tenex_base_dir: &tenex_base_dir,
+                        daemon_dir: &daemon_dir,
+                        now_ms: 1_710_001_000_000,
+                        project_boot_state,
+                        project_event_index,
+                        heartbeat_latch: None,
+                    },
+                    DaemonWorkerTickInput {
+                        runtime_state: runtime_state_clone.clone(),
+                        correlation_id: "daemon-loop-drain-gate".to_string(),
+                        lock_owner: build_ral_lock_info(100, "host-a", 1_710_001_000_000),
+                        command: AgentWorkerCommand::new("bun"),
+                        worker_config: &worker_config,
+                        writer_version: "daemon-loop-test@0".to_string(),
+                        resolved_pending_delegations: Vec::new(),
+                        publish_result_sequence: None,
+                        session_registry: session_registry_clone.clone(),
+                        max_frames: 4,
+                    },
+                    &mut spawner,
+                    &publisher_clone,
+                    PublishOutboxRetryPolicy::default(),
+                    &mut telegram_publisher,
+                )
+                .expect("tick must succeed");
+
+                // The tick must admit the session.
+                assert!(
+                    tick_outcome
+                        .worker_runtime
+                        .iter()
+                        .any(|o| matches!(o, DaemonWorkerRuntimeOutcome::SessionAdmitted { .. })),
+                    "tick must emit SessionAdmitted"
+                );
+
+                // Block until the session task finishes, then call drain_finished
+                // to verify the outcome. join_all is the correct sync-context join
+                // from within spawn_blocking (Handle::current().block_on works here).
+                let drain_outcomes = session_registry_clone.join_all();
+                let runtime_len = runtime_state_clone
+                    .lock()
+                    .expect("runtime state lock")
+                    .len();
+                (drain_outcomes, runtime_len)
+            })
+            .await
+            .expect("spawn_blocking must not panic")
+        });
+
+        // Exactly one session outcome, and it must be SessionCompleted — not
+        // SessionFailed. The prior Option<RuntimeHandle> bug would have produced
+        // SessionFailed here because the None-handle path never actually joined
+        // the task.
+        assert_eq!(drain_outcomes.len(), 1, "exactly one session must be joined");
+        assert!(
+            matches!(
+                drain_outcomes[0],
+                DaemonWorkerRuntimeOutcome::SessionCompleted { .. }
+            ),
+            "session must complete successfully, got {:?}",
+            drain_outcomes[0]
+        );
+
+        // The session's closure called remove_terminal_worker before returning,
+        // so by the time is_finished() becomes true (and block_on returns),
+        // the runtime state entry is already gone.
+        assert_eq!(
+            runtime_len, 0,
+            "SharedWorkerRuntimeState must be empty after session completes: \
+             remove_terminal_worker must run inside the task closure before it returns"
+        );
     }
 }
