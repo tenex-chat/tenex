@@ -4,6 +4,10 @@
 **Active branch:** `rust-agent-worker-publishing`  
 **Audited commit:** `e37a4342`
 
+## Work in flight
+
+- **Backend-event publish path simplification** (branch: sonnet worktree dispatched 2026-04-24). The `publish_outbox` layer was routing *backend-authored* ephemeral events (kinds 24010 project status, 24011 installed agent list, 24012 backend heartbeat, 24133 operations status) through the same durable pending→drain→published pipeline used for worker-signed events. This is ceremony for ephemeral, self-healing events — when a heartbeat publish fails, the next heartbeat 30s later is strictly better than a replayed old one. Agent is removing the outbox routing from backend events (direct `relay_publisher` calls, log-on-failure, next tick regenerates), while keeping the outbox intact for worker-signed events where durable acceptance before worker exit is load-bearing. Status will be updated here when the slice lands.
+
 ## TL;DR
 
 Rust already owns the daemon control plane on this branch. Bun remains the bounded worker execution layer plus shared runtime contracts.
