@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::worker_abort::DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS;
 use crate::worker_dispatch::execution::WorkerDispatchSession;
-use crate::worker_frame_pump::WorkerFrameReceiver;
+use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_injection_queue::{
     WorkerInjectionMarkSentInput, WorkerInjectionQueueError, WorkerInjectionQueueRecord,
     WorkerInjectionRole, mark_worker_injection_sent, pending_worker_injections_for,
@@ -521,10 +521,10 @@ mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
-        "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
+        "../../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
     );
     const STREAM_TEXT_DELTA_FIXTURE: &str =
-        include_str!("../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
+        include_str!("../../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

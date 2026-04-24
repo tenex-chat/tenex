@@ -118,10 +118,10 @@ mod tests {
     use std::sync::atomic::AtomicU64;
 
     const WORKER_PROTOCOL_FIXTURE: &str = include_str!(
-        "../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
+        "../../../../src/test-utils/fixtures/worker-protocol/agent-execution.compat.json"
     );
     const STREAM_TEXT_DELTA_FIXTURE: &str =
-        include_str!("../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
+        include_str!("../../../../src/test-utils/fixtures/nostr/stream-text-delta.compat.json");
 
     #[derive(Debug, Default)]
     struct RecordingWorker {

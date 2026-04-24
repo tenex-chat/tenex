@@ -24,10 +24,10 @@ use crate::publish_outbox::PublishOutboxRetryPolicy;
 use crate::ral_journal::RalPendingDelegation;
 use crate::worker_concurrency::WorkerConcurrencyLimits;
 use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
-use crate::worker_frame_pump::WorkerFrameReceiver;
+use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
-use crate::worker_session_registry::WorkerSessionRegistry;
+use crate::worker_session::registry::WorkerSessionRegistry;
 
 #[derive(Debug, Clone)]
 pub struct DaemonForegroundInput<'a> {
@@ -403,7 +403,7 @@ mod tests {
         encode_agent_worker_protocol_frame,
     };
     use crate::worker_runtime_state::new_shared_worker_runtime_state;
-    use crate::worker_session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
+    use crate::worker_session::session_loop::{WorkerSessionLoopFinalReason, WorkerSessionLoopOutcome};
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
     use std::collections::VecDeque;

@@ -790,7 +790,7 @@ where
             resolved_pending_delegations: Vec::new(),
             publish_result_sequence: Some(Arc::new(AtomicU64::new(1))),
             max_frames: DEFAULT_WORKER_MAX_FRAMES,
-            session_registry: tenex_daemon::worker_session_registry::WorkerSessionRegistry::new(),
+            session_registry: tenex_daemon::worker_session::registry::WorkerSessionRegistry::new(),
         },
         clock,
         sleeper,

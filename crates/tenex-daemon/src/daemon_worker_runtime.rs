@@ -38,7 +38,7 @@ use crate::worker_dispatch::start::{WorkerDispatchStartInput, start_lock_scoped_
 use crate::worker_dispatch::tick::{
     WorkerDispatchTickError, WorkerDispatchTickInput, apply_worker_dispatch_tick,
 };
-use crate::worker_frame_pump::WorkerFrameReceiver;
+use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_launch::{WorkerLaunchPlanInput, plan_worker_launch};
 use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
@@ -47,7 +47,7 @@ use crate::worker_completion::result::WorkerResultTransitionContext;
 use crate::worker_runtime_state::{
     SharedWorkerRuntimeState, WorkerRuntimeStartedDispatch, WorkerRuntimeState,
 };
-use crate::worker_session_loop::{
+use crate::worker_session::session_loop::{
     WorkerSessionLoopError, WorkerSessionLoopInput, WorkerSessionLoopOutcome,
     run_worker_session_loop,
 };
@@ -1098,8 +1098,8 @@ mod tests {
     };
     use crate::worker_completion::flow::{WorkerTerminalFlowError, WorkerTerminalFlowPlanningError};
     use crate::worker_completion::result::WorkerResultError;
-    use crate::worker_session_loop::WorkerSessionLoopError;
-    use crate::worker_session_loop::WorkerSessionLoopFinalReason;
+    use crate::worker_session::session_loop::WorkerSessionLoopError;
+    use crate::worker_session::session_loop::WorkerSessionLoopFinalReason;
     use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::fmt;
