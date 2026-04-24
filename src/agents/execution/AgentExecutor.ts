@@ -652,16 +652,16 @@ export class AgentExecutor {
             );
         }
 
-        if (responseEvent) {
-            if (!finalOutstandingWork.hasWork) {
-                const summarizer = new ConversationSummarizer(context.projectContext);
-                metadataDebounceManager.schedulePublish(
-                    context.conversationId,
-                    false,
-                    () => summarizer.summarizeAndPublish(context.conversationStore)
-                );
-            }
+        if (!finalOutstandingWork.hasWork) {
+            const summarizer = new ConversationSummarizer(context.projectContext);
+            metadataDebounceManager.schedulePublish(
+                context.conversationId,
+                false,
+                () => summarizer.summarizeAndPublish(context.conversationStore)
+            );
+        }
 
+        if (responseEvent) {
             await ConversationStore.addEnvelope(context.conversationId, responseEvent.envelope);
 
             trace.getActiveSpan()?.addEvent("executor.published", {
