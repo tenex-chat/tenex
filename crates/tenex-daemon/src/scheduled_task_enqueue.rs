@@ -16,7 +16,8 @@ use crate::project_status_agent_sources::{
 };
 use crate::project_status_descriptors::ProjectStatusDescriptor;
 use crate::ral_journal::{
-    RalJournalError, RalJournalIdentity, RalReplayEntry, RalReplayStatus, append_ral_journal_record,
+    RalJournalError, RalJournalIdentity, RalReplayEntry, RalReplayStatus,
+    append_ral_journal_record_with_resequence,
 };
 use crate::ral_scheduler::{
     RalDispatchPreparation, RalDispatchPreparationInput, RalNamespace, RalScheduler,
@@ -235,7 +236,7 @@ pub fn enqueue_scheduled_task_dispatch(
         });
     }
 
-    let preparation = scheduler.plan_dispatch_preparation(RalDispatchPreparationInput {
+    let mut preparation = scheduler.plan_dispatch_preparation(RalDispatchPreparationInput {
         namespace,
         triggering_event_id: ids.triggering_event_id.clone(),
         worker_id: ids.worker_id.clone(),
@@ -248,7 +249,7 @@ pub fn enqueue_scheduled_task_dispatch(
         dispatch_id: ids.dispatch_id.clone(),
         writer_version: input.writer_version,
     })?;
-    append_dispatch_preparation(input.daemon_dir, &preparation)?;
+    append_dispatch_preparation(input.daemon_dir, &mut preparation)?;
 
     Ok(ScheduledTaskEnqueueOutcome {
         dispatch_id: ids.dispatch_id,
@@ -332,10 +333,10 @@ fn recover_dispatch_from_existing_ral(
 
 fn append_dispatch_preparation(
     daemon_dir: &Path,
-    preparation: &RalDispatchPreparation,
+    preparation: &mut RalDispatchPreparation,
 ) -> Result<(), ScheduledTaskEnqueueError> {
-    append_ral_journal_record(daemon_dir, &preparation.allocation_record)?;
-    append_ral_journal_record(daemon_dir, &preparation.claim_record)?;
+    append_ral_journal_record_with_resequence(daemon_dir, &mut preparation.allocation_record)?;
+    append_ral_journal_record_with_resequence(daemon_dir, &mut preparation.claim_record)?;
     append_dispatch_queue_record(daemon_dir, &preparation.dispatch_record)?;
     Ok(())
 }
@@ -686,6 +687,105 @@ mod tests {
                 .queued
                 .is_empty()
         );
+
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn concurrent_scheduled_task_and_completion_appends_produce_unique_sequences() {
+        use crate::ral_journal::{
+            RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalRecord, RalTerminalSummary,
+            append_ral_journal_record_with_resequence,
+        };
+        use std::collections::HashSet;
+        use std::sync::Arc;
+        use std::thread;
+
+        let fixture = Fixture::new("scheduled-task-enqueue-concurrency");
+        let daemon_dir = Arc::new(fixture.daemon_dir.clone());
+        let tenex_base_dir = Arc::new(fixture.tenex_base_dir.clone());
+        let project = Arc::new(fixture.project.clone());
+
+        const ENQUEUE_ITERATIONS: usize = 20;
+        const COMPLETION_ITERATIONS: usize = 20;
+
+        let enqueue_daemon_dir = Arc::clone(&daemon_dir);
+        let enqueue_tenex_base_dir = Arc::clone(&tenex_base_dir);
+        let enqueue_project = Arc::clone(&project);
+        let enqueue = thread::spawn(move || {
+            for iteration in 0..ENQUEUE_ITERATIONS {
+                let mut plan = scheduled_task_plan(None);
+                plan.task_id = format!("task-concurrency-{iteration}");
+                plan.due_at = 1_710_001_000 + iteration as u64;
+                enqueue_scheduled_task_dispatch(ScheduledTaskEnqueueInput {
+                    daemon_dir: enqueue_daemon_dir.as_path(),
+                    tenex_base_dir: enqueue_tenex_base_dir.as_path(),
+                    project: &enqueue_project,
+                    plan: &plan,
+                    timestamp: 1_710_001_000_000 + iteration as u64,
+                    writer_version: "scheduled-task-concurrency@0".to_string(),
+                })
+                .expect("scheduled task enqueue must succeed");
+            }
+        });
+
+        let completion_daemon_dir = Arc::clone(&daemon_dir);
+        let completion = thread::spawn(move || {
+            for iteration in 0..COMPLETION_ITERATIONS {
+                let identity = RalJournalIdentity {
+                    project_id: "demo".to_string(),
+                    agent_pubkey: "agent-pubkey".to_string(),
+                    conversation_id: format!("conversation-completion-{iteration}"),
+                    ral_number: 1,
+                };
+                let mut record = RalJournalRecord::new(
+                    RAL_JOURNAL_WRITER_RUST_DAEMON,
+                    "scheduled-task-concurrency@0",
+                    1,
+                    1_710_000_500_000 + iteration as u64,
+                    format!("completion-{iteration}"),
+                    RalJournalEvent::Completed {
+                        identity,
+                        worker_id: format!("worker-completion-{iteration}"),
+                        claim_token: format!("claim-completion-{iteration}"),
+                        terminal: RalTerminalSummary {
+                            published_user_visible_event: true,
+                            pending_delegations_remain: false,
+                            accumulated_runtime_ms: 0,
+                            final_event_ids: Vec::new(),
+                            keep_worker_warm: false,
+                        },
+                    },
+                );
+                append_ral_journal_record_with_resequence(
+                    completion_daemon_dir.as_path(),
+                    &mut record,
+                )
+                .expect("completion append must succeed");
+            }
+        });
+
+        enqueue.join().expect("enqueue thread must join");
+        completion.join().expect("completion thread must join");
+
+        let journal = read_ral_journal_records(daemon_dir.as_path())
+            .expect("journal must read after concurrent writes");
+        let expected_len = ENQUEUE_ITERATIONS * 2 + COMPLETION_ITERATIONS;
+        assert_eq!(
+            journal.len(),
+            expected_len,
+            "journal should contain every concurrent write"
+        );
+        let mut sequences: HashSet<u64> = HashSet::with_capacity(expected_len);
+        for record in &journal {
+            assert!(
+                sequences.insert(record.sequence),
+                "duplicate journal sequence {}",
+                record.sequence
+            );
+        }
+        let max_sequence = *sequences.iter().max().expect("sequences must not be empty");
+        assert_eq!(max_sequence, expected_len as u64);
 
         fixture.cleanup();
     }

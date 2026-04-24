@@ -14,7 +14,7 @@ use crate::dispatch_queue::{
 use crate::inbound_envelope::{InboundEnvelope, RuntimeTransport};
 use crate::ral_journal::{
     RalCompletedDelegation, RalJournalError, RalJournalIdentity, RalJournalRecord, RalReplayStatus,
-    append_ral_journal_record,
+    append_ral_journal_record_with_resequence,
 };
 use crate::ral_scheduler::{
     RalDelegationCompletionPlanInput, RalDispatchPreparation, RalDispatchPreparationInput,
@@ -190,7 +190,7 @@ pub fn enqueue_inbound_dispatch(
     }
 
     let scheduler = RalScheduler::from_daemon_dir(input.daemon_dir)?;
-    let preparation = scheduler.plan_dispatch_preparation(RalDispatchPreparationInput {
+    let mut preparation = scheduler.plan_dispatch_preparation(RalDispatchPreparationInput {
         namespace: RalNamespace::new(
             input.project.project_id.to_string(),
             input.route.agent_pubkey.to_string(),
@@ -207,7 +207,7 @@ pub fn enqueue_inbound_dispatch(
         dispatch_id: ids.dispatch_id.clone(),
         writer_version: input.writer_version.to_string(),
     })?;
-    append_dispatch_preparation(input.daemon_dir, &preparation)?;
+    append_dispatch_preparation(input.daemon_dir, &mut preparation)?;
 
     tracing::info!(
         dispatch_id = %ids.dispatch_id,
@@ -303,7 +303,7 @@ pub fn enqueue_delegation_completion_dispatch(
     }
 
     let scheduler = RalScheduler::from_daemon_dir(input.daemon_dir)?;
-    let completion_plan =
+    let mut completion_plan =
         scheduler.plan_delegation_completion(RalDelegationCompletionPlanInput {
             identity: input.identity.clone(),
             completion: input.completion.clone(),
@@ -314,13 +314,13 @@ pub fn enqueue_delegation_completion_dispatch(
         })?;
 
     if !should_resume {
-        append_ral_journal_record(input.daemon_dir, &completion_plan.record)?;
+        append_ral_journal_record_with_resequence(input.daemon_dir, &mut completion_plan.record)?;
         return Ok(DelegationCompletionDispatchOutcome::Recorded {
             completion_record: completion_plan.record,
         });
     }
 
-    let resume_preparation =
+    let mut resume_preparation =
         scheduler.plan_resume_dispatch_preparation(RalResumeDispatchPreparationInput {
             identity: input.identity.clone(),
             worker_id: ids.worker_id.clone(),
@@ -336,8 +336,8 @@ pub fn enqueue_delegation_completion_dispatch(
         })?;
     append_delegation_resume_preparation(
         input.daemon_dir,
-        &completion_plan.record,
-        &resume_preparation,
+        &mut completion_plan.record,
+        &mut resume_preparation,
     )?;
 
     tracing::info!(
@@ -372,21 +372,21 @@ pub fn enqueue_delegation_completion_dispatch(
 
 fn append_dispatch_preparation(
     daemon_dir: &Path,
-    preparation: &RalDispatchPreparation,
+    preparation: &mut RalDispatchPreparation,
 ) -> Result<(), InboundDispatchEnqueueError> {
-    append_ral_journal_record(daemon_dir, &preparation.allocation_record)?;
-    append_ral_journal_record(daemon_dir, &preparation.claim_record)?;
+    append_ral_journal_record_with_resequence(daemon_dir, &mut preparation.allocation_record)?;
+    append_ral_journal_record_with_resequence(daemon_dir, &mut preparation.claim_record)?;
     append_dispatch_queue_record(daemon_dir, &preparation.dispatch_record)?;
     Ok(())
 }
 
 fn append_delegation_resume_preparation(
     daemon_dir: &Path,
-    completion_record: &RalJournalRecord,
-    resume_preparation: &RalResumeDispatchPreparation,
+    completion_record: &mut RalJournalRecord,
+    resume_preparation: &mut RalResumeDispatchPreparation,
 ) -> Result<(), InboundDispatchEnqueueError> {
-    append_ral_journal_record(daemon_dir, completion_record)?;
-    append_ral_journal_record(daemon_dir, &resume_preparation.claim_record)?;
+    append_ral_journal_record_with_resequence(daemon_dir, completion_record)?;
+    append_ral_journal_record_with_resequence(daemon_dir, &mut resume_preparation.claim_record)?;
     append_dispatch_queue_record(daemon_dir, &resume_preparation.dispatch_record)?;
     Ok(())
 }
@@ -1083,6 +1083,104 @@ mod tests {
             entry.active_claim_token.as_deref(),
             Some(outcome.claim_token.as_str())
         );
+    }
+
+    #[test]
+    fn concurrent_ingress_and_completion_appends_produce_unique_sequences() {
+        use crate::ral_journal::append_ral_journal_record_with_resequence;
+        use std::collections::HashSet;
+        use std::sync::Arc;
+        use std::thread;
+
+        let daemon_dir = Arc::new(unique_temp_dir("inbound-dispatch-concurrency"));
+        fs::create_dir_all(daemon_dir.as_path()).expect("daemon dir must be created");
+
+        const INGRESS_ITERATIONS: usize = 20;
+        const COMPLETION_ITERATIONS: usize = 20;
+
+        let ingress_daemon_dir = Arc::clone(&daemon_dir);
+        let ingress = thread::spawn(move || {
+            for iteration in 0..INGRESS_ITERATIONS {
+                let mut envelope = nostr_envelope();
+                let event_id = format!("event-ingress-{iteration}");
+                envelope.message.id = format!("nostr:{event_id}");
+                envelope.message.native_id = event_id.clone();
+                envelope.channel.id = format!("nostr:conversation:{event_id}");
+                let conversation_id = format!("conversation-ingress-{iteration}");
+                enqueue_inbound_dispatch(InboundDispatchEnqueueInput {
+                    daemon_dir: ingress_daemon_dir.as_path(),
+                    project: InboundDispatchProject {
+                        project_id: "TENEX-concurrency",
+                        project_base_path: "/repo/concurrency",
+                        metadata_path: "/repo/concurrency/.tenex/project.json",
+                    },
+                    route: InboundDispatchRoute {
+                        agent_pubkey: "agent-pubkey",
+                        conversation_id: &conversation_id,
+                    },
+                    envelope: &envelope,
+                    timestamp: 1_710_000_000_000 + iteration as u64,
+                    writer_version: "inbound-dispatch-concurrency@0",
+                })
+                .expect("ingress enqueue must succeed");
+            }
+        });
+
+        let completion_daemon_dir = Arc::clone(&daemon_dir);
+        let completion = thread::spawn(move || {
+            for iteration in 0..COMPLETION_ITERATIONS {
+                let identity = RalJournalIdentity {
+                    project_id: "TENEX-concurrency".to_string(),
+                    agent_pubkey: "agent-pubkey".to_string(),
+                    conversation_id: format!("conversation-completion-{iteration}"),
+                    ral_number: 1,
+                };
+                let mut record = RalJournalRecord::new(
+                    RAL_JOURNAL_WRITER_RUST_DAEMON,
+                    "inbound-dispatch-concurrency@0",
+                    1,
+                    1_710_000_500_000 + iteration as u64,
+                    format!("completion-{iteration}"),
+                    RalJournalEvent::Completed {
+                        identity,
+                        worker_id: format!("worker-completion-{iteration}"),
+                        claim_token: format!("claim-completion-{iteration}"),
+                        terminal: terminal_summary(),
+                    },
+                );
+                append_ral_journal_record_with_resequence(
+                    completion_daemon_dir.as_path(),
+                    &mut record,
+                )
+                .expect("completion append must succeed");
+            }
+        });
+
+        ingress.join().expect("ingress thread must join");
+        completion.join().expect("completion thread must join");
+
+        let journal = read_ral_journal_records(daemon_dir.as_path())
+            .expect("journal must read after concurrent writes");
+        let expected_len = INGRESS_ITERATIONS * 2 + COMPLETION_ITERATIONS;
+        assert_eq!(
+            journal.len(),
+            expected_len,
+            "journal should contain every concurrent write"
+        );
+        let mut sequences: HashSet<u64> = HashSet::with_capacity(expected_len);
+        for record in &journal {
+            assert!(
+                sequences.insert(record.sequence),
+                "duplicate journal sequence {}",
+                record.sequence
+            );
+        }
+        let max_sequence = *sequences.iter().max().expect("sequences must not be empty");
+        assert_eq!(max_sequence, expected_len as u64);
+
+        if daemon_dir.exists() {
+            fs::remove_dir_all(daemon_dir.as_path()).expect("temp dir cleanup must succeed");
+        }
     }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
