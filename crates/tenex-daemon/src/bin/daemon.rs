@@ -154,8 +154,17 @@ impl fmt::Display for CliError {
 
 impl std::error::Error for CliError {}
 
-fn main() {
-    match run_cli(env::args().skip(1)) {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let result = match tokio::task::spawn_blocking(move || run_cli(args)).await {
+        Ok(result) => result,
+        Err(error) => Err(runtime_error(format!(
+            "failed to join daemon CLI task: {error}"
+        ))),
+    };
+
+    match result {
         Ok(output) => println!("{output}"),
         Err(error) => {
             eprintln!("{error}");
