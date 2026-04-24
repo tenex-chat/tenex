@@ -1,0 +1,45 @@
+{
+  "expectedModelId": "mock/delegation-02",
+  "label": "e2e/02_delegation_a_to_b_to_a",
+  "responses": [
+    {
+      "priority": 100,
+      "trigger": {
+        "agentName": "agent1",
+        "messageContains": "<delegations>"
+      },
+      "response": {
+        "content": "Final answer: agent2 says 4."
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/2\\+2/"
+      },
+      "response": {
+        "content": "Delegating to agent2.",
+        "toolCalls": [
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent2",
+              "prompt": "What is 2+2? Respond with a single number."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent2",
+        "userMessage": "/2\\+2/"
+      },
+      "response": {
+        "content": "agent2 says 4"
+      }
+    }
+  ]
+}
