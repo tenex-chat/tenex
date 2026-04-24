@@ -50,6 +50,27 @@ fn read_agent_slug(tenex_base_dir: &Path, agent_pubkey: &str) -> Option<String> 
     value.get("slug")?.as_str().map(str::to_string)
 }
 
+pub fn print_daemon_ready(
+    nostr_enabled: bool,
+    telegram_enabled: bool,
+    max_concurrent_workers: Option<u64>,
+) {
+    let nostr = if nostr_enabled { "nostr on" } else { "nostr off" };
+    let telegram = if telegram_enabled {
+        "telegram on"
+    } else {
+        "telegram off"
+    };
+    let workers = match max_concurrent_workers {
+        Some(n) => format!("max {n} workers"),
+        None => "unbounded workers".to_string(),
+    };
+    println!(
+        "{DIM}{}{RESET}  {BOLD}{GREEN}✓{RESET}  {BOLD}{GREEN}daemon ready{RESET}  {DIM}({nostr}, {telegram}, {workers}){RESET}",
+        timestamp()
+    );
+}
+
 pub fn print_project_booted(project_d_tag: &str, total_count: usize, already_booted: bool) {
     let marker = if already_booted { "↻" } else { "↑" };
     let project_color = color_for(project_d_tag);

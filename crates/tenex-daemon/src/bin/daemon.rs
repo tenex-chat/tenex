@@ -2,7 +2,7 @@ use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -70,6 +70,32 @@ const SHUTDOWN_REQUESTED_MESSAGE: &[u8] =
     b"\nTENEX daemon: shutdown requested; finishing current work and stopping gateways.\n";
 static DAEMON_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static DAEMON_RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Shutdown progress. Signal handler reads this on repeated SIGINT/SIGTERM to
+/// tell the user which phase is currently blocking. Main thread advances it
+/// before each phase so the reported value reflects the *current* wait, not
+/// the previously completed step.
+static SHUTDOWN_PHASE: AtomicUsize = AtomicUsize::new(SHUTDOWN_PHASE_IDLE);
+
+const SHUTDOWN_PHASE_IDLE: usize = 0;
+const SHUTDOWN_PHASE_FOREGROUND_DRAIN: usize = 1;
+const SHUTDOWN_PHASE_TELEGRAM: usize = 2;
+const SHUTDOWN_PHASE_NOSTR: usize = 3;
+const SHUTDOWN_PHASE_RELOAD_WATCHER: usize = 4;
+const SHUTDOWN_PHASE_COMPLETE: usize = 5;
+
+/// Pre-baked per-phase messages used from the signal handler. Indexed by the
+/// `SHUTDOWN_PHASE_*` constants. Must be static byte slices so the handler can
+/// write them with `libc::write` without any formatting — formatting is not
+/// async-signal-safe.
+const SHUTDOWN_PHASE_MESSAGES: &[&[u8]] = &[
+    b"\nTENEX daemon: shutdown not in progress.\n",
+    b"\nTENEX daemon: draining foreground loop (finishing current tick, waiting for in-flight workers).\n",
+    b"\nTENEX daemon: stopping Telegram gateway.\n",
+    b"\nTENEX daemon: stopping Nostr subscription gateway (waiting for relay reads, up to 10s).\n",
+    b"\nTENEX daemon: stopping reload watcher.\n",
+    b"\nTENEX daemon: shutdown complete; main thread exiting.\n",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DaemonCliOptions {
@@ -189,6 +215,11 @@ where
     let heartbeat_latch = whitelist_wiring
         .as_ref()
         .map(|wiring| Arc::clone(&wiring.heartbeat_latch));
+    tenex_daemon::stdout_status::print_daemon_ready(
+        nostr_supervisor.is_some(),
+        gateway_supervisor.is_some(),
+        options.max_concurrent_workers,
+    );
     let diagnostics_result = if telegram_registry.is_empty() {
         let mut telegram_publisher = NoTelegramPublisher;
         run_daemon_foreground(
@@ -219,10 +250,12 @@ where
 
     emit_shutdown_status("foreground loop stopped; shutting down gateway threads");
     if let Some(supervisor) = gateway_supervisor {
+        SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_TELEGRAM, Ordering::SeqCst);
         supervisor.request_stop();
         emit_shutdown_status("Telegram gateway stopped");
     }
     if let Some(supervisor) = nostr_supervisor {
+        SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_NOSTR, Ordering::SeqCst);
         emit_shutdown_status(format_args!(
             "stopping Nostr subscription gateway; waiting for relay reads, up to {}s",
             DEFAULT_RELAY_READ_TIMEOUT.as_secs()
@@ -234,6 +267,7 @@ where
     if let Some(watcher) = reload_watcher {
         // The foreground loop has exited, so `DAEMON_STOP_REQUESTED` is set
         // and the watcher will exit on its next poll.
+        SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_RELOAD_WATCHER, Ordering::SeqCst);
         emit_shutdown_status("stopping reload watcher");
         let _ = watcher.join();
     }
@@ -244,6 +278,7 @@ where
     drop(whitelist_wiring);
 
     diagnostics_result?;
+    SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_COMPLETE, Ordering::SeqCst);
     emit_shutdown_status("shutdown complete");
     tracing::info!("tenex-daemon stopped");
     Ok(String::new())
@@ -782,11 +817,25 @@ impl DaemonMaintenanceLoopSleeper for ProcessSignalAwareSleeper {
 extern "C" fn request_daemon_stop(_signal: libc::c_int) {
     let already_requested = DAEMON_STOP_REQUESTED.swap(true, Ordering::SeqCst);
     if !already_requested {
+        SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_FOREGROUND_DRAIN, Ordering::SeqCst);
         unsafe {
             let _ = libc::write(
                 libc::STDERR_FILENO,
                 SHUTDOWN_REQUESTED_MESSAGE.as_ptr() as *const libc::c_void,
                 SHUTDOWN_REQUESTED_MESSAGE.len(),
+            );
+        }
+    } else {
+        let mut phase = SHUTDOWN_PHASE.load(Ordering::SeqCst);
+        if phase >= SHUTDOWN_PHASE_MESSAGES.len() {
+            phase = SHUTDOWN_PHASE_MESSAGES.len() - 1;
+        }
+        let message = SHUTDOWN_PHASE_MESSAGES[phase];
+        unsafe {
+            let _ = libc::write(
+                libc::STDERR_FILENO,
+                message.as_ptr() as *const libc::c_void,
+                message.len(),
             );
         }
     }
@@ -799,6 +848,7 @@ extern "C" fn request_daemon_reload(_signal: libc::c_int) {
 fn install_signal_handlers() -> Result<(), CliError> {
     DAEMON_STOP_REQUESTED.store(false, Ordering::SeqCst);
     DAEMON_RELOAD_REQUESTED.store(false, Ordering::SeqCst);
+    SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_IDLE, Ordering::SeqCst);
     for signal in [libc::SIGINT, libc::SIGTERM] {
         install_signal_handler(signal, request_daemon_stop)?;
     }
