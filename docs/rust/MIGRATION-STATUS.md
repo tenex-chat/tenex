@@ -58,7 +58,8 @@ M0–M7 substantially landed. M8 in progress (Telegram outbox + caches + wakeups
 - **🔴 Real-client verification never performed.** Milestone doc (`implementation-milestones-and-quality-gates.md:1441`) declares this a **per-slice development gate**. `git log` since branch start shows **zero commits** verifying web/iOS/CLI/Telegram against the Rust daemon end-to-end. This is the largest untouched risk. Session 2 review surfaced it as the LFG blocker that will take the longest to close.
 - **Scenario 37 (dispatch input mismatch) — scenario bug.** Daemon correctly rejects mismatched sidecars and logs the validation failure (`worker dispatch input validation failed: execute field triggeringEventId ... does not match`), but the scenario's grep assertion doesn't match the actual error string. Parked under `scripts/e2e/scenarios/_wip/` pending assertion fix. Daemon behavior is **correct**.
 - **Scenario 39 (RAL number exhaustion) — needs investigation.** After seeding the journal with `ralNumber=u64::MAX` and restarting the daemon, no `RalNumberExhausted` error appears in the log. Could be: (a) seeding method doesn't trigger the exhaustion check path, (b) daemon lacks the check on restart replay, or (c) the republish never routes to that identity. Parked under `scripts/e2e/scenarios/_wip/`.
-- **🚨 Scenario 02 flake rate 20% under stress (root cause identified).** 50-run stress of scenario 02 complete: **40 pass / 10 fail = 20%**. Mean 31s, min 25s, max 82s. 9 of 10 failures are `[harness] FATAL: daemon subscription never became live`; 1 is `agent1 never published any kind:1 event` (run 42, 82s duration — slowest run also failed). Root cause from run-4 daemon log (`artifacts/e2e/stress/02_delegation/4/fixture_root.tar`): daemon-relay WebSocket disconnects mid-run with `"websocket error: WebSocket protocol error: Connection reset without closing handshake"`, then `relay disconnected, reconnecting after backoff backoff_ms=2000`. The 2s backoff + re-AUTH + resubscribe exceeds the harness's 45s probe window when combined with other startup work. Combination of **daemon/relay WebSocket stability** and **insufficient harness probe tolerance**. Stress summary: `artifacts/e2e/stress/02_delegation/_x50_summary.json`.
+- **🚨 Scenario 02 flake rate ~15% on clean system — real race, root cause identified.** Initial stress 40/50=80% (with 115 zombies). Clean re-stress so far: 17/20 pass = 85%. Investigation report (`docs/rust/websocket-disconnect-investigation.md`): the `"Connection reset without closing handshake"` was a red herring — caused by the HARNESS SIGTERMing the relay during cleanup, not mid-run disconnect. **True root cause**: for 25+ seconds the daemon's subscription socket receives ZERO live events despite the harness publishing 6 probe events matching active filters. Top hypothesis: khatru per-filter listener-registration race during active-project subscription refresh (related to but distinct from `d5bcf38b`'s fix). Failures come in bursts (runs 19+20 both failed back-to-back, 7+8 of first stress also adjacent). **Daemon WebSocket client is fine**; issue is listener-registration ordering between daemon and khatru. Fix requires either khatru v0.19.1 source inspection OR moving to a more robust subscription-ready signal than log-grep.
+- **Scenario 43 (RAL status transitions) — scenario-logic bug, parked.** Daemon journal correctly shows delegation flow (allocated → claimed → delegation_registered → delegation_completed), but scenario asserts all 3 RAL identities reach a terminal state (`completed | no_response | error | aborted | crashed`) at the same wait-loop exit. Agent1's parent RAL's re-dispatch terminal arrives LATER than the wait-loop's first-exit condition. Scenario needs per-identity terminal polling, not global. Daemon behavior is **correct**.
 - **Sleep-based synchronization** in existing scenarios (01, 02) — will flake under load. `helpers/await_file.sh` now available; existing scenarios not yet migrated.
 - `_pick_free_port` TOCTOU race — will collide with >30 parallel scenarios.
 - `await_daemon_subscribed` depends on log-grep — brittle to log format changes.
@@ -109,7 +110,7 @@ Regenerated automatically by `scripts/e2e/run.sh` after every run. Do not edit
 between the delimiters — changes will be overwritten.
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T08:10:14Z · branch `rust-agent-worker-publishing` · commit `f9542684e3d5` · total=1 pass=0 fail=0 skip=1 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T08:11:42Z · branch `rust-agent-worker-publishing` · commit `786fe1c452d2` · total=1 pass=0 fail=1 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
@@ -126,6 +127,7 @@ _Last run: 2026-04-24T08:10:14Z · branch `rust-agent-worker-publishing` · comm
 | 36_triggering_event_dedup.sh | fail | 2026-04-24T08:00:16Z | 31s |  |
 | 37_dispatch_input_mismatch.sh | fail | 2026-04-24T08:00:48Z | 32s |  |
 | 39_ral_number_exhaustion.sh | fail | 2026-04-24T07:11:50Z | 38s |  |
+| 43_ral_status_transitions.sh | fail | 2026-04-24T08:11:42Z | 13s |  |
 | 55_active_parent_receives_via_injection.sh | skip | 2026-04-24T08:10:14Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
 <!-- e2e-matrix:end -->
 
