@@ -48,8 +48,7 @@ export async function createAgentInstance(
     const signer = new NDKPrivateKeySigner(storedAgent.nsec);
     const pubkey = signer.pubkey;
 
-    // Resolve effective configuration: projectOverrides[dTag] ?? default
-    const resolvedConfig = agentStorage.getEffectiveConfig(storedAgent, projectDTag);
+    const resolvedConfig = agentStorage.getEffectiveConfig(storedAgent);
     const effectiveLLMConfig = resolvedConfig.model;
     const effectiveTools = resolvedConfig.tools;
     const effectiveAlwaysSkills = resolvedConfig.skills;
@@ -105,7 +104,6 @@ export async function createAgentInstance(
         mcpServers: storedAgent.mcpServers,
         pmOverrides: storedAgent.pmOverrides,
         isPM: storedAgent.isPM,
-        projectOverrides: storedAgent.projectOverrides,
         telegram: storedAgent.telegram,
         alwaysSkills: allowed.length > 0
             ? allowed

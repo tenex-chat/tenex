@@ -621,100 +621,52 @@ describe("AgentStorage", () => {
         });
     });
 
-    describe("project-scoped configuration", () => {
-        it("should resolve effective config with project override", async () => {
+    describe("agent configuration resolution", () => {
+        it("should resolve effective config from default block", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "anthropic:claude-sonnet-4" },
-                projectOverrides: {
-                    "project-1": { model: "anthropic:claude-opus-4" },
-                },
+                defaultConfig: { model: "anthropic:claude-sonnet-4", tools: ["fs_read", "shell"] },
             });
 
-            // project-1 should use override
-            const config1 = storage.getEffectiveConfig(agent, "project-1");
-            expect(config1.model).toBe("anthropic:claude-opus-4");
-
-            // project-2 should use default
-            const config2 = storage.getEffectiveConfig(agent, "project-2");
-            expect(config2.model).toBe("anthropic:claude-sonnet-4");
+            const resolved = storage.getEffectiveConfig(agent);
+            expect(resolved.model).toBe("anthropic:claude-sonnet-4");
+            expect(resolved.tools).toEqual(["fs_read", "shell"]);
         });
 
-        it("should resolve effective tools with project override", async () => {
+        it("should resolve effective config with no default block", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { tools: ["fs_read", "shell"] },
-                projectOverrides: {
-                    "project-1": { tools: ["+agents_write"] },
-                },
             });
 
-            // project-1 should add agents_write via delta
-            const config1 = storage.getEffectiveConfig(agent, "project-1");
-            expect(config1.tools).toEqual(["fs_read", "shell", "agents_write"]);
-
-            // project-2 should use defaults
-            const config2 = storage.getEffectiveConfig(agent, "project-2");
-            expect(config2.tools).toEqual(["fs_read", "shell"]);
+            const resolved = storage.getEffectiveConfig(agent);
+            expect(resolved.model).toBeUndefined();
+            expect(resolved.tools).toBeUndefined();
         });
 
-        it("should resolve effective skills with project override", async () => {
+        it("should resolve effective skills and blockedSkills from default block", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { skills: ["make-posters"] },
-                projectOverrides: {
-                    "project-1": { skills: ["edit-videos"] },
-                    "project-2": { skills: [] },
-                },
+                defaultConfig: { skills: ["make-posters"], blockedSkills: ["shell"] },
             });
 
-            const config1 = storage.getEffectiveConfig(agent, "project-1");
-            expect(config1.skills).toEqual(["edit-videos"]);
-
-            const config2 = storage.getEffectiveConfig(agent, "project-2");
-            expect(config2.skills).toEqual([]);
-
-            const config3 = storage.getEffectiveConfig(agent, "project-3");
-            expect(config3.skills).toEqual(["make-posters"]);
+            const resolved = storage.getEffectiveConfig(agent);
+            expect(resolved.skills).toEqual(["make-posters"]);
+            expect(resolved.blockedSkills).toEqual(["shell"]);
         });
 
-        it("should resolve effective blockedSkills with project override", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                defaultConfig: { blockedSkills: ["shell"] },
-                projectOverrides: {
-                    "project-1": { blockedSkills: ["write-access"] },
-                    "project-2": { blockedSkills: [] },
-                },
-            });
-
-            const config1 = storage.getEffectiveConfig(agent, "project-1");
-            expect(config1.blockedSkills).toEqual(["shell", "write-access"]);
-
-            const config2 = storage.getEffectiveConfig(agent, "project-2");
-            expect(config2.blockedSkills).toEqual(["shell"]);
-
-            const config3 = storage.getEffectiveConfig(agent, "project-3");
-            expect(config3.blockedSkills).toEqual(["shell"]);
-        });
-
-        it("should resolve effective mcpAccess with project override", async () => {
+        it("should resolve effective mcpAccess from default block", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
@@ -722,20 +674,10 @@ describe("AgentStorage", () => {
                 name: "Test Agent",
                 role: "assistant",
                 defaultConfig: { mcpAccess: ["github"] },
-                projectOverrides: {
-                    "project-1": { mcpAccess: ["github", "slack"] },
-                    "project-2": { mcpAccess: [] },
-                },
             });
 
-            const config1 = storage.getEffectiveConfig(agent, "project-1");
-            expect(config1.mcpAccess).toEqual(["github", "slack"]);
-
-            const config2 = storage.getEffectiveConfig(agent, "project-2");
-            expect(config2.mcpAccess).toEqual([]);
-
-            const config3 = storage.getEffectiveConfig(agent, "project-3");
-            expect(config3.mcpAccess).toEqual(["github"]);
+            const resolved = storage.getEffectiveConfig(agent);
+            expect(resolved.mcpAccess).toEqual(["github"]);
         });
 
         it("should resolve effective isPM with priority order", async () => {
@@ -747,57 +689,19 @@ describe("AgentStorage", () => {
                 role: "assistant",
             });
 
-            // Test 1: No PM designation
+            // No PM designation
             expect(storage.resolveEffectiveIsPM(agent, "project-1")).toBe(false);
 
-            // Test 2: pmOverrides
+            // pmOverrides
             agent.pmOverrides = { "project-1": true };
             expect(storage.resolveEffectiveIsPM(agent, "project-1")).toBe(true);
             expect(storage.resolveEffectiveIsPM(agent, "project-2")).toBe(false);
 
-            // Test 3: projectOverrides isPM
-            agent.projectOverrides = { "project-2": { isPM: true } };
-            expect(storage.resolveEffectiveIsPM(agent, "project-2")).toBe(true);
-
-            // Test 4: Global isPM takes highest precedence
+            // Global isPM takes highest precedence
             agent.isPM = true;
             expect(storage.resolveEffectiveIsPM(agent, "project-1")).toBe(true);
             expect(storage.resolveEffectiveIsPM(agent, "project-2")).toBe(true);
             expect(storage.resolveEffectiveIsPM(agent, "project-3")).toBe(true);
-        });
-
-        it("should strip legacy project-scoped Telegram config while preserving other override fields", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "telegram-agent",
-                name: "Telegram Agent",
-                role: "assistant",
-                telegram: {
-                    botToken: "default-token",
-                    allowDMs: true,
-                },
-                projectOverrides: {
-                    "project-1": {
-                        model: "anthropic:claude-opus-4",
-                        telegram: {
-                            botToken: "project-token",
-                            allowDMs: false,
-                        },
-                    },
-                },
-            });
-
-            await storage.saveAgent(agent);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toEqual({
-                model: "anthropic:claude-opus-4",
-            });
-            expect(loaded?.telegram).toEqual({
-                botToken: "default-token",
-                allowDMs: true,
-            });
         });
 
         it("should collapse legacy default Telegram config into top-level transport on load", async () => {
@@ -816,14 +720,6 @@ describe("AgentStorage", () => {
                         allowDMs: true,
                     },
                 },
-                projectOverrides: {
-                    "project-1": {
-                        model: "anthropic:claude-opus-4",
-                        telegram: {
-                            botToken: "ignored-project-token",
-                        },
-                    },
-                },
             }, null, 2));
 
             const loaded = await storage.loadAgent(signer.pubkey);
@@ -833,9 +729,6 @@ describe("AgentStorage", () => {
             });
             expect(loaded?.default).toEqual({
                 model: "anthropic:claude-sonnet-4",
-            });
-            expect(loaded?.projectOverrides?.["project-1"]).toEqual({
-                model: "anthropic:claude-opus-4",
             });
         });
     });

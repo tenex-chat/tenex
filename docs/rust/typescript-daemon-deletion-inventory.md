@@ -1,68 +1,98 @@
 # TypeScript Daemon Deletion Inventory
 
-This document is an inventory, not a deletion plan. It assumes the target architecture described in `docs/rust/agent-execution-worker-migration.md`: Rust is the always-on daemon/control plane, and Bun/TypeScript is execution-only worker code plus the shared runtime contracts the worker still needs.
+This document tracks the current `HEAD` state of the TypeScript side after the Rust daemon migration work on `rust-agent-worker-publishing`.
 
-The classification below is based on local file inspection and import search. Where a file is shared between the worker and the old daemon surface, it is marked ambiguous until the Rust worker-spine and end-to-end gates prove the TS path is no longer required.
+It is intentionally split into three buckets:
 
-## Deleted Daemon / Control-Plane Modules
+1. TypeScript daemon/control-plane code that is already gone
+2. TypeScript execution/runtime code that must still remain
+3. TypeScript surfaces that look daemon-adjacent but are still runtime-coupled and therefore not safe to delete yet
 
-These files were old TS daemon/control-plane code rather than execution support. They have been deleted from the Rust-daemon branch; Bun/TypeScript keeps only worker execution and shared runtime contracts.
+This is an inventory, not a deletion checklist.
+
+## Current Tree Snapshot
+
+At audited commit `e37a4342`:
+
+- `src/daemon/**` is absent
+- `src/commands/**` is absent
+- `src/index.ts` is internal-only and points operators to the Rust binary
+- Rust control-plane code lives under `crates/tenex-daemon/**`
+
+That means the "delete the TS daemon directory" phase is no longer hypothetical on this branch. It has already happened.
+
+## Already Deleted TypeScript Daemon / Control-Plane Surfaces
+
+### Whole trees already gone
+
+| Surface | Current state |
+| --- | --- |
+| `src/daemon/**` | removed |
+| `src/commands/**` | removed |
+
+### Additional removed TS daemon/control-plane modules
+
+These are still useful to track historically because they were part of the daemon/control-plane cleanup and are no longer present:
 
 | File | Removed responsibility |
 | --- | --- |
-| `src/services/dispatch/AgentDispatchService.ts` | Legacy inbound routing, delegation completion, kill wake-up, and message injection coordination. |
-| `src/services/dispatch/AgentRouter.ts` | Routing helpers for delegation completion and agent-target selection. |
-| `src/services/dispatch/DelegationCompletionHandler.ts` | Delegation completion recognition and RAL recording for the TS daemon path. |
-| `src/services/agents/AgentConfigUpdateService.ts` | Kind `24020` agent config event interpretation for TS daemon event handling. |
-| `src/services/agents/ProjectMembershipPublishService.ts` | Project membership sync and publish helper. |
-| `src/services/ingress/ChannelSessionStoreService.ts` | Persistent channel-session state for old transport handling. |
-| `src/events/runtime/diagnostic-event-snapshot.ts` | Runtime diagnostic snapshot builder for TS daemon diagnostics. |
-| `src/nostr/AgentEventDecoder.ts` daemon/routing helpers and tests | Legacy TS daemon event classification (`classifyForDaemon`, never-route helpers, project/config/boot classification helpers) plus unused routing/tag helpers that were only re-exported through `src/nostr/index.ts`. Rust owns relay classification in `crates/tenex-daemon/src/nostr_classification.rs`; TypeScript keeps only worker-needed Nostr tag helpers. |
+| `src/services/dispatch/AgentDispatchService.ts` | old TS inbound routing / delegation completion / wake-up orchestration |
+| `src/services/dispatch/AgentRouter.ts` | old TS routing helpers |
+| `src/services/dispatch/DelegationCompletionHandler.ts` | old TS delegation completion path |
+| `src/services/agents/AgentConfigUpdateService.ts` | TS daemon-side kind `24020` config update handling |
+| `src/services/agents/ProjectMembershipPublishService.ts` | old TS project membership sync/publish logic |
+| `src/services/ingress/ChannelSessionStoreService.ts` | old long-lived transport session state |
+| `src/events/runtime/diagnostic-event-snapshot.ts` | TS daemon diagnostics snapshotting |
+| daemon-only routing/classification helpers formerly in `src/nostr/AgentEventDecoder.ts` | relay classification moved to Rust-side ownership |
 
-## Must Remain for Bun Worker Execution
+## TypeScript Execution / Runtime Code That Must Remain
 
-These modules are part of the worker runtime, worker protocol, or execution-time support. They should stay until the worker entrypoint and the execution stack no longer depend on them.
+These are still part of the active Bun worker/runtime surface.
 
 | Scope | Must remain |
 | --- | --- |
-| Worker entrypoint and protocol | `src/agents/execution/worker/agent-worker.ts`, `src/agents/execution/worker/bootstrap.ts`, `src/agents/execution/worker/protocol.ts`, `src/agents/execution/worker/protocol-emitter.ts`, `src/agents/execution/worker/publisher-bridge.ts`, `src/events/runtime/AgentWorkerProtocol.ts`, `src/events/runtime/InboundEnvelope.ts` |
-| Execution core | `src/agents/execution/AgentExecutor.ts`, `src/agents/execution/ExecutionContextFactory.ts`, `src/agents/execution/StreamSetup.ts`, `src/agents/execution/StreamExecutionHandler.ts`, `src/agents/execution/StreamCallbacks.ts`, `src/agents/execution/ToolEventHandlers.ts`, `src/agents/execution/ToolExecutionTracker.ts`, `src/agents/execution/ToolOutputTruncation.ts`, `src/agents/execution/ToolSupervisionWrapper.ts`, `src/agents/execution/MessageCompiler.ts`, `src/agents/execution/MessageSyncer.ts`, `src/agents/execution/PostCompletionChecker.ts`, `src/agents/execution/RALResolver.ts`, `src/agents/execution/ProgressMonitor.ts`, `src/agents/execution/request-preparation.ts`, `src/agents/execution/context-management/**`, `src/agents/execution/prompt-history.ts`, `src/agents/execution/prompt-cache.ts`, `src/agents/execution/system-reminders.ts`, `src/agents/execution/skill-reminder-renderers.ts`, `src/agents/execution/types.ts`, `src/agents/execution/utils.ts`, `src/agents/execution/ToolResultUtils.ts` |
-| Nostr publish path | `src/nostr/AgentPublisher.ts`, `src/nostr/AgentEventEncoder.ts`, `src/nostr/NostrInboundAdapter.ts`, `src/nostr/RustPublishOutbox.ts`, `src/nostr/trace-context.ts`, `src/nostr/AgentPublishError.ts` |
-| Tool surface | `src/tools/registry.ts`, `src/tools/implementations/**` |
-| Worker support services | `src/services/ConfigService.ts`, `src/services/LLMOperationsRegistry.ts`, `src/services/CooldownRegistry.ts`, `src/services/projects/**`, `src/services/mcp/**`, `src/services/skill/**`, `src/services/analysis/**`, `src/services/ingress/TransportBindingStoreService.ts`, `src/services/telegram/TelegramChatContextStoreService.ts`, `src/services/agents/AgentProvisioningService.ts`, `src/services/agents/AgentResolution.ts`, `src/services/agents/EscalationService.ts`, `src/agents/**`, `src/conversations/**`, `src/llm/**` |
-| Shared runtime contracts | `src/events/runtime/AgentRuntimePublisher.ts`, `src/events/runtime/AgentRuntimePublisherFactory.ts`, `src/events/runtime/RuntimeAgent.ts`, `src/events/runtime/LocalInboundAdapter.ts`, `src/events/runtime/RecordingRuntimePublisher.ts` |
+| Worker entrypoint and protocol | `src/agents/execution/worker/**`, `src/events/runtime/AgentWorkerProtocol.ts`, `src/events/runtime/InboundEnvelope.ts` |
+| Execution core | `src/agents/execution/**` including `AgentExecutor.ts`, `ExecutionContextFactory.ts`, `StreamSetup.ts`, `StreamExecutionHandler.ts`, `StreamCallbacks.ts`, `MessageCompiler.ts`, `PostCompletionChecker.ts`, `RALResolver.ts`, context-management, prompt history/cache, and tool supervision helpers |
+| Tool runtime | `src/tools/registry.ts`, `src/tools/implementations/**` |
+| Nostr runtime path | `src/nostr/AgentPublisher.ts`, `AgentEventEncoder.ts`, `RustPublishOutbox.ts`, `NostrInboundAdapter.ts`, trace/publish helpers |
+| Worker support services | `src/services/projects/**`, `src/services/mcp/**`, `src/services/skill/**`, `src/services/analysis/**`, `src/services/agents/**`, `src/services/rag/**`, `src/services/ConfigService.ts`, `src/services/LLMOperationsRegistry.ts`, `src/services/CooldownRegistry.ts` |
+| Shared runtime contracts and fixtures | `src/events/runtime/LocalInboundAdapter.ts`, `RecordingRuntimePublisher.ts`, runtime publisher contracts, test fixtures still consumed by worker/protocol tests |
+| Prompts / conversations / LLM | `src/prompts/**`, `src/conversations/**`, `src/llm/**` |
 
-## Ambiguous Items Requiring E2E Verification
+## Ambiguous Or Runtime-Coupled TypeScript Surfaces
 
-These are not safe to delete just because they smell like daemon code. They are shared with execution-time behavior, test fixtures, or migration-only compatibility paths.
+These are the important "do not delete by smell" areas in the current tree.
 
-| File / area | Why it is ambiguous | Verify with |
+| File / area | Why it is not safe to delete yet | Evidence in current tree |
 | --- | --- | --- |
-| `src/services/ral/**` | The worker still depends on in-process RAL state for claim transfer, delegation, injections, kill behavior, and runtime accounting. Some of this may eventually move to Rust, but not all of it is daemon-only today. | Worker protocol smoke tests, delegation completion tests, kill-cascade tests, and any Rust worker-spine test that exercises resumption and injection handoff. |
-| `src/events/runtime/envelope-classifier.ts` | Shared by conversation resolution, diagnostics, and routing code. It is part runtime contract, part old routing helper. | Conversation-resolution E2E and any Rust ingress tests that prove TS no longer needs the helper. |
-| `src/events/runtime/LocalInboundAdapter.ts` | Test/gateway adapter for constructing canonical inbound envelopes. | Remove only if test coverage no longer needs the adapter or Rust owns the corresponding adapter path. |
-| `src/events/runtime/RecordingRuntimePublisher.ts` | Test-only publisher, but still useful for branch-safe execution and protocol validation. | Delete only after tests stop consuming it or an equivalent fixture is moved elsewhere. |
-| `src/services/ingress/TransportBindingStoreService.ts` | It looks transport/control-plane-ish, but the worker prompt/tool surface still reads it for `send_message` and project context. | `tools/registry` and prompt-context E2E, especially `send_message` and project-context rendering. |
-| `src/services/telegram/TelegramChatContextStoreService.ts` | The Rust telegram gateway owns live ingress, but the worker still consumes chat context for prompt assembly and related execution flows. | Worker prompt/context E2E and Telegram-related execution tests. |
+| `src/services/projects/ProjectContext.ts` and `getProjectContext()` | Core Bun execution still depends on AsyncLocalStorage-backed project context | imported across execution, prompts, tools, Nostr, MCP, search, scheduling |
+| `src/services/ingress/TransportBindingStoreService.ts` | looks control-plane-ish, but still drives worker prompt/tool behavior | imported by `src/tools/registry.ts`; read by `src/prompts/fragments/08-project-context.ts` |
+| `src/services/telegram/TelegramChatContextStoreService.ts` | Rust has daemon-side Telegram chat context, but Bun still reads TS-owned chat context during prompt rendering | read by `src/prompts/fragments/08-project-context.ts` |
+| `src/services/mcp/McpSubscriptionService.ts` | subscription setup/notification delivery still depends on project context and captured TS runtime objects | comments and code in `setupMcpSubscription()` / `handleNotification()` explicitly describe MCP callbacks running outside ALS scope |
+| `src/services/mcp/McpNotificationDelivery.ts` | directly invokes `AgentExecutor` and `createExecutionContext()` | still part of live TS runtime notification behavior |
+| `src/services/ral/**` | still part of the active Bun execution/delegation/injection model | not a dead daemon shim; still used by execution flows |
+| `src/events/runtime/LocalInboundAdapter.ts` | adapter/test/runtime contract boundary, not just dead control-plane residue | still part of runtime-contract/test surface |
+| `src/events/runtime/RecordingRuntimePublisher.ts` | compatibility/test helper, still useful while the worker protocol remains under active migration | still part of runtime-contract/test surface |
 
-## Suggested Deletion Order and Gates
+## What This Means For Future Cleanup
 
-1. Remove the compatibility/test scaffolding only after the worker and protocol test suites have been reshaped:
-   `src/events/runtime/RecordingRuntimePublisher.ts`, `src/events/runtime/LocalInboundAdapter.ts`, and any fixtures that become dead after the worker/daemon split settles.
-   Gate: test migration completed, not just production parity.
+The highest-value remaining TS cleanup is no longer "delete `src/daemon`". That work is already done.
 
-2. Defer `src/services/ral/**` until last.
-   This tree is shared with worker execution, so it should only be deleted if the Rust side has taken over the full claim/resume/injection/kill model and the Bun worker no longer needs local RAL state.
-   Gate: full worker-spine E2E, including delegation, injections, aborts, and warm-reuse behavior.
+The remaining cleanup categories are:
 
-## Practical Gate Set
+1. reduce `getProjectContext()` dependence so the Bun worker depends on explicit execution inputs rather than broad ambient TS runtime state
+2. re-home or replace TS-owned transport/chat-context persistence still read during prompt/tool assembly
+3. decide whether MCP notification delivery remains a TS worker concern or becomes a more explicit Rust-to-worker contract
+4. only then re-evaluate whether runtime-coupled helpers like `LocalInboundAdapter`, `RecordingRuntimePublisher`, or parts of `services/ral` are truly removable
 
-Use the existing repo gates before and after each removal batch:
+## Practical Validation Gates
 
-- `bun test`
+Any future TypeScript-removal batch should still use:
+
 - `bun run typecheck`
+- `bun test`
 - `bun run lint`
 - `bun run lint:architecture`
 - `scripts/rust-daemon-quality-gates.sh`
 
-For migration-sensitive removals, also run the targeted Rust interop gates already encoded in `scripts/rust-daemon-quality-gates.sh`, especially the worker protocol probe, real worker execution, publish interop, and daemon worker runtime spine checks.
+For migration-boundary removals, the Rust worker/runtime interop gates matter more than static search alone.

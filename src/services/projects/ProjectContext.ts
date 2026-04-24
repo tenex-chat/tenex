@@ -14,11 +14,10 @@ import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
  *
  * Priority order:
  * 1. Global PM designation via kind 24020 event ["pm"] tag without a-tag (highest priority)
- * 2. Project-scoped PM designation via kind 24020 event ["pm"] tag WITH a-tag (projectOverrides[dTag].isPM)
- * 3. Local PM override for this specific project (pmOverrides) - legacy, for backward compatibility
- * 4. Explicit PM designation in 31933 lowercase `p` tags (tag[2] === "pm")
- * 5. First lowercase `p` project tag
- * 6. First agent in registry (fallback for projects with no agent tags)
+ * 2. Local PM override for this specific project (pmOverrides)
+ * 3. Explicit PM designation in 31933 lowercase `p` tags (tag[2] === "pm")
+ * 4. First lowercase `p` project tag
+ * 5. First agent in registry (fallback for projects with no agent tags)
  *
  * @param project - The NDKProject event
  * @param agents - Map of agent slug to AgentInstance
@@ -56,21 +55,7 @@ export function resolveProjectManager(
         return globalPMAgents[0];
     }
 
-    // Step 2: Check for project-scoped PM designation via kind 24020 with a-tag
-    if (projectDTag) {
-        for (const agent of agents.values()) {
-            if (agent.projectOverrides?.[projectDTag]?.isPM === true) {
-                logger.info("Found project-scoped PM designation via kind 24020 event", {
-                    agentName: agent.name,
-                    agentSlug: agent.slug,
-                    projectDTag,
-                });
-                return agent;
-            }
-        }
-    }
-
-    // Step 3: Check for local PM override for this specific project (pmOverrides)
+    // Step 2: Check for local PM override for this specific project (pmOverrides)
     if (projectDTag) {
         for (const agent of agents.values()) {
             if (agent.pmOverrides?.[projectDTag] === true) {
@@ -84,7 +69,7 @@ export function resolveProjectManager(
         }
     }
 
-    // Step 4: Check for explicit "pm" role in project tags
+    // Step 3: Check for explicit "pm" role in project tags
     const pmAgentTag = project.tags.find(
         (tag: string[]) => tag[0] === "p" && tag[2] === "pm"
     );
@@ -105,7 +90,7 @@ export function resolveProjectManager(
         });
     }
 
-    // Step 5: Fallback to first agent from project tags
+    // Step 4: Fallback to first agent from project tags
     const firstAgentTag = project.tags.find(
         (tag: string[]) => tag[0] === "p" && tag[1]
     );
@@ -126,7 +111,7 @@ export function resolveProjectManager(
         });
     }
 
-    // Step 6: No agent tags in project, use first from registry if any exist
+    // Step 5: No agent tags in project, use first from registry if any exist
     if (agents.size > 0) {
         const firstAgent = agents.values().next().value;
         if (firstAgent) {

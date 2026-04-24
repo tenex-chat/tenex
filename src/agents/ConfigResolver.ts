@@ -1,39 +1,17 @@
 /**
  * ConfigResolver - Utility module for resolving effective agent configuration.
  *
- * Handles the merging of default config with project-scoped delta overrides.
+ * Resolves the effective config from an agent's default config block.
  *
  * ## Tool Delta Syntax
- * Project overrides can use delta syntax for tools:
- * - "+tool" - add this tool on top of defaults
- * - "-tool" - remove this tool from defaults
- * - Plain "tool" (no prefix) - full replacement (entire list is the effective tools)
- *
- * If any tool uses delta syntax, the whole list is treated as delta.
- * If no tool uses delta syntax, the whole list is a full replacement.
- *
- * ## Dedup Logic
- * When a project override field is identical to the default, the override is cleared.
- * This keeps overrides minimal and avoids redundant entries.
- *
- * @example
- * const resolver = new ConfigResolver({
- *   defaultConfig: { model: 'modelA', tools: ['tool1', 'tool2'] },
- *   projectOverrides: {
- *     projectA: { model: 'modelB', tools: ['-tool1', '+tool4'] },
- *     projectB: { tools: ['+tool5'] }
- *   }
- * });
- *
- * // projectA: model=modelB, tools=[tool2, tool4]
- * resolver.resolveEffectiveConfig('projectA');
- *
- * // projectB: model=modelA (default), tools=[tool1, tool2, tool5]
- * resolver.resolveEffectiveConfig('projectB');
+ * Tools can use delta syntax when combining lists:
+ * - "+tool" - add this tool on top of a base list
+ * - "-tool" - remove this tool from a base list
+ * - Plain "tool" (no prefix) - no-op in delta context (treated as addition or base)
  */
 
-import type { AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
-export type { AgentDefaultConfig, AgentProjectConfig };
+import type { AgentDefaultConfig } from "@/agents/types";
+export type { AgentDefaultConfig };
 
 export interface ResolvedAgentConfig {
     /** The effective model for this project context */
@@ -157,142 +135,18 @@ export function resolveEffectiveMcpAccess(
 }
 
 /**
- * Resolve the full effective config for an agent in a specific project context.
+ * Resolve the full effective config for an agent from its default config.
  */
 export function resolveEffectiveConfig(
-    defaultConfig: AgentDefaultConfig,
-    projectConfig: AgentProjectConfig | undefined
+    defaultConfig: AgentDefaultConfig
 ): ResolvedAgentConfig {
-    const effectiveModel = resolveEffectiveModel(defaultConfig.model, projectConfig?.model);
-    const effectiveTools = resolveEffectiveTools(defaultConfig.tools, projectConfig?.tools);
-    const effectiveSkills = resolveEffectiveSkills(defaultConfig.skills, projectConfig?.skills);
-    const effectiveBlockedSkills = resolveEffectiveBlockedSkills(
-        defaultConfig.blockedSkills,
-        projectConfig?.blockedSkills
-    );
-    const effectiveMcpAccess = resolveEffectiveMcpAccess(defaultConfig.mcpAccess, projectConfig?.mcpAccess);
-
     return {
-        model: effectiveModel,
-        tools: effectiveTools,
-        skills: effectiveSkills,
-        blockedSkills: effectiveBlockedSkills,
-        mcpAccess: effectiveMcpAccess,
+        model: defaultConfig.model,
+        tools: defaultConfig.tools,
+        skills: defaultConfig.skills,
+        blockedSkills: defaultConfig.blockedSkills,
+        mcpAccess: defaultConfig.mcpAccess,
     };
-}
-
-/**
- * Compute the minimal delta representation of a full tool list relative to a set of defaults.
- *
- * This is the inverse of applyToolsDelta: given a desired full list and the current defaults,
- * produce the smallest delta (+tool/-tool) that when applied to defaults yields the desired list.
- *
- * Used when storing project-scoped tool overrides: kind 24020 events carry a full list,
- * but the storage layer stores deltas for project overrides.
- *
- * ## Algorithm
- * - Tools in desired but NOT in defaults → "+tool" additions
- * - Tools in defaults but NOT in desired → "-tool" removals
- * - Tools in both → no entry needed (they're already in defaults)
- *
- * @param defaultTools - The agent's default tools list
- * @param desiredTools - The full tool list to achieve
- * @returns Delta array (may contain "+tool" and "-tool" entries), or empty array if no change
- */
-export function computeToolsDelta(defaultTools: string[], desiredTools: string[]): string[] {
-    const defaultSet = new Set(defaultTools);
-    const desiredSet = new Set(desiredTools);
-
-    const delta: string[] = [];
-
-    // Tools to remove: in defaults but not in desired
-    for (const tool of defaultTools) {
-        if (!desiredSet.has(tool)) {
-            delta.push(`-${tool}`);
-        }
-    }
-
-    // Tools to add: in desired but not in defaults
-    for (const tool of desiredTools) {
-        if (!defaultSet.has(tool)) {
-            delta.push(`+${tool}`);
-        }
-    }
-
-    return delta;
-}
-
-/**
- * Deduplicate a project config against the default config.
- *
- * If a project override value is identical to the effective default, remove it
- * from the override (it's redundant). This keeps overrides minimal.
- *
- * For tools: we compare the fully-resolved tool list. If the resolved tools
- * equal the default tools, clear the project override.
- *
- * Also handles no-op delta dedup: if a stored delta becomes a no-op against
- * the current defaults (e.g., "+tool" where tool is already in defaults),
- * it is cleaned up since the user is explicitly confirming the tool should be available.
- *
- * @param defaultConfig - Agent's default config
- * @param projectConfig - Project override config to deduplicate
- * @returns Cleaned project config (may be empty object if all fields were identical to default)
- */
-export function deduplicateProjectConfig(
-    defaultConfig: AgentDefaultConfig,
-    projectConfig: AgentProjectConfig
-): AgentProjectConfig {
-    const cleaned: AgentProjectConfig = { ...projectConfig };
-
-    // Dedup model: if project model == default model, clear it
-    if (cleaned.model !== undefined && cleaned.model === defaultConfig.model) {
-        cleaned.model = undefined;
-    }
-
-    // Dedup tools: resolve, normalize delta, and compare
-    if (cleaned.tools !== undefined) {
-        const defaultToolsResolved = defaultConfig.tools ?? [];
-        const resolvedProjectTools = resolveEffectiveTools(defaultConfig.tools, cleaned.tools);
-
-        // Compare resolved tools to default tools (order-insensitive)
-        if (arraysEqualUnordered(resolvedProjectTools ?? [], defaultToolsResolved)) {
-            cleaned.tools = undefined;
-        } else {
-            // Normalize: recompute the minimal delta from the fully-resolved tool list.
-            cleaned.tools = computeToolsDelta(defaultToolsResolved, resolvedProjectTools ?? []);
-        }
-    }
-
-    // Dedup skills: a project-scoped skill list is redundant if it matches defaults.
-    if (cleaned.skills !== undefined) {
-        const defaultSkills = defaultConfig.skills ?? [];
-        if (arraysEqualUnordered(cleaned.skills, defaultSkills)) {
-            cleaned.skills = undefined;
-        }
-    }
-
-    // Dedup blockedSkills: union semantics mean project entries already in defaults are redundant.
-    if (cleaned.blockedSkills !== undefined) {
-        const defaultBlockedSkills = new Set(defaultConfig.blockedSkills ?? []);
-        const uniqueProjectBlockedSkills = [...new Set(cleaned.blockedSkills)].filter(
-            (skillId) => !defaultBlockedSkills.has(skillId)
-        );
-
-        cleaned.blockedSkills = uniqueProjectBlockedSkills.length > 0
-            ? uniqueProjectBlockedSkills
-            : undefined;
-    }
-
-    // Dedup mcpAccess: a project-scoped list is redundant if it matches defaults.
-    if (cleaned.mcpAccess !== undefined) {
-        const defaultMcpAccess = defaultConfig.mcpAccess ?? [];
-        if (arraysEqualUnordered(cleaned.mcpAccess, defaultMcpAccess)) {
-            cleaned.mcpAccess = undefined;
-        }
-    }
-
-    return cleaned;
 }
 
 /**

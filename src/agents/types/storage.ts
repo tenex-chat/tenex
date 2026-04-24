@@ -33,50 +33,6 @@ export interface AgentDefaultConfig {
 }
 
 /**
- * Per-project configuration override block.
- * Stored under `projectOverrides[projectDTag]` in agent JSON files.
- * A 24020 event with an a-tag writes to this block.
- *
- * Tools can use delta syntax:
- * - "+tool" adds a tool on top of defaults
- * - "-tool" removes a tool from defaults
- * - Plain "tool" (no prefix) = full replacement list
- */
-export interface AgentProjectConfig {
-    /** Project-specific model override (when set, overrides default.model) */
-    model?: string;
-    /**
-     * Project-specific tools.
-     * Can be a full replacement list or a delta (using +/- prefix).
-     * If any entry has +/- prefix, treated as delta applied to default tools.
-     * Empty array or undefined means: use defaults.
-     */
-    tools?: string[];
-    /**
-     * Project-specific always-on skills.
-     * This is a full replacement list for the project context.
-     * - undefined: use default.skills
-     * - []: disable all always-on skills for this project
-     */
-    skills?: string[];
-    /** Project-specific blocked skill IDs. Merged (union) with default.blockedSkills. */
-    blockedSkills?: string[];
-    /**
-     * Project-scoped PM designation.
-     * When true, this agent is designated as PM for this specific project.
-     * Set via kind 24020 event with ["pm"] tag and an a-tag.
-     */
-    isPM?: boolean;
-    /**
-     * Project-specific MCP server access.
-     * This is a full replacement list for the project context.
-     * - undefined: use default.mcpAccess
-     * - []: disable all MCP server access for this project
-     */
-    mcpAccess?: string[];
-}
-
-/**
  * Agent data stored in JSON files (.tenex/agents/*.json).
  */
 export interface StoredAgentData {
@@ -129,16 +85,6 @@ export interface StoredAgentData {
 
     /** Telegram transport configuration for this agent. One bot per agent. */
     telegram?: TelegramAgentConfig;
-
-    /**
-     * Per-project configuration overrides.
-     * Key is project dTag, value is the project-specific delta override.
-     * Written by kind 24020 events WITH an a-tag.
-     *
-     * Tools stored here use delta syntax ("+tool" / "-tool") or full replacement.
-     * See ConfigResolver for resolution logic.
-     */
-    projectOverrides?: Record<string, AgentProjectConfig>;
 
 }
 

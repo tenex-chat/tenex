@@ -3,7 +3,6 @@ import * as path from "node:path";
 import type {
     StoredAgentData,
     AgentDefaultConfig,
-    AgentProjectConfig,
     TelegramAgentConfig,
 } from "@/agents/types";
 import type { AgentCategory } from "@/agents/role-categories";
@@ -52,30 +51,6 @@ function sanitizeDefaultConfig(
     return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-function sanitizeProjectOverrides(
-    projectOverrides: Record<string, AgentProjectConfig> | undefined
-): Record<string, AgentProjectConfig> | undefined {
-    if (!projectOverrides) {
-        return undefined;
-    }
-
-    const sanitizedEntries = Object.entries(projectOverrides)
-        .map(([projectId, override]) => {
-            const { telegram: _legacyTelegram, ...rest } = override as AgentProjectConfig & {
-                telegram?: TelegramAgentConfig;
-            };
-            const sanitized = stripUndefinedValues(rest) as AgentProjectConfig;
-            return Object.keys(sanitized).length > 0
-                ? [projectId, sanitized]
-                : undefined;
-        })
-        .filter((entry): entry is [string, AgentProjectConfig] => Boolean(entry));
-
-    return sanitizedEntries.length > 0
-        ? Object.fromEntries(sanitizedEntries)
-        : undefined;
-}
-
 function normalizeLoadedAgent(agent: StoredAgent): StoredAgent {
     const topLevelTelegram = sanitizeTelegramConfig(agent.telegram);
     const legacyDefaultTelegram = sanitizeTelegramConfig(
@@ -86,7 +61,6 @@ function normalizeLoadedAgent(agent: StoredAgent): StoredAgent {
         ...agent,
         telegram: topLevelTelegram ?? legacyDefaultTelegram,
         default: sanitizeDefaultConfig(agent.default),
-        projectOverrides: sanitizeProjectOverrides(agent.projectOverrides),
     };
 }
 
@@ -118,7 +92,6 @@ function sanitizeStoredAgentForPersistence(agent: StoredAgent): StoredAgent {
         ...agent,
         telegram: sanitizeTelegramConfig(agent.telegram),
         default: sanitizeDefaultConfig(agent.default),
-        projectOverrides: sanitizeProjectOverrides(agent.projectOverrides),
     };
 }
 
@@ -152,17 +125,6 @@ export interface StoredAgent extends StoredAgentData {
      * Takes precedence over pmOverrides and project tag designations.
      */
     isPM?: boolean;
-    /**
-     * Project-scoped configuration overrides.
-     * Key is project dTag, value contains project-specific settings.
-     * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
-     *
-     * ## Priority (highest to lowest)
-     * 1. projectOverrides[projectDTag].* (project-scoped from kind 24020 with a-tag)
-     * 2. Global fields (llmConfig, tools, isPM) (global from kind 24020 without a-tag)
-     * 3. pmOverrides[projectDTag]
-     * 4. Project tag designations (from kind 31933)
-     */
 }
 
 /**
@@ -203,7 +165,6 @@ export function createStoredAgent(config: {
     mcpServers?: Record<string, MCPServerConfig>;
     pmOverrides?: Record<string, boolean>;
     defaultConfig?: AgentDefaultConfig & { telegram?: TelegramAgentConfig };
-    projectOverrides?: Record<string, AgentProjectConfig & { telegram?: TelegramAgentConfig }>;
     telegram?: TelegramAgentConfig;
     definitionDTag?: string;
     definitionAuthor?: string;
@@ -229,7 +190,6 @@ export function createStoredAgent(config: {
         pmOverrides: config.pmOverrides,
         default: defaultConfig,
         telegram: sanitizeTelegramConfig(config.telegram ?? legacyDefaultTelegram),
-        projectOverrides: config.projectOverrides,
         definitionDTag: config.definitionDTag,
         definitionAuthor: config.definitionAuthor,
         definitionCreatedAt: config.definitionCreatedAt,
@@ -1093,13 +1053,12 @@ export class AgentStorage {
     }
 
     /**
-     * Get the effective (resolved) config for an agent, optionally scoped to a project.
+     * Get the effective (resolved) config for an agent.
      *
      * @param agent - The stored agent
-     * @param projectDTag - Optional project dTag for project-scoped resolution
      * @returns ResolvedAgentConfig with effective model and tools
      */
-    getEffectiveConfig(agent: StoredAgent, projectDTag?: string): ResolvedAgentConfig {
+    getEffectiveConfig(agent: StoredAgent): ResolvedAgentConfig {
         const defaultConfig: AgentDefaultConfig = {
             model: agent.default?.model,
             tools: agent.default?.tools,
@@ -1108,25 +1067,17 @@ export class AgentStorage {
             mcpAccess: agent.default?.mcpAccess,
         };
 
-        const projectConfig = projectDTag
-            ? agent.projectOverrides?.[projectDTag]
-            : undefined;
-
-        return resolveEffectiveConfig(defaultConfig, projectConfig);
+        return resolveEffectiveConfig(defaultConfig);
     }
 
     /**
      * Resolve the effective PM status for an agent in a specific project.
      * Priority:
      * 1. agent.isPM (global PM designation via kind 24020 without a-tag)
-     * 2. projectOverrides[projectDTag].isPM (project-scoped PM via kind 24020 with a-tag)
-     * 3. pmOverrides[projectDTag] (older persisted project-scoped PM state)
+     * 2. pmOverrides[projectDTag] (persisted project-scoped PM state)
      */
     resolveEffectiveIsPM(agent: StoredAgent, projectDTag: string): boolean {
         if (agent.isPM === true) {
-            return true;
-        }
-        if (agent.projectOverrides?.[projectDTag]?.isPM === true) {
             return true;
         }
         return agent.pmOverrides?.[projectDTag] === true;
