@@ -88,3 +88,7 @@ typecheck.cjs
 .worktrees/
 .claude/worktrees/
 .devtools
+
+# E2E test output
+artifacts/
+scripts/e2e/.status.json
