@@ -50,12 +50,15 @@ M0–M7 substantially landed. M8 in progress (Telegram outbox + caches + wakeups
 - **E2E runner + dashboard** (Track D, landed) — `./scripts/e2e/run.sh [glob] [--jobs N]`, atomic `.status.json`, auto-regenerated `e2e-matrix` block in this doc, portable `HARNESS_RELAY_BIN` resolution, condition-based `await_file_contains`, `collect_artifacts` tarball helper.
 - **Project boot scenarios** (Track B, committed): 1.1, 1.2, 1.3, 1.4 all green through runner. 1.5 (reordering) not yet scripted (Track B stream-idle-timed-out).
 - **Dispatch queue scenarios** (Track C partial, committed): 3.1 flock-serialization, 3.3 per-agent admission (via cargo unit tests — CLI can't set per_agent), 3.6 triggering-event dedup. All green.
+- **Redispatch sequence under lock** (Track F, `f74bd4a6`) — scenario 3.2 green. Pure filesystem contention test, 100/100 completion writers had stale pre-snapshot sequences rewritten under lock during verification. Defends `d8c8238f` + `6d5b9e72` from bash.
+- **Concurrency tests strengthened** (Track G, merged) — weak `project_event_index_is_shared_singleton_across_paths` DELETED with module docstring documenting the type-enforced contract; weak `ral_claim_tokens_unique` REWRITTEN so 32 threads contend for the same identity + same worker_id, forcing uniqueness to come entirely from the `AtomicU64+nanosecond+sha256` mint mechanism. 3/3 strengthened tests pass 5× consecutively.
 
 ## What DOES NOT WORK (known broken / blockers)
 
 - **🔴 Real-client verification never performed.** Milestone doc (`implementation-milestones-and-quality-gates.md:1441`) declares this a **per-slice development gate**. `git log` since branch start shows **zero commits** verifying web/iOS/CLI/Telegram against the Rust daemon end-to-end. This is the largest untouched risk. Session 2 review surfaced it as the LFG blocker that will take the longest to close.
 - **Scenario 37 (dispatch input mismatch) — scenario bug.** Daemon correctly rejects mismatched sidecars and logs the validation failure (`worker dispatch input validation failed: execute field triggeringEventId ... does not match`), but the scenario's grep assertion doesn't match the actual error string. Parked under `scripts/e2e/scenarios/_wip/` pending assertion fix. Daemon behavior is **correct**.
 - **Scenario 39 (RAL number exhaustion) — needs investigation.** After seeding the journal with `ralNumber=u64::MAX` and restarting the daemon, no `RalNumberExhausted` error appears in the log. Could be: (a) seeding method doesn't trigger the exhaustion check path, (b) daemon lacks the check on restart replay, or (c) the republish never routes to that identity. Parked under `scripts/e2e/scenarios/_wip/`.
+- **🚨 Scenario 02 FLAKE surfaced by 50-run stress test.** In first 6 runs: 5 pass, 1 fail. Failure mode: `[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s → FATAL: daemon subscription never became live`. The `await_daemon_subscribed` helper (`scripts/e2e-test-harness.sh:217-270`) sends a kind:14199 probe event and expects to see it echoed back on the subscription within 45s. Failed on run 4/50. **Classification: could be daemon subscription-startup race OR harness probe timing — needs deeper investigation.** Full stress run still in progress.
 - **Sleep-based synchronization** in existing scenarios (01, 02) — will flake under load. `helpers/await_file.sh` now available; existing scenarios not yet migrated.
 - `_pick_free_port` TOCTOU race — will collide with >30 parallel scenarios.
 - `await_daemon_subscribed` depends on log-grep — brittle to log format changes.
@@ -106,7 +109,7 @@ Regenerated automatically by `scripts/e2e/run.sh` after every run. Do not edit
 between the delimiters — changes will be overwritten.
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T07:11:50Z · branch `rust-agent-worker-publishing` · commit `775965f0ba4e` · total=5 pass=3 fail=2 skip=0 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T07:22:14Z · branch `rust-agent-worker-publishing` · commit `db9d3a66e1d7` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
@@ -116,6 +119,7 @@ _Last run: 2026-04-24T07:11:50Z · branch `rust-agent-worker-publishing` · comm
 | 13_boot_is_idempotent.sh | pass | 2026-04-24T07:05:39Z | 15s |  |
 | 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T07:06:15Z | 36s |  |
 | 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T07:10:21Z | 0s |  |
+| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-24T07:22:14Z | 0s | ral journal resequenced correctly under concurrent inbound+completion writers |
 | 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T07:10:21Z | 0s |  |
 | 36_triggering_event_dedup.sh | pass | 2026-04-24T07:10:44Z | 23s |  |
 | 37_dispatch_input_mismatch.sh | fail | 2026-04-24T07:11:12Z | 28s |  |
