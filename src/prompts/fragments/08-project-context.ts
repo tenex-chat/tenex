@@ -2,10 +2,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { ProjectAgentRuntimeInfo } from "@/services/projects/ProjectContext";
-import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
-import { getIdentityBindingStore } from "@/services/identity";
-import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
-import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { config } from "@/services/ConfigService";
 import { listWorktrees, loadWorktreeMetadata, type WorktreeMetadata } from "@/utils/git/worktree";
 import { shortenPubkey, shortenConversationId } from "@/utils/conversation-id";
@@ -13,6 +9,7 @@ import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 import type { ProjectDTag } from "@/types/project-ids";
 import type { TeamContext, TeamInfo } from "./types";
+import type { ChannelBindingEntry } from "@/prompts/utils/projectChannelBindings";
 
 // =============================================================================
 // Constants
@@ -114,112 +111,6 @@ async function getCachedRootAgentsMd(
 }
 
 // =============================================================================
-// Channel binding helpers
-// =============================================================================
-
-interface ChannelBindingEntry {
-    channelId: string;
-    type: "dm" | "group" | "topic";
-    description: string;
-}
-
-function formatHandle(username: string | undefined): string {
-    return username ? ` (@${username})` : "";
-}
-
-function formatIdentityLabel(
-    displayName: string | undefined,
-    username: string | undefined,
-    fallback: string
-): string {
-    const base = displayName ?? username ?? fallback;
-    if (!username || base === username) {
-        return base;
-    }
-    return `${base}${formatHandle(username)}`;
-}
-
-function describeTelegramChannelBinding(
-    projectId: string,
-    agentPubkey: string,
-    channelId: string
-): { type: "dm" | "group" | "topic"; description: string } | undefined {
-    const parsed = parseTelegramChannelId(channelId);
-    if (!parsed) {
-        return undefined;
-    }
-
-    // DM: chat ID does not start with "-"
-    if (!parsed.chatId.startsWith("-")) {
-        const identity = getIdentityBindingStore().getBinding(`telegram:user:${parsed.chatId}`);
-        const description = `DM with ${formatIdentityLabel(
-            identity?.displayName,
-            identity?.username,
-            parsed.chatId
-        )}`;
-        return { type: "dm", description };
-    }
-
-    const chatContext = getTelegramChatContextStore().getContext(projectId, agentPubkey, channelId);
-    if (!chatContext?.chatTitle && !chatContext?.chatUsername) {
-        if (parsed.messageThreadId) {
-            return { type: "topic", description: "Telegram topic" };
-        }
-        return { type: "group", description: "Telegram chat" };
-    }
-
-    const title = chatContext.chatTitle
-        ? `"${chatContext.chatTitle}"`
-        : chatContext.chatUsername
-          ? `@${chatContext.chatUsername}`
-          : undefined;
-
-    if (!title) {
-        if (parsed.messageThreadId) {
-            return { type: "topic", description: "Telegram topic" };
-        }
-        return { type: "group", description: "Telegram chat" };
-    }
-
-    if (parsed.messageThreadId) {
-        const topicLabel = chatContext.topicTitle
-            ? `'${chatContext.topicTitle}' in ${title}`
-            : `topic in ${title}`;
-        return { type: "topic", description: topicLabel };
-    }
-
-    return { type: "group", description: title };
-}
-
-function buildChannelBindingEntries(
-    agent: AgentInstance,
-    projectId: string
-): ChannelBindingEntry[] {
-    if (!agent.pubkey || !agent.telegram?.botToken) {
-        return [];
-    }
-
-    const bindings = getTransportBindingStore().listBindingsForAgentProject(
-        agent.pubkey,
-        projectId,
-        "telegram"
-    );
-
-    const entries: ChannelBindingEntry[] = [];
-    for (const binding of bindings) {
-        const info = describeTelegramChannelBinding(projectId, agent.pubkey, binding.channelId);
-        if (info) {
-            entries.push({
-                channelId: binding.channelId,
-                type: info.type,
-                description: info.description,
-            });
-        }
-    }
-    return entries;
-}
-
-// =============================================================================
 // Fragment interface and implementation
 // =============================================================================
 
@@ -236,6 +127,7 @@ export interface ProjectContextArgs {
     availableAgents?: AgentInstance[];
     agentRuntimeInfo?: ProjectAgentRuntimeInfo[];
     teamContext?: TeamContext;
+    channelBindingEntries?: ChannelBindingEntry[];
 }
 
 export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
@@ -254,6 +146,7 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         availableAgents,
         agentRuntimeInfo,
         teamContext,
+        channelBindingEntries,
     }) => {
         const parts: string[] = [];
 
@@ -444,19 +337,17 @@ export const projectContextFragment: PromptFragment<ProjectContextArgs> = {
         }
 
         // <channels> section
-        if (projectId) {
-            const channelEntries = buildChannelBindingEntries(agent, projectId);
-            if (channelEntries.length > 0) {
-                parts.push("");
-                parts.push("  <channels>");
-                parts.push("    These are alternative communication channels available to you via the send_message tool.");
-                for (const entry of channelEntries) {
-                    parts.push(
-                        `    <telegram type="${entry.type}" id="${entry.channelId}" description="${entry.description}" />`
-                    );
-                }
-                parts.push("  </channels>");
+        const channelEntries = channelBindingEntries ?? [];
+        if (channelEntries.length > 0) {
+            parts.push("");
+            parts.push("  <channels>");
+            parts.push("    These are alternative communication channels available to you via the send_message tool.");
+            for (const entry of channelEntries) {
+                parts.push(
+                    `    <telegram type="${entry.type}" id="${entry.channelId}" description="${entry.description}" />`
+                );
             }
+            parts.push("  </channels>");
         }
 
         // <agents.md> section — only include root content

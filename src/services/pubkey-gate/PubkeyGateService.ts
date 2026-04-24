@@ -78,12 +78,8 @@ export class PubkeyGateService {
      * Record a denied event in telemetry for audit trail.
      */
     private recordDenied(event: NDKEvent, reason: string): void {
-        if (!event.pubkey) {
-            throw new Error("[PubkeyGateService] Missing pubkey on denied event.");
-        }
-
         trace.getActiveSpan()?.addEvent("pubkey_gate.denied", {
-            "gate.pubkey": event.pubkey.substring(0, 8),
+            "gate.pubkey": event.pubkey?.substring(0, 8) ?? "missing",
             "gate.kind": event.kind ?? 0,
             "gate.reason": reason,
         });

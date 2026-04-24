@@ -1,2 +1,2 @@
 export { TrustPubkeyService, getTrustPubkeyService } from "./TrustPubkeyService";
-export type { TrustResult, TrustReason } from "./TrustPubkeyService";
+export type { TrustCheckContext, TrustResult, TrustReason } from "./TrustPubkeyService";

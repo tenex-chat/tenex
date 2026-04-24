@@ -1,5 +1,4 @@
 import { config } from "@/services/ConfigService";
-import { projectContextStore } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
@@ -20,17 +19,26 @@ export interface TrustResult {
 }
 
 /**
+ * Optional project-scoped trust inputs for the current check.
+ * This keeps project agent trust explicit instead of reaching into ambient context.
+ */
+export interface TrustCheckContext {
+    /** Agent pubkeys scoped to the current project or execution context. */
+    projectAgentPubkeys?: Iterable<Hexpubkey>;
+}
+
+/**
  * TrustPubkeyService determines if a given pubkey should be heeded or ignored.
  *
  * A pubkey is trusted if it is:
  * - In the whitelisted pubkeys from config
  * - The backend's own pubkey
- * - An agent in the system (registered in ProjectContext or globally across all projects)
+ * - An agent in the system (provided explicitly for the current project or globally across all projects)
  *
  * Trust precedence (highest to lowest): whitelisted > backend > agent
  *
  * ## Agent Trust: Two-Tier Lookup + Daemon Seeding
- * 1. **Project context** (sync): Check the current project's agent registry (fast, scoped)
+ * 1. **Project-scoped agent set** (sync): Check the caller-provided agent registry (fast, scoped)
  * 2. **Global agent set** (sync): Check daemon-level set of all agent pubkeys across all projects
  *
  * The global agent set is seeded by the Daemon at startup from AgentStorage (covering
@@ -72,7 +80,7 @@ export class TrustPubkeyService {
      * @param pubkey The pubkey to check (hex format)
      * @returns TrustResult indicating if trusted and why
      */
-    async isTrusted(pubkey: Hexpubkey): Promise<TrustResult> {
+    async isTrusted(pubkey: Hexpubkey, context?: TrustCheckContext): Promise<TrustResult> {
         // 1. Check whitelisted pubkeys from config
         if (this.isWhitelisted(pubkey)) {
             logger.debug("[TRUST_PUBKEY] Pubkey trusted: whitelisted", {
@@ -91,7 +99,7 @@ export class TrustPubkeyService {
         }
 
         // 3. Check if it's an agent in the system
-        if (this.isAgentPubkey(pubkey)) {
+        if (this.isAgentPubkey(pubkey, context)) {
             logger.debug("[TRUST_PUBKEY] Pubkey trusted: agent", {
                 pubkey: shortenPubkey(pubkey),
             });
@@ -112,14 +120,14 @@ export class TrustPubkeyService {
      * @param event The NDKEvent to check
      * @returns TrustResult indicating if the event's author is trusted and why
      */
-    async isTrustedEvent(event: NDKEvent): Promise<TrustResult> {
+    async isTrustedEvent(event: NDKEvent, context?: TrustCheckContext): Promise<TrustResult> {
         const pubkey = this.getEventPubkey(event);
 
         if (!pubkey) {
             return { trusted: false };
         }
 
-        return this.isTrusted(pubkey);
+        return this.isTrusted(pubkey, context);
     }
 
     /**
@@ -130,14 +138,14 @@ export class TrustPubkeyService {
      * @param event The NDKEvent to check
      * @returns TrustResult indicating if the event's author is trusted and why
      */
-    isTrustedEventSync(event: NDKEvent): TrustResult {
+    isTrustedEventSync(event: NDKEvent, context?: TrustCheckContext): TrustResult {
         const pubkey = this.getEventPubkey(event);
 
         if (!pubkey) {
             return { trusted: false };
         }
 
-        return this.isTrustedSync(pubkey);
+        return this.isTrustedSync(pubkey, context);
     }
 
     /**
@@ -148,7 +156,7 @@ export class TrustPubkeyService {
      * @param pubkey The pubkey to check (hex format)
      * @returns TrustResult indicating if trusted and why
      */
-    isTrustedSync(pubkey: Hexpubkey): TrustResult {
+    isTrustedSync(pubkey: Hexpubkey, context?: TrustCheckContext): TrustResult {
         // 1. Check whitelisted pubkeys from config
         if (this.isWhitelisted(pubkey)) {
             return { trusted: true, reason: "whitelisted" };
@@ -160,7 +168,7 @@ export class TrustPubkeyService {
         }
 
         // 3. Check if it's an agent in the system
-        if (this.isAgentPubkey(pubkey)) {
+        if (this.isAgentPubkey(pubkey, context)) {
             return { trusted: true, reason: "agent" };
         }
 
@@ -204,7 +212,9 @@ export class TrustPubkeyService {
      *
      * @returns Array of trusted pubkeys with their trust reasons
      */
-    async getAllTrustedPubkeys(): Promise<Array<{ pubkey: Hexpubkey; reason: TrustReason }>> {
+    async getAllTrustedPubkeys(
+        context?: TrustCheckContext
+    ): Promise<Array<{ pubkey: Hexpubkey; reason: TrustReason }>> {
         // Use a Map to de-duplicate, storing by pubkey with highest precedence reason
         const trustedMap = new Map<Hexpubkey, TrustReason>();
 
@@ -226,13 +236,10 @@ export class TrustPubkeyService {
         }
 
         // 3. Add agent pubkeys (lowest priority)
-        // 3a. Current project context agents
-        const projectCtx = projectContextStore.getContext();
-        if (projectCtx) {
-            for (const [_slug, agent] of projectCtx.agents) {
-                if (agent.pubkey && !trustedMap.has(agent.pubkey)) {
-                    trustedMap.set(agent.pubkey, "agent");
-                }
+        // 3a. Caller-provided project-scoped agent pubkeys
+        for (const pubkey of context?.projectAgentPubkeys ?? []) {
+            if (!trustedMap.has(pubkey)) {
+                trustedMap.set(pubkey, "agent");
             }
         }
 
@@ -336,17 +343,18 @@ export class TrustPubkeyService {
     /**
      * Check if pubkey belongs to an agent in the system (synchronous, two-tier).
      *
-     * Tier 1: Current project context (fast, scoped to the active project)
+     * Tier 1: Caller-provided project-scoped agent pubkeys
      * Tier 2: Global agent pubkeys set (daemon-level, covers all projects including non-running)
      *
      * The global set is maintained by the Daemon via setGlobalAgentPubkeys(),
      * which unions active runtime pubkeys with the AgentStorage seed.
      */
-    private isAgentPubkey(pubkey: Hexpubkey): boolean {
-        // Tier 1: Current project context (existing fast path)
-        const projectCtx = projectContextStore.getContext();
-        if (projectCtx?.getAgentByPubkey(pubkey) !== undefined) {
-            return true;
+    private isAgentPubkey(pubkey: Hexpubkey, context?: TrustCheckContext): boolean {
+        // Tier 1: Caller-provided project-scoped agent pubkeys
+        for (const candidate of context?.projectAgentPubkeys ?? []) {
+            if (candidate === pubkey) {
+                return true;
+            }
         }
 
         // Tier 2: Global agent pubkeys (daemon-level, cross-project)

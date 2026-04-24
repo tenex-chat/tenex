@@ -13,6 +13,7 @@ import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
 import type { TeamContext } from "@/prompts/fragments/types";
+import { buildProjectChannelBindingEntries } from "@/prompts/utils/projectChannelBindings";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
@@ -220,6 +221,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     const agentForFragments: AgentInstance = effectiveAgentInstructions
         ? { ...agent, instructions: effectiveAgentInstructions }
         : agent;
+    const channelBindingEntries =
+        dTag ? buildProjectChannelBindingEntries(agentForFragments, dTag) : [];
 
     const systemPromptBuilder = new PromptBuilder();
     let t0: number;
@@ -271,6 +274,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         availableAgents,
         agentRuntimeInfo: effectiveAgentRuntimeInfo,
         teamContext,
+        channelBindingEntries,
     });
 
     // Add delegation chain if present (shows agent their position in multi-agent workflow)
