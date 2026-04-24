@@ -1,0 +1,74 @@
+{
+  "expectedModelId": "mock/three-hop-53",
+  "label": "e2e/53_three_hop_delegation",
+  "responses": [
+    {
+      "priority": 110,
+      "trigger": {
+        "agentName": "agent1",
+        "messageContains": "<delegations>"
+      },
+      "response": {
+        "content": "Final answer: agent2 confirmed that agent3 says result is 42."
+      }
+    },
+    {
+      "priority": 110,
+      "trigger": {
+        "agentName": "agent2",
+        "messageContains": "<delegations>"
+      },
+      "response": {
+        "content": "agent2 relays: agent3 says result is 42"
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/calculate/"
+      },
+      "response": {
+        "content": "Delegating calculation to agent2.",
+        "toolCalls": [
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent2",
+              "prompt": "Please calculate: what is 6 times 7? Delegate further if needed."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent2",
+        "userMessage": "/6 times 7/"
+      },
+      "response": {
+        "content": "Delegating deep calculation to agent3.",
+        "toolCalls": [
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent3",
+              "prompt": "What is 6 times 7? Reply with the numeric answer only."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent3",
+        "userMessage": "/6 times 7/"
+      },
+      "response": {
+        "content": "agent3 says result is 42"
+      }
+    }
+  ]
+}
