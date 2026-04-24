@@ -614,6 +614,12 @@ fn log_daemon_tick_publish_summary(
         || publish_drained_count > 0
         || any_session_completed;
 
+    crate::stdout_status::report_publish_backlog(
+        publish_pending_before,
+        publish_drained_count,
+        publish_pending_after,
+    );
+
     if has_activity {
         tracing::info!(
             tick_kind = message,

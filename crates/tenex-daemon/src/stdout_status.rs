@@ -1,7 +1,13 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use time::OffsetDateTime;
 use time::macros::format_description;
+
+/// Last outbox pending count we reported to stdout. Kept as a process-wide
+/// atomic so the tick summary can be called from either sync path without
+/// threading mutable state through their call chains.
+static LAST_REPORTED_BACKLOG: AtomicUsize = AtomicUsize::new(0);
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -155,6 +161,45 @@ pub fn print_agent_installed(slug: &str, agent_pubkey: &str, already_installed: 
         "{DIM}{}{RESET}  {marker}  {BOLD}{agent_color}{slug}{RESET}  {DIM}{short_pubkey}…{RESET}",
         timestamp()
     );
+}
+
+/// Threshold below which outbox depth is unremarkable. Anything at or above
+/// this count will trigger a stdout status line.
+pub const PUBLISH_BACKLOG_THRESHOLD: usize = 20;
+
+/// Emits a stdout line when the publish outbox backlog crosses the
+/// threshold, shifts materially (≥10 events), or clears back below the
+/// threshold. Silent when the backlog is small or unchanged.
+pub fn report_publish_backlog(pending_before: usize, drained: usize, pending_after: usize) {
+    let last_reported = LAST_REPORTED_BACKLOG.load(Ordering::Relaxed);
+    let over = pending_after >= PUBLISH_BACKLOG_THRESHOLD;
+    let was_over = last_reported >= PUBLISH_BACKLOG_THRESHOLD;
+
+    if over {
+        let moved_enough = !was_over
+            || (pending_after as i64 - last_reported as i64).abs() >= 10;
+        if moved_enough {
+            let delta = pending_after as i64 - pending_before as i64;
+            let trend = if delta < 0 {
+                format!("{GREEN}↓{}{RESET}", -delta)
+            } else if delta > 0 {
+                format!("{YELLOW}↑+{}{RESET}", delta)
+            } else {
+                format!("{DIM}→{RESET}")
+            };
+            println!(
+                "{DIM}{ts}{RESET}  {BOLD}{YELLOW}⏳{RESET}  {BOLD}{YELLOW}publish backlog{RESET}  {DIM}({pending_after} pending, drained {drained} this tick, {trend}){RESET}",
+                ts = timestamp()
+            );
+            LAST_REPORTED_BACKLOG.store(pending_after, Ordering::Relaxed);
+        }
+    } else if was_over {
+        println!(
+            "{DIM}{}{RESET}  {BOLD}{GREEN}✓{RESET}  {BOLD}{GREEN}publish backlog cleared{RESET}",
+            timestamp()
+        );
+        LAST_REPORTED_BACKLOG.store(0, Ordering::Relaxed);
+    }
 }
 
 pub fn print_sighup_reload_failed(error: &dyn std::error::Error) {
