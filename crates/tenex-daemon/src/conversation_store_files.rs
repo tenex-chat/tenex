@@ -69,7 +69,7 @@ pub fn record_delegation_completion(
     })
 }
 
-fn append_envelope_message(
+pub fn append_envelope_message(
     metadata_path: &Path,
     conversation_id: &str,
     envelope: &InboundEnvelope,

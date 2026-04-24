@@ -403,7 +403,8 @@ fn frame_event_kind(frame: &RelaySubscriptionFrame) -> Option<u64> {
         RelaySubscriptionFrame::Eose { .. }
         | RelaySubscriptionFrame::Notice { .. }
         | RelaySubscriptionFrame::Closed { .. }
-        | RelaySubscriptionFrame::Auth { .. } => None,
+        | RelaySubscriptionFrame::Auth { .. }
+        | RelaySubscriptionFrame::Ok { .. } => None,
     }
 }
 
@@ -413,7 +414,8 @@ fn frame_event_pubkey(frame: &RelaySubscriptionFrame) -> Option<String> {
         RelaySubscriptionFrame::Eose { .. }
         | RelaySubscriptionFrame::Notice { .. }
         | RelaySubscriptionFrame::Closed { .. }
-        | RelaySubscriptionFrame::Auth { .. } => None,
+        | RelaySubscriptionFrame::Auth { .. }
+        | RelaySubscriptionFrame::Ok { .. } => None,
     }
 }
 

@@ -7,6 +7,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::conversation_store_files::{ConversationStoreFilesError, append_envelope_message};
 use crate::dispatch_queue::{
     DispatchQueueError, DispatchQueueRecord, DispatchQueueStatus, acquire_dispatch_queue_lock,
     append_dispatch_queue_record, replay_dispatch_queue,
@@ -128,6 +129,8 @@ pub enum InboundDispatchEnqueueError {
     RalJournal(#[from] RalJournalError),
     #[error("inbound dispatch queue failed: {0}")]
     DispatchQueue(#[from] DispatchQueueError),
+    #[error("inbound dispatch conversation store write failed: {0}")]
+    ConversationStore(#[from] ConversationStoreFilesError),
 }
 
 pub fn enqueue_inbound_dispatch(
@@ -167,6 +170,9 @@ pub fn enqueue_inbound_dispatch(
             source_metadata: Some(source_metadata(input.envelope)),
         });
     write_create_or_compare_equal(input.daemon_dir, &sidecar_input)?;
+
+    let metadata_path = std::path::Path::new(input.project.metadata_path);
+    append_envelope_message(metadata_path, input.route.conversation_id, input.envelope)?;
 
     let _dispatch_lock = acquire_dispatch_queue_lock(input.daemon_dir)?;
     let dispatch_state = replay_dispatch_queue(input.daemon_dir)?;
@@ -512,6 +518,8 @@ mod tests {
     #[test]
     fn enqueue_inbound_nostr_dispatch_writes_worker_runtime_artifacts() {
         let daemon_dir = unique_temp_dir("inbound-dispatch-nostr");
+        let metadata_path = daemon_dir.join("project");
+        fs::create_dir_all(&metadata_path).expect("metadata path must create");
         let envelope = nostr_envelope();
 
         let outcome = enqueue_inbound_dispatch(InboundDispatchEnqueueInput {
@@ -519,7 +527,7 @@ mod tests {
             project: InboundDispatchProject {
                 project_id: "TENEX-demo",
                 project_base_path: "/repo/demo",
-                metadata_path: "/repo/demo/.tenex/project.json",
+                metadata_path: metadata_path.to_str().expect("metadata path must be utf8"),
             },
             route: InboundDispatchRoute {
                 agent_pubkey: "agent-pubkey",
@@ -571,9 +579,21 @@ mod tests {
             "TENEX-demo",
             "agent-pubkey",
             "conversation-alpha",
+            metadata_path.to_str().expect("metadata path must be utf8"),
             1_710_000_700_000,
             "inbound-dispatch-test@0",
         );
+
+        let conversation_file = metadata_path.join("conversations").join("conversation-alpha.json");
+        let conversation: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&conversation_file).expect("conversation file must exist"),
+        )
+        .expect("conversation file must parse");
+        let messages = conversation["messages"].as_array().expect("messages must be array");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["eventId"], "event-alpha");
+        assert_eq!(messages[0]["content"], "hello");
+        assert_eq!(messages[0]["messageType"], "text");
 
         if daemon_dir.exists() {
             fs::remove_dir_all(daemon_dir).expect("temp dir cleanup must succeed");
@@ -583,6 +603,8 @@ mod tests {
     #[test]
     fn enqueue_inbound_telegram_dispatch_writes_worker_runtime_artifacts() {
         let daemon_dir = unique_temp_dir("inbound-dispatch-telegram");
+        let metadata_path = daemon_dir.join("project");
+        fs::create_dir_all(&metadata_path).expect("metadata path must create");
         let envelope = telegram_envelope();
 
         let outcome = enqueue_inbound_dispatch(InboundDispatchEnqueueInput {
@@ -590,7 +612,7 @@ mod tests {
             project: InboundDispatchProject {
                 project_id: "TENEX-demo",
                 project_base_path: "/repo/demo",
-                metadata_path: "/repo/demo/.tenex/project.json",
+                metadata_path: metadata_path.to_str().expect("metadata path must be utf8"),
             },
             route: InboundDispatchRoute {
                 agent_pubkey: "agent-pubkey",
@@ -663,6 +685,7 @@ mod tests {
             "TENEX-demo",
             "agent-pubkey",
             "conversation-bravo",
+            metadata_path.to_str().expect("metadata path must be utf8"),
             1_710_000_800_000,
             "inbound-dispatch-test@0",
         );
@@ -675,13 +698,16 @@ mod tests {
     #[test]
     fn enqueue_inbound_dispatch_is_idempotent_for_same_route_and_event() {
         let daemon_dir = unique_temp_dir("inbound-dispatch-idempotent");
+        let metadata_path = daemon_dir.join("project");
+        fs::create_dir_all(&metadata_path).expect("metadata path must create");
         let envelope = nostr_envelope();
+        let metadata_path_str = metadata_path.to_str().expect("metadata path must be utf8");
         let input = InboundDispatchEnqueueInput {
             daemon_dir: &daemon_dir,
             project: InboundDispatchProject {
                 project_id: "TENEX-demo",
                 project_base_path: "/repo/demo",
-                metadata_path: "/repo/demo/.tenex/project.json",
+                metadata_path: metadata_path_str,
             },
             route: InboundDispatchRoute {
                 agent_pubkey: "agent-pubkey",
@@ -992,6 +1018,7 @@ mod tests {
         project_id: &str,
         agent_pubkey: &str,
         conversation_id: &str,
+        metadata_path: &str,
         timestamp: u64,
         writer_version: &str,
     ) {
@@ -1011,7 +1038,7 @@ mod tests {
             Some(outcome.worker_id.as_str())
         );
         assert_eq!(fields.project_base_path, "/repo/demo");
-        assert_eq!(fields.metadata_path, "/repo/demo/.tenex/project.json");
+        assert_eq!(fields.metadata_path, metadata_path);
         assert_eq!(fields.triggering_envelope, expected_triggering_envelope);
         assert_eq!(
             serde_json::to_value(envelope).expect("triggering envelope must serialize"),
@@ -1098,7 +1125,10 @@ mod tests {
         const INGRESS_ITERATIONS: usize = 20;
         const COMPLETION_ITERATIONS: usize = 20;
 
+        let metadata_path = Arc::new(daemon_dir.join("project"));
+        fs::create_dir_all(metadata_path.as_path()).expect("metadata path must create");
         let ingress_daemon_dir = Arc::clone(&daemon_dir);
+        let ingress_metadata_path = Arc::clone(&metadata_path);
         let ingress = thread::spawn(move || {
             for iteration in 0..INGRESS_ITERATIONS {
                 let mut envelope = nostr_envelope();
@@ -1112,7 +1142,9 @@ mod tests {
                     project: InboundDispatchProject {
                         project_id: "TENEX-concurrency",
                         project_base_path: "/repo/concurrency",
-                        metadata_path: "/repo/concurrency/.tenex/project.json",
+                        metadata_path: ingress_metadata_path
+                            .to_str()
+                            .expect("metadata path must be utf8"),
                     },
                     route: InboundDispatchRoute {
                         agent_pubkey: "agent-pubkey",
