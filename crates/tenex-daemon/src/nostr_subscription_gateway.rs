@@ -1,16 +1,22 @@
 use std::fmt;
-use std::net::TcpStream;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread::{self, JoinHandle as StdJoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures_util::{SinkExt, StreamExt};
 use tracing;
 
 use thiserror::Error;
-use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Message, connect};
+use tokio::net::TcpStream as TokioTcpStream;
+use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioRuntimeHandle};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle as TokioJoinHandle;
+use tokio::time::{sleep, timeout};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tungstenite::Message;
 use url::Url;
 
 use crate::nostr_classification::DaemonNostrEventClass;
@@ -133,12 +139,37 @@ pub enum NostrSubscriptionGatewayStartError {
     NoFilters,
     #[error("relay url must use ws:// or wss://: {url}")]
     InvalidRelayUrl { url: String },
+    #[error("failed to build subscription gateway runtime: {0}")]
+    RuntimeBuild(#[source] io::Error),
+    #[error("subscription gateway runtime thread exited before initialization")]
+    RuntimeThreadExited,
+    #[error("failed to initialize subscription gateway runtime: {0}")]
+    RuntimeBootstrap(#[source] std::sync::mpsc::RecvError),
+}
+
+#[derive(Debug)]
+struct OwnedSubscriptionGatewayRuntime {
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    thread: Option<StdJoinHandle<()>>,
+}
+
+impl Drop for OwnedSubscriptionGatewayRuntime {
+    fn drop(&mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct NostrSubscriptionGatewaySupervisor {
-    handles: Vec<JoinHandle<()>>,
+    handles: Vec<TokioJoinHandle<()>>,
     stop_flag: Arc<AtomicBool>,
+    runtime_handle: TokioRuntimeHandle,
+    _owned_runtime: Option<OwnedSubscriptionGatewayRuntime>,
 }
 
 impl NostrSubscriptionGatewaySupervisor {
@@ -148,9 +179,11 @@ impl NostrSubscriptionGatewaySupervisor {
 
     pub fn join(mut self) {
         let handles = std::mem::take(&mut self.handles);
-        for handle in handles {
-            let _ = handle.join();
-        }
+        self.runtime_handle.block_on(async move {
+            for handle in handles {
+                let _ = handle.await;
+            }
+        });
     }
 
     pub fn stop_flag(&self) -> Arc<AtomicBool> {
@@ -171,6 +204,23 @@ pub fn start_nostr_subscription_gateway<O>(
 where
     O: NostrSubscriptionObserver + 'static,
 {
+    let (runtime_handle, owned_runtime) = spawn_owned_gateway_runtime()?;
+    start_nostr_subscription_gateway_on_runtime(config, observer, runtime_handle).map(
+        |mut supervisor| {
+            supervisor._owned_runtime = Some(owned_runtime);
+            supervisor
+        },
+    )
+}
+
+pub fn start_nostr_subscription_gateway_on_runtime<O>(
+    config: NostrSubscriptionGatewayConfig,
+    observer: O,
+    runtime_handle: TokioRuntimeHandle,
+) -> Result<NostrSubscriptionGatewaySupervisor, NostrSubscriptionGatewayStartError>
+where
+    O: NostrSubscriptionObserver + 'static,
+{
     if config.plan.relay_urls.is_empty() {
         return Err(NostrSubscriptionGatewayStartError::NoRelays);
     }
@@ -187,40 +237,81 @@ where
     let mut handles = Vec::with_capacity(config.plan.relay_urls.len());
 
     for relay_url in &config.plan.relay_urls {
-        let handle = spawn_relay_thread(
+        let handle = spawn_relay_task(
             relay_url.clone(),
             config.clone(),
             observer.clone(),
             stop_flag.clone(),
+            &runtime_handle,
         );
         handles.push(handle);
     }
 
-    Ok(NostrSubscriptionGatewaySupervisor { handles, stop_flag })
+    Ok(NostrSubscriptionGatewaySupervisor {
+        handles,
+        stop_flag,
+        runtime_handle,
+        _owned_runtime: None,
+    })
 }
 
-fn spawn_relay_thread(
+fn spawn_owned_gateway_runtime()
+-> Result<(TokioRuntimeHandle, OwnedSubscriptionGatewayRuntime), NostrSubscriptionGatewayStartError>
+{
+    let (handle_tx, handle_rx) = std::sync::mpsc::channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let thread = thread::spawn(move || {
+        let runtime = match TokioRuntimeBuilder::new_multi_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = handle_tx.send(Err(error));
+                return;
+            }
+        };
+        let handle = runtime.handle().clone();
+        if handle_tx.send(Ok(handle)).is_err() {
+            return;
+        }
+        runtime.block_on(async move {
+            let _ = shutdown_rx.await;
+        });
+    });
+
+    let runtime_handle = handle_rx
+        .recv()
+        .map_err(NostrSubscriptionGatewayStartError::RuntimeBootstrap)?
+        .map_err(NostrSubscriptionGatewayStartError::RuntimeBuild)?;
+
+    Ok((
+        runtime_handle,
+        OwnedSubscriptionGatewayRuntime {
+            shutdown_tx: Some(shutdown_tx),
+            thread: Some(thread),
+        },
+    ))
+}
+
+fn spawn_relay_task(
     relay_url: String,
     config: NostrSubscriptionGatewayConfig,
     observer: Arc<dyn NostrSubscriptionObserver>,
     stop_flag: Arc<AtomicBool>,
-) -> JoinHandle<()> {
-    thread::Builder::new()
-        .name(format!("nostr-subscription:{relay_url}"))
-        .spawn(move || run_relay_loop(relay_url, config, observer, stop_flag))
-        .expect("spawn nostr subscription gateway thread")
+    runtime_handle: &TokioRuntimeHandle,
+) -> TokioJoinHandle<()> {
+    runtime_handle
+        .spawn(async move { run_relay_loop_async(relay_url, config, observer, stop_flag).await })
 }
 
-fn run_relay_loop(
+async fn run_relay_loop_async(
     relay_url: String,
     config: NostrSubscriptionGatewayConfig,
     observer: Arc<dyn NostrSubscriptionObserver>,
     stop_flag: Arc<AtomicBool>,
 ) {
-    tracing::info!(relay_url = %relay_url, "nostr relay thread started");
+    tracing::info!(relay_url = %relay_url, "nostr relay task started");
     while !stop_flag.load(Ordering::SeqCst) {
-        let _span = tracing::info_span!("relay.connect", relay_url = %relay_url).entered();
-        let result = run_nostr_subscription_relay_once(NostrSubscriptionRelayInput {
+        tracing::debug!(relay_url = %relay_url, "connecting subscription relay session");
+        let result = run_nostr_subscription_relay_once_async(NostrSubscriptionRelayInput {
             tenex_base_dir: &config.tenex_base_dir,
             daemon_dir: &config.daemon_dir,
             relay_url: &relay_url,
@@ -233,14 +324,14 @@ fn run_relay_loop(
             auth_signer: config
                 .auth_signer
                 .as_ref()
-                .map(|signer| signer.as_ref() as &dyn RelayAuthSigner),
+                .map(|signer| signer.as_ref() as &(dyn RelayAuthSigner + Send + Sync)),
             stop_flag: &stop_flag,
             whitelist_ingress: config.whitelist_ingress.as_deref(),
             project_boot_state: Some(&config.project_boot_state),
             project_event_index: &config.project_event_index,
             observer: Some(observer.as_ref()),
-        });
-        drop(_span);
+        })
+        .await;
 
         match result {
             Ok(diagnostics) => {
@@ -263,9 +354,9 @@ fn run_relay_loop(
             }
         }
 
-        sleep_with_stop(&stop_flag, config.reconnect_backoff);
+        sleep_with_stop_async(&stop_flag, config.reconnect_backoff).await;
     }
-    tracing::info!(relay_url = %relay_url, "nostr relay thread stopped");
+    tracing::info!(relay_url = %relay_url, "nostr relay task stopped");
 }
 
 #[derive(Clone, Copy)]
@@ -279,7 +370,7 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub read_timeout: Duration,
     pub stop_after_eose: bool,
     pub max_messages: Option<usize>,
-    pub auth_signer: Option<&'a dyn RelayAuthSigner>,
+    pub auth_signer: Option<&'a (dyn RelayAuthSigner + Send + Sync)>,
     pub stop_flag: &'a AtomicBool,
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
@@ -333,6 +424,16 @@ pub enum NostrSubscriptionRelayError {
 pub fn run_nostr_subscription_relay_once(
     input: NostrSubscriptionRelayInput<'_>,
 ) -> Result<NostrSubscriptionTickDiagnostics, NostrSubscriptionRelayError> {
+    let runtime = TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| NostrSubscriptionRelayError::WebSocket(tungstenite::Error::Io(error)))?;
+    runtime.block_on(run_nostr_subscription_relay_once_async(input))
+}
+
+async fn run_nostr_subscription_relay_once_async(
+    input: NostrSubscriptionRelayInput<'_>,
+) -> Result<NostrSubscriptionTickDiagnostics, NostrSubscriptionRelayError> {
     validate_relay_url(input.relay_url).map_err(|_| {
         NostrSubscriptionRelayError::InvalidRelayUrl {
             url: input.relay_url.to_string(),
@@ -343,14 +444,17 @@ pub fn run_nostr_subscription_relay_once(
     }
 
     tracing::debug!(relay_url = %input.relay_url, subscription_id = %input.subscription_id, "connecting to relay");
-    let (mut socket, _) = connect(input.relay_url)?;
-    set_stream_timeouts(socket.get_mut(), input.read_timeout);
+    let (mut socket, _) = timeout(input.read_timeout, connect_async(input.relay_url))
+        .await
+        .map_err(|_| websocket_timeout_error("timed out connecting to relay websocket"))??;
     let mut active_filters = input.filters.to_vec();
     let refresh_since = subscription_refresh_since(&active_filters);
-    socket.send(Message::text(build_req_message(
-        input.subscription_id,
-        &active_filters,
-    )?))?;
+    send_socket_message(
+        &mut socket,
+        Message::text(build_req_message(input.subscription_id, &active_filters)?),
+        input.read_timeout,
+    )
+    .await?;
 
     // NIP-42 AUTH state machine. Khatru-based relays handle each incoming
     // websocket message in a separate goroutine, so the post-AUTH REQ races
@@ -378,13 +482,14 @@ pub fn run_nostr_subscription_relay_once(
             .max_messages
             .is_none_or(|max| diagnostics.raw_message_count < max)
     {
-        let message = match socket.read() {
-            Ok(message) => message,
-            Err(error) if is_timeout_error(&error) => continue,
-            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
-                break;
-            }
-            Err(error) => return Err(NostrSubscriptionRelayError::WebSocket(error)),
+        let message = match timeout(input.read_timeout, socket.next()).await {
+            Err(_) => continue,
+            Ok(Some(Ok(message))) => message,
+            Ok(Some(Err(
+                tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed,
+            )))
+            | Ok(None) => break,
+            Ok(Some(Err(error))) => return Err(NostrSubscriptionRelayError::WebSocket(error)),
         };
 
         match message {
@@ -485,7 +590,12 @@ pub fn run_nostr_subscription_relay_once(
                                 current_unix_time_ms() / 1_000,
                             )?;
                             let auth_event_id = auth_event.id.clone();
-                            socket.send(Message::text(build_auth_message(&auth_event)?))?;
+                            send_socket_message(
+                                &mut socket,
+                                Message::text(build_auth_message(&auth_event)?),
+                                input.read_timeout,
+                            )
+                            .await?;
                             auth_state = AuthState::AwaitingOk { auth_event_id };
                         }
                         AuthState::AwaitingOk { .. } | AuthState::Authenticated => {
@@ -499,10 +609,12 @@ pub fn run_nostr_subscription_relay_once(
                 if let AuthState::AwaitingOk { auth_event_id } = &auth_state
                     && is_ok_frame_for(text.as_str(), auth_event_id)
                 {
-                    socket.send(Message::text(build_req_message(
-                        input.subscription_id,
-                        &active_filters,
-                    )?))?;
+                    send_socket_message(
+                        &mut socket,
+                        Message::text(build_req_message(input.subscription_id, &active_filters)?),
+                        input.read_timeout,
+                    )
+                    .await?;
                     auth_state = AuthState::Authenticated;
                     tracing::info!(relay_url = %input.relay_url, "relay authenticated, resubscribed");
                 }
@@ -512,7 +624,8 @@ pub fn run_nostr_subscription_relay_once(
                         input,
                         &mut active_filters,
                         refresh_since,
-                    )?;
+                    )
+                    .await?;
                 }
                 append_tick_diagnostics(&mut diagnostics, tick, frame_index);
                 if stop_after_this_frame {
@@ -520,21 +633,29 @@ pub fn run_nostr_subscription_relay_once(
                 }
             }
             Message::Ping(payload) => {
-                socket.send(Message::Pong(payload))?;
+                send_socket_message(&mut socket, Message::Pong(payload), input.read_timeout)
+                    .await?;
             }
             Message::Close(_) => break,
             Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
         }
     }
 
-    let _ = socket.send(Message::text(build_close_message(input.subscription_id)?));
-    let _ = socket.close(None);
+    let _ = send_socket_message(
+        &mut socket,
+        Message::text(build_close_message(input.subscription_id)?),
+        input.read_timeout,
+    )
+    .await;
+    let _ = socket.close(None).await;
 
     Ok(diagnostics)
 }
 
-fn refresh_subscription_filters(
-    socket: &mut tungstenite::WebSocket<MaybeTlsStream<TcpStream>>,
+type RelaySocket = WebSocketStream<MaybeTlsStream<TokioTcpStream>>;
+
+async fn refresh_subscription_filters(
+    socket: &mut RelaySocket,
     input: NostrSubscriptionRelayInput<'_>,
     active_filters: &mut Vec<NostrFilter>,
     since: Option<u64>,
@@ -549,11 +670,21 @@ fn refresh_subscription_filters(
         return Ok(());
     }
 
-    socket.send(Message::text(build_close_message(input.subscription_id)?))?;
-    socket.send(Message::text(build_req_message(
-        input.subscription_id,
-        &refreshed.filters,
-    )?))?;
+    send_socket_message(
+        socket,
+        Message::text(build_close_message(input.subscription_id)?),
+        input.read_timeout,
+    )
+    .await?;
+    send_socket_message(
+        socket,
+        Message::text(build_req_message(
+            input.subscription_id,
+            &refreshed.filters,
+        )?),
+        input.read_timeout,
+    )
+    .await?;
 
     tracing::info!(
         relay_url = %input.relay_url,
@@ -740,40 +871,34 @@ fn validate_relay_url(relay_url: &str) -> Result<(), NostrSubscriptionGatewaySta
     Ok(())
 }
 
-fn set_stream_timeouts(stream: &mut MaybeTlsStream<TcpStream>, timeout: Duration) {
-    match stream {
-        MaybeTlsStream::Plain(tcp_stream) => {
-            let _ = tcp_stream.set_read_timeout(Some(timeout));
-            let _ = tcp_stream.set_write_timeout(Some(timeout));
-        }
-        MaybeTlsStream::Rustls(tls_stream) => {
-            let _ = tls_stream.sock.set_read_timeout(Some(timeout));
-            let _ = tls_stream.sock.set_write_timeout(Some(timeout));
-        }
-        _ => {}
-    }
+async fn send_socket_message(
+    socket: &mut RelaySocket,
+    message: Message,
+    timeout_duration: Duration,
+) -> Result<(), NostrSubscriptionRelayError> {
+    let send_result = timeout(timeout_duration, socket.send(message))
+        .await
+        .map_err(|_| websocket_timeout_error("timed out writing subscription websocket frame"))?;
+    send_result?;
+    Ok(())
 }
 
-fn is_timeout_error(error: &tungstenite::Error) -> bool {
-    matches!(
-        error,
-        tungstenite::Error::Io(io_error)
-            if matches!(
-                io_error.kind(),
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-            )
-    )
-}
-
-fn sleep_with_stop(stop_flag: &AtomicBool, duration: Duration) {
+async fn sleep_with_stop_async(stop_flag: &AtomicBool, duration: Duration) {
     let poll_interval = Duration::from_millis(100);
     let mut slept = Duration::ZERO;
     while slept < duration && !stop_flag.load(Ordering::SeqCst) {
         let remaining = duration.saturating_sub(slept);
         let step = remaining.min(poll_interval);
-        thread::sleep(step);
+        sleep(step).await;
         slept += step;
     }
+}
+
+fn websocket_timeout_error(message: &str) -> NostrSubscriptionRelayError {
+    NostrSubscriptionRelayError::WebSocket(tungstenite::Error::Io(io::Error::new(
+        io::ErrorKind::TimedOut,
+        message.to_string(),
+    )))
 }
 
 fn current_unix_time_ms() -> u64 {
@@ -795,8 +920,9 @@ mod tests {
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use serde_json::{Value, json};
     use std::fs;
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc::{Receiver, channel};
+    use std::thread::JoinHandle;
     use std::time::Duration;
     use tempfile::tempdir;
 

@@ -25,7 +25,7 @@ use tenex_daemon::nip46::protocol::NIP46_KIND;
 use tenex_daemon::nostr_subscription_gateway::{
     DEFAULT_RELAY_READ_TIMEOUT, NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
     NostrSubscriptionGatewaySupervisor, NostrSubscriptionObserver, NostrSubscriptionRelayError,
-    start_nostr_subscription_gateway,
+    start_nostr_subscription_gateway_on_runtime,
 };
 use tenex_daemon::nostr_subscription_tick::{
     NostrSubscriptionTickDiagnostics, NostrSubscriptionTickDispatch,
@@ -215,6 +215,7 @@ where
     // the loop admits and executes queued work.
     let nostr_supervisor = start_nostr_subscription_supervisor_from_options(
         &options,
+        &runtime_handle,
         whitelist_wiring
             .as_ref()
             .map(|wiring| Arc::clone(&wiring.ingress)),
@@ -333,6 +334,7 @@ fn run_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) {
 
 fn start_nostr_subscription_supervisor_from_options(
     options: &DaemonCliOptions,
+    runtime_handle: &tokio::runtime::Handle,
     whitelist_ingress: Option<Arc<WhitelistIngress>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
@@ -364,9 +366,17 @@ fn start_nostr_subscription_supervisor_from_options(
     }
     config.writer_version = daemon_writer_version();
     let supervisor = if options.debug {
-        start_nostr_subscription_gateway(config, StdoutNostrDebugObserver)
+        start_nostr_subscription_gateway_on_runtime(
+            config,
+            StdoutNostrDebugObserver,
+            runtime_handle.clone(),
+        )
     } else {
-        start_nostr_subscription_gateway(config, NoopNostrSubscriptionObserver)
+        start_nostr_subscription_gateway_on_runtime(
+            config,
+            NoopNostrSubscriptionObserver,
+            runtime_handle.clone(),
+        )
     }
     .map_err(|error| runtime_error(format!("failed to start nostr subscription: {error}")))?;
     Ok(Some(supervisor))
