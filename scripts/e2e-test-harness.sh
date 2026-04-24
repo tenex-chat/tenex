@@ -337,6 +337,36 @@ publish_event_as() {
   nak "${nak_args[@]}"
 }
 
+# === Dispatch id derivation ==================================================
+
+# dispatch_id_for <project_id> <agent_pubkey> <conversation_id> <triggering_event_id>
+# Computes the inbound dispatch id that the daemon will use for this route
+# and event. Mirrors the Rust daemon's `inbound_dispatch_ids`:
+#   prefix = "inbound"
+#   digest = hex(sha256("tenex-inbound-dispatch-v1" \0 project_id \0 agent_pubkey
+#                        \0 conversation_id \0 triggering_event_id))[:24]
+# Echoes "inbound-<digest>".
+dispatch_id_for() {
+  local project_id="${1:?project_id}"
+  local agent_pubkey="${2:?agent_pubkey}"
+  local conversation_id="${3:?conversation_id}"
+  local triggering_event_id="${4:?triggering_event_id}"
+
+  python3 - "$project_id" "$agent_pubkey" "$conversation_id" "$triggering_event_id" <<'PY'
+import hashlib
+import sys
+
+project_id, agent_pubkey, conversation_id, triggering_event_id = sys.argv[1:5]
+h = hashlib.sha256()
+h.update(b"tenex-inbound-dispatch-v1")
+for part in (project_id, agent_pubkey, conversation_id, triggering_event_id):
+    h.update(b"\x00")
+    h.update(part.encode("utf-8"))
+digest = h.hexdigest()[:24]  # first 12 bytes = 24 hex chars
+print(f"inbound-{digest}")
+PY
+}
+
 # === Polling helpers ==========================================================
 
 # await_dispatch_status <dispatch_id> <status> [timeout_seconds]
