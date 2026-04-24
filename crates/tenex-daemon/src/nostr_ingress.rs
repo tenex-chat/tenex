@@ -177,6 +177,19 @@ pub fn process_verified_nostr_event(
             boot.booted_project_count,
             boot.already_booted,
         );
+
+        // Wake the foreground maintenance loop so it picks up the new boot
+        // state on its next poll (within ~100ms) instead of waiting for
+        // the next `sleep_ms` interval. The loop will register the
+        // project-status task and emit the first 24010 on that iteration.
+        //
+        // The ingress thread deliberately does NOT publish the 24010
+        // inline: `publish_project_status_from_filesystem` reads every
+        // agent JSON file under `<tenex_base>/agents/`, which at ~100
+        // agents is a multi-second filesystem scan that would block the
+        // relay subscription thread.
+        crate::foreground_wake::request_wake();
+
         return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
     }
 

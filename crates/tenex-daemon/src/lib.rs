@@ -33,6 +33,7 @@ pub mod daemon_status;
 pub mod daemon_worker_runtime;
 pub mod dispatch_queue;
 pub mod filesystem_state;
+pub mod foreground_wake;
 pub mod inbound_dispatch;
 pub mod inbound_envelope;
 pub mod inbound_routing;

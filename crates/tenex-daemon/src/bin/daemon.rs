@@ -807,6 +807,12 @@ impl DaemonMaintenanceLoopSleeper for ProcessSignalAwareSleeper {
     fn sleep_ms(&mut self, sleep_ms: u64) {
         let mut remaining = Duration::from_millis(sleep_ms);
         while remaining > Duration::ZERO && !DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
+            // Honor ingress wake-ups (e.g. fresh boot state): return early
+            // so the next maintenance iteration runs within SHUTDOWN_SLEEP_POLL_INTERVAL
+            // instead of waiting the full sleep_ms.
+            if tenex_daemon::foreground_wake::take_wake() {
+                return;
+            }
             let step = remaining.min(SHUTDOWN_SLEEP_POLL_INTERVAL);
             thread::sleep(step);
             remaining = remaining.saturating_sub(step);
