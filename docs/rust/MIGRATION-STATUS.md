@@ -109,7 +109,7 @@ Regenerated automatically by `scripts/e2e/run.sh` after every run. Do not edit
 between the delimiters — changes will be overwritten.
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T08:03:04Z · branch `rust-agent-worker-publishing` · commit `dcacba34e1c9` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T08:03:27Z · branch `rust-agent-worker-publishing` · commit `dcacba34e1c9` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
@@ -119,7 +119,7 @@ _Last run: 2026-04-24T08:03:04Z · branch `rust-agent-worker-publishing` · comm
 | 12_boot_activates_dispatch.sh | pass | 2026-04-24T07:57:05Z | 26s |  |
 | 13_boot_is_idempotent.sh | pass | 2026-04-24T07:57:28Z | 23s |  |
 | 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T07:58:13Z | 45s |  |
-| 15_boot_event_reordering.sh | pass | 2026-04-24T08:03:04Z | 20s | newer 31933 wins; older discarded; boot succeeded; no crash |
+| 15_boot_event_reordering.sh | pass | 2026-04-24T08:03:27Z | 19s | newer 31933 wins; older discarded; boot succeeded; no crash |
 | 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T07:58:57Z | 0s |  |
 | 32_redispatch_sequence_under_lock.sh | pass | 2026-04-24T07:58:59Z | 2s | ral journal resequenced correctly under concurrent inbound+completion writers |
 | 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T07:59:45Z | 46s |  |
@@ -177,16 +177,24 @@ Every ~30 min: dispatch 2–3 critical reviewers in parallel asking (a) is the c
 - Hidden blockers surfaced from milestone doc: correlation-ID chain, rollback-tests-with-in-flight-state, Telegram outbound idempotence-across-restart, cold/warm TTFT perf, "no stuck RALs after restart", "no duplicate completions".
 - Actions: parked scenarios 37 (bad assertion) and 39 (needs investigation) under `_wip`; committed Track C's 3 green scenarios + `dispatch_id_for` harness helper; rewrote Batch 3 to be **single-scenario dispatches** (§3.2, patch weak tests, stress-loop scenario 02); logged hidden M9 gates into "DOES NOT WORK"; bumped real-client verification to top of blockers; recommended web-client-pointed-at-Rust-daemon as the next human-driven checkpoint.
 
+**2026-04-24 — Session 3**
+- Verdict: direction is right — keep scripting e2e scenarios. Clean re-stress shows 10/11 pass (vs 40/50 contaminated), so 20% flake was mostly load-induced, **but run 8 failed even on a clean system with the same signature** → real intermittent bug exists, just at ~9% not 20%. Scenario 1.5 agent independently observed "tenex-khatru-relay drops idle connections after ~33s" which matches the 25s disconnect pattern in stress failures.
+- Real-client gap re-scoped: this repo is `@tenex-chat/backend`, NOT the web/iOS clients — clients live in sibling repos. Orchestrator cannot spawn a sonnet agent to "run the web client" from here; genuinely needs human with sibling-repo access. A CLI-only smoke via existing tool implementations IS possible and queued as a future dispatch.
+- **M9 is gated on M8**: `docs/rust/m9-ts-shim-audit.md` shows 14 TS daemon files are transitively live via `getDaemon()` called from 3 TS tool files (`project_list.ts`, `delegate_crossproject.ts`, `send_message.ts`). Deleting them requires first re-homing those tools off `getDaemon()`, which needs Rust-side replacements — that's M8 work. Do not attack M9 deletions directly until M8 tools have Rust parity.
+- Zero-coverage sections ranked by "prove production-ready": §10.1/10.3/10.4 (crash recovery) > §5.5/5.7 (injection, deferred completion) > §4.1/4.6 (claim tokens, stale lock) > §11.15 (relay reconnect) > §2.1 (add agent).
+- Actions: dispatched §5.5 (active-parent injection) and §4.3 (RAL status transitions) as next scenarios; queued §11.15 for after WS investigation lands; kept clean re-stress running as the threshold for retiring the 20% flake flag (success = ≥45/50 AND no `Connection reset` in any clean-run daemon log).
+
 ## Blockers for master merge (ranked by estimated time-to-close)
 
-1. **Real-client verification** (web / iOS / CLI / Telegram) against Rust daemon — zero evidence it's been done; milestone says this is a per-slice gate that has been ignored throughout the branch. Requires human + device + signed build + real bot.
-2. **M8 Telegram inbound adapter** — not written; needed for inbound Nostr→Telegram flow.
-3. **M8 real-client Telegram fixture** — outbound bot API delivery never verified against a real bot.
-4. **M8 Telegram outbound idempotence-across-restart** — claimed landed, not tested.
-5. **M9 TS daemon code audit** — unclear what remains; needs systematic pass.
+1. **Real-client verification** (web / iOS / Telegram) against Rust daemon — zero evidence it's been done; milestone says this is a per-slice gate that has been ignored. **Requires human** because clients live in sibling repos, not this one. CLI smoke via in-tree tool implementations is achievable and queued.
+2. **M8 tools need Rust replacement** before M9 can delete any daemon TS: `src/tools/implementations/project_list.ts`, `delegate_crossproject.ts`, `send_message.ts` all call `getDaemon()`; they keep all 14 TS daemon files alive.
+3. **M8 Telegram inbound adapter** — not written.
+4. **M8 real-client Telegram fixture** — outbound bot API never verified against a real bot.
+5. **M8 Telegram outbound idempotence-across-restart** — claimed landed, not tested.
 6. **CI runnability** — portable `HARNESS_RELAY_BIN` now resolves, but Ollama dep + sandboxed CI runner not decided.
 7. **Hidden quality gates**: correlation-ID chain, rollback-with-in-flight-state, no-stuck-RAL-after-restart, no-duplicate-completions, cold/warm TTFT perf.
-8. **e2e coverage breadth**: ~10 of ~100 scenarios scripted + green. Top-priority (§§1–8, §10, §11) needs ~30 more.
+8. **Intermittent daemon-relay WebSocket disconnect** (~9% after zombie purge) — real bug, not pure load artifact. Likely khatru ~33s idle-connection drop. Daemon reconnect works but harness probe window is insufficient.
+9. **e2e coverage breadth**: ~14 of ~100 scenarios scripted + green. Zero coverage in §10 (crash/recovery), §4 (claims/locks), §5.2-5.11 (delegation variants), §11.12-21 (NIP-42 / relay edge cases).
 
 ## Release criteria — LFG! readiness checklist
 
