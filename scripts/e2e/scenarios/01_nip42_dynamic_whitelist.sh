@@ -17,6 +17,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # shellcheck source=../../e2e-test-harness.sh
 source "$repo_root/scripts/e2e-test-harness.sh"
+# shellcheck source=../helpers/await_file.sh
+source "$repo_root/scripts/e2e/helpers/await_file.sh"
 
 # --- Setup --------------------------------------------------------------------
 
@@ -83,8 +85,8 @@ whitelist_evt="$(publish_event_as "$USER_NSEC" 14199 "" \
 whitelist_id="$(printf '%s' "$whitelist_evt" | jq -r .id)"
 echo "[scenario]   14199 event id=$whitelist_id"
 
-# Relay processes 14199 synchronously in OnEventSavedHook.
-sleep 0.3
+# Relay processes 14199 in OnEventSavedHook; wait for the ACL log line.
+await_file_contains "$HARNESS_RELAY_LOG" '\[acl\] whitelisted' 5
 
 # --- Step 4: user re-subscribes; expect to see ALL 3 historical events -------
 # Use --limit 50 (≠ step 2's 100) so we get a fresh cache key in the replay guard.
