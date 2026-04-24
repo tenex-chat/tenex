@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use tenex_daemon::daemon_foreground::{
@@ -15,16 +16,13 @@ use tenex_daemon::daemon_foreground::{
 };
 use tenex_daemon::daemon_loop::{
     DaemonMaintenanceLoopClock, DaemonMaintenanceLoopSleeper, DaemonMaintenanceLoopStopSignal,
-    DaemonTickPublishMode, DaemonTickWithWorkerError, DaemonTickWithWorkerOutcome,
-    DaemonWorkerTickInput, SystemDaemonMaintenanceLoopClock,
-    run_daemon_tick_once_from_filesystem_with_worker_in_mode,
+    DaemonTickWithWorkerError, DaemonTickWithWorkerOutcome, DaemonWorkerTickInput,
+    SystemDaemonMaintenanceLoopClock, run_daemon_tick_once_from_filesystem_with_worker,
 };
 use tenex_daemon::daemon_maintenance::DaemonMaintenanceOutcome;
 use tenex_daemon::daemon_maintenance::{NoTelegramPublisher, WithTelegramPublisher};
 use tenex_daemon::daemon_shell::{DaemonShell, DaemonShellStopMode};
 use tenex_daemon::nip46::protocol::NIP46_KIND;
-use tenex_daemon::nostr_classification::KIND_PROJECT;
-use tenex_daemon::nostr_event::SignedNostrEvent;
 use tenex_daemon::nostr_subscription_gateway::{
     DEFAULT_RELAY_READ_TIMEOUT, NoopNostrSubscriptionObserver, NostrSubscriptionGatewayConfig,
     NostrSubscriptionGatewaySupervisor, NostrSubscriptionObserver, NostrSubscriptionRelayError,
@@ -38,15 +36,13 @@ use tenex_daemon::project_agent_whitelist::snapshot_state::PROJECT_AGENT_SNAPSHO
 use tenex_daemon::project_boot_state::ProjectBootState;
 use tenex_daemon::publish_outbox::PublishOutboxMaintenanceReport;
 use tenex_daemon::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
-use tenex_daemon::publish_runtime::{PublishRuntimeMaintainInput, maintain_publish_runtime};
 use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
 use tenex_daemon::subscription_runtime::{
     NostrSubscriptionPlanInput, build_nostr_subscription_plan,
 };
 use tenex_daemon::telegram::agent_config::read_agent_gateway_bots;
 use tenex_daemon::telegram::gateway::{
-    AsyncTelegramGatewaySupervisor, GatewayConfig, NoopIngressObserver,
-    start_telegram_gateway_on_runtime,
+    GatewayConfig, NoopIngressObserver, TelegramGatewaySupervisor, start_telegram_gateway,
 };
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::telemetry;
@@ -55,17 +51,11 @@ use tenex_daemon::whitelist_wiring::{
 };
 use tenex_daemon::worker_concurrency::WorkerConcurrencyLimits;
 use tenex_daemon::worker_dispatch::execution::AgentWorkerProcessDispatchSpawner;
-use tenex_daemon::worker_lifecycle::startup_recovery::{
-    WorkerStartupRecoveryInput, WorkerStartupRecoveryLiveWorkers, WorkerStartupRecoveryOutcome,
-    recover_worker_startup,
-};
 use tenex_daemon::worker_process::{
     AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
-    install_worker_io_runtime_handle,
 };
 use tenex_daemon::worker_runtime_state::new_shared_worker_runtime_state;
 use tenex_daemon::worker_session::registry::WorkerSessionRegistry;
-use tokio::sync::watch;
 
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
@@ -78,10 +68,10 @@ const WORKER_ENGINE_ENV: &str = "TENEX_AGENT_WORKER_ENGINE";
 const AGENT_WORKER_ENGINE: &str = "agent";
 const RELOAD_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const ASYNC_FOREGROUND_SLEEP_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const ASYNC_PUBLISH_OUTBOX_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const SHUTDOWN_REQUESTED_MESSAGE: &[u8] =
     b"\nTENEX daemon: shutdown requested; finishing current work and stopping gateways.\n";
 static DAEMON_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+static DAEMON_RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Shutdown progress. Signal handler reads this on repeated SIGINT/SIGTERM to
 /// tell the user which phase is currently blocking. Main thread advances it
@@ -94,8 +84,7 @@ const SHUTDOWN_PHASE_FOREGROUND_DRAIN: usize = 1;
 const SHUTDOWN_PHASE_TELEGRAM: usize = 2;
 const SHUTDOWN_PHASE_NOSTR: usize = 3;
 const SHUTDOWN_PHASE_RELOAD_WATCHER: usize = 4;
-const SHUTDOWN_PHASE_WHITELIST: usize = 5;
-const SHUTDOWN_PHASE_COMPLETE: usize = 6;
+const SHUTDOWN_PHASE_COMPLETE: usize = 5;
 
 /// Pre-baked per-phase messages used from the signal handler. Indexed by the
 /// `SHUTDOWN_PHASE_*` constants. Must be static byte slices so the handler can
@@ -107,7 +96,6 @@ const SHUTDOWN_PHASE_MESSAGES: &[&[u8]] = &[
     b"\nTENEX daemon: stopping Telegram gateway.\n",
     b"\nTENEX daemon: stopping Nostr subscription gateway (waiting for relay reads, up to 10s).\n",
     b"\nTENEX daemon: stopping reload watcher.\n",
-    b"\nTENEX daemon: stopping whitelist supervisors.\n",
     b"\nTENEX daemon: shutdown complete; main thread exiting.\n",
 ];
 
@@ -200,49 +188,26 @@ where
     let _telemetry = telemetry::init(&daemon_dir);
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "tenex-daemon starting");
     install_signal_handlers()?;
-    install_worker_io_runtime_handle(runtime_handle.clone());
     let publisher = Arc::new(Mutex::new(actual_relay_publisher(
         &options,
         &runtime_handle,
     )?));
 
-    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
+    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
         .map_err(|error| runtime_error(error.to_string()))?;
     let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
     let project_event_index = Arc::new(Mutex::new(
         tenex_daemon::project_event_index::ProjectEventIndex::new(),
     ));
-    hydrate_project_event_index_from_filesystem(&tenex_base_dir, &project_event_index)?;
-    run_worker_startup_recovery(&daemon_dir)?;
 
-    // Persist the current owner whitelist so restarts can rehydrate it even
-    // when config.json is temporarily empty. When whitelist_wiring is Some,
-    // the owners came from config.json and are non-empty — write them to the
-    // durable fallback file. When whitelist_wiring is None (config.json had no
-    // owners), read whatever was persisted from a previous run so the
-    // subscription gateway can still start subscribed.
-    let persisted_whitelist: Vec<String> = if let Some(wiring) = &whitelist_wiring {
-        let owners = wiring
-            .reconciler_owners
-            .read()
-            .expect("reconciler owners lock must not be poisoned")
-            .clone();
-        tenex_daemon::daemon_whitelist_store::write_daemon_whitelist(&daemon_dir, &owners);
-        owners
-    } else {
-        tenex_daemon::daemon_whitelist_store::read_daemon_whitelist(&daemon_dir)
-    };
-
+    // While the daemon is running, a dedicated thread watches for SIGHUP
+    // (via the global reload flag set by `request_daemon_reload`) and
+    // invokes `reload_whitelist_wiring` to swap the whitelisted owner set
+    // without restarting any supervisor thread. The watcher exits when the
+    // daemon stop flag is set.
     let reload_watcher = whitelist_wiring
         .as_ref()
-        .map(|wiring| {
-            spawn_reload_watcher_on_runtime(
-                tenex_base_dir.clone(),
-                wiring.reload_handle(),
-                &runtime_handle,
-            )
-        })
-        .transpose()?;
+        .map(|wiring| spawn_reload_watcher(tenex_base_dir.clone(), wiring.reload_handle()));
 
     // Start the Nostr and Telegram gateway supervisors before the foreground
     // worker loop so relay messages can enqueue filesystem dispatches while
@@ -255,13 +220,9 @@ where
             .map(|wiring| Arc::clone(&wiring.ingress)),
         Arc::clone(&project_boot_state),
         Arc::clone(&project_event_index),
-        &persisted_whitelist,
     )?;
-    let gateway_supervisor = start_gateway_supervisor_from_options(
-        &options,
-        &runtime_handle,
-        Arc::clone(&project_event_index),
-    )?;
+    let gateway_supervisor =
+        start_gateway_supervisor_from_options(&options, Arc::clone(&project_event_index))?;
 
     let mut telegram_registry = build_telegram_publisher_registry_from_options(&options)?;
     let heartbeat_latch = whitelist_wiring
@@ -325,7 +286,6 @@ where
     if let Some(supervisor) = gateway_supervisor {
         SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_TELEGRAM, Ordering::SeqCst);
         supervisor.request_stop();
-        runtime_handle.block_on(supervisor.join());
         emit_shutdown_status("Telegram gateway stopped");
     }
     if let Some(supervisor) = nostr_supervisor {
@@ -340,18 +300,16 @@ where
     }
     if let Some(watcher) = reload_watcher {
         // The foreground loop has exited, so `DAEMON_STOP_REQUESTED` is set
-        // and the watcher will exit on its next poll interval.
+        // and the watcher will exit on its next poll.
         SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_RELOAD_WATCHER, Ordering::SeqCst);
         emit_shutdown_status("stopping reload watcher");
-        let _ = runtime_handle.block_on(watcher);
+        let _ = watcher.join();
     }
-    if let Some(wiring) = whitelist_wiring {
-        SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_WHITELIST, Ordering::SeqCst);
-        emit_shutdown_status("stopping whitelist supervisors");
-        wiring.request_stop();
-        runtime_handle.block_on(wiring.join());
-        emit_shutdown_status("whitelist supervisors stopped");
-    }
+    // Dropping the whitelist wiring closes the reconciler trigger channel,
+    // which causes `run_reconciler_loop` to exit. The supervisor threads
+    // detach here; on a clean shutdown the main thread exits immediately
+    // after and the OS reaps them.
+    drop(whitelist_wiring);
 
     diagnostics_result?;
     SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_COMPLETE, Ordering::SeqCst);
@@ -360,51 +318,37 @@ where
     Ok(String::new())
 }
 
-/// Spawn the SIGHUP reload watcher. The task exits when
+/// Spawn the SIGHUP reload watcher. The thread exits when
 /// `DAEMON_STOP_REQUESTED` is set.
-fn spawn_reload_watcher_on_runtime(
-    tenex_base_dir: PathBuf,
-    handle: WhitelistReloadHandle,
-    runtime_handle: &tokio::runtime::Handle,
-) -> Result<tokio::task::JoinHandle<()>, CliError> {
-    let mut signals = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
-        .map_err(|error| runtime_error(format!("failed to install SIGHUP watcher: {error}")))?;
-    Ok(runtime_handle.spawn(async move {
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep(RELOAD_WATCHER_POLL_INTERVAL) => {
-                    if DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
-                        return;
-                    }
+fn spawn_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) -> JoinHandle<()> {
+    thread::Builder::new()
+        .name("whitelist-reload-watcher".to_string())
+        .spawn(move || run_reload_watcher(tenex_base_dir, handle))
+        .expect("reload watcher thread must spawn")
+}
+
+fn run_reload_watcher(tenex_base_dir: PathBuf, handle: WhitelistReloadHandle) {
+    while !DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
+        if DAEMON_RELOAD_REQUESTED.swap(false, Ordering::SeqCst) {
+            match reload_whitelist_from_handle(&tenex_base_dir, &handle) {
+                Ok(outcome) => {
+                    tracing::info!(
+                        previous_owner_count = outcome.previous_owner_count,
+                        new_owner_count = outcome.new_owner_count,
+                        nip46_clients_cleared = outcome.nip46_clients_cleared,
+                        "SIGHUP reload complete"
+                    );
                 }
-                maybe_signal = signals.recv() => {
-                    if maybe_signal.is_none() || DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    run_reload_watcher(&tenex_base_dir, &handle);
+                Err(error) => {
+                    tracing::error!(
+                        error = %error,
+                        "SIGHUP reload failed; keeping previous configuration"
+                    );
+                    tenex_daemon::stdout_status::print_sighup_reload_failed(&error);
                 }
             }
         }
-    }))
-}
-
-fn run_reload_watcher(tenex_base_dir: &Path, handle: &WhitelistReloadHandle) {
-    match reload_whitelist_from_handle(tenex_base_dir, handle) {
-        Ok(outcome) => {
-            tracing::info!(
-                previous_owner_count = outcome.previous_owner_count,
-                new_owner_count = outcome.new_owner_count,
-                nip46_clients_cleared = outcome.nip46_clients_cleared,
-                "SIGHUP reload complete"
-            );
-        }
-        Err(error) => {
-            tracing::error!(
-                error = %error,
-                "SIGHUP reload failed; keeping previous configuration"
-            );
-            tenex_daemon::stdout_status::print_sighup_reload_failed(&error);
-        }
+        thread::sleep(RELOAD_WATCHER_POLL_INTERVAL);
     }
 }
 
@@ -414,7 +358,6 @@ fn start_nostr_subscription_supervisor_from_options(
     whitelist_ingress: Option<Arc<WhitelistIngress>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
-    persisted_whitelist: &[String],
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let plan = build_nostr_subscription_plan(NostrSubscriptionPlanInput {
@@ -422,7 +365,6 @@ fn start_nostr_subscription_supervisor_from_options(
         since: Some(current_unix_time_ms() / 1_000),
         lesson_definition_ids: &[],
         project_event_index: &project_event_index,
-        persisted_whitelist,
     })
     .map_err(|error| runtime_error(format!("nostr subscription plan failed: {error}")))?;
     if plan.relay_urls.is_empty() || plan.filters.is_empty() {
@@ -458,121 +400,6 @@ fn start_nostr_subscription_supervisor_from_options(
     }
     .map_err(|error| runtime_error(format!("failed to start nostr subscription: {error}")))?;
     Ok(Some(supervisor))
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredProjectDescriptor {
-    project_owner_pubkey: String,
-    project_d_tag: String,
-    #[serde(default)]
-    project_manager_pubkey: Option<String>,
-}
-
-fn hydrate_project_event_index_from_filesystem(
-    tenex_base_dir: &Path,
-    project_event_index: &Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
-) -> Result<(), CliError> {
-    let config =
-        read_backend_config(tenex_base_dir).map_err(|error| runtime_error(error.to_string()))?;
-    let mut project_roots = Vec::new();
-    if let Some(projects_base) = config.projects_base.as_deref() {
-        project_roots.push(PathBuf::from(projects_base));
-    }
-    let legacy_projects_root = tenex_base_dir.join("projects");
-    if !project_roots
-        .iter()
-        .any(|root| root == &legacy_projects_root)
-    {
-        project_roots.push(legacy_projects_root);
-    }
-
-    let mut restored = 0usize;
-    let mut index = project_event_index
-        .lock()
-        .expect("project event index mutex must not be poisoned");
-    for project_root in project_roots {
-        if !project_root.exists() {
-            continue;
-        }
-        let entries = std::fs::read_dir(&project_root).map_err(|error| {
-            runtime_error(format!(
-                "failed to read projects directory {}: {error}",
-                project_root.display()
-            ))
-        })?;
-        for entry in entries {
-            let entry = entry.map_err(|error| runtime_error(error.to_string()))?;
-            let project_json_path = entry.path().join("project.json");
-            if !project_json_path.is_file() {
-                continue;
-            }
-            let raw = std::fs::read_to_string(&project_json_path).map_err(|error| {
-                runtime_error(format!(
-                    "failed to read project descriptor {}: {error}",
-                    project_json_path.display()
-                ))
-            })?;
-            let descriptor: StoredProjectDescriptor =
-                serde_json::from_str(&raw).map_err(|error| {
-                    runtime_error(format!(
-                        "failed to parse project descriptor {}: {error}",
-                        project_json_path.display()
-                    ))
-                })?;
-            let mut tags = vec![vec!["d".to_string(), descriptor.project_d_tag.clone()]];
-            if let Some(manager) = descriptor.project_manager_pubkey.as_ref() {
-                tags.push(vec!["p".to_string(), manager.clone()]);
-            }
-            let synthetic_event = SignedNostrEvent {
-                id: format!(
-                    "filesystem-project:{}:{}",
-                    descriptor.project_owner_pubkey, descriptor.project_d_tag
-                ),
-                pubkey: descriptor.project_owner_pubkey,
-                created_at: 0,
-                kind: KIND_PROJECT,
-                tags,
-                content: String::new(),
-                sig: String::new(),
-            };
-            if index.upsert(synthetic_event) {
-                restored += 1;
-            }
-        }
-    }
-
-    if restored > 0 {
-        tracing::info!(
-            restored,
-            "restored project index entries from filesystem descriptors"
-        );
-    }
-    Ok(())
-}
-
-fn run_worker_startup_recovery(daemon_dir: &Path) -> Result<(), CliError> {
-    match recover_worker_startup(WorkerStartupRecoveryInput {
-        daemon_dir: daemon_dir.to_path_buf(),
-        live_workers: WorkerStartupRecoveryLiveWorkers::from_worker_ids(
-            std::iter::empty::<String>(),
-        ),
-        timestamp: current_unix_time_ms(),
-        correlation_id: "daemon-startup-recovery".to_string(),
-        writer_version: daemon_writer_version(),
-    }) {
-        Ok(WorkerStartupRecoveryOutcome::NoOrphans { .. }) => Ok(()),
-        Ok(WorkerStartupRecoveryOutcome::Applied { applied, .. }) => {
-            tracing::warn!(
-                reconciled = applied.actions.len(),
-                "reconciled orphaned worker claims during daemon startup"
-            );
-            Ok(())
-        }
-        Err(error) => Err(runtime_error(format!(
-            "worker startup recovery failed: {error}"
-        ))),
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -685,14 +512,13 @@ fn build_telegram_publisher_registry_from_options(
         .map_err(|error| runtime_error(format!("telegram publisher registry failed: {error}")))
 }
 
-/// Build an [`AsyncTelegramGatewaySupervisor`] from the on-disk agent
+/// Build a [`TelegramGatewaySupervisor`] from the on-disk agent
 /// configurations. Returns `None` when no agent has a Telegram bot token
 /// configured; the gateway is simply not started in that case.
 fn start_gateway_supervisor_from_options(
     options: &DaemonCliOptions,
-    runtime_handle: &tokio::runtime::Handle,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
-) -> Result<Option<AsyncTelegramGatewaySupervisor>, CliError> {
+) -> Result<Option<TelegramGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let bots = read_agent_gateway_bots(&tenex_base_dir)
         .map_err(|error| runtime_error(format!("telegram agent config scan failed: {error}")))?;
@@ -716,7 +542,7 @@ fn start_gateway_supervisor_from_options(
     config.signer = Some(signer);
     config.project_event_index = project_event_index;
 
-    match start_telegram_gateway_on_runtime(config, NoopIngressObserver, runtime_handle) {
+    match start_telegram_gateway(config, NoopIngressObserver) {
         Ok(supervisor) => Ok(Some(supervisor)),
         Err(error) => Err(runtime_error(format!(
             "failed to start telegram gateway: {error}"
@@ -761,18 +587,11 @@ where
     let worker_config = AgentWorkerProcessConfig::default();
     let worker_runtime_state = new_shared_worker_runtime_state();
     let publish_result_sequence = Arc::new(AtomicU64::new(1));
-    let session_registry = WorkerSessionRegistry::new_on_runtime(tokio::runtime::Handle::current());
+    let session_registry = WorkerSessionRegistry::new();
     let started_at = current_unix_time_ms();
     let session = shell
         .start_foreground(started_at)
         .map_err(|error| runtime_error(error.to_string()))?;
-    tenex_daemon::publish_outbox_wake::request_drain();
-    let (publish_stop_tx, publish_stop_rx) = watch::channel(false);
-    let publish_outbox_task = tokio::spawn(run_async_publish_outbox_task(
-        daemon_dir.clone(),
-        Arc::clone(&publisher),
-        publish_stop_rx,
-    ));
     let lock_owner = session.lock_info().clone();
     let mut steps: Vec<DaemonForegroundStepDiagnostics> = Vec::new();
     let mut iteration_index = 0u64;
@@ -852,11 +671,6 @@ where
                 "failed to join foreground session registry: {error}"
             ))
         })?;
-    tenex_daemon::publish_outbox_wake::request_drain();
-    let _ = publish_stop_tx.send(true);
-    publish_outbox_task
-        .await
-        .map_err(|error| runtime_error(format!("async publish outbox task failed: {error}")))??;
 
     session
         .stop(DaemonShellStopMode::Shutdown)
@@ -873,68 +687,6 @@ where
         sleep_ms: options.sleep_ms,
         steps,
     })
-}
-
-async fn run_async_publish_outbox_task<P>(
-    daemon_dir: PathBuf,
-    publisher: Arc<Mutex<P>>,
-    mut stop: watch::Receiver<bool>,
-) -> Result<(), CliError>
-where
-    P: PublishOutboxRelayPublisher + Send + 'static,
-{
-    loop {
-        let pending_after =
-            drain_async_publish_outbox_once(&daemon_dir, Arc::clone(&publisher)).await?;
-        if *stop.borrow() && pending_after == 0 {
-            return Ok(());
-        }
-
-        tokio::select! {
-            changed = stop.changed() => {
-                let _ = changed;
-            }
-            _ = tenex_daemon::publish_outbox_wake::wait_for_drain() => {}
-            _ = tokio::time::sleep(ASYNC_PUBLISH_OUTBOX_POLL_INTERVAL) => {}
-        }
-    }
-}
-
-async fn drain_async_publish_outbox_once<P>(
-    daemon_dir: &Path,
-    publisher: Arc<Mutex<P>>,
-) -> Result<u64, CliError>
-where
-    P: PublishOutboxRelayPublisher + Send + 'static,
-{
-    let daemon_dir = daemon_dir.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let now_ms = current_unix_time_ms();
-        let mut guard = publisher
-            .lock()
-            .expect("publisher mutex poisoned; another task panicked while publishing");
-        let report = maintain_publish_runtime(PublishRuntimeMaintainInput {
-            daemon_dir: &daemon_dir,
-            publisher: &mut *guard,
-            now: now_ms,
-            retry_policy: PublishOutboxRetryPolicy::default(),
-        })
-        .map_err(|error| runtime_error(format!("publish-outbox maintenance failed: {error}")))?;
-        if !report.maintenance_report.requeued.is_empty()
-            || !report.maintenance_report.drained.is_empty()
-        {
-            tracing::debug!(
-                requeued = report.maintenance_report.requeued.len(),
-                drained = report.maintenance_report.drained.len(),
-                pending_after = report.maintenance_report.diagnostics_after.pending_count,
-                failed_after = report.maintenance_report.diagnostics_after.failed_count,
-                "async publish-outbox maintenance ran"
-            );
-        }
-        Ok::<u64, CliError>(report.maintenance_report.diagnostics_after.pending_count as u64)
-    })
-    .await
-    .map_err(|error| runtime_error(format!("failed to join async publish outbox task: {error}")))?
 }
 
 async fn run_async_foreground_tick<P>(
@@ -970,7 +722,7 @@ where
         match telegram_publisher {
             ForegroundTelegramPublisherState::None => {
                 let mut telegram_publisher = NoTelegramPublisher;
-                let outcome = run_daemon_tick_once_from_filesystem_with_worker_in_mode(
+                let outcome = run_daemon_tick_once_from_filesystem_with_worker(
                     tenex_daemon::daemon_maintenance::DaemonMaintenanceInput {
                         tenex_base_dir: &tenex_base_dir,
                         daemon_dir: &daemon_dir,
@@ -1002,7 +754,6 @@ where
                     &mut worker_spawner,
                     &publisher,
                     PublishOutboxRetryPolicy::default(),
-                    DaemonTickPublishMode::NotifyOnly,
                     &mut telegram_publisher,
                 );
                 (outcome, ForegroundTelegramPublisherState::None)
@@ -1010,7 +761,7 @@ where
             ForegroundTelegramPublisherState::Registry(mut registry) => {
                 let outcome = {
                     let mut telegram_publisher = WithTelegramPublisher(&mut registry);
-                    run_daemon_tick_once_from_filesystem_with_worker_in_mode(
+                    run_daemon_tick_once_from_filesystem_with_worker(
                         tenex_daemon::daemon_maintenance::DaemonMaintenanceInput {
                             tenex_base_dir: &tenex_base_dir,
                             daemon_dir: &daemon_dir,
@@ -1042,7 +793,6 @@ where
                         &mut worker_spawner,
                         &publisher,
                         PublishOutboxRetryPolicy::default(),
-                        DaemonTickPublishMode::NotifyOnly,
                         &mut telegram_publisher,
                     )
                 };
@@ -1400,12 +1150,18 @@ extern "C" fn request_daemon_stop(_signal: libc::c_int) {
     }
 }
 
+extern "C" fn request_daemon_reload(_signal: libc::c_int) {
+    DAEMON_RELOAD_REQUESTED.store(true, Ordering::SeqCst);
+}
+
 fn install_signal_handlers() -> Result<(), CliError> {
     DAEMON_STOP_REQUESTED.store(false, Ordering::SeqCst);
+    DAEMON_RELOAD_REQUESTED.store(false, Ordering::SeqCst);
     SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_IDLE, Ordering::SeqCst);
     for signal in [libc::SIGINT, libc::SIGTERM] {
         install_signal_handler(signal, request_daemon_stop)?;
     }
+    install_signal_handler(libc::SIGHUP, request_daemon_reload)?;
     Ok(())
 }
 
@@ -1759,7 +1515,6 @@ mod tests {
     fn build_whitelist_wiring_returns_none_when_no_whitelisted_pubkeys() {
         let tenex_base_dir = unique_temp_dir("whitelist-wiring-empty");
         let daemon_dir = tenex_base_dir.join("daemon");
-        let runtime = tokio::runtime::Runtime::new().expect("runtime must build");
         fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
         fs::write(
             backend_config_path(&tenex_base_dir),
@@ -1773,7 +1528,7 @@ mod tests {
         )
         .expect("config must write");
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, runtime.handle())
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
             .expect("wiring construction must succeed");
         assert!(wiring.is_none());
 
@@ -1787,7 +1542,6 @@ mod tests {
         let tenex_base_dir = unique_temp_dir("whitelist-wiring-full");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
-        let runtime = tokio::runtime::Runtime::new().expect("runtime must build");
         fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
         fs::create_dir_all(&agents_dir).expect("agents dir must create");
         let owner = pubkey_hex(0x02);
@@ -1803,7 +1557,7 @@ mod tests {
         )
         .expect("config must write");
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, runtime.handle())
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
             .expect("wiring construction must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -1821,8 +1575,7 @@ mod tests {
         // Dropping the wiring closes the trigger channel and exits the
         // supervisor threads; no assertions required, but we verify the
         // destructor runs cleanly without blocking on tests.
-        wiring.request_stop();
-        runtime.block_on(wiring.join());
+        drop(wiring);
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
@@ -1856,7 +1609,6 @@ mod tests {
             since: Some(1_710_001_000),
             lesson_definition_ids: &[],
             project_event_index: &project_event_index,
-            persisted_whitelist: &[],
         })
         .expect("subscription plan must build");
 
@@ -1897,7 +1649,6 @@ mod tests {
         let tenex_base_dir = unique_temp_dir("reload-swap");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
-        let runtime = tokio::runtime::Runtime::new().expect("runtime must build");
         fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
         fs::create_dir_all(&agents_dir).expect("agents dir must create");
 
@@ -1906,7 +1657,7 @@ mod tests {
         let owner_new_b = pubkey_hex(0x33);
         write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, runtime.handle())
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
             .expect("wiring build must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -1966,8 +1717,7 @@ mod tests {
             "reload must drop the previously-cached NIP-46 client"
         );
 
-        wiring.request_stop();
-        runtime.block_on(wiring.join());
+        drop(wiring);
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
 
@@ -1980,7 +1730,6 @@ mod tests {
         let tenex_base_dir = unique_temp_dir("reload-latched-stopped");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
-        let runtime = tokio::runtime::Runtime::new().expect("runtime must build");
         fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
         fs::create_dir_all(&agents_dir).expect("agents dir must create");
 
@@ -1988,7 +1737,7 @@ mod tests {
         let owner_new = pubkey_hex(0x55);
         write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
 
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, runtime.handle())
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir)
             .expect("wiring build must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -2036,8 +1785,7 @@ mod tests {
         assert!(!latch.contains_owner(&owner_initial));
         drop(latch);
 
-        wiring.request_stop();
-        runtime.block_on(wiring.join());
+        drop(wiring);
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
 

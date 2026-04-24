@@ -1028,9 +1028,7 @@ fn persist_pending_record(
     if write_result.is_err() {
         let _ = fs::remove_file(&tmp_path);
     }
-    let persisted = write_result?;
-    crate::publish_outbox_wake::request_drain();
-    Ok(persisted)
+    write_result
 }
 
 fn transition_pending_record(

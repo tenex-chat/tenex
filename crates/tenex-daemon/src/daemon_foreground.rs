@@ -527,14 +527,9 @@ mod tests {
 
     impl WorkerFrameReceiver for EmptyQueueSession {
         type Error = EmptyQueueWorkerError;
-        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             panic!("empty queue session should not receive frames");
-        }
-
-        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
-            std::future::ready(self.receive_worker_frame())
         }
     }
 
@@ -586,16 +581,11 @@ mod tests {
 
     impl WorkerFrameReceiver for RecordingWorkerSession {
         type Error = RecordingWorkerError;
-        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             self.incoming_frames
                 .pop_front()
                 .ok_or(RecordingWorkerError("missing worker frame"))
-        }
-
-        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
-            std::future::ready(self.receive_worker_frame())
         }
     }
 

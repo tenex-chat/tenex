@@ -1,7 +1,6 @@
 use std::fmt;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
-
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::nip46::protocol::NIP46_KIND;
@@ -20,7 +19,7 @@ pub struct WhitelistIngress {
     pub snapshot_state: Arc<SnapshotState>,
     pub heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
     pub owners: Arc<RwLock<Vec<String>>>,
-    pub reconciler_trigger: UnboundedSender<String>,
+    pub reconciler_trigger: Sender<String>,
     pub nip46_registry: Arc<NIP46Registry>,
 }
 
@@ -71,9 +70,11 @@ impl WhitelistIngress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::str::FromStr;
-    use tokio::sync::mpsc::{self, error::TryRecvError};
+    use std::sync::mpsc::{self, TryRecvError};
+    use std::time::Duration;
+
+    use secp256k1::{Keypair, Secp256k1, SecretKey};
 
     use crate::backend_config::Nip46Config;
     use crate::backend_heartbeat_latch::BackendHeartbeatLatchState;
@@ -169,8 +170,8 @@ mod tests {
         heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
         registry: Arc<NIP46Registry>,
         owners: Vec<String>,
-    ) -> (WhitelistIngress, mpsc::UnboundedReceiver<String>) {
-        let (tx, rx) = mpsc::unbounded_channel();
+    ) -> (WhitelistIngress, mpsc::Receiver<String>) {
+        let (tx, rx) = mpsc::channel();
         (
             WhitelistIngress {
                 snapshot_state,
@@ -197,7 +198,7 @@ mod tests {
             vec![owner.xonly_hex.clone()],
         )));
 
-        let (ingress, mut rx) = ingress_with(
+        let (ingress, rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -226,7 +227,8 @@ mod tests {
         assert_eq!(snapshot_state.p_tags_for(&owner.xonly_hex), Some(expected));
 
         assert_eq!(
-            rx.blocking_recv().expect("reconciler must receive trigger"),
+            rx.recv_timeout(Duration::from_millis(100))
+                .expect("reconciler must receive trigger"),
             owner.xonly_hex
         );
 
@@ -248,7 +250,7 @@ mod tests {
             Vec::<String>::new(),
         )));
 
-        let (ingress, mut rx) = ingress_with(
+        let (ingress, rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -330,7 +332,7 @@ mod tests {
             vec![owner.xonly_hex.clone()],
         )));
 
-        let (ingress, mut rx) = ingress_with(
+        let (ingress, rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -366,7 +368,7 @@ mod tests {
             Vec::<String>::new(),
         )));
 
-        let (ingress, mut rx) = ingress_with(
+        let (ingress, rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -383,7 +385,7 @@ mod tests {
 
         ingress.handle_event(&event);
         assert_eq!(
-            rx.blocking_recv()
+            rx.recv_timeout(Duration::from_millis(100))
                 .expect("first event must trigger reconciler"),
             owner.xonly_hex
         );
@@ -405,7 +407,7 @@ mod tests {
             vec![owner_a.xonly_hex.clone(), owner_b.xonly_hex.clone()],
         )));
 
-        let (ingress, mut rx) = ingress_with(
+        let (ingress, rx) = ingress_with(
             Arc::clone(&snapshot_state),
             Arc::clone(&heartbeat_latch),
             empty_registry(),
@@ -416,8 +418,10 @@ mod tests {
         assert!(snapshot_state.is_catchup_complete());
 
         let mut triggered = vec![
-            rx.blocking_recv().expect("owner a trigger"),
-            rx.blocking_recv().expect("owner b trigger"),
+            rx.recv_timeout(Duration::from_millis(100))
+                .expect("owner a trigger"),
+            rx.recv_timeout(Duration::from_millis(100))
+                .expect("owner b trigger"),
         ];
         triggered.sort();
         let mut expected = vec![owner_a.xonly_hex, owner_b.xonly_hex];

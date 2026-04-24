@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::future::Future;
 
 use serde_json::Value;
 use thiserror::Error;
@@ -14,12 +13,8 @@ use crate::worker_runtime_state::SharedWorkerRuntimeState;
 
 pub trait WorkerFrameReceiver {
     type Error: Error + Send + Sync + 'static;
-    type ReceiveFuture<'a>: Future<Output = Result<Vec<u8>, Self::Error>> + Send
-    where
-        Self: 'a;
 
     fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error>;
-    fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_>;
 }
 
 #[derive(Debug)]
@@ -138,7 +133,6 @@ mod tests {
 
     impl WorkerFrameReceiver for RecordingWorker {
         type Error = FakeWorkerError;
-        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             if let Some(error) = self.receive_error.clone() {
@@ -148,10 +142,6 @@ mod tests {
             self.incoming_frames
                 .pop_front()
                 .ok_or(FakeWorkerError("missing frame"))
-        }
-
-        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
-            std::future::ready(self.receive_worker_frame())
         }
     }
 

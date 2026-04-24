@@ -18,14 +18,6 @@ pub struct NostrSubscriptionPlanInput<'a> {
     pub since: Option<u64>,
     pub lesson_definition_ids: &'a [String],
     pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
-    /// Pubkeys rehydrated from `<daemon_dir>/whitelist.json` at startup. Used
-    /// as the effective whitelist when `config.json` has no `whitelistedPubkeys`
-    /// — allows the subscription gateway to start immediately with the
-    /// last-known owner set instead of waiting for a fresh kind:14199 event.
-    ///
-    /// Ignored when `config.json` already supplies a non-empty whitelist (the
-    /// config is always authoritative over the persisted fallback).
-    pub persisted_whitelist: &'a [String],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -86,18 +78,7 @@ pub fn build_nostr_subscription_plan(
     );
     let relay_urls = config.effective_relay_urls();
     let backend_pubkey = config.backend_signer()?.pubkey_hex().to_string();
-    let whitelisted_pubkeys = {
-        let from_config = sorted_deduped(config.whitelisted_pubkeys);
-        if from_config.is_empty() && !input.persisted_whitelist.is_empty() {
-            tracing::info!(
-                count = input.persisted_whitelist.len(),
-                "config.json has no whitelisted pubkeys; using persisted whitelist from daemon/whitelist.json"
-            );
-            sorted_deduped(input.persisted_whitelist.to_vec())
-        } else {
-            from_config
-        }
-    };
+    let whitelisted_pubkeys = sorted_deduped(config.whitelisted_pubkeys);
 
     let static_filters = build_static_filters(&whitelisted_pubkeys, input.since);
     let project_tagged_filter = build_project_tagged_filter(&project_addresses, input.since);
@@ -169,7 +150,6 @@ mod tests {
             since: Some(1_710_001_000),
             lesson_definition_ids: std::slice::from_ref(&lesson_id),
             project_event_index: &project_event_index,
-            persisted_whitelist: &[],
         })
         .expect("subscription plan must build");
 
@@ -233,7 +213,6 @@ mod tests {
             since: None,
             lesson_definition_ids: &[],
             project_event_index: &project_event_index,
-            persisted_whitelist: &[],
         })
         .expect("subscription plan must build");
 

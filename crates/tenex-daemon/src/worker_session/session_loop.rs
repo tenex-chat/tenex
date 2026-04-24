@@ -32,8 +32,7 @@ pub struct WorkerSessionLoopInput<'a> {
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
     pub nip46_publish: Option<WorkerMessageNip46PublishContext<'a>>,
-    pub live_publish_maintenance:
-        Option<&'a mut (dyn FnMut(&Path, u64) -> Result<(), String> + Send)>,
+    pub live_publish_maintenance: Option<&'a mut dyn FnMut(&Path, u64) -> Result<(), String>>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
     pub max_frames: u64,
 }
@@ -135,105 +134,6 @@ where
 
         let frame = worker
             .receive_worker_frame()
-            .map_err(|source| WorkerSessionLoopError::Receive { source })?;
-        let decoded_message = decode_agent_worker_protocol_frame(&frame)
-            .map_err(|source| WorkerSessionLoopError::Decode { source })?;
-        let terminal = if is_terminal_message(&decoded_message) {
-            input.terminal.take()
-        } else {
-            None
-        };
-
-        let outcome = handle_worker_message_flow(
-            worker,
-            input.runtime_state,
-            WorkerMessageFlowInput {
-                daemon_dir: input.daemon_dir,
-                worker_id: input.worker_id,
-                message: &decoded_message,
-                observed_at: input.observed_at,
-                publish: input.publish.clone(),
-                nip46_publish: input.nip46_publish.clone(),
-                terminal,
-            },
-        )
-        .map_err(|source| WorkerSessionLoopError::MessageFlow { source })?;
-
-        frame_count += 1;
-
-        match outcome {
-            WorkerMessageFlowOutcome::TerminalResultHandled { .. } => {
-                return Ok(WorkerSessionLoopOutcome {
-                    frame_count,
-                    final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
-                });
-            }
-            WorkerMessageFlowOutcome::BootFailureCandidate { .. } => {
-                return Ok(WorkerSessionLoopOutcome {
-                    frame_count,
-                    final_reason: WorkerSessionLoopFinalReason::BootFailureCandidate,
-                });
-            }
-            WorkerMessageFlowOutcome::PublishRequestHandled { outcome } => {
-                run_live_publish_maintenance(&mut input)?;
-                if let WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error } =
-                    &outcome.result_delivery
-                {
-                    return finish_terminal_publish_after_closed_worker_pipe(
-                        worker,
-                        &mut input,
-                        frame_count,
-                        &outcome,
-                        error,
-                    );
-                }
-                send_pending_worker_injections(worker, &input)?;
-                send_pending_stop_request(worker, &input)?;
-            }
-            WorkerMessageFlowOutcome::Nip46PublishRequestHandled { .. } => {
-                run_live_publish_maintenance(&mut input)?;
-                if let Some(nip46) = input.nip46_publish.as_mut() {
-                    nip46.result_sequence = nip46.result_sequence.saturating_add(1);
-                }
-                send_pending_worker_injections(worker, &input)?;
-                send_pending_stop_request(worker, &input)?;
-            }
-            WorkerMessageFlowOutcome::HeartbeatUpdated { .. }
-            | WorkerMessageFlowOutcome::ControlTelemetry { .. }
-            | WorkerMessageFlowOutcome::StreamTelemetry { .. }
-            | WorkerMessageFlowOutcome::PublishedNotification { .. } => {
-                send_pending_worker_injections(worker, &input)?;
-                send_pending_stop_request(worker, &input)?;
-            }
-        }
-    }
-}
-
-pub async fn run_worker_session_loop_async<S>(
-    worker: &mut S,
-    mut input: WorkerSessionLoopInput<'_>,
-) -> Result<WorkerSessionLoopOutcome, WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
-where
-    S: WorkerFrameReceiver
-        + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>
-        + Send,
-{
-    let mut frame_count = 0_u64;
-
-    loop {
-        if frame_count >= input.max_frames {
-            return Err(WorkerSessionLoopError::MaxFrameLimitExceeded {
-                frame_count,
-                max_frames: input.max_frames,
-            });
-        }
-
-        send_pending_worker_injections(worker, &input)?;
-        send_pending_stop_request(worker, &input)?;
-
-        let frame = worker
-            .receive_worker_frame_async()
-            .await
             .map_err(|source| WorkerSessionLoopError::Receive { source })?;
         let decoded_message = decode_agent_worker_protocol_frame(&frame)
             .map_err(|source| WorkerSessionLoopError::Decode { source })?;
@@ -648,7 +548,6 @@ mod tests {
 
     impl WorkerFrameReceiver for RecordingWorker {
         type Error = FakeWorkerError;
-        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             if let Some(error) = self.receive_error.clone() {
@@ -658,10 +557,6 @@ mod tests {
             self.incoming_frames
                 .pop_front()
                 .ok_or(FakeWorkerError("missing frame"))
-        }
-
-        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
-            std::future::ready(self.receive_worker_frame())
         }
     }
 
@@ -767,12 +662,11 @@ mod tests {
             ..Default::default()
         };
         let runtime_state = runtime_state_for("worker-alpha", identity_with_agent(&fixture.pubkey));
-        let maintenance_calls = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let maintenance_calls_for_closure = std::sync::Arc::clone(&maintenance_calls);
+        let maintenance_calls = std::cell::Cell::new(0_u64);
         let mut live_publish_maintenance = |daemon_dir_seen: &Path, now_seen: u64| {
             assert_eq!(daemon_dir_seen, daemon_dir.as_path());
             assert_eq!(now_seen, 1_710_000_403_000);
-            maintenance_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+            maintenance_calls.set(maintenance_calls.get() + 1);
             Ok(())
         };
 
@@ -807,7 +701,7 @@ mod tests {
         assert_eq!(worker.sent_messages.len(), 1);
         assert_eq!(worker.sent_messages[0]["type"], "publish_result");
         assert_eq!(worker.sent_messages[0]["status"], "accepted");
-        assert_eq!(maintenance_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(maintenance_calls.get(), 1);
         assert!(
             runtime_state
                 .lock()

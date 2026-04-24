@@ -1,21 +1,13 @@
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::process::{ExitStatus, Stdio};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::{
-    Child as TokioChild, ChildStderr, ChildStdin, ChildStdout, Command as TokioCommand,
-};
-use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioRuntimeHandle};
-use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::worker_protocol::{
     AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES, AGENT_WORKER_MAX_FRAME_BYTES,
@@ -25,19 +17,7 @@ use crate::worker_protocol::{
 };
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
 
-static WORKER_IO_EXTERNAL_RUNTIME: OnceLock<TokioRuntimeHandle> = OnceLock::new();
-static WORKER_IO_OWNED_RUNTIME: OnceLock<Result<OwnedWorkerIoRuntime, String>> = OnceLock::new();
-
-fn block_on_worker_runtime<F>(runtime_handle: &TokioRuntimeHandle, future: F) -> F::Output
-where
-    F: Future,
-{
-    if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::task::block_in_place(|| runtime_handle.block_on(future))
-    } else {
-        runtime_handle.block_on(future)
-    }
-}
+const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Error)]
 pub enum WorkerProcessError {
@@ -103,8 +83,8 @@ impl AgentWorkerCommand {
         self
     }
 
-    fn build(&self) -> TokioCommand {
-        let mut command = TokioCommand::new(&self.program);
+    fn build(&self) -> Command {
+        let mut command = Command::new(&self.program);
         command.args(&self.args);
 
         if let Some(current_dir) = &self.current_dir {
@@ -117,55 +97,6 @@ impl AgentWorkerCommand {
 
         command
     }
-}
-
-#[derive(Debug)]
-struct OwnedWorkerIoRuntime {
-    handle: TokioRuntimeHandle,
-    _thread: thread::JoinHandle<()>,
-}
-
-pub fn install_worker_io_runtime_handle(handle: TokioRuntimeHandle) {
-    let _ = WORKER_IO_EXTERNAL_RUNTIME.set(handle);
-}
-
-fn worker_io_runtime_handle() -> WorkerProcessResult<TokioRuntimeHandle> {
-    if let Some(handle) = WORKER_IO_EXTERNAL_RUNTIME.get() {
-        return Ok(handle.clone());
-    }
-
-    let runtime = WORKER_IO_OWNED_RUNTIME
-        .get_or_init(|| spawn_owned_worker_io_runtime().map_err(|error| error.to_string()))
-        .as_ref()
-        .map_err(|error| WorkerProcessError::Io(io::Error::other(error.clone())))?;
-    Ok(runtime.handle.clone())
-}
-
-fn spawn_owned_worker_io_runtime() -> io::Result<OwnedWorkerIoRuntime> {
-    let (handle_tx, handle_rx) = mpsc::channel();
-    let thread = thread::spawn(move || {
-        let runtime = match TokioRuntimeBuilder::new_multi_thread().enable_all().build() {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = handle_tx.send(Err(error));
-                return;
-            }
-        };
-        let handle = runtime.handle().clone();
-        if handle_tx.send(Ok(handle)).is_err() {
-            return;
-        }
-        runtime.block_on(std::future::pending::<()>());
-    });
-
-    let handle = handle_rx
-        .recv()
-        .map_err(|error| io::Error::other(error.to_string()))??;
-
-    Ok(OwnedWorkerIoRuntime {
-        handle,
-        _thread: thread,
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,66 +130,31 @@ pub struct BootedAgentWorkerProcess {
 /// Owns the stdin writer, the background stdout frame reader, and the
 /// background stderr collector. Independent of whether the worker is a real
 /// subprocess — `AgentWorkerProcess` wraps this plus a `Child` handle.
-enum WorkerStdin {
-    Sync(Box<dyn Write + Send>),
-    Tokio(ChildStdin),
-}
-
 pub(crate) struct AgentWorkerChannel {
-    runtime_handle: TokioRuntimeHandle,
-    stdin: Option<WorkerStdin>,
-    frames: tokio_mpsc::UnboundedReceiver<WorkerProcessResult<Vec<u8>>>,
+    stdin: Option<Box<dyn Write + Send>>,
+    frames: mpsc::Receiver<WorkerProcessResult<Vec<u8>>>,
     stderr: Arc<Mutex<String>>,
 }
 
 impl AgentWorkerChannel {
-    #[cfg(test)]
     pub(crate) fn new(
         stdin: Box<dyn Write + Send>,
         stdout: Box<dyn Read + Send>,
         stderr: Box<dyn Read + Send>,
     ) -> Self {
-        let runtime_handle =
-            worker_io_runtime_handle().expect("worker io runtime handle must initialize in tests");
         Self {
-            runtime_handle: runtime_handle.clone(),
-            stdin: Some(WorkerStdin::Sync(stdin)),
+            stdin: Some(stdin),
             frames: spawn_stdout_reader(stdout),
             stderr: spawn_stderr_collector(stderr),
         }
     }
 
-    pub(crate) fn from_tokio_pipes(
-        stdin: ChildStdin,
-        stdout: ChildStdout,
-        stderr: ChildStderr,
-        runtime_handle: TokioRuntimeHandle,
-    ) -> Self {
-        Self {
-            runtime_handle: runtime_handle.clone(),
-            stdin: Some(WorkerStdin::Tokio(stdin)),
-            frames: spawn_stdout_reader_on_runtime(stdout, &runtime_handle),
-            stderr: spawn_stderr_collector_on_runtime(stderr, &runtime_handle),
-        }
-    }
-
     pub(crate) fn send_message(&mut self, value: &Value) -> WorkerProcessResult<()> {
         let frame = encode_agent_worker_protocol_frame(value)?;
-        match self.stdin.as_mut().ok_or(WorkerProcessError::StdinClosed)? {
-            WorkerStdin::Sync(stdin) => {
-                stdin.write_all(&frame)?;
-                stdin.flush()?;
-                Ok(())
-            }
-            WorkerStdin::Tokio(stdin) => {
-                let runtime_handle = self.runtime_handle.clone();
-                block_on_worker_runtime(&runtime_handle, async {
-                    stdin.write_all(&frame).await?;
-                    stdin.flush().await?;
-                    Ok(())
-                })
-            }
-        }
+        let stdin = self.stdin.as_mut().ok_or(WorkerProcessError::StdinClosed)?;
+        stdin.write_all(&frame)?;
+        stdin.flush()?;
+        Ok(())
     }
 
     pub(crate) fn request_shutdown(
@@ -296,60 +192,51 @@ impl AgentWorkerChannel {
     }
 
     pub(crate) fn next_frame_blocking(&mut self) -> WorkerProcessResult<Vec<u8>> {
-        match self.frames.blocking_recv() {
-            Some(frame) => frame,
-            None => Err(WorkerProcessError::MessageChannelClosed {
-                stderr: self.stderr_snapshot(),
-            }),
-        }
-    }
-
-    pub(crate) async fn next_frame_async(&mut self) -> WorkerProcessResult<Vec<u8>> {
-        match self.frames.recv().await {
-            Some(frame) => frame,
-            None => Err(WorkerProcessError::MessageChannelClosed {
+        match self.frames.recv() {
+            Ok(frame) => frame,
+            Err(_) => Err(WorkerProcessError::MessageChannelClosed {
                 stderr: self.stderr_snapshot(),
             }),
         }
     }
 
     fn next_frame_timeout(&mut self, timeout: Duration) -> WorkerProcessResult<Vec<u8>> {
-        let stderr = Arc::clone(&self.stderr);
-        block_on_worker_runtime(&self.runtime_handle, async {
-            match tokio::time::timeout(timeout, self.frames.recv()).await {
-                Ok(Some(frame)) => frame,
-                Ok(None) => Err(WorkerProcessError::MessageChannelClosed {
-                    stderr: stderr_snapshot_from_arc(&stderr),
-                }),
-                Err(_) => Err(WorkerProcessError::MessageTimeout {
-                    timeout_ms: duration_millis(timeout),
-                    stderr: stderr_snapshot_from_arc(&stderr),
-                }),
+        match self.frames.recv_timeout(timeout) {
+            Ok(frame) => frame,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(WorkerProcessError::MessageTimeout {
+                timeout_ms: duration_millis(timeout),
+                stderr: self.stderr_snapshot(),
+            }),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(WorkerProcessError::MessageChannelClosed {
+                    stderr: self.stderr_snapshot(),
+                })
             }
-        })
+        }
     }
 
     fn read_ready(&mut self, timeout: Duration) -> WorkerProcessResult<AgentWorkerReady> {
-        let stderr = Arc::clone(&self.stderr);
-        let frame = block_on_worker_runtime(&self.runtime_handle, async {
-            match tokio::time::timeout(timeout, self.frames.recv()).await {
-                Ok(Some(frame)) => frame,
-                Ok(None) => Err(WorkerProcessError::MessageChannelClosed {
-                    stderr: stderr_snapshot_from_arc(&stderr),
-                }),
-                Err(_) => Err(WorkerProcessError::BootTimeout {
+        let frame = match self.frames.recv_timeout(timeout) {
+            Ok(frame) => frame?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(WorkerProcessError::BootTimeout {
                     timeout_ms: duration_millis(timeout),
-                    stderr: stderr_snapshot_from_arc(&stderr),
-                }),
+                    stderr: self.stderr_snapshot(),
+                });
             }
-        })?;
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(WorkerProcessError::MessageChannelClosed {
+                    stderr: self.stderr_snapshot(),
+                });
+            }
+        };
 
         parse_ready_message(decode_agent_worker_protocol_frame(&frame)?)
     }
 }
 
 pub struct AgentWorkerProcess {
-    child: TokioChild,
+    child: Child,
     channel: AgentWorkerChannel,
 }
 
@@ -358,7 +245,6 @@ impl AgentWorkerProcess {
         command: &AgentWorkerCommand,
         config: &AgentWorkerProcessConfig,
     ) -> WorkerProcessResult<BootedAgentWorkerProcess> {
-        let runtime_handle = worker_io_runtime_handle()?;
         let mut child = command
             .build()
             .stdin(Stdio::piped())
@@ -379,7 +265,7 @@ impl AgentWorkerProcess {
             .take()
             .ok_or(WorkerProcessError::MissingPipe("stderr"))?;
 
-        let channel = AgentWorkerChannel::from_tokio_pipes(stdin, stdout, stderr, runtime_handle);
+        let channel = AgentWorkerChannel::new(Box::new(stdin), Box::new(stdout), Box::new(stderr));
         let mut process = AgentWorkerProcess { child, channel };
 
         let ready = match process.channel.read_ready(config.boot_timeout) {
@@ -423,29 +309,28 @@ impl AgentWorkerProcess {
     }
 
     pub fn wait_for_exit(&mut self, timeout: Duration) -> WorkerProcessResult<ExitStatus> {
-        let runtime_handle = self.channel.runtime_handle.clone();
-        let stderr = Arc::clone(&self.channel.stderr);
-        let child = &mut self.child;
-        block_on_worker_runtime(&runtime_handle, async move {
-            match tokio::time::timeout(timeout, child.wait()).await {
-                Ok(result) => result.map_err(Into::into),
-                Err(_) => Err(WorkerProcessError::ExitTimeout {
-                    timeout_ms: duration_millis(timeout),
-                    stderr: stderr_snapshot_from_arc(&stderr),
-                }),
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            if let Some(status) = self.child.try_wait()? {
+                return Ok(status);
             }
-        })
+
+            if Instant::now() >= deadline {
+                return Err(WorkerProcessError::ExitTimeout {
+                    timeout_ms: duration_millis(timeout),
+                    stderr: self.stderr_snapshot(),
+                });
+            }
+
+            thread::sleep(WORKER_POLL_INTERVAL);
+        }
     }
 
     pub fn kill(&mut self) -> WorkerProcessResult<()> {
         if self.child.try_wait()?.is_none() {
-            let runtime_handle = self.channel.runtime_handle.clone();
-            let child = &mut self.child;
-            block_on_worker_runtime(&runtime_handle, async {
-                child.kill().await?;
-                let _ = child.wait().await;
-                Ok::<(), io::Error>(())
-            })?;
+            self.child.kill()?;
+            let _ = self.child.wait();
         }
         Ok(())
     }
@@ -472,15 +357,9 @@ impl WorkerProcessError {
 
 impl WorkerFrameReceiver for AgentWorkerProcess {
     type Error = WorkerProcessError;
-    type ReceiveFuture<'a> =
-        Pin<Box<dyn Future<Output = Result<Vec<u8>, Self::Error>> + Send + 'a>>;
 
     fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
         self.channel.next_frame_blocking()
-    }
-
-    fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
-        Box::pin(self.channel.next_frame_async())
     }
 }
 
@@ -522,14 +401,11 @@ pub fn read_agent_worker_protocol_message<R: Read>(reader: &mut R) -> WorkerProc
     Ok(decode_agent_worker_protocol_frame(&frame)?)
 }
 
-#[cfg(test)]
-fn spawn_stdout_reader<R>(
-    mut stdout: R,
-) -> tokio_mpsc::UnboundedReceiver<WorkerProcessResult<Vec<u8>>>
+fn spawn_stdout_reader<R>(mut stdout: R) -> mpsc::Receiver<WorkerProcessResult<Vec<u8>>>
 where
     R: Read + Send + 'static,
 {
-    let (sender, receiver) = tokio_mpsc::unbounded_channel();
+    let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         loop {
             let frame = read_agent_worker_protocol_frame(&mut stdout);
@@ -542,27 +418,6 @@ where
     receiver
 }
 
-fn spawn_stdout_reader_on_runtime<R>(
-    mut stdout: R,
-    runtime_handle: &TokioRuntimeHandle,
-) -> tokio_mpsc::UnboundedReceiver<WorkerProcessResult<Vec<u8>>>
-where
-    R: AsyncRead + Unpin + Send + 'static,
-{
-    let (sender, receiver) = tokio_mpsc::unbounded_channel();
-    runtime_handle.spawn(async move {
-        loop {
-            let frame = read_agent_worker_protocol_frame_async(&mut stdout).await;
-            let should_continue = frame.is_ok();
-            if sender.send(frame).is_err() || !should_continue {
-                break;
-            }
-        }
-    });
-    receiver
-}
-
-#[cfg(test)]
 fn spawn_stderr_collector<R>(mut stderr: R) -> Arc<Mutex<String>>
 where
     R: Read + Send + 'static,
@@ -586,71 +441,6 @@ where
     });
 
     output
-}
-
-fn spawn_stderr_collector_on_runtime<R>(
-    mut stderr: R,
-    runtime_handle: &TokioRuntimeHandle,
-) -> Arc<Mutex<String>>
-where
-    R: AsyncRead + Unpin + Send + 'static,
-{
-    let output = Arc::new(Mutex::new(String::new()));
-    let task_output = Arc::clone(&output);
-    runtime_handle.spawn(async move {
-        let mut buffer = [0_u8; 4096];
-        loop {
-            match stderr.read(&mut buffer).await {
-                Ok(0) => break,
-                Ok(read) => {
-                    if let Ok(mut output) = task_output.lock() {
-                        output.push_str(&String::from_utf8_lossy(&buffer[..read]));
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
-    output
-}
-
-async fn read_agent_worker_protocol_frame_async<R>(reader: &mut R) -> WorkerProcessResult<Vec<u8>>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut length_prefix = [0_u8; AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES];
-    reader.read_exact(&mut length_prefix).await?;
-
-    let payload_byte_length = u32::from_be_bytes(length_prefix) as usize;
-    let max_payload_bytes =
-        AGENT_WORKER_MAX_FRAME_BYTES as usize - AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES;
-    if payload_byte_length > max_payload_bytes {
-        return Err(WorkerProtocolError::FramePayloadTooLarge {
-            payload_bytes: payload_byte_length,
-            max_payload_bytes,
-        }
-        .into());
-    }
-
-    let mut frame =
-        Vec::with_capacity(AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES + payload_byte_length);
-    frame.extend_from_slice(&length_prefix);
-    frame.resize(
-        AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES + payload_byte_length,
-        0,
-    );
-    reader
-        .read_exact(&mut frame[AGENT_WORKER_FRAME_LENGTH_PREFIX_BYTES..])
-        .await?;
-
-    Ok(frame)
-}
-
-fn stderr_snapshot_from_arc(stderr: &Arc<Mutex<String>>) -> String {
-    stderr
-        .lock()
-        .map(|stderr| stderr.clone())
-        .unwrap_or_default()
 }
 
 fn parse_ready_message(message: Value) -> WorkerProcessResult<AgentWorkerReady> {

@@ -4,8 +4,6 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::{mpsc::UnboundedReceiver, watch};
-use tokio::time::Instant as TokioInstant;
 use tracing::warn;
 
 use crate::agent_inventory::read_project_index_agent_pubkeys;
@@ -38,7 +36,6 @@ pub enum ReconcileOutcome {
     Published { p_tag_count: usize },
 }
 
-#[derive(Clone)]
 pub struct ReconcilerDeps {
     pub tenex_base_dir: PathBuf,
     pub backend_pubkey: String,
@@ -175,91 +172,6 @@ pub fn run_reconciler_loop(deps: ReconcilerDeps, trigger_rx: Receiver<String>) {
             }
             Err(RecvTimeoutError::Disconnected) => {
                 return;
-            }
-        }
-    }
-}
-
-pub async fn run_reconciler_loop_async(
-    deps: ReconcilerDeps,
-    mut trigger_rx: UnboundedReceiver<String>,
-    mut stop: watch::Receiver<bool>,
-) {
-    let mut deadlines: BTreeMap<String, TokioInstant> = BTreeMap::new();
-    if *stop.borrow() {
-        return;
-    }
-
-    loop {
-        let next_deadline = deadlines.values().copied().min();
-
-        match next_deadline {
-            None => {
-                tokio::select! {
-                    changed = stop.changed() => {
-                        let _ = changed;
-                        if *stop.borrow() {
-                            return;
-                        }
-                    }
-                    maybe_owner = trigger_rx.recv() => {
-                        let Some(owner) = maybe_owner else {
-                            return;
-                        };
-                        deadlines.insert(owner, TokioInstant::now() + deps.debounce);
-                    }
-                }
-            }
-            Some(deadline) => {
-                tokio::select! {
-                    changed = stop.changed() => {
-                        let _ = changed;
-                        if *stop.borrow() {
-                            return;
-                        }
-                    }
-                    maybe_owner = trigger_rx.recv() => {
-                        let Some(owner) = maybe_owner else {
-                            return;
-                        };
-                        deadlines.insert(owner, TokioInstant::now() + deps.debounce);
-                    }
-                    _ = tokio::time::sleep_until(deadline) => {
-                        let now = TokioInstant::now();
-                        let due_owners: Vec<String> = deadlines
-                            .iter()
-                            .filter(|(_, scheduled)| **scheduled <= now)
-                            .map(|(owner, _)| owner.clone())
-                            .collect();
-
-                        for owner in due_owners {
-                            let deps_for_owner = deps.clone();
-                            let owner_for_task = owner.clone();
-                            match tokio::task::spawn_blocking(move || reconcile_owner(&deps_for_owner, &owner_for_task)).await {
-                                Ok(Ok(ReconcileOutcome::NoChange))
-                                | Ok(Ok(ReconcileOutcome::Published { .. })) => {
-                                    deadlines.remove(&owner);
-                                }
-                                Ok(Err(err)) => {
-                                    warn!(
-                                        owner = %owner,
-                                        error = %err,
-                                        "reconcile_owner failed; rescheduling"
-                                    );
-                                    deadlines.insert(owner, TokioInstant::now() + deps.idle_retry);
-                                }
-                                Err(err) => {
-                                    warn!(
-                                        owner = %owner,
-                                        error = %err,
-                                        "reconcile_owner task join failed; rescheduling"
-                                    );
-                                    deadlines.insert(owner, TokioInstant::now() + deps.idle_retry);
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
     }

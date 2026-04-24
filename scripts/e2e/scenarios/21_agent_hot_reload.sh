@@ -251,35 +251,67 @@ echo "[scenario]   subscription filter refresh logged ✓"
 
 echo "[scenario] === Phase 4 complete: filter refresh confirmed ==="
 
-# ── Phase 5: dispatch kind:1 to agent2 after hot reload ──────────────────────
-# After a filter refresh, the daemon sends CLOSE + new REQ. The local relay can
-# briefly race listener registration, so we retry the post-reload message a few
-# times before calling it a real failure.
-echo "[scenario] phase 5: dispatching to agent2 after hot-reload"
+# ── Phase 5: wait for daemon to subscribe to agent2, then dispatch kind:1 ────
+# After a filter refresh, the daemon sends CLOSE + new REQ. There is a brief
+# window (Khatru per-filter addListener race) between REQ-sent and
+# listener-registered. We use the same probe-and-poll strategy as
+# await_daemon_subscribed to confirm agent2's filter is live.
+echo "[scenario] phase 5: probing for agent2 filter liveness before publishing"
 
-saw_agent2_dispatch=0
-agent2_msg_id=""
-for attempt in 1 2 3 4; do
-  echo "[scenario]   publishing kind:1 to agent2 (attempt $attempt)"
-  agent2_msg_evt="$(publish_event_as "$USER_NSEC" 1 "hello agent2 post-reload" \
-    "p=$AGENT2_PUBKEY" \
-    "a=$PROJECT_A_TAG")"
-  agent2_msg_id="$(printf '%s' "$agent2_msg_evt" | jq -r .id)"
-  echo "[scenario]   agent2 kind:1 id=$agent2_msg_id"
+agent2_filter_live=0
+for attempt in 1 2 3 4 5 6; do
+  probe_evt="$(nak event --sec "$USER_NSEC" -k 14199 \
+    -c "harness probe agent2 filter a=$attempt t=$(date +%s%N)" \
+    --tag "p=$AGENT2_PUBKEY" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  probe_id="$(printf '%s' "$probe_evt" | jq -r '.id // empty' 2>/dev/null)"
+  if [[ -z "$probe_id" ]]; then
+    sleep 1
+    continue
+  fi
 
-  agent2_dispatch_deadline=$(( $(date +%s) + 8 ))
-  while [[ $(date +%s) -lt $agent2_dispatch_deadline ]]; do
-    if [[ -f "$queue" ]] && jq -se --arg e "$agent2_msg_id" \
-         'any(.[]; (.triggeringEventId // .triggering_event_id) == $e)' "$queue" \
-         >/dev/null 2>&1; then
-      saw_agent2_dispatch=1
+  for poll in 1 2 3 4 5 6 7 8; do
+    if [[ -f "$DAEMON_DIR/daemon.log" ]] && grep -q "$probe_id" "$DAEMON_DIR/daemon.log"; then
+      echo "[scenario]   agent2 filter live (probe #$attempt round-tripped)"
+      agent2_filter_live=1
       break 2
     fi
     sleep 0.5
   done
 done
 
+if [[ "$agent2_filter_live" -ne 1 ]]; then
+  echo "[scenario] WARN: agent2 filter probe did not round-trip — known Khatru race; proceeding"
+  echo "[scenario]   (this is the ~18% harness flake documented in websocket-disconnect-investigation.md)"
+fi
+
+echo "[scenario]   publishing kind:1 to agent2"
+agent2_msg_evt="$(publish_event_as "$USER_NSEC" 1 "hello agent2 post-reload" \
+  "p=$AGENT2_PUBKEY" \
+  "a=$PROJECT_A_TAG")"
+agent2_msg_id="$(printf '%s' "$agent2_msg_evt" | jq -r .id)"
+echo "[scenario]   agent2 kind:1 id=$agent2_msg_id"
+
+echo "[scenario]   waiting for agent2 dispatch to appear in queue..."
+agent2_dispatch_deadline=$(( $(date +%s) + 30 ))
+saw_agent2_dispatch=0
+while [[ $(date +%s) -lt $agent2_dispatch_deadline ]]; do
+  if [[ -f "$queue" ]] && jq -se --arg e "$agent2_msg_id" \
+       'any(.[]; (.triggeringEventId // .triggering_event_id) == $e)' "$queue" \
+       >/dev/null 2>&1; then
+    saw_agent2_dispatch=1
+    break
+  fi
+  sleep 0.5
+done
+
 if [[ "$saw_agent2_dispatch" -ne 1 ]]; then
+  # Check if this looks like the Khatru subscription race
+  if [[ "$agent2_filter_live" -ne 1 ]]; then
+    tail -20 "$DAEMON_DIR/daemon.log" >&2 || true
+    emit_result fail "harness flake: agent2 filter never became live (Khatru per-filter addListener race) — see websocket-disconnect-investigation.md"
+    exit 1
+  fi
   tail -40 "$DAEMON_DIR/daemon.log" >&2 || true
   emit_result fail "ASSERT: no dispatch for agent2 kind:1 after hot-reload"
   exit 1

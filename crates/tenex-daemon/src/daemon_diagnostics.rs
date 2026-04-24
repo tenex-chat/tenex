@@ -1189,16 +1189,11 @@ mod tests {
 
     impl WorkerFrameReceiver for RecordingSession {
         type Error = FakeWorkerError;
-        type ReceiveFuture<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>>;
 
         fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
             self.incoming_frames
                 .pop_front()
                 .ok_or(FakeWorkerError("missing worker frame"))
-        }
-
-        fn receive_worker_frame_async(&mut self) -> Self::ReceiveFuture<'_> {
-            std::future::ready(self.receive_worker_frame())
         }
     }
 

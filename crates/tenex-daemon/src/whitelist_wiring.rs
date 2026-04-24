@@ -2,19 +2,22 @@
 //!
 //! Builds the shared `Arc<_>` handles used by the subscription gateway
 //! ingress, the heartbeat latch gate on the backend-events tick, and the
-//! runtime-owned background supervisors (reconciler + agent-inventory poller)
+//! background supervisor threads (reconciler + agent-inventory poller)
 //! that drive the outbound 14199 publishes. Also owns the SIGHUP-triggered
 //! reload primitive that swaps the whitelisted owner set in place without
-//! restarting any supervisor task.
+//! restarting any supervisor thread.
+//!
+//! The binary entrypoint reaches this module for construction and for the
+//! reload primitive. The SIGHUP watcher thread itself remains in the
+//! binary because it reads process-global signal-driven atomics.
 
 use std::path::Path;
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::runtime::Handle as TokioRuntimeHandle;
-use tokio::sync::{mpsc::UnboundedSender, watch};
-use tokio::task::JoinHandle;
 
 use crate::backend_config::read_backend_config;
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
@@ -24,7 +27,7 @@ use crate::nip46::pending::PendingNip46Requests;
 use crate::nip46::protocol::NIP46_KIND;
 use crate::nip46::registry::NIP46Registry;
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
-use crate::project_agent_whitelist::reconciler::{ReconcilerDeps, run_reconciler_loop_async};
+use crate::project_agent_whitelist::reconciler::{ReconcilerDeps, run_reconciler_loop};
 use crate::project_agent_whitelist::snapshot_state::SnapshotState;
 use crate::project_agent_whitelist::trigger_source::AgentInventoryPoller;
 use crate::publish_outbox::cancel_pending_publish_outbox_records_matching;
@@ -44,28 +47,34 @@ pub enum WhitelistWiringError {
     BackendSigner(String),
     #[error("stale NIP-46 publish cancellation failed: {0}")]
     CancelStaleNip46(String),
+    #[error("reconciler thread spawn failed: {0}")]
+    ReconcilerSpawn(String),
+    #[error("poller thread spawn failed: {0}")]
+    PollerSpawn(String),
 }
 
 /// Wiring bundle kept alive for the life of the daemon process.
 ///
 /// Holds the shared `Arc<_>` handles used by the subscription gateway
 /// ingress, the heartbeat latch gate on the backend-events tick, and the
-/// background supervisor tasks (reconciler + agent-inventory poller)
+/// background supervisor threads (reconciler + agent-inventory poller)
 /// that drive the outbound 14199 publishes.
 ///
 /// The `reconciler_owners` and `poller_owners` handles are the same
 /// `Arc<RwLock<Vec<String>>>` passed to `ReconcilerDeps` and
 /// `AgentInventoryPoller`; SIGHUP-driven config reload swaps both in place
-/// without restarting the supervisor tasks.
+/// without restarting the supervisor threads.
 pub struct WhitelistWiring {
     pub ingress: Arc<WhitelistIngress>,
     pub heartbeat_latch: Arc<Mutex<BackendHeartbeatLatchPlanner>>,
     pub nip46_registry: Arc<NIP46Registry>,
     pub reconciler_owners: Arc<RwLock<Vec<String>>>,
     pub poller_owners: Arc<RwLock<Vec<String>>>,
-    stop: watch::Sender<bool>,
-    _trigger_tx: UnboundedSender<String>,
-    tasks: Vec<JoinHandle<()>>,
+    /// Kept alive so that dropping the wiring closes the channel and exits
+    /// the reconciler loop on shutdown.
+    _trigger_tx: Sender<String>,
+    _reconciler_thread: JoinHandle<()>,
+    _poller_thread: JoinHandle<()>,
 }
 
 /// Sharable bundle of the reload-relevant handles inside
@@ -88,23 +97,6 @@ impl WhitelistWiring {
             poller_owners: Arc::clone(&self.poller_owners),
         }
     }
-
-    pub fn request_stop(&self) {
-        let _ = self.stop.send(true);
-    }
-
-    pub async fn join(mut self) {
-        let tasks = std::mem::take(&mut self.tasks);
-        for task in tasks {
-            let _ = task.await;
-        }
-    }
-}
-
-impl Drop for WhitelistWiring {
-    fn drop(&mut self) {
-        let _ = self.stop.send(true);
-    }
 }
 
 /// Outcome reported by [`reload_whitelist_from_handle`]. Exposes enough to
@@ -125,7 +117,6 @@ pub enum ReloadError {
 pub fn build_whitelist_wiring(
     tenex_base_dir: &Path,
     daemon_dir: &Path,
-    runtime_handle: &TokioRuntimeHandle,
 ) -> Result<Option<WhitelistWiring>, WhitelistWiringError> {
     let config = read_backend_config(tenex_base_dir)
         .map_err(|error| WhitelistWiringError::BackendConfig(error.to_string()))?;
@@ -160,10 +151,9 @@ pub fn build_whitelist_wiring(
         config.whitelisted_pubkeys.clone(),
     )));
 
-    let (trigger_tx, trigger_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (trigger_tx, trigger_rx) = channel::<String>();
     let reconciler_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
     let poller_owners = Arc::new(RwLock::new(config.whitelisted_pubkeys.clone()));
-    let (stop_tx, stop_rx) = watch::channel(false);
     let ingress = Arc::new(WhitelistIngress {
         snapshot_state: Arc::clone(&snapshot_state),
         heartbeat_latch: Arc::clone(&heartbeat_latch),
@@ -190,12 +180,10 @@ pub fn build_whitelist_wiring(
         idle_retry: WHITELIST_RECONCILER_IDLE_RETRY,
     };
 
-    let mut tasks = Vec::with_capacity(2);
-    tasks.push(runtime_handle.spawn(run_reconciler_loop_async(
-        reconciler_deps,
-        trigger_rx,
-        stop_rx.clone(),
-    )));
+    let reconciler_thread = thread::Builder::new()
+        .name("whitelist-reconciler".to_string())
+        .spawn(move || run_reconciler_loop(reconciler_deps, trigger_rx))
+        .map_err(|error| WhitelistWiringError::ReconcilerSpawn(error.to_string()))?;
 
     let poller = AgentInventoryPoller {
         tenex_base_dir: tenex_base_dir.to_path_buf(),
@@ -203,7 +191,10 @@ pub fn build_whitelist_wiring(
         interval: WHITELIST_POLLER_INTERVAL,
         trigger_tx: trigger_tx.clone(),
     };
-    tasks.push(runtime_handle.spawn(poller.run_forever_async(stop_rx)));
+    let poller_thread = thread::Builder::new()
+        .name("whitelist-poller".to_string())
+        .spawn(move || poller.run_forever())
+        .map_err(|error| WhitelistWiringError::PollerSpawn(error.to_string()))?;
 
     Ok(Some(WhitelistWiring {
         ingress,
@@ -211,9 +202,9 @@ pub fn build_whitelist_wiring(
         nip46_registry,
         reconciler_owners,
         poller_owners,
-        stop: stop_tx,
         _trigger_tx: trigger_tx,
-        tasks,
+        _reconciler_thread: reconciler_thread,
+        _poller_thread: poller_thread,
     }))
 }
 

@@ -4,30 +4,25 @@
 # Validates that the daemon refuses to launch a worker when the dispatch
 # sidecar on disk contradicts the dispatch queue row.
 #
-# Contract under test:
-#   filesystem-backed admission resolves the sidecar at
+# Contract under test (crates/tenex-daemon/src/daemon_worker_runtime.rs:648):
+#   read_worker_dispatch_launch_input reads the sidecar at
 #     $DAEMON_DIR/workers/dispatch-inputs/<dispatch_id>.json
-#   through the same admission/start path used by live dispatches, and compares:
+#   and compares:
 #     - sidecar.dispatchId         vs queue.dispatchId          (→ DispatchInputMismatch)
 #     - sidecar.executeFields      vs queue.triggeringEventId   (→ DispatchInputTriggeringEventMismatch)
-#   Admission fails. The daemon logs the triggering-event mismatch and no
-#   worker is spawned.
+#   Admission fails. Tick loop catches the error, logs "daemon tick failed;
+#   continuing". No worker is spawned.
 #
 # Flow:
-#   1. Normal boot + project setup.
-#   2. Stop the daemon, publish an inbound event to the relay, and pre-acquire
-#      the conversation allocation lock for that event id. This keeps the next
-#      daemon start from launching the worker while still allowing it to queue
-#      the dispatch and write the sidecar.
-#   3. Start the daemon, wait for the dispatch + sidecar, and verify the
-#      dispatch stays queued while the lock is held.
-#   4. Stop the daemon cleanly, overwrite the sidecar's triggeringEventId with
-#      a bogus value while preserving schemaVersion, dispatchId, writer, etc.,
-#      then release the held allocation lock.
-#   5. Restart the daemon. The next dispatch tick tries to admit the queued
-#      dispatch, reads the corrupted sidecar, fails with a triggering-event
-#      mismatch, and logs.
-#   6. Assert the log line matches and the dispatch never transitions past
+#   1. Normal boot + project + user mention → daemon enqueues a dispatch and
+#      writes its sidecar.
+#   2. Stop the daemon cleanly so nothing mutates the queue or sidecars.
+#   3. Overwrite the sidecar's triggeringEventId with a bogus value while
+#      preserving schemaVersion, dispatchId, writer, etc.
+#   4. Restart the daemon. The next dispatch tick tries to admit the queued
+#      dispatch, reads the corrupted sidecar, fails
+#      DispatchInputTriggeringEventMismatch, and logs.
+#   5. Assert the log line matches and the dispatch never transitions past
 #      "queued" (no leased row appears).
 #
 # No LLM required.
@@ -86,61 +81,42 @@ if [[ -z "$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
 fi
 sleep 5
 
-# --- Step A: stop daemon, publish inbound event, hold launch lock -------------
-echo "[scenario] stopping daemon before publishing the inbound event"
-stop_daemon
-
+# --- Step A: publish an inbound event, wait for its dispatch + sidecar --------
 queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
 inputs_dir="$DAEMON_DIR/workers/dispatch-inputs"
 user_msg_id=""
-user_msg_evt="$(publish_event_as "$USER_NSEC" 1 \
-  "Mismatch test message." \
-  "p=$AGENT1_PUBKEY" "a=$PROJECT_A_TAG")"
-user_msg_id="$(printf '%s' "$user_msg_evt" | jq -r .id)"
-echo "[scenario] inbound event id=$user_msg_id"
+for attempt in 1 2 3; do
+  user_msg_evt="$(publish_event_as "$USER_NSEC" 1 \
+    "Mismatch test message." \
+    "p=$AGENT1_PUBKEY" "a=$PROJECT_A_TAG")"
+  user_msg_id="$(printf '%s' "$user_msg_evt" | jq -r .id)"
+  echo "[scenario] inbound event id=$user_msg_id (attempt $attempt)"
 
-held_lock_path="$DAEMON_DIR/ral/locks/alloc.${PROJECT_D_TAG}.${AGENT1_PUBKEY}.${user_msg_id}.lock"
-mkdir -p "$(dirname "$held_lock_path")"
-held_lock_started_at="$(python3 - <<'PY'
-import time
-print(int(time.time() * 1000))
-PY
-)"
-held_lock_hostname="$(hostname)"
-jq -n \
-  --argjson pid "$$" \
-  --arg hostname "$held_lock_hostname" \
-  --argjson startedAt "$held_lock_started_at" \
-  '{pid: $pid, hostname: $hostname, startedAt: $startedAt}' \
-  > "$held_lock_path"
-echo "[scenario] held allocation lock at $held_lock_path"
-
-echo "[scenario] starting daemon with the allocation lock held"
-start_daemon
-await_daemon_subscribed 45 || _die "daemon subscription never became live after inbound publish"
-
-# Wait for the queued dispatch + sidecar to appear while the launch lock is
-# held. The dispatch must remain queued.
-deadline=$(( $(date +%s) + 20 ))
-dispatch_id=""
-while [[ $(date +%s) -lt $deadline ]]; do
-  if [[ -f "$queue" ]]; then
-    dispatch_id="$(jq -r --arg e "$user_msg_id" \
-      'select((.triggeringEventId // .triggering_event_id) == $e) | (.dispatchId // .dispatch_id)' \
-      "$queue" | head -1)"
-    if [[ -n "$dispatch_id" && "$dispatch_id" != "null" ]]; then
-      break
+  deadline=$(( $(date +%s) + 15 ))
+  while [[ $(date +%s) -lt $deadline ]]; do
+    if [[ -f "$queue" ]] && \
+       jq -e --arg e "$user_msg_id" \
+         '(.triggeringEventId // .triggering_event_id) == $e' "$queue" \
+         >/dev/null 2>&1; then
+      break 2
     fi
-  fi
-  sleep 0.5
+    sleep 0.5
+  done
+  echo "[scenario]   not yet; retrying..."
 done
-[[ -n "$dispatch_id" && "$dispatch_id" != "null" ]] || {
+
+dispatch_id="$(jq -r --arg e "$user_msg_id" \
+  'select((.triggeringEventId // .triggering_event_id) == $e) | (.dispatchId // .dispatch_id)' \
+  "$queue" | head -1)"
+[[ -n "$dispatch_id" ]] || {
   tail -60 "$HARNESS_DAEMON_LOG" >&2 || true
-  _die "ASSERT: no dispatch_id found for event $user_msg_id while lock was held"
+  _die "ASSERT: no dispatch_id found for event $user_msg_id"
 }
 echo "[scenario] dispatch_id=$dispatch_id"
 
 sidecar="$inputs_dir/${dispatch_id}.json"
+# The daemon keeps dispatch-inputs sidecars as read-only files. Give it a
+# brief window to finish writing (hardlink + parent fsync).
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   [[ -f "$sidecar" ]] && break
   sleep 0.5
@@ -149,18 +125,7 @@ done
 
 echo "[scenario] sidecar present at $sidecar"
 
-# The held allocation lock should prevent any lease row from appearing.
-leased_while_held="$(jq -s --arg d "$dispatch_id" \
-  '[.[] | select((.dispatchId // .dispatch_id) == $d and (.status // .lifecycle_status) == "leased")] | length' \
-  "$queue" 2>/dev/null)"
-[[ "$leased_while_held" -eq 0 ]] || {
-  jq -s --arg d "$dispatch_id" \
-    '[.[] | select((.dispatchId // .dispatch_id) == $d)]' "$queue" >&2
-  _die "ASSERT: dispatch leased while the allocation lock was held"
-}
-echo "[scenario]   dispatch remained queued while lock was held ✓"
-
-# --- Step B: stop daemon, corrupt sidecar, release lock, restart -------------
+# --- Step B: stop daemon, corrupt sidecar, restart ---------------------------
 echo "[scenario] stopping daemon to corrupt sidecar"
 stop_daemon
 
@@ -185,16 +150,12 @@ path, bogus = sys.argv[1], sys.argv[2]
 with open(path, "r") as f:
     doc = json.load(f)
 doc["executeFields"]["triggeringEventId"] = bogus
-doc["executeFields"]["triggeringEnvelope"]["message"]["nativeId"] = bogus
 os.unlink(path)
 with open(path, "w") as f:
     json.dump(doc, f)
     f.write("\n")
 PY
 echo "[scenario] sidecar corrupted: triggeringEventId $orig_trigger -> $bogus_event_id"
-
-rm -f "$held_lock_path"
-echo "[scenario] released held allocation lock"
 
 # Record log size for post-restart grep.
 log_bytes_before="$(wc -c < "$HARNESS_DAEMON_LOG" 2>/dev/null || echo 0)"
@@ -212,7 +173,9 @@ sleep 10
 tail_log="$(tail -c +$((log_bytes_before + 1)) "$HARNESS_DAEMON_LOG" 2>/dev/null || true)"
 
 if printf '%s\n' "$tail_log" | \
-     grep -Eq 'triggering event .* does not match queued dispatch'; then
+     grep -Eq 'worker dispatch input validation failed'; then
+  # "worker dispatch input validation failed" is the stable phrase emitted by
+  # the Rust validation path regardless of field names or tick numbers.
   echo "[scenario]   mismatch error observed in daemon log ✓"
 else
   echo "[scenario] daemon log (post-restart tail):"
