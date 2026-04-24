@@ -159,12 +159,28 @@ export class MockLLMService implements MockLLMServiceContract {
             }
         }
 
-        // Send tool calls
+        // Send tool calls. Accept either legacy `{function, args}` or
+        // `{name, params}` shape — the rest of the mock infra (complete,
+        // MockProvider.formatToolName) already handles both.
         if (response.toolCalls && response.toolCalls.length > 0) {
             for (const toolCall of response.toolCalls) {
-                const toolName = toolCall.function;
-                const toolArgs = toolCall.args || "{}";
-                const argsStr = typeof toolArgs === "string" ? toolArgs : JSON.stringify(toolArgs);
+                const toolName = toolCall.name ?? toolCall.function;
+                if (!toolName) {
+                    throw new Error(
+                        "[MockLLMService] Missing tool name in mock response (stream)."
+                    );
+                }
+
+                let toolArgs: string | Record<string, unknown> | undefined;
+                if (toolCall.params !== undefined) {
+                    toolArgs = toolCall.params;
+                } else if (toolCall.args !== undefined) {
+                    toolArgs = toolCall.args;
+                } else {
+                    toolArgs = "{}";
+                }
+                const argsStr =
+                    typeof toolArgs === "string" ? toolArgs : JSON.stringify(toolArgs);
 
                 yield {
                     type: "tool_start",
@@ -326,6 +342,17 @@ export class MockLLMService implements MockLLMServiceContract {
             return mockResponse.response;
         }
 
+        // Strict mode: no scripted trigger matched. Surface loudly with enough
+        // context to point at the gap.
+        if (this.config.strict) {
+            const label = this.config.fixtureLabel || "mock-fixture";
+            const userPreview = (lastUserMessage?.content ?? "").slice(0, 200);
+            throw new Error(
+                `[MockLLMService:${label}] No scripted response matched. ` +
+                    `agent=${agentName} phase=${phase} userMessagePreview=${JSON.stringify(userPreview)}`
+            );
+        }
+
         // Return default response
         if (this.config.debug) {
             conversationalLogger.logAgentResponse(agentName, {
@@ -338,8 +365,10 @@ export class MockLLMService implements MockLLMServiceContract {
     }
 
     private extractAgentName(systemPrompt: string): string {
-        // Try multiple patterns to extract agent name
+        // Primary pattern: matches the production `<agent-identity>\nYour name: <slug>`
+        // fragment emitted by `src/prompts/fragments/01-agent-identity.ts`.
         const patterns = [
+            /Your name:\s*([\w-]+)/i,
             /You are the ([\w-]+) agent/i,
             /You are ([\w-]+)[\s.]/i,
             /Agent: ([\w-]+)/i,
@@ -350,8 +379,8 @@ export class MockLLMService implements MockLLMServiceContract {
             const match = systemPrompt.match(pattern);
             if (match) {
                 const name = match[1]?.toLowerCase();
-                // Handle special cases
-                if (!name || name === "the") continue; // Skip if we accidentally matched "the"
+                // Skip if we accidentally matched "the"
+                if (!name || name === "the") continue;
                 return name;
             }
         }
@@ -366,11 +395,12 @@ export class MockLLMService implements MockLLMServiceContract {
         if (systemPrompt.includes("planning specialist")) return "planner";
         if (systemPrompt.includes("planner")) return "planner";
 
-        throw new Error("[MockLLMService] Unable to extract agent name from system prompt.");
+        // Don't throw. Triggers that don't care about agentName still match;
+        // triggers that do will correctly fail to match.
+        return "unknown";
     }
 
     private extractPhase(systemPrompt: string): string {
-        // Try multiple patterns to extract phase
         const patterns = [
             /Current Phase: (\w+)/i,
             /Phase: (\w+)/i,
@@ -382,14 +412,11 @@ export class MockLLMService implements MockLLMServiceContract {
             const match = systemPrompt.match(pattern);
             if (match) {
                 const phase = match[1]?.toLowerCase();
-                if (!phase) {
-                    throw new Error("[MockLLMService] Missing phase match in system prompt.");
-                }
-                return phase;
+                if (phase) return phase;
             }
         }
 
-        throw new Error("[MockLLMService] Unable to extract phase from system prompt.");
+        return "unknown";
     }
 
     private recordRequest(

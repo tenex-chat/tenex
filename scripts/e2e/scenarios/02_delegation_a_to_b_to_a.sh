@@ -1,29 +1,25 @@
 #!/usr/bin/env bash
 # E2E scenario 5.1 — agent1 delegates to agent2, agent2 responds, agent1 continues.
 #
-# Runs the daemon against a local relay with real Ollama. The test has two
-# phases:
+# Runs the daemon against a local relay with the TENEX mock LLM by default.
+# The mock is driven by a fixture at
+# scripts/e2e/fixtures/mock-llm/02_delegation.json, so both phases are
+# deterministic assertions:
 #
-#   Phase A — deterministic daemon plumbing (must pass):
-#     - Daemon starts and authenticates as admin to the local relay
-#     - Project boot via kind:24000 is recorded in booted-projects.json
+#   Phase A — daemon plumbing (must pass):
+#     - Daemon authenticates as admin to the local relay
+#     - Project boot via kind:24000 is recorded (observed via kind:24010)
 #     - kind:1 from user mentioning agent1 triggers a dispatch in the queue
 #     - Daemon publishes kind:24010 project status within a bounded window
 #
-#   Phase B — best-effort LLM behavior (logged, not asserted):
-#     - agent1 invokes the `delegate` tool for agent2 (depends on the LLM
-#       choosing to delegate — we override the agent's instructions below to
-#       push it toward delegation, but with a small local model this is not
-#       guaranteed)
-#     - agent2 replies, agent1 resumes, full turn completes
+#   Phase B — mock-driven agent behaviour (must pass):
+#     - agent1 publishes kind:1 (the delegation)
+#     - agent2 publishes kind:1 (the reply with content "agent2 says 4")
+#     - agent1 publishes its final kind:1 ("Final answer: agent2 says 4.")
+#     - RAL journal carries at least one DelegationRegistered/Completed marker
 #
-# Phase B is observed and reported, but the test reports PASS if Phase A
-# passes. See "== Phase B =" at the end. If you want deterministic Phase B
-# assertions, replace the Ollama model with one that reliably invokes tools,
-# or stub the agent worker.
-#
-# Requires: ollama running at $OLLAMA_BASE_URL (default http://localhost:11434)
-# with the model configured in the fixture (qwen3.5) pulled.
+# To run against real Ollama for diagnostics (non-deterministic, best-effort):
+#     E2E_USE_OLLAMA=1 ./scripts/e2e/scenarios/02_delegation_a_to_b_to_a.sh
 
 set -euo pipefail
 
@@ -31,12 +27,18 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # shellcheck source=../../e2e-test-harness.sh
 source "$repo_root/scripts/e2e-test-harness.sh"
 
-# --- Preflight: ollama reachable? --------------------------------------------
-OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
-if ! curl -fsS --max-time 3 "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1; then
-  echo "[scenario] SKIP — Ollama not reachable at $OLLAMA_BASE_URL"
-  echo "[scenario] Start ollama ('ollama serve') and pull qwen3.5, then rerun."
-  exit 77  # conventional skip code
+E2E_USE_OLLAMA="${E2E_USE_OLLAMA:-0}"
+MOCK_FIXTURE_PATH="$repo_root/scripts/e2e/fixtures/mock-llm/02_delegation.json"
+MOCK_MODEL_ID="mock/delegation-02"
+
+if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
+  OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
+  if ! curl -fsS --max-time 3 "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1; then
+    echo "[scenario] SKIP — Ollama not reachable at $OLLAMA_BASE_URL (E2E_USE_OLLAMA=1)"
+    exit 77
+  fi
+else
+  [[ -f "$MOCK_FIXTURE_PATH" ]] || _die "mock fixture missing at $MOCK_FIXTURE_PATH"
 fi
 
 # --- Setup --------------------------------------------------------------------
@@ -50,18 +52,45 @@ TENEX_INTEROP_RELAY_URL="ws://placeholder" \
 
 harness_init "$fixture_root"
 
-# Override agent1/agent2 instructions to push toward a delegation path.
-# These overrides land before the daemon starts, so they're read at boot.
-echo "[scenario] overriding agent1/agent2 instructions for delegation test"
-_override_agent_instructions() {
-  local pubkey="$1" new_instructions="$2"
-  local f="$BACKEND_BASE/agents/$pubkey.json"
-  jq --arg s "$new_instructions" '.instructions = $s' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-}
-_override_agent_instructions "$AGENT1_PUBKEY" \
-  "You are Agent 1. Agent 2 is available and its npub is known to the system. When you receive ANY message from the user, you MUST call the delegate tool to forward the message to Agent 2 verbatim. Do not reply directly. After Agent 2 responds, relay the response back."
-_override_agent_instructions "$AGENT2_PUBKEY" \
-  "You are Agent 2. When you receive a message, respond with exactly: 'agent2 received: <one sentence summary>'. Do not delegate. Complete the turn immediately."
+if [[ "$E2E_USE_OLLAMA" != "1" ]]; then
+  # Repoint the fixture's llms.json to the mock model. The provider switch
+  # happens at the factory layer (USE_MOCK_LLM=true); we still need the
+  # default configuration to declare the modelId the fixture expects, so
+  # MockProvider.createModel() accepts it.
+  echo "[scenario] rewriting llms.json to use mock fixture model '$MOCK_MODEL_ID'"
+  llms_json="$BACKEND_BASE/llms.json"
+  jq --arg model "$MOCK_MODEL_ID" '
+      .configurations = {
+        "mock-delegation-02": { "provider": "mock", "model": $model }
+      }
+      | .default = "mock-delegation-02"
+      | .summarization = "mock-delegation-02"
+      | .supervision = "mock-delegation-02"
+      | .search = "mock-delegation-02"
+      | .promptCompilation = "mock-delegation-02"
+    ' "$llms_json" > "$llms_json.tmp" && mv "$llms_json.tmp" "$llms_json"
+  chmod 600 "$llms_json"
+
+  export USE_MOCK_LLM=true
+  export TENEX_MOCK_LLM_FIXTURE="$MOCK_FIXTURE_PATH"
+  echo "[scenario] mock LLM enabled: fixture=$TENEX_MOCK_LLM_FIXTURE"
+fi
+
+# Under Ollama we still override agent instructions to nudge delegation.
+# Under the mock they're not needed (the mock ignores instructions) but
+# they do no harm — we just keep the behaviour symmetric.
+if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
+  echo "[scenario] overriding agent1/agent2 instructions for delegation test"
+  _override_agent_instructions() {
+    local pubkey="$1" new_instructions="$2"
+    local f="$BACKEND_BASE/agents/$pubkey.json"
+    jq --arg s "$new_instructions" '.instructions = $s' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  }
+  _override_agent_instructions "$AGENT1_PUBKEY" \
+    "You are Agent 1. Agent 2 is available and its npub is known to the system. When you receive ANY message from the user, you MUST call the delegate tool to forward the message to Agent 2 verbatim. Do not reply directly. After Agent 2 responds, relay the response back."
+  _override_agent_instructions "$AGENT2_PUBKEY" \
+    "You are Agent 2. When you receive a message, respond with exactly: 'agent2 received: <one sentence summary>'. Do not delegate. Complete the turn immediately."
+fi
 
 # Pre-seed the per-project descriptor at <TENEX_BASE_DIR>/projects/<d_tag>/project.json
 # (separate from the project content dir under projectsBase). Without this, the
@@ -78,18 +107,11 @@ jq -n \
   > "$desc_dir/project.json"
 echo "[scenario] pre-seeded project descriptor at $desc_dir/project.json"
 
-# Admin on the relay = backend. Agents and user are whitelisted via a 14199
-# that user publishes below (admin-level events aren't enough to let broadcasts
-# reach the daemon for events authored by the user/agents; whitelisting is
-# needed for the live broadcast path for non-ephemeral kinds).
 start_local_relay --admin "$BACKEND_PUBKEY"
 trap harness_cleanup EXIT
 
 point_daemon_config_at_local_relay
 
-# Publish a kind:14199 from user that whitelists user + all three agents +
-# backend. This mirrors production: the project owner's client publishes a
-# 14199 listing their backend and agents.
 echo "[scenario] publishing 14199 (whitelist) as user"
 publish_event_as "$USER_NSEC" 14199 "" \
   "p=$USER_PUBKEY" \
@@ -98,8 +120,6 @@ publish_event_as "$USER_NSEC" 14199 "" \
   "p=$AGENT1_PUBKEY" \
   "p=$AGENT2_PUBKEY" >/dev/null
 
-# Publish kind:31933 (project definition). We need to include the agents as
-# p-tags so the daemon knows which agents belong to this project.
 echo "[scenario] publishing 31933 (project) as user"
 publish_event_as "$USER_NSEC" 31933 "NAK interop test project" \
   "d=$PROJECT_D_TAG" \
@@ -111,33 +131,20 @@ publish_event_as "$USER_NSEC" 31933 "NAK interop test project" \
 # --- Start daemon -------------------------------------------------------------
 start_daemon
 
-# Wait for the daemon's relay listeners to be registered for both filter
-# groups we care about. Without this, the kind:24000 boot publish below races
-# against per-filter listener registration in Khatru and is silently dropped.
 await_daemon_subscribed 45 || _die "daemon subscription never became live"
 
 # ============================================================================
 # Phase A — deterministic daemon plumbing
 # ============================================================================
 
-# Publish kind:24000 boot event for the project
 echo "[scenario] publishing 24000 (boot) as user"
 boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 boot_id="$(printf '%s' "$boot_evt" | jq -r .id)"
 echo "[scenario]   boot event id=$boot_id"
 
-# Assert: daemon publishes a kind:24010 project status event for our project.
-# The on-disk booted-projects file is not written; the in-memory state is
-# observable as the daemon's 24010 publication (its periodic project-status
-# tick only fires for booted projects, so seeing one for our d-tag is the
-# canonical "boot was recorded" signal).
 echo "[scenario] waiting 8s for daemon to process boot and publish kind:24010..."
 sleep 8
 
-# Single query (no polling). The relay's historicalQueryReplayGuard makes
-# tight polling unreliable — repeated identical-signature queries from the
-# same IP+pubkey within 5s get LimitZero'd. One well-timed query sidesteps
-# the issue entirely.
 echo "[scenario] querying for kind:24010 from backend..."
 events_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
   "$HARNESS_RELAY_URL" 2>/dev/null || true)"
@@ -148,8 +155,6 @@ if [[ -z "$events_24010" ]] || [[ "$events_24010" == "[]" ]]; then
   _die "ASSERT: daemon never published kind:24010 for d-tag $PROJECT_D_TAG"
 fi
 
-# Verify the project a-tag matches our project (the 24010 carries the project
-# reference as ["a", "31933:<owner>:<d_tag>"], not as a separate d-tag).
 if ! printf '%s\n' "$events_24010" | jq -se --arg a "$PROJECT_A_TAG" \
     'any(.[]; .tags[]? | select(.[0]=="a" and .[1]==$a))' >/dev/null 2>&1; then
   echo "[scenario] saw kind:24010 but no matching a-tag $PROJECT_A_TAG"
@@ -157,16 +162,9 @@ if ! printf '%s\n' "$events_24010" | jq -se --arg a "$PROJECT_A_TAG" \
 fi
 echo "[scenario]   24010 status published for our project ✓ (proves boot was recorded)"
 
-# Wait for project-agent membership to hydrate. There's a race between the
-# daemon's agent inventory (visible in 24010) and its routing-time
-# project-agent membership map. If kind:1 arrives in that window, the daemon
-# logs `no_project_agent_recipient` and drops it. Sleep and retry.
 echo "[scenario] waiting 5s for project-agent membership to hydrate..."
 sleep 5
 
-# Publish kind:1 from user mentioning agent1 with the project a-tag.
-# Retry up to 3x with 5s gap on the dispatch-enqueue check, republishing
-# each time, since the membership race can drop the first message.
 _queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
 _saw_dispatch=0
 user_msg_id=""
@@ -207,25 +205,26 @@ echo "[scenario]   dispatch enqueued ✓"
 echo "[scenario] === Phase A complete: daemon plumbing OK ==="
 
 # ============================================================================
-# Phase B — best-effort LLM behavior observation
+# Phase B — mock-driven delegation (or Ollama best-effort when E2E_USE_OLLAMA=1)
 # ============================================================================
 
 echo ""
-echo "[scenario] === Phase B: observing LLM-driven delegation (best-effort) ==="
+if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
+  echo "[scenario] === Phase B: observing LLM-driven delegation (Ollama, best-effort) ==="
+  phase_b_timeout=120
+else
+  echo "[scenario] === Phase B: asserting mock-driven delegation ==="
+  phase_b_timeout=60
+fi
 
-# Give the LLM up to 120s to process. With qwen3.5 on Mac this is usually
-# enough for short turns.
-phase_b_timeout=120
 phase_b_deadline=$(( $(date +%s) + phase_b_timeout ))
 
-# Track what we see
 saw_agent1_delegation=0
 saw_agent2_response=0
-saw_agent1_resumption=0
+saw_agent1_final=0
 saw_terminal_ral=0
 
 while [[ $(date +%s) -lt $phase_b_deadline ]]; do
-  # Did agent1 publish a kind:1 with a delegation-style tag?
   if [[ "$saw_agent1_delegation" -eq 0 ]] && \
      nak req -k 1 -a "$AGENT1_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
        "$HARNESS_RELAY_URL" 2>/dev/null | jq -se 'any' >/dev/null 2>&1; then
@@ -233,15 +232,39 @@ while [[ $(date +%s) -lt $phase_b_deadline ]]; do
     saw_agent1_delegation=1
   fi
 
-  # Did agent2 respond?
-  if [[ "$saw_agent2_response" -eq 0 ]] && \
-     nak req -k 1 -a "$AGENT2_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
-       "$HARNESS_RELAY_URL" 2>/dev/null | jq -se 'any' >/dev/null 2>&1; then
-    echo "[scenario]   observed: agent2 published kind:1"
-    saw_agent2_response=1
+  if [[ "$saw_agent2_response" -eq 0 ]]; then
+    agent2_events="$(nak req -k 1 -a "$AGENT2_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
+      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+    if [[ -n "$agent2_events" ]] && [[ "$agent2_events" != "[]" ]]; then
+      if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
+        echo "[scenario]   observed: agent2 published kind:1"
+        saw_agent2_response=1
+      elif printf '%s\n' "$agent2_events" | jq -se \
+            'any(.[]; .content | test("agent2 says 4"))' >/dev/null 2>&1; then
+        echo "[scenario]   observed: agent2 published kind:1 with fixture content 'agent2 says 4'"
+        saw_agent2_response=1
+      fi
+    fi
   fi
 
-  # Did the RAL journal record any DelegationRegistered or DelegationCompleted?
+  if [[ "$saw_agent1_final" -eq 0 ]]; then
+    agent1_events="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 --auth --sec "$BACKEND_NSEC" \
+      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+    if [[ -n "$agent1_events" ]] && [[ "$agent1_events" != "[]" ]]; then
+      if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
+        # Ollama path: count any second agent1 kind:1 as "resumption".
+        if printf '%s\n' "$agent1_events" | jq -se 'length >= 2' >/dev/null 2>&1; then
+          echo "[scenario]   observed: agent1 published >=2 kind:1 events (resumption)"
+          saw_agent1_final=1
+        fi
+      elif printf '%s\n' "$agent1_events" | jq -se \
+            'any(.[]; .content | test("Final answer: agent2 says 4"))' >/dev/null 2>&1; then
+        echo "[scenario]   observed: agent1 published its final kind:1 with fixture content"
+        saw_agent1_final=1
+      fi
+    fi
+  fi
+
   if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
     if [[ "$saw_terminal_ral" -eq 0 ]] && \
        jq -e 'select((.event // .kind) | tostring | test("DelegationCompleted|Completed|Terminal"; "i"))' \
@@ -251,28 +274,56 @@ while [[ $(date +%s) -lt $phase_b_deadline ]]; do
     fi
   fi
 
-  # If we've seen everything, break early
-  [[ "$saw_agent1_delegation" -eq 1 && "$saw_agent2_response" -eq 1 && "$saw_terminal_ral" -eq 1 ]] && break
+  if [[ "$saw_agent1_delegation" -eq 1 && "$saw_agent2_response" -eq 1 \
+        && "$saw_agent1_final" -eq 1 && "$saw_terminal_ral" -eq 1 ]]; then
+    break
+  fi
 
   sleep 2
 done
 
 echo ""
 echo "[scenario] === Phase B observations ==="
-echo "[scenario]   agent1 published kind:1       : $([[ $saw_agent1_delegation -eq 1 ]] && echo yes || echo no)"
-echo "[scenario]   agent2 published kind:1       : $([[ $saw_agent2_response -eq 1 ]] && echo yes || echo no)"
-echo "[scenario]   RAL journal saw completion    : $([[ $saw_terminal_ral -eq 1 ]] && echo yes || echo no)"
+echo "[scenario]   agent1 published kind:1           : $([[ $saw_agent1_delegation -eq 1 ]] && echo yes || echo no)"
+echo "[scenario]   agent2 replied with fixture text  : $([[ $saw_agent2_response -eq 1 ]] && echo yes || echo no)"
+echo "[scenario]   agent1 final kind:1 (post-delegation): $([[ $saw_agent1_final -eq 1 ]] && echo yes || echo no)"
+echo "[scenario]   RAL journal completion record     : $([[ $saw_terminal_ral -eq 1 ]] && echo yes || echo no)"
 
-if [[ "$saw_agent2_response" -eq 1 && "$saw_terminal_ral" -eq 1 ]]; then
-  echo "[scenario] Phase B: apparent delegation flow completed"
-else
-  echo "[scenario] Phase B: flow did NOT fully complete within ${phase_b_timeout}s"
-  echo "[scenario]   This is expected if the LLM (qwen3.5) didn't invoke the delegate tool."
-  echo "[scenario]   To make Phase B deterministic, use a tool-capable model or stub the worker."
-  echo "[scenario]   daemon log at:  $HARNESS_DAEMON_LOG"
-  echo "[scenario]   dispatch queue: $_queue"
-  echo "[scenario]   RAL journal:    $DAEMON_DIR/ral/journal.jsonl"
+if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
+  # Diagnostic mode — Ollama is non-deterministic, so only log Phase B outcomes.
+  if [[ "$saw_agent2_response" -eq 1 && "$saw_terminal_ral" -eq 1 ]]; then
+    echo "[scenario] Phase B (Ollama): apparent delegation flow completed"
+  else
+    echo "[scenario] Phase B (Ollama): flow did NOT fully complete within ${phase_b_timeout}s"
+    echo "[scenario]   daemon log:     $HARNESS_DAEMON_LOG"
+    echo "[scenario]   dispatch queue: $_queue"
+    echo "[scenario]   RAL journal:    $DAEMON_DIR/ral/journal.jsonl"
+  fi
+  echo "[scenario] PASS — Phase A assertions held; Phase B was observed under Ollama."
+  exit 0
+fi
+
+# Mock mode: hard _die on any Phase B miss.
+if [[ "$saw_agent1_delegation" -ne 1 ]]; then
+  echo "[scenario] daemon log (last 80 lines):"
+  tail -80 "$HARNESS_DAEMON_LOG" >&2 || true
+  _die "ASSERT: agent1 never published any kind:1 event"
+fi
+if [[ "$saw_agent2_response" -ne 1 ]]; then
+  echo "[scenario] daemon log (last 80 lines):"
+  tail -80 "$HARNESS_DAEMON_LOG" >&2 || true
+  _die "ASSERT: agent2 never published kind:1 with fixture content 'agent2 says 4'"
+fi
+if [[ "$saw_agent1_final" -ne 1 ]]; then
+  echo "[scenario] daemon log (last 80 lines):"
+  tail -80 "$HARNESS_DAEMON_LOG" >&2 || true
+  _die "ASSERT: agent1 never published its final kind:1 ('Final answer: agent2 says 4.')"
+fi
+if [[ "$saw_terminal_ral" -ne 1 ]]; then
+  echo "[scenario] daemon log (last 80 lines):"
+  tail -80 "$HARNESS_DAEMON_LOG" >&2 || true
+  _die "ASSERT: RAL journal never recorded a DelegationCompleted/Terminal marker"
 fi
 
 echo ""
-echo "[scenario] PASS — scenario 5.1 Phase A (daemon plumbing). Phase B is best-effort."
+echo "[scenario] PASS — scenario 5.1 (Phase A daemon plumbing + Phase B mock-driven delegation)"
