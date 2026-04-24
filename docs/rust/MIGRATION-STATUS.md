@@ -40,33 +40,52 @@ M0–M7 substantially landed. M8 in progress (Telegram outbox + caches + wakeups
 - Concurrent worker sessions on scoped threads with detached tick boundaries
 - e2e scenario **01 (NIP-42 dynamic whitelist)** passes
 - e2e scenario **02 Phase A (delegation daemon plumbing)** passes
-- e2e scenario **02 Phase B (delegation with deterministic Mock-LLM)** passes 3/3 consecutive runs (merged from Track A `72586c4a`/`6d28db3d` → `3106e7ce`)
+- e2e scenario **02 Phase B (delegation with deterministic Mock-LLM)** passes 3/3 consecutive runs (Track A merged as `3106e7ce`)
 - **Mock-LLM fixture infra** (`USE_MOCK_LLM=true` + `TENEX_MOCK_LLM_FIXTURE`) working end-to-end with strict matching, `expectedModelId` pinning, fail-loud on missing triggers — production TS unit tests still green (`bun test src/test-utils/mock-llm` 6/0, `bun test src/llm/providers/__tests__` 58/0)
+- **Concurrency invariants** (Track E, `d4a90c19`) — 4 tests pass, but Session 2 review flagged **2 of 4 as weak**:
+  - ✅ RAL journal resequences concurrent appends under the append lock with no gaps/duplicates (defends `d8c8238f`) — real invariant
+  - ✅ `publish_result` sequence atomic is globally monotonic across 1024 concurrent reservations (defends `5fe5ba00`) — real invariant at the primitive level (doesn't route through `handle_worker_message_flow` yet)
+  - ⚠️ `ProjectEventIndex` singleton test clones an `Arc` in-test and asserts `ptr_eq` — **tautology**, doesn't exercise daemon wiring. Regression in `src/` would still pass. Patch or delete (tracked).
+  - ⚠️ `RAL claim tokens unique` uses 16 distinct identities — uniqueness is over-determined by inputs, doesn't actually test the `AtomicU64+nanosecond+sha256` mint mechanism. Patch to same-identity minting (tracked).
+- **E2E runner + dashboard** (Track D, landed) — `./scripts/e2e/run.sh [glob] [--jobs N]`, atomic `.status.json`, auto-regenerated `e2e-matrix` block in this doc, portable `HARNESS_RELAY_BIN` resolution, condition-based `await_file_contains`, `collect_artifacts` tarball helper.
+- **Project boot scenarios** (Track B, committed): 1.1, 1.2, 1.3, 1.4 all green through runner. 1.5 (reordering) not yet scripted (Track B stream-idle-timed-out).
+- **Dispatch queue scenarios** (Track C partial, committed): 3.1 flock-serialization, 3.3 per-agent admission (via cargo unit tests — CLI can't set per_agent), 3.6 triggering-event dedup. All green.
 
 ## What DOES NOT WORK (known broken / blockers)
 
-- **Hardcoded relay binary path** in `scripts/e2e-test-harness.sh:18` — CI-unrunnable. (Track D shipped `scripts/e2e/_bootstrap.sh` portable resolver; not yet committed — files still untracked in main tree.)
-- **Sleep-based synchronization** in several scenarios (scenario 02, 01) — will flake under load. Track D added `helpers/await_file.sh` for condition-based waiting but existing scenarios not yet migrated.
+- **🔴 Real-client verification never performed.** Milestone doc (`implementation-milestones-and-quality-gates.md:1441`) declares this a **per-slice development gate**. `git log` since branch start shows **zero commits** verifying web/iOS/CLI/Telegram against the Rust daemon end-to-end. This is the largest untouched risk. Session 2 review surfaced it as the LFG blocker that will take the longest to close.
+- **Scenario 37 (dispatch input mismatch) — scenario bug.** Daemon correctly rejects mismatched sidecars and logs the validation failure (`worker dispatch input validation failed: execute field triggeringEventId ... does not match`), but the scenario's grep assertion doesn't match the actual error string. Parked under `scripts/e2e/scenarios/_wip/` pending assertion fix. Daemon behavior is **correct**.
+- **Scenario 39 (RAL number exhaustion) — needs investigation.** After seeding the journal with `ralNumber=u64::MAX` and restarting the daemon, no `RalNumberExhausted` error appears in the log. Could be: (a) seeding method doesn't trigger the exhaustion check path, (b) daemon lacks the check on restart replay, or (c) the republish never routes to that identity. Parked under `scripts/e2e/scenarios/_wip/`.
+- **Sleep-based synchronization** in existing scenarios (01, 02) — will flake under load. `helpers/await_file.sh` now available; existing scenarios not yet migrated.
 - `_pick_free_port` TOCTOU race — will collide with >30 parallel scenarios.
 - `await_daemon_subscribed` depends on log-grep — brittle to log format changes.
 - Telegram inbound adapter missing (M8 blocker).
+- Telegram outbound idempotency across daemon restart — claimed landed, **not tested** (per milestone doc line 1197).
 - M9 TS shim audit not done — unclear what remains to delete.
-- Agent worktree isolation unreliable: Tracks C, D, E wrote files to main tree instead of their worktrees. Landed work in main as untracked; merge plan in progress.
+- **Correlation-ID chain** (milestone global gate line 1324) across logs / worker protocol / RAL journal / worker state / telemetry spans — no test verifies the full chain.
+- **Cold/warm time-to-first-token** (M9 line 1258) — no perf gate exists.
+- Scenario 1.5 (boot event reordering) — not scripted (Track B timed out before delivering).
+- Agent worktree isolation was unreliable: Tracks C, D, E wrote files to main tree instead of their worktrees. All landed work committed; future dispatches use single-scenario prompts with tighter scope.
 
 ## What we DON'T KNOW YET (and when we'll know)
 
 | Unknown | ETA / trigger |
 |---------|---------------|
-| Do project boot scenarios (1.1–1.5) pass on Rust daemon? | Batch 1 Track B completes |
-| Do dispatch queue concurrency scenarios (3.1, 3.3, 3.6, 3.7, 3.9) pass? | Batch 1 Track C completes |
-| Does deterministic mock-LLM Phase B work end-to-end? | Batch 1 Track A completes |
-| Do delegation flows survive concurrent interleaved RAL completions under the append lock? | Cargo concurrency-invariants integration test (Batch 2 Track E, dispatched) |
-| Does §3.2 (re-dispatch sequence under lock) hold? | Batch 2 scenarios (pending) |
-| Do §4.3–4.5 (RAL transitions, snapshot recovery, append failure) hold? | Batch 2 scenarios (pending) |
-| Does §5.5/5.7 (active-parent injection, deferred completion) hold? | Batch 3 delegation scenarios (pending) |
-| Does publish-outbox tolerate two daemons racing on same directory? | Batch 3 adversarial M7 scenarios (not scheduled) |
+| Does §3.2 (re-dispatch sequence under lock) hold? | Batch 3 Track F (dispatching) |
+| Does §1.5 (boot event reordering) hold? | Follow-up (Track B didn't finish it) |
+| Do §4.3/4.4/4.5 (RAL transitions, snapshot recovery, journal append failure) hold? | Batch 3 (after §3.2 lands clean) |
+| Does §5.5/5.7 (active-parent injection, deferred completion) hold? | Batch 4 (after §4.*) |
+| Does scenario 02 pass 50× consecutively, not just 3×? | Stress-loop test (Batch 3) |
+| Does the `ProjectEventIndex` singleton invariant hold in daemon wiring (not just the isolated test)? | Patched concurrency test (Batch 3 Track G) |
+| Does the claim-token mint mechanism produce unique tokens for same-identity concurrent claims? | Patched concurrency test (Batch 3 Track G) |
+| Does §8.3 (live publish without daemon tick) hold? | Not scheduled |
+| Does §8.10 (operations-status persists across ticks) hold? | Not scheduled |
+| Does publish-outbox tolerate two daemons racing on same directory? | Adversarial M7 (not scheduled) |
+| Does Telegram outbound delivery survive daemon restart (idempotent)? | M8 idempotence gate (not scheduled) |
 | Does Telegram outbound delivery work against a real bot? | M8 real-client fixture (not scheduled) |
+| Do real TENEX clients (web/iOS/CLI) work against Rust daemon end-to-end? | **#1 LFG blocker — not scheduled, needs human** |
 | Does M9 TS cleanup leave any dead imports / broken builds? | M9 audit pass (not scheduled) |
+| Does scenario 39 fail because of scenario bug or real daemon gap in RalNumberExhausted? | Investigation (not scheduled) |
 
 ## Test coverage snapshot
 
@@ -87,33 +106,55 @@ Regenerated automatically by `scripts/e2e/run.sh` after every run. Do not edit
 between the delimiters — changes will be overwritten.
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-24T06:53:24Z · branch `rust-agent-worker-publishing` · commit `6d5b9e72ecb1` · total=1 pass=1 fail=0 skip=0 unknown=0 phase_partial=0_
+_Last run: 2026-04-24T07:11:50Z · branch `rust-agent-worker-publishing` · commit `775965f0ba4e` · total=5 pass=3 fail=2 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
 | 01_nip42_dynamic_whitelist.sh | pass | 2026-04-24T06:53:24Z | 3s |  |
+| 11_boot_gates_dispatch.sh | pass | 2026-04-24T07:05:05Z | 13s |  |
+| 12_boot_activates_dispatch.sh | pass | 2026-04-24T07:05:24Z | 19s |  |
+| 13_boot_is_idempotent.sh | pass | 2026-04-24T07:05:39Z | 15s |  |
+| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-24T07:06:15Z | 36s |  |
+| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-24T07:10:21Z | 0s |  |
+| 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T07:10:21Z | 0s |  |
+| 36_triggering_event_dedup.sh | pass | 2026-04-24T07:10:44Z | 23s |  |
+| 37_dispatch_input_mismatch.sh | fail | 2026-04-24T07:11:12Z | 28s |  |
+| 39_ral_number_exhaustion.sh | fail | 2026-04-24T07:11:50Z | 38s |  |
 <!-- e2e-matrix:end -->
 
 ## Active orchestration
 
-**Batch 1 in flight (background subagents, Ollama+local relay, isolated worktrees):**
-- Track A — Mock-LLM fixtures + port scenario 02 to deterministic Phase B
-- Track B — Project boot scenarios 1.1–1.5 (`11_*.sh`–`15_*.sh`)
-- Track C — Dispatch queue scenarios 3.1/3.3/3.6/3.7/3.9 (`31_*.sh`–`39_*.sh`)
+**Batch 1 (COMPLETE, merged):**
+- ✅ Track A — Mock-LLM fixtures + deterministic scenario 02 (`3106e7ce`)
+- ✅ Track B — Boot scenarios 1.1–1.4 green (`22bce496` predecessor; 1.5 deferred)
+- 🟡 Track C — 3 of 5 green (31, 33, 36); 37/39 parked under `_wip` (`22bce496`)
 
-**Batch 2 planned (dispatching now, revised per reviewer feedback):**
-- Track D — e2e runner + status JSON + portable harness fixes (new files only; serialized harness edits land later)
-- Track E — cargo integration test for concurrency invariants: shared `ProjectEventIndex` identity, RAL seq monotonicity under lock, claim-token uniqueness, publish-outbox atomic seq monotonicity
+**Batch 2 (COMPLETE, merged):**
+- ✅ Track D — e2e runner + portable bootstrap + dashboard section
+- ✅ Track E — concurrency invariants integration test (`d4a90c19`) — 2 strong, 2 weak (flagged)
 
-**Batch 3 planned (after Batch 2 merges):**
-- High-churn concurrency scenarios: §3.2, §4.3, §4.4, §4.5
-- Delegation variants: §5.5 (active-parent injection), §5.7 (deferred completion)
-- Recovery: §10.1, §10.2
+**Batch 3 (single-scenario focused dispatches, 15-min cap, structured RESULT):**
+- Track F — §3.2 re-dispatch sequence under lock
+- Track G — patch weak concurrency tests (drop or rewrite `ProjectEventIndex` singleton test; rewrite claim-token test for same-identity concurrent minting)
+- Track H — stress-loop scenario 02 (50× consecutive, cold daemon) to surface flake that 3× doesn't
 
-**Deferred:**
-- Adversarial M7 (two daemons on same outbox, relay half-ack, tmp→pending gap)
-- M8 real-client Telegram E2E
+**Batch 4 planned (after Batch 3):**
+- §4.4 RAL snapshot recovery, §4.5 journal append failure, §4.3 RAL transitions
+- §1.5 boot event reordering (Track B's missing scenario)
+- Fix scenario 37 assertion; investigate scenario 39
+
+**Batch 5 planned:**
+- Delegation §5.5, §5.7, §5.3 three-hop
+- §8.3 live publish without daemon tick, §8.10 operations-status persistence across ticks
+
+**Deferred (needs human or multi-day effort):**
+- Real-client verification (web/iOS/CLI/Telegram) — **#1 LFG blocker**
+- Adversarial M7: two daemons on same outbox, relay half-ack, tmp→pending gap, replay attack, EACCES mid-write
+- M8 Telegram inbound adapter
+- M8 outbound idempotence-across-restart test
 - M9 TS shim audit
+- Correlation-ID chain verification
+- Cold/warm TTFT perf gate
 
 ## Orchestration-feedback cadence
 
@@ -122,17 +163,24 @@ Every ~30 min: dispatch 2–3 critical reviewers in parallel asking (a) is the c
 ### Feedback session log
 
 **2026-04-24 — Session 1**
-- Verdict: my initial Batch 1 partitioning aimed at quiescent subsystems (boot, dispatch admission). High-churn concurrency work was not probed. Bash scenarios duplicate some cargo interop gates. Harness has scalability issues. No dashboard.
+- Verdict: initial Batch 1 partitioning aimed at quiescent subsystems (boot, dispatch admission). High-churn concurrency work was not probed. Bash scenarios duplicate some cargo interop gates. Harness has scalability issues. No dashboard.
 - Actions: wrote this doc; redirected Batch 2 toward concurrency invariants via cargo integration test; froze harness edits during fan-out; deferred high-risk sections (§3.2, §4.*, §5.5/7, §10.*) to Batch 3 after runner + dashboard land.
 
-## Blockers for master merge
+**2026-04-24 — Session 2**
+- Verdict: Batch 2 delivered the runner + dashboard (great), **but 2 of 4 concurrency tests are weak ceremony** (`ProjectEventIndex` singleton is a tautology, claim-token test is over-determined by distinct inputs). Real-client verification remains **untouched**, which is the biggest unknown risk and longest LFG blocker. Scenario catalog is ~8% adversarial — happy-path regression suite dressed up as E2E. Multiple agents wrote to main tree instead of worktrees (not blocking, but indicates prompts were too broad).
+- Hidden blockers surfaced from milestone doc: correlation-ID chain, rollback-tests-with-in-flight-state, Telegram outbound idempotence-across-restart, cold/warm TTFT perf, "no stuck RALs after restart", "no duplicate completions".
+- Actions: parked scenarios 37 (bad assertion) and 39 (needs investigation) under `_wip`; committed Track C's 3 green scenarios + `dispatch_id_for` harness helper; rewrote Batch 3 to be **single-scenario dispatches** (§3.2, patch weak tests, stress-loop scenario 02); logged hidden M9 gates into "DOES NOT WORK"; bumped real-client verification to top of blockers; recommended web-client-pointed-at-Rust-daemon as the next human-driven checkpoint.
 
-1. M8: Telegram inbound adapter + real-client fixture
-2. M8: full-daemon E2E for project-status / operations-status / scheduler-wakeups
-3. M9: TS daemon code fully deleted, no feature flags remaining
-4. All M0–M8 quality gates green in CI (currently local-only; requires portable relay resolution + CI plan)
-5. Real clients (web / iOS / CLI / Telegram) verified against Rust daemon E2E
-6. e2e scenario matrix: top-priority scenarios (sections 1–8) scripted, green, and reproducible from clean checkout
+## Blockers for master merge (ranked by estimated time-to-close)
+
+1. **Real-client verification** (web / iOS / CLI / Telegram) against Rust daemon — zero evidence it's been done; milestone says this is a per-slice gate that has been ignored throughout the branch. Requires human + device + signed build + real bot.
+2. **M8 Telegram inbound adapter** — not written; needed for inbound Nostr→Telegram flow.
+3. **M8 real-client Telegram fixture** — outbound bot API delivery never verified against a real bot.
+4. **M8 Telegram outbound idempotence-across-restart** — claimed landed, not tested.
+5. **M9 TS daemon code audit** — unclear what remains; needs systematic pass.
+6. **CI runnability** — portable `HARNESS_RELAY_BIN` now resolves, but Ollama dep + sandboxed CI runner not decided.
+7. **Hidden quality gates**: correlation-ID chain, rollback-with-in-flight-state, no-stuck-RAL-after-restart, no-duplicate-completions, cold/warm TTFT perf.
+8. **e2e coverage breadth**: ~10 of ~100 scenarios scripted + green. Top-priority (§§1–8, §10, §11) needs ~30 more.
 
 ## Release criteria — LFG! readiness checklist
 
