@@ -3,7 +3,7 @@
  *
  * Verifies the priority chain:
  *   1. Explicit projectId parameter
- *   2. AsyncLocalStorage context (projectContextStore)
+ *   2. Envelope projectBinding
  *   3. Single-project shortcut (unambiguous when only one project)
  *
  * Also tests that multiple initialize() calls accumulate entries.
@@ -11,15 +11,41 @@
 
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { conversationRegistry } from "../ConversationRegistry";
-// Import directly from the module file to avoid heavy barrel re-exports
-// that trigger circular dependency chains through ProjectContext.
-import { projectContextStore } from "@/services/projects/ProjectContextStore";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { logger } from "@/utils/logger";
 
 describe("ConversationRegistry.resolveProjectId", () => {
     const TEST_DIR = "/tmp/tenex-test-resolve-project-id";
     const PROJECT_A = "project-alpha";
     const PROJECT_B = "project-beta";
+
+    function createEnvelope(projectId: string): InboundEnvelope {
+        return {
+            transport: "nostr",
+            principal: {
+                id: "nostr:user-pubkey",
+                transport: "nostr",
+                linkedPubkey: "user-pubkey",
+                kind: "human",
+            },
+            channel: {
+                id: `nostr:project:31933:test-owner:${projectId}`,
+                transport: "nostr",
+                kind: "conversation",
+                projectBinding: `31933:test-owner:${projectId}`,
+            },
+            message: {
+                id: `nostr:${projectId}:message`,
+                transport: "nostr",
+                nativeId: `${projectId}-message`,
+            },
+            recipients: [],
+            content: "test",
+            occurredAt: Date.now(),
+            capabilities: [],
+            metadata: {},
+        };
+    }
 
     beforeEach(() => {
         conversationRegistry.reset();
@@ -38,66 +64,42 @@ describe("ConversationRegistry.resolveProjectId", () => {
             expect(result).toBe("explicit-project");
         });
 
-        it("should prefer explicit projectId over AsyncLocalStorage context", async () => {
-            conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
+        it("should prefer explicit projectId over envelope projectBinding", () => {
+            const envelope = createEnvelope(PROJECT_A);
 
-            // Even if ALS context is available, explicit param wins
-            const mockProject = {
-                tagValue: (tag: string) => (tag === "d" ? PROJECT_A : undefined),
-            };
-            const mockContext = { project: mockProject } as any;
-
-            const result = await projectContextStore.run(mockContext, async () =>
-                conversationRegistry.resolveProjectId("explicit-override")
-            );
+            const result = conversationRegistry.resolveProjectId("explicit-override", envelope);
 
             expect(result).toBe("explicit-override");
         });
     });
 
-    describe("Tier 2: AsyncLocalStorage context", () => {
-        it("should resolve from ALS context when no explicit param given", async () => {
+    describe("Tier 2: Envelope projectBinding", () => {
+        it("should resolve from envelope projectBinding when no explicit param given", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
-            const mockProject = {
-                tagValue: (tag: string) => (tag === "d" ? PROJECT_A : undefined),
-            };
-            const mockContext = { project: mockProject } as any;
-
-            const result = await projectContextStore.run(mockContext, async () =>
-                conversationRegistry.resolveProjectId()
-            );
+            const result = conversationRegistry.resolveProjectId(undefined, createEnvelope(PROJECT_A));
 
             expect(result).toBe(PROJECT_A);
         });
 
-        it("should fall through when ALS context has unknown project dTag", async () => {
+        it("should fall through when envelope projectBinding has unknown project dTag", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
-            const mockProject = {
-                tagValue: (tag: string) => (tag === "d" ? "unknown-project" : undefined),
-            };
-            const mockContext = { project: mockProject } as any;
-
-            const result = await projectContextStore.run(mockContext, async () =>
-                conversationRegistry.resolveProjectId()
+            const result = conversationRegistry.resolveProjectId(
+                undefined,
+                createEnvelope("unknown-project")
             );
 
             // Should fall through to single-project shortcut
             expect(result).toBe(PROJECT_A);
         });
 
-        it("should fall through when ALS context project has no dTag", async () => {
+        it("should fall through when envelope lacks projectBinding", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
-            const mockProject = {
-                tagValue: () => undefined,
-            };
-            const mockContext = { project: mockProject } as any;
-
-            const result = await projectContextStore.run(mockContext, async () =>
-                conversationRegistry.resolveProjectId()
-            );
+            const envelope = createEnvelope(PROJECT_A);
+            envelope.channel.projectBinding = undefined;
+            const result = conversationRegistry.resolveProjectId(undefined, envelope);
 
             // Should fall through to single-project shortcut
             expect(result).toBe(PROJECT_A);
@@ -108,16 +110,18 @@ describe("ConversationRegistry.resolveProjectId", () => {
         it("should return the sole project when only one is initialized", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
-            // Outside any ALS context — should return the only initialized project
+            // Without an explicit or envelope-scoped binding, the single initialized
+            // project remains unambiguous.
             const result = conversationRegistry.resolveProjectId();
             expect(result).toBe(PROJECT_A);
         });
 
-        it("should return null when multiple projects are initialized without ALS context", () => {
+        it("should return null when multiple projects are initialized without project binding", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, []);
 
-            // Outside ALS context with 2 projects => no safe resolution
+            // Without an explicit or envelope-scoped binding, multi-project mode
+            // has no safe implicit resolution.
             const result = conversationRegistry.resolveProjectId();
             expect(result).toBeNull();
         });
@@ -146,63 +150,36 @@ describe("ConversationRegistry.resolveProjectId", () => {
     });
 
     describe("Multiple initialize() calls accumulate entries", () => {
-        it("should accumulate project configs across multiple initialize() calls", async () => {
+        it("should accumulate project configs across multiple initialize() calls", () => {
             const agentsA = ["pubkey-a1", "pubkey-a2"];
             const agentsB = ["pubkey-b1"];
 
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, agentsA);
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, agentsB);
 
-            // Both projects should be resolvable via ALS
-            const mockProjectA = {
-                tagValue: (tag: string) => (tag === "d" ? PROJECT_A : undefined),
-            };
-            const contextA = { project: mockProjectA } as any;
-
-            const resolvedA = await projectContextStore.run(contextA, async () =>
-                conversationRegistry.resolveProjectId()
+            const resolvedA = conversationRegistry.resolveProjectId(
+                undefined,
+                createEnvelope(PROJECT_A)
             );
             expect(resolvedA).toBe(PROJECT_A);
 
-            const mockProjectB = {
-                tagValue: (tag: string) => (tag === "d" ? PROJECT_B : undefined),
-            };
-            const contextB = { project: mockProjectB } as any;
-
-            const resolvedB = await projectContextStore.run(contextB, async () =>
-                conversationRegistry.resolveProjectId()
+            const resolvedB = conversationRegistry.resolveProjectId(
+                undefined,
+                createEnvelope(PROJECT_B)
             );
             expect(resolvedB).toBe(PROJECT_B);
         });
 
-        it("should return project-specific agent pubkeys via ALS context", async () => {
+        it("should fall back to the union of all agent pubkeys when no project can be resolved", () => {
             const agentsA = ["pubkey-a1", "pubkey-a2"];
             const agentsB = ["pubkey-b1"];
 
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, agentsA);
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, agentsB);
 
-            // In project A context, should see project A agents
-            const mockProjectA = {
-                tagValue: (tag: string) => (tag === "d" ? PROJECT_A : undefined),
-            };
-            const contextA = { project: mockProjectA } as any;
-
-            const pubkeysA = await projectContextStore.run(contextA, async () =>
-                conversationRegistry.agentPubkeys
+            expect(conversationRegistry.agentPubkeys).toEqual(
+                new Set(["pubkey-a1", "pubkey-a2", "pubkey-b1"])
             );
-            expect(pubkeysA).toEqual(new Set(agentsA));
-
-            // In project B context, should see project B agents
-            const mockProjectB = {
-                tagValue: (tag: string) => (tag === "d" ? PROJECT_B : undefined),
-            };
-            const contextB = { project: mockProjectB } as any;
-
-            const pubkeysB = await projectContextStore.run(contextB, async () =>
-                conversationRegistry.agentPubkeys
-            );
-            expect(pubkeysB).toEqual(new Set(agentsB));
         });
 
         it("should merge all agent pubkeys into allAgentPubkeys union", () => {
@@ -234,11 +211,12 @@ describe("ConversationRegistry.resolveProjectId", () => {
             expect(conversationRegistry.isAgentPubkey("pubkey-b1")).toBe(true);
         });
 
-        it("should return null outside ALS context with multiple projects", () => {
+        it("should return null without project binding when multiple projects are initialized", () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, []);
 
-            // Outside ALS context with multiple projects — no safe resolution
+            // Without an explicit or envelope-scoped binding, multi-project mode
+            // has no safe implicit resolution.
             const result = conversationRegistry.resolveProjectId();
             expect(result).toBeNull();
         });
