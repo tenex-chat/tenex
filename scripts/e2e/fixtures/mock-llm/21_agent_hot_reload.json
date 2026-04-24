@@ -1,0 +1,26 @@
+{
+  "expectedModelId": "mock/agent-hot-reload-21",
+  "label": "e2e/21_agent_hot_reload",
+  "responses": [
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent1",
+        "messageContains": "hello agent1"
+      },
+      "response": {
+        "content": "agent1 received hello"
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent2",
+        "messageContains": "hello agent2"
+      },
+      "response": {
+        "content": "agent2 received hello"
+      }
+    }
+  ]
+}
