@@ -1179,7 +1179,10 @@ Scope:
 - Implement Telegram inbound update handling inside the Rust-native Telegram
   adapter, normalizing updates into the same `InboundEnvelope` contract before
   Rust dispatch.
-- Decide and implement MCP notification strategy.
+- Defer MCP resource browsing, resource subscriptions, and MCP-triggered
+  wakeups. The active supported MCP surface for this migration is injected
+  external MCP tool execution only; any future resource strategy needs its own
+  design and quality gates.
 - Move agent definition monitoring or isolate it as an adapter.
 - Move skill whitelist hydration or isolate it as an adapter.
 - Define filesystem-backed caches for trust pubkeys, prefix lookups, and
@@ -1253,8 +1256,10 @@ Quality gates:
   relays, real Telegram, and real clients.
 - Every feature the TypeScript daemon supported works against the Rust daemon:
   project discovery, boot, direct PM reply, delegation, tools, stop command,
-  scheduled tasks, restart during idle and during waiting delegation, MCP
-  subscriptions, Telegram inbound and outbound, no-response path.
+  scheduled tasks, restart during idle and during waiting delegation, injected
+  MCP tool execution, Telegram inbound and outbound, no-response path. MCP
+  resource browsing and subscriptions remain deferred future work and are not
+  part of this cutover gate.
 - Cold/warm time-to-first-token is acceptable for interactive use with and
   without MCP.
 - No stuck active RALs after restarts.

@@ -68,8 +68,7 @@ These are the important "do not delete by smell" areas in the current tree.
 | `src/services/projects/ProjectContext.ts` and `getProjectContext()` | Core Bun execution still depends on AsyncLocalStorage-backed project context | imported across execution, prompts, tools, Nostr, MCP, search, scheduling |
 | `src/services/ingress/TransportBindingStoreService.ts` | looks control-plane-ish, but still drives worker prompt/tool behavior | imported by `src/tools/registry.ts`; read by `src/prompts/fragments/08-project-context.ts` |
 | `src/services/telegram/TelegramChatContextStoreService.ts` | Rust has daemon-side Telegram chat context, but Bun still reads TS-owned chat context during prompt rendering | read by `src/prompts/fragments/08-project-context.ts` |
-| `src/services/mcp/McpSubscriptionService.ts` | subscription setup/notification delivery still depends on project context and captured TS runtime objects | comments and code in `setupMcpSubscription()` / `handleNotification()` explicitly describe MCP callbacks running outside ALS scope |
-| `src/services/mcp/McpNotificationDelivery.ts` | directly invokes `AgentExecutor` and `createExecutionContext()` | still part of live TS runtime notification behavior |
+| `src/services/mcp/MCPManager.ts` plus MCP tool injection in `src/tools/registry.ts` | still backs active external MCP tool execution inside the Bun worker | MCP resource browsing, reads, and subscriptions were removed, but injected `mcp__<server>__<tool>` execution remains a live TS runtime surface |
 | `src/services/ral/**` | still part of the active Bun execution/delegation/injection model | not a dead daemon shim; still used by execution flows |
 | `src/events/runtime/LocalInboundAdapter.ts` | adapter/test/runtime contract boundary, not just dead control-plane residue | still part of runtime-contract/test surface |
 | `src/events/runtime/RecordingRuntimePublisher.ts` | compatibility/test helper, still useful while the worker protocol remains under active migration | still part of runtime-contract/test surface |
@@ -82,7 +81,7 @@ The remaining cleanup categories are:
 
 1. reduce `getProjectContext()` dependence so the Bun worker depends on explicit execution inputs rather than broad ambient TS runtime state
 2. re-home or replace TS-owned transport/chat-context persistence still read during prompt/tool assembly
-3. decide whether MCP notification delivery remains a TS worker concern or becomes a more explicit Rust-to-worker contract
+3. keep MCP tool execution only for now; if resource browsing or subscriptions return later, reintroduce them as an explicit future design rather than reviving the deleted TS paths
 4. only then re-evaluate whether runtime-coupled helpers like `LocalInboundAdapter`, `RecordingRuntimePublisher`, or parts of `services/ral` are truly removable
 
 ## Practical Validation Gates

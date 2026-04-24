@@ -73,7 +73,7 @@ The tree still has active TypeScript runtime dependencies that are not old daemo
 | `getProjectContext()` | imported across execution, tools, prompts, Nostr, MCP, search, and scheduling | Bun execution is still heavily coupled to AsyncLocalStorage-backed TS runtime state |
 | `src/services/ingress/TransportBindingStoreService.ts` | imported by `src/tools/registry.ts`; read by `src/prompts/fragments/08-project-context.ts` | Bun prompt/tool behavior still depends on TS-owned transport binding persistence |
 | `src/services/telegram/TelegramChatContextStoreService.ts` | read by `src/prompts/fragments/08-project-context.ts` | Bun prompt assembly still depends on TS-owned Telegram chat context persistence |
-| `src/services/mcp/McpSubscriptionService.ts` | requires project context during setup and captures `mcpManager` because MCP callbacks run outside ALS scope | MCP push notification behavior is still tied to TypeScript runtime state |
+| `src/services/mcp/MCPManager.ts` and `src/tools/registry.ts` | still start per-project MCP clients and inject `mcp__<server>__<tool>` tools into the Bun worker | External MCP tool execution remains TS-owned even though MCP resource browsing and subscriptions were removed |
 | `src/services/ral/**` and active `RALRegistry` usage | still exercised by execution and notification flows | RAL is still part of the active Bun execution model, not dead daemon scaffolding |
 
 ## What Should Not Be Reported As Current Blockers
@@ -101,6 +101,7 @@ Rust
 Bun / TypeScript
   - bounded worker execution
   - AgentExecutor, tool registry, prompts, providers, MCP client behavior
+  - injected MCP tool execution only; resource browsing and subscriptions are deferred future work
   - runtime contracts still consumed by the worker
   - remaining transport/chat/project context coupling that has not yet been fully re-homed
 ```

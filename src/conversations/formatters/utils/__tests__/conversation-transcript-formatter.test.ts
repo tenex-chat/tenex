@@ -135,7 +135,7 @@ describe("conversation-transcript-formatter", () => {
           {
             type: "tool-call",
             toolCallId: "mcp-1",
-            toolName: "mcp_resource_read",
+            toolName: "mcp__docs__resource_read",
             input: {
               serverName: "docs",
               resourceUri: "mcp://resource/with/a/very/long/path?query=1",

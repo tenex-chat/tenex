@@ -50,9 +50,9 @@ These are the current migration-relevant TypeScript surfaces. They are not old d
 `getProjectContext()` is still imported across execution, prompt compilation, tools, Nostr encoding, MCP, and search flows. Current importers include:
 
 - execution path: `src/agents/execution/AgentExecutor.ts`, `StreamSetup.ts`, `StreamCallbacks.ts`, `PostCompletionChecker.ts`, `ToolSupervisionWrapper.ts`
-- prompt/tool path: `src/prompts/utils/systemPromptBuilder.ts`, `src/tools/registry.ts`, `src/tools/implementations/ask.ts`, `delegate.ts`, `learn.ts`, `mcp_list_resources.ts`, `mcp_resource_read.ts`, `mcp_subscribe.ts`, `rag_add_documents.ts`
+- prompt/tool path: `src/prompts/utils/systemPromptBuilder.ts`, `src/tools/registry.ts`, `src/tools/implementations/ask.ts`, `delegate.ts`, `learn.ts`, `rag_add_documents.ts`
 - Nostr/runtime path: `src/nostr/AgentEventEncoder.ts`, `src/nostr/utils.ts`
-- services path: `src/services/mcp/McpSubscriptionService.ts`, `src/services/mcp/McpNotificationDelivery.ts`, `src/services/agents/AgentResolution.ts`, `src/services/agents/EscalationService.ts`, `src/services/rag/RagSubscriptionService.ts`, `src/services/scheduling/SchedulerService.ts`
+- services path: `src/services/agents/AgentResolution.ts`, `src/services/agents/EscalationService.ts`, `src/services/scheduling/SchedulerService.ts`
 
 This is the biggest remaining TypeScript runtime coupling in the current tree.
 
@@ -67,11 +67,11 @@ These stores are still consumed by prompt and tool assembly:
 
 Rust already has corresponding daemon-side slices (`crates/tenex-daemon/src/telegram/chat_context.rs` and transport/inbound runtime code), but Bun still reads TypeScript-owned stores during prompt assembly and tool gating.
 
-### MCP notifications still depend on TypeScript project context and captured runtime objects
+### MCP resource features are removed; tool execution remains
 
-`src/services/mcp/McpSubscriptionService.ts` still requires project context during setup and explicitly captures `mcpManager` because MCP SDK callbacks execute outside `projectContextStore.run(...)`. The file documents this directly in `setupMcpSubscription()` and `handleNotification()`.
+The old TypeScript MCP resource list/read helpers and subscription path have been removed from the current tree. MCP remains active only through per-project `MCPManager` startup and injected `mcp__<server>__<tool>` tools exposed via `src/tools/registry.ts`.
 
-That means MCP subscription delivery is still coupled to TypeScript runtime context even though the daemon/control plane moved to Rust.
+That means external MCP tool execution is still part of the active TypeScript worker runtime, but MCP resource browsing, reads, subscriptions, and wakeups are no longer part of the current migration scope. They are deferred future work if the product needs them again.
 
 ### RAL remains Bun-runtime critical
 
@@ -89,7 +89,7 @@ The blockers at `HEAD` are now quality, transport, and runtime-boundary issues r
 | Correlation-ID chain | milestone plan requires correlation IDs in Rust logs, worker protocol, RAL journal, worker state, and telemetry spans |
 | Restart/rollback quality gates | milestone plan still requires in-flight rollback tests, no stuck RALs after restart, and no duplicate completions |
 | Cold/warm TTFT performance gate | still an explicit migration-quality gate |
-| TypeScript runtime coupling | `getProjectContext()`, transport binding store, Telegram chat context store, MCP notification/runtime capture, and active RAL usage still bind Bun execution to TS runtime state |
+| TypeScript runtime coupling | `getProjectContext()`, transport binding store, Telegram chat context store, injected MCP tool execution/runtime ownership, and active RAL usage still bind Bun execution to TS runtime state |
 
 ## What Is No Longer A Blocker
 

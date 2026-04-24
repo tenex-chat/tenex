@@ -168,10 +168,11 @@ services/
 ├── teams/                # Local team definitions, prompt context, and delegate resolution
 ├── rag/                  # RAG domain
 │   ├── RAGService.ts
-│   ├── RAGDatabaseService.ts
-│   ├── RagSubscriptionService.ts
+│   ├── RAGCollectionRegistry.ts
+│   ├── RAGOperations.ts
+│   ├── EmbeddingProviderFactory.ts
+│   ├── providers/
 │   ├── ...
-│   └── index.ts
 ├── projects/
 ├── scheduling/
 ├── reports/

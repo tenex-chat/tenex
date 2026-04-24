@@ -1247,9 +1247,10 @@ Work:
 
 - Replace project status publishing with Rust-owned status publishing.
 - Move operations status to Rust or convert it to worker event summaries.
-- Account for project-wide MCP subscriptions. Either port
-  `McpSubscriptionService` semantics, or make MCP notifications explicit wakeup
-  events handled by a dedicated adapter.
+- Defer MCP resource browsing and project-wide MCP subscriptions. The active
+  supported MCP surface in this migration is injected MCP tool execution only;
+  do not port the deleted resource list/read helpers or add MCP-triggered
+  wakeups as part of the current cutover.
 - Account for trust-pubkey cache, prefix KV store, and profile/name cache.
   These should be rebuilt from filesystem/relay state or moved behind
   filesystem-backed cache files.
