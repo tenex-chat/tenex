@@ -1,15 +1,18 @@
 # TENEX Rust Migration — Live Status
 
-**Last updated:** 2026-04-24  
+**Last updated:** 2026-04-24 (late session)  
 **Active branch:** `rust-agent-worker-publishing`  
-**Audited commit:** `c9442522`
+**Audited commit:** `2b2f4db1`
 
 ## Work in flight
 
-- **Post-plan cleanup only** — the daemon-internal async-runtime migration is operationally landed on this branch. Remaining work is now cleanup and follow-on scope, not the original runtime migration itself:
-  - bounded owned-runtime fallback helpers still exist for standalone/test paths
-  - `daemon-control` JSON snapshot failures are outside the e2e harness sweep and still need a separate cleanup pass
-  - broader Rust-vs-Bun migration work remains around TS runtime coupling, real-client verification, and product acceptance gates
+- **Backend-event publish path simplification** — first agent attempt killed mid-flight after writing to the main checkout instead of its worktree; partial WIP stashed (broken-build state). To re-dispatch with explicit pwd-isolation guard and the 24133 NIP-46 bunker-reply nuance flagged by the feedback critic.
+- **Tokio finishing pieces (whitelist_wiring → tokio tasks, async session loop, publish_outbox_wake)** — was bundled into the contaminated commit `4555db58`, since reverted via `ee79842f`. Coherent work but caused a Phase-5 regression in scenario 101 because the new tokio session lifecycle didn't decrement the active-worker counter on completion, leaving admission permanently rejecting `not_admitted`. To re-dispatch in scoped chunks with an explicit "must not regress 101 or 21" gate.
+- **`scenario 39` RAL exhaustion** — still parked in `_wip/`; journal seed format mismatch, never re-investigated.
+
+## Recent cleanups landed this session
+
+- **`WorkerConcurrencyLimits` deleted entirely (`2b2f4db1`)** — global/per-project/per-agent caps were either unwired in production or judged unnecessary by the user. Removed the struct, planner, `--max-concurrent-workers` CLI flag, `DEFAULT_MAX_CONCURRENT_WORKERS`, the admission concurrency check, scenario `33_per_agent_concurrency_cap.sh`, and ~540 lines of related code. Deduplication checks (`CandidateAlreadyActive`, `ConversationAlreadyActive`) retained as `check_worker_dispatch_dedup` — those are correctness, not capping.
 
 ## Latest daemon e2e suite (2026-04-24)
 
@@ -47,6 +50,11 @@ The following issues were real on earlier 2026-04-24 snapshots but are no longer
   - dispatch leases are rolled back to `queued` on post-lease launch failure
 - **Filesystem restart admission now uses the validated admission/start path**
   - `37_dispatch_input_mismatch.sh` now passes reliably by holding the allocation lock until restart, then asserting the corrupted sidecar is rejected before launch
+- **Whitelist rehydrated from persisted state at startup (`7646650a`)**
+  - new `daemon_whitelist_store` module atomically writes `<daemon_dir>/whitelist.json` whenever config supplies owners, reads it back as a fallback when config doesn't
+  - eliminates the SIGKILL-restart window where the daemon would subscribe to nothing until a fresh kind:14199 lands
+  - 4 integration tests in `crates/tenex-daemon/tests/whitelist_rehydration.rs`
+  - first attempt landed as `4555db58` with ~2,250 lines of unrelated tokio-finishing work bundled in; reverted (`ee79842f`) and re-applied cleanly
 
 ## E2E Matrix
 
