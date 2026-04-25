@@ -209,22 +209,6 @@ const delegationSnapshotSchema = z
     })
     .passthrough();
 
-const agentSkillSchema = z
-    .object({
-        slug: z.string().min(1),
-        version: z.string().min(1),
-    })
-    .passthrough();
-
-const agentModelSchema = z
-    .object({
-        provider: z.string().min(1),
-        modelId: z.string().min(1),
-        temperature: z.number().optional(),
-        maxOutputTokens: positiveIntegerSchema.optional(),
-    })
-    .passthrough();
-
 const agentExecuteSchema = z
     .object({
         pubkey: hexPubkeySchema,
@@ -238,9 +222,7 @@ const agentExecuteSchema = z
         useCriteria: z.string().optional(),
         signingPrivateKey: z.string().min(1),
         llmConfig: z.string().min(1).optional(),
-        systemPrompt: z.string().optional(),
         tools: z.array(z.string().min(1)).optional(),
-        skills: z.array(agentSkillSchema).optional(),
         alwaysSkills: z.array(z.string().min(1)).optional(),
         blockedSkills: z.array(z.string().min(1)).optional(),
         mcpAccess: z.array(z.string().min(1)).optional(),
@@ -249,7 +231,6 @@ const agentExecuteSchema = z
         isPM: z.boolean().optional(),
         eventId: z.string().min(1).optional(),
         useAISDKAgent: z.boolean().optional(),
-        model: agentModelSchema.optional(),
         telegram: z.record(z.string(), z.unknown()).optional(),
     })
     .passthrough();
