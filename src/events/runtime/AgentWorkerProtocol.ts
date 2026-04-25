@@ -251,6 +251,7 @@ const agentExecuteSchema = z
         useAISDKAgent: z.boolean().optional(),
         maxAgentSteps: positiveIntegerSchema.optional(),
         model: agentModelSchema.optional(),
+        telegram: z.record(z.string(), z.unknown()).optional(),
     })
     .passthrough();
 

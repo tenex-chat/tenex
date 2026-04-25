@@ -407,6 +407,21 @@ function materializeInlineAgent(
     const metadataPath = scope.metadataPath;
     const projectBasePath = scope.projectBasePath;
 
+    // Skill blocking: filter alwaysSkills against blockedSkills. The disk
+    // path uses SkillService.listAvailableSkills + buildSkillAliasMap to
+    // expand aliases (e.g. recall@1.2.3 against recall). The inline path
+    // can't do alias-aware blocking without a disk read, so we do
+    // exact-match blocking here. The daemon ships agent.default.skills
+    // pre-filtered against agent.default.blockedSkills in agent storage,
+    // but a misconfigured agent may still have an overlap and we don't
+    // want to surface a blocked skill at runtime.
+    const blockedSkillSet = new Set(inline.blockedSkills ?? []);
+    const alwaysSkillsCandidates = (inline.alwaysSkills ?? []).filter(
+        (skill) => !blockedSkillSet.has(skill)
+    );
+    const alwaysSkills =
+        alwaysSkillsCandidates.length > 0 ? alwaysSkillsCandidates : undefined;
+
     const agent: AgentInstance = {
         name: inline.name,
         pubkey,
@@ -421,13 +436,13 @@ function materializeInlineAgent(
         tools,
         eventId: inline.eventId,
         slug: inline.slug,
+        useAISDKAgent: inline.useAISDKAgent,
+        maxAgentSteps: inline.maxAgentSteps,
         mcpServers: inline.mcpServers as AgentInstance["mcpServers"],
         pmOverrides: inline.pmOverrides,
         isPM: inline.isPM,
-        alwaysSkills:
-            inline.alwaysSkills && inline.alwaysSkills.length > 0
-                ? inline.alwaysSkills
-                : undefined,
+        telegram: inline.telegram as AgentInstance["telegram"],
+        alwaysSkills,
         blockedSkills: inline.blockedSkills,
         mcpAccess: inline.mcpAccess ?? [],
         createMetadataStore: (conversationId: string) =>
