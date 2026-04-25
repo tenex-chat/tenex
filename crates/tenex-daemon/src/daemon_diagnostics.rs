@@ -228,7 +228,7 @@ fn build_worker_runtime_summary(
         .lock()
         .expect("runtime state mutex poisoned")
         .workers()
-        .map(|worker| active_worker_diagnostics(worker, inspected_at))
+        .flat_map(|worker| active_worker_diagnostics(worker, inspected_at))
         .collect::<Vec<_>>();
     let projects = worker_projects_summary(&active_workers);
 
@@ -244,23 +244,27 @@ fn build_worker_runtime_summary(
 fn active_worker_diagnostics(
     worker: &ActiveWorkerRuntimeSnapshot,
     inspected_at: u64,
-) -> WorkerDiagnosticsActiveWorker {
-    WorkerDiagnosticsActiveWorker {
-        worker_id: worker.worker_id.clone(),
-        pid: worker.pid,
-        dispatch_id: worker.dispatch_id.clone(),
-        identity: worker.identity.clone(),
-        claim_token_present: !worker.claim_token.is_empty(),
-        started_at: worker.started_at,
-        graceful_signal: worker
-            .graceful_signal
-            .as_ref()
-            .map(graceful_signal_diagnostics),
-        heartbeat: worker
-            .last_heartbeat
-            .as_ref()
-            .map(|heartbeat| heartbeat_summary(heartbeat, inspected_at)),
-    }
+) -> Vec<WorkerDiagnosticsActiveWorker> {
+    worker
+        .executions
+        .iter()
+        .map(|slot| WorkerDiagnosticsActiveWorker {
+            worker_id: worker.worker_id.clone(),
+            pid: worker.pid,
+            dispatch_id: slot.dispatch_id.clone(),
+            identity: slot.identity.clone(),
+            claim_token_present: !slot.claim_token.is_empty(),
+            started_at: slot.started_at,
+            graceful_signal: worker
+                .graceful_signal
+                .as_ref()
+                .map(graceful_signal_diagnostics),
+            heartbeat: slot
+                .last_heartbeat
+                .as_ref()
+                .map(|heartbeat| heartbeat_summary(heartbeat, inspected_at)),
+        })
+        .collect()
 }
 
 fn graceful_signal_diagnostics(

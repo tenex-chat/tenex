@@ -24,15 +24,50 @@ pub struct WorkerRuntimeStartedDispatch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActiveWorkerRuntimeSnapshot {
-    pub worker_id: String,
-    pub pid: u64,
+pub struct ActiveExecutionSlot {
     pub dispatch_id: String,
     pub identity: RalJournalIdentity,
     pub claim_token: String,
     pub started_at: u64,
     pub last_heartbeat: Option<WorkerHeartbeatSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveWorkerRuntimeSnapshot {
+    pub worker_id: String,
+    pub pid: u64,
+    pub started_at: u64,
     pub graceful_signal: Option<WorkerRuntimeGracefulSignal>,
+    pub executions: Vec<ActiveExecutionSlot>,
+}
+
+impl ActiveWorkerRuntimeSnapshot {
+    /// First execution slot, if any. During the project-warm transition many
+    /// callers still assume one execution per worker; they reach through this.
+    pub fn primary_execution(&self) -> Option<&ActiveExecutionSlot> {
+        self.executions.first()
+    }
+
+    pub fn execution_by_dispatch(&self, dispatch_id: &str) -> Option<&ActiveExecutionSlot> {
+        self.executions
+            .iter()
+            .find(|slot| slot.dispatch_id == dispatch_id)
+    }
+
+    pub fn execution_by_identity(
+        &self,
+        identity: &RalJournalIdentity,
+    ) -> Option<&ActiveExecutionSlot> {
+        self.executions.iter().find(|slot| &slot.identity == identity)
+    }
+
+    /// Convenience: latest heartbeat across all execution slots.
+    pub fn latest_heartbeat(&self) -> Option<&WorkerHeartbeatSnapshot> {
+        self.executions
+            .iter()
+            .filter_map(|slot| slot.last_heartbeat.as_ref())
+            .max_by_key(|heartbeat| heartbeat.observed_at)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,8 +102,6 @@ pub fn new_shared_worker_runtime_state() -> SharedWorkerRuntimeState {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum WorkerRuntimeStateError {
-    #[error("worker {worker_id} is already active")]
-    DuplicateWorker { worker_id: String },
     #[error("dispatch {dispatch_id} is already active on worker {worker_id}")]
     DuplicateDispatch {
         dispatch_id: String,
@@ -141,12 +174,6 @@ impl WorkerRuntimeState {
         &mut self,
         started: WorkerRuntimeStartedDispatch,
     ) -> WorkerRuntimeStateResult<()> {
-        if self.workers.contains_key(&started.worker_id) {
-            return Err(WorkerRuntimeStateError::DuplicateWorker {
-                worker_id: started.worker_id,
-            });
-        }
-
         if let Some(worker_id) = self.dispatch_to_worker.get(&started.dispatch_id) {
             return Err(WorkerRuntimeStateError::DuplicateDispatch {
                 dispatch_id: started.dispatch_id,
@@ -154,22 +181,31 @@ impl WorkerRuntimeState {
             });
         }
 
-        let worker_id = started.worker_id.clone();
-        let dispatch_id = started.dispatch_id.clone();
-        self.workers.insert(
-            worker_id.clone(),
-            ActiveWorkerRuntimeSnapshot {
-                worker_id: started.worker_id,
-                pid: started.pid,
-                dispatch_id: started.dispatch_id,
-                identity: started.identity,
-                claim_token: started.claim_token,
-                started_at: started.started_at,
-                last_heartbeat: None,
-                graceful_signal: None,
-            },
-        );
-        self.dispatch_to_worker.insert(dispatch_id, worker_id);
+        let slot = ActiveExecutionSlot {
+            dispatch_id: started.dispatch_id.clone(),
+            identity: started.identity,
+            claim_token: started.claim_token,
+            started_at: started.started_at,
+            last_heartbeat: None,
+        };
+
+        if let Some(worker) = self.workers.get_mut(&started.worker_id) {
+            worker.executions.push(slot);
+        } else {
+            self.workers.insert(
+                started.worker_id.clone(),
+                ActiveWorkerRuntimeSnapshot {
+                    worker_id: started.worker_id.clone(),
+                    pid: started.pid,
+                    started_at: started.started_at,
+                    graceful_signal: None,
+                    executions: vec![slot],
+                },
+            );
+        }
+
+        self.dispatch_to_worker
+            .insert(started.dispatch_id, started.worker_id);
         Ok(())
     }
 
@@ -191,16 +227,25 @@ impl WorkerRuntimeState {
             });
         }
 
-        if heartbeat.identity != worker.identity {
-            return Err(WorkerRuntimeStateError::HeartbeatIdentityMismatch {
+        if let Some(slot) = worker
+            .executions
+            .iter_mut()
+            .find(|slot| slot.identity == heartbeat.identity)
+        {
+            slot.last_heartbeat = Some(heartbeat);
+            Ok(())
+        } else {
+            let expected = worker
+                .executions
+                .first()
+                .map(|first| first.identity.clone())
+                .unwrap_or_else(|| heartbeat.identity.clone());
+            Err(WorkerRuntimeStateError::HeartbeatIdentityMismatch {
                 worker_id: worker.worker_id.clone(),
-                expected: Box::new(worker.identity.clone()),
+                expected: Box::new(expected),
                 actual: Box::new(heartbeat.identity),
-            });
+            })
         }
-
-        worker.last_heartbeat = Some(heartbeat);
-        Ok(())
     }
 
     pub fn mark_graceful_signal_sent(
@@ -226,22 +271,54 @@ impl WorkerRuntimeState {
                 worker_id: worker_id.to_string(),
             }
         })?;
-        self.dispatch_to_worker.remove(&worker.dispatch_id);
+        for slot in &worker.executions {
+            self.dispatch_to_worker.remove(&slot.dispatch_id);
+        }
         Ok(worker)
     }
 
+    /// Remove a single execution slot. Returns the parent worker snapshot
+    /// before mutation, with the removed slot already detached. If the
+    /// removal leaves the worker with zero slots, the worker is also
+    /// removed from the registry.
     pub fn remove_terminal_dispatch(
         &mut self,
         dispatch_id: &str,
     ) -> WorkerRuntimeStateResult<ActiveWorkerRuntimeSnapshot> {
         let worker_id = self
             .dispatch_to_worker
-            .get(dispatch_id)
-            .cloned()
+            .remove(dispatch_id)
             .ok_or_else(|| WorkerRuntimeStateError::UnknownDispatch {
                 dispatch_id: dispatch_id.to_string(),
             })?;
-        self.remove_terminal_worker(&worker_id)
+
+        let worker = self.workers.get_mut(&worker_id).ok_or_else(|| {
+            WorkerRuntimeStateError::UnknownWorker {
+                worker_id: worker_id.clone(),
+            }
+        })?;
+
+        let slot_index = worker
+            .executions
+            .iter()
+            .position(|slot| slot.dispatch_id == dispatch_id)
+            .ok_or_else(|| WorkerRuntimeStateError::UnknownDispatch {
+                dispatch_id: dispatch_id.to_string(),
+            })?;
+        let removed_slot = worker.executions.remove(slot_index);
+
+        let snapshot = ActiveWorkerRuntimeSnapshot {
+            worker_id: worker.worker_id.clone(),
+            pid: worker.pid,
+            started_at: worker.started_at,
+            graceful_signal: worker.graceful_signal.clone(),
+            executions: vec![removed_slot],
+        };
+
+        if worker.executions.is_empty() {
+            self.workers.remove(&worker_id);
+        }
+        Ok(snapshot)
     }
 
     pub fn agent_pubkeys_for_conversation(
@@ -250,26 +327,24 @@ impl WorkerRuntimeState {
         conversation_id: &str,
     ) -> Vec<String> {
         let mut seen = std::collections::BTreeSet::new();
-        self.workers
-            .values()
-            .filter(|worker| {
-                worker.identity.project_id == project_id
-                    && worker.identity.conversation_id == conversation_id
-            })
-            .filter_map(|worker| {
-                if seen.insert(worker.identity.agent_pubkey.clone()) {
-                    Some(worker.identity.agent_pubkey.clone())
-                } else {
-                    None
+        let mut out = Vec::new();
+        for worker in self.workers.values() {
+            for slot in &worker.executions {
+                if slot.identity.project_id == project_id
+                    && slot.identity.conversation_id == conversation_id
+                    && seen.insert(slot.identity.agent_pubkey.clone())
+                {
+                    out.push(slot.identity.agent_pubkey.clone());
                 }
-            })
-            .collect()
+            }
+        }
+        out
     }
 
     pub fn to_active_worker_concurrency_snapshots(&self) -> Vec<ActiveWorkerConcurrencySnapshot> {
         self.workers
             .values()
-            .map(ActiveWorkerRuntimeSnapshot::to_active_worker_concurrency_snapshot)
+            .flat_map(ActiveWorkerRuntimeSnapshot::to_active_worker_concurrency_snapshots)
             .collect()
     }
 
@@ -278,7 +353,7 @@ impl WorkerRuntimeState {
     ) -> Vec<ActiveDispatchConcurrencySnapshot> {
         self.workers
             .values()
-            .map(ActiveWorkerRuntimeSnapshot::to_active_dispatch_concurrency_snapshot)
+            .flat_map(ActiveWorkerRuntimeSnapshot::to_active_dispatch_concurrency_snapshots)
             .collect()
     }
 
@@ -298,30 +373,46 @@ impl WorkerRuntimeState {
 }
 
 impl ActiveWorkerRuntimeSnapshot {
-    pub fn to_active_worker_concurrency_snapshot(&self) -> ActiveWorkerConcurrencySnapshot {
-        ActiveWorkerConcurrencySnapshot {
-            worker_id: self.worker_id.clone(),
-            dispatch_id: Some(self.dispatch_id.clone()),
-            project_id: self.identity.project_id.clone(),
-            agent_pubkey: self.identity.agent_pubkey.clone(),
-            conversation_id: self.identity.conversation_id.clone(),
-        }
+    pub fn to_active_worker_concurrency_snapshots(
+        &self,
+    ) -> Vec<ActiveWorkerConcurrencySnapshot> {
+        self.executions
+            .iter()
+            .map(|slot| ActiveWorkerConcurrencySnapshot {
+                worker_id: self.worker_id.clone(),
+                dispatch_id: Some(slot.dispatch_id.clone()),
+                project_id: slot.identity.project_id.clone(),
+                agent_pubkey: slot.identity.agent_pubkey.clone(),
+                conversation_id: slot.identity.conversation_id.clone(),
+            })
+            .collect()
     }
 
-    pub fn to_active_dispatch_concurrency_snapshot(&self) -> ActiveDispatchConcurrencySnapshot {
-        ActiveDispatchConcurrencySnapshot {
-            dispatch_id: self.dispatch_id.clone(),
-            project_id: self.identity.project_id.clone(),
-            agent_pubkey: self.identity.agent_pubkey.clone(),
-            conversation_id: self.identity.conversation_id.clone(),
-        }
+    pub fn to_active_dispatch_concurrency_snapshots(
+        &self,
+    ) -> Vec<ActiveDispatchConcurrencySnapshot> {
+        self.executions
+            .iter()
+            .map(|slot| ActiveDispatchConcurrencySnapshot {
+                dispatch_id: slot.dispatch_id.clone(),
+                project_id: slot.identity.project_id.clone(),
+                agent_pubkey: slot.identity.agent_pubkey.clone(),
+                conversation_id: slot.identity.conversation_id.clone(),
+            })
+            .collect()
     }
 
     pub fn to_abort_decision_input(
         &self,
         context: WorkerRuntimeAbortDecisionContext,
     ) -> WorkerRuntimeStateResult<WorkerAbortDecisionInput<'_>> {
-        let heartbeat = self.last_heartbeat.as_ref().ok_or_else(|| {
+        let slot =
+            self.executions
+                .first()
+                .ok_or_else(|| WorkerRuntimeStateError::MissingHeartbeat {
+                    worker_id: self.worker_id.clone(),
+                })?;
+        let heartbeat = slot.last_heartbeat.as_ref().ok_or_else(|| {
             WorkerRuntimeStateError::MissingHeartbeat {
                 worker_id: self.worker_id.clone(),
             }
@@ -339,7 +430,7 @@ impl ActiveWorkerRuntimeSnapshot {
 
         Ok(WorkerAbortDecisionInput {
             worker_id: self.worker_id.clone(),
-            identity: self.identity.clone(),
+            identity: slot.identity.clone(),
             heartbeat,
             process_status: context.process_status,
             signal,
@@ -384,13 +475,14 @@ mod tests {
                 .worker_id,
             "worker-a"
         );
-        assert_eq!(
-            state
-                .get_worker_by_dispatch("dispatch-a")
-                .expect("dispatch index must resolve")
-                .dispatch_id,
-            "dispatch-a"
-        );
+        let dispatched_slot_id = state
+            .get_worker_by_dispatch("dispatch-a")
+            .expect("dispatch index must resolve")
+            .execution_by_dispatch("dispatch-a")
+            .expect("slot must exist for dispatch-a")
+            .dispatch_id
+            .clone();
+        assert_eq!(dispatched_slot_id, "dispatch-a");
 
         let heartbeat = heartbeat("worker-a", started.identity.clone(), 20);
         state
@@ -408,7 +500,14 @@ mod tests {
             .expect("graceful marker must update");
 
         let worker = state.get_worker("worker-a").expect("worker must exist");
-        assert_eq!(worker.last_heartbeat, Some(heartbeat));
+        assert_eq!(
+            worker
+                .primary_execution()
+                .expect("slot must exist")
+                .last_heartbeat
+                .as_ref(),
+            Some(&heartbeat)
+        );
         assert_eq!(
             worker.graceful_signal,
             Some(WorkerRuntimeGracefulSignal {
@@ -427,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_duplicate_worker_and_duplicate_dispatch_without_mutating_registry() {
+    fn allows_multiple_dispatches_per_worker_and_rejects_duplicate_dispatch_id() {
         let mut state = WorkerRuntimeState::default();
         state
             .register_started_dispatch(started_dispatch(
@@ -435,18 +534,18 @@ mod tests {
                 "dispatch-a",
                 identity("project-a", "agent-a"),
             ))
-            .expect("initial worker must register");
+            .expect("initial dispatch must register");
 
-        assert_eq!(
-            state.register_started_dispatch(started_dispatch(
+        // Second dispatch on the same worker is now allowed (project-warm worker model).
+        state
+            .register_started_dispatch(started_dispatch(
                 "worker-a",
                 "dispatch-b",
-                identity("project-a", "agent-a"),
-            )),
-            Err(WorkerRuntimeStateError::DuplicateWorker {
-                worker_id: "worker-a".to_string()
-            })
-        );
+                identity("project-a", "agent-b"),
+            ))
+            .expect("second dispatch on same worker must register");
+
+        // Duplicate dispatch ID across workers is still rejected.
         assert_eq!(
             state.register_started_dispatch(started_dispatch(
                 "worker-b",
@@ -460,10 +559,11 @@ mod tests {
         );
 
         assert_eq!(state.len(), 1);
-        assert!(state.get_worker("worker-a").is_some());
+        let worker = state.get_worker("worker-a").expect("worker must exist");
+        assert_eq!(worker.executions.len(), 2);
         assert!(state.get_worker("worker-b").is_none());
         assert!(state.get_worker_by_dispatch("dispatch-a").is_some());
-        assert!(state.get_worker_by_dispatch("dispatch-b").is_none());
+        assert!(state.get_worker_by_dispatch("dispatch-b").is_some());
     }
 
     #[test]
@@ -492,7 +592,8 @@ mod tests {
             state
                 .get_worker("worker-a")
                 .expect("worker must exist")
-                .last_heartbeat,
+                .primary_execution()
+                .and_then(|slot| slot.last_heartbeat.as_ref()),
             None
         );
 
@@ -512,7 +613,8 @@ mod tests {
             state
                 .get_worker("worker-a")
                 .expect("worker must exist")
-                .last_heartbeat,
+                .primary_execution()
+                .and_then(|slot| slot.last_heartbeat.as_ref()),
             None
         );
 
@@ -523,6 +625,8 @@ mod tests {
             state
                 .get_worker("worker-a")
                 .expect("worker must exist")
+                .primary_execution()
+                .expect("slot must exist")
                 .last_heartbeat
                 .as_ref()
                 .expect("heartbeat must be present")

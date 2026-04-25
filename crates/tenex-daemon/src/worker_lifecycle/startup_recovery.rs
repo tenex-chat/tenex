@@ -399,12 +399,15 @@ mod tests {
         ActiveWorkerRuntimeSnapshot {
             worker_id: worker_id.to_string(),
             pid: 9001,
-            dispatch_id: dispatch_id.to_string(),
-            identity: identity.clone(),
-            claim_token: "claim-live".to_string(),
             started_at: 1710000500100,
-            last_heartbeat: None,
             graceful_signal: None,
+            executions: vec![crate::worker_runtime_state::ActiveExecutionSlot {
+                dispatch_id: dispatch_id.to_string(),
+                identity: identity.clone(),
+                claim_token: "claim-live".to_string(),
+                started_at: 1710000500100,
+                last_heartbeat: None,
+            }],
         }
     }
 

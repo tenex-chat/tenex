@@ -168,7 +168,7 @@ pub fn build_worker_diagnostics_snapshot(
         active_workers: input
             .runtime_state
             .workers()
-            .map(|worker| {
+            .flat_map(|worker| {
                 active_worker_diagnostics(worker, input.inspected_at, input.heartbeat_freshness)
             })
             .collect(),
@@ -182,23 +182,27 @@ fn active_worker_diagnostics(
     worker: &ActiveWorkerRuntimeSnapshot,
     inspected_at: u64,
     heartbeat_freshness: WorkerHeartbeatFreshnessConfig,
-) -> WorkerDiagnosticsActiveWorker {
-    WorkerDiagnosticsActiveWorker {
-        worker_id: worker.worker_id.clone(),
-        pid: worker.pid,
-        dispatch_id: worker.dispatch_id.clone(),
-        identity: worker.identity.clone(),
-        claim_token_present: !worker.claim_token.is_empty(),
-        started_at: worker.started_at,
-        graceful_signal: worker
-            .graceful_signal
-            .as_ref()
-            .map(graceful_signal_diagnostics),
-        heartbeat: worker
-            .last_heartbeat
-            .as_ref()
-            .map(|heartbeat| heartbeat_summary(heartbeat, inspected_at, heartbeat_freshness)),
-    }
+) -> Vec<WorkerDiagnosticsActiveWorker> {
+    worker
+        .executions
+        .iter()
+        .map(|slot| WorkerDiagnosticsActiveWorker {
+            worker_id: worker.worker_id.clone(),
+            pid: worker.pid,
+            dispatch_id: slot.dispatch_id.clone(),
+            identity: slot.identity.clone(),
+            claim_token_present: !slot.claim_token.is_empty(),
+            started_at: slot.started_at,
+            graceful_signal: worker
+                .graceful_signal
+                .as_ref()
+                .map(graceful_signal_diagnostics),
+            heartbeat: slot
+                .last_heartbeat
+                .as_ref()
+                .map(|heartbeat| heartbeat_summary(heartbeat, inspected_at, heartbeat_freshness)),
+        })
+        .collect()
 }
 
 fn graceful_signal_diagnostics(
@@ -282,13 +286,15 @@ fn active_execution_scopes(
     }
 
     for worker in runtime_state.workers() {
-        scopes.insert(
-            worker.dispatch_id.clone(),
-            ActiveExecutionScope {
-                project_id: worker.identity.project_id.clone(),
-                agent_pubkey: worker.identity.agent_pubkey.clone(),
-            },
-        );
+        for slot in &worker.executions {
+            scopes.insert(
+                slot.dispatch_id.clone(),
+                ActiveExecutionScope {
+                    project_id: slot.identity.project_id.clone(),
+                    agent_pubkey: slot.identity.agent_pubkey.clone(),
+                },
+            );
+        }
     }
 
     scopes

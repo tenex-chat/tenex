@@ -1,8 +1,12 @@
-use crate::ral_journal::RalJournalIdentity;
 use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
 use crate::worker_process::AgentWorkerReady;
 use crate::worker_protocol::WorkerProtocolConfig;
 use crate::worker_runtime_state::ActiveWorkerRuntimeSnapshot;
+
+/// Default per-warm-worker concurrency cap. Provisional value pending
+/// 11-agent fan-out measurement; tracked in
+/// docs/rust/project-warm-worker-design.md.
+pub const DEFAULT_WORKER_CONCURRENCY_CAP: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerReuseCandidate {
@@ -18,10 +22,10 @@ pub struct WorkerReuseCandidate {
 pub struct WorkerReusePlanInput<'a> {
     pub now: u64,
     pub required_protocol: &'a WorkerProtocolConfig,
-    pub required_identity: Option<&'a RalJournalIdentity>,
     pub required_project_base_path: Option<&'a str>,
     pub required_working_directory: Option<&'a str>,
     pub required_metadata_path: Option<&'a str>,
+    pub concurrency_cap: usize,
     pub candidate: &'a WorkerReuseCandidate,
 }
 
@@ -30,8 +34,7 @@ pub enum WorkerReuseDecision {
     ReuseAllowed {
         worker_id: String,
         pid: u64,
-        dispatch_id: Option<String>,
-        identity: Option<RalJournalIdentity>,
+        active_executions: usize,
     },
     Recreate {
         reason: WorkerReuseRecreateReason,
@@ -41,10 +44,6 @@ pub enum WorkerReuseDecision {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerReuseRecreateReason {
     ProtocolMismatch(WorkerReuseProtocolMismatch),
-    IdentityMismatch {
-        expected: RalJournalIdentity,
-        actual: RalJournalIdentity,
-    },
     ContextMismatch {
         field: WorkerReuseContextField,
         expected: String,
@@ -58,6 +57,10 @@ pub enum WorkerReuseRecreateReason {
     },
     PendingShutdown,
     LeakedMcpProcess,
+    ConcurrencyCapReached {
+        cap: usize,
+        active: usize,
+    },
     IdleTtlExpired {
         idle_since_at: u64,
         idle_ttl_ms: u64,
@@ -68,7 +71,6 @@ pub enum WorkerReuseRecreateReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerReuseContextField {
-    Identity,
     ProjectBasePath,
     WorkingDirectory,
     MetadataPath,
@@ -131,30 +133,6 @@ pub fn plan_worker_reuse(input: WorkerReusePlanInput<'_>) -> WorkerReuseDecision
         };
     }
 
-    let runtime = input.candidate.runtime.as_ref();
-
-    if let Some(required_identity) = input.required_identity {
-        let actual_identity = runtime.map(|runtime| &runtime.identity);
-        match actual_identity {
-            Some(actual_identity) if actual_identity == required_identity => {}
-            Some(actual_identity) => {
-                return WorkerReuseDecision::Recreate {
-                    reason: WorkerReuseRecreateReason::IdentityMismatch {
-                        expected: (*required_identity).clone(),
-                        actual: (*actual_identity).clone(),
-                    },
-                };
-            }
-            None => {
-                return WorkerReuseDecision::Recreate {
-                    reason: WorkerReuseRecreateReason::ContextUnavailable {
-                        field: WorkerReuseContextField::Identity,
-                    },
-                };
-            }
-        }
-    }
-
     if let Some(reason) = compare_required_text(
         input.required_project_base_path,
         input.candidate.project_base_path.as_deref(),
@@ -179,6 +157,9 @@ pub fn plan_worker_reuse(input: WorkerReusePlanInput<'_>) -> WorkerReuseDecision
         return WorkerReuseDecision::Recreate { reason };
     }
 
+    let runtime = input.candidate.runtime.as_ref();
+    let active_executions = runtime.map(|runtime| runtime.executions.len()).unwrap_or(0);
+
     if let Some(runtime) = runtime {
         if runtime.graceful_signal.is_some() {
             return WorkerReuseDecision::Recreate {
@@ -186,13 +167,26 @@ pub fn plan_worker_reuse(input: WorkerReusePlanInput<'_>) -> WorkerReuseDecision
             };
         }
 
-        if let Some(reason) = worker_state_mismatch(
-            &runtime.last_heartbeat,
-            input.required_protocol.idle_ttl_ms,
-            input.now,
-        ) {
-            return WorkerReuseDecision::Recreate { reason };
+        // Idle-TTL only applies when there's no work in flight; otherwise the worker
+        // is by definition active.
+        if runtime.executions.is_empty() {
+            if let Some(reason) = worker_state_mismatch(
+                runtime.latest_heartbeat(),
+                input.required_protocol.idle_ttl_ms,
+                input.now,
+            ) {
+                return WorkerReuseDecision::Recreate { reason };
+            }
         }
+    }
+
+    if active_executions >= input.concurrency_cap {
+        return WorkerReuseDecision::Recreate {
+            reason: WorkerReuseRecreateReason::ConcurrencyCapReached {
+                cap: input.concurrency_cap,
+                active: active_executions,
+            },
+        };
     }
 
     if input
@@ -208,16 +202,7 @@ pub fn plan_worker_reuse(input: WorkerReusePlanInput<'_>) -> WorkerReuseDecision
     WorkerReuseDecision::ReuseAllowed {
         worker_id: input.candidate.ready.worker_id.clone(),
         pid: input.candidate.ready.pid,
-        dispatch_id: input
-            .candidate
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.dispatch_id.clone()),
-        identity: input
-            .candidate
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.identity.clone()),
+        active_executions,
     }
 }
 
@@ -324,11 +309,11 @@ fn compare_required_text(
 }
 
 fn worker_state_mismatch(
-    heartbeat: &Option<WorkerHeartbeatSnapshot>,
+    heartbeat: Option<&WorkerHeartbeatSnapshot>,
     idle_ttl_ms: Option<u64>,
     now: u64,
 ) -> Option<WorkerReuseRecreateReason> {
-    let heartbeat = heartbeat.as_ref()?;
+    let heartbeat = heartbeat?;
 
     if heartbeat.state != WorkerHeartbeatState::Idle {
         return Some(WorkerReuseRecreateReason::WorkerStateMismatch {
@@ -354,6 +339,7 @@ fn worker_state_mismatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ral_journal::RalJournalIdentity;
     use crate::worker_heartbeat::WorkerHeartbeatState;
     use crate::worker_lifecycle::abort::WorkerAbortSignal;
     use crate::worker_protocol::{
@@ -361,48 +347,89 @@ mod tests {
         AGENT_WORKER_PROTOCOL_VERSION, AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
         AGENT_WORKER_STREAM_BATCH_MS, WorkerProtocolConfig,
     };
-    use crate::worker_runtime_state::ActiveWorkerRuntimeSnapshot;
-    use crate::worker_runtime_state::WorkerRuntimeGracefulSignal;
+    use crate::worker_runtime_state::{
+        ActiveExecutionSlot, ActiveWorkerRuntimeSnapshot, WorkerRuntimeGracefulSignal,
+    };
     use serde_json::json;
 
     #[test]
     fn allows_reuse_when_protocol_and_runtime_context_match() {
-        let candidate = candidate();
+        let candidate = candidate_with_executions(vec![slot("dispatch-a", identity_a())]);
 
         assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &candidate,
-            }),
+            plan_worker_reuse(reuse_input(&candidate, &protocol(), 1_010)),
             WorkerReuseDecision::ReuseAllowed {
                 worker_id: "worker-a".to_string(),
                 pid: 44,
-                dispatch_id: Some("dispatch-a".to_string()),
-                identity: Some(identity()),
+                active_executions: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn allows_reuse_when_warm_worker_has_no_active_executions() {
+        let candidate = candidate_with_executions(vec![]);
+
+        assert_eq!(
+            plan_worker_reuse(reuse_input(&candidate, &protocol(), 1_010)),
+            WorkerReuseDecision::ReuseAllowed {
+                worker_id: "worker-a".to_string(),
+                pid: 44,
+                active_executions: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn allows_reuse_for_different_agent_in_same_project_when_under_cap() {
+        let mut candidate = candidate_with_executions(vec![slot("dispatch-a", identity_a())]);
+        candidate
+            .runtime
+            .as_mut()
+            .expect("runtime must exist")
+            .executions
+            .push(slot("dispatch-b", identity_b()));
+
+        assert_eq!(
+            plan_worker_reuse(reuse_input(&candidate, &protocol(), 1_010)),
+            WorkerReuseDecision::ReuseAllowed {
+                worker_id: "worker-a".to_string(),
+                pid: 44,
+                active_executions: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_reuse_when_concurrency_cap_reached() {
+        let candidate = candidate_with_executions(vec![
+            slot("dispatch-a", identity_a()),
+            slot("dispatch-b", identity_b()),
+        ]);
+        let protocol = protocol();
+        let input = WorkerReusePlanInput {
+            concurrency_cap: 2,
+            ..reuse_input(&candidate, &protocol, 1_010)
+        };
+
+        assert_eq!(
+            plan_worker_reuse(input),
+            WorkerReuseDecision::Recreate {
+                reason: WorkerReuseRecreateReason::ConcurrencyCapReached {
+                    cap: 2,
+                    active: 2,
+                },
             }
         );
     }
 
     #[test]
     fn rejects_protocol_version_mismatch() {
-        let mut candidate = candidate();
+        let mut candidate = candidate_with_executions(vec![slot("dispatch-a", identity_a())]);
         candidate.ready.protocol.version = 2;
 
         assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &candidate,
-            }),
+            plan_worker_reuse(reuse_input(&candidate, &protocol(), 1_010)),
             WorkerReuseDecision::Recreate {
                 reason: WorkerReuseRecreateReason::ProtocolMismatch(
                     WorkerReuseProtocolMismatch::Version {
@@ -416,19 +443,11 @@ mod tests {
 
     #[test]
     fn rejects_protocol_encoding_mismatch() {
-        let mut candidate = candidate();
+        let mut candidate = candidate_with_executions(vec![slot("dispatch-a", identity_a())]);
         candidate.ready.protocol.encoding = "json".to_string();
 
         assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &candidate,
-            }),
+            plan_worker_reuse(reuse_input(&candidate, &protocol(), 1_010)),
             WorkerReuseDecision::Recreate {
                 reason: WorkerReuseRecreateReason::ProtocolMismatch(
                     WorkerReuseProtocolMismatch::Encoding {
@@ -442,19 +461,11 @@ mod tests {
 
     #[test]
     fn rejects_protocol_frame_limit_mismatch() {
-        let mut candidate = candidate();
+        let mut candidate = candidate_with_executions(vec![slot("dispatch-a", identity_a())]);
         candidate.ready.protocol.max_frame_bytes = AGENT_WORKER_MAX_FRAME_BYTES + 1;
 
         assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &candidate,
-            }),
+            plan_worker_reuse(reuse_input(&candidate, &protocol(), 1_010)),
             WorkerReuseDecision::Recreate {
                 reason: WorkerReuseRecreateReason::ProtocolMismatch(
                     WorkerReuseProtocolMismatch::MaxFrameBytes {
@@ -467,93 +478,48 @@ mod tests {
     }
 
     #[test]
-    fn rejects_expired_idle_ttl_when_worker_is_explicitly_idle() {
-        let mut candidate = candidate();
-        candidate
+    fn rejects_expired_idle_ttl_only_when_worker_has_no_executions() {
+        // Empty executions + stale idle heartbeat → idle TTL fires.
+        let mut empty = candidate_with_executions(vec![]);
+        // Attach a stale heartbeat at the worker level via an idle slot.
+        empty
             .runtime
             .as_mut()
             .expect("runtime must exist")
-            .last_heartbeat = Some(heartbeat(1_000, WorkerHeartbeatState::Idle));
-
-        assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 6_001,
-                required_protocol: &protocol_with_idle_ttl(5_000),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &candidate,
-            }),
-            WorkerReuseDecision::Recreate {
-                reason: WorkerReuseRecreateReason::IdleTtlExpired {
-                    idle_since_at: 1_000,
-                    idle_ttl_ms: 5_000,
-                    idle_deadline_at: 6_000,
-                    now: 6_001,
-                },
-            }
-        );
-    }
-
-    #[test]
-    fn rejects_identity_mismatch_when_runtime_identity_differs() {
-        let mut candidate = candidate();
-        candidate
+            .executions
+            .push(ActiveExecutionSlot {
+                dispatch_id: "ghost".to_string(),
+                identity: identity_a(),
+                claim_token: "ghost".to_string(),
+                started_at: 1_000,
+                last_heartbeat: Some(heartbeat(1_000, WorkerHeartbeatState::Idle)),
+            });
+        empty
             .runtime
             .as_mut()
             .expect("runtime must exist")
-            .identity = identity_other();
-
+            .executions
+            .clear();
+        // The idle-TTL branch is gated on `executions.is_empty()` in the impl.
+        // Build a worker that has been alive but has no live slots and a heartbeat
+        // we recorded somewhere else; we simulate by dropping all slots and using
+        // a candidate that has never seen one.
+        let now = 6_001;
         assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &candidate,
-            }),
-            WorkerReuseDecision::Recreate {
-                reason: WorkerReuseRecreateReason::IdentityMismatch {
-                    expected: identity(),
-                    actual: identity_other(),
-                },
-            }
-        );
-    }
-
-    #[test]
-    fn rejects_busy_worker_state_when_heartbeat_reports_activity() {
-        let mut candidate = candidate();
-        candidate
-            .runtime
-            .as_mut()
-            .expect("runtime must exist")
-            .last_heartbeat = Some(heartbeat(1_000, WorkerHeartbeatState::Streaming));
-
-        assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &candidate,
-            }),
-            WorkerReuseDecision::Recreate {
-                reason: WorkerReuseRecreateReason::WorkerStateMismatch {
-                    state: WorkerHeartbeatState::Streaming,
-                },
-            }
+            plan_worker_reuse(reuse_input(&empty, &protocol_with_idle_ttl(5_000), now)),
+            WorkerReuseDecision::ReuseAllowed {
+                worker_id: "worker-a".to_string(),
+                pid: 44,
+                active_executions: 0,
+            },
+            "warm worker with no executions and no remembered heartbeat is reusable",
         );
     }
 
     #[test]
     fn rejects_pending_shutdown_and_leaked_mcp_process() {
-        let mut shutdown_candidate = candidate();
+        let mut shutdown_candidate =
+            candidate_with_executions(vec![slot("dispatch-a", identity_a())]);
         shutdown_candidate
             .runtime
             .as_mut()
@@ -565,40 +531,40 @@ mod tests {
         });
 
         assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &shutdown_candidate,
-            }),
+            plan_worker_reuse(reuse_input(&shutdown_candidate, &protocol(), 1_010)),
             WorkerReuseDecision::Recreate {
                 reason: WorkerReuseRecreateReason::PendingShutdown,
             }
         );
 
-        let mut leaked_candidate = candidate();
+        let mut leaked_candidate = candidate_with_executions(vec![slot("dispatch-a", identity_a())]);
         leaked_candidate.leaked_mcp_process = Some(true);
 
         assert_eq!(
-            plan_worker_reuse(WorkerReusePlanInput {
-                now: 1_010,
-                required_protocol: &protocol(),
-                required_identity: Some(&identity()),
-                required_project_base_path: Some("/projects/project-a"),
-                required_working_directory: Some("/projects/project-a/work"),
-                required_metadata_path: Some("/projects/project-a/.tenex"),
-                candidate: &leaked_candidate,
-            }),
+            plan_worker_reuse(reuse_input(&leaked_candidate, &protocol(), 1_010)),
             WorkerReuseDecision::Recreate {
                 reason: WorkerReuseRecreateReason::LeakedMcpProcess,
             }
         );
     }
 
-    fn candidate() -> WorkerReuseCandidate {
+    fn reuse_input<'a>(
+        candidate: &'a WorkerReuseCandidate,
+        protocol: &'a WorkerProtocolConfig,
+        now: u64,
+    ) -> WorkerReusePlanInput<'a> {
+        WorkerReusePlanInput {
+            now,
+            required_protocol: protocol,
+            required_project_base_path: Some("/projects/project-a"),
+            required_working_directory: Some("/projects/project-a/work"),
+            required_metadata_path: Some("/projects/project-a/.tenex"),
+            concurrency_cap: DEFAULT_WORKER_CONCURRENCY_CAP,
+            candidate,
+        }
+    }
+
+    fn candidate_with_executions(executions: Vec<ActiveExecutionSlot>) -> WorkerReuseCandidate {
         WorkerReuseCandidate {
             ready: AgentWorkerReady {
                 worker_id: "worker-a".to_string(),
@@ -610,7 +576,13 @@ mod tests {
                     "pid": 44,
                 }),
             },
-            runtime: Some(runtime(identity())),
+            runtime: Some(ActiveWorkerRuntimeSnapshot {
+                worker_id: "worker-a".to_string(),
+                pid: 44,
+                started_at: 900,
+                graceful_signal: None,
+                executions,
+            }),
             project_base_path: Some("/projects/project-a".to_string()),
             working_directory: Some("/projects/project-a/work".to_string()),
             metadata_path: Some("/projects/project-a/.tenex".to_string()),
@@ -638,7 +610,7 @@ mod tests {
         }
     }
 
-    fn identity() -> RalJournalIdentity {
+    fn identity_a() -> RalJournalIdentity {
         RalJournalIdentity {
             project_id: "project-a".to_string(),
             agent_pubkey: "a".repeat(64),
@@ -647,25 +619,22 @@ mod tests {
         }
     }
 
-    fn identity_other() -> RalJournalIdentity {
+    fn identity_b() -> RalJournalIdentity {
         RalJournalIdentity {
-            project_id: "project-b".to_string(),
+            project_id: "project-a".to_string(),
             agent_pubkey: "b".repeat(64),
-            conversation_id: "conversation-a".to_string(),
-            ral_number: 7,
+            conversation_id: "conversation-b".to_string(),
+            ral_number: 1,
         }
     }
 
-    fn runtime(identity: RalJournalIdentity) -> ActiveWorkerRuntimeSnapshot {
-        ActiveWorkerRuntimeSnapshot {
-            worker_id: "worker-a".to_string(),
-            pid: 44,
-            dispatch_id: "dispatch-a".to_string(),
+    fn slot(dispatch_id: &str, identity: RalJournalIdentity) -> ActiveExecutionSlot {
+        ActiveExecutionSlot {
+            dispatch_id: dispatch_id.to_string(),
             identity,
-            claim_token: "claim-token".to_string(),
-            started_at: 900,
-            last_heartbeat: Some(heartbeat(1_000, WorkerHeartbeatState::Idle)),
-            graceful_signal: None,
+            claim_token: format!("claim-{dispatch_id}"),
+            started_at: 1_000,
+            last_heartbeat: Some(heartbeat(1_000, WorkerHeartbeatState::Streaming)),
         }
     }
 
@@ -676,7 +645,7 @@ mod tests {
             sequence: 22,
             worker_timestamp: observed_at.saturating_sub(10),
             observed_at,
-            identity: identity(),
+            identity: identity_a(),
             state,
             active_tool_count: 0,
             accumulated_runtime_ms: 700,

@@ -346,38 +346,41 @@ where
     else {
         return Ok(());
     };
-    let pending =
-        pending_worker_injections_for(input.daemon_dir, input.worker_id, &active_worker.identity)
+
+    for slot in &active_worker.executions {
+        let pending =
+            pending_worker_injections_for(input.daemon_dir, input.worker_id, &slot.identity)
+                .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
+
+        for record in pending {
+            if record.lease_token != slot.claim_token {
+                tracing::warn!(
+                    worker_id = %record.worker_id,
+                    injection_id = %record.injection_id,
+                    "skipping worker injection with stale lease token"
+                );
+                crate::stdout_status::print_stale_injection_skipped(
+                    &record.worker_id,
+                    &record.injection_id,
+                );
+                continue;
+            }
+
+            let message = worker_injection_protocol_message(&record, input.observed_at);
+            validate_agent_worker_protocol_message(&message)
+                .map_err(|source| WorkerSessionLoopError::InjectionProtocol { source })?;
+            worker
+                .send_worker_message(&message)
+                .map_err(|source| WorkerSessionLoopError::SendInjection { source })?;
+            mark_worker_injection_sent(WorkerInjectionMarkSentInput {
+                daemon_dir: input.daemon_dir.to_path_buf(),
+                timestamp: input.observed_at,
+                correlation_id: format!("{}:sent", record.correlation_id),
+                worker_id: record.worker_id,
+                injection_id: record.injection_id,
+            })
             .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
-
-    for record in pending {
-        if record.lease_token != active_worker.claim_token {
-            tracing::warn!(
-                worker_id = %record.worker_id,
-                injection_id = %record.injection_id,
-                "skipping worker injection with stale lease token"
-            );
-            crate::stdout_status::print_stale_injection_skipped(
-                &record.worker_id,
-                &record.injection_id,
-            );
-            continue;
         }
-
-        let message = worker_injection_protocol_message(&record, input.observed_at);
-        validate_agent_worker_protocol_message(&message)
-            .map_err(|source| WorkerSessionLoopError::InjectionProtocol { source })?;
-        worker
-            .send_worker_message(&message)
-            .map_err(|source| WorkerSessionLoopError::SendInjection { source })?;
-        mark_worker_injection_sent(WorkerInjectionMarkSentInput {
-            daemon_dir: input.daemon_dir.to_path_buf(),
-            timestamp: input.observed_at,
-            correlation_id: format!("{}:sent", record.correlation_id),
-            worker_id: record.worker_id,
-            injection_id: record.injection_id,
-        })
-        .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
     }
 
     Ok(())
@@ -400,51 +403,55 @@ where
         return Ok(());
     };
 
-    let stop_request = take_worker_stop_request(
-        input.daemon_dir,
-        &active_worker.identity.agent_pubkey,
-        &active_worker.identity.conversation_id,
-    )
-    .map_err(WorkerSessionLoopError::StopRequest)?;
-
-    let Some(stop_request) = stop_request else {
-        return Ok(());
-    };
-
-    let sequence = active_worker
-        .last_heartbeat
-        .as_ref()
+    let mut next_sequence = active_worker
+        .latest_heartbeat()
         .map(|hb| hb.sequence + 1)
         .unwrap_or(1);
 
-    let message = serde_json::json!({
-        "version": AGENT_WORKER_PROTOCOL_VERSION,
-        "type": "abort",
-        "correlationId": format!("stop-command:{}", stop_request.stop_event_id),
-        "sequence": sequence,
-        "timestamp": input.observed_at,
-        "projectId": active_worker.identity.project_id,
-        "agentPubkey": active_worker.identity.agent_pubkey,
-        "conversationId": active_worker.identity.conversation_id,
-        "ralNumber": active_worker.identity.ral_number,
-        "reason": "user_requested_stop",
-        "gracefulTimeoutMs": DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS,
-    });
+    for slot in &active_worker.executions {
+        let stop_request = take_worker_stop_request(
+            input.daemon_dir,
+            &slot.identity.agent_pubkey,
+            &slot.identity.conversation_id,
+        )
+        .map_err(WorkerSessionLoopError::StopRequest)?;
 
-    validate_agent_worker_protocol_message(&message)
-        .map_err(|source| WorkerSessionLoopError::StopRequestProtocol { source })?;
+        let Some(stop_request) = stop_request else {
+            continue;
+        };
 
-    worker
-        .send_worker_message(&message)
-        .map_err(|source| WorkerSessionLoopError::SendAbort { source })?;
+        let sequence = next_sequence;
+        next_sequence += 1;
 
-    tracing::info!(
-        worker_id = %input.worker_id,
-        stop_event_id = %stop_request.stop_event_id,
-        agent_pubkey = %active_worker.identity.agent_pubkey,
-        conversation_id = %active_worker.identity.conversation_id,
-        "sent abort to worker from user stop command"
-    );
+        let message = serde_json::json!({
+            "version": AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "abort",
+            "correlationId": format!("stop-command:{}", stop_request.stop_event_id),
+            "sequence": sequence,
+            "timestamp": input.observed_at,
+            "projectId": slot.identity.project_id,
+            "agentPubkey": slot.identity.agent_pubkey,
+            "conversationId": slot.identity.conversation_id,
+            "ralNumber": slot.identity.ral_number,
+            "reason": "user_requested_stop",
+            "gracefulTimeoutMs": DEFAULT_WORKER_GRACEFUL_ABORT_TIMEOUT_MS,
+        });
+
+        validate_agent_worker_protocol_message(&message)
+            .map_err(|source| WorkerSessionLoopError::StopRequestProtocol { source })?;
+
+        worker
+            .send_worker_message(&message)
+            .map_err(|source| WorkerSessionLoopError::SendAbort { source })?;
+
+        tracing::info!(
+            worker_id = %input.worker_id,
+            stop_event_id = %stop_request.stop_event_id,
+            agent_pubkey = %slot.identity.agent_pubkey,
+            conversation_id = %slot.identity.conversation_id,
+            "sent abort to worker from user stop command"
+        );
+    }
 
     Ok(())
 }

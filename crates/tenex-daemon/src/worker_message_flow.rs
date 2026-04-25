@@ -220,7 +220,8 @@ where
                     .ok_or_else(|| WorkerMessageFlowError::MissingPublishContext {
                         message_type: message_plan.metadata.message_type.clone(),
                     })?;
-            ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
+            let _ =
+                ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
             let result_sequence = publish
                 .result_sequence_source
                 .fetch_add(1, Ordering::Relaxed);
@@ -247,7 +248,8 @@ where
                     message_type: message_plan.metadata.message_type.clone(),
                 }
             })?;
-            ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
+            let _ =
+                ensure_active_worker_matches_message(runtime_state, input.worker_id, &message_plan)?;
             let outcome = handle_worker_nip46_publish_request(
                 session,
                 WorkerNip46PublishFlowInput {
@@ -275,12 +277,16 @@ where
                     .ok_or_else(|| WorkerMessageFlowError::MissingTerminalContext {
                         message_type: message_plan.metadata.message_type.clone(),
                     })?;
-            let active_worker = ensure_active_worker_matches_message(
+            let (active_worker, active_slot) = ensure_active_worker_matches_message(
                 runtime_state,
                 input.worker_id,
                 &message_plan,
             )?;
-            ensure_terminal_context_matches_worker(&active_worker, &terminal.result_context)?;
+            ensure_terminal_context_matches_worker(
+                &active_worker,
+                &active_slot,
+                &terminal.result_context,
+            )?;
             let terminal_scheduler =
                 RalScheduler::from_daemon_dir(input.daemon_dir).map_err(|source| {
                     WorkerMessageFlowError::RalJournal {
@@ -295,7 +301,7 @@ where
                 .ok_or(WorkerMessageFlowError::RalJournalSequenceExhausted {
                     last_sequence: terminal_scheduler.state().last_sequence,
                 })?;
-            if let Some(entry) = terminal_scheduler.entry(&active_worker.identity) {
+            if let Some(entry) = terminal_scheduler.entry(&active_slot.identity) {
                 result_context.resolved_pending_delegations = entry.pending_delegations.clone();
             }
 
@@ -312,10 +318,13 @@ where
             )
             .map_err(WorkerMessageFlowError::from)?;
 
+            // Remove just the terminating execution slot. If it was the worker's
+            // only slot, the worker is removed too — same observable outcome as
+            // the pre-warm-worker behavior.
             let removed_worker = runtime_state
                 .lock()
                 .expect("runtime state mutex poisoned")
-                .remove_terminal_worker(input.worker_id)
+                .remove_terminal_dispatch(&active_slot.dispatch_id)
                 .map_err(WorkerMessageFlowError::from)?;
 
             Ok(WorkerMessageFlowOutcome::TerminalResultHandled {
@@ -387,7 +396,13 @@ fn ensure_active_worker_matches_message(
     runtime_state: &SharedWorkerRuntimeState,
     worker_id: &str,
     message_plan: &WorkerMessagePlan,
-) -> Result<ActiveWorkerRuntimeSnapshot, WorkerMessageFlowError> {
+) -> Result<
+    (
+        ActiveWorkerRuntimeSnapshot,
+        crate::worker_runtime_state::ActiveExecutionSlot,
+    ),
+    WorkerMessageFlowError,
+> {
     let worker = runtime_state
         .lock()
         .expect("runtime state mutex poisoned")
@@ -399,19 +414,26 @@ fn ensure_active_worker_matches_message(
         .map_err(WorkerMessageFlowError::from)?;
     let actual_identity = ral_identity_from_message(&message_plan.message)?;
 
-    if actual_identity != worker.identity {
-        return Err(WorkerMessageFlowError::RuntimeIdentityMismatch {
-            worker_id: worker.worker_id,
-            expected: Box::new(worker.identity),
+    let slot = worker
+        .execution_by_identity(&actual_identity)
+        .cloned()
+        .ok_or_else(|| WorkerMessageFlowError::RuntimeIdentityMismatch {
+            worker_id: worker.worker_id.clone(),
+            expected: Box::new(
+                worker
+                    .primary_execution()
+                    .map(|s| s.identity.clone())
+                    .unwrap_or_else(|| actual_identity.clone()),
+            ),
             actual: Box::new(actual_identity),
-        });
-    }
+        })?;
 
-    Ok(worker)
+    Ok((worker, slot))
 }
 
 fn ensure_terminal_context_matches_worker(
     worker: &ActiveWorkerRuntimeSnapshot,
+    slot: &crate::worker_runtime_state::ActiveExecutionSlot,
     context: &WorkerResultTransitionContext,
 ) -> Result<(), WorkerMessageFlowError> {
     if context.worker_id != worker.worker_id {
@@ -421,10 +443,10 @@ fn ensure_terminal_context_matches_worker(
         });
     }
 
-    if context.claim_token != worker.claim_token {
+    if context.claim_token != slot.claim_token {
         return Err(WorkerMessageFlowError::TerminalContextClaimTokenMismatch {
             worker_id: worker.worker_id.clone(),
-            expected: worker.claim_token.clone(),
+            expected: slot.claim_token.clone(),
             actual: context.claim_token.clone(),
         });
     }
@@ -437,10 +459,10 @@ fn handle_delegation_registered(
     input: &WorkerMessageFlowInput<'_>,
     message_plan: &WorkerMessagePlan,
 ) -> Result<(), WorkerMessageFlowError> {
-    let active_worker =
+    let (active_worker, active_slot) =
         ensure_active_worker_matches_message(runtime_state, input.worker_id, message_plan)?;
     let pending_delegation =
-        pending_delegation_from_message(&message_plan.message, &active_worker.identity)?;
+        pending_delegation_from_message(&message_plan.message, &active_slot.identity)?;
     let scheduler = RalScheduler::from_daemon_dir(input.daemon_dir).map_err(|source| {
         WorkerMessageFlowError::RalJournal {
             source: Box::new(source),
@@ -461,9 +483,9 @@ fn handle_delegation_registered(
             message_plan.metadata.correlation_id
         ),
         RalJournalEvent::DelegationRegistered {
-            identity: active_worker.identity,
+            identity: active_slot.identity,
             worker_id: active_worker.worker_id,
-            claim_token: active_worker.claim_token,
+            claim_token: active_slot.claim_token,
             pending_delegation,
         },
     );
@@ -481,7 +503,7 @@ fn handle_delegation_killed(
     input: &WorkerMessageFlowInput<'_>,
     message_plan: &WorkerMessagePlan,
 ) -> Result<(), WorkerMessageFlowError> {
-    let active_worker =
+    let (_active_worker, active_slot) =
         ensure_active_worker_matches_message(runtime_state, input.worker_id, message_plan)?;
     let delegation_conversation_id =
         required_string(&message_plan.message, "delegationConversationId")?.to_string();
@@ -503,7 +525,7 @@ fn handle_delegation_killed(
         input.observed_at,
         format!("{}:delegation_killed", message_plan.metadata.correlation_id),
         RalJournalEvent::DelegationKilled {
-            identity: active_worker.identity,
+            identity: active_slot.identity,
             delegation_conversation_id,
             killed_at: input.observed_at,
             reason,
@@ -772,8 +794,8 @@ mod tests {
                         .unwrap()
                         .get_worker("worker-alpha")
                         .expect("worker must remain active")
-                        .last_heartbeat
-                        .clone(),
+                        .latest_heartbeat()
+                        .cloned(),
                     Some(snapshot)
                 );
             }
