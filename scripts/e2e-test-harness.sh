@@ -554,11 +554,23 @@ harness_cleanup() {
   if [[ "$HARNESS_DAEMON_PANICKED" -eq 1 ]]; then
     local panic_line
     panic_line="$(grep -E "thread '.*' panicked|panicked at" "${HARNESS_DAEMON_LOG:-/dev/null}" 2>/dev/null | head -1 || true)"
-    emit_result fail "daemon panicked: $panic_line"
+    _log "RESULT status=fail detail=daemon panicked: $panic_line"
+    if declare -f emit_result >/dev/null 2>&1; then
+      emit_result fail "daemon panicked: $panic_line"
+    else
+      printf '[harness] RESULT status=fail scenario=%s detail=daemon panicked: %s\n' \
+        "$(basename "${BASH_SOURCE[1]:-${0}}")" "$panic_line"
+    fi
     return 1
   fi
   if [[ "$HARNESS_DAEMON_CRASHED" -eq 1 ]]; then
-    emit_result fail "daemon exited with unexpected non-zero exit code after SIGTERM"
+    _log "RESULT status=fail detail=daemon exited with unexpected non-zero exit code after SIGTERM"
+    if declare -f emit_result >/dev/null 2>&1; then
+      emit_result fail "daemon exited with unexpected non-zero exit code after SIGTERM"
+    else
+      printf '[harness] RESULT status=fail scenario=%s detail=daemon exited with unexpected non-zero exit code after SIGTERM\n' \
+        "$(basename "${BASH_SOURCE[1]:-${0}}")"
+    fi
     return 1
   fi
   return $rc

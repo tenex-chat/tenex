@@ -26,6 +26,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# shellcheck source=../_bootstrap.sh
+source "$repo_root/scripts/e2e/_bootstrap.sh"
 # shellcheck source=../../e2e-test-harness.sh
 source "$repo_root/scripts/e2e-test-harness.sh"
 
