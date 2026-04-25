@@ -1,7 +1,7 @@
 use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
 use crate::worker_process::AgentWorkerReady;
 use crate::worker_protocol::WorkerProtocolConfig;
-use crate::worker_runtime_state::ActiveWorkerRuntimeSnapshot;
+use crate::worker_runtime_state::{ActiveWorkerRuntimeSnapshot, WorkerRuntimeState};
 
 /// Default per-warm-worker concurrency cap. Provisional value pending
 /// 11-agent fan-out measurement; tracked in
@@ -204,6 +204,60 @@ pub fn plan_worker_reuse(input: WorkerReusePlanInput<'_>) -> WorkerReuseDecision
         pid: input.candidate.ready.pid,
         active_executions,
     }
+}
+
+/// Pick the best warm worker in `runtime_state` to host a new dispatch for
+/// `project_id`. Selection rule (per docs/rust/project-warm-worker-design.md):
+///
+/// - same project (i.e. at least one slot's identity carries `project_id`,
+///   or the worker is project-warm with no slots — see below)
+/// - no graceful_signal pending
+/// - executions.len() < concurrency_cap
+///
+/// Tie-break: lowest `executions.len()`, then oldest `started_at`.
+///
+/// During the project-warm transition, the project a worker belongs to is
+/// inferred from its current execution slots. A worker with zero slots
+/// (idle warm) is project-ambiguous; such workers are NOT considered for
+/// reuse here. Project-warm bootstrap (C7) will tag the worker with its
+/// project_id explicitly so an idle warm worker can still be selected.
+pub fn select_warm_worker_for_dispatch(
+    runtime_state: &WorkerRuntimeState,
+    project_id: &str,
+    concurrency_cap: usize,
+) -> Option<String> {
+    let mut best: Option<&ActiveWorkerRuntimeSnapshot> = None;
+    for worker in runtime_state.workers() {
+        if worker.graceful_signal.is_some() {
+            continue;
+        }
+        if worker.executions.len() >= concurrency_cap {
+            continue;
+        }
+        // Until C7 lands the project-tagged worker boot, infer the worker's
+        // project from its existing slots. A slotless warm worker is ignored
+        // here.
+        let belongs_to_project = worker
+            .executions
+            .iter()
+            .any(|slot| slot.identity.project_id == project_id);
+        if !belongs_to_project {
+            continue;
+        }
+
+        match best {
+            None => best = Some(worker),
+            Some(current) => {
+                let candidate_better = worker.executions.len() < current.executions.len()
+                    || (worker.executions.len() == current.executions.len()
+                        && worker.started_at < current.started_at);
+                if candidate_better {
+                    best = Some(worker);
+                }
+            }
+        }
+    }
+    best.map(|worker| worker.worker_id.clone())
 }
 
 fn protocol_mismatch(
@@ -546,6 +600,148 @@ mod tests {
                 reason: WorkerReuseRecreateReason::LeakedMcpProcess,
             }
         );
+    }
+
+    #[test]
+    fn warm_selector_returns_none_when_no_workers_match_project() {
+        let mut state = WorkerRuntimeState::default();
+        state
+            .register_started_dispatch(crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
+                worker_id: "worker-other".to_string(),
+                pid: 1,
+                dispatch_id: "dispatch-other".to_string(),
+                identity: identity_for("project-other", "agent-x", "convo-x", 1),
+                claim_token: "claim-other".to_string(),
+                started_at: 100,
+            })
+            .unwrap();
+
+        assert_eq!(
+            select_warm_worker_for_dispatch(&state, "project-target", 16),
+            None
+        );
+    }
+
+    #[test]
+    fn warm_selector_picks_lowest_active_count_then_oldest() {
+        let mut state = WorkerRuntimeState::default();
+        // Worker A: 2 slots, started at 100
+        state
+            .register_started_dispatch(crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
+                worker_id: "worker-a".to_string(),
+                pid: 1,
+                dispatch_id: "dispatch-a1".to_string(),
+                identity: identity_for("project-target", "agent-x", "convo-1", 1),
+                claim_token: "claim-a1".to_string(),
+                started_at: 100,
+            })
+            .unwrap();
+        state
+            .register_started_dispatch(crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
+                worker_id: "worker-a".to_string(),
+                pid: 1,
+                dispatch_id: "dispatch-a2".to_string(),
+                identity: identity_for("project-target", "agent-y", "convo-2", 1),
+                claim_token: "claim-a2".to_string(),
+                started_at: 100,
+            })
+            .unwrap();
+        // Worker B: 1 slot, started at 200 (younger but lighter)
+        state
+            .register_started_dispatch(crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
+                worker_id: "worker-b".to_string(),
+                pid: 2,
+                dispatch_id: "dispatch-b1".to_string(),
+                identity: identity_for("project-target", "agent-z", "convo-3", 1),
+                claim_token: "claim-b1".to_string(),
+                started_at: 200,
+            })
+            .unwrap();
+        // Worker C: 1 slot, started at 50 (oldest of the 1-slot workers)
+        state
+            .register_started_dispatch(crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
+                worker_id: "worker-c".to_string(),
+                pid: 3,
+                dispatch_id: "dispatch-c1".to_string(),
+                identity: identity_for("project-target", "agent-w", "convo-4", 1),
+                claim_token: "claim-c1".to_string(),
+                started_at: 50,
+            })
+            .unwrap();
+
+        // Lowest count is 1; tiebreaker oldest started_at → worker-c.
+        assert_eq!(
+            select_warm_worker_for_dispatch(&state, "project-target", 16),
+            Some("worker-c".to_string())
+        );
+    }
+
+    #[test]
+    fn warm_selector_skips_workers_at_concurrency_cap() {
+        let mut state = WorkerRuntimeState::default();
+        for i in 0..3 {
+            state
+                .register_started_dispatch(
+                    crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
+                        worker_id: "worker-full".to_string(),
+                        pid: 1,
+                        dispatch_id: format!("dispatch-full-{i}"),
+                        identity: identity_for("project-target", "agent-x", &format!("convo-{i}"), 1),
+                        claim_token: format!("claim-full-{i}"),
+                        started_at: 100,
+                    },
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            select_warm_worker_for_dispatch(&state, "project-target", 3),
+            None
+        );
+    }
+
+    #[test]
+    fn warm_selector_skips_workers_with_pending_graceful_signal() {
+        let mut state = WorkerRuntimeState::default();
+        state
+            .register_started_dispatch(crate::worker_runtime_state::WorkerRuntimeStartedDispatch {
+                worker_id: "worker-shutting".to_string(),
+                pid: 1,
+                dispatch_id: "dispatch-x".to_string(),
+                identity: identity_for("project-target", "agent-x", "convo-x", 1),
+                claim_token: "claim-x".to_string(),
+                started_at: 100,
+            })
+            .unwrap();
+        state
+            .mark_graceful_signal_sent(
+                "worker-shutting",
+                WorkerRuntimeGracefulSignal {
+                    signal: WorkerAbortSignal::Shutdown,
+                    sent_at: 200,
+                    reason: "test".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            select_warm_worker_for_dispatch(&state, "project-target", 16),
+            None
+        );
+    }
+
+    fn identity_for(
+        project_id: &str,
+        agent_pubkey: &str,
+        conversation_id: &str,
+        ral_number: u64,
+    ) -> RalJournalIdentity {
+        RalJournalIdentity {
+            project_id: project_id.to_string(),
+            agent_pubkey: agent_pubkey.to_string(),
+            conversation_id: conversation_id.to_string(),
+            ral_number,
+        }
     }
 
     fn reuse_input<'a>(
