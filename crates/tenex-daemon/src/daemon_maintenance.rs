@@ -5,12 +5,6 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::backend_config::{BackendConfigError, read_backend_config};
-use crate::backend_events::project_status::PROJECT_STATUS_KIND;
-use crate::backend_events_maintenance::{
-    BackendEventsMaintenanceError, BackendEventsMaintenanceOutcome,
-    BackendEventsMaintenanceSharedSchedulerInput, maintain_backend_events_from_shared_scheduler,
-};
-use crate::backend_events_tick::{BackendEventsTickProject, ensure_backend_events_tasks};
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::intervention::{
     InterventionMaintenanceError, InterventionMaintenanceInput, InterventionMaintenanceOutcome,
@@ -22,10 +16,6 @@ use crate::periodic_tick_state::{
 use crate::project_boot_state::{BootedProjectsState, is_project_booted};
 use crate::project_event_index::ProjectEventIndex;
 use crate::project_status_descriptors::{ProjectStatusDescriptor, ProjectStatusDescriptorReport};
-use crate::publish_outbox::{
-    PublishOutboxCancellationOutcome, PublishOutboxError,
-    cancel_pending_publish_outbox_records_matching,
-};
 use crate::scheduled_task_maintenance::{
     ScheduledTaskMaintenanceError, ScheduledTaskMaintenanceOutcome,
     ScheduledTaskMaintenanceSharedSchedulerInput, maintain_scheduled_tasks_from_shared_scheduler,
@@ -63,8 +53,6 @@ pub struct DaemonMaintenanceOutcome {
     pub project_descriptor_report: ProjectStatusDescriptorReport,
     pub booted_project_descriptor_report: ProjectStatusDescriptorReport,
     pub project_boot_state: BootedProjectsState,
-    pub canceled_unbooted_project_statuses: Vec<PublishOutboxCancellationOutcome>,
-    pub backend_events: BackendEventsMaintenanceOutcome,
     pub scheduled_tasks: ScheduledTaskMaintenanceOutcome,
     pub scheduler_wakeups: SchedulerWakeupsMaintenanceReport,
     pub intervention: InterventionMaintenanceOutcome,
@@ -75,10 +63,6 @@ pub struct DaemonMaintenanceOutcome {
 pub enum DaemonMaintenanceError {
     #[error("maintenance backend config failed: {0}")]
     BackendConfig(#[from] BackendConfigError),
-    #[error("publish outbox maintenance failed: {0}")]
-    PublishOutbox(#[from] PublishOutboxError),
-    #[error("backend-events maintenance failed: {0}")]
-    BackendEvents(#[from] BackendEventsMaintenanceError),
     #[error("scheduled task maintenance failed: {0}")]
     ScheduledTasks(#[from] ScheduledTaskMaintenanceError),
     #[error("periodic scheduler state failed: {0}")]
@@ -125,13 +109,11 @@ where
     let project_boot_state = input.project_boot_state;
     let booted_project_descriptor_report =
         filter_booted_project_descriptors(&project_descriptor_report, &project_boot_state);
-    let projects = backend_events_projects_from_descriptors(&booted_project_descriptor_report);
     tracing::info!(
         target: "tenex_daemon::daemon_maintenance::project_status_filter",
         index_descriptor_count = project_descriptor_report.descriptors.len(),
         boot_state_count = project_boot_state.projects.len(),
         booted_descriptor_count = booted_project_descriptor_report.descriptors.len(),
-        resulting_projects = projects.len(),
         index_coordinates = ?project_descriptor_report
             .descriptors
             .iter()
@@ -144,13 +126,7 @@ where
             .collect::<Vec<_>>(),
         "project-status filter trace"
     );
-    let canceled_unbooted_project_statuses =
-        cancel_pending_unbooted_project_statuses(input.daemon_dir, &project_boot_state)?;
     let mut scheduler = read_periodic_scheduler_state(input.daemon_dir)?;
-    let backend_events_registration =
-        ensure_backend_events_tasks(&mut scheduler, now_seconds, &projects)
-            .map_err(crate::backend_events_tick::BackendEventsTickError::from)
-            .map_err(BackendEventsMaintenanceError::from)?;
     let scheduled_task_registration =
         crate::scheduled_task_due_planner::ensure_scheduled_task_due_planner_task(
             &mut scheduler,
@@ -161,20 +137,6 @@ where
     let due_task_names = scheduler.take_due(now_seconds);
     let scheduler_snapshot = scheduler.inspect();
 
-    let backend_events = maintain_backend_events_from_shared_scheduler(
-        BackendEventsMaintenanceSharedSchedulerInput {
-            tenex_base_dir: input.tenex_base_dir,
-            daemon_dir: input.daemon_dir,
-            now: now_seconds,
-            first_due_at: now_seconds,
-            accepted_at: input.now_ms,
-            request_timestamp: input.now_ms,
-            projects: &projects,
-            registered: backend_events_registration,
-            due_task_names: due_task_names.clone(),
-            scheduler_snapshot: scheduler_snapshot.clone(),
-        },
-    )?;
     let scheduled_tasks = maintain_scheduled_tasks_from_shared_scheduler(
         ScheduledTaskMaintenanceSharedSchedulerInput {
             tenex_base_dir: input.tenex_base_dir,
@@ -213,8 +175,6 @@ where
         project_descriptor_report,
         booted_project_descriptor_report,
         project_boot_state,
-        canceled_unbooted_project_statuses,
-        backend_events,
         scheduled_tasks,
         scheduler_wakeups,
         intervention,
@@ -279,22 +239,6 @@ impl<T: TelegramMaintenancePublisher + ?Sized> TelegramMaintenancePublisher for 
     }
 }
 
-fn backend_events_projects_from_descriptors<'a>(
-    report: &'a ProjectStatusDescriptorReport,
-) -> Vec<BackendEventsTickProject<'a>> {
-    report
-        .descriptors
-        .iter()
-        .map(|descriptor| BackendEventsTickProject {
-            project_owner_pubkey: &descriptor.project_owner_pubkey,
-            project_d_tag: &descriptor.project_d_tag,
-            project_manager_pubkey: descriptor.project_manager_pubkey.as_deref(),
-            project_base_path: descriptor.project_base_path.as_deref().map(Path::new),
-            worktrees: None,
-        })
-        .collect()
-}
-
 fn filter_booted_project_descriptors(
     report: &ProjectStatusDescriptorReport,
     boot_state: &BootedProjectsState,
@@ -321,41 +265,10 @@ fn descriptor_is_booted(
     )
 }
 
-fn cancel_pending_unbooted_project_statuses(
-    daemon_dir: &Path,
-    boot_state: &BootedProjectsState,
-) -> Result<Vec<PublishOutboxCancellationOutcome>, PublishOutboxError> {
-    cancel_pending_publish_outbox_records_matching(daemon_dir, |record| {
-        record.event.kind == PROJECT_STATUS_KIND
-            && !pending_project_status_record_is_booted(record, boot_state)
-    })
-}
-
-fn pending_project_status_record_is_booted(
-    record: &crate::publish_outbox::PublishOutboxRecord,
-    boot_state: &BootedProjectsState,
-) -> bool {
-    record
-        .event
-        .tags
-        .iter()
-        .filter(|tag| tag.first().map(String::as_str) == Some("a"))
-        .filter_map(|tag| tag.get(1))
-        .any(|reference| {
-            boot_state
-                .projects
-                .iter()
-                .any(|project| project.project_reference == *reference)
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
-    use crate::backend_events_tick::{
-        PROJECT_STATUS_TICK_INTERVAL_SECONDS, backend_events_project_status_task_name,
-    };
     use crate::dispatch_queue::replay_dispatch_queue;
     use crate::periodic_tick::PeriodicScheduler;
     use crate::periodic_tick_state::{
@@ -378,7 +291,7 @@ mod tests {
         "0101010101010101010101010101010101010101010101010101010101010101";
 
     #[test]
-    fn daemon_maintenance_discovers_projects_and_runs_backend_events_once() {
+    fn daemon_maintenance_discovers_booted_projects_and_runs_scheduled_tasks() {
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -436,20 +349,11 @@ mod tests {
             1
         );
         assert_eq!(outcome.project_boot_state.projects.len(), 1);
-        assert!(outcome.canceled_unbooted_project_statuses.is_empty());
-        assert_eq!(
-            outcome.backend_events.tick.due_task_names,
-            vec![format!("project-status:{owner}:demo-project")]
-        );
-        assert_eq!(outcome.backend_events.tick.project_statuses.len(), 1);
-        assert_eq!(
-            outcome
-                .backend_events
-                .persisted_scheduler_snapshot
-                .tasks
-                .len(),
-            2
-        );
+        // Project-status (kind 31934) is now handled by the project_status_driver,
+        // not by daemon maintenance. The publish outbox is empty here.
+        let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
+            .expect("publish outbox diagnostics must read");
+        assert_eq!(publish_outbox.pending_count, 0);
         assert!(outcome.scheduled_tasks.triggers.is_empty());
         assert_eq!(
             outcome.scheduled_tasks.planner.due_task_names,
@@ -461,36 +365,12 @@ mod tests {
                 .persisted_scheduler_snapshot
                 .tasks
                 .len(),
-            2
-        );
-        assert_eq!(
-            outcome.backend_events.tick.scheduler_snapshot,
-            outcome.scheduled_tasks.planner.scheduler_snapshot
-        );
-        assert_eq!(
-            outcome.backend_events.persisted_scheduler_snapshot,
-            outcome.scheduled_tasks.persisted_scheduler_snapshot
-        );
-        let persisted_scheduler_snapshot = read_periodic_scheduler_state(&daemon_dir)
-            .expect("shared scheduler state must read")
-            .inspect();
-        assert_eq!(
-            outcome.backend_events.persisted_scheduler_snapshot,
-            persisted_scheduler_snapshot
+            1
         );
         assert_eq!(outcome.scheduler_wakeups.diagnostics_after.pending_count, 0);
-        // Telegram outbox is empty on a fresh tenex dir; pass runs without
-        // needing a Bot API client because drain is deliberately skipped.
         assert_eq!(outcome.telegram_outbox.diagnostics_after.pending_count, 0);
         assert!(outcome.telegram_outbox.drained.is_empty());
         assert!(outcome.telegram_outbox.requeued.is_empty());
-
-        let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
-            .expect("publish outbox diagnostics must read");
-        // Backend-status (kind 24012/24011) now publishes from the dedicated
-        // driver; this maintenance pass enqueues only the project-status event
-        // (kind 31934) for the booted project.
-        assert_eq!(publish_outbox.pending_count, 1);
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
@@ -567,13 +447,6 @@ mod tests {
         let mut scheduler = PeriodicScheduler::new();
         scheduler
             .register_task(
-                backend_events_project_status_task_name(&owner, "demo-project"),
-                PROJECT_STATUS_TICK_INTERVAL_SECONDS,
-                1_710_001_000,
-            )
-            .expect("project-status task must register");
-        scheduler
-            .register_task(
                 SCHEDULED_TASK_DUE_PLANNER_TASK_NAME,
                 SCHEDULED_TASK_DUE_PLANNER_INTERVAL_SECONDS,
                 1_710_001_000,
@@ -625,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn daemon_maintenance_does_not_publish_or_schedule_unbooted_project_status() {
+    fn daemon_maintenance_filters_unbooted_projects_from_scheduled_tasks() {
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-unbooted-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -659,16 +532,6 @@ mod tests {
             ),
         )
         .expect("project descriptor must write");
-        let mut scheduler = PeriodicScheduler::new();
-        scheduler
-            .register_task(
-                backend_events_project_status_task_name(&owner, "demo-project"),
-                PROJECT_STATUS_TICK_INTERVAL_SECONDS,
-                1_710_001_000,
-            )
-            .expect("stale project-status task must register");
-        write_periodic_scheduler_state(&daemon_dir, &scheduler)
-            .expect("shared scheduler state must write");
         let project_event_index =
             project_event_index_with(project_event(&owner, "demo-project", 1_710_000_998));
 
@@ -690,8 +553,11 @@ mod tests {
                 .is_empty()
         );
         assert!(outcome.project_boot_state.projects.is_empty());
-        assert!(outcome.backend_events.tick.project_statuses.is_empty());
-        assert!(outcome.backend_events.tick.due_task_names.is_empty());
+        // No project-status events in the outbox — driver handles those.
+        let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
+            .expect("publish outbox diagnostics must read");
+        assert_eq!(publish_outbox.pending_count, 0);
+        // Scheduled-task planner is the only entry in the shared scheduler now.
         assert_eq!(
             read_periodic_scheduler_state(&daemon_dir)
                 .expect("scheduler must read")
@@ -702,12 +568,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["scheduled-task-due-planner"]
         );
-        let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
-            .expect("publish outbox diagnostics must read");
-        // Backend-status publishing now lives in the dedicated driver, not in
-        // daemon maintenance — so an unbooted fixture produces zero
-        // publish-outbox entries here.
-        assert_eq!(publish_outbox.pending_count, 0);
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }

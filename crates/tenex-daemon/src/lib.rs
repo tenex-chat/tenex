@@ -67,6 +67,7 @@ pub mod project_nostr_ingress;
 pub mod project_repository_init;
 pub mod project_status_agent_sources;
 pub mod project_status_descriptors;
+pub mod project_status_driver;
 pub mod project_status_runtime;
 pub mod project_status_snapshot;
 pub mod project_status_sources;

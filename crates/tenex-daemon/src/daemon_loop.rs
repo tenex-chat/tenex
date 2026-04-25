@@ -580,14 +580,11 @@ fn log_daemon_tick_publish_summary(
     worker_runtime: Option<&[DaemonWorkerRuntimeOutcome]>,
     publish_outbox: &PublishOutboxMaintenanceReport,
 ) {
-    let backend_enqueued_event_count = backend_enqueued_event_count(maintenance);
-    let backend_due_task_count = maintenance.backend_events.tick.due_task_names.len();
     let project_descriptor_count = maintenance.project_descriptor_report.descriptors.len();
     let booted_project_descriptor_count = maintenance
         .booted_project_descriptor_report
         .descriptors
         .len();
-    let project_status_count = maintenance.backend_events.tick.project_statuses.len();
     let worker_outcome: Option<Vec<&'static str>> =
         worker_runtime.map(|outcomes| outcomes.iter().map(worker_runtime_outcome_label).collect());
     let publish_pending_before = publish_outbox.diagnostics_before.pending_count;
@@ -610,9 +607,7 @@ fn log_daemon_tick_publish_summary(
             })
         })
         .unwrap_or(false);
-    let has_activity = backend_due_task_count > 0
-        || backend_enqueued_event_count > 0
-        || publish_pending_before > 0
+    let has_activity = publish_pending_before > 0
         || publish_failed_before > 0
         || publish_requeued_count > 0
         || publish_drained_count > 0
@@ -628,11 +623,8 @@ fn log_daemon_tick_publish_summary(
         tracing::info!(
             tick_kind = message,
             now_ms,
-            backend_due_task_count,
-            backend_enqueued_event_count,
             project_descriptor_count,
             booted_project_descriptor_count,
-            project_status_count,
             worker_outcome = ?worker_outcome,
             publish_pending_before,
             publish_failed_before,
@@ -648,11 +640,8 @@ fn log_daemon_tick_publish_summary(
         tracing::debug!(
             tick_kind = message,
             now_ms,
-            backend_due_task_count,
-            backend_enqueued_event_count,
             project_descriptor_count,
             booted_project_descriptor_count,
-            project_status_count,
             worker_outcome = ?worker_outcome,
             publish_pending_after,
             publish_published_after,
@@ -661,16 +650,6 @@ fn log_daemon_tick_publish_summary(
             "daemon tick publish summary"
         );
     }
-}
-
-fn backend_enqueued_event_count(maintenance: &DaemonMaintenanceOutcome) -> usize {
-    maintenance
-        .backend_events
-        .tick
-        .project_statuses
-        .iter()
-        .map(|status| status.enqueued_event_count)
-        .sum::<usize>()
 }
 
 fn worker_runtime_outcome_label(outcome: &DaemonWorkerRuntimeOutcome) -> &'static str {
@@ -1299,6 +1278,26 @@ mod tests {
     #[test]
     fn filesystem_tick_loop_drains_publish_outbox_after_daemon_maintenance() {
         let fixture = TickFilesystemFixture::new("daemon-loop-publish-success", 0x04);
+        // Pre-seed the publish outbox with one project-status record. The tick
+        // loop's job is to drain it; the project_status_driver now owns the
+        // periodic publish, but any enqueued records must still drain on tick.
+        crate::project_status_runtime::publish_project_status_from_filesystem(
+            crate::project_status_runtime::ProjectStatusRuntimeInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                created_at: 1_710_001_000,
+                accepted_at: 1_710_001_000_000,
+                request_timestamp: 1_710_001_000_000,
+                project_owner_pubkey: &fixture.owner_pubkey,
+                project_d_tag: "demo-project",
+                project_manager_pubkey: None,
+                project_base_path: None,
+                agents: None,
+                worktrees: None,
+            },
+        )
+        .expect("pre-seed project-status publish must succeed");
+
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![1_710_001_000_000]),
             observed_now_ms_values: Vec::new(),
@@ -1325,13 +1324,6 @@ mod tests {
 
         assert_eq!(outcome.steps.len(), 1);
         let tick = &outcome.steps[0].maintenance_outcome;
-        assert_eq!(
-            tick.maintenance.backend_events.tick.due_task_names,
-            vec![format!(
-                "project-status:{}:demo-project",
-                fixture.owner_pubkey
-            )]
-        );
         assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 1);
         assert_eq!(tick.publish_outbox.drained.len(), 1);
         assert_eq!(tick.publish_outbox.diagnostics_after.pending_count, 0);
@@ -1348,6 +1340,25 @@ mod tests {
     #[test]
     fn filesystem_tick_loop_records_retryable_publish_failures() {
         let fixture = TickFilesystemFixture::new("daemon-loop-publish-failure", 0x05);
+        // Pre-seed the publish outbox with one project-status record so the tick
+        // has something to drain (and fail on).
+        crate::project_status_runtime::publish_project_status_from_filesystem(
+            crate::project_status_runtime::ProjectStatusRuntimeInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                created_at: 1_710_001_000,
+                accepted_at: 1_710_001_000_000,
+                request_timestamp: 1_710_001_000_000,
+                project_owner_pubkey: &fixture.owner_pubkey,
+                project_d_tag: "demo-project",
+                project_manager_pubkey: None,
+                project_base_path: None,
+                agents: None,
+                worktrees: None,
+            },
+        )
+        .expect("pre-seed project-status publish must succeed");
+
         let mut clock = RecordingClock {
             now_ms_values: VecDeque::from(vec![1_710_001_000_000]),
             observed_now_ms_values: Vec::new(),
@@ -1408,6 +1419,24 @@ mod tests {
     #[test]
     fn filesystem_tick_with_worker_runs_worker_runtime_before_publish_drain() {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-empty-queue", 0x06);
+        // Pre-seed the publish outbox so the tick has a record to drain.
+        crate::project_status_runtime::publish_project_status_from_filesystem(
+            crate::project_status_runtime::ProjectStatusRuntimeInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                created_at: 1_710_001_000,
+                accepted_at: 1_710_001_000_000,
+                request_timestamp: 1_710_001_000_000,
+                project_owner_pubkey: &fixture.owner_pubkey,
+                project_d_tag: "demo-project",
+                project_manager_pubkey: None,
+                project_base_path: None,
+                agents: None,
+                worktrees: None,
+            },
+        )
+        .expect("pre-seed project-status publish must succeed");
+
         let publisher = Arc::new(Mutex::new(RecordingPublisher::default()));
         let mut telegram_publisher = NoTelegramPublisher;
         let mut spawner = EmptyQueueSpawner::default();
@@ -1442,13 +1471,6 @@ mod tests {
         )
         .expect("filesystem tick with worker must succeed");
 
-        assert_eq!(
-            outcome.maintenance.backend_events.tick.due_task_names,
-            vec![format!(
-                "project-status:{}:demo-project",
-                fixture.owner_pubkey
-            )]
-        );
         assert_eq!(outcome.worker_runtime.len(), 1);
         assert!(matches!(
             outcome.worker_runtime[0],
@@ -1467,6 +1489,24 @@ mod tests {
     #[test]
     fn filesystem_tick_with_worker_drains_publish_outbox_after_worker_runtime_error() {
         let fixture = TickFilesystemFixture::new("daemon-loop-worker-error-drain", 0x07);
+        // Pre-seed the publish outbox so the tick has a record to drain.
+        crate::project_status_runtime::publish_project_status_from_filesystem(
+            crate::project_status_runtime::ProjectStatusRuntimeInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                created_at: 1_710_001_000,
+                accepted_at: 1_710_001_000_000,
+                request_timestamp: 1_710_001_000_000,
+                project_owner_pubkey: &fixture.owner_pubkey,
+                project_d_tag: "demo-project",
+                project_manager_pubkey: None,
+                project_base_path: None,
+                agents: None,
+                worktrees: None,
+            },
+        )
+        .expect("pre-seed project-status publish must succeed");
+
         let scenario = DispatchScenario {
             project_id: "project-alpha",
             agent_pubkey: TEST_AGENT_PUBKEY.to_string(),

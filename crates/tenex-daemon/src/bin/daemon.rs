@@ -11,6 +11,7 @@ use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use tenex_daemon::backend_status_driver::{BackendStatusDriverDeps, run_backend_status_driver};
+use tenex_daemon::project_status_driver::{ProjectStatusDriverDeps, run_project_status_supervisor};
 use tenex_daemon::daemon_foreground::{
     DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
     run_daemon_foreground_until_stopped_from_filesystem_with_worker,
@@ -208,12 +209,11 @@ where
     ));
     run_worker_startup_recovery(&daemon_dir)?;
 
-    // Create the process-wide signal bus. Senders are threaded into producers
-    // now; driver tasks that consume the receivers are added in subsequent
-    // commits. The receivers from this call are dropped immediately because
-    // UnboundedSender::send silently discards items when no receiver exists —
-    // correct behavior until drivers are wired in.
-    let (signals, _) = create_daemon_signals();
+    // Create the process-wide signal bus. Extract the receivers that are
+    // consumed by driver tasks; remaining receivers are dropped (senders
+    // silently discard items when no receiver exists).
+    let (signals, receivers) = create_daemon_signals();
+    let project_booted_rx = receivers.project_booted_rx;
 
     // While the daemon is running, a dedicated thread watches for SIGHUP
     // (via the global reload flag set by `request_daemon_reload`) and
@@ -258,6 +258,20 @@ where
             heartbeat_latch: heartbeat_latch.clone(),
         },
         backend_status_shutdown_rx,
+    ));
+
+    // Spawn the project-status supervisor. It listens for BootedProject signals
+    // and spawns per-project 30s timer tasks that publish kind 31934. Replaces
+    // the `project-status:*` entries in the PeriodicScheduler.
+    let (project_status_shutdown_tx, project_status_shutdown_rx) =
+        tokio::sync::watch::channel(false);
+    let project_status_supervisor_handle = runtime_handle.spawn(run_project_status_supervisor(
+        ProjectStatusDriverDeps {
+            tenex_base_dir: tenex_base_dir.clone(),
+            daemon_dir: daemon_dir.clone(),
+        },
+        project_booted_rx,
+        project_status_shutdown_rx,
     ));
 
     tenex_daemon::stdout_status::print_daemon_ready(
@@ -346,10 +360,12 @@ where
         });
     }
 
-    // Stop the backend-status driver and join its task.
+    // Stop the backend-status and project-status drivers and join their tasks.
     let _ = backend_status_shutdown_tx.send(true);
+    let _ = project_status_shutdown_tx.send(true);
     runtime_handle.block_on(async {
         let _ = backend_status_driver_handle.await;
+        let _ = project_status_supervisor_handle.await;
     });
 
     diagnostics_result?;
