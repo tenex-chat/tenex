@@ -1,11 +1,24 @@
 # TENEX Rust Migration — Live Status
 
-**Last updated:** 2026-04-24 (late session)  
+**Last updated:** 2026-04-25  
 **Active branch:** `rust-agent-worker-publishing`  
-**Audited commit:** `d265e49b`
+**Audited commit:** `9c48ce6f`
 
 ## Work in flight
 
+- **Project-warm worker migration** — commits 1–5 of the 8-commit plan in
+  `docs/rust/project-warm-worker-design.md` are landed:
+  - bootstrap split into `bootstrapProjectScope` + `runOneExecution`
+  - TS worker drops the serialization guard, supports concurrent executions
+  - protocol carries `agent` payload + `projectAgentInventory` + `project_boot`/`project_ready`
+  - inline `agent` payload consumed (executing agent materialized via `materializeAgent`)
+  - Rust runtime state moved to many-execution-per-worker (`Vec<ActiveExecutionSlot>`)
+  - `select_warm_worker_for_dispatch` selector added with concurrency-cap arm
+
+  Commits 6–8 remain open: admission still spawns a fresh worker per
+  dispatch, `project_boot` is never sent, `AgentRegistry` placeholder
+  cleanup is gated on commit 6. See the design doc for the per-commit
+  status matrix and the wire-up needed for commit 6.
 - **Backend-event publish path simplification** — second dispatch in flight in worktree with explicit pwd-isolation guard and the 24133 NIP-46 bunker-reply nuance flagged for verification before removal.
 - **Tokio finishing pieces (b)+(c) — async session loop + publish_outbox_wake** — design landed at `docs/plans/2026-04-24-tokio-finishing-design.md`. The new design eliminates the registry's `Option<RuntimeHandle>` field that caused last attempt's 101 regression: `spawn_blocking` uses ambient runtime, `JoinHandle::blocking_join()` joins from sync context. Will dispatch as a single commit after backend-publish lands and stabilizes.
 
@@ -61,30 +74,30 @@ The following issues were real on earlier 2026-04-24 snapshots but are no longer
 ## E2E Matrix
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-25T11:15:22Z · branch `rust-agent-worker-publishing` · commit `79f22b643880` · total=19 pass=16 fail=1 skip=1 unknown=0 phase_partial=1_
+_Last run: 2026-04-25T11:36:01Z · branch `rust-agent-worker-publishing` · commit `9c48ce6f787a` · total=19 pass=16 fail=1 skip=1 unknown=0 phase_partial=1_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
-| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-25T11:07:51Z | 3s |  |
-| 02_delegation_a_to_b_to_a.sh | pass | 2026-04-25T11:08:04Z | 13s |  |
-| 04_parallel_sessions.sh | pass | 2026-04-25T11:08:16Z | 12s | parallel execution confirmed: RAL claimed→terminal windows overlap |
-| 101_graceful_restart_no_stuck_ral.sh | pass | 2026-04-25T11:08:34Z | 18s |  |
-| 102_sigkill_mid_stream_crash_restart.sh | phase_partial | 2026-04-25T11:10:16Z | 102s | passes:clean-restart+crash-reconciliation+no-zombies; gaps:phase6=1 |
-| 11_boot_gates_dispatch.sh | pass | 2026-04-25T11:10:29Z | 13s |  |
-| 12_boot_activates_dispatch.sh | pass | 2026-04-25T11:10:48Z | 19s |  |
-| 13_boot_is_idempotent.sh | pass | 2026-04-25T11:11:02Z | 14s |  |
-| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-25T11:11:37Z | 35s |  |
-| 15_boot_event_reordering.sh | pass | 2026-04-25T11:11:56Z | 19s | newer 31933 wins; older discarded; boot succeeded; no crash |
-| 21_agent_hot_reload.sh | pass | 2026-04-25T11:12:02Z | 6s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
-| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-25T11:12:02Z | 0s |  |
-| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-25T11:12:03Z | 1s | ral journal resequenced correctly under concurrent inbound+completion writers |
+| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-25T11:29:57Z | 3s |  |
+| 02_delegation_a_to_b_to_a.sh | pass | 2026-04-25T11:30:10Z | 13s |  |
+| 04_parallel_sessions.sh | pass | 2026-04-25T11:30:22Z | 12s | parallel execution confirmed: RAL claimed→terminal windows overlap |
+| 101_graceful_restart_no_stuck_ral.sh | pass | 2026-04-25T11:30:40Z | 18s |  |
+| 102_sigkill_mid_stream_crash_restart.sh | phase_partial | 2026-04-25T11:32:22Z | 102s | passes:clean-restart+crash-reconciliation+no-zombies; gaps:phase6=1 |
+| 11_boot_gates_dispatch.sh | pass | 2026-04-25T11:32:35Z | 13s |  |
+| 12_boot_activates_dispatch.sh | pass | 2026-04-25T11:32:54Z | 19s |  |
+| 13_boot_is_idempotent.sh | pass | 2026-04-25T11:33:08Z | 14s |  |
+| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-25T11:33:43Z | 35s |  |
+| 15_boot_event_reordering.sh | pass | 2026-04-25T11:34:02Z | 19s | newer 31933 wins; older discarded; boot succeeded; no crash |
+| 21_agent_hot_reload.sh | pass | 2026-04-25T11:34:08Z | 6s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
+| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-25T11:34:08Z | 0s |  |
+| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-25T11:34:09Z | 0s | ral journal resequenced correctly under concurrent inbound+completion writers |
 | 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T18:03:50Z | 1s |  |
-| 36_triggering_event_dedup.sh | pass | 2026-04-25T11:12:25Z | 22s |  |
-| 37_dispatch_input_mismatch.sh | fail | 2026-04-25T11:12:52Z | 27s |  |
-| 39_ral_number_exhaustion.sh | pass | 2026-04-25T11:13:29Z | 37s |  |
-| 43_ral_status_transitions.sh | pass | 2026-04-25T11:13:41Z | 12s | ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed |
-| 53_three_hop_delegation.sh | pass | 2026-04-25T11:15:22Z | 101s | all six Phase B assertions held: A->B->C chain + unwind both verified |
-| 55_active_parent_receives_via_injection.sh | skip | 2026-04-25T11:15:22Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
+| 36_triggering_event_dedup.sh | pass | 2026-04-25T11:34:31Z | 22s |  |
+| 37_dispatch_input_mismatch.sh | fail | 2026-04-25T11:34:59Z | 28s |  |
+| 39_ral_number_exhaustion.sh | pass | 2026-04-25T11:35:36Z | 37s |  |
+| 43_ral_status_transitions.sh | pass | 2026-04-25T11:35:48Z | 12s | ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed |
+| 53_three_hop_delegation.sh | pass | 2026-04-25T11:36:01Z | 13s | all six Phase B assertions held: A->B->C chain + unwind both verified |
+| 55_active_parent_receives_via_injection.sh | skip | 2026-04-25T11:36:01Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
 <!-- e2e-matrix:end -->
 
 ## TL;DR
