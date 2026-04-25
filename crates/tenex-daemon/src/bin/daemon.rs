@@ -298,7 +298,7 @@ where
             tenex_base_dir: tenex_base_dir.clone(),
             daemon_dir: daemon_dir.clone(),
             project_event_index: Arc::clone(&project_event_index),
-            publish_enqueued_tx: None,
+            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
         },
         ral_completed_rx,
         Arc::clone(&signals.project_index_changed),

@@ -60,6 +60,7 @@ pub async fn run_intervention_arm_driver(
         );
     } else {
         armed_notify.notify_one();
+        signal_publish_enqueued(&deps);
     }
 
     loop {
@@ -79,6 +80,7 @@ pub async fn run_intervention_arm_driver(
                     // Notify the fire driver: a new wakeup may have been armed
                     // with a sooner deadline than the one we're sleeping toward.
                     armed_notify.notify_one();
+                    signal_publish_enqueued(&deps);
                 }
             }
             _ = project_index_changed.notified() => {
@@ -92,9 +94,16 @@ pub async fn run_intervention_arm_driver(
                     );
                 } else {
                     armed_notify.notify_one();
+                    signal_publish_enqueued(&deps);
                 }
             }
         }
+    }
+}
+
+fn signal_publish_enqueued(deps: &InterventionDriverDeps) {
+    if let Some(ref tx) = deps.publish_enqueued_tx {
+        let _ = tx.send(PublishEnqueued);
     }
 }
 
@@ -209,4 +218,89 @@ fn current_unix_time_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system time must be after UNIX_EPOCH")
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tokio::sync::mpsc;
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("{prefix}-{nanos}-{counter}"));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// Verify that the arm driver sends `PublishEnqueued` after a successful arm pass.
+    ///
+    /// The test drives the arm driver through a single `RalCompletion` signal on a
+    /// runtime that has a minimal backend config (intervention disabled). When
+    /// `arm_from_journal` returns `Ok`, the driver must call `signal_publish_enqueued`,
+    /// which puts a value on the `publish_enqueued_tx` channel. The test asserts that
+    /// the channel carries at least one message after the driver task processes the signal.
+    #[tokio::test]
+    async fn arm_driver_sends_publish_enqueued_after_successful_arm_pass() {
+        let tenex_base_dir = unique_temp_dir("intervention-arm-driver-test-base");
+        let daemon_dir = unique_temp_dir("intervention-arm-driver-test-daemon");
+
+        // Write a minimal config.json so read_backend_config succeeds.
+        // Default intervention config has is_active() == false, so arm_from_journal
+        // returns Ok early without needing a RAL journal or signer.
+        fs::write(tenex_base_dir.join("config.json"), r#"{}"#).expect("write config.json");
+
+        let (publish_enqueued_tx, mut publish_enqueued_rx) = mpsc::unbounded_channel::<PublishEnqueued>();
+        let (ral_tx, ral_rx) = mpsc::unbounded_channel::<RalCompletion>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let project_index_changed = Arc::new(Notify::new());
+        let armed_notify = Arc::new(Notify::new());
+
+        let deps = InterventionDriverDeps {
+            tenex_base_dir: tenex_base_dir.clone(),
+            daemon_dir: daemon_dir.clone(),
+            project_event_index: Arc::new(Mutex::new(
+                crate::project_event_index::ProjectEventIndex::new(),
+            )),
+            publish_enqueued_tx: Some(publish_enqueued_tx),
+        };
+
+        let driver = tokio::spawn(run_intervention_arm_driver(
+            deps,
+            ral_rx,
+            Arc::clone(&project_index_changed),
+            Arc::clone(&armed_notify),
+            shutdown_rx,
+        ));
+
+        // The driver runs a startup catch-up pass immediately; give it time to
+        // complete before we check the channel.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Send one RalCompletion to trigger another arm pass.
+        ral_tx.send(RalCompletion { sequence: 1 }).expect("send");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Signal shutdown and wait for the driver to exit cleanly.
+        shutdown_tx.send(true).expect("shutdown send");
+        driver.await.expect("driver task must not panic");
+
+        // The startup pass and the ral-completion pass both called signal_publish_enqueued.
+        // At least one PublishEnqueued must have arrived.
+        assert!(
+            publish_enqueued_rx.try_recv().is_ok(),
+            "arm driver must send PublishEnqueued after a successful arm pass"
+        );
+
+        fs::remove_dir_all(&tenex_base_dir).ok();
+        fs::remove_dir_all(&daemon_dir).ok();
+    }
 }
