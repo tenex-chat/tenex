@@ -74,32 +74,32 @@ The following issues were real on earlier 2026-04-24 snapshots but are no longer
 ## E2E Matrix
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-25T18:13:46Z · branch `rust-agent-worker-publishing` · commit `5342cef898e1` · total=21 pass=19 fail=0 skip=1 unknown=0 phase_partial=1_
+_Last run: 2026-04-25T18:31:45Z · branch `rust-agent-worker-publishing` · commit `17dac72aa300` · total=21 pass=12 fail=7 skip=1 unknown=0 phase_partial=1_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
-| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-25T18:07:46Z | 3s |  |
-| 02_delegation_a_to_b_to_a.sh | pass | 2026-04-25T18:07:59Z | 13s |  |
-| 04_parallel_sessions.sh | pass | 2026-04-25T18:08:11Z | 12s | parallel execution confirmed: RAL claimed→terminal windows overlap |
-| 101_graceful_restart_no_stuck_ral.sh | pass | 2026-04-25T18:08:28Z | 17s |  |
-| 102_sigkill_mid_stream_crash_restart.sh | phase_partial | 2026-04-25T18:10:10Z | 102s | passes:clean-restart+crash-reconciliation+no-zombies; gaps:phase6=1 |
-| 11_boot_gates_dispatch.sh | pass | 2026-04-25T18:10:22Z | 12s |  |
-| 12_boot_activates_dispatch.sh | pass | 2026-04-25T18:10:41Z | 19s |  |
-| 13_boot_is_idempotent.sh | pass | 2026-04-25T18:10:56Z | 15s |  |
-| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-25T18:11:18Z | 22s |  |
-| 15_boot_event_reordering.sh | pass | 2026-04-25T18:11:37Z | 19s | newer 31933 wins; older discarded; boot succeeded; no crash |
-| 17_intervention_due.sh | pass | 2026-04-25T18:11:44Z | 7s | intervention review kind:1 published to relay within 20s of daemon start |
-| 21_agent_hot_reload.sh | pass | 2026-04-25T18:11:53Z | 9s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
-| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-25T18:11:53Z | 0s |  |
-| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-25T18:11:54Z | 1s | ral journal resequenced correctly under concurrent inbound+completion writers |
+| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-25T18:21:06Z | 4s |  |
+| 02_delegation_a_to_b_to_a.sh | fail | 2026-04-25T18:22:12Z | 66s |  |
+| 04_parallel_sessions.sh | fail | 2026-04-25T18:22:24Z | 12s |  |
+| 101_graceful_restart_no_stuck_ral.sh | fail | 2026-04-25T18:23:31Z | 66s |  |
+| 102_sigkill_mid_stream_crash_restart.sh | phase_partial | 2026-04-25T18:25:11Z | 100s | passes:clean-restart+crash-reconciliation+no-zombies; gaps:phase6=1 |
+| 11_boot_gates_dispatch.sh | pass | 2026-04-25T18:25:24Z | 13s |  |
+| 12_boot_activates_dispatch.sh | pass | 2026-04-25T18:25:43Z | 19s |  |
+| 13_boot_is_idempotent.sh | pass | 2026-04-25T18:25:57Z | 14s |  |
+| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-25T18:26:19Z | 22s |  |
+| 15_boot_event_reordering.sh | pass | 2026-04-25T18:26:39Z | 20s | newer 31933 wins; older discarded; boot succeeded; no crash |
+| 17_intervention_due.sh | pass | 2026-04-25T18:26:44Z | 5s | intervention review kind:1 published to relay within 20s of daemon start |
+| 21_agent_hot_reload.sh | fail | 2026-04-25T18:27:14Z | 30s | daemon subscription never became live |
+| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-25T18:27:14Z | 0s |  |
+| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-25T18:27:14Z | 0s | ral journal resequenced correctly under concurrent inbound+completion writers |
 | 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T18:03:50Z | 1s |  |
-| 36_triggering_event_dedup.sh | pass | 2026-04-25T18:12:16Z | 22s |  |
-| 37_dispatch_input_mismatch.sh | pass | 2026-04-25T18:12:44Z | 28s |  |
-| 39_ral_number_exhaustion.sh | pass | 2026-04-25T18:13:14Z | 30s |  |
-| 41_scheduled_task_fires_within_deadline.sh | pass | 2026-04-25T18:13:22Z | 8s |  |
-| 43_ral_status_transitions.sh | pass | 2026-04-25T18:13:34Z | 12s | ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed |
-| 53_three_hop_delegation.sh | pass | 2026-04-25T18:13:46Z | 12s | all six Phase B assertions held: A->B->C chain + unwind both verified |
-| 55_active_parent_receives_via_injection.sh | skip | 2026-04-25T18:13:46Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
+| 36_triggering_event_dedup.sh | pass | 2026-04-25T18:27:36Z | 22s |  |
+| 37_dispatch_input_mismatch.sh | pass | 2026-04-25T18:28:05Z | 28s |  |
+| 39_ral_number_exhaustion.sh | pass | 2026-04-25T18:28:35Z | 30s |  |
+| 41_scheduled_task_fires_within_deadline.sh | fail | 2026-04-25T18:29:04Z | 29s |  |
+| 43_ral_status_transitions.sh | fail | 2026-04-25T18:30:10Z | 66s |  |
+| 53_three_hop_delegation.sh | fail | 2026-04-25T18:31:45Z | 95s | agent2 never published resume reply incorporating agent3's result |
+| 55_active_parent_receives_via_injection.sh | skip | 2026-04-25T18:31:45Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
 <!-- e2e-matrix:end -->
 
 ## TL;DR

@@ -16,7 +16,7 @@ use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_agent_config,
 };
 use crate::backend_events::installed_agent_list::AgentConfigInputs;
-use crate::daemon_signals::BootedProject;
+use crate::daemon_signals::{BootedProject, DispatchEnqueued};
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
     resolve_and_enqueue_inbound_dispatch,
@@ -51,6 +51,9 @@ pub struct NostrIngressInput<'a> {
     /// Signal that a boot event was recorded. `None` in tests that don't
     /// need signal wiring.
     pub project_booted_tx: Option<UnboundedSender<BootedProject>>,
+    /// Signal that a new dispatch was appended to the queue. `None` in tests
+    /// that don't need signal wiring.
+    pub dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -265,6 +268,13 @@ pub fn process_verified_nostr_event(
         project_event_index: input.project_event_index,
     })?;
 
+    // Signal the admission driver that a new dispatch may be ready.
+    if inbound.produced_queued_dispatch() {
+        if let Some(tx) = &input.dispatch_enqueued_tx {
+            let _ = tx.send(DispatchEnqueued);
+        }
+    }
+
     Ok(NostrIngressOutcome::Routed { class, inbound })
 }
 
@@ -453,6 +463,7 @@ mod tests {
             project_event_index: &project_event_index,
             project_index_changed: None,
             project_booted_tx: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -493,6 +504,7 @@ mod tests {
             project_event_index: &project_event_index,
             project_index_changed: None,
             project_booted_tx: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -543,6 +555,7 @@ mod tests {
             project_event_index: &project_event_index,
             project_index_changed: None,
             project_booted_tx: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -608,6 +621,7 @@ mod tests {
             project_event_index: &project_event_index,
             project_index_changed: None,
             project_booted_tx: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -667,6 +681,7 @@ mod tests {
             project_event_index: &project_event_index,
             project_index_changed: None,
             project_booted_tx: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("project ingress must process");
 
@@ -690,6 +705,7 @@ mod tests {
             project_event_index: &project_event_index,
             project_index_changed: None,
             project_booted_tx: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("repeat ingress must process");
 

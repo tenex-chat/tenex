@@ -14,7 +14,10 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
+use tokio::sync::mpsc::UnboundedSender;
+
 use crate::backend_config::{BackendConfigError, BackendConfigSnapshot, read_backend_config};
+use crate::daemon_signals::DispatchEnqueued;
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
     resolve_and_enqueue_inbound_dispatch,
@@ -44,6 +47,7 @@ pub struct TelegramIngressRuntimeInput<'a> {
     pub timestamp: u64,
     pub writer_version: &'a str,
     pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
+    pub dispatch_enqueued_tx: Option<&'a UnboundedSender<DispatchEnqueued>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -171,6 +175,12 @@ pub fn process_telegram_update(
         writer_version: input.writer_version,
         project_event_index: input.project_event_index,
     })?;
+
+    if inbound.produced_queued_dispatch() {
+        if let Some(tx) = input.dispatch_enqueued_tx {
+            let _ = tx.send(DispatchEnqueued);
+        }
+    }
 
     Ok(TelegramIngressRuntimeOutcome::Routed {
         channel_id: facts.channel_id,
@@ -415,6 +425,7 @@ mod tests {
             timestamp: 1_710_001_500_000,
             writer_version: "telegram-ingress-runtime-test@0",
             project_event_index: &project_event_index,
+            dispatch_enqueued_tx: None,
         })
         .expect("telegram ingress must process");
 
@@ -494,6 +505,7 @@ mod tests {
             timestamp: 1_710_001_500_001,
             writer_version: "telegram-ingress-runtime-test@0",
             project_event_index: &project_event_index,
+            dispatch_enqueued_tx: None,
         })
         .expect("telegram ingress must process");
 
@@ -547,6 +559,7 @@ mod tests {
             timestamp: 1_710_001_500_002,
             writer_version: "telegram-ingress-runtime-test@0",
             project_event_index: &project_event_index,
+            dispatch_enqueued_tx: None,
         })
         .expect("telegram ingress must process");
 

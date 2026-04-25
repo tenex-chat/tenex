@@ -518,6 +518,7 @@ fn run_daemon_maintenance(
         project_boot_state: tenex_daemon::project_boot_state::empty_booted_projects_state(),
         project_event_index,
         heartbeat_latch: None,
+        dispatch_enqueued_tx: None,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 

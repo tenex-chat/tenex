@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use thiserror::Error;
 
+use tokio::sync::mpsc::UnboundedSender;
+
 use crate::backend_config::{BackendConfigError, read_backend_config};
+use crate::daemon_signals::DispatchEnqueued;
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::project_boot_state::{BootedProjectsState, is_project_booted};
 use crate::project_event_index::ProjectEventIndex;
@@ -30,6 +33,7 @@ pub struct DaemonMaintenanceInput<'a> {
     /// When present, the backend-events maintenance pass gates the kind
     /// 24012 heartbeat on the latch state.
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
+    pub dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -271,6 +275,7 @@ mod tests {
             project_boot_state,
             project_event_index,
             heartbeat_latch: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("daemon maintenance must run");
 
@@ -339,6 +344,7 @@ mod tests {
             project_boot_state: empty_booted_projects_state(),
             project_event_index,
             heartbeat_latch: None,
+            dispatch_enqueued_tx: None,
         })
         .expect("daemon maintenance must run");
 

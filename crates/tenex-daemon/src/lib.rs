@@ -113,6 +113,7 @@ pub mod worker_protocol;
 pub mod worker_publish;
 pub mod worker_reuse;
 pub mod worker_runtime_state;
+pub mod worker_admission_driver;
 pub mod worker_session;
 pub mod worker_telegram_egress;
 pub mod warm_worker_runtime;

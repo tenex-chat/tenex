@@ -18,14 +18,15 @@ use tenex_daemon::project_status_driver::{ProjectStatusDriverDeps, run_project_s
 use tenex_daemon::telegram_outbox_driver::{TelegramOutboxDriverDeps, run_telegram_outbox_driver};
 use tenex_daemon::scheduled_task_driver::{ScheduledTaskDriverDeps, run_scheduled_task_supervisor};
 use tenex_daemon::daemon_foreground::{
-    DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
-    run_daemon_foreground_until_stopped_from_filesystem_with_worker,
+    DaemonForegroundStoppableInput,
+    run_daemon_foreground_until_stopped_from_filesystem,
 };
 use tenex_daemon::daemon_loop::{
     DaemonMaintenanceLoopClock, DaemonMaintenanceLoopSleeper, DaemonMaintenanceLoopStopSignal,
-    DaemonTickWithWorkerError, DaemonTickWithWorkerOutcome, DaemonWorkerTickInput,
-    SystemDaemonMaintenanceLoopClock, run_daemon_tick_once_from_filesystem_with_worker,
+    DaemonTickError, DaemonTickOutcome, SystemDaemonMaintenanceLoopClock,
+    run_daemon_tick_once_from_filesystem,
 };
+use tenex_daemon::worker_admission_driver::{WorkerAdmissionDriverDeps, run_worker_admission_driver};
 use tenex_daemon::daemon_maintenance::DaemonMaintenanceOutcome;
 use tenex_daemon::daemon_maintenance::{NoTelegramPublisher, WithTelegramPublisher};
 use tenex_daemon::daemon_shell::{DaemonShell, DaemonShellStopMode};
@@ -58,7 +59,6 @@ use tokio::sync::Notify;
 use tenex_daemon::whitelist_wiring::{
     WhitelistReloadHandle, build_whitelist_wiring, reload_whitelist_from_handle,
 };
-use tenex_daemon::worker_dispatch::execution::AgentWorkerProcessDispatchSpawner;
 use tenex_daemon::worker_lifecycle::startup_recovery::{
     WorkerStartupRecoveryInput, WorkerStartupRecoveryLiveWorkers, WorkerStartupRecoveryOutcome,
     recover_worker_startup,
@@ -67,7 +67,6 @@ use tenex_daemon::worker_process::{
     AgentWorkerCommand, AgentWorkerProcessConfig, bun_agent_worker_command,
 };
 use tenex_daemon::worker_runtime_state::new_shared_worker_runtime_state;
-use tenex_daemon::worker_session::registry::WorkerSessionRegistry;
 
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
@@ -222,6 +221,8 @@ where
     let project_booted_rx = receivers.project_booted_rx;
     let ral_completed_rx = receivers.ral_completed_rx;
     let telegram_enqueued_rx = receivers.telegram_enqueued_rx;
+    let dispatch_enqueued_rx = receivers.dispatch_enqueued_rx;
+    let session_completed_rx = receivers.session_completed_rx;
 
     // Fan-out BootedProject to the project-status supervisor and the
     // scheduled-task supervisor. A single sender (project_booted_tx) is wired
@@ -261,9 +262,13 @@ where
         Arc::clone(&project_event_index),
         signals.project_index_changed.clone(),
         signals.project_booted_tx.clone(),
+        signals.dispatch_enqueued_tx.clone(),
     )?;
-    let gateway_supervisor =
-        start_gateway_supervisor_from_options(&options, Arc::clone(&project_event_index))?;
+    let gateway_supervisor = start_gateway_supervisor_from_options(
+        &options,
+        Arc::clone(&project_event_index),
+        signals.dispatch_enqueued_tx.clone(),
+    )?;
 
     let mut telegram_registry = build_telegram_publisher_registry_from_options(&options)?;
     let heartbeat_latch = whitelist_wiring
@@ -386,7 +391,8 @@ where
             project_boot_state,
             project_event_index,
             Arc::clone(&publisher),
-            Some(signals.session_completed_tx.clone()),
+            dispatch_enqueued_rx,
+            session_completed_rx,
             telegram_publisher,
         ))
     } else {
@@ -708,6 +714,9 @@ fn start_nostr_subscription_supervisor_from_options(
     project_booted_tx: tokio::sync::mpsc::UnboundedSender<
         tenex_daemon::daemon_signals::BootedProject,
     >,
+    dispatch_enqueued_tx: tokio::sync::mpsc::UnboundedSender<
+        tenex_daemon::daemon_signals::DispatchEnqueued,
+    >,
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let persisted_whitelist =
@@ -736,6 +745,7 @@ fn start_nostr_subscription_supervisor_from_options(
     config.project_event_index = project_event_index;
     config.project_index_changed = Some(project_index_changed);
     config.project_booted_tx = Some(project_booted_tx);
+    config.dispatch_enqueued_tx = Some(dispatch_enqueued_tx);
     if let Some(ingress) = whitelist_ingress {
         config = config.with_whitelist_ingress(ingress);
     }
@@ -873,6 +883,9 @@ fn build_telegram_publisher_registry_from_options(
 fn start_gateway_supervisor_from_options(
     options: &DaemonCliOptions,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
+    dispatch_enqueued_tx: tokio::sync::mpsc::UnboundedSender<
+        tenex_daemon::daemon_signals::DispatchEnqueued,
+    >,
 ) -> Result<Option<TelegramGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let bots = read_agent_gateway_bots(&tenex_base_dir)
@@ -896,6 +909,7 @@ fn start_gateway_supervisor_from_options(
     config.writer_version = daemon_writer_version();
     config.signer = Some(signer);
     config.project_event_index = project_event_index;
+    config.dispatch_enqueued_tx = Some(dispatch_enqueued_tx);
 
     match start_telegram_gateway(config, NoopIngressObserver) {
         Ok(supervisor) => Ok(Some(supervisor)),
@@ -920,17 +934,20 @@ enum ForegroundTelegramPublisherState {
 
 /// Async foreground driver for the unbounded production daemon path.
 ///
-/// Each maintenance tick still runs through the existing sync code on the
-/// blocking pool; only the outer sleep/wake/shutdown orchestration moves onto
-/// Tokio in this slice.
+/// Each maintenance tick runs through the existing sync code on the blocking
+/// pool. The worker admission driver runs concurrently as a dedicated tokio
+/// task, waking on `dispatch_enqueued` and `session_completed` signals.
 async fn run_daemon_foreground_async<P>(
     options: &DaemonCliOptions,
     heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
     publisher: Arc<Mutex<P>>,
-    session_completed_tx: Option<
-        tokio::sync::mpsc::UnboundedSender<tenex_daemon::daemon_signals::SessionCompletion>,
+    dispatch_enqueued_rx: tokio::sync::mpsc::UnboundedReceiver<
+        tenex_daemon::daemon_signals::DispatchEnqueued,
+    >,
+    session_completed_rx: tokio::sync::mpsc::UnboundedReceiver<
+        tenex_daemon::daemon_signals::SessionCompletion,
     >,
     mut telegram_publisher: ForegroundTelegramPublisherState,
 ) -> Result<DaemonForegroundDiagnostics, CliError>
@@ -945,12 +962,34 @@ where
     let worker_config = AgentWorkerProcessConfig::default();
     let worker_runtime_state = new_shared_worker_runtime_state();
     let publish_result_sequence = Arc::new(AtomicU64::new(1));
-    let session_registry = WorkerSessionRegistry::new();
     let started_at = current_unix_time_ms();
     let session = shell
         .start_foreground(started_at)
         .map_err(|error| runtime_error(error.to_string()))?;
     let lock_owner = session.lock_info().clone();
+
+    // Spawn the worker admission driver. It owns session lifecycle and wakes
+    // on dispatch_enqueued / session_completed signals.
+    let (admission_shutdown_tx, admission_shutdown_rx) = tokio::sync::watch::channel(false);
+    let admission_driver_handle = tokio::spawn(run_worker_admission_driver(
+        WorkerAdmissionDriverDeps {
+            daemon_dir: daemon_dir.clone(),
+            tenex_base_dir: tenex_base_dir.clone(),
+            runtime_state: worker_runtime_state,
+            lock_owner,
+            worker_command,
+            worker_config,
+            writer_version: daemon_writer_version(),
+            publisher: Arc::clone(&publisher),
+            retry_policy: PublishOutboxRetryPolicy::default(),
+            publish_result_sequence,
+            project_event_index: Arc::clone(&project_event_index),
+        },
+        dispatch_enqueued_rx,
+        session_completed_rx,
+        admission_shutdown_rx,
+    ));
+
     let mut steps: Vec<DaemonForegroundStepDiagnostics> = Vec::new();
     let mut iteration_index = 0u64;
 
@@ -968,13 +1007,6 @@ where
             Arc::clone(&project_boot_state),
             Arc::clone(&project_event_index),
             Arc::clone(&publisher),
-            worker_runtime_state.clone(),
-            lock_owner.clone(),
-            worker_command.clone(),
-            worker_config.clone(),
-            Arc::clone(&publish_result_sequence),
-            session_registry.clone(),
-            session_completed_tx.clone(),
             telegram_publisher,
         )
         .await?;
@@ -1022,13 +1054,9 @@ where
         iteration_index = iteration_index.saturating_add(1);
     }
 
-    tokio::task::spawn_blocking(move || session_registry.join_all())
-        .await
-        .map_err(|error| {
-            runtime_error(format!(
-                "failed to join foreground session registry: {error}"
-            ))
-        })?;
+    // Stop the admission driver and await all in-flight sessions.
+    let _ = admission_shutdown_tx.send(true);
+    let _ = admission_driver_handle.await;
 
     session
         .stop(DaemonShellStopMode::Shutdown)
@@ -1055,19 +1083,10 @@ async fn run_async_foreground_tick<P>(
     project_boot_state: Arc<Mutex<ProjectBootState>>,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
     publisher: Arc<Mutex<P>>,
-    worker_runtime_state: tenex_daemon::worker_runtime_state::SharedWorkerRuntimeState,
-    lock_owner: tenex_daemon::ral_lock::RalLockInfo,
-    worker_command: AgentWorkerCommand,
-    worker_config: AgentWorkerProcessConfig,
-    publish_result_sequence: Arc<AtomicU64>,
-    session_registry: WorkerSessionRegistry,
-    session_completed_tx: Option<
-        tokio::sync::mpsc::UnboundedSender<tenex_daemon::daemon_signals::SessionCompletion>,
-    >,
     telegram_publisher: ForegroundTelegramPublisherState,
 ) -> Result<
     (
-        Result<DaemonTickWithWorkerOutcome, DaemonTickWithWorkerError>,
+        Result<DaemonTickOutcome, DaemonTickError>,
         ForegroundTelegramPublisherState,
     ),
     CliError,
@@ -1078,11 +1097,9 @@ where
     let tenex_base_dir = tenex_base_dir.to_path_buf();
     let daemon_dir = daemon_dir.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let mut worker_spawner = AgentWorkerProcessDispatchSpawner;
         match telegram_publisher {
             ForegroundTelegramPublisherState::None => {
-                let mut telegram_publisher = NoTelegramPublisher;
-                let outcome = run_daemon_tick_once_from_filesystem_with_worker(
+                let outcome = run_daemon_tick_once_from_filesystem(
                     tenex_daemon::daemon_maintenance::DaemonMaintenanceInput {
                         tenex_base_dir: &tenex_base_dir,
                         daemon_dir: &daemon_dir,
@@ -1093,59 +1110,30 @@ where
                             .snapshot(),
                         project_event_index,
                         heartbeat_latch,
+                        dispatch_enqueued_tx: None,
                     },
-                    DaemonWorkerTickInput {
-                        runtime_state: worker_runtime_state,
-                        correlation_id: format!("daemon-foreground-worker:{now_ms}"),
-                        lock_owner,
-                        command: worker_command,
-                        worker_config: &worker_config,
-                        writer_version: daemon_writer_version(),
-                        resolved_pending_delegations: Vec::new(),
-                        publish_result_sequence: Some(publish_result_sequence),
-                        session_registry,
-                        session_completed_tx,
-                    },
-                    &mut worker_spawner,
                     &publisher,
                     PublishOutboxRetryPolicy::default(),
-                    &mut telegram_publisher,
                 );
                 (outcome, ForegroundTelegramPublisherState::None)
             }
-            ForegroundTelegramPublisherState::Registry(mut registry) => {
-                let outcome = {
-                    let mut telegram_publisher = WithTelegramPublisher(&mut registry);
-                    run_daemon_tick_once_from_filesystem_with_worker(
-                        tenex_daemon::daemon_maintenance::DaemonMaintenanceInput {
-                            tenex_base_dir: &tenex_base_dir,
-                            daemon_dir: &daemon_dir,
-                            now_ms,
-                            project_boot_state: project_boot_state
-                                .lock()
-                                .expect("project boot state mutex must not be poisoned")
-                                .snapshot(),
-                            project_event_index,
-                            heartbeat_latch,
-                        },
-                        DaemonWorkerTickInput {
-                            runtime_state: worker_runtime_state,
-                            correlation_id: format!("daemon-foreground-worker:{now_ms}"),
-                            lock_owner,
-                            command: worker_command,
-                            worker_config: &worker_config,
-                            writer_version: daemon_writer_version(),
-                            resolved_pending_delegations: Vec::new(),
-                            publish_result_sequence: Some(publish_result_sequence),
-                            session_registry,
-                            session_completed_tx,
-                        },
-                        &mut worker_spawner,
-                        &publisher,
-                        PublishOutboxRetryPolicy::default(),
-                        &mut telegram_publisher,
-                    )
-                };
+            ForegroundTelegramPublisherState::Registry(registry) => {
+                let outcome = run_daemon_tick_once_from_filesystem(
+                    tenex_daemon::daemon_maintenance::DaemonMaintenanceInput {
+                        tenex_base_dir: &tenex_base_dir,
+                        daemon_dir: &daemon_dir,
+                        now_ms,
+                        project_boot_state: project_boot_state
+                            .lock()
+                            .expect("project boot state mutex must not be poisoned")
+                            .snapshot(),
+                        project_event_index,
+                        heartbeat_latch,
+                        dispatch_enqueued_tx: None,
+                    },
+                    &publisher,
+                    PublishOutboxRetryPolicy::default(),
+                );
                 (
                     outcome,
                     ForegroundTelegramPublisherState::Registry(registry),
@@ -1193,11 +1181,7 @@ where
 
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let shell = DaemonShell::new(&daemon_dir);
-    let worker_command = build_agent_worker_command()?;
-    let worker_config = AgentWorkerProcessConfig::default();
-    let worker_runtime_state = new_shared_worker_runtime_state();
-    let mut worker_spawner = AgentWorkerProcessDispatchSpawner;
-    let report = run_daemon_foreground_until_stopped_from_filesystem_with_worker(
+    let report = run_daemon_foreground_until_stopped_from_filesystem(
         &shell,
         DaemonForegroundStoppableInput {
             tenex_base_dir: &tenex_base_dir,
@@ -1208,25 +1192,14 @@ where
             project_event_index,
             heartbeat_latch,
         },
-        DaemonForegroundWorkerInput {
-            runtime_state: worker_runtime_state,
-            correlation_id_prefix: "daemon-foreground-worker".to_string(),
-            command: worker_command,
-            worker_config: &worker_config,
-            writer_version: daemon_writer_version(),
-            resolved_pending_delegations: Vec::new(),
-            publish_result_sequence: Some(Arc::new(AtomicU64::new(1))),
-            session_registry: tenex_daemon::worker_session::registry::WorkerSessionRegistry::new(),
-            session_completed_tx: None,
-        },
         clock,
         sleeper,
         stop_signal,
-        &mut worker_spawner,
         publisher,
-        telegram_publisher,
     )
     .map_err(|error| runtime_error(error.to_string()))?;
+
+    let _ = telegram_publisher;
 
     let stopped_at = current_unix_time_ms();
     let steps: Vec<DaemonForegroundStepDiagnostics> = report

@@ -64,6 +64,26 @@ pub enum InboundRuntimeOutcome {
     },
 }
 
+impl InboundRuntimeOutcome {
+    /// Returns `true` when this outcome appended a new QUEUED dispatch record
+    /// that the admission driver should immediately consider.
+    pub fn produced_queued_dispatch(&self) -> bool {
+        match self {
+            InboundRuntimeOutcome::Routed { dispatch, .. } => dispatch.queued,
+            InboundRuntimeOutcome::DelegationCompletion { dispatch, .. } => match dispatch {
+                crate::inbound_dispatch::DelegationCompletionDispatchOutcome::Resumed {
+                    queued,
+                    ..
+                } => *queued,
+                crate::inbound_dispatch::DelegationCompletionDispatchOutcome::Recorded {
+                    ..
+                } => false,
+            },
+            InboundRuntimeOutcome::Ignored { .. } => false,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum InboundRuntimeError {
     #[error("inbound routing catalog failed: {0}")]

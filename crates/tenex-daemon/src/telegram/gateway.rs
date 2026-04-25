@@ -41,7 +41,10 @@ use serde_json::Value;
 use thiserror::Error;
 use tracing;
 
+use tokio::sync::mpsc::UnboundedSender;
+
 use crate::backend_events::heartbeat::BackendSigner;
+use crate::daemon_signals::DispatchEnqueued;
 use crate::telegram::chat_context::{
     ChatContextError, ChatContextSnapshot, DEFAULT_API_SYNC_TTL_MS, RefreshChatContextInput,
     SeenUser, record_seen_participant, refresh_chat_context,
@@ -111,6 +114,7 @@ pub struct GatewayConfig {
     /// don't exercise Nostr publishing terse.
     pub signer: Option<Arc<dyn BackendSigner + Send + Sync>>,
     pub project_event_index: Arc<std::sync::Mutex<crate::project_event_index::ProjectEventIndex>>,
+    pub dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
 }
 
 impl std::fmt::Debug for GatewayConfig {
@@ -147,6 +151,7 @@ impl GatewayConfig {
             project_event_index: Arc::new(std::sync::Mutex::new(
                 crate::project_event_index::ProjectEventIndex::new(),
             )),
+            dispatch_enqueued_tx: None,
         }
     }
 
@@ -351,6 +356,7 @@ where
                 chat_context_api_sync_ttl_ms: config.chat_context_api_sync_ttl_ms,
                 signer: config.signer.clone(),
                 project_event_index: config.project_event_index.clone(),
+                dispatch_enqueued_tx: config.dispatch_enqueued_tx.clone(),
             },
         );
         handles.push(handle);
@@ -369,6 +375,7 @@ struct GatewayThreadConfig {
     chat_context_api_sync_ttl_ms: u64,
     signer: Option<Arc<dyn BackendSigner + Send + Sync>>,
     project_event_index: Arc<std::sync::Mutex<crate::project_event_index::ProjectEventIndex>>,
+    dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
 }
 
 fn spawn_gateway_thread<A>(
@@ -690,6 +697,7 @@ fn process_one<A>(
         timestamp: now,
         writer_version: &config.writer_version,
         project_event_index: &config.project_event_index,
+        dispatch_enqueued_tx: config.dispatch_enqueued_tx.as_ref(),
     });
 
     match result {
@@ -1210,6 +1218,7 @@ mod tests {
             chat_context_api_sync_ttl_ms: 0,
             signer: None,
             project_event_index: std::sync::Arc::clone(&project_event_index),
+            dispatch_enqueued_tx: None,
         }
     }
 

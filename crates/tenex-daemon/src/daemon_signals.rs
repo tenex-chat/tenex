@@ -9,7 +9,7 @@
 //! no sane fallback (the event has already been persisted, so dropping the
 //! wake produces silent data loss).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
