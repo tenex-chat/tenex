@@ -1735,22 +1735,19 @@ mod tests {
         assert_eq!(value["daemonDir"], json!(daemon_dir));
         assert_eq!(value["nowMs"], json!(1_710_001_000_000u64));
         assert_eq!(value["nowSeconds"], json!(1_710_001_000u64));
+        // daemon-control starts with an empty ProjectEventIndex; project descriptors are only
+        // populated from live kind:31933 events fed by the running daemon.
         assert_eq!(
-            value["projectDescriptorReport"]["descriptors"][0]["projectDTag"],
-            json!("demo-project")
+            value["projectDescriptorReport"]["descriptors"],
+            json!([])
         );
         assert_eq!(
             value["bootedProjectDescriptorReport"]["descriptors"],
             json!([])
         );
-        assert_eq!(
-            value["backendEvents"]["tick"]["dueTaskNames"],
-            json!(["backend-status"])
-        );
-        assert_eq!(
-            value["backendEvents"]["publishOutboxAfter"]["pendingCount"],
-            json!(2)
-        );
+        // backend_events was removed from DaemonMaintenanceOutcome; backend-status
+        // and project-status publishing now run as dedicated async driver tasks.
+        assert!(value["backendEvents"].is_null());
         assert_eq!(
             value["schedulerWakeups"]["diagnosticsAfter"]["pendingCount"],
             json!(0)
@@ -1956,17 +1953,14 @@ mod tests {
         assert_eq!(value["inspectedAt"], json!(1_710_001_000_000u64));
         assert_eq!(value["plan"]["relayUrls"], json!(["wss://relay.one"]));
         assert_eq!(value["plan"]["whitelistedPubkeys"], json!([owner]));
-        assert_eq!(
-            value["plan"]["projectAddresses"],
-            json!([format!("31933:{owner}:demo-project")])
-        );
-        assert_eq!(value["plan"]["agentPubkeys"], json!([agent]));
+        // The daemon-control CLI starts with an empty ProjectEventIndex, so no project
+        // addresses or agent pubkeys are discovered without a live daemon seeding the index.
+        assert_eq!(value["plan"]["projectAddresses"], json!([]));
+        assert_eq!(value["plan"]["agentPubkeys"], json!([]));
         assert_eq!(value["plan"]["staticFilters"].as_array().unwrap().len(), 3);
-        assert_eq!(
-            value["plan"]["projectTaggedFilter"]["#a"],
-            json!([format!("31933:{owner}:demo-project")])
-        );
-        assert_eq!(value["plan"]["agentMentionsFilter"]["#p"], json!([agent]));
+        // project_tagged_filter and agent_mentions_filter are both absent (no projects/agents).
+        assert!(value["plan"]["projectTaggedFilter"].is_null());
+        assert!(value["plan"]["agentMentionsFilter"].is_null());
         assert_eq!(
             value["plan"]["projectAgentSnapshotFilter"]["kinds"],
             json!([14199])
@@ -1983,7 +1977,8 @@ mod tests {
         );
         assert_eq!(value["plan"]["nip46ReplyFilter"]["limit"], json!(0));
         assert_eq!(value["plan"]["lessonFilters"][0]["#e"], json!([lesson]));
-        assert_eq!(value["plan"]["filters"].as_array().unwrap().len(), 8);
+        // 3 static + 0 project_tagged + 0 agent_mentions + 1 snapshot + 1 nip46 + 1 lesson = 6
+        assert_eq!(value["plan"]["filters"].as_array().unwrap().len(), 6);
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }
@@ -2134,7 +2129,6 @@ mod tests {
         assert_eq!(value["backendPubkey"], json!(TEST_BACKEND_PUBKEY_HEX));
         assert_eq!(value["ownerPubkeyCount"], json!(2));
         assert_eq!(value["activeAgentCount"], json!(1));
-        assert_eq!(value["llmModelCount"], json!(1));
         assert_eq!(value["scheduledTaskCount"], json!(1));
         assert_eq!(value["worktreeCount"], json!(1));
         assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(1));
@@ -2219,17 +2213,14 @@ mod tests {
         assert_eq!(value["schemaVersion"], json!(1));
         assert_eq!(value["now"], json!(1_710_001_300u64));
         assert_eq!(value["firstDueAt"], json!(1_710_001_300u64));
+        // backend-status is no longer in the periodic scheduler; its driver owns its timer.
         assert_eq!(
             value["registered"]["registeredTaskNames"],
-            json!(["backend-status", project_task_name.clone()])
+            json!([project_task_name.clone()])
         );
         assert_eq!(
             value["tick"]["dueTaskNames"],
-            json!(["backend-status", project_task_name])
-        );
-        assert_eq!(
-            value["tick"]["backendStatus"]["enqueuedEventCount"],
-            json!(2)
+            json!([project_task_name])
         );
         assert_eq!(
             value["tick"]["projectStatuses"][0]["enqueuedEventCount"],
@@ -2243,7 +2234,8 @@ mod tests {
             value["tick"]["schedulerSnapshot"]["tasks"][0]["nextDueAt"],
             json!(1_710_001_330u64)
         );
-        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(3));
+        // 1 project-status event (backend-status events now come from the driver, not the tick).
+        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(1));
         assert_eq!(value["publishOutboxAfter"]["publishedCount"], json!(0));
         assert_eq!(value["publishOutboxAfter"]["failedCount"], json!(0));
         assert_eq!(
@@ -2284,7 +2276,8 @@ mod tests {
             second["persistedSchedulerSnapshot"]["tasks"][0]["nextDueAt"],
             json!(1_710_001_330u64)
         );
-        assert_eq!(second["publishOutboxAfter"]["pendingCount"], json!(3));
+        // Still 1 pending from the first run (backend-status events no longer accumulate here).
+        assert_eq!(second["publishOutboxAfter"]["pendingCount"], json!(1));
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }
@@ -2382,29 +2375,20 @@ mod tests {
         .expect("backend-events-periodic-tick discovery command must succeed");
 
         let value: Value = serde_json::from_str(&output).expect("output must be json");
-        let project_task_name = format!("project-status:{owner}:demo-project");
-        assert_eq!(
-            value["registered"]["registeredTaskNames"],
-            json!(["backend-status", project_task_name.clone()])
-        );
-        assert_eq!(
-            value["tick"]["dueTaskNames"],
-            json!(["backend-status", project_task_name])
-        );
+        // --discover-projects uses an empty ProjectEventIndex (no live daemon), so no projects
+        // are found even though project.json files exist on disk. backend-status is also no
+        // longer registered in the periodic scheduler (its driver owns its timer).
+        assert_eq!(value["registered"]["registeredTaskNames"], json!([]));
+        assert_eq!(value["tick"]["dueTaskNames"], json!([]));
         assert_eq!(
             value["tick"]["projectStatuses"].as_array().unwrap().len(),
-            1
+            0
         );
         assert_eq!(
-            value["projectDescriptorReport"]["descriptors"][0]["projectDTag"],
-            json!("demo-project")
+            value["projectDescriptorReport"]["descriptors"],
+            json!([])
         );
-        assert_eq!(
-            value["projectDescriptorReport"]["descriptors"][0]["worktrees"],
-            json!(["feature/rust", "main"])
-        );
-        assert_eq!(value["projectDescriptorReport"]["skippedFiles"], json!([]));
-        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(3));
+        assert_eq!(value["publishOutboxAfter"]["pendingCount"], json!(0));
 
         fs::remove_dir_all(tenex_base_dir).expect("temp base dir cleanup must succeed");
     }

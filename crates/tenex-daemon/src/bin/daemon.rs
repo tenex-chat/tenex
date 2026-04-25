@@ -1576,6 +1576,27 @@ mod tests {
     #[test]
     fn foreground_runner_serializes_diagnostics() {
         let fixture = foreground_fixture("foreground_runner_serializes_diagnostics");
+        // Pre-seed the publish outbox with a project-status record so the
+        // foreground loop has something to drain. The backend-status driver no
+        // longer runs inside the tick path.
+        let owner = pubkey_hex(0x02);
+        tenex_daemon::project_status_runtime::publish_project_status_from_filesystem(
+            tenex_daemon::project_status_runtime::ProjectStatusRuntimeInput {
+                tenex_base_dir: &fixture.tenex_base_dir,
+                daemon_dir: &fixture.daemon_dir,
+                created_at: 1_710_001_000,
+                accepted_at: 1_710_001_000_000,
+                request_timestamp: 1_710_001_000_000,
+                project_owner_pubkey: &owner,
+                project_d_tag: "demo-project",
+                project_manager_pubkey: None,
+                project_base_path: None,
+                agents: None,
+                worktrees: None,
+            },
+        )
+        .expect("pre-seed project-status publish must succeed");
+
         let options = DaemonCliOptions {
             daemon_dir: Some(fixture.daemon_dir.clone()),
             tenex_base_dir: Some(fixture.tenex_base_dir.clone()),
