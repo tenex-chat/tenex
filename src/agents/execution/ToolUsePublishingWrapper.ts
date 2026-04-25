@@ -11,7 +11,6 @@ import { formatMcpToolName, isDelegateToolName } from "@/agents/tool-names";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import { createEventContext } from "@/services/event-context";
-import { PendingDelegationsRegistry } from "@/services/ral";
 import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
 import type { Tool as CoreTool } from "ai";
 import type { FullRuntimeContext } from "./types";
@@ -38,11 +37,11 @@ function extractDelegationEventId(result: unknown): string | undefined {
  * tool execution, awaited inside the AI SDK's execute() call.
  *
  * For delegate-family tools the event carries q-tags referencing the
- * delegation event IDs. These are derived directly from the tool result's
- * `delegationEventId` field. For MCP-wrapped delegate tools (where the
- * result is stripped by the MCP transport) we fall back to
- * PendingDelegationsRegistry, which was populated by AgentPublisher before
- * the MCP result transformation ran.
+ * delegation event IDs, derived directly from the tool result's
+ * `delegationEventId` field. MCP-wrapped delegate variants whose result
+ * shape is stripped by the transport publish without a q-tag — there is
+ * no per-tool-call correlation channel that survives transport stripping
+ * and would correctly disambiguate parallel calls on the same conversation.
  */
 export function wrapToolsWithToolUsePublishing(
     toolsObject: Record<string, CoreTool<unknown, unknown>>,
@@ -74,15 +73,6 @@ export function wrapToolsWithToolUsePublishing(
                     const directId = extractDelegationEventId(result);
                     if (directId) {
                         referencedEventIds = [directId];
-                    } else {
-                        // MCP-wrapped path: result was stripped by the transport.
-                        // Fall back to PendingDelegationsRegistry which AgentPublisher
-                        // populated before the MCP transformation ran.
-                        const pending = PendingDelegationsRegistry.consume(
-                            context.agent.pubkey,
-                            context.conversationId
-                        );
-                        referencedEventIds = pending.length > 0 ? pending : undefined;
                     }
                 }
 

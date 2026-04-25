@@ -6,7 +6,7 @@ import type {
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import { RALRegistry } from "@/services/ral";
 import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { shortenConversationId, shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
@@ -393,9 +393,6 @@ export class AgentPublisher implements AgentRuntimePublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "delegation");
 
-        // Register with PendingDelegationsRegistry for q-tag correlation
-        PendingDelegationsRegistry.register(this.agent.pubkey, context.conversationId, event.id);
-
         return event.id;
     }
 
@@ -456,9 +453,6 @@ export class AgentPublisher implements AgentRuntimePublisher {
         injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "ask");
-
-        // Register with PendingDelegationsRegistry for q-tag correlation
-        PendingDelegationsRegistry.register(this.agent.pubkey, enhancedContext.conversationId, event.id);
 
         return this.toPublishedMessageRef(event);
     }
