@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use notify::{EventKind, RecursiveMode, Watcher};
+use notify::{Config, EventKind, PollWatcher, RecursiveMode, Watcher};
 use tokio::sync::{Notify, mpsc};
 
 /// Sent when a new project is booted (i.e. a 24000 boot event is recorded).
@@ -86,12 +86,17 @@ pub struct ScheduleWatcherHandle {
 }
 
 /// Spawn a background OS thread that watches `<tenex_base_dir>/projects/`
-/// recursively. When any path matching `*/schedules.json` is created,
-/// modified, or renamed, `project_schedules_changed` is fired so all
-/// per-project scheduled-task driver tasks re-read their schedule files.
+/// recursively for `schedules.json` changes. When such a change is detected,
+/// `project_schedules_changed` is notified so all per-project scheduled-task
+/// driver tasks re-read their schedule files.
 ///
-/// Uses an OS-level file watcher via the `notify` crate (kqueue on macOS,
-/// inotify on Linux) so there's no polling.
+/// Uses `notify::PollWatcher` with a 1-second interval rather than the
+/// platform OS watcher (`kqueue` on macOS). The kqueue backend in
+/// `kqueue-1.1.1` has a known bug (unwrap on None at lib.rs:661) that causes
+/// the watcher thread to panic during e2e runs when the watched directory is
+/// removed and recreated. PollWatcher is pure-stdlib, never panics on
+/// directory lifecycle events, and 1-second detection latency is acceptable
+/// for schedule file changes.
 pub fn spawn_schedule_watcher(
     tenex_base_dir: PathBuf,
     project_schedules_changed: Arc<Notify>,
@@ -105,7 +110,8 @@ pub fn spawn_schedule_watcher(
         let _ = std::fs::create_dir_all(&projects_dir);
 
         let notify_clone = Arc::clone(&project_schedules_changed);
-        let mut watcher = match notify::recommended_watcher(
+        let config = Config::default().with_poll_interval(Duration::from_secs(1));
+        let mut watcher = match PollWatcher::new(
             move |event: notify::Result<notify::Event>| {
                 let Ok(event) = event else {
                     return;
@@ -125,6 +131,7 @@ pub fn spawn_schedule_watcher(
                     notify_clone.notify_waiters();
                 }
             },
+            config,
         ) {
             Ok(w) => w,
             Err(error) => {
@@ -138,8 +145,8 @@ pub fn spawn_schedule_watcher(
             return;
         }
 
-        // Block until shutdown. The notify watcher runs in its own internal
-        // thread; this thread just keeps the watcher alive.
+        // Block until shutdown. PollWatcher runs its polling loop internally;
+        // this thread just keeps the watcher alive.
         loop {
             match stop_rx.recv_timeout(Duration::from_secs(60)) {
                 Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
