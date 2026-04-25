@@ -228,11 +228,24 @@ pub fn read_project_agent_inventory_payload(
 
 /// Derive the TENEX base dir from a per-project metadata path. The metadata
 /// path is `<tenex_base_dir>/projects/<project_id>` per existing layout.
+///
+/// Falls back to the `TENEX_BASE_DIR` environment variable when the path
+/// derivation fails (e.g. the metadata_path is not under the standard
+/// `<base>/projects/<id>` layout). The daemon is always launched with
+/// TENEX_BASE_DIR set, so the env-var fallback is a reliable safety net.
 pub fn tenex_base_dir_from_metadata_path(metadata_path: &Path) -> Option<PathBuf> {
-    metadata_path
-        .parent() // .../projects
-        .and_then(Path::parent) // .../<tenex_base_dir>
-        .map(Path::to_path_buf)
+    if let Some(parent) = metadata_path.parent().and_then(Path::parent) {
+        // Sanity check: the derived parent should be the same as the
+        // grandparent of the metadata_path. We treat the parent path as
+        // valid if it actually exists; a non-existent path likely means
+        // the layout is non-standard and we should fall through to env.
+        let candidate = parent.to_path_buf();
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    std::env::var_os("TENEX_BASE_DIR").map(PathBuf::from)
 }
 
 #[cfg(test)]
