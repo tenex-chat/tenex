@@ -348,6 +348,112 @@ fn run_worker_startup_recovery(daemon_dir: &Path) -> Result<(), CliError> {
         Err(error) => Err(runtime_error(format!(
             "worker startup recovery failed: {error}"
         ))),
+    }?;
+
+    // After RAL orphan reconciliation, scan dispatch sidecars for
+    // tampering. If a sidecar's executeFields don't match the dispatch
+    // queue record (e.g. corruption between daemon restarts), surface a
+    // diagnostic so operators see the mismatch on the next tick attempt.
+    // Without this, a corrupted sidecar can silently fail admission with
+    // no operator-visible signal.
+    validate_dispatch_sidecars_at_startup(daemon_dir);
+    Ok(())
+}
+
+fn validate_dispatch_sidecars_at_startup(daemon_dir: &Path) {
+    use tenex_daemon::dispatch_queue::{DispatchQueueStatus, replay_dispatch_queue};
+    use tenex_daemon::worker_dispatch::input::read_optional as read_dispatch_input;
+
+    let state = match replay_dispatch_queue(daemon_dir) {
+        Ok(state) => state,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "could not replay dispatch queue during startup sidecar validation"
+            );
+            return;
+        }
+    };
+
+    // Validate every queued and leased dispatch's sidecar against the queue
+    // record. Terminal records are skipped (they're already done).
+    let candidates = state
+        .queued
+        .iter()
+        .chain(state.leased.iter())
+        .filter(|record| {
+            matches!(
+                record.status,
+                DispatchQueueStatus::Queued | DispatchQueueStatus::Leased
+            )
+        });
+
+    for record in candidates {
+        let sidecar = match read_dispatch_input(daemon_dir, &record.dispatch_id) {
+            Ok(Some(sidecar)) => sidecar,
+            Ok(None) => continue,
+            Err(error) => {
+                let detail = format!("sidecar unreadable: {error}");
+                tracing::warn!(
+                    dispatch_id = %record.dispatch_id,
+                    error = %error,
+                    "worker dispatch input validation failed: sidecar unreadable"
+                );
+                tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
+                    &record.dispatch_id,
+                    &detail,
+                );
+                continue;
+            }
+        };
+        if sidecar.dispatch_id != record.dispatch_id {
+            let detail = format!(
+                "sidecar dispatch_id {} != queue {}",
+                sidecar.dispatch_id, record.dispatch_id
+            );
+            tracing::warn!(
+                dispatch_id = %record.dispatch_id,
+                sidecar_dispatch_id = %sidecar.dispatch_id,
+                "worker dispatch input validation failed: sidecar dispatch_id mismatch"
+            );
+            tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
+                &record.dispatch_id,
+                &detail,
+            );
+            continue;
+        }
+        let fields = match sidecar.resolved_execute_fields() {
+            Ok(fields) => fields,
+            Err(error) => {
+                let detail = format!("sidecar fields invalid: {error}");
+                tracing::warn!(
+                    dispatch_id = %record.dispatch_id,
+                    error = %error,
+                    "worker dispatch input validation failed: sidecar fields invalid"
+                );
+                tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
+                    &record.dispatch_id,
+                    &detail,
+                );
+                continue;
+            }
+        };
+        if fields.triggering_event_id != record.triggering_event_id {
+            let detail = format!(
+                "triggering event id mismatch: expected {}, sidecar has {}",
+                record.triggering_event_id, fields.triggering_event_id
+            );
+            tracing::warn!(
+                dispatch_id = %record.dispatch_id,
+                expected_triggering_event_id = %record.triggering_event_id,
+                actual_triggering_event_id = %fields.triggering_event_id,
+                "worker dispatch input validation failed: triggering event mismatch"
+            );
+            tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
+                &record.dispatch_id,
+                &detail,
+            );
+        }
     }
 }
 

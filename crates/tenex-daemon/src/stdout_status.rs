@@ -210,3 +210,10 @@ pub fn print_sighup_reload_failed(error: &dyn std::error::Error) {
         timestamp()
     );
 }
+
+pub fn print_dispatch_input_validation_failed(dispatch_id: &str, detail: &str) {
+    println!(
+        "{DIM}{}{RESET}  {BOLD}{RED}✖{RESET}  {BOLD}{RED}worker dispatch input validation failed{RESET}  dispatch {DIM}{dispatch_id}{RESET}  {detail}",
+        timestamp()
+    );
+}

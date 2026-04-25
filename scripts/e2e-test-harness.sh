@@ -176,11 +176,15 @@ start_daemon() {
   HARNESS_DAEMON_LOG="$FIXTURE_ROOT/daemon.log"
   _log "starting daemon (TENEX_BASE_DIR=$TENEX_BASE_DIR)"
 
+  # Append rather than truncate: scenarios that stop+restart the daemon
+  # rely on byte-offset tailing to differentiate pre-restart vs post-restart
+  # log lines (see scripts/e2e/scenarios/37_dispatch_input_mismatch.sh).
+  # Truncating on each start makes those offsets meaningless.
   ( cd "$HARNESS_REPO_ROOT" && \
     TENEX_BASE_DIR="$TENEX_BASE_DIR" \
     cargo run --release -p tenex-daemon --bin daemon -- \
       --tenex-base-dir "$TENEX_BASE_DIR" \
-      >"$HARNESS_DAEMON_LOG" 2>&1 ) &
+      >>"$HARNESS_DAEMON_LOG" 2>&1 ) &
   HARNESS_DAEMON_PID=$!
 
   if ! _await_file "$DAEMON_DIR/tenex.lock" 60; then
