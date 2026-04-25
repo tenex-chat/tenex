@@ -153,7 +153,7 @@ echo "[scenario]   user message id=$user_msg_id"
 # Wait for the dispatch queue to show this event as "leased" — the worker
 # has picked it up, meaning we are genuinely mid-stream.
 echo "[scenario] waiting for dispatch to reach 'leased' state (mid-stream window)..."
-_deadline=$(( $(date +%s) + 45 ))
+_deadline=$(( $(date +%s) + 15 ))
 saw_leased=0
 while [[ $(date +%s) -lt $_deadline ]]; do
   if [[ -f "$_queue" ]] && \
@@ -164,7 +164,7 @@ while [[ $(date +%s) -lt $_deadline ]]; do
     saw_leased=1
     break
   fi
-  sleep 0.3
+  sleep 0.2
 done
 
 if [[ "$saw_leased" -ne 1 ]]; then
@@ -176,7 +176,7 @@ if [[ "$saw_leased" -ne 1 ]]; then
        "$_queue" >/dev/null 2>&1; then
     echo "[scenario]   dispatch enqueued (not yet leased) — SIGKILL will interrupt at dispatch stage"
   else
-    _die "ASSERT: no dispatch enqueued for user message within 45s"
+    _die "ASSERT: no dispatch enqueued for user message within 15s"
   fi
 else
   echo "[scenario]   dispatch reached 'leased' (worker mid-stream) ✓"
@@ -245,8 +245,13 @@ if ! kill -0 "$HARNESS_DAEMON_PID" 2>/dev/null; then
 fi
 echo "[scenario]   restarted daemon is running (pid $HARNESS_DAEMON_PID) ✓"
 
-# Give the daemon a moment to apply any startup reconciliation it performs.
-sleep 3
+# Wait for startup reconciliation (poll for authenticated log line).
+reconcile_deadline=$(( $(date +%s) + 3 ))
+while [[ $(date +%s) -lt $reconcile_deadline ]]; do
+  [[ -f "$DAEMON_DIR/daemon.log" ]] && \
+    grep -q '"relay authenticated, resubscribed"' "$DAEMON_DIR/daemon.log" 2>/dev/null && break
+  sleep 0.2
+done
 
 # Assert: no panic in daemon log.
 if grep -q "thread '.*' panicked\|RUST_BACKTRACE" "$DAEMON_DIR/daemon.log" 2>/dev/null; then
@@ -341,7 +346,7 @@ while [[ $(date +%s) -lt $_deadline2 ]]; do
     saw_dispatch2=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 
 if [[ "$saw_dispatch2" -eq 1 ]]; then

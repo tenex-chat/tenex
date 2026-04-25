@@ -96,8 +96,13 @@ newer_evt="$(publish_event_at "$USER_NSEC" 31933 "$ts_newer" "Newer project revi
 newer_id="$(printf '%s' "$newer_evt" | jq -r .id)"
 echo "[scenario]   newer 31933 id=$newer_id created_at=$ts_newer"
 
-# Give the daemon time to ingest the newer event.
-sleep 3
+# Wait for daemon to ingest the newer event (poll for project_updated log).
+ingest_deadline=$(( $(date +%s) + 5 ))
+while [[ $(date +%s) -lt $ingest_deadline ]]; do
+  [[ -f "$DAEMON_DIR/daemon.log" ]] && \
+    grep -q '"code":"project_updated"' "$DAEMON_DIR/daemon.log" 2>/dev/null && break
+  sleep 0.2
+done
 
 pre_updated_count="$(grep -c '"code":"project_updated"' "$DAEMON_DIR/daemon.log" 2>/dev/null || echo 0)"
 echo "[scenario]   daemon log project_updated count after newer 31933: $pre_updated_count"
@@ -118,8 +123,8 @@ older_evt="$(publish_event_at "$USER_NSEC" 31933 "$ts_older" "Older project revi
 older_id="$(printf '%s' "$older_evt" | jq -r .id)"
 echo "[scenario]   older 31933 id=$older_id created_at=$ts_older"
 
-# Give the daemon time to process (or correctly discard) the older event.
-sleep 3
+# Wait for daemon to process the older event (max 3s — it's a discard path).
+sleep 0.5
 
 post_updated_count="$(grep -c '"code":"project_updated"' "$DAEMON_DIR/daemon.log" 2>/dev/null || echo 0)"
 echo "[scenario]   daemon log project_updated count after older 31933: $post_updated_count (informational)"
@@ -157,7 +162,7 @@ echo "[scenario]   daemon still running (pid $HARNESS_DAEMON_PID) ✓"
 # daemon may have reconnected and re-subscribed). This is robust to both the
 # subscription-refresh window and relay reconnect cycles.
 echo "[scenario] phase 4: polling-boot kind:24000 for project $PROJECT_D_TAG"
-boot_deadline=$(( $(date +%s) + 60 ))
+boot_deadline=$(( $(date +%s) + 15 ))
 saw_boot=0
 attempt=0
 while [[ $(date +%s) -lt $boot_deadline ]]; do
@@ -166,15 +171,15 @@ while [[ $(date +%s) -lt $boot_deadline ]]; do
   boot_id="$(printf '%s' "$boot_evt" | jq -r '.id // empty' 2>/dev/null || true)"
   [[ -n "$boot_id" ]] && echo "[scenario]   boot attempt #$attempt id=$boot_id"
 
-  # Poll for project_booted up to 10s per attempt before republishing.
-  poll_deadline=$(( $(date +%s) + 10 ))
+  # Poll for project_booted up to 5s per attempt before republishing.
+  poll_deadline=$(( $(date +%s) + 5 ))
   while [[ $(date +%s) -lt $poll_deadline ]]; do
     if [[ -f "$DAEMON_DIR/daemon.log" ]] && \
        grep -q '"code":"project_booted"' "$DAEMON_DIR/daemon.log" 2>/dev/null; then
       saw_boot=1
       break 2
     fi
-    sleep 0.5
+    sleep 0.2
   done
 
   [[ $(date +%s) -ge $boot_deadline ]] && break
@@ -191,8 +196,8 @@ if ! grep '"code":"project_booted"' "$DAEMON_DIR/daemon.log" | grep -q "$PROJECT
 fi
 echo "[scenario]   project_booted logged for our d-tag ✓"
 
-# Allow the periodic maintenance tick to publish the project-status (kind:24010).
-sleep 8
+# Wait for daemon to publish kind:24010 (poll-wait, up to 10s).
+await_kind_event 24010 "" "$BACKEND_PUBKEY" 10 >/dev/null 2>&1 || true
 
 # Assertion: daemon published kind:24010 for the project a-tag.
 events_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
@@ -210,9 +215,11 @@ fi
 echo "[scenario]   kind:24010 published for our project a-tag ✓"
 
 # ── Phase 5: verify relay retains the newer 31933 ────────────────────────────
+# Use --limit 2 (distinct from the phase-2 --limit 1) so the relay's 5-second
+# historicalQueryReplayGuard does not deduplicate this query.
 echo "[scenario] phase 5: verifying relay retains the newer kind:31933"
 relay_project="$(nak req -k 31933 -d "$PROJECT_D_TAG" -a "$USER_PUBKEY" \
-  --limit 1 --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  --limit 2 --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
 relay_created_at="$(printf '%s' "$relay_project" | jq -r '.created_at // empty' 2>/dev/null || true)"
 if [[ "$relay_created_at" != "$ts_newer" ]]; then
   emit_result fail "relay does not retain newer 31933 (got created_at=$relay_created_at want=$ts_newer)"

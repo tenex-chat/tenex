@@ -140,7 +140,7 @@ for attempt in 1 2 3; do
       _saw_dispatch=1
       break
     fi
-    sleep 0.5
+    sleep 0.2
   done
   [[ "$_saw_dispatch" -eq 1 ]] && break
   echo "[scenario]   no dispatch yet — retrying..."
@@ -161,11 +161,11 @@ echo ""
 echo "[scenario] waiting for mock-driven delegation flow to complete (timeout=60s)..."
 phase_b_deadline=$(( $(date +%s) + 60 ))
 
+journal="$DAEMON_DIR/ral/journal.jsonl"
+
 saw_agent2_response=0
 saw_agent1_final=0
 saw_terminal_ral=0
-
-journal="$DAEMON_DIR/ral/journal.jsonl"
 
 while [[ $(date +%s) -lt $phase_b_deadline ]]; do
   if [[ "$saw_agent2_response" -eq 0 ]]; then

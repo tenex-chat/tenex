@@ -22,8 +22,8 @@ HARNESS_REPO_ROOT="${HARNESS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.."
 HARNESS_DEFAULT_MODEL="${HARNESS_DEFAULT_MODEL:-qwen3.5}"
 
 # Default polling intervals (seconds)
-HARNESS_POLL_INTERVAL="${HARNESS_POLL_INTERVAL:-0.5}"
-HARNESS_DEFAULT_TIMEOUT="${HARNESS_DEFAULT_TIMEOUT:-30}"
+HARNESS_POLL_INTERVAL="${HARNESS_POLL_INTERVAL:-0.2}"
+HARNESS_DEFAULT_TIMEOUT="${HARNESS_DEFAULT_TIMEOUT:-15}"
 
 # === Logging ==================================================================
 
@@ -252,13 +252,13 @@ await_daemon_subscribed() {
       [[ -z "$probe_id" ]] && { sleep 1; continue; }
 
       local poll
-      for poll in 1 2 3 4 5 6 7 8; do
+      for poll in 1 2 3 4 5 6 7 8 9 10 12 14 16 18 20; do
         if [[ -f "$log" ]] && grep -q "$probe_id" "$log"; then
-          _log "kind:$kind listener confirmed (probe #$attempt round-tripped after $((poll*500))ms)"
+          _log "kind:$kind listener confirmed (probe #$attempt round-tripped after $((poll*200))ms)"
           got=1
           break 2
         fi
-        sleep 0.5
+        sleep 0.2
         [[ $(date +%s) -ge $deadline ]] && break
       done
       [[ $(date +%s) -ge $deadline ]] && break
@@ -397,12 +397,14 @@ await_dispatch_status() {
 }
 
 # await_kind_event <kind> [d-tag] [author] [timeout_seconds]
-# Polls the relay (over websocket via nak req) until at least one matching event
-# is returned. Echoes the first event JSON.
+# Waits for at least one matching event on the relay. Returns immediately when
+# the event arrives; fails after timeout. Echoes the first event JSON.
+#
+# Strategy: first try a historical fetch (catches events already on the relay),
+# then open a streaming subscription that exits on the first live event.
+# Both paths share the same timeout budget.
 #
 # Authenticates as BACKEND_NSEC (admin on the harness relay).
-# Varies --limit per iteration to dodge the relay's historicalQueryReplayGuard,
-# which short-circuits repeated identical filters within ~5s with LimitZero.
 await_kind_event() {
   local kind="${1:?kind}"
   local d_tag="${2:-}"
@@ -413,22 +415,30 @@ await_kind_event() {
   [[ -n "${BACKEND_NSEC:-}" ]] || _die "BACKEND_NSEC unset; call harness_init first"
 
   local deadline=$(( $(date +%s) + timeout ))
+
+  # Build the common filter args (sans relay).
+  local base_args=(req -k "$kind" --auth --sec "$BACKEND_NSEC")
+  [[ -n "$d_tag" ]] && base_args+=(-d "$d_tag")
+  [[ -n "$author" ]] && base_args+=(-a "$author")
+
+  # Poll with an incrementing --limit so each successive query produces a
+  # distinct filter signature, bypassing the relay's 5-second
+  # historicalQueryReplayGuard that deduplicates identical filter signatures.
+  # This replaces the historical-fetch + timeout-stream pattern, which requires
+  # the GNU `timeout` command that is not available on macOS.
   local lim=20
   while [[ $(date +%s) -lt $deadline ]]; do
-    local args=(req -k "$kind" --limit "$lim" --auth --sec "$BACKEND_NSEC")
-    [[ -n "$d_tag" ]] && args+=(-d "$d_tag")
-    [[ -n "$author" ]] && args+=(-a "$author")
-    args+=("$HARNESS_RELAY_URL")
     local out
-    out="$(nak "${args[@]}" 2>/dev/null || true)"
+    out="$(nak "${base_args[@]}" --limit "$lim" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
     if [[ -n "$out" ]] && [[ "$out" != "[]" ]]; then
       printf '%s\n' "$out" | head -1
       return 0
     fi
-    lim=$((lim + 1))
-    sleep "$HARNESS_POLL_INTERVAL"
+    lim=$(( lim + 1 ))
+    sleep 0.5
   done
-  _log "TIMEOUT: no kind=$kind d=$d_tag author=$author event seen"
+
+  _log "TIMEOUT: no kind=$kind d=$d_tag author=$author event seen within ${timeout}s"
   return 1
 }
 

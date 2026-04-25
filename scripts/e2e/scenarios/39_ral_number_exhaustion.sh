@@ -103,20 +103,9 @@ await_daemon_subscribed 45 || _die "daemon subscription never became live"
 boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 echo "[scenario] boot event id=$(printf '%s' "$boot_evt" | jq -r .id)"
 
-deadline=$(( $(date +%s) + 60 ))
-while [[ $(date +%s) -lt $deadline ]]; do
-  if [[ -n "$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
-              "$HARNESS_RELAY_URL" 2>/dev/null || true)" ]]; then
-    echo "[scenario] daemon published kind:24010 ✓"
-    break
-  fi
-  sleep 2
-done
-if [[ $(date +%s) -ge $deadline ]]; then
-  tail -40 "$HARNESS_DAEMON_LOG" >&2 || true
-  _die "ASSERT: daemon never published kind:24010 within 60s"
-fi
-sleep 5
+await_kind_event 24010 "" "$BACKEND_PUBKEY" 15 >/dev/null \
+  || { tail -40 "$HARNESS_DAEMON_LOG" >&2 || true; _die "ASSERT: daemon never published kind:24010 within 15s"; }
+echo "[scenario] daemon published kind:24010 ✓"
 
 # --- Step A: seed a real allocation, then capture its namespace --------------
 queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
@@ -138,7 +127,7 @@ for attempt in 1 2 3; do
          >/dev/null 2>&1; then
       break 2
     fi
-    sleep 0.5
+    sleep 0.2
   done
 done
 
@@ -230,8 +219,13 @@ echo "[scenario] restarting daemon"
 start_daemon
 await_daemon_subscribed 45 || _die "daemon subscription never became live after restart"
 
-# Give a moment for routing to rehydrate.
-sleep 5
+# Wait for routing to rehydrate — poll for the daemon's boot log.
+rehydrate_deadline=$(( $(date +%s) + 5 ))
+while [[ $(date +%s) -lt $rehydrate_deadline ]]; do
+  [[ -f "$daemon_json_log" ]] && \
+    grep -q '"relay authenticated, resubscribed"' "$daemon_json_log" 2>/dev/null && break
+  sleep 0.2
+done
 
 # The routing derives conversation_id from the inbound envelope's identity.
 # For a top-level event (no reply), conversation_id = the event's own id. For a
@@ -259,14 +253,22 @@ publish_event_as "$USER_NSEC" 1 \
 # NostrSubscriptionTickError -> NostrSubscriptionRelayError and causes the
 # relay session to disconnect and reconnect. Each reconnect attempt will log
 # the error in the daemon JSON log at $DAEMON_DIR/daemon.log.
-echo "[scenario] waiting 15s for the daemon to hit RalNumberExhausted"
-sleep 15
+echo "[scenario] polling for RalNumberExhausted in daemon log (up to 10s)"
+exhaust_deadline=$(( $(date +%s) + 10 ))
+saw_exhausted=0
+while [[ $(date +%s) -lt $exhaust_deadline ]]; do
+  tail_log="$(tail -c +$((log_bytes_before + 1)) "$daemon_json_log" 2>/dev/null || true)"
+  if printf '%s\n' "$tail_log" | grep -Eq 'RAL number space exhausted'; then
+    saw_exhausted=1
+    break
+  fi
+  sleep 0.2
+done
 
 # --- Assertions --------------------------------------------------------------
 tail_log="$(tail -c +$((log_bytes_before + 1)) "$daemon_json_log" 2>/dev/null || true)"
 
-if printf '%s\n' "$tail_log" | \
-     grep -Eq 'RAL number space exhausted'; then
+if [[ "$saw_exhausted" -eq 1 ]]; then
   echo "[scenario]   RalNumberExhausted error observed in daemon log ✓"
 else
   echo "[scenario] daemon log (post-restart tail, $daemon_json_log):"

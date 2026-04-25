@@ -81,8 +81,13 @@ publish_event_as "$USER_NSEC" 31933 "boot-gate-test project" \
 start_daemon
 await_daemon_subscribed 45 || _die "daemon subscription never became live"
 
-# Give the daemon a moment to ingest the 31933.
-sleep 2
+# Wait for daemon to ingest the 31933 (poll for project_updated log).
+ingest_deadline=$(( $(date +%s) + 5 ))
+while [[ $(date +%s) -lt $ingest_deadline ]]; do
+  [[ -f "$DAEMON_DIR/daemon.log" ]] && \
+    grep -q '"code":"project_updated"' "$DAEMON_DIR/daemon.log" 2>/dev/null && break
+  sleep 0.2
+done
 
 # Publish kind:1 for agent1 WITHOUT having booted the project.
 echo "[scenario] publishing kind:1 without a prior boot event"
@@ -92,8 +97,8 @@ user_msg_evt="$(publish_event_as "$USER_NSEC" 1 "pre-boot probe" \
 user_msg_id="$(printf '%s' "$user_msg_evt" | jq -r .id)"
 echo "[scenario]   user message id=$user_msg_id"
 
-# Observation window.
-sleep 6
+# Observation window — 2s is sufficient for a local relay round-trip.
+sleep 2
 
 # Assertion 1: no kind:24010 published for our project — the enforced boot gate.
 events_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \

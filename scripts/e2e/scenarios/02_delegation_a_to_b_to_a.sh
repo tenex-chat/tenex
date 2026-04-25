@@ -185,7 +185,7 @@ for attempt in 1 2 3; do
       _saw_dispatch=1
       break
     fi
-    sleep 0.5
+    sleep 0.2
   done
   [[ "$_saw_dispatch" -eq 1 ]] && break
   echo "[scenario]   no dispatch yet — daemon may still be hydrating; retrying..."
@@ -209,75 +209,92 @@ echo "[scenario] === Phase A complete: daemon plumbing OK ==="
 echo ""
 if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
   echo "[scenario] === Phase B: observing LLM-driven delegation (Ollama, best-effort) ==="
-  phase_b_timeout=120
+  phase_b_timeout=60
 else
   echo "[scenario] === Phase B: asserting mock-driven delegation ==="
-  phase_b_timeout=60
+  phase_b_timeout=15
 fi
 
-phase_b_deadline=$(( $(date +%s) + phase_b_timeout ))
+# Stream-wait helper for relay events: exits as soon as the first matching event
+# arrives or times out. Returns 0 on match, 1 on timeout.
+_await_relay_content() {
+  local kind="$1" author="$2" pattern="$3" secs="$4"
+  # Check historical first, then stream.
+  local out
+  out="$(nak req -k "$kind" -a "$author" --limit 50 --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  if printf '%s\n' "$out" | jq -se "any(.[]; .content | test(\"$pattern\"))" >/dev/null 2>&1; then
+    return 0
+  fi
+  out="$(timeout "$secs" nak req -k "$kind" -a "$author" --stream \
+    --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null \
+    | grep -m1 "$pattern" || true)"
+  [[ -n "$out" ]]
+}
 
 saw_agent1_delegation=0
 saw_agent2_response=0
 saw_agent1_final=0
 saw_terminal_ral=0
 
-while [[ $(date +%s) -lt $phase_b_deadline ]]; do
-  if [[ "$saw_agent1_delegation" -eq 0 ]] && \
-     nak req -k 1 -a "$AGENT1_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
+# agent1 any kind:1 — delegation event
+if timeout "$phase_b_timeout" nak req -k 1 -a "$AGENT1_PUBKEY" --stream \
+     --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null | head -1 | grep -q .; then
+  echo "[scenario]   observed: agent1 published kind:1"
+  saw_agent1_delegation=1
+else
+  if nak req -k 1 -a "$AGENT1_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
        "$HARNESS_RELAY_URL" 2>/dev/null | jq -se 'any' >/dev/null 2>&1; then
-    echo "[scenario]   observed: agent1 published kind:1"
+    echo "[scenario]   observed: agent1 published kind:1 (historical)"
     saw_agent1_delegation=1
   fi
+fi
 
-  if [[ "$saw_agent2_response" -eq 0 ]]; then
-    agent2_events="$(nak req -k 1 -a "$AGENT2_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent2_events" ]] && [[ "$agent2_events" != "[]" ]]; then
-      if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
-        echo "[scenario]   observed: agent2 published kind:1"
-        saw_agent2_response=1
-      elif printf '%s\n' "$agent2_events" | jq -se \
-            'any(.[]; .content | test("agent2 says 4"))' >/dev/null 2>&1; then
-        echo "[scenario]   observed: agent2 published kind:1 with fixture content 'agent2 says 4'"
-        saw_agent2_response=1
-      fi
-    fi
+# agent2 kind:1 with fixture content
+if [[ "$E2E_USE_OLLAMA" != "1" ]]; then
+  remaining=$(( phase_b_timeout - 2 ))
+  [[ $remaining -lt 3 ]] && remaining=3
+  if _await_relay_content 1 "$AGENT2_PUBKEY" "agent2 says 4" "$remaining"; then
+    echo "[scenario]   observed: agent2 published kind:1 with fixture content 'agent2 says 4'"
+    saw_agent2_response=1
   fi
-
-  if [[ "$saw_agent1_final" -eq 0 ]]; then
-    agent1_events="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent1_events" ]] && [[ "$agent1_events" != "[]" ]]; then
-      if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
-        # Ollama path: count any second agent1 kind:1 as "resumption".
-        if printf '%s\n' "$agent1_events" | jq -se 'length >= 2' >/dev/null 2>&1; then
-          echo "[scenario]   observed: agent1 published >=2 kind:1 events (resumption)"
-          saw_agent1_final=1
-        fi
-      elif printf '%s\n' "$agent1_events" | jq -se \
-            'any(.[]; .content | test("Final answer: agent2 says 4"))' >/dev/null 2>&1; then
-        echo "[scenario]   observed: agent1 published its final kind:1 with fixture content"
-        saw_agent1_final=1
-      fi
-    fi
+else
+  agent2_events="$(nak req -k 1 -a "$AGENT2_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  if [[ -n "$agent2_events" ]] && [[ "$agent2_events" != "[]" ]]; then
+    echo "[scenario]   observed: agent2 published kind:1"
+    saw_agent2_response=1
   fi
+fi
 
-  if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
-    if [[ "$saw_terminal_ral" -eq 0 ]] && \
-       jq -e 'select((.event // .kind) | tostring | test("DelegationCompleted|Completed|Terminal"; "i"))' \
-         "$DAEMON_DIR/ral/journal.jsonl" >/dev/null 2>&1; then
-      echo "[scenario]   observed: RAL journal has a completion/terminal record"
-      saw_terminal_ral=1
-    fi
+# agent1 final kind:1
+if [[ "$E2E_USE_OLLAMA" != "1" ]]; then
+  remaining=$(( phase_b_timeout - 3 ))
+  [[ $remaining -lt 3 ]] && remaining=3
+  if _await_relay_content 1 "$AGENT1_PUBKEY" "Final answer: agent2 says 4" "$remaining"; then
+    echo "[scenario]   observed: agent1 published its final kind:1 with fixture content"
+    saw_agent1_final=1
   fi
+else
+  agent1_events="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  if printf '%s\n' "$agent1_events" | jq -se 'length >= 2' >/dev/null 2>&1; then
+    echo "[scenario]   observed: agent1 published >=2 kind:1 events (resumption)"
+    saw_agent1_final=1
+  fi
+fi
 
-  if [[ "$saw_agent1_delegation" -eq 1 && "$saw_agent2_response" -eq 1 \
-        && "$saw_agent1_final" -eq 1 && "$saw_terminal_ral" -eq 1 ]]; then
+# RAL journal terminal record — filesystem poll (tight)
+ral_deadline=$(( $(date +%s) + 10 ))
+while [[ $(date +%s) -lt $ral_deadline ]]; do
+  if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]] && \
+     jq -e 'select((.event // .kind) | tostring | test("DelegationCompleted|Completed|Terminal"; "i"))' \
+       "$DAEMON_DIR/ral/journal.jsonl" >/dev/null 2>&1; then
+    echo "[scenario]   observed: RAL journal has a completion/terminal record"
+    saw_terminal_ral=1
     break
   fi
-
-  sleep 2
+  sleep 0.2
 done
 
 echo ""

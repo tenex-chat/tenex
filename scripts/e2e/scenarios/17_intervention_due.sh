@@ -139,41 +139,38 @@ await_daemon_subscribed 45 || _die "daemon subscription never became live"
 
 # ── Wait for the intervention review kind:1 from backend pubkey ───────────────
 echo ""
-echo "[scenario] waiting up to 20s for intervention review event (kind:1, context=intervention-review, author=backend)..."
+echo "[scenario] waiting up to 10s for intervention review event (kind:1, context=intervention-review, author=backend)..."
 
-deadline=$(( $(date +%s) + 20 ))
 saw_review=0
-lim=20
 
-while [[ $(date +%s) -lt $deadline ]]; do
-  events="$(nak req \
-    -k 1 \
-    -a "$BACKEND_PUBKEY" \
-    --tag "context=intervention-review" \
-    --limit "$lim" \
-    --auth --sec "$BACKEND_NSEC" \
-    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-  if [[ -n "$events" ]] && [[ "$events" != "[]" ]]; then
-    echo "[scenario]   received intervention review event ✓"
-    echo "$events" | head -1 | jq -r '"[scenario]   event id=\(.id) pubkey=\(.pubkey) kind=\(.kind)"'
-    # Validate pubkey, kind, and context tag
-    echo "$events" | head -1 | jq -e \
-      --arg pk "$BACKEND_PUBKEY" '.pubkey == $pk' \
-      >/dev/null 2>&1 \
-      || _die "ASSERT: event pubkey is not BACKEND_PUBKEY"
-    echo "$events" | head -1 | jq -e '.kind == 1' \
-      >/dev/null 2>&1 \
-      || _die "ASSERT: event kind is not 1"
-    echo "$events" | head -1 | jq -e \
-      'any(.tags[]; .[0] == "context" and .[1] == "intervention-review")' \
-      >/dev/null 2>&1 \
-      || _die "ASSERT: event does not have context=intervention-review tag"
-    saw_review=1
-    break
-  fi
-  lim=$((lim + 1))
+# Poll for the intervention review event (no GNU timeout needed; use deadline loop).
+events=""
+poll_deadline=$(( $(date +%s) + 20 ))
+lim=20
+while [[ $(date +%s) -lt $poll_deadline ]]; do
+  events="$(nak req -k 1 -a "$BACKEND_PUBKEY" --tag "context=intervention-review" \
+    --limit "$lim" --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  [[ -n "$events" ]] && [[ "$events" != "[]" ]] && break
+  lim=$(( lim + 1 ))
   sleep 0.5
 done
+
+if [[ -n "$events" ]] && [[ "$events" != "[]" ]]; then
+  echo "[scenario]   received intervention review event ✓"
+  printf '%s\n' "$events" | head -1 | jq -r '"[scenario]   event id=\(.id) pubkey=\(.pubkey) kind=\(.kind)"'
+  printf '%s\n' "$events" | head -1 | jq -e \
+    --arg pk "$BACKEND_PUBKEY" '.pubkey == $pk' \
+    >/dev/null 2>&1 \
+    || _die "ASSERT: event pubkey is not BACKEND_PUBKEY"
+  printf '%s\n' "$events" | head -1 | jq -e '.kind == 1' \
+    >/dev/null 2>&1 \
+    || _die "ASSERT: event kind is not 1"
+  printf '%s\n' "$events" | head -1 | jq -e \
+    'any(.tags[]; .[0] == "context" and .[1] == "intervention-review")' \
+    >/dev/null 2>&1 \
+    || _die "ASSERT: event does not have context=intervention-review tag"
+  saw_review=1
+fi
 
 if [[ "$saw_review" -ne 1 ]]; then
   echo "[scenario] daemon log (last 80 lines):"

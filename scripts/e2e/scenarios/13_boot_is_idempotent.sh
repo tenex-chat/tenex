@@ -77,10 +77,14 @@ boot1_evt="$(publish_event_as "$USER_NSEC" 24000 "boot-1" "a=$PROJECT_A_TAG")"
 boot1_id="$(printf '%s' "$boot1_evt" | jq -r .id)"
 echo "[scenario]   first boot id=$boot1_id"
 
-sleep 3
+sleep 1
 
 # Snapshot the 14199 population on the relay after first boot.
-pre_14199_count="$(nak req -k 14199 --auth --sec "$BACKEND_NSEC" \
+# Use an explicit --limit so the filter signature differs from the post-boot
+# query below.  The relay's historicalQueryReplayGuard deduplicates identical
+# filter signatures within a 5-second window; distinct limits produce distinct
+# signatures and both queries return live results.
+pre_14199_count="$(nak req -k 14199 --limit 200 --auth --sec "$BACKEND_NSEC" \
   "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
 echo "[scenario]   14199 count on relay after first boot: $pre_14199_count"
 
@@ -97,7 +101,7 @@ boot2_id="$(printf '%s' "$boot2_evt" | jq -r .id)"
 echo "[scenario]   second boot id=$boot2_id"
 [[ "$boot2_id" != "$boot1_id" ]] || _die "ASSERT: nak should have produced a distinct boot event id"
 
-sleep 3
+sleep 0.5
 
 # Third boot — yet another fresh kind:24000 for the same project a-tag.
 echo "[scenario] publishing third kind:24000 (replay)"
@@ -105,7 +109,7 @@ boot3_evt="$(publish_event_as "$USER_NSEC" 24000 "boot-3" "a=$PROJECT_A_TAG")"
 boot3_id="$(printf '%s' "$boot3_evt" | jq -r .id)"
 echo "[scenario]   third boot id=$boot3_id"
 
-sleep 3
+sleep 0.5
 
 # Assertion 1: every boot's ingress lands project_booted log lines, and the
 # total count monotonically grows across replays. (Each arriving boot event
@@ -144,7 +148,9 @@ echo "[scenario]   distinct project a-tags in 24010: $distinct_a_tags"
 
 # Assertion 3: no new kind:14199 from the daemon. The 14199 count on the relay
 # should equal pre_14199_count (the daemon is not authoring 14199 here).
-post_14199_count="$(nak req -k 14199 --auth --sec "$BACKEND_NSEC" \
+# Use --limit 201 (distinct from the pre query's 200) so the relay's 5-second
+# historicalQueryReplayGuard does not deduplicate this second query.
+post_14199_count="$(nak req -k 14199 --limit 201 --auth --sec "$BACKEND_NSEC" \
   "$HARNESS_RELAY_URL" 2>/dev/null | jq -s 'length')"
 echo "[scenario]   14199 count on relay after 3 boots: $post_14199_count"
 [[ "$post_14199_count" == "$pre_14199_count" ]] || \

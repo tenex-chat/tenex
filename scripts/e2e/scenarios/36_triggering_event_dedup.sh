@@ -89,19 +89,14 @@ boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 boot_id="$(printf '%s' "$boot_evt" | jq -r .id)"
 echo "[scenario] boot event id=$boot_id"
 
-# Wait for the daemon to publish kind:24010, proving the boot took effect.
+# Stream-wait for kind:24010 proving the boot took effect.
 echo "[scenario] waiting for kind:24010 from daemon (proves boot recorded)"
-sleep 8
-events_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
-  "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-if [[ -z "$events_24010" ]] || [[ "$events_24010" == "[]" ]]; then
+events_24010="$(await_kind_event 24010 "" "$BACKEND_PUBKEY" 10 || true)"
+if [[ -z "$events_24010" ]]; then
   tail -40 "$HARNESS_DAEMON_LOG" >&2 || true
   _die "ASSERT: daemon never published kind:24010"
 fi
 echo "[scenario]   kind:24010 observed ✓"
-
-# Give membership index a moment to hydrate (see scenario 02 for the rationale).
-sleep 5
 
 # --- Step A: publish event #1 and wait for its dispatch row ------------------
 queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
@@ -123,7 +118,7 @@ for attempt in 1 2 3; do
          >/dev/null 2>&1; then
       break 2
     fi
-    sleep 0.5
+    sleep 0.2
   done
   echo "[scenario]   no dispatch yet; retrying..."
 done
@@ -148,9 +143,9 @@ echo "[scenario] republishing identical event id=$user_msg_id"
 replay_out="$(printf '%s' "$user_msg_evt" | nak event "$HARNESS_RELAY_URL" 2>&1 || true)"
 printf '%s\n' "$replay_out" | head -5 | sed 's/^/[scenario]   nak: /'
 
-# The daemon polls the socket; give it a window to observe, ingest, and attempt
-# an enqueue, then short-circuit on the existing dispatch record.
-sleep 4
+# Give the daemon a window to observe, ingest, and short-circuit on the existing
+# dispatch record. 1s is enough for a local relay round-trip.
+sleep 1
 
 # --- Assertions --------------------------------------------------------------
 records_after="$(jq -s --arg e "$user_msg_id" \

@@ -143,7 +143,7 @@ for attempt in 1 2 3; do
       _saw_dispatch=1
       break
     fi
-    sleep 0.5
+    sleep 0.2
   done
   [[ "$_saw_dispatch" -eq 1 ]] && break
   echo "[scenario]   no dispatch yet — retrying..."
@@ -151,36 +151,41 @@ done
 [[ "$_saw_dispatch" -eq 1 ]] || _die "ASSERT: no dispatch enqueued for user message 1"
 echo "[scenario]   dispatch enqueued ✓"
 
-echo "[scenario] waiting for mock-driven delegation to complete (up to 60s)..."
-phase1_deadline=$(( $(date +%s) + 60 ))
+echo "[scenario] waiting for mock-driven delegation to complete (up to 15s)..."
 saw_agent1_final=0
 saw_terminal_ral=0
 
-while [[ $(date +%s) -lt $phase1_deadline ]]; do
-  if [[ "$saw_agent1_final" -eq 0 ]]; then
-    agent1_events="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 \
-      --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent1_events" ]] && [[ "$agent1_events" != "[]" ]]; then
-      if printf '%s\n' "$agent1_events" | jq -se \
-          'any(.[]; .content | test("Final answer: agent2 says 4"))' >/dev/null 2>&1; then
-        echo "[scenario]   agent1 published final kind:1 with fixture content ✓"
-        saw_agent1_final=1
-      fi
+# Stream-wait for agent1's final reply.
+{
+  out="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 50 --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  if printf '%s\n' "$out" | jq -se \
+      'any(.[]; .content | test("Final answer: agent2 says 4"))' >/dev/null 2>&1; then
+    echo "[scenario]   agent1 published final kind:1 with fixture content ✓ (historical)"
+    saw_agent1_final=1
+  else
+    matched="$(timeout 15 nak req -k 1 -a "$AGENT1_PUBKEY" --stream \
+      --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null \
+      | grep -m1 "Final answer: agent2 says 4" || true)"
+    if [[ -n "$matched" ]]; then
+      echo "[scenario]   agent1 published final kind:1 with fixture content ✓"
+      saw_agent1_final=1
     fi
   fi
+}
 
-  if [[ "$saw_terminal_ral" -eq 0 && -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
-    if jq -e 'select(.event == "completed" or .event == "no_response" or
-                     .event == "error" or .event == "aborted" or
-                     .event == "crashed")' \
-         "$DAEMON_DIR/ral/journal.jsonl" >/dev/null 2>&1; then
-      echo "[scenario]   RAL journal has a terminal record ✓"
-      saw_terminal_ral=1
-    fi
+ral_deadline=$(( $(date +%s) + 10 ))
+while [[ $(date +%s) -lt $ral_deadline ]]; do
+  if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]] && \
+     jq -e 'select(.event == "completed" or .event == "no_response" or
+                   .event == "error" or .event == "aborted" or
+                   .event == "crashed")' \
+       "$DAEMON_DIR/ral/journal.jsonl" >/dev/null 2>&1; then
+    echo "[scenario]   RAL journal has a terminal record ✓"
+    saw_terminal_ral=1
+    break
   fi
-
-  [[ "$saw_agent1_final" -eq 1 && "$saw_terminal_ral" -eq 1 ]] && break
-  sleep 2
+  sleep 0.2
 done
 
 if [[ "$saw_agent1_final" -ne 1 ]]; then
@@ -194,8 +199,15 @@ fi
 
 echo "[scenario] === Phase 1 complete: delegation finished; daemon is idle ==="
 
-# Allow the daemon a moment to flush writes before we stop it.
-sleep 2
+# Wait for RAL journal to reach a stable flush (poll for no new lines for 1s).
+ral_journal_flush_deadline=$(( $(date +%s) + 5 ))
+prev_lines=0
+while [[ $(date +%s) -lt $ral_journal_flush_deadline ]]; do
+  curr_lines="$(wc -l < "$DAEMON_DIR/ral/journal.jsonl" 2>/dev/null | tr -d '[:space:]' || echo 0)"
+  [[ "$curr_lines" -eq "$prev_lines" && "$curr_lines" -gt 0 ]] && break
+  prev_lines="$curr_lines"
+  sleep 0.3
+done
 
 # Snapshot journal and queue state for post-restart comparison.
 ral_journal="$DAEMON_DIR/ral/journal.jsonl"
@@ -244,8 +256,13 @@ echo "[scenario]   restarted daemon is running (pid $HARNESS_DAEMON_PID) ✓"
 echo ""
 echo "[scenario] === Phase 4: assert no stuck RAL after restart ==="
 
-# Give the daemon a brief window to apply any reconciliation it does on boot.
-sleep 3
+# Wait for daemon reconciliation on boot — poll until it logs readiness or 3s pass.
+recon_deadline=$(( $(date +%s) + 3 ))
+while [[ $(date +%s) -lt $recon_deadline ]]; do
+  [[ -f "$DAEMON_DIR/daemon.log" ]] && \
+    grep -q '"relay authenticated, resubscribed"' "$DAEMON_DIR/daemon.log" 2>/dev/null && break
+  sleep 0.2
+done
 
 if [[ -f "$ral_journal" ]]; then
   stuck_count="$(jq -s '
@@ -357,7 +374,7 @@ for attempt in 1 2 3; do
       _saw_dispatch2=1
       break
     fi
-    sleep 0.5
+    sleep 0.2
   done
   [[ "$_saw_dispatch2" -eq 1 ]] && break
   echo "[scenario]   no dispatch yet — retrying..."
@@ -366,14 +383,25 @@ done
 echo "[scenario]   second dispatch enqueued by restarted daemon ✓"
 
 # Wait for the second delegation to complete and produce a terminal RAL record.
-echo "[scenario] waiting for second delegation to complete (up to 60s)..."
-phase5_deadline=$(( $(date +%s) + 60 ))
+echo "[scenario] waiting for second delegation to complete (up to 15s)..."
 saw_second_terminal=0
 
-while [[ $(date +%s) -lt $phase5_deadline ]]; do
+# Stream-wait for agent1's second final reply, then verify the RAL journal.
+{
+  out="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 50 --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  count="$(printf '%s\n' "$out" | jq -se 'length' 2>/dev/null || echo 0)"
+  if [[ "$count" -ge 2 ]]; then
+    :  # already has two events; fall through to RAL check
+  else
+    timeout 15 nak req -k 1 -a "$AGENT1_PUBKEY" --stream \
+      --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null | head -1 >/dev/null || true
+  fi
+}
+
+phase5_ral_deadline=$(( $(date +%s) + 10 ))
+while [[ $(date +%s) -lt $phase5_ral_deadline ]]; do
   if [[ -f "$ral_journal" ]]; then
-    # Count terminal records. After restart the journal grows with new entries.
-    # We need strictly more terminal records than before.
     terminal_now="$(jq -s '[.[] | select(
         .event == "completed" or .event == "no_response" or
         .event == "error" or .event == "aborted" or
@@ -385,7 +413,7 @@ while [[ $(date +%s) -lt $phase5_deadline ]]; do
       break
     fi
   fi
-  sleep 2
+  sleep 0.2
 done
 
 if [[ "$saw_second_terminal" -ne 1 ]]; then

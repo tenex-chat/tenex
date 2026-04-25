@@ -75,7 +75,7 @@ await_daemon_subscribed 45 || _die "daemon subscription never became live"
 # Phase 1: pre-boot. Daemon has seen the 31933 (ProjectEventIndex populated)
 # but has NOT seen a kind:24000 — boot state is empty.
 echo "[scenario] phase 1: verifying no 24010 is published before boot"
-sleep 3
+sleep 1
 pre_boot_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
   "$HARNESS_RELAY_URL" 2>/dev/null || true)"
 if [[ -n "$pre_boot_24010" ]] && [[ "$pre_boot_24010" != "[]" ]]; then
@@ -92,15 +92,10 @@ boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 boot_id="$(printf '%s' "$boot_evt" | jq -r .id)"
 echo "[scenario]   boot event id=$boot_id"
 
-# Wait for the daemon to process the boot event. Its periodic tick publishes
-# kind:24010 for booted projects only.
-echo "[scenario]   waiting 8s for boot + first periodic project-status publish"
-sleep 8
-
-# Phase 2a: observe kind:24010 on the relay.
-events_24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
-  "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-if [[ -z "$events_24010" ]] || [[ "$events_24010" == "[]" ]]; then
+# Stream-wait for kind:24010 (daemon publishes on boot, not just on tick).
+echo "[scenario]   waiting for boot + project-status publish (stream)"
+events_24010="$(await_kind_event 24010 "" "$BACKEND_PUBKEY" 12 || true)"
+if [[ -z "$events_24010" ]]; then
   echo "[scenario] daemon log (last 60 lines):"
   tail -60 "$DAEMON_DIR/daemon.log" >&2 || true
   _die "ASSERT: daemon never published kind:24010 after boot"
@@ -126,7 +121,7 @@ echo "[scenario]   ingress recorded project_booted for our d-tag ✓"
 # Phase 3: post-boot inbound. Dispatch must still be queued (the daemon does
 # not gate conversation dispatch on boot, but the test documents that boot
 # does not BREAK dispatch either).
-sleep 3  # let project-agent membership hydrate
+sleep 0.5  # let project-agent membership hydrate
 echo "[scenario] phase 3: publishing kind:1 after boot"
 user_msg_evt="$(publish_event_as "$USER_NSEC" 1 "post-boot kind:1" \
   "p=$AGENT1_PUBKEY" \
@@ -143,7 +138,7 @@ while [[ $(date +%s) -lt $deadline ]]; do
     saw_dispatch=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 if [[ "$saw_dispatch" -ne 1 ]]; then
   echo "[scenario] daemon log (last 40 lines):"

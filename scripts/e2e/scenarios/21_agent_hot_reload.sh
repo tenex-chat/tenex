@@ -123,7 +123,7 @@ while [[ $(date +%s) -lt $boot_deadline ]]; do
     saw_boot=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 if [[ "$saw_boot" -ne 1 ]]; then
   tail -40 "$DAEMON_DIR/daemon.log" >&2 || true
@@ -150,7 +150,7 @@ while [[ $(date +%s) -lt $agent1_dispatch_deadline ]]; do
     saw_agent1_dispatch=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 if [[ "$saw_agent1_dispatch" -ne 1 ]]; then
   tail -40 "$DAEMON_DIR/daemon.log" >&2 || true
@@ -184,7 +184,7 @@ while [[ $(date +%s) -lt $project_update_deadline ]]; do
     saw_project_updated=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 if [[ "$saw_project_updated" -ne 1 ]]; then
   tail -40 "$DAEMON_DIR/daemon.log" >&2 || true
@@ -206,7 +206,7 @@ while [[ $(date +%s) -lt $index_deadline ]]; do
     saw_agent2_in_index=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 if [[ "$saw_agent2_in_index" -ne 1 ]]; then
   echo "[scenario] agents/index.json current contents:"
@@ -240,7 +240,7 @@ while [[ $(date +%s) -lt $filter_refresh_deadline ]]; do
     saw_filter_refresh=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 if [[ "$saw_filter_refresh" -ne 1 ]]; then
   tail -40 "$DAEMON_DIR/daemon.log" >&2 || true
@@ -276,7 +276,7 @@ for attempt in 1 2 3 4 5 6; do
       agent2_filter_live=1
       break 2
     fi
-    sleep 0.5
+    sleep 0.2
   done
 done
 
@@ -302,7 +302,7 @@ while [[ $(date +%s) -lt $agent2_dispatch_deadline ]]; do
     saw_agent2_dispatch=1
     break
   fi
-  sleep 0.5
+  sleep 0.2
 done
 
 if [[ "$saw_agent2_dispatch" -ne 1 ]]; then

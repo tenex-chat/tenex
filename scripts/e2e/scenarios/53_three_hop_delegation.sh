@@ -209,7 +209,7 @@ for attempt in 1 2 3; do
       _saw_dispatch=1
       break
     fi
-    sleep 0.5
+    sleep 0.2
   done
   [[ "$_saw_dispatch" -eq 1 ]] && break
   echo "[scenario]   no dispatch yet — daemon may still be hydrating; retrying..."
@@ -230,8 +230,23 @@ echo "[scenario] === Phase A complete: daemon plumbing OK ==="
 
 echo ""
 echo "[scenario] === Phase B: asserting mock-driven three-hop delegation ==="
-phase_b_timeout=90
-phase_b_deadline=$(( $(date +%s) + phase_b_timeout ))
+phase_b_timeout=15
+
+# Stream-wait for a relay event whose content matches a pattern.
+# Checks historical first, then opens a streaming subscription.
+_await_content() {
+  local kind="$1" author="$2" pattern="$3" secs="$4"
+  local out
+  out="$(nak req -k "$kind" -a "$author" --limit 50 --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  if printf '%s\n' "$out" | jq -se "any(.[]; .content | test(\"$pattern\"))" >/dev/null 2>&1; then
+    return 0
+  fi
+  out="$(timeout "$secs" nak req -k "$kind" -a "$author" --stream \
+    --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null \
+    | grep -m1 "$pattern" || true)"
+  [[ -n "$out" ]]
+}
 
 saw_agent1_delegation=0
 saw_agent2_delegation=0
@@ -240,66 +255,42 @@ saw_agent2_resume=0
 saw_agent1_final=0
 saw_ral_completions=0
 
-while [[ $(date +%s) -lt $phase_b_deadline ]]; do
-  # agent1 published at least one kind:1 (its delegation to agent2)
-  if [[ "$saw_agent1_delegation" -eq 0 ]] && \
-     nak req -k 1 -a "$AGENT1_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
-       "$HARNESS_RELAY_URL" 2>/dev/null | jq -se 'any' >/dev/null 2>&1; then
-    echo "[scenario]   observed: agent1 published kind:1 (delegation)"
-    saw_agent1_delegation=1
-  fi
+# agent1 any kind:1 (delegation)
+if timeout "$phase_b_timeout" nak req -k 1 -a "$AGENT1_PUBKEY" --stream \
+     --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null | head -1 | grep -q .; then
+  echo "[scenario]   observed: agent1 published kind:1 (delegation)"
+  saw_agent1_delegation=1
+fi
 
-  # agent2 published at least one kind:1 (its delegation to agent3)
-  if [[ "$saw_agent2_delegation" -eq 0 ]]; then
-    agent2_events="$(nak req -k 1 -a "$AGENT2_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent2_events" ]] && [[ "$agent2_events" != "[]" ]]; then
-      echo "[scenario]   observed: agent2 published kind:1"
-      saw_agent2_delegation=1
-    fi
-  fi
+# agent2 any kind:1 (delegation to agent3)
+if timeout "$phase_b_timeout" nak req -k 1 -a "$AGENT2_PUBKEY" --stream \
+     --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null | head -1 | grep -q .; then
+  echo "[scenario]   observed: agent2 published kind:1"
+  saw_agent2_delegation=1
+fi
 
-  # agent3 published a terminal reply with fixture content
-  if [[ "$saw_agent3_terminal" -eq 0 ]]; then
-    agent3_events="$(nak req -k 1 -a "$AGENT3_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent3_events" ]] && [[ "$agent3_events" != "[]" ]]; then
-      if printf '%s\n' "$agent3_events" | jq -se \
-          'any(.[]; .content | test("agent3 says result is 42"))' >/dev/null 2>&1; then
-        echo "[scenario]   observed: agent3 published terminal reply 'agent3 says result is 42'"
-        saw_agent3_terminal=1
-      fi
-    fi
-  fi
+# agent3 terminal reply with fixture content
+if _await_content 1 "$AGENT3_PUBKEY" "agent3 says result is 42" "$phase_b_timeout"; then
+  echo "[scenario]   observed: agent3 published terminal reply 'agent3 says result is 42'"
+  saw_agent3_terminal=1
+fi
 
-  # agent2's resume: a second kind:1 from agent2 incorporating agent3's answer
-  if [[ "$saw_agent2_delegation" -eq 1 && "$saw_agent2_resume" -eq 0 ]]; then
-    agent2_all="$(nak req -k 1 -a "$AGENT2_PUBKEY" --limit 20 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent2_all" ]] && [[ "$agent2_all" != "[]" ]]; then
-      if printf '%s\n' "$agent2_all" | jq -se \
-          'any(.[]; .content | test("agent2 relays: agent3 says result is 42"))' >/dev/null 2>&1; then
-        echo "[scenario]   observed: agent2 published resume reply with agent3's result"
-        saw_agent2_resume=1
-      fi
-    fi
-  fi
+# agent2 resume incorporating agent3's answer
+if _await_content 1 "$AGENT2_PUBKEY" "agent2 relays: agent3 says result is 42" "$phase_b_timeout"; then
+  echo "[scenario]   observed: agent2 published resume reply with agent3's result"
+  saw_agent2_resume=1
+fi
 
-  # agent1's final reply incorporating agent2's relayed answer
-  if [[ "$saw_agent1_final" -eq 0 ]]; then
-    agent1_all="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent1_all" ]] && [[ "$agent1_all" != "[]" ]]; then
-      if printf '%s\n' "$agent1_all" | jq -se \
-          'any(.[]; .content | test("Final answer: agent2 confirmed"))' >/dev/null 2>&1; then
-        echo "[scenario]   observed: agent1 published final answer incorporating the full chain"
-        saw_agent1_final=1
-      fi
-    fi
-  fi
+# agent1 final answer incorporating the full chain
+if _await_content 1 "$AGENT1_PUBKEY" "Final answer: agent2 confirmed" "$phase_b_timeout"; then
+  echo "[scenario]   observed: agent1 published final answer incorporating the full chain"
+  saw_agent1_final=1
+fi
 
-  # RAL journal must record at least two delegation completions (agent3→agent2, agent2→agent1)
-  if [[ "$saw_ral_completions" -eq 0 ]] && [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
+# RAL journal must record at least two delegation completions (agent3→agent2, agent2→agent1)
+ral_deadline=$(( $(date +%s) + 10 ))
+while [[ $(date +%s) -lt $ral_deadline ]]; do
+  if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
     completion_count="$(jq -s '
       [.[] | select(
         (.event // .kind) | tostring | test("DelegationCompleted|Completed|Terminal"; "i")
@@ -308,16 +299,10 @@ while [[ $(date +%s) -lt $phase_b_deadline ]]; do
     if [[ "$completion_count" -ge 2 ]]; then
       echo "[scenario]   observed: RAL journal has $completion_count delegation completion records"
       saw_ral_completions=1
+      break
     fi
   fi
-
-  if [[ "$saw_agent1_delegation" -eq 1 && "$saw_agent2_delegation" -eq 1 \
-        && "$saw_agent3_terminal" -eq 1 && "$saw_agent2_resume" -eq 1 \
-        && "$saw_agent1_final" -eq 1 && "$saw_ral_completions" -eq 1 ]]; then
-    break
-  fi
-
-  sleep 2
+  sleep 0.2
 done
 
 echo ""

@@ -179,7 +179,7 @@ while [[ $(date +%s) -lt $_deadline ]]; do
     fi
   fi
   [[ "$_saw_dispatch1" -eq 1 && "$_saw_dispatch2" -eq 1 ]] && break
-  sleep 0.5
+  sleep 0.2
 done
 
 if [[ "$_saw_dispatch1" -ne 1 ]]; then
@@ -201,53 +201,49 @@ echo "[scenario] === Phase A complete: both dispatches enqueued ==="
 
 echo ""
 echo "[scenario] === Phase B: asserting both sessions complete and ran in parallel ==="
-phase_b_timeout=90
-phase_b_deadline=$(( $(date +%s) + phase_b_timeout ))
+phase_b_timeout=15
+
+# Stream-wait for a relay event whose content matches a pattern.
+_await_content() {
+  local kind="$1" author="$2" pattern="$3" secs="$4"
+  local out
+  out="$(nak req -k "$kind" -a "$author" --limit 50 --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  if printf '%s\n' "$out" | jq -se "any(.[]; .content | test(\"$pattern\"))" >/dev/null 2>&1; then
+    return 0
+  fi
+  out="$(timeout "$secs" nak req -k "$kind" -a "$author" --stream \
+    --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null \
+    | grep -m1 "$pattern" || true)"
+  [[ -n "$out" ]]
+}
 
 saw_agent1_response=0
 saw_agent2_response=0
 saw_ral_terminals=0
 
-while [[ $(date +%s) -lt $phase_b_deadline ]]; do
-  if [[ "$saw_agent1_response" -eq 0 ]]; then
-    agent1_events="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent1_events" ]] && [[ "$agent1_events" != "[]" ]]; then
-      if printf '%s\n' "$agent1_events" | jq -se \
-          'any(.[]; .content | test("session-alpha result: 100"))' >/dev/null 2>&1; then
-        echo "[scenario]   observed: agent1 published kind:1 with 'session-alpha result: 100'"
-        saw_agent1_response=1
-      fi
-    fi
-  fi
+if _await_content 1 "$AGENT1_PUBKEY" "session-alpha result: 100" "$phase_b_timeout"; then
+  echo "[scenario]   observed: agent1 published kind:1 with 'session-alpha result: 100'"
+  saw_agent1_response=1
+fi
 
-  if [[ "$saw_agent2_response" -eq 0 ]]; then
-    agent2_events="$(nak req -k 1 -a "$AGENT2_PUBKEY" --limit 10 --auth --sec "$BACKEND_NSEC" \
-      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if [[ -n "$agent2_events" ]] && [[ "$agent2_events" != "[]" ]]; then
-      if printf '%s\n' "$agent2_events" | jq -se \
-          'any(.[]; .content | test("session-beta result: 200"))' >/dev/null 2>&1; then
-        echo "[scenario]   observed: agent2 published kind:1 with 'session-beta result: 200'"
-        saw_agent2_response=1
-      fi
-    fi
-  fi
+if _await_content 1 "$AGENT2_PUBKEY" "session-beta result: 200" "$phase_b_timeout"; then
+  echo "[scenario]   observed: agent2 published kind:1 with 'session-beta result: 200'"
+  saw_agent2_response=1
+fi
 
-  if [[ "$saw_ral_terminals" -eq 0 ]] && [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
+ral_deadline=$(( $(date +%s) + 10 ))
+while [[ $(date +%s) -lt $ral_deadline ]]; do
+  if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
     terminal_count="$(jq -s '[.[] | select(.event | test("completed|no_response|error|aborted|crashed"))] | length' \
       "$DAEMON_DIR/ral/journal.jsonl" 2>/dev/null || echo 0)"
     if [[ "$terminal_count" -ge 2 ]]; then
       echo "[scenario]   observed: RAL journal has $terminal_count terminal entries"
       saw_ral_terminals=1
+      break
     fi
   fi
-
-  if [[ "$saw_agent1_response" -eq 1 && "$saw_agent2_response" -eq 1 \
-        && "$saw_ral_terminals" -eq 1 ]]; then
-    break
-  fi
-
-  sleep 2
+  sleep 0.2
 done
 
 echo ""

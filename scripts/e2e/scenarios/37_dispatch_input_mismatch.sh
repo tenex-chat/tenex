@@ -72,14 +72,10 @@ await_daemon_subscribed 45 || _die "daemon subscription never became live"
 
 boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 echo "[scenario] boot event id=$(printf '%s' "$boot_evt" | jq -r .id)"
-sleep 8
 
-if [[ -z "$(nak req -k 24010 -a "$BACKEND_PUBKEY" --auth --sec "$BACKEND_NSEC" \
-          "$HARNESS_RELAY_URL" 2>/dev/null || true)" ]]; then
-  tail -40 "$HARNESS_DAEMON_LOG" >&2 || true
-  _die "ASSERT: daemon never published kind:24010"
-fi
-sleep 5
+await_kind_event 24010 "" "$BACKEND_PUBKEY" 12 >/dev/null \
+  || { tail -40 "$HARNESS_DAEMON_LOG" >&2 || true; _die "ASSERT: daemon never published kind:24010"; }
+echo "[scenario] daemon published kind:24010 ✓"
 
 # --- Step A: publish an inbound event, wait for its dispatch + sidecar --------
 queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
@@ -100,7 +96,7 @@ for attempt in 1 2 3; do
          >/dev/null 2>&1; then
       break 2
     fi
-    sleep 0.5
+    sleep 0.2
   done
   echo "[scenario]   not yet; retrying..."
 done
@@ -165,15 +161,23 @@ start_daemon
 
 # The dispatch is still queued; on the next tick the daemon will replay the
 # queue, attempt admission, try to load the sidecar, and hit the mismatch.
-# Give several ticks to accumulate at least one failure.
-echo "[scenario] waiting 10s for dispatch tick to attempt admission + fail"
-sleep 10
+# Poll the daemon log for the expected failure phrase (up to 10s).
+echo "[scenario] polling for dispatch admission failure in daemon log (up to 10s)"
+mismatch_deadline=$(( $(date +%s) + 10 ))
+saw_mismatch=0
+while [[ $(date +%s) -lt $mismatch_deadline ]]; do
+  tail_log_check="$(tail -c +$((log_bytes_before + 1)) "$HARNESS_DAEMON_LOG" 2>/dev/null || true)"
+  if printf '%s\n' "$tail_log_check" | grep -Eq 'worker dispatch input validation failed'; then
+    saw_mismatch=1
+    break
+  fi
+  sleep 0.2
+done
 
 # --- Assertions --------------------------------------------------------------
 tail_log="$(tail -c +$((log_bytes_before + 1)) "$HARNESS_DAEMON_LOG" 2>/dev/null || true)"
 
-if printf '%s\n' "$tail_log" | \
-     grep -Eq 'worker dispatch input validation failed'; then
+if [[ "$saw_mismatch" -eq 1 ]]; then
   # "worker dispatch input validation failed" is the stable phrase emitted by
   # the Rust validation path regardless of field names or tick numbers.
   echo "[scenario]   mismatch error observed in daemon log ✓"
