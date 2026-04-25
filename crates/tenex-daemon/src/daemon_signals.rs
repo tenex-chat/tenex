@@ -43,6 +43,10 @@ pub struct RalCompletion {
     pub sequence: u64,
 }
 
+/// Sent when a record is appended to the Telegram outbox.
+#[derive(Debug, Clone)]
+pub struct TelegramEnqueued;
+
 /// All signal producers. Construct once in `run_cli`, clone senders to producers.
 ///
 /// `project_index_changed` is an `Arc<Notify>` shared between the producer
@@ -61,6 +65,7 @@ pub struct DaemonSignals {
     pub session_completed_tx: mpsc::UnboundedSender<SessionCompletion>,
     pub publish_enqueued_tx: mpsc::UnboundedSender<PublishEnqueued>,
     pub ral_completed_tx: mpsc::UnboundedSender<RalCompletion>,
+    pub telegram_enqueued_tx: mpsc::UnboundedSender<TelegramEnqueued>,
 }
 
 /// All channel receivers. Consumed one-per-driver in `run_cli`.
@@ -70,6 +75,7 @@ pub struct DaemonSignalReceivers {
     pub session_completed_rx: mpsc::UnboundedReceiver<SessionCompletion>,
     pub publish_enqueued_rx: mpsc::UnboundedReceiver<PublishEnqueued>,
     pub ral_completed_rx: mpsc::UnboundedReceiver<RalCompletion>,
+    pub telegram_enqueued_rx: mpsc::UnboundedReceiver<TelegramEnqueued>,
 }
 
 /// Handle for the schedules-file watcher OS thread. Held by `run_cli`; on
@@ -156,6 +162,7 @@ pub fn create_daemon_signals() -> (DaemonSignals, DaemonSignalReceivers) {
     let (session_completed_tx, session_completed_rx) = mpsc::unbounded_channel();
     let (publish_enqueued_tx, publish_enqueued_rx) = mpsc::unbounded_channel();
     let (ral_completed_tx, ral_completed_rx) = mpsc::unbounded_channel();
+    let (telegram_enqueued_tx, telegram_enqueued_rx) = mpsc::unbounded_channel();
 
     (
         DaemonSignals {
@@ -166,6 +173,7 @@ pub fn create_daemon_signals() -> (DaemonSignals, DaemonSignalReceivers) {
             session_completed_tx,
             publish_enqueued_tx,
             ral_completed_tx,
+            telegram_enqueued_tx,
         },
         DaemonSignalReceivers {
             project_booted_rx,
@@ -173,6 +181,7 @@ pub fn create_daemon_signals() -> (DaemonSignals, DaemonSignalReceivers) {
             session_completed_rx,
             publish_enqueued_rx,
             ral_completed_rx,
+            telegram_enqueued_rx,
         },
     )
 }

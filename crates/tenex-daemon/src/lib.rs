@@ -96,6 +96,7 @@ pub mod subscription_filters;
 pub mod subscription_runtime;
 pub mod telegram;
 pub mod telegram_outbox;
+pub mod telegram_outbox_driver;
 pub mod telemetry;
 pub mod whitelist_wiring;
 pub mod worker_completion;

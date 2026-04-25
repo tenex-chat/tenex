@@ -15,6 +15,7 @@ use tenex_daemon::intervention_driver::{
     InterventionDriverDeps, run_intervention_arm_driver, run_intervention_fire_driver,
 };
 use tenex_daemon::project_status_driver::{ProjectStatusDriverDeps, run_project_status_supervisor};
+use tenex_daemon::telegram_outbox_driver::{TelegramOutboxDriverDeps, run_telegram_outbox_driver};
 use tenex_daemon::scheduled_task_driver::{ScheduledTaskDriverDeps, run_scheduled_task_supervisor};
 use tenex_daemon::daemon_foreground::{
     DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
@@ -220,6 +221,7 @@ where
     let (signals, receivers) = create_daemon_signals();
     let project_booted_rx = receivers.project_booted_rx;
     let ral_completed_rx = receivers.ral_completed_rx;
+    let telegram_enqueued_rx = receivers.telegram_enqueued_rx;
 
     // Fan-out BootedProject to the project-status supervisor and the
     // scheduled-task supervisor. A single sender (project_booted_tx) is wired
@@ -349,6 +351,23 @@ where
         intervention_fire_shutdown_rx,
     ));
 
+    // Spawn the Telegram outbox driver. Woken by `telegram_enqueued_rx`
+    // signals + an internal retry timer. The legacy tick path in
+    // daemon_maintenance.rs continues to call `run_telegram_outbox_maintenance`
+    // for now; both drainers safely operate on the same on-disk outbox
+    // (each record is keyed by id; the second drainer sees an empty outbox).
+    // Removing the tick path is part of commit 9.
+    let (telegram_outbox_shutdown_tx, telegram_outbox_shutdown_rx) =
+        tokio::sync::watch::channel(false);
+    let telegram_outbox_driver_handle = runtime_handle.spawn(run_telegram_outbox_driver(
+        TelegramOutboxDriverDeps {
+            daemon_dir: daemon_dir.clone(),
+            publisher_registry: None,
+        },
+        telegram_enqueued_rx,
+        telegram_outbox_shutdown_rx,
+    ));
+
     tenex_daemon::stdout_status::print_daemon_ready(
         nostr_supervisor.is_some(),
         gateway_supervisor.is_some(),
@@ -441,6 +460,7 @@ where
     let _ = project_status_shutdown_tx.send(true);
     let _ = scheduled_task_shutdown_tx.send(true);
     let _ = intervention_shutdown_tx.send(true);
+    let _ = telegram_outbox_shutdown_tx.send(true);
     boot_fanout_handle.abort();
     runtime_handle.block_on(async {
         let _ = backend_status_driver_handle.await;
@@ -448,6 +468,7 @@ where
         let _ = scheduled_task_supervisor_handle.await;
         let _ = intervention_arm_handle.await;
         let _ = intervention_fire_handle.await;
+        let _ = telegram_outbox_driver_handle.await;
     });
 
     // Stop the schedule file watcher OS thread.
