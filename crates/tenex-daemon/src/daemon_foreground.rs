@@ -658,7 +658,10 @@ mod tests {
         assert_eq!(report.tick_loop.steps[1].iteration_index, 1);
         assert_eq!(report.tick_loop.steps[0].sleep_after_ms, Some(25));
         assert_eq!(report.tick_loop.steps[1].sleep_after_ms, None);
-        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
+        // Backend-status (kind 24012/24011) now publishes from the dedicated
+        // backend_status_driver, not from the central tick. With no booted
+        // projects in the fixture, the tick has nothing to publish.
+        assert!(publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -670,7 +673,7 @@ mod tests {
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_200)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
-        assert!(publish_outbox.published_count > 0);
+        assert_eq!(publish_outbox.published_count, 0);
     }
 
     #[test]
@@ -715,7 +718,9 @@ mod tests {
         );
         assert!(sleeper.sleeps_ms.is_empty());
         assert_eq!(stop_signal.checks, 2);
-        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
+        // Backend-status now publishes from the dedicated driver; with no
+        // booted projects the central tick has nothing to publish.
+        assert!(publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None
@@ -790,7 +795,9 @@ mod tests {
             other => panic!("unexpected worker runtime outcome: {other:?}"),
         }
         assert_eq!(spawner.spawn_calls, 0);
-        assert!(!publisher.lock().unwrap().published_event_ids.is_empty());
+        // Backend-status now publishes from the dedicated driver; with no
+        // booted projects the central tick has nothing to publish.
+        assert!(publisher.lock().unwrap().published_event_ids.is_empty());
         assert_eq!(
             read_lock_info_file(&fixture.daemon_dir).expect("lock read must succeed"),
             None

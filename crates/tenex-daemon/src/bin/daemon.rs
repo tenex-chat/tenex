@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
+use tenex_daemon::backend_status_driver::{BackendStatusDriverDeps, run_backend_status_driver};
 use tenex_daemon::daemon_foreground::{
     DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
     run_daemon_foreground_until_stopped_from_filesystem_with_worker,
@@ -244,6 +245,21 @@ where
     let heartbeat_latch = whitelist_wiring
         .as_ref()
         .map(|wiring| Arc::clone(&wiring.heartbeat_latch));
+
+    // Spawn the backend-status driver. It owns its own 30s timer and replaces
+    // the central tick's `backend-status` periodic-scheduler entry. Shutdown
+    // is signalled by a watch channel polled from the stop watcher below.
+    let (backend_status_shutdown_tx, backend_status_shutdown_rx) =
+        tokio::sync::watch::channel(false);
+    let backend_status_driver_handle = runtime_handle.spawn(run_backend_status_driver(
+        BackendStatusDriverDeps {
+            tenex_base_dir: tenex_base_dir.clone(),
+            daemon_dir: daemon_dir.clone(),
+            heartbeat_latch: heartbeat_latch.clone(),
+        },
+        backend_status_shutdown_rx,
+    ));
+
     tenex_daemon::stdout_status::print_daemon_ready(
         nostr_supervisor.is_some(),
         gateway_supervisor.is_some(),
@@ -329,6 +345,12 @@ where
             let _ = wiring.poller_task.await;
         });
     }
+
+    // Stop the backend-status driver and join its task.
+    let _ = backend_status_shutdown_tx.send(true);
+    runtime_handle.block_on(async {
+        let _ = backend_status_driver_handle.await;
+    });
 
     diagnostics_result?;
     SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_COMPLETE, Ordering::SeqCst);

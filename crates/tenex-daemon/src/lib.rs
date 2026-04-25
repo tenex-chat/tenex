@@ -18,6 +18,7 @@ pub mod backend_events_tick;
 pub mod backend_heartbeat_latch;
 pub mod backend_profile;
 pub mod backend_signer;
+pub mod backend_status_driver;
 pub mod backend_status_runtime;
 pub mod backend_status_tick;
 pub mod caches;

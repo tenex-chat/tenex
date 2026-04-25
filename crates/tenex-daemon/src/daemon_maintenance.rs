@@ -173,7 +173,6 @@ where
             registered: backend_events_registration,
             due_task_names: due_task_names.clone(),
             scheduler_snapshot: scheduler_snapshot.clone(),
-            heartbeat_latch: input.heartbeat_latch.clone(),
         },
     )?;
     let scheduled_tasks = maintain_scheduled_tasks_from_shared_scheduler(
@@ -357,9 +356,6 @@ mod tests {
     use crate::backend_events_tick::{
         PROJECT_STATUS_TICK_INTERVAL_SECONDS, backend_events_project_status_task_name,
     };
-    use crate::backend_status_tick::{
-        BACKEND_STATUS_TICK_INTERVAL_SECONDS, BACKEND_STATUS_TICK_TASK_NAME,
-    };
     use crate::dispatch_queue::replay_dispatch_queue;
     use crate::periodic_tick::PeriodicScheduler;
     use crate::periodic_tick_state::{
@@ -443,10 +439,7 @@ mod tests {
         assert!(outcome.canceled_unbooted_project_statuses.is_empty());
         assert_eq!(
             outcome.backend_events.tick.due_task_names,
-            vec![
-                "backend-status".to_string(),
-                format!("project-status:{owner}:demo-project"),
-            ]
+            vec![format!("project-status:{owner}:demo-project")]
         );
         assert_eq!(outcome.backend_events.tick.project_statuses.len(), 1);
         assert_eq!(
@@ -455,7 +448,7 @@ mod tests {
                 .persisted_scheduler_snapshot
                 .tasks
                 .len(),
-            3
+            2
         );
         assert!(outcome.scheduled_tasks.triggers.is_empty());
         assert_eq!(
@@ -468,7 +461,7 @@ mod tests {
                 .persisted_scheduler_snapshot
                 .tasks
                 .len(),
-            3
+            2
         );
         assert_eq!(
             outcome.backend_events.tick.scheduler_snapshot,
@@ -494,7 +487,10 @@ mod tests {
 
         let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
-        assert_eq!(publish_outbox.pending_count, 2);
+        // Backend-status (kind 24012/24011) now publishes from the dedicated
+        // driver; this maintenance pass enqueues only the project-status event
+        // (kind 31934) for the booted project.
+        assert_eq!(publish_outbox.pending_count, 1);
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }
@@ -569,13 +565,6 @@ mod tests {
         )
         .expect("schedule must write");
         let mut scheduler = PeriodicScheduler::new();
-        scheduler
-            .register_task(
-                BACKEND_STATUS_TICK_TASK_NAME,
-                BACKEND_STATUS_TICK_INTERVAL_SECONDS,
-                1_710_001_000,
-            )
-            .expect("backend-status task must register");
         scheduler
             .register_task(
                 backend_events_project_status_task_name(&owner, "demo-project"),
@@ -702,10 +691,7 @@ mod tests {
         );
         assert!(outcome.project_boot_state.projects.is_empty());
         assert!(outcome.backend_events.tick.project_statuses.is_empty());
-        assert_eq!(
-            outcome.backend_events.tick.due_task_names,
-            vec!["backend-status".to_string()]
-        );
+        assert!(outcome.backend_events.tick.due_task_names.is_empty());
         assert_eq!(
             read_periodic_scheduler_state(&daemon_dir)
                 .expect("scheduler must read")
@@ -714,13 +700,14 @@ mod tests {
                 .iter()
                 .map(|task| task.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["backend-status", "scheduled-task-due-planner"]
+            vec!["scheduled-task-due-planner"]
         );
         let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
-        // Unbooted fixture has no installed agents, so only the heartbeat
-        // enqueues (per-agent 24011 publishes require installed agents).
-        assert_eq!(publish_outbox.pending_count, 1);
+        // Backend-status publishing now lives in the dedicated driver, not in
+        // daemon maintenance — so an unbooted fixture produces zero
+        // publish-outbox entries here.
+        assert_eq!(publish_outbox.pending_count, 0);
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }

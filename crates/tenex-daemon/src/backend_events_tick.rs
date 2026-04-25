@@ -1,17 +1,9 @@
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
-use crate::backend_status_runtime::{
-    BackendStatusRuntimeError, BackendStatusRuntimeInput, publish_backend_status_from_filesystem,
-};
-use crate::backend_status_tick::{
-    BACKEND_STATUS_TICK_INTERVAL_SECONDS, BACKEND_STATUS_TICK_TASK_NAME,
-};
 use crate::periodic_tick::{PeriodicScheduler, PeriodicSchedulerSnapshot, PeriodicTickError};
 use crate::project_status_runtime::{
     PROJECT_STATUS_REQUEST_SEQUENCE, ProjectStatusRuntimeError, ProjectStatusRuntimeInput,
@@ -39,10 +31,6 @@ pub struct BackendEventsTickInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub projects: &'a [BackendEventsTickProject<'a>],
-    /// When `Some` and the planner is in the `Stopped` state, the kind
-    /// 24012 heartbeat is skipped for this tick. Installed agent list and
-    /// other status events continue to publish.
-    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug)]
@@ -55,28 +43,12 @@ pub struct BackendEventsDueTickInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub projects: &'a [BackendEventsTickProject<'a>],
-    /// See [`BackendEventsTickInput::heartbeat_latch`].
-    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendEventsTaskRegistration {
     pub registered_task_names: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BackendEventsTickBackendStatusOutcome {
-    pub task_name: String,
-    pub backend_profile_event_id: Option<String>,
-    /// `None` when the heartbeat latch observed a matching kind 14199 and
-    /// gated the heartbeat for this tick.
-    pub heartbeat_event_id: Option<String>,
-    /// One event id per installed agent — kind 24011 is now published
-    /// per-agent, one signed event per installed agent.
-    pub agent_config_event_ids: Vec<String>,
-    pub enqueued_event_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -94,7 +66,6 @@ pub struct BackendEventsTickProjectStatusOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct BackendEventsTickOutcome {
     pub due_task_names: Vec<String>,
-    pub backend_status: Option<BackendEventsTickBackendStatusOutcome>,
     pub project_statuses: Vec<BackendEventsTickProjectStatusOutcome>,
     pub scheduler_snapshot: PeriodicSchedulerSnapshot,
 }
@@ -103,8 +74,6 @@ pub struct BackendEventsTickOutcome {
 pub enum BackendEventsTickError {
     #[error("periodic scheduler failed: {0}")]
     Periodic(#[from] PeriodicTickError),
-    #[error("backend status runtime failed: {0}")]
-    BackendStatus(#[from] BackendStatusRuntimeError),
     #[error("project-status runtime failed for {task_name}: {source}")]
     ProjectStatus {
         task_name: String,
@@ -145,15 +114,6 @@ pub fn ensure_backend_events_tasks(
         }
     }
 
-    if !scheduler.has_task(BACKEND_STATUS_TICK_TASK_NAME) {
-        scheduler.register_task(
-            BACKEND_STATUS_TICK_TASK_NAME,
-            BACKEND_STATUS_TICK_INTERVAL_SECONDS,
-            first_due_at,
-        )?;
-        registered_task_names.push(BACKEND_STATUS_TICK_TASK_NAME.to_string());
-    }
-
     for task_name in desired_project_tasks {
         if scheduler.has_task(&task_name) {
             continue;
@@ -186,7 +146,6 @@ pub fn tick_backend_events(
         accepted_at: input.accepted_at,
         request_timestamp: input.request_timestamp,
         projects: input.projects,
-        heartbeat_latch: input.heartbeat_latch,
     })
 }
 
@@ -202,56 +161,12 @@ pub fn tick_backend_events_for_due_tasks(
         accepted_at,
         request_timestamp,
         projects,
-        heartbeat_latch,
     } = input;
-    let backend_due_task_names = due_task_names
+    let project_due_task_names = due_task_names
         .iter()
-        .filter(|task_name| {
-            task_name.as_str() == BACKEND_STATUS_TICK_TASK_NAME
-                || task_name.starts_with(PROJECT_STATUS_TICK_TASK_PREFIX)
-        })
+        .filter(|task_name| task_name.starts_with(PROJECT_STATUS_TICK_TASK_PREFIX))
         .cloned()
         .collect::<Vec<_>>();
-    let backend_status = if backend_due_task_names
-        .iter()
-        .any(|task_name| task_name == BACKEND_STATUS_TICK_TASK_NAME)
-    {
-        let mut runtime_input = BackendStatusRuntimeInput::new(
-            tenex_base_dir,
-            daemon_dir,
-            now,
-            accepted_at,
-            request_timestamp,
-        );
-        if let Some(latch) = heartbeat_latch {
-            runtime_input = runtime_input.with_heartbeat_latch(latch);
-        }
-        let outcome = publish_backend_status_from_filesystem(runtime_input)?;
-        let heartbeat_event_id = outcome
-            .heartbeat
-            .as_ref()
-            .map(|heartbeat| heartbeat.record.event.id.clone());
-        let agent_config_event_ids: Vec<String> = outcome
-            .agent_configs
-            .iter()
-            .map(|publish| publish.record.event.id.clone())
-            .collect();
-        let enqueued_event_count = usize::from(outcome.backend_profile.is_some())
-            + usize::from(outcome.heartbeat.is_some())
-            + agent_config_event_ids.len();
-        Some(BackendEventsTickBackendStatusOutcome {
-            task_name: BACKEND_STATUS_TICK_TASK_NAME.to_string(),
-            backend_profile_event_id: outcome
-                .backend_profile
-                .as_ref()
-                .map(|profile| profile.record.event.id.clone()),
-            heartbeat_event_id,
-            agent_config_event_ids,
-            enqueued_event_count,
-        })
-    } else {
-        None
-    };
 
     let mut project_statuses = Vec::new();
     for project in projects {
@@ -259,7 +174,7 @@ pub fn tick_backend_events_for_due_tasks(
             project.project_owner_pubkey,
             project.project_d_tag,
         );
-        if !backend_due_task_names.iter().any(|due| due == &task_name) {
+        if !project_due_task_names.iter().any(|due| due == &task_name) {
             continue;
         }
 
@@ -292,8 +207,7 @@ pub fn tick_backend_events_for_due_tasks(
     }
 
     Ok(BackendEventsTickOutcome {
-        due_task_names: backend_due_task_names,
-        backend_status,
+        due_task_names: project_due_task_names,
         project_statuses,
         scheduler_snapshot,
     })
@@ -303,8 +217,6 @@ pub fn tick_backend_events_for_due_tasks(
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
-    use crate::backend_events::heartbeat::BACKEND_HEARTBEAT_KIND;
-    use crate::backend_events::installed_agent_list::INSTALLED_AGENT_LIST_KIND;
     use crate::backend_events::project_status::PROJECT_STATUS_KIND;
     use crate::publish_outbox::read_pending_publish_outbox_record;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
@@ -319,7 +231,7 @@ mod tests {
         "0101010101010101010101010101010101010101010101010101010101010101";
 
     #[test]
-    fn ensure_backend_events_tasks_registers_backend_and_projects_once() {
+    fn ensure_backend_events_tasks_registers_projects_once() {
         let owner = pubkey_hex(0x02);
         let project = BackendEventsTickProject {
             project_owner_pubkey: &owner,
@@ -339,13 +251,10 @@ mod tests {
 
         assert_eq!(
             first.registered_task_names,
-            vec![
-                BACKEND_STATUS_TICK_TASK_NAME.to_string(),
-                backend_events_project_status_task_name(&owner, "demo-project"),
-            ]
+            vec![backend_events_project_status_task_name(&owner, "demo-project")]
         );
         assert!(second.registered_task_names.is_empty());
-        assert_eq!(scheduler.inspect().tasks.len(), 2);
+        assert_eq!(scheduler.inspect().tasks.len(), 1);
     }
 
     #[test]
@@ -359,9 +268,6 @@ mod tests {
             worktrees: None,
         };
         let mut scheduler = PeriodicScheduler::new();
-        scheduler
-            .register_task(BACKEND_STATUS_TICK_TASK_NAME, 30, 100)
-            .expect("backend task");
         scheduler
             .register_task(
                 backend_events_project_status_task_name(&owner, "stale-project"),
@@ -389,10 +295,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             task_names,
-            vec![
-                BACKEND_STATUS_TICK_TASK_NAME.to_string(),
-                backend_events_project_status_task_name(&owner, "active-project"),
-            ]
+            vec![backend_events_project_status_task_name(&owner, "active-project")]
         );
     }
 
@@ -421,52 +324,30 @@ mod tests {
             accepted_at: 100_000,
             request_timestamp: 100_000,
             projects: std::slice::from_ref(&project),
-            heartbeat_latch: None,
         })
         .expect("not-due tick must succeed");
 
         assert!(outcome.due_task_names.is_empty());
-        assert!(outcome.backend_status.is_none());
         assert!(outcome.project_statuses.is_empty());
-        assert_eq!(outcome.scheduler_snapshot.tasks.len(), 2);
+        assert_eq!(outcome.scheduler_snapshot.tasks.len(), 1);
         assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 200);
-        assert_eq!(outcome.scheduler_snapshot.tasks[1].next_due_at, 200);
 
         cleanup_temp_dir(tenex_base_dir);
     }
 
     #[test]
-    fn tick_backend_events_enqueues_backend_and_project_status_when_due() {
+    fn tick_backend_events_enqueues_project_status_when_due() {
         let tenex_base_dir = unique_temp_dir("due-base");
         let daemon_dir = tenex_base_dir.join("daemon");
-        let agents_dir = tenex_base_dir.join("agents");
         let project_dir = tenex_base_dir.join("projects").join("demo-project");
+        let agents_dir = tenex_base_dir.join("agents");
         fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
-        fs::create_dir_all(&agents_dir).expect("agents dir must create");
         fs::create_dir_all(&project_dir).expect("project dir must create");
+        fs::create_dir_all(&agents_dir).expect("agents dir must create");
 
         let owner = pubkey_hex(0x04);
         let manager = pubkey_hex(0x05);
-        let worker = pubkey_hex(0x06);
         write_config(&tenex_base_dir, &[&owner]);
-        write_agent(&agents_dir, &manager, "manager");
-        write_agent(&agents_dir, &worker, "worker");
-        fs::write(
-            tenex_base_dir.join("llms.json"),
-            r#"{"configurations":{"alpha":{"provider":"openai","model":"gpt-4o"}}}"#,
-        )
-        .expect("llms file must write");
-        fs::write(
-            project_dir.join("schedules.json"),
-            r#"[{
-                "id": "task-1",
-                "title": "Nightly report",
-                "schedule": "0 1 * * *",
-                "prompt": "Run nightly report",
-                "targetAgentSlug": "worker"
-            }]"#,
-        )
-        .expect("schedules file must write");
 
         let worktrees = vec!["main".to_string()];
         let project = BackendEventsTickProject {
@@ -488,52 +369,24 @@ mod tests {
             accepted_at: 100_050,
             request_timestamp: 100_025,
             projects: std::slice::from_ref(&project),
-            heartbeat_latch: None,
         })
-        .expect("due tick must enqueue backend events");
+        .expect("due tick must enqueue project status");
 
         assert_eq!(
             outcome.due_task_names,
-            vec![
-                BACKEND_STATUS_TICK_TASK_NAME.to_string(),
-                backend_events_project_status_task_name(&owner, "demo-project"),
-            ]
+            vec![backend_events_project_status_task_name(&owner, "demo-project")]
         );
-        let backend_status = outcome
-            .backend_status
-            .as_ref()
-            .expect("backend status must publish");
-        // 1 heartbeat + 1 per-agent 24011 per installed agent (2 agents).
-        assert_eq!(backend_status.enqueued_event_count, 3);
         assert_eq!(outcome.project_statuses.len(), 1);
         assert_eq!(outcome.project_statuses[0].project_d_tag, "demo-project");
         assert_eq!(outcome.project_statuses[0].enqueued_event_count, 1);
         assert_eq!(outcome.scheduler_snapshot.tasks[0].next_due_at, 130);
-        assert_eq!(outcome.scheduler_snapshot.tasks[1].next_due_at, 130);
 
-        let heartbeat_event_id = backend_status
-            .heartbeat_event_id
-            .as_ref()
-            .expect("heartbeat must publish when latch is absent");
-        let heartbeat = read_pending_publish_outbox_record(&daemon_dir, heartbeat_event_id)
-            .expect("heartbeat record read must succeed")
-            .expect("heartbeat record must exist");
-        let first_agent_config = backend_status
-            .agent_config_event_ids
-            .first()
-            .expect("per-agent 24011 must publish");
-        let installed = read_pending_publish_outbox_record(&daemon_dir, first_agent_config)
-            .expect("agent-config record read must succeed")
-            .expect("agent-config record must exist");
         let project_status = read_pending_publish_outbox_record(
             &daemon_dir,
             &outcome.project_statuses[0].project_status_event_id,
         )
         .expect("project-status record read must succeed")
         .expect("project-status record must exist");
-
-        assert_eq!(heartbeat.event.kind, BACKEND_HEARTBEAT_KIND);
-        assert_eq!(installed.event.kind, INSTALLED_AGENT_LIST_KIND);
         assert_eq!(project_status.event.kind, PROJECT_STATUS_KIND);
 
         let second = tick_backend_events(BackendEventsTickInput {
@@ -544,72 +397,11 @@ mod tests {
             accepted_at: 100_050,
             request_timestamp: 100_025,
             projects: std::slice::from_ref(&project),
-            heartbeat_latch: None,
         })
         .expect("same-now tick must be no-op");
 
         assert!(second.due_task_names.is_empty());
-        assert!(second.backend_status.is_none());
         assert!(second.project_statuses.is_empty());
-
-        cleanup_temp_dir(tenex_base_dir);
-    }
-
-    #[test]
-    fn tick_backend_events_skips_heartbeat_when_latch_is_stopped() {
-        let tenex_base_dir = unique_temp_dir("latch-stopped");
-        let daemon_dir = tenex_base_dir.join("daemon");
-        let agents_dir = tenex_base_dir.join("agents");
-        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
-        fs::create_dir_all(&agents_dir).expect("agents dir must create");
-
-        let owner = pubkey_hex(0x04);
-        let worker = pubkey_hex(0x06);
-        write_config(&tenex_base_dir, &[&owner]);
-        write_agent(&agents_dir, &worker, "worker");
-
-        let mut scheduler = PeriodicScheduler::new();
-        ensure_backend_events_tasks(&mut scheduler, 100, &[])
-            .expect("task registration must succeed");
-
-        let backend_pubkey = pubkey_hex(0x02);
-        let latch = Arc::new(Mutex::new(BackendHeartbeatLatchPlanner::new(
-            backend_pubkey,
-            Vec::<String>::new(),
-        )));
-        assert!(!latch.lock().unwrap().should_heartbeat());
-
-        let outcome = tick_backend_events(BackendEventsTickInput {
-            now: 100,
-            scheduler: &mut scheduler,
-            tenex_base_dir: &tenex_base_dir,
-            daemon_dir: &daemon_dir,
-            accepted_at: 100_050,
-            request_timestamp: 100_025,
-            projects: &[],
-            heartbeat_latch: Some(Arc::clone(&latch)),
-        })
-        .expect("due tick must enqueue non-heartbeat backend events");
-
-        let backend_status = outcome
-            .backend_status
-            .as_ref()
-            .expect("backend status must publish");
-        assert!(
-            backend_status.heartbeat_event_id.is_none(),
-            "heartbeat must be gated when latch is stopped"
-        );
-        assert!(!backend_status.agent_config_event_ids.is_empty());
-
-        // Per-agent 24011s are still persisted to the publish outbox.
-        let first_agent_config = backend_status
-            .agent_config_event_ids
-            .first()
-            .expect("per-agent 24011 must publish");
-        let installed = read_pending_publish_outbox_record(&daemon_dir, first_agent_config)
-            .expect("agent-config record read must succeed")
-            .expect("agent-config record must exist");
-        assert_eq!(installed.event.kind, INSTALLED_AGENT_LIST_KIND);
 
         cleanup_temp_dir(tenex_base_dir);
     }
@@ -632,14 +424,6 @@ mod tests {
             ),
         )
         .expect("config must write");
-    }
-
-    fn write_agent(agents_dir: &Path, pubkey: &str, slug: &str) {
-        fs::write(
-            agents_dir.join(format!("{pubkey}.json")),
-            format!(r#"{{"slug":"{slug}","status":"active"}}"#),
-        )
-        .expect("agent file must write");
     }
 
     fn pubkey_hex(fill_byte: u8) -> String {

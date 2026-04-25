@@ -667,16 +667,10 @@ fn backend_enqueued_event_count(maintenance: &DaemonMaintenanceOutcome) -> usize
     maintenance
         .backend_events
         .tick
-        .backend_status
-        .as_ref()
-        .map_or(0, |status| status.enqueued_event_count)
-        + maintenance
-            .backend_events
-            .tick
-            .project_statuses
-            .iter()
-            .map(|status| status.enqueued_event_count)
-            .sum::<usize>()
+        .project_statuses
+        .iter()
+        .map(|status| status.enqueued_event_count)
+        .sum::<usize>()
 }
 
 fn worker_runtime_outcome_label(outcome: &DaemonWorkerRuntimeOutcome) -> &'static str {
@@ -1333,22 +1327,22 @@ mod tests {
         let tick = &outcome.steps[0].maintenance_outcome;
         assert_eq!(
             tick.maintenance.backend_events.tick.due_task_names,
-            vec![
-                "backend-status".to_string(),
-                format!("project-status:{}:demo-project", fixture.owner_pubkey),
-            ]
+            vec![format!(
+                "project-status:{}:demo-project",
+                fixture.owner_pubkey
+            )]
         );
-        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 2);
-        assert_eq!(tick.publish_outbox.drained.len(), 2);
+        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 1);
+        assert_eq!(tick.publish_outbox.drained.len(), 1);
         assert_eq!(tick.publish_outbox.diagnostics_after.pending_count, 0);
-        assert_eq!(tick.publish_outbox.diagnostics_after.published_count, 2);
-        assert_eq!(publisher.lock().unwrap().event_ids.len(), 2);
+        assert_eq!(tick.publish_outbox.diagnostics_after.published_count, 1);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 1);
         assert!(sleeper.sleeps_ms.is_empty());
 
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
-        assert_eq!(publish_outbox.published_count, 2);
+        assert_eq!(publish_outbox.published_count, 1);
     }
 
     #[test]
@@ -1379,8 +1373,8 @@ mod tests {
         .expect("filesystem tick loop must record retryable publish failures");
 
         let tick = &outcome.steps[0].maintenance_outcome;
-        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 2);
-        assert_eq!(tick.publish_outbox.drained.len(), 2);
+        assert_eq!(tick.publish_outbox.diagnostics_before.pending_count, 1);
+        assert_eq!(tick.publish_outbox.drained.len(), 1);
         assert!(
             tick.publish_outbox
                 .drained
@@ -1388,10 +1382,10 @@ mod tests {
                 .all(|drain| drain.status == crate::publish_outbox::PublishOutboxStatus::Failed)
         );
         assert_eq!(tick.publish_outbox.diagnostics_after.pending_count, 0);
-        assert_eq!(tick.publish_outbox.diagnostics_after.failed_count, 2);
+        assert_eq!(tick.publish_outbox.diagnostics_after.failed_count, 1);
         assert_eq!(
             tick.publish_outbox.diagnostics_after.retryable_failed_count,
-            2
+            1
         );
         assert_eq!(tick.publish_outbox.diagnostics_after.retry_due_count, 0);
         assert!(
@@ -1402,13 +1396,13 @@ mod tests {
                 .and_then(|failure| failure.next_attempt_at)
                 .is_some()
         );
-        assert_eq!(publisher.lock().unwrap().publish_attempts, 2);
+        assert_eq!(publisher.lock().unwrap().publish_attempts, 1);
         assert!(sleeper.sleeps_ms.is_empty());
 
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
-        assert_eq!(publish_outbox.failed_count, 2);
-        assert_eq!(publish_outbox.retryable_failed_count, 2);
+        assert_eq!(publish_outbox.failed_count, 1);
+        assert_eq!(publish_outbox.retryable_failed_count, 1);
     }
 
     #[test]
@@ -1450,10 +1444,10 @@ mod tests {
 
         assert_eq!(
             outcome.maintenance.backend_events.tick.due_task_names,
-            vec![
-                "backend-status".to_string(),
-                format!("project-status:{}:demo-project", fixture.owner_pubkey),
-            ]
+            vec![format!(
+                "project-status:{}:demo-project",
+                fixture.owner_pubkey
+            )]
         );
         assert_eq!(outcome.worker_runtime.len(), 1);
         assert!(matches!(
@@ -1464,10 +1458,10 @@ mod tests {
             }
         ));
         assert_eq!(spawner.spawn_calls, 0);
-        assert_eq!(outcome.publish_outbox.diagnostics_before.pending_count, 2);
-        assert_eq!(outcome.publish_outbox.drained.len(), 2);
+        assert_eq!(outcome.publish_outbox.diagnostics_before.pending_count, 1);
+        assert_eq!(outcome.publish_outbox.drained.len(), 1);
         assert_eq!(outcome.publish_outbox.diagnostics_after.pending_count, 0);
-        assert_eq!(publisher.lock().unwrap().event_ids.len(), 2);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 1);
     }
 
     #[test]
@@ -1569,11 +1563,11 @@ mod tests {
         ));
         assert_eq!(spawner.spawn_calls, 1);
         // Publish outbox drain still runs before the tick returns.
-        assert_eq!(publisher.lock().unwrap().event_ids.len(), 2);
+        assert_eq!(publisher.lock().unwrap().event_ids.len(), 1);
         let publish_outbox = inspect_publish_outbox(&fixture.daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
-        assert_eq!(publish_outbox.published_count, 2);
+        assert_eq!(publish_outbox.published_count, 1);
     }
 
     #[derive(Debug)]

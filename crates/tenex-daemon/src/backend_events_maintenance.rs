@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -9,7 +8,6 @@ use crate::backend_events_tick::{
     BackendEventsTickInput, BackendEventsTickOutcome, BackendEventsTickProject,
     ensure_backend_events_tasks, tick_backend_events, tick_backend_events_for_due_tasks,
 };
-use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::periodic_tick::PeriodicSchedulerSnapshot;
 use crate::periodic_tick_state::{
     PeriodicTickStateError, periodic_scheduler_state_path, read_periodic_scheduler_state,
@@ -26,9 +24,6 @@ pub struct BackendEventsMaintenanceInput<'a> {
     pub accepted_at: u64,
     pub request_timestamp: u64,
     pub projects: &'a [BackendEventsTickProject<'a>],
-    /// When present, a `Stopped` latch gates the kind 24012 heartbeat for
-    /// this maintenance pass.
-    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,8 +38,6 @@ pub struct BackendEventsMaintenanceSharedSchedulerInput<'a> {
     pub registered: BackendEventsTaskRegistration,
     pub due_task_names: Vec<String>,
     pub scheduler_snapshot: PeriodicSchedulerSnapshot,
-    /// See [`BackendEventsMaintenanceInput::heartbeat_latch`].
-    pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -88,7 +81,6 @@ pub fn maintain_backend_events_from_filesystem(
         accepted_at: input.accepted_at,
         request_timestamp: input.request_timestamp,
         projects: input.projects,
-        heartbeat_latch: input.heartbeat_latch,
     })?;
     let persisted_scheduler_snapshot =
         write_periodic_scheduler_state(input.daemon_dir, &scheduler)?;
@@ -121,7 +113,6 @@ pub fn maintain_backend_events_from_shared_scheduler(
         accepted_at: input.accepted_at,
         request_timestamp: input.request_timestamp,
         projects: input.projects,
-        heartbeat_latch: input.heartbeat_latch,
     })?;
     let publish_outbox_after = inspect_publish_outbox(input.daemon_dir, input.accepted_at)?;
 
@@ -156,7 +147,10 @@ mod tests {
         "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f";
 
     #[test]
-    fn backend_events_maintenance_persists_scheduler_state_between_runs() {
+    fn backend_events_maintenance_with_no_projects_is_a_noop() {
+        // Backend-status (kind 24012/24011) now publishes from the dedicated
+        // backend_status_driver, not from this maintenance pass. With zero
+        // booted projects, this pass has no work to do.
         let base_dir = unique_temp_dir("backend-events-maintenance-base");
         let daemon_dir = base_dir.join("daemon");
         let agents_dir = base_dir.join("agents");
@@ -174,7 +168,7 @@ mod tests {
         )
         .expect("config must write");
 
-        let first = maintain_backend_events_from_filesystem(BackendEventsMaintenanceInput {
+        let outcome = maintain_backend_events_from_filesystem(BackendEventsMaintenanceInput {
             tenex_base_dir: &base_dir,
             daemon_dir: &daemon_dir,
             now: 1_710_001_000,
@@ -182,42 +176,12 @@ mod tests {
             accepted_at: 1_710_001_000_100,
             request_timestamp: 1_710_001_000_050,
             projects: &[],
-            heartbeat_latch: None,
         })
-        .expect("first maintenance run must succeed");
+        .expect("maintenance run must succeed");
 
-        assert_eq!(
-            first.tick.due_task_names,
-            vec!["backend-status".to_string()]
-        );
-        // No agents installed in this fixture, so only the heartbeat
-        // enqueues. Per-agent 24011 publishes depend on installed agents.
-        assert_eq!(first.publish_outbox_after.pending_count, 1);
-        assert_eq!(
-            first.persisted_scheduler_snapshot.tasks[0].next_due_at,
-            1_710_001_030
-        );
-        assert!(first.scheduler_state_path.is_file());
-
-        let second = maintain_backend_events_from_filesystem(BackendEventsMaintenanceInput {
-            tenex_base_dir: &base_dir,
-            daemon_dir: &daemon_dir,
-            now: 1_710_001_010,
-            first_due_at: 1_710_001_000,
-            accepted_at: 1_710_001_010_100,
-            request_timestamp: 1_710_001_010_050,
-            projects: &[],
-            heartbeat_latch: None,
-        })
-        .expect("second maintenance run must succeed");
-
-        assert!(second.registered.registered_task_names.is_empty());
-        assert!(second.tick.due_task_names.is_empty());
-        assert_eq!(second.publish_outbox_after.pending_count, 1);
-        assert_eq!(
-            second.persisted_scheduler_snapshot.tasks[0].next_due_at,
-            1_710_001_030
-        );
+        assert!(outcome.tick.due_task_names.is_empty());
+        assert!(outcome.tick.project_statuses.is_empty());
+        assert_eq!(outcome.publish_outbox_after.pending_count, 0);
     }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {

@@ -497,7 +497,6 @@ fn run_backend_events_periodic_tick(
         accepted_at,
         request_timestamp,
         projects,
-        heartbeat_latch: None,
     })
     .map_err(|error| runtime_error(error.to_string()))?;
 
