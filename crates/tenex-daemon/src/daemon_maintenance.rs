@@ -6,10 +6,6 @@ use thiserror::Error;
 
 use crate::backend_config::{BackendConfigError, read_backend_config};
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
-use crate::intervention::{
-    InterventionMaintenanceError, InterventionMaintenanceInput, InterventionMaintenanceOutcome,
-    run_intervention_maintenance,
-};
 use crate::project_boot_state::{BootedProjectsState, is_project_booted};
 use crate::project_event_index::ProjectEventIndex;
 use crate::project_status_descriptors::{ProjectStatusDescriptor, ProjectStatusDescriptorReport};
@@ -47,7 +43,6 @@ pub struct DaemonMaintenanceOutcome {
     pub booted_project_descriptor_report: ProjectStatusDescriptorReport,
     pub project_boot_state: BootedProjectsState,
     pub scheduler_wakeups: SchedulerWakeupsMaintenanceReport,
-    pub intervention: InterventionMaintenanceOutcome,
     pub telegram_outbox: TelegramOutboxMaintenanceReport,
 }
 
@@ -57,8 +52,6 @@ pub enum DaemonMaintenanceError {
     BackendConfig(#[from] BackendConfigError),
     #[error("scheduler wakeups maintenance failed: {0}")]
     SchedulerWakeups(#[from] SchedulerWakeupError),
-    #[error("intervention maintenance failed: {0}")]
-    Intervention(#[from] InterventionMaintenanceError),
     #[error("telegram outbox maintenance failed: {0}")]
     TelegramOutbox(#[from] TelegramOutboxError),
 }
@@ -115,13 +108,6 @@ where
         "project-status filter trace"
     );
     let scheduler_wakeups = run_scheduler_maintenance(input.daemon_dir, input.now_ms)?;
-    let intervention = run_intervention_maintenance(InterventionMaintenanceInput {
-        tenex_base_dir: input.tenex_base_dir,
-        daemon_dir: input.daemon_dir,
-        now_ms: input.now_ms,
-        project_descriptors: &booted_project_descriptor_report.descriptors,
-        writer_version: DAEMON_MAINTENANCE_WRITER_VERSION,
-    })?;
     let telegram_outbox = telegram_publisher.run_maintenance(input.daemon_dir, input.now_ms)?;
 
     Ok(DaemonMaintenanceOutcome {
@@ -133,7 +119,6 @@ where
         booted_project_descriptor_report,
         project_boot_state,
         scheduler_wakeups,
-        intervention,
         telegram_outbox,
     })
 }

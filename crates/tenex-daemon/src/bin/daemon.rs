@@ -11,6 +11,9 @@ use serde::Serialize;
 use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use tenex_daemon::backend_status_driver::{BackendStatusDriverDeps, run_backend_status_driver};
+use tenex_daemon::intervention_driver::{
+    InterventionDriverDeps, run_intervention_arm_driver, run_intervention_fire_driver,
+};
 use tenex_daemon::project_status_driver::{ProjectStatusDriverDeps, run_project_status_supervisor};
 use tenex_daemon::scheduled_task_driver::{ScheduledTaskDriverDeps, run_scheduled_task_supervisor};
 use tenex_daemon::daemon_foreground::{
@@ -50,6 +53,7 @@ use tenex_daemon::telegram::gateway::{
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::daemon_signals::create_daemon_signals;
 use tenex_daemon::telemetry;
+use tokio::sync::Notify;
 use tenex_daemon::whitelist_wiring::{
     WhitelistReloadHandle, build_whitelist_wiring, reload_whitelist_from_handle,
 };
@@ -214,6 +218,8 @@ where
     // consumed by driver tasks; remaining receivers are dropped (senders
     // silently discard items when no receiver exists).
     let (signals, receivers) = create_daemon_signals();
+    let project_booted_rx = receivers.project_booted_rx;
+    let ral_completed_rx = receivers.ral_completed_rx;
 
     // Fan-out BootedProject to the project-status supervisor and the
     // scheduled-task supervisor. A single sender (project_booted_tx) is wired
@@ -224,7 +230,7 @@ where
     let (scheduled_task_boot_tx, scheduled_task_boot_rx) =
         tokio::sync::mpsc::unbounded_channel::<tenex_daemon::daemon_signals::BootedProject>();
     let boot_fanout_handle = runtime_handle.spawn(async move {
-        let mut boot_rx = receivers.project_booted_rx;
+        let mut boot_rx = project_booted_rx;
         while let Some(booted) = boot_rx.recv().await {
             let _ = project_status_boot_tx.send(booted.clone());
             let _ = scheduled_task_boot_tx.send(booted);
@@ -314,6 +320,34 @@ where
         tenex_base_dir.clone(),
         signals.project_schedules_changed.clone(),
     );
+
+    // Spawn the intervention drivers. A shared Notify lets the arm driver wake
+    // the fire driver immediately after arming a new wakeup, so the fire driver
+    // can recompute its sleep_until deadline without waiting for the old one.
+    let armed_notify = Arc::new(Notify::new());
+    let (intervention_shutdown_tx, intervention_arm_shutdown_rx) =
+        tokio::sync::watch::channel(false);
+    let intervention_fire_shutdown_rx = intervention_arm_shutdown_rx.clone();
+    let intervention_arm_handle = runtime_handle.spawn(run_intervention_arm_driver(
+        InterventionDriverDeps {
+            tenex_base_dir: tenex_base_dir.clone(),
+            daemon_dir: daemon_dir.clone(),
+            project_event_index: Arc::clone(&project_event_index),
+        },
+        ral_completed_rx,
+        Arc::clone(&signals.project_index_changed),
+        Arc::clone(&armed_notify),
+        intervention_arm_shutdown_rx,
+    ));
+    let intervention_fire_handle = runtime_handle.spawn(run_intervention_fire_driver(
+        InterventionDriverDeps {
+            tenex_base_dir: tenex_base_dir.clone(),
+            daemon_dir: daemon_dir.clone(),
+            project_event_index: Arc::clone(&project_event_index),
+        },
+        armed_notify,
+        intervention_fire_shutdown_rx,
+    ));
 
     tenex_daemon::stdout_status::print_daemon_ready(
         nostr_supervisor.is_some(),
@@ -406,11 +440,14 @@ where
     let _ = backend_status_shutdown_tx.send(true);
     let _ = project_status_shutdown_tx.send(true);
     let _ = scheduled_task_shutdown_tx.send(true);
+    let _ = intervention_shutdown_tx.send(true);
     boot_fanout_handle.abort();
     runtime_handle.block_on(async {
         let _ = backend_status_driver_handle.await;
         let _ = project_status_supervisor_handle.await;
         let _ = scheduled_task_supervisor_handle.await;
+        let _ = intervention_arm_handle.await;
+        let _ = intervention_fire_handle.await;
     });
 
     // Stop the schedule file watcher OS thread.
