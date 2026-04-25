@@ -359,7 +359,20 @@ impl WorkerFrameReceiver for AgentWorkerProcess {
     type Error = WorkerProcessError;
 
     fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
-        self.channel.next_frame_blocking()
+        match self.channel.next_frame_blocking() {
+            Ok(frame) => Ok(frame),
+            Err(error) => {
+                let stderr = self.stderr_snapshot();
+                if !stderr.is_empty() {
+                    tracing::warn!(
+                        worker_stderr = %stderr,
+                        error = %error,
+                        "worker frame receive failed; surfacing worker stderr"
+                    );
+                }
+                Err(error)
+            }
+        }
     }
 }
 

@@ -180,6 +180,16 @@ class AgentWorkerSession {
             return undefined;
         }
 
+        if (message.type === "publish_result" || message.type === "ack") {
+            // Worker is fire-and-forget for publishes (commit 22ee6bcc removed
+            // the publish-result coordinator). The daemon still sends these
+            // frames after every publish_request acceptance; the worker simply
+            // acknowledges them by ignoring. Throwing here would kill the
+            // worker mid-stream and cascade into "failed to fill whole buffer"
+            // on the daemon side.
+            return undefined;
+        }
+
         if (message.type === "inject") {
             this.handleInject(message);
             return undefined;
