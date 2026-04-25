@@ -277,8 +277,16 @@ stop_daemon() {
   if [[ -n "${HARNESS_DAEMON_PID:-}" ]]; then
     _log "stopping daemon pid $HARNESS_DAEMON_PID (SIGTERM)"
     kill -TERM "$HARNESS_DAEMON_PID" 2>/dev/null || true
-    wait "$HARNESS_DAEMON_PID" 2>/dev/null || true
+    local daemon_exit
+    wait "$HARNESS_DAEMON_PID" 2>/dev/null
+    daemon_exit=$?
     unset HARNESS_DAEMON_PID
+    # On SIGTERM the process exits with 143 (128+15) — that is expected.
+    # Any other non-zero exit code indicates a crash.
+    if [[ "$daemon_exit" -ne 0 && "$daemon_exit" -ne 143 ]]; then
+      _log "ERROR: daemon exited with code $daemon_exit after SIGTERM (expected 0 or 143)"
+      HARNESS_DAEMON_CRASHED=1
+    fi
   fi
 }
 
@@ -517,12 +525,42 @@ assert_event_on_relay() {
 
 # === Cleanup ==================================================================
 
+# _check_daemon_log_for_panics
+# Greps daemon.log for Rust thread panics. If found, prints the panic line to
+# stderr and sets HARNESS_DAEMON_PANICKED=1.  Called from harness_cleanup.
+_check_daemon_log_for_panics() {
+  local log="${HARNESS_DAEMON_LOG:-}"
+  [[ -n "$log" && -f "$log" ]] || return 0
+  local panic_line
+  panic_line="$(grep -E "thread '.*' panicked|panicked at" "$log" 2>/dev/null | head -1 || true)"
+  if [[ -n "$panic_line" ]]; then
+    _log "PANIC DETECTED in daemon.log: $panic_line"
+    HARNESS_DAEMON_PANICKED=1
+  fi
+}
+
 # Use: trap harness_cleanup EXIT
 harness_cleanup() {
   local rc=$?
   _log "cleanup (script exit code=$rc)"
+  HARNESS_DAEMON_CRASHED="${HARNESS_DAEMON_CRASHED:-0}"
+  HARNESS_DAEMON_PANICKED="${HARNESS_DAEMON_PANICKED:-0}"
   stop_daemon || true
+  _check_daemon_log_for_panics
   stop_local_relay || true
+
+  # Promote any daemon panic or unexpected crash to a scenario failure,
+  # regardless of whether the scenario's own assertions passed.
+  if [[ "$HARNESS_DAEMON_PANICKED" -eq 1 ]]; then
+    local panic_line
+    panic_line="$(grep -E "thread '.*' panicked|panicked at" "${HARNESS_DAEMON_LOG:-/dev/null}" 2>/dev/null | head -1 || true)"
+    emit_result fail "daemon panicked: $panic_line"
+    return 1
+  fi
+  if [[ "$HARNESS_DAEMON_CRASHED" -eq 1 ]]; then
+    emit_result fail "daemon exited with unexpected non-zero exit code after SIGTERM"
+    return 1
+  fi
   return $rc
 }
 
