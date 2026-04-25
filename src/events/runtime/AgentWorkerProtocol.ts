@@ -17,6 +17,7 @@ export const DAEMON_TO_WORKER_MESSAGE_TYPES = [
     "publish_result",
     "nip46_publish_result",
     "ack",
+    "project_boot",
 ] as const;
 
 export const WORKER_TO_DAEMON_MESSAGE_TYPES = [
@@ -41,6 +42,7 @@ export const WORKER_TO_DAEMON_MESSAGE_TYPES = [
     "aborted",
     "error",
     "heartbeat",
+    "project_ready",
 ] as const;
 
 export type AgentWorkerProtocolDirection = "daemon_to_worker" | "worker_to_daemon";
@@ -207,6 +209,61 @@ const delegationSnapshotSchema = z
     })
     .passthrough();
 
+const agentSkillSchema = z
+    .object({
+        slug: z.string().min(1),
+        version: z.string().min(1),
+    })
+    .passthrough();
+
+const agentModelSchema = z
+    .object({
+        provider: z.string().min(1),
+        modelId: z.string().min(1),
+        temperature: z.number().optional(),
+        maxOutputTokens: positiveIntegerSchema.optional(),
+    })
+    .passthrough();
+
+const agentExecuteSchema = z
+    .object({
+        pubkey: hexPubkeySchema,
+        slug: z.string().min(1),
+        name: z.string().min(1),
+        role: z.string().min(1),
+        category: z.string().optional(),
+        description: z.string().optional(),
+        instructions: z.string().optional(),
+        customInstructions: z.string().optional(),
+        useCriteria: z.string().optional(),
+        signingPrivateKey: z.string().min(1),
+        llmConfig: z.string().min(1).optional(),
+        systemPrompt: z.string().optional(),
+        tools: z.array(z.string().min(1)).optional(),
+        skills: z.array(agentSkillSchema).optional(),
+        alwaysSkills: z.array(z.string().min(1)).optional(),
+        blockedSkills: z.array(z.string().min(1)).optional(),
+        mcpAccess: z.array(z.string().min(1)).optional(),
+        mcpServers: z.record(z.string(), z.unknown()).optional(),
+        pmOverrides: z.record(z.string(), z.boolean()).optional(),
+        isPM: z.boolean().optional(),
+        eventId: z.string().min(1).optional(),
+        useAISDKAgent: z.boolean().optional(),
+        maxAgentSteps: positiveIntegerSchema.optional(),
+        model: agentModelSchema.optional(),
+    })
+    .passthrough();
+
+const projectAgentMetadataSchema = z
+    .object({
+        pubkey: hexPubkeySchema,
+        slug: z.string().min(1),
+        name: z.string().min(1),
+        role: z.string().min(1).optional(),
+        isPM: z.boolean().optional(),
+    })
+    .passthrough();
+
 const executeMessageSchema = frameSchema("execute", {
     projectId: z.string().min(1),
     projectBasePath: z.string().min(1),
@@ -225,6 +282,30 @@ const executeMessageSchema = frameSchema("execute", {
         })
         .passthrough(),
     delegationSnapshot: delegationSnapshotSchema.optional(),
+    agent: agentExecuteSchema.optional(),
+    projectAgentInventory: z.array(projectAgentMetadataSchema).optional(),
+});
+
+const projectEventSchema = z
+    .object({
+        ownerPubkey: hexPubkeySchema,
+        dTag: z.string().min(1),
+        title: z.string().optional(),
+        tags: z.array(z.array(z.string())).optional(),
+    })
+    .passthrough();
+
+const projectBootMessageSchema = frameSchema("project_boot", {
+    projectId: z.string().min(1),
+    projectBasePath: z.string().min(1),
+    metadataPath: z.string().min(1),
+    projectEvent: projectEventSchema,
+});
+
+const projectReadyMessageSchema = frameSchema("project_ready", {
+    projectId: z.string().min(1),
+    workerId: z.string().min(1),
+    projectWarmAt: nonNegativeIntegerSchema,
 });
 
 const pingMessageSchema = frameSchema("ping", {
@@ -573,6 +654,8 @@ export const AgentWorkerProtocolMessageSchema = z.union([
     abortedMessageSchema,
     errorMessageSchema,
     heartbeatMessageSchema,
+    projectBootMessageSchema,
+    projectReadyMessageSchema,
 ]);
 
 export const AgentWorkerProtocolFixtureSchema = z.object({

@@ -10,7 +10,7 @@ import { config } from "@/services/ConfigService";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { ProjectContext, projectContextStore } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
-import { createProjectDTag } from "@/types/project-ids";
+import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { NDKProject } from "@nostr-dev-kit/ndk";
 import {
     createWorkerProtocolPublisherFactory,
@@ -20,6 +20,21 @@ import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
 
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type AgentWorkerExecutor = Pick<AgentExecutor, "execute">;
+
+export interface ProjectScope {
+    projectContext: ProjectContext;
+    mcpManager: MCPManager;
+    agentRegistry: AgentRegistry;
+    projectId: string;
+    projectDTag: ProjectDTag;
+    metadataPath: string;
+    projectBasePath: string;
+}
+
+export interface ProjectScopeBootstrapResult {
+    scope: ProjectScope;
+    cleanup: () => Promise<void>;
+}
 
 export class AgentWorkerExecutionFailure extends Error {
     constructor(
@@ -50,11 +65,10 @@ export interface AgentWorkerBootstrapDependencies {
     ) => AgentWorkerExecutor;
 }
 
-export async function executeAgentWorkerRequest(
+export async function bootstrapProjectScope(
     message: ExecuteMessage,
-    emit: AgentWorkerProtocolEmit,
     dependencies: AgentWorkerBootstrapDependencies = {}
-): Promise<AgentWorkerExecutionResult> {
+): Promise<ProjectScopeBootstrapResult> {
     await config.loadConfig(message.metadataPath);
     await fs.mkdir(config.getConfigPath("daemon"), { recursive: true });
     await fs.mkdir(path.join(message.metadataPath, "conversations"), { recursive: true });
@@ -66,24 +80,16 @@ export async function executeAgentWorkerRequest(
         new AgentRegistry(message.projectBasePath, message.metadataPath);
     await agentRegistry.loadFromProject(project, { publishProfiles: false });
 
-    const agent = agentRegistry.getAgentByPubkey(message.agentPubkey);
-    if (!agent) {
-        throw new AgentWorkerExecutionFailure(
-            "missing_agent",
-            "Agent was not found in shared filesystem state",
-            false
-        );
-    }
-
     const projectContext = new ProjectContext(project, agentRegistry);
     const mcpManager = dependencies.createMcpManager?.() ?? new MCPManager();
 
+    const projectDTag = createProjectDTag(message.projectId);
     const agentPubkeys = Array.from(projectContext.agents.values()).map(
         (candidate) => candidate.pubkey
     );
     ConversationStore.initialize(message.metadataPath, agentPubkeys);
     const conversationCatalog = ConversationCatalogService.getInstance(
-        createProjectDTag(message.projectId),
+        projectDTag,
         message.metadataPath,
         agentPubkeys
     );
@@ -91,6 +97,39 @@ export async function executeAgentWorkerRequest(
     conversationCatalog.reconcile();
 
     await mcpManager.initialize(message.metadataPath, message.projectBasePath);
+
+    return {
+        scope: {
+            projectContext,
+            mcpManager,
+            agentRegistry,
+            projectId: message.projectId,
+            projectDTag,
+            metadataPath: message.metadataPath,
+            projectBasePath: message.projectBasePath,
+        },
+        cleanup: async () => {
+            await mcpManager.shutdown();
+            await ConversationStore.cleanup();
+            ConversationCatalogService.closeProject(projectDTag, message.metadataPath);
+        },
+    };
+}
+
+export async function runOneExecution(
+    message: ExecuteMessage,
+    scope: ProjectScope,
+    emit: AgentWorkerProtocolEmit,
+    dependencies: AgentWorkerBootstrapDependencies = {}
+): Promise<AgentWorkerExecutionResult> {
+    const agent = scope.agentRegistry.getAgentByPubkey(message.agentPubkey);
+    if (!agent) {
+        throw new AgentWorkerExecutionFailure(
+            "missing_agent",
+            "Agent was not found in shared filesystem state",
+            false
+        );
+    }
 
     const publisherExecutionState: WorkerProtocolPublisherExecutionState = {
         silentCompletionRequested: false,
@@ -100,81 +139,85 @@ export async function executeAgentWorkerRequest(
             emit,
             execution: message,
             executionState: publisherExecutionState,
-            projectContext,
+            projectContext: scope.projectContext,
         }),
     };
     const executor =
         dependencies.createExecutor?.(executorOptions) ?? new AgentExecutor(executorOptions);
 
-    try {
-        return await projectContextStore.run(projectContext, async () => {
-            await ensureTriggeringEnvelopeStored(message);
-            const workerRalClaim = seedWorkerRalBridge(message);
+    return await projectContextStore.run(scope.projectContext, async () => {
+        await ensureTriggeringEnvelopeStored(message);
+        const workerRalClaim = seedWorkerRalBridge(message);
 
-            await emit({
-                type: "execution_started",
-                correlationId: message.correlationId,
-                ...executionIdentity(message),
-            });
+        await emit({
+            type: "execution_started",
+            correlationId: message.correlationId,
+            ...executionIdentity(message),
+        });
 
-            const executionContext = await createExecutionContext({
-                agent,
-                conversationId: message.conversationId,
-                projectContext,
-                projectBasePath: message.projectBasePath,
-                triggeringEnvelope: message.triggeringEnvelope,
-                isDelegationCompletion: message.executionFlags.isDelegationCompletion,
-                hasPendingDelegations: message.executionFlags.hasPendingDelegations,
-                debug: message.executionFlags.debug,
-                mcpManager,
-            });
-            if (workerRalClaim) {
-                executionContext.preferredRalNumber = workerRalClaim.ralNumber;
-                executionContext.preferredRalClaimToken = workerRalClaim.claimToken;
-            }
+        const executionContext = await createExecutionContext({
+            agent,
+            conversationId: message.conversationId,
+            projectContext: scope.projectContext,
+            projectBasePath: scope.projectBasePath,
+            triggeringEnvelope: message.triggeringEnvelope,
+            isDelegationCompletion: message.executionFlags.isDelegationCompletion,
+            hasPendingDelegations: message.executionFlags.hasPendingDelegations,
+            debug: message.executionFlags.debug,
+            mcpManager: scope.mcpManager,
+        });
+        if (workerRalClaim) {
+            executionContext.preferredRalNumber = workerRalClaim.ralNumber;
+            executionContext.preferredRalClaimToken = workerRalClaim.claimToken;
+        }
 
-            const response = await executor.execute(executionContext);
-            const outstandingWork = RALRegistry.getInstance().hasOutstandingWork(
+        const response = await executor.execute(executionContext);
+        const outstandingWork = RALRegistry.getInstance().hasOutstandingWork(
+            message.agentPubkey,
+            message.conversationId,
+            message.ralNumber
+        );
+        const registryPendingDelegations = RALRegistry.getInstance()
+            .getConversationPendingDelegations(
                 message.agentPubkey,
                 message.conversationId,
                 message.ralNumber
-            );
-            const registryPendingDelegations = RALRegistry.getInstance()
-                .getConversationPendingDelegations(
-                    message.agentPubkey,
-                    message.conversationId,
-                    message.ralNumber
-                )
-                .map((delegation) => delegation.delegationConversationId);
-            const pendingDelegations =
-                registryPendingDelegations.length > 0
-                    ? registryPendingDelegations
-                    : (message.executionFlags.pendingDelegationIds ?? []);
-            const pendingDelegationsRemain =
-                outstandingWork.details.pendingDelegations > 0 || pendingDelegations.length > 0;
+            )
+            .map((delegation) => delegation.delegationConversationId);
+        const pendingDelegations =
+            registryPendingDelegations.length > 0
+                ? registryPendingDelegations
+                : (message.executionFlags.pendingDelegationIds ?? []);
+        const pendingDelegationsRemain =
+            outstandingWork.details.pendingDelegations > 0 || pendingDelegations.length > 0;
 
-            return {
-                finalRalState: pendingDelegationsRemain
-                    ? "waiting_for_delegation"
-                    : !response &&
-                        publisherExecutionState.silentCompletionRequested &&
-                        !outstandingWork.hasWork
-                      ? "no_response"
-                      : "completed",
-                publishedUserVisibleEvent: Boolean(response),
-                finalEventIds: response ? [response.id] : [],
-                pendingDelegations,
-                pendingDelegationsRemain,
-                keepWorkerWarm: false,
-            };
-        });
+        return {
+            finalRalState: pendingDelegationsRemain
+                ? "waiting_for_delegation"
+                : !response &&
+                    publisherExecutionState.silentCompletionRequested &&
+                    !outstandingWork.hasWork
+                  ? "no_response"
+                  : "completed",
+            publishedUserVisibleEvent: Boolean(response),
+            finalEventIds: response ? [response.id] : [],
+            pendingDelegations,
+            pendingDelegationsRemain,
+            keepWorkerWarm: false,
+        };
+    });
+}
+
+export async function executeAgentWorkerRequest(
+    message: ExecuteMessage,
+    emit: AgentWorkerProtocolEmit,
+    dependencies: AgentWorkerBootstrapDependencies = {}
+): Promise<AgentWorkerExecutionResult> {
+    const { scope, cleanup } = await bootstrapProjectScope(message, dependencies);
+    try {
+        return await runOneExecution(message, scope, emit, dependencies);
     } finally {
-        await mcpManager.shutdown();
-        await ConversationStore.cleanup();
-        ConversationCatalogService.closeProject(
-            createProjectDTag(message.projectId),
-            message.metadataPath
-        );
+        await cleanup();
     }
 }
 

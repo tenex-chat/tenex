@@ -22,6 +22,7 @@ const DAEMON_TO_WORKER_MESSAGE_TYPES: &[&str] = &[
     "publish_result",
     "nip46_publish_result",
     "ack",
+    "project_boot",
 ];
 
 const WORKER_TO_DAEMON_MESSAGE_TYPES: &[&str] = &[
@@ -46,6 +47,7 @@ const WORKER_TO_DAEMON_MESSAGE_TYPES: &[&str] = &[
     "aborted",
     "error",
     "heartbeat",
+    "project_ready",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -308,6 +310,8 @@ pub fn validate_agent_worker_protocol_message(
         "aborted" => validate_aborted(object)?,
         "error" => validate_error_message(object)?,
         "heartbeat" => validate_heartbeat(object)?,
+        "project_boot" => validate_project_boot(object)?,
+        "project_ready" => validate_project_ready(object)?,
         _ => {
             return Err(WorkerProtocolError::UnknownMessageType(
                 message_type.to_string(),
@@ -550,6 +554,20 @@ fn validate_execute(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     require_bool(flags, "hasPendingDelegations")?;
     optional_string_array(flags, "pendingDelegationIds")?;
     require_bool(flags, "debug")?;
+
+    if let Some(value) = object.get("agent") {
+        let agent = value
+            .as_object()
+            .ok_or(WorkerProtocolError::InvalidField("agent"))?;
+        validate_inline_agent(agent)?;
+    }
+
+    if let Some(value) = object.get("projectAgentInventory") {
+        let inventory = value
+            .as_array()
+            .ok_or(WorkerProtocolError::InvalidField("projectAgentInventory"))?;
+        validate_project_agent_inventory(inventory)?;
+    }
 
     Ok(())
 }
@@ -921,6 +939,44 @@ fn validate_heartbeat(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     )?;
     require_u64(object, "activeToolCount")?;
     require_u64(object, "accumulatedRuntimeMs")?;
+    Ok(())
+}
+
+fn validate_project_boot(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    require_string(object, "projectId")?;
+    require_string(object, "projectBasePath")?;
+    require_string(object, "metadataPath")?;
+    let project_event = require_object(object, "projectEvent")?;
+    require_hex_pubkey(project_event, "ownerPubkey")?;
+    require_string(project_event, "dTag")?;
+    Ok(())
+}
+
+fn validate_project_ready(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    require_string(object, "projectId")?;
+    require_string(object, "workerId")?;
+    require_u64(object, "projectWarmAt")?;
+    Ok(())
+}
+
+fn validate_inline_agent(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+    require_hex_pubkey(object, "pubkey")?;
+    require_string(object, "slug")?;
+    require_string(object, "name")?;
+    require_string(object, "role")?;
+    require_string(object, "signingPrivateKey")?;
+    Ok(())
+}
+
+fn validate_project_agent_inventory(values: &[Value]) -> WorkerProtocolResult<()> {
+    for value in values {
+        let entry = value
+            .as_object()
+            .ok_or(WorkerProtocolError::InvalidField("projectAgentInventory"))?;
+        require_hex_pubkey(entry, "pubkey")?;
+        require_string(entry, "slug")?;
+        require_string(entry, "name")?;
+    }
     Ok(())
 }
 

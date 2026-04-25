@@ -605,6 +605,123 @@
                 "activeToolCount": 0,
                 "accumulatedRuntimeMs": 700
             }
+        },
+        {
+            "name": "project-boot",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "project_boot",
+                "correlationId": "boot_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 21,
+                "timestamp": 1710000403000,
+                "projectId": "project-alpha",
+                "projectBasePath": "/tmp/tenex/projects/project-alpha/work",
+                "metadataPath": "/tmp/tenex/projects/project-alpha/metadata",
+                "projectEvent": {
+                    "ownerPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "dTag": "project-alpha",
+                    "title": "Project Alpha",
+                    "tags": [
+                        ["d", "project-alpha"],
+                        ["title", "Project Alpha"],
+                        ["p", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "pm"]
+                    ]
+                }
+            }
+        },
+        {
+            "name": "project-ready",
+            "direction": "worker_to_daemon",
+            "message": {
+                "version": 1,
+                "type": "project_ready",
+                "correlationId": "boot_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "sequence": 2,
+                "timestamp": 1710000403200,
+                "projectId": "project-alpha",
+                "workerId": "worker_01hzzzzzzzzzzzzzzzzzzzzzzz",
+                "projectWarmAt": 1710000403200
+            }
+        },
+        {
+            "name": "execute-with-inline-agent",
+            "direction": "daemon_to_worker",
+            "message": {
+                "version": 1,
+                "type": "execute",
+                "correlationId": "exec_inline_agent",
+                "sequence": 22,
+                "timestamp": 1710000403300,
+                "projectId": "project-alpha",
+                "projectBasePath": "/tmp/tenex/projects/project-alpha/work",
+                "metadataPath": "/tmp/tenex/projects/project-alpha/metadata",
+                "agentPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "conversationId": "conversation-alpha",
+                "ralNumber": 4,
+                "ralClaimToken": "claim_inline_agent",
+                "triggeringEnvelope": {
+                    "transport": "nostr",
+                    "principal": {
+                        "id": "nostr:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "transport": "nostr",
+                        "linkedPubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "displayName": "Project Owner",
+                        "kind": "human"
+                    },
+                    "channel": {
+                        "id": "conversation:conversation-alpha",
+                        "transport": "nostr",
+                        "kind": "conversation",
+                        "projectBinding": "project-alpha"
+                    },
+                    "message": {
+                        "id": "trigger-event-id",
+                        "transport": "nostr",
+                        "nativeId": "trigger-event-id"
+                    },
+                    "recipients": [
+                        {
+                            "id": "nostr:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "transport": "nostr",
+                            "linkedPubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "kind": "agent"
+                        }
+                    ],
+                    "content": "please continue the migration",
+                    "occurredAt": 1710000403000,
+                    "capabilities": ["reply"],
+                    "metadata": {}
+                },
+                "executionFlags": {
+                    "isDelegationCompletion": false,
+                    "hasPendingDelegations": false,
+                    "debug": false
+                },
+                "agent": {
+                    "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "slug": "project-manager",
+                    "name": "Project Manager",
+                    "role": "project-manager",
+                    "category": "orchestrator",
+                    "signingPrivateKey": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    "instructions": "You are the project-manager agent.",
+                    "llmConfig": "default",
+                    "tools": [],
+                    "skills": [],
+                    "alwaysSkills": [],
+                    "blockedSkills": [],
+                    "mcpAccess": []
+                },
+                "projectAgentInventory": [
+                    {
+                        "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "slug": "project-manager",
+                        "name": "Project Manager",
+                        "isPM": true
+                    }
+                ]
+            }
         }
     ],
     "invalidMessages": [

@@ -41,6 +41,10 @@ class AgentWorkerSession {
         return framedMessage;
     };
 
+    private readonly activeExecutions = new Set<Promise<void>>();
+    private executionSettled: Deferred<void> = createDeferred<void>();
+    private exitWhenDrained = false;
+
     constructor() {
         installProcessStdoutSuppressor();
         installConsoleSuppressor();
@@ -66,62 +70,93 @@ class AgentWorkerSession {
         const messages = decodeAgentWorkerProtocolChunks(
             process.stdin as AsyncIterable<Uint8Array | string>
         );
-        let activeExecution: Promise<boolean> | undefined;
         let pendingNext: Promise<IteratorResult<AgentWorkerProtocolMessage>> | undefined;
+        let stdinExhausted = false;
+        let shutdownRequested = false;
 
         while (true) {
-            pendingNext ??= messages.next();
-
-            if (activeExecution) {
-                const result = await Promise.race([
-                    pendingNext.then((iteration) => ({ type: "message" as const, iteration })),
-                    activeExecution.then((keepRunning) => ({
-                        type: "execution" as const,
-                        keepRunning,
-                    })),
-                ]);
-
-                if (result.type === "execution") {
-                    activeExecution = undefined;
-                    if (!result.keepRunning) {
-                        return;
-                    }
-                    continue;
-                }
-
-                pendingNext = undefined;
-                if (result.iteration.done) {
-                    const keepRunning = await activeExecution;
-                    activeExecution = undefined;
-                    if (!keepRunning) {
-                        return;
-                    }
-                    continue;
-                }
-
-                const nextExecution = this.handleIncomingMessage(result.iteration.value);
-                if (nextExecution === "shutdown") {
+            // Exit: stdin closed or shutdown requested, and no executions in flight.
+            if (this.activeExecutions.size === 0 && (stdinExhausted || shutdownRequested || this.exitWhenDrained)) {
+                if (shutdownRequested) {
                     this.nip46Results.rejectAll(new Error("worker shutdown requested"));
-                    return;
                 }
-                if (nextExecution) {
-                    throw new Error("Agent worker received execute while execution is active");
-                }
+                return;
+            }
+
+            const acceptingMessages =
+                !shutdownRequested && !stdinExhausted && !this.exitWhenDrained;
+            if (acceptingMessages) {
+                pendingNext ??= messages.next();
+            }
+
+            type RaceResult =
+                | { kind: "message"; iteration: IteratorResult<AgentWorkerProtocolMessage> }
+                | { kind: "execution_settled" };
+            const waiters: Promise<RaceResult>[] = [];
+            if (pendingNext) {
+                waiters.push(
+                    pendingNext.then((iteration) => ({ kind: "message" as const, iteration }))
+                );
+            }
+            if (this.activeExecutions.size > 0) {
+                waiters.push(
+                    this.executionSettled.promise.then(() => ({ kind: "execution_settled" as const }))
+                );
+            }
+            if (waiters.length === 0) {
+                return;
+            }
+
+            const result = await Promise.race(waiters);
+            if (result.kind === "execution_settled") {
                 continue;
             }
 
-            const result = await pendingNext;
             pendingNext = undefined;
-            if (result.done) {
-                return;
+            if (result.iteration.done) {
+                stdinExhausted = true;
+                continue;
             }
 
-            const nextExecution = this.handleIncomingMessage(result.value);
-            if (nextExecution === "shutdown") {
-                return;
+            // After shutdown or drain-exit was requested, drop any late-arriving messages.
+            if (shutdownRequested || this.exitWhenDrained) {
+                continue;
             }
-            activeExecution = nextExecution;
+
+            const nextExecution = this.handleIncomingMessage(result.iteration.value);
+            if (nextExecution === "shutdown") {
+                shutdownRequested = true;
+                continue;
+            }
+            if (nextExecution) {
+                this.trackExecution(nextExecution);
+            }
         }
+    }
+
+    private trackExecution(promise: Promise<boolean>): void {
+        let entry: Promise<void>;
+        entry = promise
+            .then(
+                (keepRunning) => {
+                    if (!keepRunning) {
+                        this.exitWhenDrained = true;
+                    }
+                },
+                (error: unknown) => {
+                    this.exitWhenDrained = true;
+                    process.stderr.write(
+                        `agent-worker: unhandled execution error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`
+                    );
+                }
+            )
+            .finally(() => {
+                this.activeExecutions.delete(entry);
+                const prev = this.executionSettled;
+                this.executionSettled = createDeferred<void>();
+                prev.resolve();
+            });
+        this.activeExecutions.add(entry);
     }
 
     private handleIncomingMessage(
@@ -415,6 +450,22 @@ function executionIdentity(message: ExecuteMessage): {
 
 function mockDelta(message: ExecuteMessage): string {
     return `Accepted ${message.triggeringEnvelope.transport} execution for ${message.conversationId}`;
+}
+
+interface Deferred<T> {
+    promise: Promise<T>;
+    resolve: (value: T | PromiseLike<T>) => void;
+    reject: (reason?: unknown) => void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
 }
 
 initializeTelemetry(true, "tenex-agent-worker");
