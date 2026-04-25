@@ -1306,6 +1306,40 @@ async function createFilesystemBackedAgentFixture(options: {
                 hasPendingDelegations: false,
                 debug: true,
             },
+            agent: {
+                pubkey: agentPubkey,
+                slug: "project-manager",
+                name: "project-manager",
+                role: "project-manager",
+                category: "orchestrator",
+                signingPrivateKey: signer.privateKey,
+                instructions:
+                    "You are the project-manager agent. Current Phase: execute. Reply plainly.",
+                llmConfig: "default",
+                tools: [],
+                alwaysSkills: [],
+                blockedSkills: [],
+                mcpAccess: [],
+            },
+            projectAgentInventory: [
+                {
+                    pubkey: agentPubkey,
+                    slug: "project-manager",
+                    name: "project-manager",
+                    role: "project-manager",
+                    isPM: true,
+                },
+                ...(delegateAgentPubkey
+                    ? [
+                          {
+                              pubkey: delegateAgentPubkey,
+                              slug: "worker-agent",
+                              name: "worker-agent",
+                              role: "worker-agent",
+                          },
+                      ]
+                    : []),
+            ],
         },
     };
 }

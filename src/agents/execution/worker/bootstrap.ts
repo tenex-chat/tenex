@@ -79,24 +79,27 @@ export async function bootstrapProjectScope(
     await fs.mkdir(path.join(message.metadataPath, "conversations"), { recursive: true });
     await fs.mkdir(path.join(message.metadataPath, "logs"), { recursive: true });
 
-    const project = await buildWorkerProject(message);
+    const projectAgentPubkeys = message.projectAgentInventory
+        ? message.projectAgentInventory.map((entry) => entry.pubkey)
+        : [message.agentPubkey];
+    const project = buildWorkerProjectFromInventory(message, projectAgentPubkeys);
     const agentRegistry =
         dependencies.createAgentRegistry?.(message.projectBasePath, message.metadataPath) ??
         new AgentRegistry(message.projectBasePath, message.metadataPath);
-    await agentRegistry.loadFromProject(project, { publishProfiles: false });
-
+    // Project context is built from the inventory only — no agent storage
+    // disk reads. The executing AgentInstance is materialized in
+    // runOneExecution from the inline `agent` payload; placeholder
+    // AgentInstances for the rest of the inventory are added during
+    // reconcileProjectAgentInventory on the first execute.
     const projectContext = new ProjectContext(project, agentRegistry);
     const mcpManager = dependencies.createMcpManager?.() ?? new MCPManager();
 
     const projectDTag = createProjectDTag(message.projectId);
-    const agentPubkeys = Array.from(projectContext.agents.values()).map(
-        (candidate) => candidate.pubkey
-    );
-    ConversationStore.initialize(message.metadataPath, agentPubkeys);
+    ConversationStore.initialize(message.metadataPath, projectAgentPubkeys);
     const conversationCatalog = ConversationCatalogService.getInstance(
         projectDTag,
         message.metadataPath,
-        agentPubkeys
+        projectAgentPubkeys
     );
     conversationCatalog.initialize();
     conversationCatalog.reconcile();
@@ -135,22 +138,15 @@ export async function runOneExecution(
         reconcileProjectAgentInventory(scope, message.projectAgentInventory);
     }
 
-    // Materialize the executing agent. Prefer the inline payload (no disk
-    // reads); fall back to the registry path for messages still produced
-    // by the legacy emitter. The fallback is removed in C8.
-    const agent = message.agent
-        ? materializeInlineAgent(message.agent, scope, scope.projectDTag)
-        : scope.agentRegistry.getAgentByPubkey(message.agentPubkey);
-    if (!agent) {
+    if (!message.agent) {
         throw new AgentWorkerExecutionFailure(
-            "missing_agent",
-            "Agent was not found in inline payload or shared filesystem state",
+            "missing_inline_agent",
+            "execute message did not include an inline `agent` payload; the daemon must populate it",
             false
         );
     }
-    // Ensure the executing agent is in the registry so PM resolution and
-    // delegation lookups can find it.
-    if (message.agent && !scope.agentRegistry.getAgentByPubkey(agent.pubkey)) {
+    const agent = materializeInlineAgent(message.agent, scope, scope.projectDTag);
+    if (!scope.agentRegistry.getAgentByPubkey(agent.pubkey)) {
         scope.agentRegistry.addAgent(agent);
     }
 
@@ -288,41 +284,26 @@ async function ensureTriggeringEnvelopeStored(message: ExecuteMessage): Promise<
     await ConversationStore.addEnvelope(message.conversationId, message.triggeringEnvelope);
 }
 
-async function buildWorkerProject(message: ExecuteMessage): Promise<NDKProject> {
+function buildWorkerProjectFromInventory(
+    message: ExecuteMessage,
+    projectAgentPubkeys: readonly string[]
+): NDKProject {
     const project = new NDKProject(undefined as never);
     const ownerPubkey = resolveProjectOwnerPubkey(message);
-    const projectAgentPubkeys = await readProjectAgentPubkeys(message);
     project.pubkey = ownerPubkey;
     project.dTag = message.projectId;
+    // PM designation: the executing agent is marked PM if the inventory says so.
+    const pmPubkey = message.projectAgentInventory?.find((entry) => entry.isPM)?.pubkey;
     project.tags = [
         ["d", message.projectId],
         ["title", message.projectId],
         ...projectAgentPubkeys.map((pubkey) => [
             "p",
             pubkey,
-            pubkey === message.agentPubkey ? "pm" : "agent",
+            pubkey === pmPubkey ? "pm" : "agent",
         ]),
     ];
     return project;
-}
-
-async function readProjectAgentPubkeys(message: ExecuteMessage): Promise<string[]> {
-    const tenexBasePath = path.dirname(path.dirname(message.metadataPath));
-    const indexPath = path.join(tenexBasePath, "agents", "index.json");
-
-    try {
-        const rawIndex = JSON.parse(await fs.readFile(indexPath, "utf8")) as {
-            byProject?: Record<string, unknown>;
-        };
-        const projectPubkeys = rawIndex.byProject?.[message.projectId];
-        const pubkeys = Array.isArray(projectPubkeys)
-            ? projectPubkeys.filter((pubkey): pubkey is string => isHexPubkey(pubkey))
-            : [];
-
-        return Array.from(new Set([message.agentPubkey, ...pubkeys]));
-    } catch {
-        return [message.agentPubkey];
-    }
 }
 
 function resolveProjectOwnerPubkey(message: ExecuteMessage): string {
@@ -340,10 +321,6 @@ function resolveProjectOwnerPubkey(message: ExecuteMessage): string {
     }
 
     return "0".repeat(64);
-}
-
-function isHexPubkey(value: unknown): value is string {
-    return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 }
 
 function executionIdentity(message: ExecuteMessage): {
@@ -378,8 +355,8 @@ function materializeInlineAgent(
     const resolvedCategory = resolveCategory(inline.category);
     const tools = processAgentTools(inline.tools ?? [], resolvedCategory);
     const llmConfigName = inline.llmConfig ?? DEFAULT_AGENT_LLM_CONFIG;
-    const metadataPath = scope.agentRegistry.getMetadataPath();
-    const projectBasePath = scope.agentRegistry.getBasePath();
+    const metadataPath = scope.metadataPath;
+    const projectBasePath = scope.projectBasePath;
 
     const agent: AgentInstance = {
         name: inline.name,
@@ -441,7 +418,7 @@ function reconcileProjectAgentInventory(
             continue;
         }
         const placeholderSigner = NDKPrivateKeySigner.generate();
-        const metadataPath = scope.agentRegistry.getMetadataPath();
+        const metadataPath = scope.metadataPath;
         const placeholder: AgentInstance = {
             name: entry.name,
             pubkey: entry.pubkey,
