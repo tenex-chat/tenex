@@ -7,10 +7,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::backend_events::project_status::ProjectStatusScheduledTaskKind;
-use crate::periodic_tick::{PeriodicScheduler, PeriodicSchedulerSnapshot, PeriodicTickError};
 use crate::project_status_sources::project_schedules_path;
 
-pub const SCHEDULED_TASK_DUE_PLANNER_TASK_NAME: &str = "scheduled-task-due-planner";
 pub const SCHEDULED_TASK_DUE_PLANNER_INTERVAL_SECONDS: u64 = 30;
 pub const SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS: u64 = 24 * 60 * 60;
 
@@ -23,27 +21,6 @@ pub struct ScheduledTaskDuePlannerProject<'a> {
 
 #[derive(Debug)]
 pub struct ScheduledTaskDuePlannerInput<'a> {
-    pub tenex_base_dir: &'a Path,
-    pub projects: &'a [ScheduledTaskDuePlannerProject<'a>],
-    pub now: u64,
-    pub grace_seconds: u64,
-    pub max_plans: usize,
-}
-
-#[derive(Debug)]
-pub struct ScheduledTaskDuePlannerTickInput<'a> {
-    pub scheduler: &'a mut PeriodicScheduler,
-    pub tenex_base_dir: &'a Path,
-    pub projects: &'a [ScheduledTaskDuePlannerProject<'a>],
-    pub now: u64,
-    pub grace_seconds: u64,
-    pub max_plans: usize,
-}
-
-#[derive(Debug)]
-pub struct ScheduledTaskDuePlannerDueInput<'a> {
-    pub due_task_names: Vec<String>,
-    pub scheduler_snapshot: PeriodicSchedulerSnapshot,
     pub tenex_base_dir: &'a Path,
     pub projects: &'a [ScheduledTaskDuePlannerProject<'a>],
     pub now: u64,
@@ -69,11 +46,8 @@ pub struct ScheduledTaskTriggerPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduledTaskDuePlannerOutcome {
-    pub tick_due: bool,
-    pub due_task_names: Vec<String>,
     pub plans: Vec<ScheduledTaskTriggerPlan>,
     pub truncated: bool,
-    pub scheduler_snapshot: Option<PeriodicSchedulerSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,8 +70,6 @@ pub enum ScheduledTaskDuePlannerError {
     },
     #[error("scheduled task planner source write failed at {path}: {source}")]
     Write { path: PathBuf, source: io::Error },
-    #[error("scheduled task planner periodic scheduler failed: {0}")]
-    Periodic(#[from] PeriodicTickError),
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,80 +131,54 @@ struct UtcComponents {
     day_of_week: u8,
 }
 
-pub fn ensure_scheduled_task_due_planner_task(
-    scheduler: &mut PeriodicScheduler,
-    first_due_at: u64,
-) -> Result<bool, PeriodicTickError> {
-    if scheduler.has_task(SCHEDULED_TASK_DUE_PLANNER_TASK_NAME) {
-        return Ok(false);
-    }
-
-    scheduler.register_task(
-        SCHEDULED_TASK_DUE_PLANNER_TASK_NAME,
-        SCHEDULED_TASK_DUE_PLANNER_INTERVAL_SECONDS,
-        first_due_at,
-    )?;
-    Ok(true)
-}
-
-pub fn tick_scheduled_task_due_planner(
-    input: ScheduledTaskDuePlannerTickInput<'_>,
-) -> Result<ScheduledTaskDuePlannerOutcome, ScheduledTaskDuePlannerError> {
-    let due_task_names = input.scheduler.take_due(input.now);
-    let scheduler_snapshot = input.scheduler.inspect();
-    tick_scheduled_task_due_planner_for_due_tasks(ScheduledTaskDuePlannerDueInput {
-        due_task_names,
-        scheduler_snapshot,
-        tenex_base_dir: input.tenex_base_dir,
-        projects: input.projects,
-        now: input.now,
-        grace_seconds: input.grace_seconds,
-        max_plans: input.max_plans,
-    })
-}
-
-pub fn tick_scheduled_task_due_planner_for_due_tasks(
-    input: ScheduledTaskDuePlannerDueInput<'_>,
-) -> Result<ScheduledTaskDuePlannerOutcome, ScheduledTaskDuePlannerError> {
-    let ScheduledTaskDuePlannerDueInput {
-        due_task_names,
-        scheduler_snapshot,
-        tenex_base_dir,
-        projects,
-        now,
-        grace_seconds,
-        max_plans,
-    } = input;
-    let tick_due = due_task_names
-        .iter()
-        .any(|task_name| task_name == SCHEDULED_TASK_DUE_PLANNER_TASK_NAME);
-    let scheduled_due_task_names = due_task_names
-        .into_iter()
-        .filter(|task_name| task_name == SCHEDULED_TASK_DUE_PLANNER_TASK_NAME)
-        .collect::<Vec<_>>();
-
-    let mut outcome = if tick_due {
-        plan_due_scheduled_tasks(ScheduledTaskDuePlannerInput {
-            tenex_base_dir,
-            projects,
-            now,
-            grace_seconds,
-            max_plans,
-        })?
-    } else {
-        ScheduledTaskDuePlannerOutcome {
-            tick_due: false,
-            due_task_names: Vec::new(),
-            plans: Vec::new(),
-            truncated: false,
-            scheduler_snapshot: None,
+/// Returns the earliest future unix timestamp at which any scheduled task for
+/// the given project will become due. Returns `None` when the project has no
+/// schedulable tasks (no `schedules.json`, empty file, or all tasks already
+/// finalized).
+pub fn next_project_scheduled_task_due_at(
+    base_dir: &Path,
+    project_d_tag: &str,
+    now: u64,
+) -> Result<Option<u64>, ScheduledTaskDuePlannerError> {
+    let tasks = read_project_scheduled_task_sources(base_dir, project_d_tag)?;
+    let mut earliest: Option<u64> = None;
+    for task in &tasks {
+        let candidate = next_task_due_at_after(task, now);
+        match (earliest, candidate) {
+            (None, Some(t)) => earliest = Some(t),
+            (Some(e), Some(t)) if t < e => earliest = Some(t),
+            _ => {}
         }
-    };
+    }
+    Ok(earliest)
+}
 
-    outcome.tick_due = tick_due;
-    outcome.due_task_names = scheduled_due_task_names;
-    outcome.scheduler_snapshot = Some(scheduler_snapshot);
-    Ok(outcome)
+fn next_task_due_at_after(task: &ScheduledTaskSource, now: u64) -> Option<u64> {
+    match task.kind {
+        ProjectStatusScheduledTaskKind::Oneoff => next_oneoff_due_at_after(task, now),
+        ProjectStatusScheduledTaskKind::Cron => next_cron_due_at_after(task, now),
+    }
+}
+
+fn next_oneoff_due_at_after(task: &ScheduledTaskSource, now: u64) -> Option<u64> {
+    if task.last_run_present {
+        return None;
+    }
+    let execute_at = task.execute_at.as_deref().unwrap_or(&task.schedule);
+    let execute_at = parse_unix_seconds_from_iso8601(execute_at)?;
+    // Due in the future (strictly after now).
+    if execute_at > now { Some(execute_at) } else { None }
+}
+
+fn next_cron_due_at_after(task: &ScheduledTaskSource, now: u64) -> Option<u64> {
+    if task.last_run_present && task.last_run.is_none() {
+        return None;
+    }
+    let anchor = task.last_run.or(task.created_at)?;
+    // Search from anchor+1 or now+1, whichever is later, up to one year out.
+    let search_start = anchor.saturating_add(1).max(now.saturating_add(1));
+    let search_end = now.saturating_add(CRON_SEARCH_LIMIT_SECONDS);
+    next_cron_occurrence_between(&task.schedule, search_start, search_end)
 }
 
 pub fn plan_due_scheduled_tasks(
@@ -276,11 +222,8 @@ pub fn plan_due_scheduled_tasks(
     plans.truncate(input.max_plans);
 
     Ok(ScheduledTaskDuePlannerOutcome {
-        tick_due: true,
-        due_task_names: Vec::new(),
         plans,
         truncated,
-        scheduler_snapshot: None,
     })
 }
 
@@ -889,9 +832,6 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::periodic_tick_state::{
-        read_periodic_scheduler_state, write_periodic_scheduler_state,
-    };
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1150,72 +1090,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["task-early", "task-middle"]
         );
-    }
-
-    #[test]
-    fn periodic_tick_state_replay_prevents_immediate_rescan() {
-        let base_dir = unique_temp_dir("scheduled-task-planner-periodic-base");
-        let daemon_dir = unique_temp_dir("scheduled-task-planner-periodic-daemon");
-        write_project_schedules(
-            &base_dir,
-            "demo-project",
-            r#"[
-                {
-                    "id": "task-due",
-                    "schedule": "1970-01-01T00:01:40Z",
-                    "prompt": "Due task",
-                    "fromPubkey": "owner",
-                    "targetAgentSlug": "reporter",
-                    "projectId": "demo-project",
-                    "type": "oneoff"
-                }
-            ]"#,
-        );
-
-        let mut scheduler = PeriodicScheduler::new();
-        let registered = ensure_scheduled_task_due_planner_task(&mut scheduler, 100)
-            .expect("planner task must register");
-        assert!(registered);
-
-        let first = tick_scheduled_task_due_planner(ScheduledTaskDuePlannerTickInput {
-            scheduler: &mut scheduler,
-            tenex_base_dir: &base_dir,
-            projects: &[ScheduledTaskDuePlannerProject {
-                project_d_tag: "demo-project",
-            }],
-            now: 100,
-            grace_seconds: SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS,
-            max_plans: 10,
-        })
-        .expect("tick must plan due task");
-
-        assert!(first.tick_due);
-        assert_eq!(
-            first.due_task_names,
-            vec![SCHEDULED_TASK_DUE_PLANNER_TASK_NAME]
-        );
-        assert_eq!(first.plans.len(), 1);
-
-        write_periodic_scheduler_state(&daemon_dir, &scheduler)
-            .expect("scheduler snapshot must persist");
-        let mut replayed =
-            read_periodic_scheduler_state(&daemon_dir).expect("scheduler snapshot must replay");
-
-        let second = tick_scheduled_task_due_planner(ScheduledTaskDuePlannerTickInput {
-            scheduler: &mut replayed,
-            tenex_base_dir: &base_dir,
-            projects: &[ScheduledTaskDuePlannerProject {
-                project_d_tag: "demo-project",
-            }],
-            now: 110,
-            grace_seconds: SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS,
-            max_plans: 10,
-        })
-        .expect("replayed tick must not rescan before next deadline");
-
-        assert!(!second.tick_due);
-        assert!(second.due_task_names.is_empty());
-        assert!(second.plans.is_empty());
     }
 
     #[test]

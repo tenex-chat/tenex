@@ -10,16 +10,9 @@ use crate::intervention::{
     InterventionMaintenanceError, InterventionMaintenanceInput, InterventionMaintenanceOutcome,
     run_intervention_maintenance,
 };
-use crate::periodic_tick_state::{
-    PeriodicTickStateError, read_periodic_scheduler_state, write_periodic_scheduler_state,
-};
 use crate::project_boot_state::{BootedProjectsState, is_project_booted};
 use crate::project_event_index::ProjectEventIndex;
 use crate::project_status_descriptors::{ProjectStatusDescriptor, ProjectStatusDescriptorReport};
-use crate::scheduled_task_maintenance::{
-    ScheduledTaskMaintenanceError, ScheduledTaskMaintenanceOutcome,
-    ScheduledTaskMaintenanceSharedSchedulerInput, maintain_scheduled_tasks_from_shared_scheduler,
-};
 use crate::scheduler_wakeups::{
     SchedulerWakeupError, SchedulerWakeupsMaintenanceReport, run_scheduler_maintenance,
 };
@@ -53,7 +46,6 @@ pub struct DaemonMaintenanceOutcome {
     pub project_descriptor_report: ProjectStatusDescriptorReport,
     pub booted_project_descriptor_report: ProjectStatusDescriptorReport,
     pub project_boot_state: BootedProjectsState,
-    pub scheduled_tasks: ScheduledTaskMaintenanceOutcome,
     pub scheduler_wakeups: SchedulerWakeupsMaintenanceReport,
     pub intervention: InterventionMaintenanceOutcome,
     pub telegram_outbox: TelegramOutboxMaintenanceReport,
@@ -63,10 +55,6 @@ pub struct DaemonMaintenanceOutcome {
 pub enum DaemonMaintenanceError {
     #[error("maintenance backend config failed: {0}")]
     BackendConfig(#[from] BackendConfigError),
-    #[error("scheduled task maintenance failed: {0}")]
-    ScheduledTasks(#[from] ScheduledTaskMaintenanceError),
-    #[error("periodic scheduler state failed: {0}")]
-    SchedulerState(#[from] PeriodicTickStateError),
     #[error("scheduler wakeups maintenance failed: {0}")]
     SchedulerWakeups(#[from] SchedulerWakeupError),
     #[error("intervention maintenance failed: {0}")]
@@ -126,37 +114,6 @@ where
             .collect::<Vec<_>>(),
         "project-status filter trace"
     );
-    let mut scheduler = read_periodic_scheduler_state(input.daemon_dir)?;
-    let scheduled_task_registration =
-        crate::scheduled_task_due_planner::ensure_scheduled_task_due_planner_task(
-            &mut scheduler,
-            now_seconds,
-        )
-        .map_err(crate::scheduled_task_due_planner::ScheduledTaskDuePlannerError::from)
-        .map_err(|source| ScheduledTaskMaintenanceError::Planner { source })?;
-    let due_task_names = scheduler.take_due(now_seconds);
-    let scheduler_snapshot = scheduler.inspect();
-
-    let scheduled_tasks = maintain_scheduled_tasks_from_shared_scheduler(
-        ScheduledTaskMaintenanceSharedSchedulerInput {
-            tenex_base_dir: input.tenex_base_dir,
-            daemon_dir: input.daemon_dir,
-            now: now_seconds,
-            first_due_at: now_seconds,
-            accepted_at: input.now_ms,
-            request_timestamp: input.now_ms,
-            writer_version: DAEMON_MAINTENANCE_WRITER_VERSION,
-            grace_seconds:
-                crate::scheduled_task_due_planner::SCHEDULED_TASK_DUE_PLANNER_DEFAULT_GRACE_SECONDS,
-            max_plans:
-                crate::scheduled_task_maintenance::SCHEDULED_TASK_MAINTENANCE_DEFAULT_MAX_PLANS,
-            project_descriptor_report: booted_project_descriptor_report.clone(),
-            registered_planner_task: scheduled_task_registration,
-            due_task_names,
-            scheduler_snapshot: scheduler_snapshot.clone(),
-        },
-    )?;
-    write_periodic_scheduler_state(input.daemon_dir, &scheduler)?;
     let scheduler_wakeups = run_scheduler_maintenance(input.daemon_dir, input.now_ms)?;
     let intervention = run_intervention_maintenance(InterventionMaintenanceInput {
         tenex_base_dir: input.tenex_base_dir,
@@ -175,7 +132,6 @@ where
         project_descriptor_report,
         booted_project_descriptor_report,
         project_boot_state,
-        scheduled_tasks,
         scheduler_wakeups,
         intervention,
         telegram_outbox,
@@ -269,17 +225,8 @@ fn descriptor_is_booted(
 mod tests {
     use super::*;
     use crate::backend_config::backend_config_path;
-    use crate::dispatch_queue::replay_dispatch_queue;
-    use crate::periodic_tick::PeriodicScheduler;
-    use crate::periodic_tick_state::{
-        read_periodic_scheduler_state, write_periodic_scheduler_state,
-    };
     use crate::project_boot_state::{ProjectBootState, empty_booted_projects_state};
     use crate::publish_outbox::inspect_publish_outbox;
-    use crate::scheduled_task_dispatch_input::read_optional as read_scheduled_task_dispatch_input;
-    use crate::scheduled_task_due_planner::{
-        SCHEDULED_TASK_DUE_PLANNER_INTERVAL_SECONDS, SCHEDULED_TASK_DUE_PLANNER_TASK_NAME,
-    };
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -291,7 +238,7 @@ mod tests {
         "0101010101010101010101010101010101010101010101010101010101010101";
 
     #[test]
-    fn daemon_maintenance_discovers_booted_projects_and_runs_scheduled_tasks() {
+    fn daemon_maintenance_discovers_booted_projects() {
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -354,19 +301,6 @@ mod tests {
         let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
-        assert!(outcome.scheduled_tasks.triggers.is_empty());
-        assert_eq!(
-            outcome.scheduled_tasks.planner.due_task_names,
-            vec!["scheduled-task-due-planner".to_string()]
-        );
-        assert_eq!(
-            outcome
-                .scheduled_tasks
-                .persisted_scheduler_snapshot
-                .tasks
-                .len(),
-            1
-        );
         assert_eq!(outcome.scheduler_wakeups.diagnostics_after.pending_count, 0);
         assert_eq!(outcome.telegram_outbox.diagnostics_after.pending_count, 0);
         assert!(outcome.telegram_outbox.drained.is_empty());
@@ -376,129 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn daemon_maintenance_enqueues_due_scheduled_tasks() {
-        let tenex_base_dir = unique_temp_dir("daemon-maintenance-scheduled-base");
-        let daemon_dir = tenex_base_dir.join("daemon");
-        let agents_dir = tenex_base_dir.join("agents");
-        let project_dir = tenex_base_dir.join("projects").join("demo-project");
-        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
-        fs::create_dir_all(&agents_dir).expect("agents dir must create");
-        fs::create_dir_all(&project_dir).expect("project dir must create");
-
-        let owner = pubkey_hex(0x02);
-        let agent_pubkey = pubkey_hex(0x03);
-        fs::write(
-            backend_config_path(&tenex_base_dir),
-            format!(
-                r#"{{
-                    "whitelistedPubkeys": ["{owner}"],
-                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
-                    "relays": ["wss://relay.one"]
-                }}"#
-            ),
-        )
-        .expect("config must write");
-        fs::write(
-            agents_dir.join("index.json"),
-            format!(r#"{{"byProject":{{"demo-project":["{agent_pubkey}"]}}}}"#),
-        )
-        .expect("agent index must write");
-        fs::write(
-            agents_dir.join(format!("{agent_pubkey}.json")),
-            r#"{"slug":"reporter","status":"active","default":{"model":"claude"}}"#,
-        )
-        .expect("agent source must write");
-        fs::write(
-            project_dir.join("project.json"),
-            format!(
-                r#"{{
-                    "schemaVersion": 1,
-                    "status": "running",
-                    "projectOwnerPubkey": "{owner}",
-                    "projectDTag": "demo-project",
-                    "projectBasePath": "/repo/demo-project",
-                    "worktrees": ["main"]
-                }}"#
-            ),
-        )
-        .expect("project descriptor must write");
-        let project_boot_state = booted_state(
-            &boot_event("boot-event", &owner, "demo-project"),
-            1_710_000_999_000,
-        );
-        fs::write(
-            project_dir.join("schedules.json"),
-            format!(
-                r#"[{{
-                    "id": "task-one",
-                    "title": "One off",
-                    "schedule": "2024-03-09T16:00:00.000Z",
-                    "executeAt": "2024-03-09T16:00:00.000Z",
-                    "prompt": "Run the report",
-                    "fromPubkey": "{owner}",
-                    "targetAgentSlug": "reporter",
-                    "projectId": "31933:{owner}:demo-project",
-                    "projectRef": "31933:{owner}:demo-project",
-                    "type": "oneoff"
-                }}]"#
-            ),
-        )
-        .expect("schedule must write");
-        let mut scheduler = PeriodicScheduler::new();
-        scheduler
-            .register_task(
-                SCHEDULED_TASK_DUE_PLANNER_TASK_NAME,
-                SCHEDULED_TASK_DUE_PLANNER_INTERVAL_SECONDS,
-                1_710_001_000,
-            )
-            .expect("scheduled task planner must register");
-        write_periodic_scheduler_state(&daemon_dir, &scheduler)
-            .expect("shared scheduler state must write");
-        let project_event_index =
-            project_event_index_with(project_event(&owner, "demo-project", 1_710_000_998));
-
-        let outcome = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
-            tenex_base_dir: &tenex_base_dir,
-            daemon_dir: &daemon_dir,
-            now_ms: 1_710_001_000_000,
-            project_boot_state,
-            project_event_index,
-            heartbeat_latch: None,
-        })
-        .expect("daemon maintenance must run");
-
-        assert_eq!(outcome.scheduled_tasks.triggers.len(), 1);
-        let trigger = &outcome.scheduled_tasks.triggers[0];
-        assert_eq!(trigger.plan.task_id, "task-one");
-        assert_eq!(trigger.enqueue.project_d_tag, "demo-project");
-        assert!(trigger.enqueue.queued);
-        assert!(trigger.finalization.removed);
-        let sidecar = read_scheduled_task_dispatch_input(&daemon_dir, &trigger.enqueue.dispatch_id)
-            .expect("sidecar read must succeed")
-            .expect("sidecar must exist");
-        assert_eq!(sidecar.task_diagnostic_metadata.task_id, "task-one");
-        assert_eq!(sidecar.worker_id, trigger.enqueue.worker_id);
-        assert_eq!(
-            replay_dispatch_queue(&daemon_dir)
-                .expect("dispatch queue must replay")
-                .queued
-                .len(),
-            1
-        );
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(
-                &fs::read_to_string(project_dir.join("schedules.json"))
-                    .expect("schedules must read")
-            )
-            .expect("schedules json"),
-            serde_json::json!([])
-        );
-
-        fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
-    }
-
-    #[test]
-    fn daemon_maintenance_filters_unbooted_projects_from_scheduled_tasks() {
+    fn daemon_maintenance_filters_unbooted_projects() {
         let tenex_base_dir = unique_temp_dir("daemon-maintenance-unbooted-base");
         let daemon_dir = tenex_base_dir.join("daemon");
         let agents_dir = tenex_base_dir.join("agents");
@@ -557,17 +369,6 @@ mod tests {
         let publish_outbox = inspect_publish_outbox(&daemon_dir, 1_710_001_000_000)
             .expect("publish outbox diagnostics must read");
         assert_eq!(publish_outbox.pending_count, 0);
-        // Scheduled-task planner is the only entry in the shared scheduler now.
-        assert_eq!(
-            read_periodic_scheduler_state(&daemon_dir)
-                .expect("scheduler must read")
-                .inspect()
-                .tasks
-                .iter()
-                .map(|task| task.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["scheduled-task-due-planner"]
-        );
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
     }

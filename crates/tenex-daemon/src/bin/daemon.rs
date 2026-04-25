@@ -12,6 +12,7 @@ use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use tenex_daemon::backend_status_driver::{BackendStatusDriverDeps, run_backend_status_driver};
 use tenex_daemon::project_status_driver::{ProjectStatusDriverDeps, run_project_status_supervisor};
+use tenex_daemon::scheduled_task_driver::{ScheduledTaskDriverDeps, run_scheduled_task_supervisor};
 use tenex_daemon::daemon_foreground::{
     DaemonForegroundStoppableInput, DaemonForegroundWorkerInput,
     run_daemon_foreground_until_stopped_from_filesystem_with_worker,
@@ -213,7 +214,22 @@ where
     // consumed by driver tasks; remaining receivers are dropped (senders
     // silently discard items when no receiver exists).
     let (signals, receivers) = create_daemon_signals();
-    let project_booted_rx = receivers.project_booted_rx;
+
+    // Fan-out BootedProject to the project-status supervisor and the
+    // scheduled-task supervisor. A single sender (project_booted_tx) is wired
+    // into the nostr ingress; the fan-out task reads each boot signal and
+    // forwards it to both consumers via their dedicated channels.
+    let (project_status_boot_tx, project_status_boot_rx) =
+        tokio::sync::mpsc::unbounded_channel::<tenex_daemon::daemon_signals::BootedProject>();
+    let (scheduled_task_boot_tx, scheduled_task_boot_rx) =
+        tokio::sync::mpsc::unbounded_channel::<tenex_daemon::daemon_signals::BootedProject>();
+    let boot_fanout_handle = runtime_handle.spawn(async move {
+        let mut boot_rx = receivers.project_booted_rx;
+        while let Some(booted) = boot_rx.recv().await {
+            let _ = project_status_boot_tx.send(booted.clone());
+            let _ = scheduled_task_boot_tx.send(booted);
+        }
+    });
 
     // While the daemon is running, a dedicated thread watches for SIGHUP
     // (via the global reload flag set by `request_daemon_reload`) and
@@ -270,8 +286,23 @@ where
             tenex_base_dir: tenex_base_dir.clone(),
             daemon_dir: daemon_dir.clone(),
         },
-        project_booted_rx,
+        project_status_boot_rx,
         project_status_shutdown_rx,
+    ));
+
+    // Spawn the scheduled-task supervisor. It listens for BootedProject signals
+    // and, per project, sleeps until the next task is due in `schedules.json`,
+    // then fires it. Replaces the `scheduled-task-due-planner` PeriodicScheduler entry.
+    let (scheduled_task_shutdown_tx, scheduled_task_shutdown_rx) =
+        tokio::sync::watch::channel(false);
+    let scheduled_task_supervisor_handle = runtime_handle.spawn(run_scheduled_task_supervisor(
+        ScheduledTaskDriverDeps {
+            tenex_base_dir: tenex_base_dir.clone(),
+            daemon_dir: daemon_dir.clone(),
+            project_event_index: Arc::clone(&project_event_index),
+        },
+        scheduled_task_boot_rx,
+        scheduled_task_shutdown_rx,
     ));
 
     tenex_daemon::stdout_status::print_daemon_ready(
@@ -360,12 +391,16 @@ where
         });
     }
 
-    // Stop the backend-status and project-status drivers and join their tasks.
+    // Stop the backend-status, project-status, and scheduled-task drivers and
+    // join their tasks. Also abort the boot fan-out task.
     let _ = backend_status_shutdown_tx.send(true);
     let _ = project_status_shutdown_tx.send(true);
+    let _ = scheduled_task_shutdown_tx.send(true);
+    boot_fanout_handle.abort();
     runtime_handle.block_on(async {
         let _ = backend_status_driver_handle.await;
         let _ = project_status_supervisor_handle.await;
+        let _ = scheduled_task_supervisor_handle.await;
     });
 
     diagnostics_result?;
