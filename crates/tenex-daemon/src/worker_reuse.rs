@@ -1,4 +1,4 @@
-use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
+use crate::worker_heartbeat::WorkerHeartbeatState;
 use crate::worker_process::AgentWorkerReady;
 use crate::worker_protocol::WorkerProtocolConfig;
 use crate::worker_runtime_state::{ActiveWorkerRuntimeSnapshot, WorkerRuntimeState};
@@ -98,30 +98,6 @@ pub enum WorkerReuseProtocolMismatch {
         expected: u64,
         actual: u64,
     },
-    HeartbeatIntervalMs {
-        expected: Option<u64>,
-        actual: Option<u64>,
-    },
-    MissedHeartbeatThreshold {
-        expected: Option<u64>,
-        actual: Option<u64>,
-    },
-    WorkerBootTimeoutMs {
-        expected: Option<u64>,
-        actual: Option<u64>,
-    },
-    GracefulAbortTimeoutMs {
-        expected: Option<u64>,
-        actual: Option<u64>,
-    },
-    ForceKillTimeoutMs {
-        expected: Option<u64>,
-        actual: Option<u64>,
-    },
-    IdleTtlMs {
-        expected: Option<u64>,
-        actual: Option<u64>,
-    },
 }
 
 pub fn plan_worker_reuse(input: WorkerReusePlanInput<'_>) -> WorkerReuseDecision {
@@ -167,17 +143,6 @@ pub fn plan_worker_reuse(input: WorkerReusePlanInput<'_>) -> WorkerReuseDecision
             };
         }
 
-        // Idle-TTL only applies when there's no work in flight; otherwise the worker
-        // is by definition active.
-        if runtime.executions.is_empty() {
-            if let Some(reason) = worker_state_mismatch(
-                runtime.latest_heartbeat(),
-                input.required_protocol.idle_ttl_ms,
-                input.now,
-            ) {
-                return WorkerReuseDecision::Recreate { reason };
-            }
-        }
     }
 
     if active_executions >= input.concurrency_cap {
@@ -299,48 +264,6 @@ fn protocol_mismatch(
         });
     }
 
-    if expected.heartbeat_interval_ms != actual.heartbeat_interval_ms {
-        return Some(WorkerReuseProtocolMismatch::HeartbeatIntervalMs {
-            expected: expected.heartbeat_interval_ms,
-            actual: actual.heartbeat_interval_ms,
-        });
-    }
-
-    if expected.missed_heartbeat_threshold != actual.missed_heartbeat_threshold {
-        return Some(WorkerReuseProtocolMismatch::MissedHeartbeatThreshold {
-            expected: expected.missed_heartbeat_threshold,
-            actual: actual.missed_heartbeat_threshold,
-        });
-    }
-
-    if expected.worker_boot_timeout_ms != actual.worker_boot_timeout_ms {
-        return Some(WorkerReuseProtocolMismatch::WorkerBootTimeoutMs {
-            expected: expected.worker_boot_timeout_ms,
-            actual: actual.worker_boot_timeout_ms,
-        });
-    }
-
-    if expected.graceful_abort_timeout_ms != actual.graceful_abort_timeout_ms {
-        return Some(WorkerReuseProtocolMismatch::GracefulAbortTimeoutMs {
-            expected: expected.graceful_abort_timeout_ms,
-            actual: actual.graceful_abort_timeout_ms,
-        });
-    }
-
-    if expected.force_kill_timeout_ms != actual.force_kill_timeout_ms {
-        return Some(WorkerReuseProtocolMismatch::ForceKillTimeoutMs {
-            expected: expected.force_kill_timeout_ms,
-            actual: actual.force_kill_timeout_ms,
-        });
-    }
-
-    if expected.idle_ttl_ms != actual.idle_ttl_ms {
-        return Some(WorkerReuseProtocolMismatch::IdleTtlMs {
-            expected: expected.idle_ttl_ms,
-            actual: actual.idle_ttl_ms,
-        });
-    }
-
     None
 }
 
@@ -362,39 +285,11 @@ fn compare_required_text(
     }
 }
 
-fn worker_state_mismatch(
-    heartbeat: Option<&WorkerHeartbeatSnapshot>,
-    idle_ttl_ms: Option<u64>,
-    now: u64,
-) -> Option<WorkerReuseRecreateReason> {
-    let heartbeat = heartbeat?;
-
-    if heartbeat.state != WorkerHeartbeatState::Idle {
-        return Some(WorkerReuseRecreateReason::WorkerStateMismatch {
-            state: heartbeat.state,
-        });
-    }
-
-    let idle_ttl_ms = idle_ttl_ms?;
-    let idle_deadline_at = heartbeat.observed_at.saturating_add(idle_ttl_ms);
-
-    if now > idle_deadline_at {
-        return Some(WorkerReuseRecreateReason::IdleTtlExpired {
-            idle_since_at: heartbeat.observed_at,
-            idle_ttl_ms,
-            idle_deadline_at,
-            now,
-        });
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ral_journal::RalJournalIdentity;
-    use crate::worker_heartbeat::WorkerHeartbeatState;
+    use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
     use crate::worker_lifecycle::abort::WorkerAbortSignal;
     use crate::worker_protocol::{
         AGENT_WORKER_MAX_FRAME_BYTES, AGENT_WORKER_PROTOCOL_ENCODING,
@@ -560,7 +455,7 @@ mod tests {
         // a candidate that has never seen one.
         let now = 6_001;
         assert_eq!(
-            plan_worker_reuse(reuse_input(&empty, &protocol_with_idle_ttl(5_000), now)),
+            plan_worker_reuse(reuse_input(&empty, &protocol(), now)),
             WorkerReuseDecision::ReuseAllowed {
                 worker_id: "worker-a".to_string(),
                 pid: 44,
@@ -765,7 +660,7 @@ mod tests {
             ready: AgentWorkerReady {
                 worker_id: "worker-a".to_string(),
                 pid: 44,
-                protocol: protocol_with_idle_ttl(5_000),
+                protocol: protocol(),
                 message: json!({
                     "type": "ready",
                     "workerId": "worker-a",
@@ -787,22 +682,12 @@ mod tests {
     }
 
     fn protocol() -> WorkerProtocolConfig {
-        protocol_with_idle_ttl(5_000)
-    }
-
-    fn protocol_with_idle_ttl(idle_ttl_ms: u64) -> WorkerProtocolConfig {
         WorkerProtocolConfig {
             version: AGENT_WORKER_PROTOCOL_VERSION,
             encoding: AGENT_WORKER_PROTOCOL_ENCODING.to_string(),
             max_frame_bytes: AGENT_WORKER_MAX_FRAME_BYTES,
             stream_batch_ms: AGENT_WORKER_STREAM_BATCH_MS,
             stream_batch_max_bytes: AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
-            heartbeat_interval_ms: Some(5_000),
-            missed_heartbeat_threshold: Some(3),
-            worker_boot_timeout_ms: Some(30_000),
-            graceful_abort_timeout_ms: Some(10_000),
-            force_kill_timeout_ms: Some(5_000),
-            idle_ttl_ms: Some(idle_ttl_ms),
         }
     }
 

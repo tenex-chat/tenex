@@ -1820,12 +1820,6 @@ mod tests {
             max_frame_bytes: AGENT_WORKER_MAX_FRAME_BYTES,
             stream_batch_ms: AGENT_WORKER_STREAM_BATCH_MS,
             stream_batch_max_bytes: AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
-            heartbeat_interval_ms: None,
-            missed_heartbeat_threshold: None,
-            worker_boot_timeout_ms: None,
-            graceful_abort_timeout_ms: None,
-            force_kill_timeout_ms: None,
-            idle_ttl_ms: None,
         }
     }
 

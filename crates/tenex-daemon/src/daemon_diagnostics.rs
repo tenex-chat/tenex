@@ -22,9 +22,6 @@ use crate::worker_diagnostics::{
     WorkerDiagnosticsDispatchQueueSummary, WorkerDiagnosticsGracefulSignal,
     WorkerDiagnosticsHeartbeatSummary, WorkerDiagnosticsProjectConcurrencySummary,
 };
-use crate::worker_heartbeat::{
-    WorkerHeartbeatFreshnessConfig, classify_worker_heartbeat_freshness,
-};
 use crate::worker_runtime_state::{ActiveWorkerRuntimeSnapshot, SharedWorkerRuntimeState};
 
 pub const DAEMON_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
@@ -228,7 +225,7 @@ fn build_worker_runtime_summary(
         .lock()
         .expect("runtime state mutex poisoned")
         .workers()
-        .flat_map(|worker| active_worker_diagnostics(worker, inspected_at))
+        .flat_map(active_worker_diagnostics)
         .collect::<Vec<_>>();
     let projects = worker_projects_summary(&active_workers);
 
@@ -243,7 +240,6 @@ fn build_worker_runtime_summary(
 
 fn active_worker_diagnostics(
     worker: &ActiveWorkerRuntimeSnapshot,
-    inspected_at: u64,
 ) -> Vec<WorkerDiagnosticsActiveWorker> {
     worker
         .executions
@@ -259,10 +255,7 @@ fn active_worker_diagnostics(
                 .graceful_signal
                 .as_ref()
                 .map(graceful_signal_diagnostics),
-            heartbeat: slot
-                .last_heartbeat
-                .as_ref()
-                .map(|heartbeat| heartbeat_summary(heartbeat, inspected_at)),
+            heartbeat: slot.last_heartbeat.as_ref().map(heartbeat_summary),
         })
         .collect()
 }
@@ -279,7 +272,6 @@ fn graceful_signal_diagnostics(
 
 fn heartbeat_summary(
     snapshot: &crate::worker_heartbeat::WorkerHeartbeatSnapshot,
-    inspected_at: u64,
 ) -> WorkerDiagnosticsHeartbeatSummary {
     WorkerDiagnosticsHeartbeatSummary {
         correlation_id: snapshot.correlation_id.clone(),
@@ -289,12 +281,6 @@ fn heartbeat_summary(
         state: snapshot.state.into(),
         active_tool_count: snapshot.active_tool_count,
         accumulated_runtime_ms: snapshot.accumulated_runtime_ms,
-        freshness: classify_worker_heartbeat_freshness(
-            snapshot,
-            inspected_at,
-            WorkerHeartbeatFreshnessConfig::default(),
-        )
-        .into(),
     }
 }
 
@@ -1444,12 +1430,6 @@ mod tests {
                 max_frame_bytes: AGENT_WORKER_MAX_FRAME_BYTES,
                 stream_batch_ms: AGENT_WORKER_STREAM_BATCH_MS,
                 stream_batch_max_bytes: AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
-                heartbeat_interval_ms: Some(30_000),
-                missed_heartbeat_threshold: Some(3),
-                worker_boot_timeout_ms: Some(30_000),
-                graceful_abort_timeout_ms: Some(5_000),
-                force_kill_timeout_ms: Some(5_000),
-                idle_ttl_ms: Some(60_000),
             },
             message: json!({
                 "version": AGENT_WORKER_PROTOCOL_VERSION,

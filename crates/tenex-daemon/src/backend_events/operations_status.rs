@@ -9,8 +9,6 @@ use crate::nostr_event::{
 };
 
 pub const OPERATIONS_STATUS_KIND: u64 = 24133;
-pub const OPERATIONS_STATUS_MAX_WHITELISTED_PUBKEYS: usize = 1024;
-pub const OPERATIONS_STATUS_MAX_AGENT_PUBKEYS: usize = 4096;
 
 const PROJECT_REFERENCE_KIND: &str = "31933";
 
@@ -34,10 +32,6 @@ pub enum OperationsStatusEncodeError {
     InvalidWhitelistedPubkey { index: usize, reason: String },
     #[error("operations-status agent pubkey at index {index} is invalid: {reason}")]
     InvalidAgentPubkey { index: usize, reason: String },
-    #[error("operations-status whitelisted pubkey count {count} exceeds maximum {max}")]
-    TooManyWhitelistedPubkeys { count: usize, max: usize },
-    #[error("operations-status agent pubkey count {count} exceeds maximum {max}")]
-    TooManyAgentPubkeys { count: usize, max: usize },
     #[error("operations-status canonicalization failed: {0}")]
     Canonicalize(#[from] NostrEventError),
     #[error("operations-status signing failed: {0}")]
@@ -79,19 +73,6 @@ pub fn encode_operations_status<S: BackendSigner>(
 fn validate_inputs(inputs: &OperationsStatusInputs<'_>) -> Result<(), OperationsStatusEncodeError> {
     validate_event_id_hex(inputs.conversation_id)?;
     validate_project_tag(inputs.project_tag)?;
-
-    if inputs.whitelisted_pubkeys.len() > OPERATIONS_STATUS_MAX_WHITELISTED_PUBKEYS {
-        return Err(OperationsStatusEncodeError::TooManyWhitelistedPubkeys {
-            count: inputs.whitelisted_pubkeys.len(),
-            max: OPERATIONS_STATUS_MAX_WHITELISTED_PUBKEYS,
-        });
-    }
-    if inputs.agent_pubkeys.len() > OPERATIONS_STATUS_MAX_AGENT_PUBKEYS {
-        return Err(OperationsStatusEncodeError::TooManyAgentPubkeys {
-            count: inputs.agent_pubkeys.len(),
-            max: OPERATIONS_STATUS_MAX_AGENT_PUBKEYS,
-        });
-    }
 
     for (index, pubkey) in inputs.whitelisted_pubkeys.iter().enumerate() {
         validate_xonly_pubkey_hex(pubkey).map_err(|err| {
@@ -481,34 +462,6 @@ mod tests {
         match err {
             OperationsStatusEncodeError::InvalidAgentPubkey { index, .. } => {
                 assert_eq!(index, 0);
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn rejects_pubkey_counts_above_bounds() {
-        let signer = test_signer();
-        let conversation_id = event_id_hex(0x10);
-        let project_owner = pubkey_hex(0x02);
-        let valid_agent = pubkey_hex(0x03);
-        let whitelisted: Vec<String> = Vec::new();
-        let agents = vec![valid_agent; OPERATIONS_STATUS_MAX_AGENT_PUBKEYS + 1];
-        let project_tag = project_tag(&project_owner);
-        let inputs = OperationsStatusInputs {
-            created_at: 1_700_000_008,
-            conversation_id: &conversation_id,
-            whitelisted_pubkeys: &whitelisted,
-            agent_pubkeys: &agents,
-            project_tag: &project_tag,
-        };
-
-        let err =
-            encode_operations_status(&inputs, &signer).expect_err("must reject oversized agents");
-        match err {
-            OperationsStatusEncodeError::TooManyAgentPubkeys { count, max } => {
-                assert_eq!(count, OPERATIONS_STATUS_MAX_AGENT_PUBKEYS + 1);
-                assert_eq!(max, OPERATIONS_STATUS_MAX_AGENT_PUBKEYS);
             }
             other => panic!("unexpected error: {other:?}"),
         }

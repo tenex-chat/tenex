@@ -8,9 +8,7 @@ use crate::worker_concurrency::{
     ActiveDispatchConcurrencySnapshot, ActiveWorkerConcurrencySnapshot,
 };
 use crate::worker_heartbeat::WorkerHeartbeatSnapshot;
-use crate::worker_lifecycle::abort::{
-    WorkerAbortDecisionInput, WorkerAbortProcessStatus, WorkerAbortSignal,
-};
+use crate::worker_lifecycle::abort::WorkerAbortSignal;
 use crate::worker_process::AgentWorkerReady;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,17 +73,6 @@ pub struct WorkerRuntimeGracefulSignal {
     pub signal: WorkerAbortSignal,
     pub sent_at: u64,
     pub reason: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkerRuntimeAbortDecisionContext {
-    pub process_status: WorkerAbortProcessStatus,
-    pub signal: WorkerAbortSignal,
-    pub reason: String,
-    pub now: u64,
-    pub sequence: u64,
-    pub timestamp: u64,
-    pub correlation_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -357,19 +344,6 @@ impl WorkerRuntimeState {
             .collect()
     }
 
-    pub fn to_abort_decision_input<'a>(
-        &'a self,
-        worker_id: &str,
-        context: WorkerRuntimeAbortDecisionContext,
-    ) -> WorkerRuntimeStateResult<WorkerAbortDecisionInput<'a>> {
-        let worker =
-            self.workers
-                .get(worker_id)
-                .ok_or_else(|| WorkerRuntimeStateError::UnknownWorker {
-                    worker_id: worker_id.to_string(),
-                })?;
-        worker.to_abort_decision_input(context)
-    }
 }
 
 impl ActiveWorkerRuntimeSnapshot {
@@ -402,49 +376,6 @@ impl ActiveWorkerRuntimeSnapshot {
             .collect()
     }
 
-    pub fn to_abort_decision_input(
-        &self,
-        context: WorkerRuntimeAbortDecisionContext,
-    ) -> WorkerRuntimeStateResult<WorkerAbortDecisionInput<'_>> {
-        let slot =
-            self.executions
-                .first()
-                .ok_or_else(|| WorkerRuntimeStateError::MissingHeartbeat {
-                    worker_id: self.worker_id.clone(),
-                })?;
-        let heartbeat = slot.last_heartbeat.as_ref().ok_or_else(|| {
-            WorkerRuntimeStateError::MissingHeartbeat {
-                worker_id: self.worker_id.clone(),
-            }
-        })?;
-        let signal = self
-            .graceful_signal
-            .as_ref()
-            .map(|graceful_signal| graceful_signal.signal)
-            .unwrap_or(context.signal);
-        let reason = self
-            .graceful_signal
-            .as_ref()
-            .map(|graceful_signal| graceful_signal.reason.clone())
-            .unwrap_or(context.reason);
-
-        Ok(WorkerAbortDecisionInput {
-            worker_id: self.worker_id.clone(),
-            identity: slot.identity.clone(),
-            heartbeat,
-            process_status: context.process_status,
-            signal,
-            graceful_signal_sent_at: self
-                .graceful_signal
-                .as_ref()
-                .map(|graceful_signal| graceful_signal.sent_at),
-            reason,
-            now: context.now,
-            sequence: context.sequence,
-            timestamp: context.timestamp,
-            correlation_id: context.correlation_id,
-        })
-    }
 }
 
 #[cfg(test)]
@@ -692,56 +623,6 @@ mod tests {
     }
 
     #[test]
-    fn builds_abort_input_from_latest_heartbeat_and_graceful_marker() {
-        let mut state = WorkerRuntimeState::default();
-        let worker_identity = identity("project-a", "agent-a");
-        state
-            .register_started_dispatch(started_dispatch(
-                "worker-a",
-                "dispatch-a",
-                worker_identity.clone(),
-            ))
-            .expect("worker must register");
-
-        assert_eq!(
-            state.to_abort_decision_input("worker-a", abort_context()),
-            Err(WorkerRuntimeStateError::MissingHeartbeat {
-                worker_id: "worker-a".to_string()
-            })
-        );
-
-        let heartbeat = heartbeat("worker-a", worker_identity.clone(), 20);
-        state
-            .update_worker_heartbeat("worker-a", heartbeat.clone())
-            .expect("heartbeat must update");
-        state
-            .mark_graceful_signal_sent(
-                "worker-a",
-                WorkerRuntimeGracefulSignal {
-                    signal: WorkerAbortSignal::Shutdown,
-                    sent_at: 1_900,
-                    reason: "shutdown requested".to_string(),
-                },
-            )
-            .expect("graceful marker must update");
-
-        let input = state
-            .to_abort_decision_input("worker-a", abort_context())
-            .expect("abort input must build");
-        assert_eq!(input.worker_id, "worker-a");
-        assert_eq!(input.identity, worker_identity);
-        assert_eq!(input.heartbeat, &heartbeat);
-        assert_eq!(input.process_status, WorkerAbortProcessStatus::Running);
-        assert_eq!(input.signal, WorkerAbortSignal::Shutdown);
-        assert_eq!(input.graceful_signal_sent_at, Some(1_900));
-        assert_eq!(input.reason, "shutdown requested");
-        assert_eq!(input.now, 2_500);
-        assert_eq!(input.sequence, 44);
-        assert_eq!(input.timestamp, 2_501);
-        assert_eq!(input.correlation_id, "abort-correlation");
-    }
-
-    #[test]
     fn builds_started_dispatch_from_ready_message() {
         let ready = AgentWorkerReady {
             worker_id: "worker-ready".to_string(),
@@ -752,12 +633,6 @@ mod tests {
                 max_frame_bytes: AGENT_WORKER_MAX_FRAME_BYTES,
                 stream_batch_ms: AGENT_WORKER_STREAM_BATCH_MS,
                 stream_batch_max_bytes: AGENT_WORKER_STREAM_BATCH_MAX_BYTES,
-                heartbeat_interval_ms: None,
-                missed_heartbeat_threshold: None,
-                worker_boot_timeout_ms: None,
-                graceful_abort_timeout_ms: None,
-                force_kill_timeout_ms: None,
-                idle_ttl_ms: None,
             },
             message: json!({"type": "ready"}),
         };
@@ -890,15 +765,4 @@ mod tests {
         }
     }
 
-    fn abort_context() -> WorkerRuntimeAbortDecisionContext {
-        WorkerRuntimeAbortDecisionContext {
-            process_status: WorkerAbortProcessStatus::Running,
-            signal: WorkerAbortSignal::Abort,
-            reason: "heartbeat missed".to_string(),
-            now: 2_500,
-            sequence: 44,
-            timestamp: 2_501,
-            correlation_id: "abort-correlation".to_string(),
-        }
-    }
 }

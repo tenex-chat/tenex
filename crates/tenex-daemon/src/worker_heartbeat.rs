@@ -6,9 +6,6 @@ use crate::worker_protocol::{
     WorkerProtocolDirection, WorkerProtocolError, validate_agent_worker_protocol_message,
 };
 
-pub const DEFAULT_WORKER_HEARTBEAT_INTERVAL_MS: u64 = 5_000;
-pub const DEFAULT_MISSED_WORKER_HEARTBEAT_THRESHOLD: u64 = 3;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerHeartbeatState {
     Starting,
@@ -35,27 +32,6 @@ pub struct WorkerHeartbeatSnapshot {
     pub state: WorkerHeartbeatState,
     pub active_tool_count: u64,
     pub accumulated_runtime_ms: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WorkerHeartbeatFreshnessConfig {
-    pub interval_ms: u64,
-    pub missed_threshold: u64,
-}
-
-impl Default for WorkerHeartbeatFreshnessConfig {
-    fn default() -> Self {
-        Self {
-            interval_ms: DEFAULT_WORKER_HEARTBEAT_INTERVAL_MS,
-            missed_threshold: DEFAULT_MISSED_WORKER_HEARTBEAT_THRESHOLD,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkerHeartbeatFreshness {
-    Fresh { deadline_at: u64, remaining_ms: u64 },
-    Missed { deadline_at: u64, missed_by_ms: u64 },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -102,27 +78,6 @@ pub fn plan_worker_heartbeat_snapshot(
         active_tool_count: required_u64(message, "activeToolCount")?,
         accumulated_runtime_ms: required_u64(message, "accumulatedRuntimeMs")?,
     })
-}
-
-pub fn classify_worker_heartbeat_freshness(
-    snapshot: &WorkerHeartbeatSnapshot,
-    now: u64,
-    config: WorkerHeartbeatFreshnessConfig,
-) -> WorkerHeartbeatFreshness {
-    let allowed_gap = config.interval_ms.saturating_mul(config.missed_threshold);
-    let deadline_at = snapshot.observed_at.saturating_add(allowed_gap);
-
-    if now <= deadline_at {
-        WorkerHeartbeatFreshness::Fresh {
-            deadline_at,
-            remaining_ms: deadline_at.saturating_sub(now),
-        }
-    } else {
-        WorkerHeartbeatFreshness::Missed {
-            deadline_at,
-            missed_by_ms: now.saturating_sub(deadline_at),
-        }
-    }
 }
 
 fn parse_heartbeat_state(state: &str) -> Result<WorkerHeartbeatState, WorkerHeartbeatError> {
@@ -213,62 +168,6 @@ mod tests {
             Err(WorkerHeartbeatError::InvalidDirection(
                 WorkerProtocolDirection::DaemonToWorker
             ))
-        );
-    }
-
-    #[test]
-    fn classifies_heartbeat_freshness_from_daemon_observed_time() {
-        let snapshot = plan_worker_heartbeat_snapshot(
-            &fixture_valid_message("heartbeat"),
-            context(1_710_000_403_000),
-        )
-        .expect("heartbeat snapshot must plan");
-
-        assert_eq!(
-            classify_worker_heartbeat_freshness(
-                &snapshot,
-                1_710_000_417_999,
-                WorkerHeartbeatFreshnessConfig::default(),
-            ),
-            WorkerHeartbeatFreshness::Fresh {
-                deadline_at: 1_710_000_418_000,
-                remaining_ms: 1,
-            }
-        );
-        assert_eq!(
-            classify_worker_heartbeat_freshness(
-                &snapshot,
-                1_710_000_418_001,
-                WorkerHeartbeatFreshnessConfig::default(),
-            ),
-            WorkerHeartbeatFreshness::Missed {
-                deadline_at: 1_710_000_418_000,
-                missed_by_ms: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn custom_freshness_config_controls_missed_deadline() {
-        let snapshot = plan_worker_heartbeat_snapshot(
-            &fixture_valid_message("heartbeat"),
-            context(1_710_000_403_000),
-        )
-        .expect("heartbeat snapshot must plan");
-
-        assert_eq!(
-            classify_worker_heartbeat_freshness(
-                &snapshot,
-                1_710_000_405_001,
-                WorkerHeartbeatFreshnessConfig {
-                    interval_ms: 1_000,
-                    missed_threshold: 2,
-                },
-            ),
-            WorkerHeartbeatFreshness::Missed {
-                deadline_at: 1_710_000_405_000,
-                missed_by_ms: 1,
-            }
         );
     }
 

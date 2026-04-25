@@ -7,10 +7,7 @@ use crate::publish_outbox::{
     PublishOutboxDiagnostics, PublishOutboxFailureDiagnostic, PublishOutboxPendingDiagnostic,
 };
 use crate::ral_journal::RalJournalIdentity;
-use crate::worker_heartbeat::{
-    WorkerHeartbeatFreshness, WorkerHeartbeatFreshnessConfig, WorkerHeartbeatSnapshot,
-    WorkerHeartbeatState, classify_worker_heartbeat_freshness,
-};
+use crate::worker_heartbeat::{WorkerHeartbeatSnapshot, WorkerHeartbeatState};
 use crate::worker_lifecycle::abort::WorkerAbortSignal;
 use crate::worker_runtime_state::{
     ActiveWorkerRuntimeSnapshot, WorkerRuntimeGracefulSignal, WorkerRuntimeState,
@@ -24,7 +21,6 @@ pub struct WorkerDiagnosticsInput<'a> {
     pub runtime_state: &'a WorkerRuntimeState,
     pub dispatch_queue: &'a DispatchQueueState,
     pub publish_outbox: &'a PublishOutboxDiagnostics,
-    pub heartbeat_freshness: WorkerHeartbeatFreshnessConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -76,7 +72,6 @@ pub struct WorkerDiagnosticsHeartbeatSummary {
     pub state: WorkerDiagnosticsHeartbeatState,
     pub active_tool_count: u64,
     pub accumulated_runtime_ms: u64,
-    pub freshness: WorkerDiagnosticsHeartbeatFreshnessSummary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -87,24 +82,6 @@ pub enum WorkerDiagnosticsHeartbeatState {
     Acting,
     Waiting,
     Idle,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerDiagnosticsHeartbeatFreshnessSummary {
-    pub status: WorkerDiagnosticsHeartbeatFreshnessStatus,
-    pub deadline_at: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remaining_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub missed_by_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerDiagnosticsHeartbeatFreshnessStatus {
-    Fresh,
-    Missed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -168,9 +145,7 @@ pub fn build_worker_diagnostics_snapshot(
         active_workers: input
             .runtime_state
             .workers()
-            .flat_map(|worker| {
-                active_worker_diagnostics(worker, input.inspected_at, input.heartbeat_freshness)
-            })
+            .flat_map(active_worker_diagnostics)
             .collect(),
         dispatch_queue: dispatch_queue_summary(input.dispatch_queue),
         concurrency: concurrency_summary(input.runtime_state, input.dispatch_queue),
@@ -180,8 +155,6 @@ pub fn build_worker_diagnostics_snapshot(
 
 fn active_worker_diagnostics(
     worker: &ActiveWorkerRuntimeSnapshot,
-    inspected_at: u64,
-    heartbeat_freshness: WorkerHeartbeatFreshnessConfig,
 ) -> Vec<WorkerDiagnosticsActiveWorker> {
     worker
         .executions
@@ -197,10 +170,7 @@ fn active_worker_diagnostics(
                 .graceful_signal
                 .as_ref()
                 .map(graceful_signal_diagnostics),
-            heartbeat: slot
-                .last_heartbeat
-                .as_ref()
-                .map(|heartbeat| heartbeat_summary(heartbeat, inspected_at, heartbeat_freshness)),
+            heartbeat: slot.last_heartbeat.as_ref().map(heartbeat_summary),
         })
         .collect()
 }
@@ -215,11 +185,7 @@ fn graceful_signal_diagnostics(
     }
 }
 
-fn heartbeat_summary(
-    snapshot: &WorkerHeartbeatSnapshot,
-    inspected_at: u64,
-    config: WorkerHeartbeatFreshnessConfig,
-) -> WorkerDiagnosticsHeartbeatSummary {
+fn heartbeat_summary(snapshot: &WorkerHeartbeatSnapshot) -> WorkerDiagnosticsHeartbeatSummary {
     WorkerDiagnosticsHeartbeatSummary {
         correlation_id: snapshot.correlation_id.clone(),
         sequence: snapshot.sequence,
@@ -228,7 +194,6 @@ fn heartbeat_summary(
         state: snapshot.state.into(),
         active_tool_count: snapshot.active_tool_count,
         accumulated_runtime_ms: snapshot.accumulated_runtime_ms,
-        freshness: classify_worker_heartbeat_freshness(snapshot, inspected_at, config).into(),
     }
 }
 
@@ -373,31 +338,6 @@ impl From<WorkerHeartbeatState> for WorkerDiagnosticsHeartbeatState {
     }
 }
 
-impl From<WorkerHeartbeatFreshness> for WorkerDiagnosticsHeartbeatFreshnessSummary {
-    fn from(freshness: WorkerHeartbeatFreshness) -> Self {
-        match freshness {
-            WorkerHeartbeatFreshness::Fresh {
-                deadline_at,
-                remaining_ms,
-            } => Self {
-                status: WorkerDiagnosticsHeartbeatFreshnessStatus::Fresh,
-                deadline_at,
-                remaining_ms: Some(remaining_ms),
-                missed_by_ms: None,
-            },
-            WorkerHeartbeatFreshness::Missed {
-                deadline_at,
-                missed_by_ms,
-            } => Self {
-                status: WorkerDiagnosticsHeartbeatFreshnessStatus::Missed,
-                deadline_at,
-                remaining_ms: None,
-                missed_by_ms: Some(missed_by_ms),
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActiveExecutionScope {
     project_id: String,
@@ -496,27 +436,18 @@ mod tests {
             runtime_state: &runtime_state,
             dispatch_queue: &dispatch_queue,
             publish_outbox: &publish_outbox,
-            heartbeat_freshness: WorkerHeartbeatFreshnessConfig {
-                interval_ms: 5_000,
-                missed_threshold: 2,
-            },
         });
 
         assert_eq!(snapshot.schema_version, WORKER_DIAGNOSTICS_SCHEMA_VERSION);
         assert_eq!(snapshot.active_workers.len(), 2);
         assert_eq!(snapshot.active_workers[0].worker_id, "worker-a");
-        assert_eq!(
+        assert!(
             snapshot.active_workers[0]
                 .heartbeat
                 .as_ref()
                 .expect("heartbeat should be present")
-                .freshness,
-            WorkerDiagnosticsHeartbeatFreshnessSummary {
-                status: WorkerDiagnosticsHeartbeatFreshnessStatus::Missed,
-                deadline_at: 12_000,
-                remaining_ms: None,
-                missed_by_ms: Some(1_000),
-            }
+                .accumulated_runtime_ms
+                > 0
         );
         assert_eq!(
             snapshot.active_workers[0].graceful_signal,
@@ -577,14 +508,6 @@ mod tests {
         let serialized = serde_json::to_value(&snapshot).expect("snapshot should serialize");
         assert_eq!(serialized["schemaVersion"], json!(1));
         assert_eq!(
-            serialized["activeWorkers"][0]["heartbeat"]["freshness"],
-            json!({
-                "status": "missed",
-                "deadlineAt": 12_000,
-                "missedByMs": 1_000,
-            })
-        );
-        assert_eq!(
             serde_json::from_value::<WorkerDiagnosticsSnapshot>(serialized)
                 .expect("snapshot should deserialize"),
             snapshot
@@ -624,7 +547,6 @@ mod tests {
             runtime_state: &runtime_state,
             dispatch_queue: &dispatch_queue,
             publish_outbox: &empty_publish_outbox_diagnostics(),
-            heartbeat_freshness: WorkerHeartbeatFreshnessConfig::default(),
         });
 
         assert_eq!(snapshot.active_workers, Vec::new());
@@ -651,52 +573,6 @@ mod tests {
                     }],
                 },
             ]
-        );
-    }
-
-    #[test]
-    fn reports_fresh_heartbeat_before_deadline() {
-        let mut runtime_state = WorkerRuntimeState::default();
-        runtime_state
-            .register_started_dispatch(started_dispatch(
-                "worker-a",
-                41,
-                "dispatch-a",
-                identity("project-a", "agent-a", 7),
-                "claim-a",
-                1_000,
-            ))
-            .expect("worker should register");
-        runtime_state
-            .update_worker_heartbeat(
-                "worker-a",
-                heartbeat("worker-a", identity("project-a", "agent-a", 7), 2_000),
-            )
-            .expect("heartbeat should update");
-
-        let snapshot = build_worker_diagnostics_snapshot(WorkerDiagnosticsInput {
-            inspected_at: 7_000,
-            runtime_state: &runtime_state,
-            dispatch_queue: &DispatchQueueState::default(),
-            publish_outbox: &empty_publish_outbox_diagnostics(),
-            heartbeat_freshness: WorkerHeartbeatFreshnessConfig {
-                interval_ms: 5_000,
-                missed_threshold: 2,
-            },
-        });
-
-        assert_eq!(
-            snapshot.active_workers[0]
-                .heartbeat
-                .as_ref()
-                .expect("heartbeat should be present")
-                .freshness,
-            WorkerDiagnosticsHeartbeatFreshnessSummary {
-                status: WorkerDiagnosticsHeartbeatFreshnessStatus::Fresh,
-                deadline_at: 12_000,
-                remaining_ms: Some(5_000),
-                missed_by_ms: None,
-            }
         );
     }
 

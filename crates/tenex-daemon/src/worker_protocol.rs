@@ -118,12 +118,6 @@ pub struct WorkerProtocolConfig {
     pub max_frame_bytes: u64,
     pub stream_batch_ms: u64,
     pub stream_batch_max_bytes: u64,
-    pub heartbeat_interval_ms: Option<u64>,
-    pub missed_heartbeat_threshold: Option<u64>,
-    pub worker_boot_timeout_ms: Option<u64>,
-    pub graceful_abort_timeout_ms: Option<u64>,
-    pub force_kill_timeout_ms: Option<u64>,
-    pub idle_ttl_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -684,12 +678,6 @@ fn validate_ready(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
         max_frame_bytes: require_u64(protocol, "maxFrameBytes")?,
         stream_batch_ms: require_u64(protocol, "streamBatchMs")?,
         stream_batch_max_bytes: require_u64(protocol, "streamBatchMaxBytes")?,
-        heartbeat_interval_ms: None,
-        missed_heartbeat_threshold: None,
-        worker_boot_timeout_ms: None,
-        graceful_abort_timeout_ms: None,
-        force_kill_timeout_ms: None,
-        idle_ttl_ms: None,
     };
     validate_worker_protocol_config(&config)?;
 
