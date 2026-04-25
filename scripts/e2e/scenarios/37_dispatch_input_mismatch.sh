@@ -183,17 +183,23 @@ else
   _die "ASSERT: expected triggering event mismatch error in daemon log"
 fi
 
-# Dispatch must not have transitioned to "leased" (worker never launched).
-leased_count="$(jq -s --arg d "$dispatch_id" \
-  '[.[] | select((.dispatchId // .dispatch_id) == $d and (.status // .lifecycle_status) == "leased")] | length' \
+# The dispatch's CURRENT (latest) status must be "cancelled". Note: the
+# original daemon may have already written a lease record before the test
+# stopped it for sidecar corruption, so a historical "leased" entry is
+# expected. What matters is that the restarted daemon recognised the
+# corrupted sidecar at startup and APPENDED a cancellation, leaving the
+# dispatch's effective state as cancelled — admission cannot lease it
+# again, and no worker will be launched.
+latest_status="$(jq -s --arg d "$dispatch_id" \
+  '[.[] | select((.dispatchId // .dispatch_id) == $d)] | last | (.status // .lifecycle_status)' \
   "$queue" 2>/dev/null)"
-[[ "$leased_count" -eq 0 ]] || {
+[[ "$latest_status" == '"cancelled"' ]] || {
   echo "[scenario] dispatch rows:"
   jq -s --arg d "$dispatch_id" \
     '[.[] | select((.dispatchId // .dispatch_id) == $d)]' "$queue" >&2
-  _die "ASSERT: dispatch transitioned to leased despite sidecar mismatch"
+  _die "ASSERT: dispatch latest status is $latest_status, expected cancelled"
 }
-echo "[scenario]   no lease row appended ✓ (worker never launched)"
+echo "[scenario]   dispatch cancelled by startup sidecar validation ✓"
 
 echo ""
 echo "[scenario] PASS — scenario 3.7: dispatch input mismatch validation"

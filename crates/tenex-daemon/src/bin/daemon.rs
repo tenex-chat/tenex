@@ -393,7 +393,10 @@ fn run_worker_startup_recovery(daemon_dir: &Path) -> Result<(), CliError> {
 }
 
 fn validate_dispatch_sidecars_at_startup(daemon_dir: &Path) {
-    use tenex_daemon::dispatch_queue::{DispatchQueueStatus, replay_dispatch_queue};
+    use tenex_daemon::dispatch_queue::{
+        DispatchQueueLifecycleInput, DispatchQueueStatus, append_dispatch_queue_record,
+        plan_dispatch_queue_terminal, replay_dispatch_queue,
+    };
     use tenex_daemon::worker_dispatch::input::read_optional as read_dispatch_input;
 
     let state = match replay_dispatch_queue(daemon_dir) {
@@ -408,84 +411,133 @@ fn validate_dispatch_sidecars_at_startup(daemon_dir: &Path) {
     };
 
     // Validate every queued and leased dispatch's sidecar against the queue
-    // record. Terminal records are skipped (they're already done).
-    let candidates = state
-        .queued
-        .iter()
-        .chain(state.leased.iter())
-        .filter(|record| {
-            matches!(
-                record.status,
-                DispatchQueueStatus::Queued | DispatchQueueStatus::Leased
-            )
-        });
-
-    for record in candidates {
+    // record. Terminal records are skipped (they're already done). Collect
+    // violators here so we can mutate the queue without holding an iterator
+    // over the replay state.
+    let mut violators: Vec<(String, String)> = Vec::new();
+    for record in state.queued.iter().chain(state.leased.iter()) {
+        if !matches!(
+            record.status,
+            DispatchQueueStatus::Queued | DispatchQueueStatus::Leased
+        ) {
+            continue;
+        }
         let sidecar = match read_dispatch_input(daemon_dir, &record.dispatch_id) {
             Ok(Some(sidecar)) => sidecar,
             Ok(None) => continue,
             Err(error) => {
-                let detail = format!("sidecar unreadable: {error}");
-                tracing::warn!(
-                    dispatch_id = %record.dispatch_id,
-                    error = %error,
-                    "worker dispatch input validation failed: sidecar unreadable"
-                );
-                tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
-                    &record.dispatch_id,
-                    &detail,
-                );
+                violators.push((
+                    record.dispatch_id.clone(),
+                    format!("sidecar unreadable: {error}"),
+                ));
                 continue;
             }
         };
         if sidecar.dispatch_id != record.dispatch_id {
-            let detail = format!(
-                "sidecar dispatch_id {} != queue {}",
-                sidecar.dispatch_id, record.dispatch_id
-            );
-            tracing::warn!(
-                dispatch_id = %record.dispatch_id,
-                sidecar_dispatch_id = %sidecar.dispatch_id,
-                "worker dispatch input validation failed: sidecar dispatch_id mismatch"
-            );
-            tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
-                &record.dispatch_id,
-                &detail,
-            );
+            violators.push((
+                record.dispatch_id.clone(),
+                format!(
+                    "sidecar dispatch_id {} != queue {}",
+                    sidecar.dispatch_id, record.dispatch_id
+                ),
+            ));
             continue;
         }
         let fields = match sidecar.resolved_execute_fields() {
             Ok(fields) => fields,
             Err(error) => {
-                let detail = format!("sidecar fields invalid: {error}");
-                tracing::warn!(
-                    dispatch_id = %record.dispatch_id,
-                    error = %error,
-                    "worker dispatch input validation failed: sidecar fields invalid"
-                );
-                tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
-                    &record.dispatch_id,
-                    &detail,
-                );
+                violators.push((
+                    record.dispatch_id.clone(),
+                    format!("sidecar fields invalid: {error}"),
+                ));
                 continue;
             }
         };
         if fields.triggering_event_id != record.triggering_event_id {
-            let detail = format!(
-                "triggering event id mismatch: expected {}, sidecar has {}",
-                record.triggering_event_id, fields.triggering_event_id
-            );
-            tracing::warn!(
-                dispatch_id = %record.dispatch_id,
-                expected_triggering_event_id = %record.triggering_event_id,
-                actual_triggering_event_id = %fields.triggering_event_id,
-                "worker dispatch input validation failed: triggering event mismatch"
-            );
-            tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
-                &record.dispatch_id,
-                &detail,
-            );
+            violators.push((
+                record.dispatch_id.clone(),
+                format!(
+                    "triggering event id mismatch: expected {}, sidecar has {}",
+                    record.triggering_event_id, fields.triggering_event_id
+                ),
+            ));
         }
+    }
+
+    if violators.is_empty() {
+        return;
+    }
+
+    // Cancel each bad dispatch so admission cannot lease it. Each cancellation
+    // is its own queue lifecycle record (status = Cancelled) and carries the
+    // diagnostic in its correlation_id for forensic reading of the queue.
+    let mut cancelled = 0usize;
+    for (dispatch_id, detail) in &violators {
+        tracing::warn!(
+            dispatch_id = %dispatch_id,
+            detail = %detail,
+            "worker dispatch input validation failed; cancelling dispatch"
+        );
+        tenex_daemon::stdout_status::print_dispatch_input_validation_failed(
+            dispatch_id,
+            detail,
+        );
+
+        // Replay-then-plan per cancellation so each new record gets the
+        // correct next sequence even if multiple violators land in the same
+        // pass.
+        let current_state = match replay_dispatch_queue(daemon_dir) {
+            Ok(state) => state,
+            Err(error) => {
+                tracing::warn!(
+                    dispatch_id = %dispatch_id,
+                    error = %error,
+                    "could not replay dispatch queue while planning sidecar cancellation"
+                );
+                continue;
+            }
+        };
+        let next_sequence = current_state.last_sequence.saturating_add(1);
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let cancellation = match plan_dispatch_queue_terminal(
+            &current_state,
+            DispatchQueueLifecycleInput {
+                dispatch_id: dispatch_id.clone(),
+                sequence: next_sequence,
+                timestamp: now_ms,
+                correlation_id: format!("startup-sidecar-mismatch:{dispatch_id}"),
+            },
+            DispatchQueueStatus::Cancelled,
+        ) {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::warn!(
+                    dispatch_id = %dispatch_id,
+                    error = %error,
+                    "could not plan sidecar-mismatch cancellation"
+                );
+                continue;
+            }
+        };
+        if let Err(error) = append_dispatch_queue_record(daemon_dir, &cancellation) {
+            tracing::warn!(
+                dispatch_id = %dispatch_id,
+                error = %error,
+                "could not append sidecar-mismatch cancellation"
+            );
+            continue;
+        }
+        cancelled += 1;
+    }
+
+    if cancelled > 0 {
+        tracing::warn!(
+            cancelled = cancelled,
+            "cancelled dispatches with corrupted sidecars at startup"
+        );
     }
 }
 
