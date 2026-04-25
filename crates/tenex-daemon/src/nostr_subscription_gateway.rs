@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tungstenite::Message;
 use url::Url;
 
+use crate::daemon_signals::BootedProject;
 use crate::nostr_classification::DaemonNostrEventClass;
 use crate::nostr_subscription_tick::{
     NostrSubscriptionTickDiagnostics, NostrSubscriptionTickDispatch, NostrSubscriptionTickError,
@@ -57,6 +58,8 @@ pub struct NostrSubscriptionGatewayConfig {
     pub whitelist_ingress: Option<Arc<WhitelistIngress>>,
     pub project_boot_state: Arc<Mutex<ProjectBootState>>,
     pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
+    pub project_index_changed: Option<Arc<tokio::sync::Notify>>,
+    pub project_booted_tx: Option<tokio::sync::mpsc::UnboundedSender<BootedProject>>,
 }
 
 impl NostrSubscriptionGatewayConfig {
@@ -73,6 +76,8 @@ impl NostrSubscriptionGatewayConfig {
             whitelist_ingress: None,
             project_boot_state: Arc::new(Mutex::new(ProjectBootState::new())),
             project_event_index: Arc::new(Mutex::new(ProjectEventIndex::new())),
+            project_index_changed: None,
+            project_booted_tx: None,
         }
     }
 
@@ -332,6 +337,8 @@ async fn run_relay_loop_async(
                 project_boot_state: Some(&config.project_boot_state),
                 project_event_index: &config.project_event_index,
                 observer: Some(observer.as_ref()),
+                project_index_changed: config.project_index_changed.clone(),
+                project_booted_tx: config.project_booted_tx.clone(),
             }) => result,
         };
 
@@ -367,7 +374,6 @@ async fn run_relay_loop_async(
     tracing::info!(relay_url = %relay_url, "nostr relay task stopped");
 }
 
-#[derive(Clone, Copy)]
 pub struct NostrSubscriptionRelayInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
@@ -383,6 +389,8 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
     pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
     pub observer: Option<&'a dyn NostrSubscriptionObserver>,
+    pub project_index_changed: Option<Arc<tokio::sync::Notify>>,
+    pub project_booted_tx: Option<tokio::sync::mpsc::UnboundedSender<BootedProject>>,
 }
 
 impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
@@ -520,6 +528,8 @@ async fn run_nostr_subscription_relay_once_async(
                     whitelist_ingress: input.whitelist_ingress,
                     project_boot_state: input.project_boot_state,
                     project_event_index: input.project_event_index,
+                    project_index_changed: input.project_index_changed.clone(),
+                    project_booted_tx: input.project_booted_tx.clone(),
                 })?;
                 if let Some(observer) = input.observer {
                     observer.on_tick(input.relay_url, &tick);
@@ -627,7 +637,7 @@ async fn run_nostr_subscription_relay_once_async(
                 if should_refresh_subscription_filters(&tick) {
                     refresh_subscription_filters(
                         &mut socket,
-                        input,
+                        &input,
                         &mut active_filters,
                         refresh_since,
                     )
@@ -662,7 +672,7 @@ type RelaySocket = WebSocketStream<MaybeTlsStream<TokioTcpStream>>;
 
 async fn refresh_subscription_filters(
     socket: &mut RelaySocket,
-    input: NostrSubscriptionRelayInput<'_>,
+    input: &NostrSubscriptionRelayInput<'_>,
     active_filters: &mut Vec<NostrFilter>,
     since: Option<u64>,
 ) -> Result<(), NostrSubscriptionRelayError> {
@@ -969,6 +979,8 @@ mod tests {
             project_boot_state: None,
             project_event_index: &project_event_index,
             observer: None,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("relay subscription must drain");
 
@@ -1037,6 +1049,8 @@ mod tests {
             whitelist_ingress: None,
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
             observer: None,
         })
         .expect("relay subscription must authenticate and drain");

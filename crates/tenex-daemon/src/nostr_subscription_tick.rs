@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
+use tokio::sync::Notify;
+use tokio::sync::mpsc::UnboundedSender;
 
+use crate::daemon_signals::BootedProject;
 use crate::inbound_runtime::InboundRuntimeOutcome;
 use crate::nostr_classification::DaemonNostrEventClass;
 use crate::nostr_ingress::NostrIngressOutcome;
@@ -20,7 +23,6 @@ use crate::project_boot_state::ProjectBootState;
 use crate::project_event_index::ProjectEventIndex;
 use crate::subscription_filters::RelaySubscriptionFrame;
 
-#[derive(Debug, Clone, Copy)]
 pub struct NostrSubscriptionTickInput<'a> {
     pub tenex_base_dir: &'a Path,
     pub daemon_dir: &'a Path,
@@ -32,6 +34,8 @@ pub struct NostrSubscriptionTickInput<'a> {
     pub whitelist_ingress: Option<&'a WhitelistIngress>,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
     pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
+    pub project_index_changed: Option<Arc<Notify>>,
+    pub project_booted_tx: Option<UnboundedSender<BootedProject>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -141,6 +145,8 @@ pub fn run_nostr_subscription_intake_tick(
             whitelist_ingress: input.whitelist_ingress,
             project_boot_state: input.project_boot_state,
             project_event_index: input.project_event_index,
+            project_index_changed: input.project_index_changed.clone(),
+            project_booted_tx: input.project_booted_tx.clone(),
         })
         .map_err(|source| NostrSubscriptionTickError::Ingress {
             frame_index,
@@ -490,6 +496,8 @@ mod tests {
             whitelist_ingress: None,
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("subscription tick must process");
 
@@ -573,6 +581,8 @@ mod tests {
             whitelist_ingress: None,
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("subscription tick must process");
 

@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use thiserror::Error;
+use tokio::sync::Notify;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::agent_config_update::{
     AgentConfigUpdateError, AgentConfigUpdateOutcome, apply_agent_config_update,
@@ -14,6 +16,7 @@ use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_agent_config,
 };
 use crate::backend_events::installed_agent_list::AgentConfigInputs;
+use crate::daemon_signals::BootedProject;
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
     resolve_and_enqueue_inbound_dispatch,
@@ -34,7 +37,6 @@ use crate::project_repository_init::{
 };
 use crate::worker_lifecycle::stop_request::{WorkerStopRequest, write_worker_stop_request};
 
-#[derive(Debug, Clone, Copy)]
 pub struct NostrIngressInput<'a> {
     pub daemon_dir: &'a Path,
     pub tenex_base_dir: &'a Path,
@@ -43,6 +45,12 @@ pub struct NostrIngressInput<'a> {
     pub writer_version: &'a str,
     pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
     pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
+    /// Signal that a new entry was added to the project event index. `None`
+    /// in tests that don't need signal wiring.
+    pub project_index_changed: Option<Arc<Notify>>,
+    /// Signal that a boot event was recorded. `None` in tests that don't
+    /// need signal wiring.
+    pub project_booted_tx: Option<UnboundedSender<BootedProject>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -126,6 +134,9 @@ pub fn process_verified_nostr_event(
             input.project_event_index,
         )?;
         if project.is_new_project {
+            if let Some(notify) = &input.project_index_changed {
+                notify.notify_one();
+            }
             crate::foreground_wake::request_wake();
         }
         return Ok(NostrIngressOutcome::ProjectUpdated { class, project });
@@ -181,16 +192,16 @@ pub fn process_verified_nostr_event(
             boot.already_booted,
         );
 
-        // Wake the foreground maintenance loop so it picks up the new boot
-        // state on its next poll (within ~100ms) instead of waiting for
-        // the next `sleep_ms` interval. The loop will register the
-        // project-status task and emit the first 24010 on that iteration.
-        //
-        // The ingress thread deliberately does NOT publish the 24010
-        // inline: `publish_project_status_from_filesystem` reads every
-        // agent JSON file under `<tenex_base>/agents/`, which at ~100
-        // agents is a multi-second filesystem scan that would block the
-        // relay subscription thread.
+        // Signal the project-status supervisor that a new project is booted
+        // so it can spawn a per-project status timer task immediately.
+        if let Some(tx) = &input.project_booted_tx {
+            let _ = tx.send(BootedProject {
+                project_owner_pubkey: boot.project_owner_pubkey.clone(),
+                project_d_tag: boot.project_d_tag.clone(),
+            });
+        }
+        // Dual-write: also wake the foreground tick while it still runs
+        // (this is only present in Commit 1 of the tick-elimination migration).
         crate::foreground_wake::request_wake();
 
         return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
@@ -440,6 +451,8 @@ mod tests {
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -478,6 +491,8 @@ mod tests {
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -526,6 +541,8 @@ mod tests {
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -589,6 +606,8 @@ mod tests {
             writer_version: "nostr-ingress-test@0",
             project_boot_state: Some(&project_boot_state),
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -646,6 +665,8 @@ mod tests {
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("project ingress must process");
 
@@ -667,6 +688,8 @@ mod tests {
             writer_version: "nostr-ingress-test@0",
             project_boot_state: None,
             project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
         })
         .expect("repeat ingress must process");
 

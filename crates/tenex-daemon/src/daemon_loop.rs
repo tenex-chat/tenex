@@ -16,6 +16,7 @@ use crate::daemon_maintenance::{
     TelegramMaintenancePublisher, run_daemon_maintenance_once_from_filesystem,
     run_daemon_maintenance_once_from_filesystem_with_telegram,
 };
+use crate::daemon_signals::SessionCompletion;
 use crate::daemon_worker_runtime::{
     AdmitWorkerDispatchOutcome, DaemonWorkerFilesystemTerminalInput,
     DaemonWorkerLivePublishMaintenance, DaemonWorkerOperationsStatusRuntimeInput,
@@ -110,6 +111,10 @@ pub struct DaemonWorkerTickInput<'a> {
     /// per admitted dispatch and polls for finished ones at the top of each
     /// tick.
     pub session_registry: WorkerSessionRegistry,
+    /// Signal bus sender for session completions. Each spawned blocking task
+    /// sends one `SessionCompletion` when it finishes so future driver tasks
+    /// can react without polling. `None` in tests that don't need signal wiring.
+    pub session_completed_tx: Option<tokio::sync::mpsc::UnboundedSender<SessionCompletion>>,
 }
 
 #[derive(Debug)]
@@ -126,6 +131,8 @@ pub struct DaemonWorkerLoopInput<'a> {
     /// remaining entries at shutdown so no session is left running when the
     /// daemon stops.
     pub session_registry: WorkerSessionRegistry,
+    /// Signal bus sender for session completions. See `DaemonWorkerTickInput`.
+    pub session_completed_tx: Option<tokio::sync::mpsc::UnboundedSender<SessionCompletion>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -457,6 +464,7 @@ where
                     format!("{}:complete-{}", worker.correlation_id, admitted_this_tick);
                 let dispatch_id_for_thread = dispatch_id.clone();
                 let worker_id_for_thread = worker_id.clone();
+                let session_completed_tx_for_spawn = worker.session_completed_tx.clone();
                 let handle = tokio::task::spawn_blocking(move || {
                     let publisher_for_live = Arc::clone(&publisher_for_thread);
                     let mut live_publish_maintenance = move |daemon_dir: &Path, now: u64| {
@@ -509,6 +517,9 @@ where
                             }
                         }
                     };
+                    if let Some(tx) = &session_completed_tx_for_spawn {
+                        let _ = tx.send(SessionCompletion);
+                    }
                     crate::foreground_wake::request_wake();
                     outcome
                 });
@@ -877,6 +888,7 @@ where
         resolved_pending_delegations,
         publish_result_sequence,
         session_registry,
+        session_completed_tx,
     } = worker;
     let heartbeat_latch = input.heartbeat_latch.clone();
     let project_boot_state = input.project_boot_state.clone();
@@ -902,6 +914,7 @@ where
                 resolved_pending_delegations: resolved_pending_delegations.clone(),
                 publish_result_sequence: publish_result_sequence.clone(),
                 session_registry: session_registry.clone(),
+                session_completed_tx: session_completed_tx.clone(),
             },
             spawner,
             publisher,
@@ -1426,6 +1439,7 @@ mod tests {
                 resolved_pending_delegations: Vec::new(),
                 publish_result_sequence: None,
                 session_registry: WorkerSessionRegistry::new(),
+                session_completed_tx: None,
             },
             &mut spawner,
             &publisher,
@@ -1521,6 +1535,7 @@ mod tests {
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: None,
                             session_registry: session_registry_clone.clone(),
+                            session_completed_tx: None,
                         },
                         &mut spawner,
                         &publisher_clone,
@@ -2236,6 +2251,7 @@ mod tests {
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: None,
                             session_registry: session_registry_clone.clone(),
+                            session_completed_tx: None,
                         },
                         &mut spawner,
                         &publisher_clone,
@@ -2468,6 +2484,7 @@ mod tests {
                         resolved_pending_delegations: Vec::new(),
                         publish_result_sequence: None,
                         session_registry: session_registry_clone.clone(),
+                        session_completed_tx: None,
                     },
                     &mut spawner,
                     &publisher_clone,

@@ -45,6 +45,7 @@ use tenex_daemon::telegram::gateway::{
     GatewayConfig, NoopIngressObserver, TelegramGatewaySupervisor, start_telegram_gateway,
 };
 use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
+use tenex_daemon::daemon_signals::create_daemon_signals;
 use tenex_daemon::telemetry;
 use tenex_daemon::whitelist_wiring::{
     WhitelistReloadHandle, build_whitelist_wiring, reload_whitelist_from_handle,
@@ -206,6 +207,13 @@ where
     ));
     run_worker_startup_recovery(&daemon_dir)?;
 
+    // Create the process-wide signal bus. Senders are threaded into producers
+    // now; driver tasks that consume the receivers are added in subsequent
+    // commits. The receivers from this call are dropped immediately because
+    // UnboundedSender::send silently discards items when no receiver exists —
+    // correct behavior until drivers are wired in.
+    let (signals, _) = create_daemon_signals();
+
     // While the daemon is running, a dedicated thread watches for SIGHUP
     // (via the global reload flag set by `request_daemon_reload`) and
     // invokes `reload_whitelist_wiring` to swap the whitelisted owner set
@@ -226,6 +234,8 @@ where
             .map(|wiring| Arc::clone(&wiring.ingress)),
         Arc::clone(&project_boot_state),
         Arc::clone(&project_event_index),
+        signals.project_index_changed.clone(),
+        signals.project_booted_tx.clone(),
     )?;
     let gateway_supervisor =
         start_gateway_supervisor_from_options(&options, Arc::clone(&project_event_index))?;
@@ -252,6 +262,7 @@ where
             project_boot_state,
             project_event_index,
             Arc::clone(&publisher),
+            Some(signals.session_completed_tx.clone()),
             telegram_publisher,
         ))
     } else {
@@ -496,6 +507,10 @@ fn start_nostr_subscription_supervisor_from_options(
     whitelist_ingress: Option<Arc<WhitelistIngress>>,
     project_boot_state: Arc<Mutex<ProjectBootState>>,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
+    project_index_changed: Arc<tokio::sync::Notify>,
+    project_booted_tx: tokio::sync::mpsc::UnboundedSender<
+        tenex_daemon::daemon_signals::BootedProject,
+    >,
 ) -> Result<Option<NostrSubscriptionGatewaySupervisor>, CliError> {
     let (tenex_base_dir, daemon_dir) = resolve_daemon_paths(options)?;
     let persisted_whitelist =
@@ -522,6 +537,8 @@ fn start_nostr_subscription_supervisor_from_options(
             .with_auth_signer(auth_signer);
     config.project_boot_state = project_boot_state;
     config.project_event_index = project_event_index;
+    config.project_index_changed = Some(project_index_changed);
+    config.project_booted_tx = Some(project_booted_tx);
     if let Some(ingress) = whitelist_ingress {
         config = config.with_whitelist_ingress(ingress);
     }
@@ -715,6 +732,9 @@ async fn run_daemon_foreground_async<P>(
     project_boot_state: Arc<Mutex<ProjectBootState>>,
     project_event_index: Arc<Mutex<tenex_daemon::project_event_index::ProjectEventIndex>>,
     publisher: Arc<Mutex<P>>,
+    session_completed_tx: Option<
+        tokio::sync::mpsc::UnboundedSender<tenex_daemon::daemon_signals::SessionCompletion>,
+    >,
     mut telegram_publisher: ForegroundTelegramPublisherState,
 ) -> Result<DaemonForegroundDiagnostics, CliError>
 where
@@ -757,6 +777,7 @@ where
             worker_config.clone(),
             Arc::clone(&publish_result_sequence),
             session_registry.clone(),
+            session_completed_tx.clone(),
             telegram_publisher,
         )
         .await?;
@@ -843,6 +864,9 @@ async fn run_async_foreground_tick<P>(
     worker_config: AgentWorkerProcessConfig,
     publish_result_sequence: Arc<AtomicU64>,
     session_registry: WorkerSessionRegistry,
+    session_completed_tx: Option<
+        tokio::sync::mpsc::UnboundedSender<tenex_daemon::daemon_signals::SessionCompletion>,
+    >,
     telegram_publisher: ForegroundTelegramPublisherState,
 ) -> Result<
     (
@@ -883,6 +907,7 @@ where
                         resolved_pending_delegations: Vec::new(),
                         publish_result_sequence: Some(publish_result_sequence),
                         session_registry,
+                        session_completed_tx,
                     },
                     &mut worker_spawner,
                     &publisher,
@@ -916,6 +941,7 @@ where
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: Some(publish_result_sequence),
                             session_registry,
+                            session_completed_tx,
                         },
                         &mut worker_spawner,
                         &publisher,
@@ -994,6 +1020,7 @@ where
             resolved_pending_delegations: Vec::new(),
             publish_result_sequence: Some(Arc::new(AtomicU64::new(1))),
             session_registry: tenex_daemon::worker_session::registry::WorkerSessionRegistry::new(),
+            session_completed_tx: None,
         },
         clock,
         sleeper,

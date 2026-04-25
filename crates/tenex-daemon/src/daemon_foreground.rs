@@ -15,6 +15,7 @@ use crate::daemon_loop::{
 };
 use crate::daemon_maintenance::TelegramMaintenancePublisher;
 use crate::daemon_shell::{DaemonShell, DaemonShellError, DaemonShellStopMode};
+use crate::daemon_signals::SessionCompletion;
 use crate::daemon_worker_runtime::DaemonWorkerRuntimeOutcome;
 use crate::process_liveness::ProcessLivenessProbe;
 use crate::project_boot_state::ProjectBootState;
@@ -66,6 +67,8 @@ pub struct DaemonForegroundWorkerInput<'a> {
     /// spawned by one tick can be observed (and joined at shutdown) by the
     /// driver.
     pub session_registry: WorkerSessionRegistry,
+    /// Signal bus sender for session completions. `None` in tests.
+    pub session_completed_tx: Option<tokio::sync::mpsc::UnboundedSender<SessionCompletion>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -323,6 +326,7 @@ where
             resolved_pending_delegations: worker.resolved_pending_delegations,
             publish_result_sequence: worker.publish_result_sequence,
             session_registry: worker.session_registry,
+            session_completed_tx: worker.session_completed_tx,
         },
         clock,
         sleeper,
@@ -762,6 +766,7 @@ mod tests {
                 resolved_pending_delegations: Vec::new(),
                 publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                 session_registry: WorkerSessionRegistry::new(),
+                session_completed_tx: None,
             },
             &mut clock,
             &mut sleeper,
@@ -863,6 +868,7 @@ mod tests {
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
                             session_registry: WorkerSessionRegistry::new(),
+                            session_completed_tx: None,
                         },
                         &mut clock,
                         &mut sleeper,
