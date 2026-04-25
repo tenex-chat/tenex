@@ -31,9 +31,17 @@ use crate::daemon_worker_runtime::{
     DaemonWorkerTelegramEgressRuntimeInput,
     admit_one_worker_dispatch_from_filesystem, run_started_worker_session_from_filesystem,
 };
+use crate::dispatch_queue::{
+    DispatchQueueLifecycleInput, DispatchQueueStatus, acquire_dispatch_queue_lock,
+    append_dispatch_queue_record, plan_dispatch_queue_terminal, replay_dispatch_queue,
+};
 use crate::project_event_index::ProjectEventIndex;
 use crate::publish_outbox::{PublishOutboxRelayPublisher, PublishOutboxRetryPolicy};
 use crate::publish_runtime::{PublishRuntimeMaintainInput, maintain_publish_runtime};
+use crate::ral_journal::{
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalEvent, RalJournalIdentity, RalJournalRecord,
+    append_ral_journal_record_with_resequence,
+};
 use crate::ral_lock::RalLockInfo;
 use crate::worker_dispatch::execution::AgentWorkerProcessDispatchSpawner;
 use crate::worker_message_flow::WorkerMessagePublishContext;
@@ -153,6 +161,8 @@ async fn drain_admit_loop<P>(
             Ok(AdmitWorkerDispatchOutcome::Admitted(started)) => {
                 let dispatch_id = started.runtime_started.dispatch_id.clone();
                 let worker_id = started.runtime_started.worker_id.clone();
+                let identity = started.runtime_started.identity.clone();
+                let claim_token = started.runtime_started.claim_token.clone();
                 tracing::info!(
                     dispatch_id = %dispatch_id,
                     worker_id = %worker_id,
@@ -160,6 +170,7 @@ async fn drain_admit_loop<P>(
                 );
 
                 let daemon_dir_s = deps.daemon_dir.clone();
+                let daemon_dir_panic = deps.daemon_dir.clone();
                 let runtime_state_s = deps.runtime_state.clone();
                 let publisher_s = Arc::clone(&deps.publisher);
                 let retry_policy_s = deps.retry_policy;
@@ -229,7 +240,25 @@ async fn drain_admit_loop<P>(
                         }
                     });
 
-                    let _ = handle.await;
+                    match handle.await {
+                        Ok(()) => {}
+                        Err(join_error) => {
+                            tracing::error!(
+                                dispatch_id = %dispatch_id,
+                                worker_id = %worker_id,
+                                error = %join_error,
+                                "worker-admission-driver: session spawn_blocking panicked; writing crash terminal"
+                            );
+                            write_panic_terminal_records(
+                                &daemon_dir_panic,
+                                &identity,
+                                &worker_id,
+                                &dispatch_id,
+                                &claim_token,
+                                now_ms,
+                            );
+                        }
+                    }
                     let _ = tx.send(SessionCompletion);
                 });
 
@@ -294,4 +323,210 @@ fn current_unix_time_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system time must be after UNIX_EPOCH")
         .as_millis() as u64
+}
+
+/// Called when a `spawn_blocking` session task panics. Writes a `Crashed` RAL
+/// terminal record and cancels the leased dispatch so neither the journal nor
+/// the queue stays stuck in an active state forever.
+///
+/// Errors are logged and swallowed — this is best-effort cleanup after a panic;
+/// there is nothing the caller can do about a secondary write failure.
+fn write_panic_terminal_records(
+    daemon_dir: &std::path::Path,
+    identity: &RalJournalIdentity,
+    worker_id: &str,
+    dispatch_id: &str,
+    claim_token: &str,
+    timestamp: u64,
+) {
+    let correlation_id = format!("panic-terminal:{dispatch_id}");
+
+    let mut crash_record = RalJournalRecord::new(
+        RAL_JOURNAL_WRITER_RUST_DAEMON,
+        "worker-admission-driver",
+        0, // resequenced under the append lock
+        timestamp,
+        &correlation_id,
+        RalJournalEvent::Crashed {
+            identity: identity.clone(),
+            worker_id: worker_id.to_string(),
+            claim_token: Some(claim_token.to_string()),
+            crash_reason: "spawn_blocking panicked; JoinError detected".to_string(),
+            last_heartbeat_at: None,
+        },
+    );
+
+    if let Err(error) = append_ral_journal_record_with_resequence(daemon_dir, &mut crash_record) {
+        tracing::error!(
+            dispatch_id = %dispatch_id,
+            worker_id = %worker_id,
+            error = %error,
+            "write_panic_terminal_records: failed to write Crashed RAL record after panic"
+        );
+    }
+
+    // Cancel the leased dispatch so the queue is no longer stuck.
+    let cancel_result = (|| {
+        let _lock = acquire_dispatch_queue_lock(daemon_dir)?;
+        let state = replay_dispatch_queue(daemon_dir)?;
+        let cancelled = plan_dispatch_queue_terminal(
+            &state,
+            DispatchQueueLifecycleInput {
+                dispatch_id: dispatch_id.to_string(),
+                sequence: state.last_sequence + 1,
+                timestamp,
+                correlation_id: correlation_id.clone(),
+            },
+            DispatchQueueStatus::Cancelled,
+        )?;
+        append_dispatch_queue_record(daemon_dir, &cancelled)
+    })();
+
+    if let Err(error) = cancel_result {
+        tracing::error!(
+            dispatch_id = %dispatch_id,
+            worker_id = %worker_id,
+            error = %error,
+            "write_panic_terminal_records: failed to cancel leased dispatch after panic"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dispatch_queue::{
+        DispatchQueueRecordParams, DispatchQueueStatus, DispatchRalIdentity,
+        append_dispatch_queue_record, build_dispatch_queue_record, replay_dispatch_queue,
+    };
+    use crate::ral_journal::{RalJournalEvent, RalReplayStatus, replay_ral_journal};
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    fn unique_temp_daemon_dir() -> std::path::PathBuf {
+        let index = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "tenex-admission-driver-{}-{index}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_nanos()
+        ))
+    }
+
+    fn cleanup_temp_dir(path: std::path::PathBuf) {
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn write_panic_terminal_records_writes_crash_ral_and_cancels_leased_dispatch() {
+        let daemon_dir = unique_temp_daemon_dir();
+        let identity = RalJournalIdentity {
+            project_id: "project-panic".to_string(),
+            agent_pubkey: "a".repeat(64),
+            conversation_id: "conversation-panic".to_string(),
+            ral_number: 1,
+        };
+        let dispatch_id = "dispatch-panic";
+        let claim_token = "claim-panic";
+        let worker_id = "worker-panic";
+        let timestamp = 1_710_000_700_000_u64;
+
+        // Seed an Allocated + Claimed RAL record so the journal has an active entry.
+        use crate::ral_journal::{
+            RAL_JOURNAL_WRITER_RUST_DAEMON, RalJournalRecord, append_ral_journal_record,
+        };
+        append_ral_journal_record(
+            &daemon_dir,
+            &RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "test",
+                1,
+                timestamp,
+                "seed-alloc",
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("event-panic".to_string()),
+                },
+            ),
+        )
+        .expect("seed allocated must append");
+        append_ral_journal_record(
+            &daemon_dir,
+            &RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "test",
+                2,
+                timestamp + 1,
+                "seed-claim",
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: worker_id.to_string(),
+                    claim_token: claim_token.to_string(),
+                },
+            ),
+        )
+        .expect("seed claimed must append");
+
+        // Seed a leased dispatch record.
+        let leased = build_dispatch_queue_record(DispatchQueueRecordParams {
+            sequence: 1,
+            timestamp,
+            correlation_id: "seed-lease".to_string(),
+            dispatch_id: dispatch_id.to_string(),
+            ral: DispatchRalIdentity {
+                project_id: identity.project_id.clone(),
+                agent_pubkey: identity.agent_pubkey.clone(),
+                conversation_id: identity.conversation_id.clone(),
+                ral_number: identity.ral_number,
+            },
+            triggering_event_id: "event-panic".to_string(),
+            claim_token: claim_token.to_string(),
+            status: DispatchQueueStatus::Leased,
+        });
+        append_dispatch_queue_record(&daemon_dir, &leased).expect("seed lease must append");
+
+        // Simulate what happens when spawn_blocking panics.
+        write_panic_terminal_records(
+            &daemon_dir,
+            &identity,
+            worker_id,
+            dispatch_id,
+            claim_token,
+            timestamp + 100,
+        );
+
+        // Verify: RAL journal has a Crashed terminal entry.
+        let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
+        let entry = ral
+            .states
+            .get(&identity)
+            .expect("RAL entry must exist after crash");
+        assert_eq!(
+            entry.status,
+            RalReplayStatus::Crashed,
+            "RAL entry must be Crashed after panic terminal"
+        );
+
+        // Verify: dispatch queue entry is Cancelled (no longer Leased).
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert!(
+            queue.leased.is_empty(),
+            "no dispatch must remain leased after panic terminal"
+        );
+        assert_eq!(
+            queue.terminal.len(),
+            1,
+            "dispatch must have one terminal record"
+        );
+        assert_eq!(
+            queue.terminal[0].status,
+            DispatchQueueStatus::Cancelled,
+            "panicked dispatch must be Cancelled"
+        );
+
+        cleanup_temp_dir(daemon_dir);
+    }
 }
