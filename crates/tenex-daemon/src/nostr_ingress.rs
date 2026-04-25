@@ -140,7 +140,6 @@ pub fn process_verified_nostr_event(
             if let Some(notify) = &input.project_index_changed {
                 notify.notify_one();
             }
-            crate::foreground_wake::request_wake();
         }
         return Ok(NostrIngressOutcome::ProjectUpdated { class, project });
     }
@@ -203,10 +202,6 @@ pub fn process_verified_nostr_event(
                 project_d_tag: boot.project_d_tag.clone(),
             });
         }
-        // Dual-write: also wake the foreground tick while it still runs
-        // (this is only present in Commit 1 of the tick-elimination migration).
-        crate::foreground_wake::request_wake();
-
         return Ok(NostrIngressOutcome::ProjectBooted { class, boot });
     }
 
@@ -430,7 +425,6 @@ fn ignored_code_for_class(class: DaemonNostrEventClass) -> &'static str {
 mod tests {
     use super::*;
     use crate::dispatch_queue::replay_dispatch_queue;
-    use crate::foreground_wake;
     use crate::inbound_runtime::InboundRuntimeOutcome;
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
@@ -438,8 +432,6 @@ mod tests {
 
     #[test]
     fn conversation_event_routes_through_inbound_runtime_and_dispatch_queue() {
-        let _guard = foreground_wake::lock_for_test();
-        foreground_wake::reset_for_test();
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -481,13 +473,10 @@ mod tests {
         let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert_eq!(queue.queued.len(), 1);
         assert_eq!(queue.queued[0].dispatch_id, dispatch.dispatch_id);
-        foreground_wake::reset_for_test();
     }
 
     #[test]
     fn never_route_event_does_not_write_dispatch_artifacts() {
-        let _guard = foreground_wake::lock_for_test();
-        foreground_wake::reset_for_test();
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -519,13 +508,10 @@ mod tests {
             }
         );
         assert!(!daemon_dir.exists());
-        foreground_wake::reset_for_test();
     }
 
     #[test]
     fn config_update_event_applies_agent_config_update() {
-        let _guard = foreground_wake::lock_for_test();
-        foreground_wake::reset_for_test();
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -587,13 +573,10 @@ mod tests {
             stored["default"]["tools"],
             serde_json::json!(["web_search"])
         );
-        foreground_wake::reset_for_test();
     }
 
     #[test]
     fn boot_event_records_project_boot_state_without_dispatch() {
-        let _guard = foreground_wake::lock_for_test();
-        foreground_wake::reset_for_test();
         let temp_dir = tempdir().expect("temp dir must create");
         let base_dir = temp_dir.path();
         let daemon_dir = base_dir.join("daemon");
@@ -642,86 +625,6 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
-            foreground_wake::take_wake(),
-            "boot ingress should wake the foreground loop"
-        );
-        foreground_wake::reset_for_test();
-    }
-
-    #[test]
-    fn project_event_requests_foreground_wake_only_when_index_changes() {
-        let _guard = foreground_wake::lock_for_test();
-        foreground_wake::reset_for_test();
-        let temp_dir = tempdir().expect("temp dir must create");
-        let base_dir = temp_dir.path();
-        let daemon_dir = base_dir.join("daemon");
-        let owner = pubkey_hex(0x11);
-        let project_event_index = fresh_project_event_index();
-        let event = SignedNostrEvent {
-            id: "project-event".to_string(),
-            pubkey: owner.clone(),
-            created_at: 1_710_000_800,
-            kind: 31933,
-            tags: vec![
-                vec!["d".to_string(), "project-alpha".to_string()],
-                vec!["p".to_string(), pubkey_hex(0x21)],
-            ],
-            content: String::new(),
-            sig: "0".repeat(128),
-        };
-
-        let outcome = process_verified_nostr_event(NostrIngressInput {
-            daemon_dir: &daemon_dir,
-            tenex_base_dir: base_dir,
-            event: &event,
-            timestamp: 1_710_000_800_004,
-            writer_version: "nostr-ingress-test@0",
-            project_boot_state: None,
-            project_event_index: &project_event_index,
-            project_index_changed: None,
-            project_booted_tx: None,
-            dispatch_enqueued_tx: None,
-        })
-        .expect("project ingress must process");
-
-        let NostrIngressOutcome::ProjectUpdated { class, project } = outcome else {
-            panic!("expected project updated outcome");
-        };
-        assert_eq!(class, DaemonNostrEventClass::Project);
-        assert!(project.is_new_project);
-        assert!(
-            foreground_wake::take_wake(),
-            "new project index entries should wake the foreground loop"
-        );
-
-        let repeated = process_verified_nostr_event(NostrIngressInput {
-            daemon_dir: &daemon_dir,
-            tenex_base_dir: base_dir,
-            event: &event,
-            timestamp: 1_710_000_800_005,
-            writer_version: "nostr-ingress-test@0",
-            project_boot_state: None,
-            project_event_index: &project_event_index,
-            project_index_changed: None,
-            project_booted_tx: None,
-            dispatch_enqueued_tx: None,
-        })
-        .expect("repeat ingress must process");
-
-        let NostrIngressOutcome::ProjectUpdated {
-            project: repeated_project,
-            ..
-        } = repeated
-        else {
-            panic!("expected repeated project updated outcome");
-        };
-        assert!(!repeated_project.is_new_project);
-        assert!(
-            !foreground_wake::take_wake(),
-            "idempotent project ingress should not schedule a redundant wake"
-        );
-        foreground_wake::reset_for_test();
     }
 
     fn signed_event(kind: u64, event_id: &str, tags: Vec<Vec<&str>>) -> SignedNostrEvent {

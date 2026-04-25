@@ -1,4 +1,4 @@
-//! Process-wide signal channels replacing `foreground_wake`.
+//! Process-wide signal channels for event-driven daemon coordination.
 //!
 //! Each subsystem driver subscribes to exactly the signals it needs from this
 //! module. The struct itself is never passed whole to any consumer — callers
