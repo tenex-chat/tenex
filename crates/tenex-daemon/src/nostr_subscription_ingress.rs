@@ -14,6 +14,7 @@ use crate::nostr_ingress::{
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::project_boot_state::ProjectBootState;
 use crate::project_event_index::ProjectEventIndex;
+use crate::seen_event_cache::SeenEventCache;
 use crate::subscription_filters::{RelaySubscriptionFrame, SubscriptionMessageError};
 
 pub struct NostrSubscriptionIngressInput<'a> {
@@ -29,6 +30,13 @@ pub struct NostrSubscriptionIngressInput<'a> {
     pub project_booted_tx: Option<UnboundedSender<BootedProject>>,
     pub dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
     pub publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
+    /// Process-wide cache of event ids already routed through ingress. The
+    /// same Nostr event arrives once per relay subscription and may also be
+    /// redelivered when a relay replays stored events on reconnect; the
+    /// cache makes those duplicates a structural no-op so per-event side
+    /// effects (24011 republishes, agent installs, project-boot signals)
+    /// fire exactly once per source event.
+    pub seen_events: Option<&'a Arc<SeenEventCache>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -112,6 +120,21 @@ fn process_event_frame(
     subscription_id: &str,
     event: &SignedNostrEvent,
 ) -> Result<NostrSubscriptionIngressOutcome, NostrSubscriptionIngressError> {
+    if let Some(seen_events) = input.seen_events
+        && !seen_events.record(&event.id)
+    {
+        return Ok(NostrSubscriptionIngressOutcome::Ignored {
+            reason: NostrSubscriptionIgnoredReason {
+                code: "duplicate_event".to_string(),
+                subscription_id: Some(subscription_id.to_string()),
+                detail: format!(
+                    "event {} already routed through ingress; dropping duplicate from relay",
+                    event.id
+                ),
+            },
+        });
+    }
+
     if let Some(whitelist_ingress) = input.whitelist_ingress {
         whitelist_ingress.handle_event(event);
     }
@@ -193,6 +216,7 @@ mod tests {
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
             publish_enqueued_tx: None,
+            seen_events: None,
         })
         .expect("subscription frame must process");
 
@@ -219,6 +243,87 @@ mod tests {
         let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert_eq!(queue.queued.len(), 1);
         assert_eq!(queue.queued[0].dispatch_id, dispatch.dispatch_id);
+    }
+
+    /// The same Nostr event arriving twice (e.g. from two relay subscriptions
+    /// or a relay redelivery on reconnect) must run ingress side effects only
+    /// once. Without dedup, every duplicate would reach
+    /// `process_verified_nostr_event` and re-enqueue a dispatch / re-publish a
+    /// 24011 / re-fire the boot signal for a single source event.
+    #[test]
+    fn duplicate_event_is_dropped_with_seen_event_cache() {
+        use crate::seen_event_cache::SeenEventCache;
+        use std::sync::Arc;
+
+        let temp_dir = tempdir().expect("temp dir must create");
+        let base_dir = temp_dir.path();
+        let daemon_dir = base_dir.join("daemon");
+        let owner = pubkey_hex(0x11);
+        let agent = pubkey_hex(0x21);
+        let project_event_index = fresh_project_event_index();
+
+        write_backend_config(base_dir, "/repo");
+        write_project(base_dir, &project_event_index, "project-alpha", &owner);
+        write_agent_index(base_dir, "project-alpha", &[&agent]);
+        write_agent(base_dir, &agent, "alpha-agent");
+
+        let seen_events = Arc::new(SeenEventCache::new());
+        let event = signed_event(1, "event-duplicate", vec![vec!["p", agent.as_str()]]);
+        let frame = RelaySubscriptionFrame::Event {
+            subscription_id: "tenex-main".to_string(),
+            event,
+        };
+
+        let first = process_relay_subscription_frame(NostrSubscriptionIngressInput {
+            daemon_dir: &daemon_dir,
+            tenex_base_dir: base_dir,
+            frame: &frame,
+            timestamp: 1_710_000_900_000,
+            writer_version: "nostr-subscription-ingress-test@0",
+            whitelist_ingress: None,
+            project_boot_state: None,
+            project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
+            dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
+            seen_events: Some(&seen_events),
+        })
+        .expect("first delivery must process");
+        assert!(matches!(
+            first,
+            NostrSubscriptionIngressOutcome::Event { .. }
+        ));
+
+        let second = process_relay_subscription_frame(NostrSubscriptionIngressInput {
+            daemon_dir: &daemon_dir,
+            tenex_base_dir: base_dir,
+            frame: &frame,
+            timestamp: 1_710_000_900_500,
+            writer_version: "nostr-subscription-ingress-test@0",
+            whitelist_ingress: None,
+            project_boot_state: None,
+            project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
+            dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
+            seen_events: Some(&seen_events),
+        })
+        .expect("second delivery must process");
+
+        let NostrSubscriptionIngressOutcome::Ignored { reason } = second else {
+            panic!("expected duplicate delivery to be ignored");
+        };
+        assert_eq!(reason.code, "duplicate_event");
+        assert_eq!(reason.subscription_id.as_deref(), Some("tenex-main"));
+
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert_eq!(
+            queue.queued.len(),
+            1,
+            "duplicate event must not enqueue a second dispatch"
+        );
     }
 
     #[test]
@@ -272,6 +377,7 @@ mod tests {
                 project_booted_tx: None,
                 dispatch_enqueued_tx: None,
                 publish_enqueued_tx: None,
+                seen_events: None,
             })
             .expect("lifecycle frame must process");
 

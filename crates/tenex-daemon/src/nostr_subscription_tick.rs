@@ -21,6 +21,7 @@ use crate::nostr_subscription_ingress::{
 use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::project_boot_state::ProjectBootState;
 use crate::project_event_index::ProjectEventIndex;
+use crate::seen_event_cache::SeenEventCache;
 use crate::subscription_filters::RelaySubscriptionFrame;
 
 pub struct NostrSubscriptionTickInput<'a> {
@@ -38,6 +39,7 @@ pub struct NostrSubscriptionTickInput<'a> {
     pub project_booted_tx: Option<UnboundedSender<BootedProject>>,
     pub dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
     pub publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
+    pub seen_events: Option<&'a Arc<SeenEventCache>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -151,6 +153,7 @@ pub fn run_nostr_subscription_intake_tick(
             project_booted_tx: input.project_booted_tx.clone(),
             dispatch_enqueued_tx: input.dispatch_enqueued_tx.clone(),
             publish_enqueued_tx: input.publish_enqueued_tx.clone(),
+            seen_events: input.seen_events,
         })
         .map_err(|source| NostrSubscriptionTickError::Ingress {
             frame_index,
@@ -504,6 +507,7 @@ mod tests {
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
             publish_enqueued_tx: None,
+            seen_events: None,
         })
         .expect("subscription tick must process");
 
@@ -591,6 +595,7 @@ mod tests {
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
             publish_enqueued_tx: None,
+            seen_events: None,
         })
         .expect("subscription tick must process");
 

@@ -25,6 +25,12 @@ pub struct PublishOutboxDriverDeps<P: PublishOutboxRelayPublisher> {
 /// Records the next retry deadline from the maintenance report and arms a
 /// timer so transient failures are retried automatically without waiting for
 /// a new signal.
+///
+/// The drain and inspect calls perform synchronous network and filesystem
+/// I/O (`NostrRelayPublisher::publish_signed_event` uses
+/// `mpsc::Sender::blocking_send` and `oneshot::Receiver::blocking_recv`,
+/// which panic when called from a tokio worker), so both are dispatched via
+/// `tokio::task::spawn_blocking`.
 pub async fn run_publish_outbox_driver<P>(
     deps: PublishOutboxDriverDeps<P>,
     mut publish_enqueued_rx: mpsc::UnboundedReceiver<PublishEnqueued>,
@@ -32,7 +38,7 @@ pub async fn run_publish_outbox_driver<P>(
 ) where
     P: PublishOutboxRelayPublisher + Send + 'static,
 {
-    let mut retry_at: Option<Instant> = compute_next_retry_instant(&deps);
+    let mut retry_at: Option<Instant> = compute_next_retry_instant(&deps).await;
 
     loop {
         if let Some(deadline) = retry_at {
@@ -43,12 +49,12 @@ pub async fn run_publish_outbox_driver<P>(
                     if maybe.is_none() {
                         break;
                     }
-                    drain_outbox(&deps);
-                    retry_at = compute_next_retry_instant(&deps);
+                    drain_outbox(&deps).await;
+                    retry_at = compute_next_retry_instant(&deps).await;
                 }
                 _ = time::sleep_until(deadline.into()) => {
-                    drain_outbox(&deps);
-                    retry_at = compute_next_retry_instant(&deps);
+                    drain_outbox(&deps).await;
+                    retry_at = compute_next_retry_instant(&deps).await;
                 }
             }
         } else {
@@ -59,39 +65,70 @@ pub async fn run_publish_outbox_driver<P>(
                     if maybe.is_none() {
                         break;
                     }
-                    drain_outbox(&deps);
-                    retry_at = compute_next_retry_instant(&deps);
+                    drain_outbox(&deps).await;
+                    retry_at = compute_next_retry_instant(&deps).await;
                 }
             }
         }
     }
 }
 
-fn drain_outbox<P: PublishOutboxRelayPublisher>(deps: &PublishOutboxDriverDeps<P>) {
-    let mut guard = deps.publisher.lock().expect("publisher mutex poisoned");
-    let now_ms = current_unix_time_ms();
-    if let Err(source) = maintain_publish_runtime(PublishRuntimeMaintainInput {
-        daemon_dir: &deps.daemon_dir,
-        publisher: &mut *guard,
-        now: now_ms,
-        retry_policy: deps.retry_policy,
-    }) {
-        tracing::warn!(error = %source, "publish outbox driver: drain failed");
+async fn drain_outbox<P>(deps: &PublishOutboxDriverDeps<P>)
+where
+    P: PublishOutboxRelayPublisher + Send + 'static,
+{
+    let publisher = Arc::clone(&deps.publisher);
+    let daemon_dir = deps.daemon_dir.clone();
+    let retry_policy = deps.retry_policy;
+
+    let join = tokio::task::spawn_blocking(move || {
+        let mut guard = publisher.lock().expect("publisher mutex poisoned");
+        let now_ms = current_unix_time_ms();
+        maintain_publish_runtime(PublishRuntimeMaintainInput {
+            daemon_dir: &daemon_dir,
+            publisher: &mut *guard,
+            now: now_ms,
+            retry_policy,
+        })
+    })
+    .await;
+
+    match join {
+        Ok(Ok(_)) => {}
+        Ok(Err(source)) => {
+            tracing::warn!(error = %source, "publish outbox driver: drain failed");
+        }
+        Err(join_error) => {
+            tracing::warn!(
+                error = %join_error,
+                "publish outbox driver: spawn_blocking panicked; will retry on next signal"
+            );
+        }
     }
 }
 
-fn compute_next_retry_instant<P: PublishOutboxRelayPublisher>(
-    deps: &PublishOutboxDriverDeps<P>,
-) -> Option<Instant> {
-    let now_ms = current_unix_time_ms();
-    let outcome = inspect_publish_runtime(PublishRuntimeInspectInput {
-        daemon_dir: &deps.daemon_dir,
-        inspected_at: now_ms,
-    })
-    .ok()?;
-    let diagnostics = outcome.diagnostics;
+async fn compute_next_retry_instant<P>(deps: &PublishOutboxDriverDeps<P>) -> Option<Instant>
+where
+    P: PublishOutboxRelayPublisher + Send + 'static,
+{
+    let daemon_dir = deps.daemon_dir.clone();
 
-    let next_attempt_ms = diagnostics.latest_failure?.next_attempt_at?;
+    let join = tokio::task::spawn_blocking(move || {
+        let now_ms = current_unix_time_ms();
+        let outcome = inspect_publish_runtime(PublishRuntimeInspectInput {
+            daemon_dir: &daemon_dir,
+            inspected_at: now_ms,
+        })
+        .ok()?;
+        outcome
+            .diagnostics
+            .latest_failure?
+            .next_attempt_at
+            .map(|next_attempt_ms| (now_ms, next_attempt_ms))
+    })
+    .await;
+
+    let (now_ms, next_attempt_ms) = join.ok().flatten()?;
     if next_attempt_ms <= now_ms {
         return Some(Instant::now());
     }

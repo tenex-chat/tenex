@@ -32,6 +32,7 @@ use crate::project_event_index::ProjectEventIndex;
 use crate::relay_publisher::{
     RelayAuthSigner, RelayPublishError, build_auth_message, build_relay_auth_event,
 };
+use crate::seen_event_cache::SeenEventCache;
 use crate::subscription_filters::{
     NostrFilter, RelaySubscriptionFrame, build_close_message, build_req_message,
     parse_relay_subscription_message,
@@ -62,6 +63,11 @@ pub struct NostrSubscriptionGatewayConfig {
     pub project_booted_tx: Option<tokio::sync::mpsc::UnboundedSender<BootedProject>>,
     pub dispatch_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<DispatchEnqueued>>,
     pub publish_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<PublishEnqueued>>,
+    /// Process-wide cache of event ids the gateway has already routed to
+    /// ingress. Shared across all relay tasks so the same event delivered by
+    /// multiple relays (or replayed by one relay on reconnect) only flows
+    /// through `process_verified_nostr_event` once.
+    pub seen_events: Arc<SeenEventCache>,
 }
 
 impl NostrSubscriptionGatewayConfig {
@@ -82,6 +88,7 @@ impl NostrSubscriptionGatewayConfig {
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
             publish_enqueued_tx: None,
+            seen_events: Arc::new(SeenEventCache::new()),
         }
     }
 
@@ -345,6 +352,7 @@ async fn run_relay_loop_async(
                 project_booted_tx: config.project_booted_tx.clone(),
                 dispatch_enqueued_tx: config.dispatch_enqueued_tx.clone(),
                 publish_enqueued_tx: config.publish_enqueued_tx.clone(),
+                seen_events: Some(&config.seen_events),
             }) => result,
         };
 
@@ -399,6 +407,7 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub project_booted_tx: Option<tokio::sync::mpsc::UnboundedSender<BootedProject>>,
     pub dispatch_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<DispatchEnqueued>>,
     pub publish_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<PublishEnqueued>>,
+    pub seen_events: Option<&'a Arc<SeenEventCache>>,
 }
 
 impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
@@ -540,6 +549,7 @@ async fn run_nostr_subscription_relay_once_async(
                     project_booted_tx: input.project_booted_tx.clone(),
                     dispatch_enqueued_tx: input.dispatch_enqueued_tx.clone(),
                     publish_enqueued_tx: input.publish_enqueued_tx.clone(),
+                    seen_events: input.seen_events,
                 })?;
                 if let Some(observer) = input.observer {
                     observer.on_tick(input.relay_url, &tick);
@@ -993,6 +1003,7 @@ mod tests {
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
             publish_enqueued_tx: None,
+            seen_events: None,
         })
         .expect("relay subscription must drain");
 
@@ -1066,6 +1077,7 @@ mod tests {
             observer: None,
             dispatch_enqueued_tx: None,
             publish_enqueued_tx: None,
+            seen_events: None,
         })
         .expect("relay subscription must authenticate and drain");
 

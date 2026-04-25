@@ -90,6 +90,7 @@ pub mod scheduled_task_driver;
 pub mod scheduled_task_due_planner;
 pub mod scheduled_task_enqueue;
 pub mod scheduler_wakeups;
+pub mod seen_event_cache;
 pub mod skill_whitelist;
 pub mod stdout_status;
 pub mod subscription_filters;
