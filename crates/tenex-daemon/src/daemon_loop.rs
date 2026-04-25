@@ -106,7 +106,6 @@ pub struct DaemonWorkerTickInput<'a> {
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
     pub publish_result_sequence: Option<Arc<AtomicU64>>,
-    pub max_frames: u64,
     /// Registry of detached session threads. The tick pushes a new handle
     /// per admitted dispatch and polls for finished ones at the top of each
     /// tick.
@@ -123,7 +122,6 @@ pub struct DaemonWorkerLoopInput<'a> {
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
     pub publish_result_sequence: Option<Arc<AtomicU64>>,
-    pub max_frames: u64,
     /// Shared registry of detached session threads; the driver joins any
     /// remaining entries at shutdown so no session is left running when the
     /// daemon stops.
@@ -457,7 +455,6 @@ where
                 let resolved_pending_delegations = worker.resolved_pending_delegations.clone();
                 let dispatch_correlation_id =
                     format!("{}:complete-{}", worker.correlation_id, admitted_this_tick);
-                let max_frames = worker.max_frames;
                 let dispatch_id_for_thread = dispatch_id.clone();
                 let worker_id_for_thread = worker_id.clone();
                 let handle = tokio::task::spawn_blocking(move || {
@@ -494,7 +491,6 @@ where
                             resolved_pending_delegations,
                             dispatch_correlation_id,
                         },
-                        max_frames,
                         started,
                     );
                     let outcome = match result {
@@ -880,7 +876,6 @@ where
         writer_version,
         resolved_pending_delegations,
         publish_result_sequence,
-        max_frames,
         session_registry,
     } = worker;
     let heartbeat_latch = input.heartbeat_latch.clone();
@@ -906,7 +901,6 @@ where
                 writer_version: writer_version.clone(),
                 resolved_pending_delegations: resolved_pending_delegations.clone(),
                 publish_result_sequence: publish_result_sequence.clone(),
-                max_frames,
                 session_registry: session_registry.clone(),
             },
             spawner,
@@ -1432,7 +1426,6 @@ mod tests {
                 resolved_pending_delegations: Vec::new(),
                 publish_result_sequence: None,
                 session_registry: WorkerSessionRegistry::new(),
-                max_frames: 1,
             },
             &mut spawner,
             &publisher,
@@ -1528,7 +1521,6 @@ mod tests {
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: None,
                             session_registry: session_registry_clone.clone(),
-                            max_frames: 1,
                         },
                         &mut spawner,
                         &publisher_clone,
@@ -2250,7 +2242,6 @@ mod tests {
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: None,
                             session_registry: session_registry_clone.clone(),
-                            max_frames: 4,
                         },
                         &mut spawner,
                         &publisher_clone,
@@ -2483,7 +2474,6 @@ mod tests {
                         resolved_pending_delegations: Vec::new(),
                         publish_result_sequence: None,
                         session_registry: session_registry_clone.clone(),
-                        max_frames: 4,
                     },
                     &mut spawner,
                     &publisher_clone,

@@ -62,7 +62,6 @@ use tenex_daemon::worker_session::registry::WorkerSessionRegistry;
 
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_SLEEP_MS: u64 = 1_000;
-const DEFAULT_WORKER_MAX_FRAMES: u64 = 4_096;
 const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
@@ -883,7 +882,6 @@ where
                         writer_version: daemon_writer_version(),
                         resolved_pending_delegations: Vec::new(),
                         publish_result_sequence: Some(publish_result_sequence),
-                        max_frames: DEFAULT_WORKER_MAX_FRAMES,
                         session_registry,
                     },
                     &mut worker_spawner,
@@ -917,7 +915,6 @@ where
                             writer_version: daemon_writer_version(),
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: Some(publish_result_sequence),
-                            max_frames: DEFAULT_WORKER_MAX_FRAMES,
                             session_registry,
                         },
                         &mut worker_spawner,
@@ -996,7 +993,6 @@ where
             writer_version: daemon_writer_version(),
             resolved_pending_delegations: Vec::new(),
             publish_result_sequence: Some(Arc::new(AtomicU64::new(1))),
-            max_frames: DEFAULT_WORKER_MAX_FRAMES,
             session_registry: tenex_daemon::worker_session::registry::WorkerSessionRegistry::new(),
         },
         clock,

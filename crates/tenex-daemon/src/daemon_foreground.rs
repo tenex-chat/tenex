@@ -62,7 +62,6 @@ pub struct DaemonForegroundWorkerInput<'a> {
     pub writer_version: String,
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
     pub publish_result_sequence: Option<Arc<AtomicU64>>,
-    pub max_frames: u64,
     /// Shared across ticks and the loop driver so detached session threads
     /// spawned by one tick can be observed (and joined at shutdown) by the
     /// driver.
@@ -323,7 +322,6 @@ where
             writer_version: worker.writer_version,
             resolved_pending_delegations: worker.resolved_pending_delegations,
             publish_result_sequence: worker.publish_result_sequence,
-            max_frames: worker.max_frames,
             session_registry: worker.session_registry,
         },
         clock,
@@ -763,7 +761,6 @@ mod tests {
                 writer_version: "foreground-worker-test@0".to_string(),
                 resolved_pending_delegations: Vec::new(),
                 publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
-                max_frames: 1,
                 session_registry: WorkerSessionRegistry::new(),
             },
             &mut clock,
@@ -865,7 +862,6 @@ mod tests {
                             writer_version: "foreground-worker-test@0".to_string(),
                             resolved_pending_delegations: Vec::new(),
                             publish_result_sequence: Some(Arc::new(AtomicU64::new(700))),
-                            max_frames: 4,
                             session_registry: WorkerSessionRegistry::new(),
                         },
                         &mut clock,

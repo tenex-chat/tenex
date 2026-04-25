@@ -1027,7 +1027,6 @@ mod tests {
                     result_timestamp: 1_710_001_000_100,
                     telegram_egress: None,
                 }),
-                4,
             ),
         )
         .expect("runtime execution must complete");
@@ -1303,7 +1302,6 @@ mod tests {
         runtime_state: &'a SharedWorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         publish: Option<WorkerMessagePublishContext<'a>>,
-        max_frames: u64,
     ) -> DaemonWorkerRuntimeInput<'a> {
         DaemonWorkerRuntimeInput {
             daemon_dir,
@@ -1340,7 +1338,6 @@ mod tests {
                 dispatch_timestamp: 1_710_001_000_060,
                 dispatch_correlation_id: "complete-dispatch-runtime".to_string(),
             },
-            max_frames,
         }
     }
 

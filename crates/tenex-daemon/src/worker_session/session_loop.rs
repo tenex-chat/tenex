@@ -34,7 +34,6 @@ pub struct WorkerSessionLoopInput<'a> {
     pub nip46_publish: Option<WorkerMessageNip46PublishContext<'a>>,
     pub live_publish_maintenance: Option<&'a mut dyn FnMut(&Path, u64) -> Result<(), String>>,
     pub terminal: Option<WorkerMessageTerminalContext<'a>>,
-    pub max_frames: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,8 +71,6 @@ where
         #[source]
         source: WorkerMessageFlowError,
     },
-    #[error("worker session loop exceeded max frame count {max_frames} after {frame_count} frames")]
-    MaxFrameLimitExceeded { frame_count: u64, max_frames: u64 },
     #[error("worker session publish maintenance failed: {message}")]
     PublishMaintenance { message: String },
     #[error("worker session injection queue failed: {source}")]
@@ -122,13 +119,6 @@ where
     let mut frame_count = 0_u64;
 
     loop {
-        if frame_count >= input.max_frames {
-            return Err(WorkerSessionLoopError::MaxFrameLimitExceeded {
-                frame_count,
-                max_frames: input.max_frames,
-            });
-        }
-
         send_pending_worker_injections(worker, &input)?;
         send_pending_stop_request(worker, &input)?;
 
@@ -657,7 +647,6 @@ mod tests {
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
-                max_frames: 4,
             },
         )
         .expect("session loop must stop on terminal frame");
@@ -719,7 +708,6 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: Some(&mut live_publish_maintenance),
                 terminal: None,
-                max_frames: 4,
             },
         )
         .expect("publish request must continue into the next frame");
@@ -790,7 +778,6 @@ mod tests {
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
-                max_frames: 4,
             },
         )
         .expect("closed worker pipe after accepted terminal publish must complete");
@@ -859,7 +846,6 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: None,
-                max_frames: 4,
             },
         )
         .expect("boot error must stop the loop");
@@ -894,48 +880,11 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: None,
-                max_frames: 4,
             },
         )
         .expect_err("malformed frame must be rejected");
 
         assert!(matches!(error, WorkerSessionLoopError::Decode { .. }));
-
-        cleanup_temp_dir(daemon_dir);
-    }
-
-    #[test]
-    fn max_frame_limit_is_enforced_before_a_second_iteration() {
-        let daemon_dir = unique_temp_daemon_dir();
-        let mut worker = RecordingWorker {
-            incoming_frames: VecDeque::from([frame_for(&fixture_valid_message("heartbeat"))]),
-            ..Default::default()
-        };
-        let runtime_state = runtime_state_for("worker-alpha", identity());
-
-        let error = run_worker_session_loop(
-            &mut worker,
-            WorkerSessionLoopInput {
-                daemon_dir: &daemon_dir,
-                runtime_state: &runtime_state,
-                worker_id: "worker-alpha",
-                observed_at: 1_710_000_403_000,
-                publish: None,
-                nip46_publish: None,
-                live_publish_maintenance: None,
-                terminal: None,
-                max_frames: 1,
-            },
-        )
-        .expect_err("loop must stop when the frame cap is reached");
-
-        assert!(matches!(
-            error,
-            WorkerSessionLoopError::MaxFrameLimitExceeded {
-                frame_count: 1,
-                max_frames: 1,
-            }
-        ));
 
         cleanup_temp_dir(daemon_dir);
     }
@@ -981,7 +930,6 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: None,
-                max_frames: 4,
             },
         )
         .expect("session loop must continue through injected message");
@@ -1057,7 +1005,6 @@ mod tests {
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
-                max_frames: 8,
             },
         )
         .expect("session loop must stop on terminal frame");

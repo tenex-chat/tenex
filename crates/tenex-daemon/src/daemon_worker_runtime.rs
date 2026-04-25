@@ -76,7 +76,6 @@ pub struct DaemonWorkerRuntimeInput<'a> {
     pub operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'a>>,
     pub live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'a>>,
     pub terminal: DaemonWorkerTerminalRuntimeInput,
-    pub max_frames: u64,
 }
 
 #[derive(Debug)]
@@ -94,7 +93,6 @@ pub struct DaemonWorkerRuntimeFilesystemInput<'a> {
     pub telegram_egress: Option<DaemonWorkerTelegramEgressRuntimeInput>,
     pub operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'a>>,
     pub live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'a>>,
-    pub max_frames: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -392,7 +390,6 @@ where
         telegram_egress,
         operations_status,
         live_publish_maintenance,
-        max_frames,
     } = input;
 
     let started = match admit_one_worker_dispatch_from_filesystem(
@@ -431,7 +428,6 @@ where
             resolved_pending_delegations,
             dispatch_correlation_id: format!("{correlation_id}:complete"),
         },
-        max_frames,
         started,
     )
 }
@@ -471,7 +467,6 @@ where
         operations_status,
         live_publish_maintenance,
         terminal,
-        max_frames,
     } = input;
 
     let started = apply_worker_dispatch_tick(
@@ -520,7 +515,6 @@ where
             operations_status,
             live_publish_maintenance,
             terminal,
-            max_frames,
             *started,
         ),
     }
@@ -821,7 +815,6 @@ fn run_started_worker_session<S>(
     operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
     live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerTerminalRuntimeInput,
-    max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
 ) -> Result<
     DaemonWorkerRuntimeOutcome,
@@ -852,7 +845,6 @@ where
         operations_status,
         live_publish_maintenance,
         terminal,
-        max_frames,
         started,
         &scheduler,
         &dispatch_state,
@@ -868,7 +860,6 @@ pub fn run_started_worker_session_from_filesystem<S>(
     operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
     live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerFilesystemTerminalInput,
-    max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
 ) -> Result<
     DaemonWorkerRuntimeOutcome,
@@ -909,7 +900,6 @@ where
         operations_status,
         live_publish_maintenance,
         terminal,
-        max_frames,
         started,
         &scheduler,
         &dispatch_state,
@@ -925,7 +915,6 @@ fn run_started_worker_session_with_state<S>(
     operations_status: Option<DaemonWorkerOperationsStatusRuntimeInput<'_>>,
     mut live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerTerminalRuntimeInput,
-    max_frames: u64,
     started: StartedWorkerDispatchAdmission<S>,
     scheduler: &RalScheduler,
     dispatch_state: &crate::dispatch_queue::DispatchQueueState,
@@ -1031,7 +1020,6 @@ where
                 }),
                 locks: started.started.locks,
             }),
-            max_frames,
         },
     );
     // Ensure the worker is removed from runtime state before snapshotting. Normal terminal
@@ -1359,7 +1347,7 @@ mod tests {
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect("runtime dispatch must complete");
 
@@ -1416,7 +1404,7 @@ mod tests {
 
         let error = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect_err("malformed frame must fail");
 
@@ -1447,58 +1435,6 @@ mod tests {
         cleanup_temp_dir(daemon_dir);
     }
 
-    #[test]
-    fn rejects_worker_session_when_frame_limit_is_exceeded() {
-        let daemon_dir = unique_temp_daemon_dir();
-        seed_claimed_ral(&daemon_dir);
-        seed_queued_dispatch(&daemon_dir);
-        let sent_messages = Arc::new(Mutex::new(Vec::new()));
-        let mut spawner = RecordingSpawner {
-            incoming_frames: VecDeque::from([
-                frame_for(&heartbeat_message()),
-                frame_for(&complete_message(vec!["published-event-id".to_string()])),
-            ]),
-            sent_messages: Arc::clone(&sent_messages),
-        };
-        let runtime_state = crate::worker_runtime_state::new_shared_worker_runtime_state();
-        let worker_config = worker_config();
-
-        let error = run_daemon_worker_runtime_once(
-            &mut spawner,
-            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 1),
-        )
-        .expect_err("max frame limit must fail");
-
-        match error {
-            DaemonWorkerRuntimeError::SessionLoop { source } => match *source {
-                WorkerSessionLoopError::MaxFrameLimitExceeded {
-                    frame_count,
-                    max_frames,
-                } => {
-                    assert_eq!(frame_count, 1);
-                    assert_eq!(max_frames, 1);
-                }
-                other => panic!("expected max frame limit error, got {other:?}"),
-            },
-            other => panic!("expected session loop error, got {other:?}"),
-        }
-        assert!(
-            sent_messages
-                .lock()
-                .expect("sent message lock must not be poisoned")
-                .iter()
-                .any(|message| message["type"] == "execute")
-        );
-        assert!(
-            runtime_state
-                .lock()
-                .unwrap()
-                .get_worker("worker-alpha")
-                .is_none()
-        );
-
-        cleanup_temp_dir(daemon_dir);
-    }
 
     #[test]
     fn returns_locks_from_terminal_planning_failure() {
@@ -1515,7 +1451,7 @@ mod tests {
 
         let error = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect_err("terminal planning failure must fail");
 
@@ -1593,7 +1529,7 @@ mod tests {
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect("worker must transition to waiting for a same-session delegation");
 
@@ -1639,7 +1575,7 @@ mod tests {
 
         let error = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect_err("missing terminal frame must fail");
 
@@ -1699,7 +1635,6 @@ mod tests {
                     result_timestamp: 1_710_000_800_200,
                     telegram_egress: None,
                 }),
-                4,
             ),
         )
         .expect("runtime dispatch with publish request must complete");
@@ -1744,7 +1679,7 @@ mod tests {
 
         let outcome = run_daemon_worker_runtime_once_from_filesystem(
             &mut spawner,
-            filesystem_runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            filesystem_runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect("filesystem runtime dispatch must complete");
 
@@ -1804,7 +1739,7 @@ mod tests {
 
         let outcome = run_daemon_worker_runtime_once_from_filesystem(
             &mut spawner,
-            filesystem_runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            filesystem_runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect("empty filesystem queue is not an error");
 
@@ -1841,7 +1776,7 @@ mod tests {
 
         let outcome = run_daemon_worker_runtime_once(
             &mut spawner,
-            runtime_input(&daemon_dir, &runtime_state, &worker_config, None, 4),
+            runtime_input(&daemon_dir, &runtime_state, &worker_config, None),
         )
         .expect("empty queue is not an error");
 
@@ -2018,7 +1953,6 @@ mod tests {
                 &worker_config,
                 command,
                 None,
-                8,
             ),
         )
         .unwrap_or_else(|error| {
@@ -2067,7 +2001,6 @@ mod tests {
         runtime_state: &'a SharedWorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         publish: Option<WorkerMessagePublishContext<'a>>,
-        max_frames: u64,
     ) -> DaemonWorkerRuntimeInput<'a> {
         DaemonWorkerRuntimeInput {
             daemon_dir,
@@ -2104,7 +2037,6 @@ mod tests {
                 dispatch_timestamp: 1_710_000_700_060,
                 dispatch_correlation_id: "complete-dispatch-alpha".to_string(),
             },
-            max_frames,
         }
     }
 
@@ -2114,15 +2046,8 @@ mod tests {
         worker_config: &'a AgentWorkerProcessConfig,
         command: AgentWorkerCommand,
         publish: Option<WorkerMessagePublishContext<'a>>,
-        max_frames: u64,
     ) -> DaemonWorkerRuntimeInput<'a> {
-        let mut input = runtime_input(
-            daemon_dir,
-            runtime_state,
-            worker_config,
-            publish,
-            max_frames,
-        );
+        let mut input = runtime_input(daemon_dir, runtime_state, worker_config, publish);
         input.command = command;
         input
     }
@@ -2132,7 +2057,6 @@ mod tests {
         runtime_state: &'a SharedWorkerRuntimeState,
         worker_config: &'a AgentWorkerProcessConfig,
         publish: Option<WorkerMessagePublishContext<'a>>,
-        max_frames: u64,
     ) -> DaemonWorkerRuntimeFilesystemInput<'a> {
         DaemonWorkerRuntimeFilesystemInput {
             daemon_dir,
@@ -2148,7 +2072,6 @@ mod tests {
             telegram_egress: None,
             operations_status: None,
             live_publish_maintenance: None,
-            max_frames,
         }
     }
 
