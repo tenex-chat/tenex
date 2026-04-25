@@ -109,3 +109,4 @@ pub mod worker_reuse;
 pub mod worker_runtime_state;
 pub mod worker_session;
 pub mod worker_telegram_egress;
+pub mod warm_worker_runtime;
