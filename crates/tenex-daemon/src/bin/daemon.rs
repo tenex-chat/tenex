@@ -1183,32 +1183,6 @@ fn spawn_watched(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Verify that a driver task that panics causes DAEMON_STOP_REQUESTED to
-    /// be set. This proves the watchdog catches the panic and signals shutdown
-    /// rather than silently leaving the subsystem dead.
-    #[tokio::test]
-    async fn panicking_driver_sets_daemon_stop_requested() {
-        // Reset the flag so the test is self-contained even if other tests
-        // run in the same process and have already set it.
-        DAEMON_STOP_REQUESTED.store(false, Ordering::SeqCst);
-
-        let handle = tokio::runtime::Handle::current();
-        let task = spawn_watched(&handle, "test-driver", async {
-            panic!("deliberate test panic");
-        });
-        task.await.expect("watchdog task itself must not panic");
-
-        assert!(
-            DAEMON_STOP_REQUESTED.load(Ordering::SeqCst),
-            "DAEMON_STOP_REQUESTED must be set when a watched driver panics"
-        );
-    }
-}
-
 fn usage_error(message: impl Into<String>) -> CliError {
     CliError {
         message: message.into(),
@@ -2026,5 +2000,24 @@ mod tests {
         assert!(observed.contains(&owner_b.xonly_hex));
 
         fs::remove_dir_all(tenex_base_dir).expect("cleanup must succeed");
+    }
+
+    /// Verify that a driver task that panics causes DAEMON_STOP_REQUESTED to
+    /// be set. This proves the watchdog catches the panic and signals shutdown
+    /// rather than silently leaving the subsystem dead.
+    #[tokio::test]
+    async fn panicking_driver_sets_daemon_stop_requested() {
+        DAEMON_STOP_REQUESTED.store(false, Ordering::SeqCst);
+
+        let handle = tokio::runtime::Handle::current();
+        let task = spawn_watched(&handle, "test-driver", async {
+            panic!("deliberate test panic");
+        });
+        task.await.expect("watchdog task itself must not panic");
+
+        assert!(
+            DAEMON_STOP_REQUESTED.load(Ordering::SeqCst),
+            "DAEMON_STOP_REQUESTED must be set when a watched driver panics"
+        );
     }
 }
