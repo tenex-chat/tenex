@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures_util::FutureExt;
+
 use tenex_daemon::backend_config::read_backend_config;
 use tenex_daemon::backend_status_driver::{BackendStatusDriverDeps, run_backend_status_driver};
 use tenex_daemon::intervention_driver::{
@@ -236,46 +238,58 @@ where
     // is signalled by a watch channel polled from the stop watcher below.
     let (backend_status_shutdown_tx, backend_status_shutdown_rx) =
         tokio::sync::watch::channel(false);
-    let backend_status_driver_handle = runtime_handle.spawn(run_backend_status_driver(
-        BackendStatusDriverDeps {
-            tenex_base_dir: tenex_base_dir.clone(),
-            daemon_dir: daemon_dir.clone(),
-            heartbeat_latch: heartbeat_latch.clone(),
-            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
-        },
-        backend_status_shutdown_rx,
-    ));
+    let backend_status_driver_handle = spawn_watched(
+        &runtime_handle,
+        "backend-status-driver",
+        run_backend_status_driver(
+            BackendStatusDriverDeps {
+                tenex_base_dir: tenex_base_dir.clone(),
+                daemon_dir: daemon_dir.clone(),
+                heartbeat_latch: heartbeat_latch.clone(),
+                publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
+            },
+            backend_status_shutdown_rx,
+        ),
+    );
 
     // Spawn the project-status supervisor. It listens for BootedProject signals
     // and spawns per-project 30s timer tasks that publish kind 31934. Replaces
     // the `project-status:*` entries in the PeriodicScheduler.
     let (project_status_shutdown_tx, project_status_shutdown_rx) =
         tokio::sync::watch::channel(false);
-    let project_status_supervisor_handle = runtime_handle.spawn(run_project_status_supervisor(
-        ProjectStatusDriverDeps {
-            tenex_base_dir: tenex_base_dir.clone(),
-            daemon_dir: daemon_dir.clone(),
-            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
-        },
-        project_status_boot_rx,
-        project_status_shutdown_rx,
-    ));
+    let project_status_supervisor_handle = spawn_watched(
+        &runtime_handle,
+        "project-status-supervisor",
+        run_project_status_supervisor(
+            ProjectStatusDriverDeps {
+                tenex_base_dir: tenex_base_dir.clone(),
+                daemon_dir: daemon_dir.clone(),
+                publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
+            },
+            project_status_boot_rx,
+            project_status_shutdown_rx,
+        ),
+    );
 
     // Spawn the scheduled-task supervisor. It listens for BootedProject signals
     // and, per project, sleeps until the next task is due in `schedules.json`,
     // then fires it. Replaces the `scheduled-task-due-planner` PeriodicScheduler entry.
     let (scheduled_task_shutdown_tx, scheduled_task_shutdown_rx) =
         tokio::sync::watch::channel(false);
-    let scheduled_task_supervisor_handle = runtime_handle.spawn(run_scheduled_task_supervisor(
-        ScheduledTaskDriverDeps {
-            tenex_base_dir: tenex_base_dir.clone(),
-            daemon_dir: daemon_dir.clone(),
-            project_event_index: Arc::clone(&project_event_index),
-            schedules_changed: signals.project_schedules_changed.clone(),
-        },
-        scheduled_task_boot_rx,
-        scheduled_task_shutdown_rx,
-    ));
+    let scheduled_task_supervisor_handle = spawn_watched(
+        &runtime_handle,
+        "scheduled-task-supervisor",
+        run_scheduled_task_supervisor(
+            ScheduledTaskDriverDeps {
+                tenex_base_dir: tenex_base_dir.clone(),
+                daemon_dir: daemon_dir.clone(),
+                project_event_index: Arc::clone(&project_event_index),
+                schedules_changed: signals.project_schedules_changed.clone(),
+            },
+            scheduled_task_boot_rx,
+            scheduled_task_shutdown_rx,
+        ),
+    );
 
     // Spawn the OS-level file watcher that fires `project_schedules_changed`
     // when any project's `schedules.json` is created, modified, or removed.
@@ -293,28 +307,36 @@ where
     let (intervention_shutdown_tx, intervention_arm_shutdown_rx) =
         tokio::sync::watch::channel(false);
     let intervention_fire_shutdown_rx = intervention_arm_shutdown_rx.clone();
-    let intervention_arm_handle = runtime_handle.spawn(run_intervention_arm_driver(
-        InterventionDriverDeps {
-            tenex_base_dir: tenex_base_dir.clone(),
-            daemon_dir: daemon_dir.clone(),
-            project_event_index: Arc::clone(&project_event_index),
-            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
-        },
-        ral_completed_rx,
-        Arc::clone(&signals.project_index_changed),
-        Arc::clone(&armed_notify),
-        intervention_arm_shutdown_rx,
-    ));
-    let intervention_fire_handle = runtime_handle.spawn(run_intervention_fire_driver(
-        InterventionDriverDeps {
-            tenex_base_dir: tenex_base_dir.clone(),
-            daemon_dir: daemon_dir.clone(),
-            project_event_index: Arc::clone(&project_event_index),
-            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
-        },
-        armed_notify,
-        intervention_fire_shutdown_rx,
-    ));
+    let intervention_arm_handle = spawn_watched(
+        &runtime_handle,
+        "intervention-arm-driver",
+        run_intervention_arm_driver(
+            InterventionDriverDeps {
+                tenex_base_dir: tenex_base_dir.clone(),
+                daemon_dir: daemon_dir.clone(),
+                project_event_index: Arc::clone(&project_event_index),
+                publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
+            },
+            ral_completed_rx,
+            Arc::clone(&signals.project_index_changed),
+            Arc::clone(&armed_notify),
+            intervention_arm_shutdown_rx,
+        ),
+    );
+    let intervention_fire_handle = spawn_watched(
+        &runtime_handle,
+        "intervention-fire-driver",
+        run_intervention_fire_driver(
+            InterventionDriverDeps {
+                tenex_base_dir: tenex_base_dir.clone(),
+                daemon_dir: daemon_dir.clone(),
+                project_event_index: Arc::clone(&project_event_index),
+                publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
+            },
+            armed_notify,
+            intervention_fire_shutdown_rx,
+        ),
+    );
 
     // Build the Telegram publisher registry from agent config files. Failures
     // are logged and treated as an empty registry (no bot tokens configured),
@@ -338,14 +360,18 @@ where
     // signals + an internal retry timer.
     let (telegram_outbox_shutdown_tx, telegram_outbox_shutdown_rx) =
         tokio::sync::watch::channel(false);
-    let telegram_outbox_driver_handle = runtime_handle.spawn(run_telegram_outbox_driver(
-        TelegramOutboxDriverDeps {
-            daemon_dir: daemon_dir.clone(),
-            publisher_registry: telegram_publisher_registry,
-        },
-        telegram_enqueued_rx,
-        telegram_outbox_shutdown_rx,
-    ));
+    let telegram_outbox_driver_handle = spawn_watched(
+        &runtime_handle,
+        "telegram-outbox-driver",
+        run_telegram_outbox_driver(
+            TelegramOutboxDriverDeps {
+                daemon_dir: daemon_dir.clone(),
+                publisher_registry: telegram_publisher_registry,
+            },
+            telegram_enqueued_rx,
+            telegram_outbox_shutdown_rx,
+        ),
+    );
 
     // Spawn the publish-outbox driver. Woken by `publish_enqueued_rx` signals
     // from every site that writes a record into the pending outbox, plus an
@@ -353,15 +379,19 @@ where
     // tick's maintain_publish_runtime call.
     let (publish_outbox_shutdown_tx, publish_outbox_shutdown_rx) =
         tokio::sync::watch::channel(false);
-    let publish_outbox_driver_handle = runtime_handle.spawn(run_publish_outbox_driver(
-        PublishOutboxDriverDeps {
-            daemon_dir: daemon_dir.clone(),
-            publisher: Arc::clone(&publisher),
-            retry_policy: PublishOutboxRetryPolicy::default(),
-        },
-        publish_enqueued_rx,
-        publish_outbox_shutdown_rx,
-    ));
+    let publish_outbox_driver_handle = spawn_watched(
+        &runtime_handle,
+        "publish-outbox-driver",
+        run_publish_outbox_driver(
+            PublishOutboxDriverDeps {
+                daemon_dir: daemon_dir.clone(),
+                publisher: Arc::clone(&publisher),
+                retry_policy: PublishOutboxRetryPolicy::default(),
+            },
+            publish_enqueued_rx,
+            publish_outbox_shutdown_rx,
+        ),
+    );
 
     tenex_daemon::stdout_status::print_daemon_ready(
         nostr_supervisor.is_some(),
@@ -382,25 +412,29 @@ where
     let lock_owner = session.lock_info().clone();
 
     let (admission_shutdown_tx, admission_shutdown_rx) = tokio::sync::watch::channel(false);
-    let admission_driver_handle = runtime_handle.spawn(run_worker_admission_driver(
-        WorkerAdmissionDriverDeps {
-            daemon_dir: daemon_dir.clone(),
-            tenex_base_dir: tenex_base_dir.clone(),
-            runtime_state: worker_runtime_state,
-            lock_owner,
-            worker_command,
-            worker_config,
-            writer_version: daemon_writer_version(),
-            publisher: Arc::clone(&publisher),
-            retry_policy: PublishOutboxRetryPolicy::default(),
-            publish_result_sequence,
-            project_event_index: Arc::clone(&project_event_index),
-            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
-        },
-        dispatch_enqueued_rx,
-        session_completed_rx,
-        admission_shutdown_rx,
-    ));
+    let admission_driver_handle = spawn_watched(
+        &runtime_handle,
+        "worker-admission-driver",
+        run_worker_admission_driver(
+            WorkerAdmissionDriverDeps {
+                daemon_dir: daemon_dir.clone(),
+                tenex_base_dir: tenex_base_dir.clone(),
+                runtime_state: worker_runtime_state,
+                lock_owner,
+                worker_command,
+                worker_config,
+                writer_version: daemon_writer_version(),
+                publisher: Arc::clone(&publisher),
+                retry_policy: PublishOutboxRetryPolicy::default(),
+                publish_result_sequence,
+                project_event_index: Arc::clone(&project_event_index),
+                publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
+            },
+            dispatch_enqueued_rx,
+            session_completed_rx,
+            admission_shutdown_rx,
+        ),
+    );
 
     // Block until SIGINT/SIGTERM sets the stop flag.
     runtime_handle.block_on(async {
@@ -1119,6 +1153,59 @@ fn install_signal_handler(
 fn emit_shutdown_status(message: impl fmt::Display) {
     if DAEMON_STOP_REQUESTED.load(Ordering::Relaxed) {
         eprintln!("TENEX daemon: {message}");
+    }
+}
+
+/// Spawn a driver task wrapped in a panic watchdog. If the future panics,
+/// the watchdog logs a `tracing::error!` with the panic detail and sets
+/// `DAEMON_STOP_REQUESTED` so the daemon exits loudly instead of silently
+/// continuing with a dead subsystem.
+fn spawn_watched(
+    handle: &tokio::runtime::Handle,
+    driver: &'static str,
+    fut: impl std::future::Future<Output = ()> + Send + 'static,
+) -> tokio::task::JoinHandle<()> {
+    handle.spawn(async move {
+        let result = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
+        if let Err(panic) = result {
+            let detail = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic payload".to_string());
+            tracing::error!(
+                driver = driver,
+                panic = %detail,
+                "driver task panicked; signaling daemon stop"
+            );
+            DAEMON_STOP_REQUESTED.store(true, Ordering::SeqCst);
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that a driver task that panics causes DAEMON_STOP_REQUESTED to
+    /// be set. This proves the watchdog catches the panic and signals shutdown
+    /// rather than silently leaving the subsystem dead.
+    #[tokio::test]
+    async fn panicking_driver_sets_daemon_stop_requested() {
+        // Reset the flag so the test is self-contained even if other tests
+        // run in the same process and have already set it.
+        DAEMON_STOP_REQUESTED.store(false, Ordering::SeqCst);
+
+        let handle = tokio::runtime::Handle::current();
+        let task = spawn_watched(&handle, "test-driver", async {
+            panic!("deliberate test panic");
+        });
+        task.await.expect("watchdog task itself must not panic");
+
+        assert!(
+            DAEMON_STOP_REQUESTED.load(Ordering::SeqCst),
+            "DAEMON_STOP_REQUESTED must be set when a watched driver panics"
+        );
     }
 }
 
