@@ -263,4 +263,145 @@ mod tests {
 
         fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
     }
+
+    /// End-to-end test: enqueue a record, run the async driver with a recording
+    /// publisher, send a `TelegramEnqueued` wake signal, and assert the outbox
+    /// is drained to zero pending records.
+    ///
+    /// Requires `--features integration` because it binds a real TCP listener
+    /// (the mock HTTP Telegram bot API server).
+    #[tokio::test]
+    #[cfg_attr(not(feature = "integration"), ignore)]
+    async fn driver_loop_drains_record_via_publisher_registry() {
+        use crate::telegram::client::{TelegramBotClient, TelegramBotClientConfig};
+        use crate::telegram::delivery::{DeliveryClock, TelegramBotDeliveryPublisher};
+        use crate::telegram::publisher_registry::TelegramPublisherRegistry;
+        use std::collections::HashMap;
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use tokio::sync::{mpsc, watch};
+
+        // Minimal mock Telegram API that returns a successful sendMessage response.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let server_url = format!("http://{}", listener.local_addr().expect("local addr"));
+        let served = Arc::new(Mutex::new(0u32));
+        let served_clone = Arc::clone(&served);
+        let _server_thread = thread::spawn(move || {
+            for stream in listener.incoming().take(5) {
+                let mut stream = match stream {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
+                let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+                // Read request line + headers until blank line.
+                let mut content_length: usize = 0;
+                let mut line = String::new();
+                reader.read_line(&mut line).ok();
+                loop {
+                    let mut h = String::new();
+                    reader.read_line(&mut h).ok();
+                    let trimmed = h.trim_end();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = trimmed.split_once(':')
+                        && name.trim().eq_ignore_ascii_case("content-length")
+                    {
+                        content_length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                use std::io::Read;
+                reader.read_exact(&mut body).ok();
+                let resp_body = r#"{"ok":true,"result":{"message_id":42,"chat":{"id":-1001,"type":"supergroup"}}}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                    resp_body.len(),
+                    resp_body
+                );
+                stream.write_all(response.as_bytes()).ok();
+                stream.flush().ok();
+                *served_clone.lock().unwrap() += 1;
+            }
+        });
+
+        let agent_pubkey = "a".repeat(64);
+        let mut publishers: HashMap<String, TelegramBotDeliveryPublisher> = HashMap::new();
+        publishers.insert(
+            agent_pubkey.clone(),
+            TelegramBotDeliveryPublisher::new(
+                TelegramBotClient::new(
+                    TelegramBotClientConfig::new("123:AAA").with_api_base_url(&server_url),
+                )
+                .expect("client"),
+            )
+            .with_clock(DeliveryClock::fixed(1_710_001_000_500)),
+        );
+        let registry = TelegramPublisherRegistry::from_publishers(publishers);
+
+        let daemon_dir = unique_temp_dir("telegram-outbox-driver-e2e");
+        let request = TelegramDeliveryRequest {
+            nostr_event_id: "event-e2e-001".to_string(),
+            correlation_id: "corr-e2e-001".to_string(),
+            project_binding: TelegramProjectBinding {
+                project_d_tag: "project-e2e".to_string(),
+                backend_pubkey: "b".repeat(64),
+            },
+            channel_binding: TelegramChannelBinding {
+                chat_id: -1001,
+                message_thread_id: None,
+                channel_label: None,
+            },
+            sender_identity: TelegramSenderIdentity {
+                agent_pubkey: agent_pubkey.clone(),
+                display_name: None,
+            },
+            delivery_reason: TelegramDeliveryReason::ProactiveSend,
+            reply_to_telegram_message_id: None,
+            payload: TelegramDeliveryPayload::PlainText {
+                text: "hello e2e".to_string(),
+            },
+            writer_version: "test@0".to_string(),
+        };
+
+        let now_ms = 1_710_001_000_000_u64;
+        accept_telegram_delivery_request(&daemon_dir, request, now_ms)
+            .expect("accept must succeed");
+
+        let before = inspect_telegram_outbox(&daemon_dir, now_ms).expect("inspect before");
+        assert_eq!(before.pending_count, 1, "one record must be pending before driver runs");
+
+        let (telegram_tx, telegram_rx) = mpsc::unbounded_channel::<TelegramEnqueued>();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let driver_handle = tokio::spawn(run_telegram_outbox_driver(
+            TelegramOutboxDriverDeps {
+                daemon_dir: daemon_dir.clone(),
+                publisher_registry: Some(registry),
+            },
+            telegram_rx,
+            shutdown_rx,
+        ));
+
+        // Wake the driver with an enqueue signal.
+        telegram_tx.send(TelegramEnqueued).expect("send signal");
+
+        // Give the driver time to drain (spawn_blocking inside).
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Shut down the driver.
+        shutdown_tx.send(true).expect("shutdown send");
+        driver_handle.await.expect("driver must not panic");
+
+        let after = inspect_telegram_outbox(&daemon_dir, now_ms).expect("inspect after");
+        assert_eq!(
+            after.pending_count, 0,
+            "driver must drain pending records when publisher_registry is wired"
+        );
+        assert_eq!(after.delivered_count, 1, "one record must be delivered");
+
+        fs::remove_dir_all(daemon_dir).expect("cleanup must succeed");
+    }
 }

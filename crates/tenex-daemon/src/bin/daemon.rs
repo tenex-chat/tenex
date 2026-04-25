@@ -13,6 +13,7 @@ use tenex_daemon::intervention_driver::{
     InterventionDriverDeps, run_intervention_arm_driver, run_intervention_fire_driver,
 };
 use tenex_daemon::project_status_driver::{ProjectStatusDriverDeps, run_project_status_supervisor};
+use tenex_daemon::telegram::publisher_registry::TelegramPublisherRegistry;
 use tenex_daemon::telegram_outbox_driver::{TelegramOutboxDriverDeps, run_telegram_outbox_driver};
 use tenex_daemon::scheduled_task_driver::{ScheduledTaskDriverDeps, run_scheduled_task_supervisor};
 use tenex_daemon::publish_outbox_driver::{PublishOutboxDriverDeps, run_publish_outbox_driver};
@@ -315,18 +316,32 @@ where
         intervention_fire_shutdown_rx,
     ));
 
+    // Build the Telegram publisher registry from agent config files. Failures
+    // are logged and treated as an empty registry (no bot tokens configured),
+    // which falls through to the drain-less maintenance path.
+    let telegram_publisher_registry = match TelegramPublisherRegistry::from_agent_config(&tenex_base_dir) {
+        Ok(registry) => {
+            if registry.is_empty() {
+                tracing::info!("telegram publisher registry: no agents with bot tokens; outbox will not drain");
+            } else {
+                tracing::info!(count = registry.len(), "telegram publisher registry: built");
+            }
+            Some(registry)
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "telegram publisher registry build failed; telegram outbox will not drain");
+            None
+        }
+    };
+
     // Spawn the Telegram outbox driver. Woken by `telegram_enqueued_rx`
-    // signals + an internal retry timer. The legacy tick path in
-    // daemon_maintenance.rs continues to call `run_telegram_outbox_maintenance`
-    // for now; both drainers safely operate on the same on-disk outbox
-    // (each record is keyed by id; the second drainer sees an empty outbox).
-    // Removing the tick path is part of commit 9.
+    // signals + an internal retry timer.
     let (telegram_outbox_shutdown_tx, telegram_outbox_shutdown_rx) =
         tokio::sync::watch::channel(false);
     let telegram_outbox_driver_handle = runtime_handle.spawn(run_telegram_outbox_driver(
         TelegramOutboxDriverDeps {
             daemon_dir: daemon_dir.clone(),
-            publisher_registry: None,
+            publisher_registry: telegram_publisher_registry,
         },
         telegram_enqueued_rx,
         telegram_outbox_shutdown_rx,
