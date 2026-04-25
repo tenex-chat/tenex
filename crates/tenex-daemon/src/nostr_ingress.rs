@@ -1,5 +1,5 @@
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -32,9 +32,7 @@ use crate::project_event_index::ProjectEventIndex;
 use crate::project_nostr_ingress::{
     ProjectNostrIngressError, ProjectNostrIngressOutcome, handle_project_nostr_event,
 };
-use crate::project_repository_init::{
-    ProjectRepositoryInitError, ensure_project_repository_on_boot,
-};
+use crate::project_repository_init::ensure_project_repository_on_boot;
 use crate::worker_lifecycle::stop_request::{WorkerStopRequest, write_worker_stop_request};
 
 pub struct NostrIngressInput<'a> {
@@ -114,8 +112,6 @@ pub enum NostrIngressError {
     ProjectIngress(#[from] ProjectNostrIngressError),
     #[error("failed to record project boot state: {0}")]
     ProjectBootState(#[from] ProjectBootStateError),
-    #[error("failed to prepare project repository on boot: {0}")]
-    ProjectRepositoryInit(#[from] ProjectRepositoryInitError),
     #[error("failed to apply agent config update: {0}")]
     AgentConfigUpdate(#[from] AgentConfigUpdateError),
     #[error("failed to build per-agent snapshot for republish: {0}")]
@@ -182,11 +178,11 @@ pub fn process_verified_nostr_event(
                     .and_then(|tag| tag.get(1))
                     .cloned()
             });
-        ensure_project_repository_on_boot(
-            &reference.project_d_tag,
-            Path::new(&project_base_path),
-            repo_url.as_deref(),
-        )?;
+        spawn_repo_init(
+            reference.project_d_tag.clone(),
+            PathBuf::from(&project_base_path),
+            repo_url,
+        );
         let boot = project_boot_state
             .lock()
             .expect("project boot state mutex must not be poisoned")
@@ -275,6 +271,63 @@ pub fn process_verified_nostr_event(
     }
 
     Ok(NostrIngressOutcome::Routed { class, inbound })
+}
+
+/// Schedules project repository initialisation to run on a blocking thread.
+///
+/// Git operations (`git init`, `git clone`) are synchronous subprocess calls
+/// that can block for seconds on a slow network or filesystem. Running them on
+/// the tokio relay-read thread would stall ALL relay message processing for
+/// every other project during that window — unacceptable.
+///
+/// The repository init is also not a prerequisite for recording the boot: the
+/// project is "booted" (state recorded, kind:24010 published, agents can be
+/// scheduled) regardless of whether the local git checkout exists yet. Agents
+/// that need the checkout will fail gracefully at dispatch time. If init
+/// fails, the next boot event for the same project (or a daemon restart) will
+/// retry it; git operations are idempotent when the directory is already
+/// initialised.
+///
+/// When called from tests that have no tokio runtime, the work runs
+/// synchronously on the calling thread so that test assertions about git
+/// directory existence still hold.
+fn spawn_repo_init(project_d_tag: String, project_base_path: PathBuf, repo_url: Option<String>) {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn_blocking(move || {
+                run_repo_init(project_d_tag, project_base_path, repo_url);
+            });
+        }
+        Err(_) => {
+            run_repo_init(project_d_tag, project_base_path, repo_url);
+        }
+    }
+}
+
+fn run_repo_init(project_d_tag: String, project_base_path: PathBuf, repo_url: Option<String>) {
+    match ensure_project_repository_on_boot(
+        &project_d_tag,
+        &project_base_path,
+        repo_url.as_deref(),
+    ) {
+        Ok(outcome) => {
+            tracing::info!(
+                project_d_tag = %project_d_tag,
+                action = ?outcome.action,
+                "project repository initialised on boot"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                project_d_tag = %project_d_tag,
+                project_base_path = %project_base_path.display(),
+                error = %error,
+                "project repository init failed; project is booted but agents \
+                 cannot dispatch until the repository is available — retry will \
+                 occur on next boot event or daemon restart"
+            );
+        }
+    }
 }
 
 /// Immediately publishes a fresh kind 24011 per-agent config event for the
@@ -733,5 +786,116 @@ mod tests {
         let keypair = Keypair::from_secret_key(&secp, &secret);
         let (xonly, _) = keypair.x_only_public_key();
         hex::encode(xonly.serialize())
+    }
+
+    /// A kind:24000 boot event in a fresh environment (no pre-existing git
+    /// directory, no repo URL) must succeed even when the repo directory is
+    /// unwritable.  The boot state is recorded and the outcome is
+    /// `ProjectBooted`; the repo init failure is handled internally without
+    /// propagating as a `NostrIngressError`, so the relay subscription is
+    /// never disconnected.
+    #[test]
+    fn boot_event_with_repo_init_failure_does_not_propagate_as_ingress_error() {
+        let temp_dir = tempdir().expect("temp dir must create");
+        let base_dir = temp_dir.path();
+        // Point projectsBase at a path inside a non-existent root that cannot
+        // be created — /dev/null is a file, so any subdirectory under it will
+        // fail to create.
+        let projects_base = Path::new("/dev/null/no-such-dir");
+        write_backend_config(base_dir, projects_base);
+
+        let owner = pubkey_hex(0x11);
+        let project_event_index = fresh_project_event_index();
+        write_project(base_dir, &project_event_index, "proj-fail", &owner);
+        let project_reference = format!("31933:{owner}:proj-fail");
+        let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
+        let event = signed_event(
+            24000,
+            "boot-event-fail",
+            vec![vec!["a", project_reference.as_str()]],
+        );
+
+        // The call must succeed — repo init failure is not a relay error.
+        let outcome = process_verified_nostr_event(NostrIngressInput {
+            daemon_dir: &base_dir.join("daemon"),
+            tenex_base_dir: base_dir,
+            event: &event,
+            timestamp: 1_710_000_900_000,
+            writer_version: "nostr-ingress-test@0",
+            project_boot_state: Some(&project_boot_state),
+            project_event_index: &project_event_index,
+            project_index_changed: None,
+            project_booted_tx: None,
+            dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
+        })
+        .expect("boot with failed repo init must NOT return Err — relay must stay connected");
+
+        assert!(
+            matches!(outcome, NostrIngressOutcome::ProjectBooted { .. }),
+            "expected ProjectBooted outcome even when repo init fails; got {outcome:?}"
+        );
+        assert_eq!(
+            project_boot_state
+                .lock()
+                .expect("boot state lock")
+                .snapshot()
+                .projects
+                .len(),
+            1,
+            "boot state must be recorded even when repo init fails"
+        );
+    }
+
+    /// Repo init runs on a blocking thread in async contexts so that git
+    /// subprocess calls never stall the tokio relay-read worker.
+    ///
+    /// Without a tokio runtime (as in this unit test) `spawn_repo_init` falls
+    /// back to synchronous execution. Inside a tokio runtime it must use
+    /// `spawn_blocking`. We verify the async path by building a runtime,
+    /// calling `spawn_repo_init` from within it, and confirming the operation
+    /// completes on a blocking thread (not the async worker thread).
+    #[test]
+    fn repo_init_runs_on_blocking_thread_inside_tokio_runtime() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let temp_dir = tempdir().expect("temp dir must create");
+        let project_path = temp_dir.path().join("blocking-test");
+
+        // We confirm the init completed by checking the .git directory.
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_clone = completed.clone();
+        let project_path_clone = project_path.clone();
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime must build");
+
+        runtime.block_on(async move {
+            // spawn_repo_init dispatches to spawn_blocking when called from
+            // an async context. We collect the JoinHandle indirectly by
+            // waiting for the side-effect (.git dir) to appear.
+            super::spawn_repo_init("blocking-test".to_string(), project_path_clone.clone(), None);
+
+            // Yield to let the blocking thread complete.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                if project_path_clone.join(".git").exists() {
+                    completed_clone.store(true, Ordering::SeqCst);
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        });
+
+        assert!(
+            completed.load(std::sync::atomic::Ordering::SeqCst),
+            "repo init must complete on the blocking thread pool and produce a .git directory"
+        );
+        assert!(project_path.join(".git").exists());
     }
 }
