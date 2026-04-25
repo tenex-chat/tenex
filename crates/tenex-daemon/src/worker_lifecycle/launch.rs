@@ -34,6 +34,12 @@ pub struct WorkerLaunchPlanInput<'a> {
     pub triggering_envelope: Value,
     pub execution_flags: AgentWorkerExecutionFlags,
     pub delegation_snapshot: crate::ral_journal::RalDelegationSnapshot,
+    /// Inline executing-agent block (signing key + slug + system prompt + skills + ...).
+    /// When `Some`, the worker materializes the agent from this payload and
+    /// does not read agent storage from disk.
+    pub agent: Option<Value>,
+    /// Daemon's authoritative project agent inventory at dispatch time.
+    pub project_agent_inventory: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +101,8 @@ pub fn plan_worker_launch(
         triggering_envelope: input.triggering_envelope,
         execution_flags: input.execution_flags,
         delegation_snapshot: input.delegation_snapshot,
+        agent: input.agent,
+        project_agent_inventory: input.project_agent_inventory,
     })?;
 
     Ok(WorkerLaunchPlan {
@@ -267,6 +275,8 @@ mod tests {
                 debug: flags["debug"].as_bool().expect("debug flag must be bool"),
             },
             delegation_snapshot: crate::ral_journal::RalDelegationSnapshot::default(),
+            agent: None,
+            project_agent_inventory: None,
         }
     }
 

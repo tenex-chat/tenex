@@ -196,6 +196,13 @@ pub struct AgentWorkerExecuteMessageInput<'a> {
     pub triggering_envelope: Value,
     pub execution_flags: AgentWorkerExecutionFlags,
     pub delegation_snapshot: crate::ral_journal::RalDelegationSnapshot,
+    /// Inline executing-agent block (signing key + slug + system prompt + skills + ...).
+    /// When `Some`, the worker materializes the agent from this payload and
+    /// does not read `~/.tenex/agents/<pubkey>.json`.
+    pub agent: Option<Value>,
+    /// Daemon's authoritative project agent inventory at dispatch time.
+    /// The worker reconciles `ProjectContext.agents` against this list.
+    pub project_agent_inventory: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,7 +347,7 @@ pub fn build_agent_worker_execute_message(
         });
     }
 
-    let message = json!({
+    let mut message = json!({
         "version": AGENT_WORKER_PROTOCOL_VERSION,
         "type": "execute",
         "correlationId": &input.dispatch.correlation_id,
@@ -357,6 +364,18 @@ pub fn build_agent_worker_execute_message(
         "executionFlags": input.execution_flags,
         "delegationSnapshot": input.delegation_snapshot,
     });
+
+    if input.agent.is_some() || input.project_agent_inventory.is_some() {
+        let object = message
+            .as_object_mut()
+            .expect("execute message must be a JSON object");
+        if let Some(agent) = input.agent {
+            object.insert("agent".to_string(), agent);
+        }
+        if let Some(inventory) = input.project_agent_inventory {
+            object.insert("projectAgentInventory".to_string(), Value::Array(inventory));
+        }
+    }
 
     validate_agent_worker_protocol_message(&message)?;
     Ok(message)
@@ -1761,6 +1780,8 @@ mod tests {
                     .expect("fixture debug flag must be bool"),
             },
             delegation_snapshot: crate::ral_journal::RalDelegationSnapshot::default(),
+            agent: None,
+            project_agent_inventory: None,
         }
     }
 

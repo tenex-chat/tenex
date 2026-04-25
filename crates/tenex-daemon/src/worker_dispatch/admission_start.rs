@@ -406,6 +406,11 @@ fn plan_launch_for_admitted_dispatch(
         execution_flags,
     } = launch_input;
     let identity = ral_identity_from_dispatch(&admitted.leased_record);
+    let (inline_agent, inline_inventory) = build_inline_agent_payloads(
+        &metadata_path,
+        &admitted.leased_record.ral.project_id,
+        &admitted.leased_record.ral.agent_pubkey,
+    );
     plan_worker_launch(WorkerLaunchPlanInput {
         dispatch: &admitted.leased_record,
         identity: &identity,
@@ -416,7 +421,37 @@ fn plan_launch_for_admitted_dispatch(
         triggering_envelope,
         execution_flags,
         delegation_snapshot,
+        agent: inline_agent,
+        project_agent_inventory: inline_inventory,
     })
+}
+
+fn build_inline_agent_payloads(
+    metadata_path: &str,
+    project_id: &str,
+    agent_pubkey: &str,
+) -> (Option<serde_json::Value>, Option<Vec<serde_json::Value>>) {
+    let metadata_path = std::path::Path::new(metadata_path);
+    let Some(tenex_base_dir) =
+        crate::inline_agent_payload::tenex_base_dir_from_metadata_path(metadata_path)
+    else {
+        return (None, None);
+    };
+
+    let agent = crate::inline_agent_payload::read_inline_agent_payload(
+        &tenex_base_dir,
+        agent_pubkey,
+    )
+    .ok();
+    let inventory = match crate::inline_agent_payload::read_project_agent_inventory_payload(
+        &tenex_base_dir,
+        project_id,
+    ) {
+        Ok(inventory) if inventory.is_empty() => None,
+        Ok(inventory) => Some(inventory),
+        Err(_) => None,
+    };
+    (agent, inventory)
 }
 
 fn resolve_launch_input(

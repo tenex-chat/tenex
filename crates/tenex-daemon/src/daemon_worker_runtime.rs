@@ -583,6 +583,12 @@ where
             },
         )?;
 
+    let (inline_agent, inline_inventory) = build_inline_agent_payloads(
+        &launch_input.metadata_path,
+        &admitted.leased_record.ral.project_id,
+        &admitted.leased_record.ral.agent_pubkey,
+    );
+
     let launch_plan = plan_worker_launch(WorkerLaunchPlanInput {
         dispatch: &admitted.leased_record,
         identity: &ral_identity_from_dispatch(&admitted.leased_record),
@@ -593,6 +599,8 @@ where
         triggering_envelope: launch_input.triggering_envelope.clone(),
         execution_flags: launch_input.execution_flags.clone(),
         delegation_snapshot,
+        agent: inline_agent,
+        project_agent_inventory: inline_inventory,
     })
     .map_err(|source| WorkerDispatchAdmissionStartError::LaunchPlan {
         admission: Box::new(admitted.clone()),
@@ -740,6 +748,60 @@ fn ral_identity_from_dispatch(
         conversation_id: dispatch.ral.conversation_id.clone(),
         ral_number: dispatch.ral.ral_number,
     }
+}
+
+/// Build the inline `agent` and `projectAgentInventory` payloads for an
+/// `execute` message. Failures are logged and surfaced as `None` so a
+/// missing or unparseable agent file falls back to the worker reading from
+/// disk (transitional — the worker filesystem fallback is removed in C8).
+fn build_inline_agent_payloads(
+    metadata_path: &str,
+    project_id: &str,
+    agent_pubkey: &str,
+) -> (Option<serde_json::Value>, Option<Vec<serde_json::Value>>) {
+    let metadata_path = std::path::Path::new(metadata_path);
+    let Some(tenex_base_dir) =
+        crate::inline_agent_payload::tenex_base_dir_from_metadata_path(metadata_path)
+    else {
+        tracing::warn!(
+            metadata_path = %metadata_path.display(),
+            "cannot derive TENEX base dir from metadata path; skipping inline agent payload"
+        );
+        return (None, None);
+    };
+
+    let agent = match crate::inline_agent_payload::read_inline_agent_payload(
+        &tenex_base_dir,
+        agent_pubkey,
+    ) {
+        Ok(payload) => Some(payload),
+        Err(error) => {
+            tracing::warn!(
+                pubkey = %agent_pubkey,
+                error = %error,
+                "could not build inline agent payload; worker will fall back to disk"
+            );
+            None
+        }
+    };
+
+    let inventory = match crate::inline_agent_payload::read_project_agent_inventory_payload(
+        &tenex_base_dir,
+        project_id,
+    ) {
+        Ok(inventory) if inventory.is_empty() => None,
+        Ok(inventory) => Some(inventory),
+        Err(error) => {
+            tracing::warn!(
+                project_id = %project_id,
+                error = %error,
+                "could not build project agent inventory payload"
+            );
+            None
+        }
+    };
+
+    (agent, inventory)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
