@@ -1521,6 +1521,7 @@ dependencies = [
  "base64",
  "bech32",
  "chacha20",
+ "crossbeam-channel",
  "dialoguer",
  "futures-util",
  "getrandom 0.3.4",

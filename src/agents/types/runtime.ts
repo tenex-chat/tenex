@@ -39,7 +39,6 @@ export interface AgentInstance {
     eventId?: string;
     slug: string;
     useAISDKAgent?: boolean; // Feature flag: use AI SDK Agent class instead of traditional AgentExecutor
-    maxAgentSteps?: number; // Maximum steps for AI SDK Agent agentic loop (default: 10)
     /** Agent-specific MCP server configurations */
     mcpServers?: Record<string, MCPServerConfig>;
     /**

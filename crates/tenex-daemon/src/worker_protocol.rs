@@ -196,7 +196,7 @@ pub struct AgentWorkerExecuteMessageInput<'a> {
     pub triggering_envelope: Value,
     pub execution_flags: AgentWorkerExecutionFlags,
     pub delegation_snapshot: crate::ral_journal::RalDelegationSnapshot,
-    /// Inline executing-agent block (signing key + slug + system prompt + skills + ...).
+    /// Executing agent block (signing key + slug + system prompt + skills + ...).
     /// When `Some`, the worker materializes the agent from this payload and
     /// does not read `~/.tenex/agents/<pubkey>.json`.
     pub agent: Option<Value>,
@@ -578,7 +578,7 @@ fn validate_execute(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
         let agent = value
             .as_object()
             .ok_or(WorkerProtocolError::InvalidField("agent"))?;
-        validate_inline_agent(agent)?;
+        validate_agent(agent)?;
     }
 
     if let Some(value) = object.get("projectAgentInventory") {
@@ -978,7 +978,7 @@ fn validate_project_ready(object: &Map<String, Value>) -> WorkerProtocolResult<(
     Ok(())
 }
 
-fn validate_inline_agent(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
+fn validate_agent(object: &Map<String, Value>) -> WorkerProtocolResult<()> {
     require_hex_pubkey(object, "pubkey")?;
     require_string(object, "slug")?;
     require_string(object, "name")?;

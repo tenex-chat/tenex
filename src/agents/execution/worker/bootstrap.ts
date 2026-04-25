@@ -89,7 +89,7 @@ export async function bootstrapProjectScope(
         new AgentRegistry(message.projectBasePath, message.metadataPath);
     // Project context is built from the inventory only — no agent storage
     // disk reads. The executing AgentInstance is materialized in
-    // runOneExecution from the inline `agent` payload; placeholder
+    // runOneExecution from the `agent` payload; placeholder
     // AgentInstances for the rest of the inventory are added during
     // reconcileProjectAgentInventory on the first execute.
     const projectContext = new ProjectContext(project, agentRegistry);
@@ -141,12 +141,12 @@ export async function runOneExecution(
 
     if (!message.agent) {
         throw new AgentWorkerExecutionFailure(
-            "missing_inline_agent",
-            "execute message did not include an inline `agent` payload; the daemon must populate it",
+            "missing_agent",
+            "execute message did not include an `agent` payload; the daemon must populate it",
             false
         );
     }
-    const agent = materializeInlineAgent(message.agent, scope, scope.projectDTag);
+    const agent = materializeAgent(message.agent, scope, scope.projectDTag);
     if (!scope.agentRegistry.getAgentByPubkey(agent.pubkey)) {
         scope.agentRegistry.addAgent(agent);
     }
@@ -386,72 +386,71 @@ function executionIdentity(message: ExecuteMessage): {
     };
 }
 
-type InlineAgent = NonNullable<ExecuteMessage["agent"]>;
+type AgentExecuteFields = NonNullable<ExecuteMessage["agent"]>;
 type ProjectAgentInventoryEntry = NonNullable<ExecuteMessage["projectAgentInventory"]>[number];
 
 /**
- * Materialize an executing AgentInstance from the inline payload that the
+ * Materialize an executing AgentInstance from the agent payload that the
  * Rust daemon ships on `execute`. Bypasses the disk-backed AgentRegistry
  * load path so the worker stays stateless w.r.t. agent config.
  */
-function materializeInlineAgent(
-    inline: InlineAgent,
+function materializeAgent(
+    agentFields: AgentExecuteFields,
     scope: ProjectScope,
     projectDTag: string | undefined
 ): AgentInstance {
-    const signer = new NDKPrivateKeySigner(inline.signingPrivateKey);
+    const signer = new NDKPrivateKeySigner(agentFields.signingPrivateKey);
     const pubkey = signer.pubkey;
-    const resolvedCategory = resolveCategory(inline.category);
-    const tools = processAgentTools(inline.tools ?? [], resolvedCategory);
-    const llmConfigName = inline.llmConfig ?? DEFAULT_AGENT_LLM_CONFIG;
+    const resolvedCategory = resolveCategory(agentFields.category);
+    const tools = processAgentTools(agentFields.tools ?? [], resolvedCategory);
+    const llmConfigName = agentFields.llmConfig ?? DEFAULT_AGENT_LLM_CONFIG;
     const metadataPath = scope.metadataPath;
     const projectBasePath = scope.projectBasePath;
 
     // Skill blocking: filter alwaysSkills against blockedSkills. The disk
     // path uses SkillService.listAvailableSkills + buildSkillAliasMap to
-    // expand aliases (e.g. recall@1.2.3 against recall). The inline path
+    // expand aliases (e.g. recall@1.2.3 against recall). The worker path
     // can't do alias-aware blocking without a disk read, so we do
     // exact-match blocking here. The daemon ships agent.default.skills
     // pre-filtered against agent.default.blockedSkills in agent storage,
     // but a misconfigured agent may still have an overlap and we don't
     // want to surface a blocked skill at runtime.
-    const blockedSkillSet = new Set(inline.blockedSkills ?? []);
-    const alwaysSkillsCandidates = (inline.alwaysSkills ?? []).filter(
+    const blockedSkillSet = new Set(agentFields.blockedSkills ?? []);
+    const alwaysSkillsCandidates = (agentFields.alwaysSkills ?? []).filter(
         (skill) => !blockedSkillSet.has(skill)
     );
     const alwaysSkills =
         alwaysSkillsCandidates.length > 0 ? alwaysSkillsCandidates : undefined;
 
     const agent: AgentInstance = {
-        name: inline.name,
+        name: agentFields.name,
         pubkey,
         signer,
-        role: inline.role,
+        role: agentFields.role,
         category: resolvedCategory,
-        description: inline.description,
-        instructions: inline.instructions,
-        customInstructions: inline.customInstructions,
-        useCriteria: inline.useCriteria,
+        description: agentFields.description,
+        instructions: agentFields.instructions,
+        customInstructions: agentFields.customInstructions,
+        useCriteria: agentFields.useCriteria,
         llmConfig: llmConfigName,
         tools,
-        eventId: inline.eventId,
-        slug: inline.slug,
-        useAISDKAgent: inline.useAISDKAgent,
-        maxAgentSteps: inline.maxAgentSteps,
-        mcpServers: inline.mcpServers as AgentInstance["mcpServers"],
-        pmOverrides: inline.pmOverrides,
-        isPM: inline.isPM,
-        telegram: inline.telegram as AgentInstance["telegram"],
+        eventId: agentFields.eventId,
+        slug: agentFields.slug,
+        useAISDKAgent: agentFields.useAISDKAgent,
+        mcpServers: agentFields.mcpServers as AgentInstance["mcpServers"],
+        pmOverrides: agentFields.pmOverrides,
+        isPM: agentFields.isPM,
+        telegram: agentFields.telegram as AgentInstance["telegram"],
         alwaysSkills,
-        blockedSkills: inline.blockedSkills,
-        mcpAccess: inline.mcpAccess ?? [],
+        blockedSkills: agentFields.blockedSkills,
+        mcpAccess: agentFields.mcpAccess ?? [],
         createMetadataStore: (conversationId: string) =>
-            new AgentMetadataStore(conversationId, inline.slug, metadataPath),
+            new AgentMetadataStore(conversationId, agentFields.slug, metadataPath),
         createLLMService: (options) =>
             config.createLLMService(options?.resolvedConfigName ?? llmConfigName, {
                 tools: options?.tools ?? {},
-                agentName: inline.name,
-                agentSlug: inline.slug,
+                agentName: agentFields.name,
+                agentSlug: agentFields.slug,
                 agentId: pubkey,
                 workingDirectory: options?.workingDirectory ?? projectBasePath,
                 mcpConfig: options?.mcpConfig,

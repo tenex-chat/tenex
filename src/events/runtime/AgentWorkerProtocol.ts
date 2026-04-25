@@ -249,7 +249,6 @@ const agentExecuteSchema = z
         isPM: z.boolean().optional(),
         eventId: z.string().min(1).optional(),
         useAISDKAgent: z.boolean().optional(),
-        maxAgentSteps: positiveIntegerSchema.optional(),
         model: agentModelSchema.optional(),
         telegram: z.record(z.string(), z.unknown()).optional(),
     })

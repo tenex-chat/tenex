@@ -1,4 +1,4 @@
-//! Build inline agent + projectAgentInventory blocks for the worker `execute`
+//! Build agent + projectAgentInventory blocks for the worker `execute`
 //! protocol message.
 //!
 //! These blocks let the Bun worker materialize the executing agent and the
@@ -21,7 +21,7 @@ use thiserror::Error;
 use crate::agent_inventory::read_project_agent_pubkeys_for;
 
 #[derive(Debug, Error)]
-pub enum InlineAgentPayloadError {
+pub enum AgentPayloadError {
     #[error("agent file {path} could not be read: {source}")]
     AgentFileRead { path: PathBuf, source: io::Error },
     #[error("agent file {path} is missing")]
@@ -37,7 +37,7 @@ pub enum InlineAgentPayloadError {
     Inventory(#[from] crate::agent_inventory::AgentInventoryError),
 }
 
-pub type InlineAgentPayloadResult<T> = Result<T, InlineAgentPayloadError>;
+pub type AgentPayloadResult<T> = Result<T, AgentPayloadError>;
 
 /// Read `<tenex_base_dir>/agents/<pubkey>.json` and convert it to the
 /// `agent` block expected by the AgentWorkerProtocol `execute` message.
@@ -58,29 +58,29 @@ pub type InlineAgentPayloadResult<T> = Result<T, InlineAgentPayloadError>;
 /// The protocol shape moves `nsec` to `signingPrivateKey` and flattens the
 /// `default` block. Unknown on-disk fields are passed through (the schema
 /// uses `passthrough`).
-pub fn read_inline_agent_payload(
+pub fn read_agent_payload(
     tenex_base_dir: &Path,
     pubkey: &str,
-) -> InlineAgentPayloadResult<Value> {
+) -> AgentPayloadResult<Value> {
     let path = tenex_base_dir.join("agents").join(format!("{pubkey}.json"));
     let content = match fs::read_to_string(&path) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(InlineAgentPayloadError::AgentFileMissing { path });
+            return Err(AgentPayloadError::AgentFileMissing { path });
         }
         Err(source) => {
-            return Err(InlineAgentPayloadError::AgentFileRead { path, source });
+            return Err(AgentPayloadError::AgentFileRead { path, source });
         }
     };
     let mut value: Value = serde_json::from_str(&content).map_err(|source| {
-        InlineAgentPayloadError::AgentFileParse {
+        AgentPayloadError::AgentFileParse {
             path: path.clone(),
             source,
         }
     })?;
 
     let object = value.as_object_mut().ok_or_else(|| {
-        InlineAgentPayloadError::AgentFileMissingField {
+        AgentPayloadError::AgentFileMissingField {
             path: path.clone(),
             field: "(root must be a JSON object)",
         }
@@ -92,7 +92,7 @@ pub fn read_inline_agent_payload(
     // Move nsec → signingPrivateKey (the protocol field name).
     let nsec = object
         .remove("nsec")
-        .ok_or_else(|| InlineAgentPayloadError::AgentFileMissingField {
+        .ok_or_else(|| AgentPayloadError::AgentFileMissingField {
             path: path.clone(),
             field: "nsec",
         })?;
@@ -101,7 +101,7 @@ pub fn read_inline_agent_payload(
     // Required fields in the protocol schema.
     for required in ["slug", "name", "role"] {
         let value = object.remove(required).ok_or_else(|| {
-            InlineAgentPayloadError::AgentFileMissingField {
+            AgentPayloadError::AgentFileMissingField {
                 path: path.clone(),
                 field: required,
             }
@@ -120,7 +120,6 @@ pub fn read_inline_agent_payload(
         "pmOverrides",
         "eventId",
         "useAISDKAgent",
-        "maxAgentSteps",
         "telegram",
         "mcpServers",
     ] {
@@ -163,7 +162,7 @@ pub fn read_inline_agent_payload(
 pub fn read_project_agent_inventory_payload(
     tenex_base_dir: &Path,
     project_id: &str,
-) -> InlineAgentPayloadResult<Vec<Value>> {
+) -> AgentPayloadResult<Vec<Value>> {
     let agents_dir = tenex_base_dir.join("agents");
     let pubkeys = read_project_agent_pubkeys_for(&agents_dir, project_id)?;
 
@@ -182,17 +181,17 @@ pub fn read_project_agent_inventory_payload(
                 continue;
             }
             Err(source) => {
-                return Err(InlineAgentPayloadError::AgentFileRead { path, source });
+                return Err(AgentPayloadError::AgentFileRead { path, source });
             }
         };
         let value: Value = serde_json::from_str(&content).map_err(|source| {
-            InlineAgentPayloadError::AgentFileParse {
+            AgentPayloadError::AgentFileParse {
                 path: path.clone(),
                 source,
             }
         })?;
         let object = value.as_object().ok_or_else(|| {
-            InlineAgentPayloadError::AgentFileMissingField {
+            AgentPayloadError::AgentFileMissingField {
                 path: path.clone(),
                 field: "(root must be a JSON object)",
             }
@@ -201,7 +200,7 @@ pub fn read_project_agent_inventory_payload(
         let slug = object
             .get("slug")
             .and_then(Value::as_str)
-            .ok_or_else(|| InlineAgentPayloadError::AgentFileMissingField {
+            .ok_or_else(|| AgentPayloadError::AgentFileMissingField {
                 path: path.clone(),
                 field: "slug",
             })?;
@@ -262,13 +261,13 @@ mod tests {
             .expect("time goes forward")
             .as_nanos();
         let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("tenex-inline-{label}-{stamp}-{counter}"));
+        let path = std::env::temp_dir().join(format!("tenex-agent-{label}-{stamp}-{counter}"));
         fs::create_dir_all(&path).expect("must create temp dir");
         path
     }
 
     #[test]
-    fn reads_inline_agent_payload_with_required_and_optional_fields() {
+    fn reads_agent_payload_with_required_and_optional_fields() {
         let base = unique_temp_dir("agent-payload");
         let agents_dir = base.join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
@@ -294,7 +293,7 @@ mod tests {
         )
         .unwrap();
 
-        let payload = read_inline_agent_payload(&base, &pubkey).expect("payload must load");
+        let payload = read_agent_payload(&base, &pubkey).expect("payload must load");
         let obj = payload.as_object().unwrap();
         assert_eq!(obj.get("pubkey").and_then(Value::as_str), Some(pubkey.as_str()));
         assert_eq!(
@@ -319,9 +318,9 @@ mod tests {
         fs::create_dir_all(base.join("agents")).unwrap();
 
         let pubkey = "b".repeat(64);
-        let result = read_inline_agent_payload(&base, &pubkey);
+        let result = read_agent_payload(&base, &pubkey);
         match result {
-            Err(InlineAgentPayloadError::AgentFileMissing { .. }) => {}
+            Err(AgentPayloadError::AgentFileMissing { .. }) => {}
             other => panic!("expected AgentFileMissing, got {other:?}"),
         }
 
@@ -345,9 +344,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = read_inline_agent_payload(&base, &pubkey);
+        let result = read_agent_payload(&base, &pubkey);
         match result {
-            Err(InlineAgentPayloadError::AgentFileMissingField { field: "nsec", .. }) => {}
+            Err(AgentPayloadError::AgentFileMissingField { field: "nsec", .. }) => {}
             other => panic!("expected MissingField nsec, got {other:?}"),
         }
 

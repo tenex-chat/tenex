@@ -34,7 +34,7 @@ pub struct WorkerLaunchPlanInput<'a> {
     pub triggering_envelope: Value,
     pub execution_flags: AgentWorkerExecutionFlags,
     pub delegation_snapshot: crate::ral_journal::RalDelegationSnapshot,
-    /// Inline executing-agent block (signing key + slug + system prompt + skills + ...).
+    /// Executing agent block (signing key + slug + system prompt + skills + ...).
     /// When `Some`, the worker materializes the agent from this payload and
     /// does not read agent storage from disk.
     pub agent: Option<Value>,
