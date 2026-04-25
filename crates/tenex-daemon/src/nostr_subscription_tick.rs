@@ -6,7 +6,7 @@ use thiserror::Error;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::daemon_signals::{BootedProject, DispatchEnqueued};
+use crate::daemon_signals::{BootedProject, DispatchEnqueued, PublishEnqueued};
 use crate::inbound_runtime::InboundRuntimeOutcome;
 use crate::nostr_classification::DaemonNostrEventClass;
 use crate::nostr_ingress::NostrIngressOutcome;
@@ -37,6 +37,7 @@ pub struct NostrSubscriptionTickInput<'a> {
     pub project_index_changed: Option<Arc<Notify>>,
     pub project_booted_tx: Option<UnboundedSender<BootedProject>>,
     pub dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
+    pub publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -149,6 +150,7 @@ pub fn run_nostr_subscription_intake_tick(
             project_index_changed: input.project_index_changed.clone(),
             project_booted_tx: input.project_booted_tx.clone(),
             dispatch_enqueued_tx: input.dispatch_enqueued_tx.clone(),
+            publish_enqueued_tx: input.publish_enqueued_tx.clone(),
         })
         .map_err(|source| NostrSubscriptionTickError::Ingress {
             frame_index,
@@ -501,6 +503,7 @@ mod tests {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("subscription tick must process");
 
@@ -587,6 +590,7 @@ mod tests {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("subscription tick must process");
 

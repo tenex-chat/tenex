@@ -7,17 +7,19 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::backend_status_runtime::{BackendStatusRuntimeInput, publish_backend_status_from_filesystem};
 pub use crate::backend_status_tick::BACKEND_STATUS_TICK_INTERVAL_SECONDS;
+use crate::daemon_signals::PublishEnqueued;
 
 pub struct BackendStatusDriverDeps {
     pub tenex_base_dir: PathBuf,
     pub daemon_dir: PathBuf,
     pub heartbeat_latch: Option<Arc<Mutex<BackendHeartbeatLatchPlanner>>>,
+    pub publish_enqueued_tx: Option<mpsc::UnboundedSender<PublishEnqueued>>,
 }
 
 pub async fn run_backend_status_driver(
@@ -52,7 +54,11 @@ pub async fn run_backend_status_driver(
                 .await;
 
                 match result {
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(_)) => {
+                        if let Some(ref tx) = deps.publish_enqueued_tx {
+                            let _ = tx.send(PublishEnqueued);
+                        }
+                    }
                     Ok(Err(error)) => {
                         tracing::warn!(
                             error = %error,

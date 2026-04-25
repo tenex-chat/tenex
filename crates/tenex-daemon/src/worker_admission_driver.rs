@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
-use crate::daemon_signals::{DispatchEnqueued, SessionCompletion};
+use crate::daemon_signals::{DispatchEnqueued, PublishEnqueued, SessionCompletion};
 use crate::daemon_worker_runtime::{
     AdmitWorkerDispatchOutcome, DaemonWorkerFilesystemTerminalInput,
     DaemonWorkerLivePublishMaintenance, DaemonWorkerOperationsStatusRuntimeInput,
@@ -52,6 +52,7 @@ pub struct WorkerAdmissionDriverDeps<P> {
     pub retry_policy: PublishOutboxRetryPolicy,
     pub publish_result_sequence: Arc<AtomicU64>,
     pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
+    pub publish_enqueued_tx: Option<mpsc::UnboundedSender<PublishEnqueued>>,
 }
 
 pub async fn run_worker_admission_driver<P>(
@@ -170,6 +171,7 @@ async fn drain_admit_loop<P>(
                 let dispatch_correlation_id =
                     format!("worker-admission-driver:{}:complete-{}", now_ms, admitted_count);
                 let tx = completion_tx.clone();
+                let publish_enqueued_tx_s = deps.publish_enqueued_tx.clone();
 
                 join_set.spawn(async move {
                     let handle = tokio::task::spawn_blocking(move || {
@@ -192,6 +194,7 @@ async fn drain_admit_loop<P>(
                             result_sequence_source: publish_seq_s,
                             result_timestamp: now_ms,
                             telegram_egress: None,
+                            publish_enqueued_tx: publish_enqueued_tx_s,
                         };
 
                         let operations_status = DaemonWorkerOperationsStatusRuntimeInput {

@@ -30,9 +30,7 @@ use tenex_daemon::project_status_descriptors::ProjectStatusDescriptorReport;
 use tenex_daemon::project_status_runtime::{
     ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
-use tenex_daemon::publish_outbox::{
-    PublishOutboxDiagnostics, inspect_publish_outbox,
-};
+use tenex_daemon::publish_outbox::{PublishOutboxDiagnostics, inspect_publish_outbox};
 use tenex_daemon::scheduler_wakeups::{inspect_scheduler_wakeups, run_scheduler_maintenance};
 use tenex_daemon::subscription_runtime::{
     NostrSubscriptionPlan, NostrSubscriptionPlanInput, build_nostr_subscription_plan,

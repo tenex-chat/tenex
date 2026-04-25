@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use thiserror::Error;
@@ -31,6 +32,7 @@ use crate::project_agent_whitelist::ingress::WhitelistIngress;
 use crate::project_agent_whitelist::reconciler::{ReconcilerDeps, run_reconciler_loop};
 use crate::project_agent_whitelist::snapshot_state::SnapshotState;
 use crate::project_agent_whitelist::trigger_source::AgentInventoryPoller;
+use crate::daemon_signals::PublishEnqueued;
 use crate::publish_outbox::cancel_pending_publish_outbox_records_matching;
 
 /// Debounce window applied to the reconciler trigger channel.
@@ -116,6 +118,7 @@ pub fn build_whitelist_wiring(
     tenex_base_dir: &Path,
     daemon_dir: &Path,
     runtime_handle: &tokio::runtime::Handle,
+    publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
 ) -> Result<Option<WhitelistWiring>, WhitelistWiringError> {
     let config = read_backend_config(tenex_base_dir)
         .map_err(|error| WhitelistWiringError::BackendConfig(error.to_string()))?;
@@ -135,8 +138,11 @@ pub fn build_whitelist_wiring(
     cancel_stale_nip46_publish_requests(daemon_dir, &backend_pubkey)?;
 
     let pending = PendingNip46Requests::default();
-    let outbox_adapter = Arc::new(PublishOutboxAdapter::new(daemon_dir.to_path_buf()));
-    let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = outbox_adapter;
+    let mut outbox_adapter = PublishOutboxAdapter::new(daemon_dir.to_path_buf());
+    if let Some(tx) = publish_enqueued_tx {
+        outbox_adapter = outbox_adapter.with_publish_enqueued_tx(tx);
+    }
+    let outbox_handle: Arc<dyn PublishOutboxHandle + Send + Sync> = Arc::new(outbox_adapter);
 
     let nip46_registry = Arc::new(NIP46Registry::new(
         Arc::clone(&backend_signer),
@@ -350,7 +356,7 @@ mod tests {
         write_backend_config(&tenex_base_dir, &[owner]);
 
         let runtime_handle = tokio::runtime::Handle::current();
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle, None)
             .expect("wiring must build")
             .expect("non-empty whitelist must produce wiring");
 

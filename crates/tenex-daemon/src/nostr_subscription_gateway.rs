@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tungstenite::Message;
 use url::Url;
 
-use crate::daemon_signals::{BootedProject, DispatchEnqueued};
+use crate::daemon_signals::{BootedProject, DispatchEnqueued, PublishEnqueued};
 use crate::nostr_classification::DaemonNostrEventClass;
 use crate::nostr_subscription_tick::{
     NostrSubscriptionTickDiagnostics, NostrSubscriptionTickDispatch, NostrSubscriptionTickError,
@@ -61,6 +61,7 @@ pub struct NostrSubscriptionGatewayConfig {
     pub project_index_changed: Option<Arc<tokio::sync::Notify>>,
     pub project_booted_tx: Option<tokio::sync::mpsc::UnboundedSender<BootedProject>>,
     pub dispatch_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<DispatchEnqueued>>,
+    pub publish_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<PublishEnqueued>>,
 }
 
 impl NostrSubscriptionGatewayConfig {
@@ -80,6 +81,7 @@ impl NostrSubscriptionGatewayConfig {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         }
     }
 
@@ -342,6 +344,7 @@ async fn run_relay_loop_async(
                 project_index_changed: config.project_index_changed.clone(),
                 project_booted_tx: config.project_booted_tx.clone(),
                 dispatch_enqueued_tx: config.dispatch_enqueued_tx.clone(),
+                publish_enqueued_tx: config.publish_enqueued_tx.clone(),
             }) => result,
         };
 
@@ -395,6 +398,7 @@ pub struct NostrSubscriptionRelayInput<'a> {
     pub project_index_changed: Option<Arc<tokio::sync::Notify>>,
     pub project_booted_tx: Option<tokio::sync::mpsc::UnboundedSender<BootedProject>>,
     pub dispatch_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<DispatchEnqueued>>,
+    pub publish_enqueued_tx: Option<tokio::sync::mpsc::UnboundedSender<PublishEnqueued>>,
 }
 
 impl fmt::Debug for NostrSubscriptionRelayInput<'_> {
@@ -535,6 +539,7 @@ async fn run_nostr_subscription_relay_once_async(
                     project_index_changed: input.project_index_changed.clone(),
                     project_booted_tx: input.project_booted_tx.clone(),
                     dispatch_enqueued_tx: input.dispatch_enqueued_tx.clone(),
+                    publish_enqueued_tx: input.publish_enqueued_tx.clone(),
                 })?;
                 if let Some(observer) = input.observer {
                     observer.on_tick(input.relay_url, &tick);
@@ -987,6 +992,7 @@ mod tests {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("relay subscription must drain");
 
@@ -1059,6 +1065,7 @@ mod tests {
             project_booted_tx: None,
             observer: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("relay subscription must authenticate and drain");
 

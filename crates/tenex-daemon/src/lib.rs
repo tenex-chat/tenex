@@ -75,6 +75,7 @@ pub mod project_status_sources;
 pub mod project_worktrees;
 pub mod providers_config;
 pub mod publish_outbox;
+pub mod publish_outbox_driver;
 pub mod publish_runtime;
 pub mod ral_journal;
 pub mod ral_lock;

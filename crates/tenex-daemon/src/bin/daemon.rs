@@ -15,6 +15,7 @@ use tenex_daemon::intervention_driver::{
 use tenex_daemon::project_status_driver::{ProjectStatusDriverDeps, run_project_status_supervisor};
 use tenex_daemon::telegram_outbox_driver::{TelegramOutboxDriverDeps, run_telegram_outbox_driver};
 use tenex_daemon::scheduled_task_driver::{ScheduledTaskDriverDeps, run_scheduled_task_supervisor};
+use tenex_daemon::publish_outbox_driver::{PublishOutboxDriverDeps, run_publish_outbox_driver};
 use tenex_daemon::worker_admission_driver::{WorkerAdmissionDriverDeps, run_worker_admission_driver};
 use tenex_daemon::daemon_shell::{DaemonShell, DaemonShellStopMode};
 use tenex_daemon::nip46::protocol::NIP46_KIND;
@@ -147,8 +148,17 @@ where
         &runtime_handle,
     )?));
 
-    let whitelist_wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
-        .map_err(|error| runtime_error(error.to_string()))?;
+    // Create the process-wide signal bus before wiring any drivers so every
+    // subsystem can clone senders from `signals` at construction time.
+    let (signals, receivers) = create_daemon_signals();
+
+    let whitelist_wiring = build_whitelist_wiring(
+        &tenex_base_dir,
+        &daemon_dir,
+        &runtime_handle,
+        Some(signals.publish_enqueued_tx.clone()),
+    )
+    .map_err(|error| runtime_error(error.to_string()))?;
     if let Some(wiring) = &whitelist_wiring {
         let owners = wiring
             .reconciler_owners
@@ -163,15 +173,12 @@ where
     ));
     run_worker_startup_recovery(&daemon_dir)?;
 
-    // Create the process-wide signal bus. Extract the receivers that are
-    // consumed by driver tasks; remaining receivers are dropped (senders
-    // silently discard items when no receiver exists).
-    let (signals, receivers) = create_daemon_signals();
     let project_booted_rx = receivers.project_booted_rx;
     let ral_completed_rx = receivers.ral_completed_rx;
     let telegram_enqueued_rx = receivers.telegram_enqueued_rx;
     let dispatch_enqueued_rx = receivers.dispatch_enqueued_rx;
     let session_completed_rx = receivers.session_completed_rx;
+    let publish_enqueued_rx = receivers.publish_enqueued_rx;
 
     // Fan-out BootedProject to the project-status supervisor and the
     // scheduled-task supervisor. A single sender (project_booted_tx) is wired
@@ -233,6 +240,7 @@ where
             tenex_base_dir: tenex_base_dir.clone(),
             daemon_dir: daemon_dir.clone(),
             heartbeat_latch: heartbeat_latch.clone(),
+            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
         },
         backend_status_shutdown_rx,
     ));
@@ -246,6 +254,7 @@ where
         ProjectStatusDriverDeps {
             tenex_base_dir: tenex_base_dir.clone(),
             daemon_dir: daemon_dir.clone(),
+            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
         },
         project_status_boot_rx,
         project_status_shutdown_rx,
@@ -288,6 +297,7 @@ where
             tenex_base_dir: tenex_base_dir.clone(),
             daemon_dir: daemon_dir.clone(),
             project_event_index: Arc::clone(&project_event_index),
+            publish_enqueued_tx: None,
         },
         ral_completed_rx,
         Arc::clone(&signals.project_index_changed),
@@ -299,6 +309,7 @@ where
             tenex_base_dir: tenex_base_dir.clone(),
             daemon_dir: daemon_dir.clone(),
             project_event_index: Arc::clone(&project_event_index),
+            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
         },
         armed_notify,
         intervention_fire_shutdown_rx,
@@ -319,6 +330,22 @@ where
         },
         telegram_enqueued_rx,
         telegram_outbox_shutdown_rx,
+    ));
+
+    // Spawn the publish-outbox driver. Woken by `publish_enqueued_rx` signals
+    // from every site that writes a record into the pending outbox, plus an
+    // internal retry timer for transient relay failures. Replaces the central
+    // tick's maintain_publish_runtime call.
+    let (publish_outbox_shutdown_tx, publish_outbox_shutdown_rx) =
+        tokio::sync::watch::channel(false);
+    let publish_outbox_driver_handle = runtime_handle.spawn(run_publish_outbox_driver(
+        PublishOutboxDriverDeps {
+            daemon_dir: daemon_dir.clone(),
+            publisher: Arc::clone(&publisher),
+            retry_policy: PublishOutboxRetryPolicy::default(),
+        },
+        publish_enqueued_rx,
+        publish_outbox_shutdown_rx,
     ));
 
     tenex_daemon::stdout_status::print_daemon_ready(
@@ -353,6 +380,7 @@ where
             retry_policy: PublishOutboxRetryPolicy::default(),
             publish_result_sequence,
             project_event_index: Arc::clone(&project_event_index),
+            publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
         },
         dispatch_enqueued_rx,
         session_completed_rx,
@@ -405,13 +433,15 @@ where
         });
     }
 
-    // Stop the backend-status, project-status, and scheduled-task drivers and
-    // join their tasks. Also abort the boot fan-out task.
+    // Stop the backend-status, project-status, scheduled-task, intervention,
+    // telegram-outbox, and publish-outbox drivers and join their tasks.
+    // Also abort the boot fan-out task.
     let _ = backend_status_shutdown_tx.send(true);
     let _ = project_status_shutdown_tx.send(true);
     let _ = scheduled_task_shutdown_tx.send(true);
     let _ = intervention_shutdown_tx.send(true);
     let _ = telegram_outbox_shutdown_tx.send(true);
+    let _ = publish_outbox_shutdown_tx.send(true);
     boot_fanout_handle.abort();
     runtime_handle.block_on(async {
         let _ = backend_status_driver_handle.await;
@@ -420,6 +450,7 @@ where
         let _ = intervention_arm_handle.await;
         let _ = intervention_fire_handle.await;
         let _ = telegram_outbox_driver_handle.await;
+        let _ = publish_outbox_driver_handle.await;
     });
 
     // Stop the schedule file watcher OS thread.
@@ -1098,35 +1129,11 @@ mod tests {
 
     use secp256k1::{Keypair, Secp256k1, SecretKey};
     use tenex_daemon::backend_config::backend_config_path;
-    use tenex_daemon::nostr_event::SignedNostrEvent;
-    use tenex_daemon::publish_outbox::{
-        PublishOutboxRelayPublisher, PublishRelayError, PublishRelayReport, PublishRelayResult,
-    };
     use tenex_daemon::whitelist_wiring::reload_whitelist_wiring;
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     const TEST_SECRET_KEY_HEX: &str =
         "0101010101010101010101010101010101010101010101010101010101010101";
 
-    #[derive(Debug, Default)]
-    struct RecordingPublisher {
-        published_event_ids: Vec<String>,
-    }
-
-    impl PublishOutboxRelayPublisher for RecordingPublisher {
-        fn publish_signed_event(
-            &mut self,
-            event: &SignedNostrEvent,
-        ) -> Result<PublishRelayReport, PublishRelayError> {
-            self.published_event_ids.push(event.id.clone());
-            Ok(PublishRelayReport {
-                relay_results: vec![PublishRelayResult {
-                    relay_url: "wss://relay.one".to_string(),
-                    accepted: true,
-                    message: None,
-                }],
-            })
-        }
-    }
 
     #[test]
     fn parses_daemon_args_with_tenex_base_dir() {
@@ -1271,7 +1278,7 @@ mod tests {
         .expect("config must write");
 
         let runtime_handle = tokio::runtime::Handle::current();
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle, None)
             .expect("wiring construction must succeed");
         assert!(wiring.is_none());
 
@@ -1301,7 +1308,7 @@ mod tests {
         .expect("config must write");
 
         let runtime_handle = tokio::runtime::Handle::current();
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle, None)
             .expect("wiring construction must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -1403,7 +1410,7 @@ mod tests {
         write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
 
         let runtime_handle = tokio::runtime::Handle::current();
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle, None)
             .expect("wiring build must succeed")
             .expect("non-empty whitelist must produce wiring");
 
@@ -1486,7 +1493,7 @@ mod tests {
         write_whitelist_config(&tenex_base_dir, std::slice::from_ref(&owner_initial));
 
         let runtime_handle = tokio::runtime::Handle::current();
-        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle)
+        let wiring = build_whitelist_wiring(&tenex_base_dir, &daemon_dir, &runtime_handle, None)
             .expect("wiring build must succeed")
             .expect("non-empty whitelist must produce wiring");
 

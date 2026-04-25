@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::daemon_signals::PublishEnqueued;
 use crate::nip46::client::PublishOutboxHandle;
 use crate::nostr_event::SignedNostrEvent;
 use crate::publish_outbox::{BackendPublishOutboxInput, accept_backend_signed_publish_event};
@@ -12,11 +15,20 @@ const NIP46_OUTBOX_CONVERSATION_ID: &str = "nip46";
 
 pub struct PublishOutboxAdapter {
     pub outbox_root: PathBuf,
+    pub publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
 }
 
 impl PublishOutboxAdapter {
     pub fn new(outbox_root: PathBuf) -> Self {
-        Self { outbox_root }
+        Self {
+            outbox_root,
+            publish_enqueued_tx: None,
+        }
+    }
+
+    pub fn with_publish_enqueued_tx(mut self, tx: UnboundedSender<PublishEnqueued>) -> Self {
+        self.publish_enqueued_tx = Some(tx);
+        self
     }
 }
 
@@ -42,7 +54,11 @@ impl PublishOutboxHandle for PublishOutboxAdapter {
         };
 
         accept_backend_signed_publish_event(&self.outbox_root, input, accepted_at)
-            .map(|_| ())
+            .map(|_| {
+                if let Some(ref tx) = self.publish_enqueued_tx {
+                    let _ = tx.send(PublishEnqueued);
+                }
+            })
             .map_err(|err| err.to_string())
     }
 }

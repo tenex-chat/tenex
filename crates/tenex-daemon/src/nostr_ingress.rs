@@ -16,7 +16,7 @@ use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_agent_config,
 };
 use crate::backend_events::installed_agent_list::AgentConfigInputs;
-use crate::daemon_signals::{BootedProject, DispatchEnqueued};
+use crate::daemon_signals::{BootedProject, DispatchEnqueued, PublishEnqueued};
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
     resolve_and_enqueue_inbound_dispatch,
@@ -54,6 +54,9 @@ pub struct NostrIngressInput<'a> {
     /// Signal that a new dispatch was appended to the queue. `None` in tests
     /// that don't need signal wiring.
     pub dispatch_enqueued_tx: Option<UnboundedSender<DispatchEnqueued>>,
+    /// Signal that a new record was appended to the publish outbox. `None` in
+    /// tests that don't need signal wiring.
+    pub publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -336,6 +339,9 @@ fn republish_agent_config_after_update(
         },
         &signer,
     )?;
+    if let Some(ref tx) = input.publish_enqueued_tx {
+        let _ = tx.send(PublishEnqueued);
+    }
     cache.record_published(&snapshot.agent_pubkey, &hash, accepted_at);
     // Writing the cache is best-effort — on disk failure the next
     // ingress just republishes. Worth logging but not worth aborting.
@@ -456,6 +462,7 @@ mod tests {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -494,6 +501,7 @@ mod tests {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -542,6 +550,7 @@ mod tests {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 
@@ -605,6 +614,7 @@ mod tests {
             project_index_changed: None,
             project_booted_tx: None,
             dispatch_enqueued_tx: None,
+            publish_enqueued_tx: None,
         })
         .expect("nostr ingress must process");
 

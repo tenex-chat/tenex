@@ -4,8 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 use thiserror::Error;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::backend_config::Nip46Config;
+use crate::daemon_signals::PublishEnqueued;
 use crate::dispatch_queue::DispatchQueueState;
 use crate::nip46::registry::NIP46Registry;
 use crate::ral_journal::{
@@ -70,6 +72,7 @@ pub struct WorkerMessagePublishContext<'a> {
     pub result_sequence_source: Arc<AtomicU64>,
     pub result_timestamp: u64,
     pub telegram_egress: Option<WorkerTelegramEgressContext<'a>>,
+    pub publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
 }
 
 #[derive(Debug)]
@@ -225,6 +228,7 @@ where
             let result_sequence = publish
                 .result_sequence_source
                 .fetch_add(1, Ordering::Relaxed);
+            let publish_enqueued_tx = publish.publish_enqueued_tx.clone();
             let outcome = handle_worker_publish_request(
                 session,
                 WorkerPublishFlowInput {
@@ -237,6 +241,12 @@ where
                 },
             )
             .map_err(WorkerMessageFlowError::from)?;
+
+            if outcome.acceptance.egress.as_nostr().is_some() {
+                if let Some(ref tx) = publish_enqueued_tx {
+                    let _ = tx.send(PublishEnqueued);
+                }
+            }
 
             Ok(WorkerMessageFlowOutcome::PublishRequestHandled {
                 outcome: Box::new(outcome),
@@ -889,6 +899,7 @@ mod tests {
                     result_sequence_source: Arc::new(AtomicU64::new(900)),
                     result_timestamp: 1_710_001_000_200,
                     telegram_egress: None,
+                    publish_enqueued_tx: None,
                 }),
                 nip46_publish: None,
                 terminal: None,

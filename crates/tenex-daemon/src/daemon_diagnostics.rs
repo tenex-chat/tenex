@@ -1012,6 +1012,7 @@ mod tests {
                     result_sequence_source: Arc::new(AtomicU64::new(900)),
                     result_timestamp: 1_710_001_000_100,
                     telegram_egress: None,
+                    publish_enqueued_tx: None,
                 }),
             ),
         )

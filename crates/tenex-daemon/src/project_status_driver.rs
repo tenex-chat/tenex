@@ -12,12 +12,13 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::backend_events_tick::PROJECT_STATUS_TICK_INTERVAL_SECONDS;
-use crate::daemon_signals::BootedProject;
+use crate::daemon_signals::{BootedProject, PublishEnqueued};
 use crate::project_status_runtime::{ProjectStatusRuntimeInput, publish_project_status_from_filesystem};
 
 pub struct ProjectStatusDriverDeps {
     pub tenex_base_dir: PathBuf,
     pub daemon_dir: PathBuf,
+    pub publish_enqueued_tx: Option<mpsc::UnboundedSender<PublishEnqueued>>,
 }
 
 /// Outer supervisor. Awaits `project_booted_rx` and spawns/replaces a
@@ -49,6 +50,7 @@ pub async fn run_project_status_supervisor(
                     deps.daemon_dir.clone(),
                     booted.project_owner_pubkey,
                     booted.project_d_tag,
+                    deps.publish_enqueued_tx.clone(),
                     shutdown_rx.clone(),
                 ));
                 tasks.insert(key, task);
@@ -72,6 +74,7 @@ async fn run_project_status_task(
     daemon_dir: PathBuf,
     project_owner_pubkey: String,
     project_d_tag: String,
+    publish_enqueued_tx: Option<mpsc::UnboundedSender<PublishEnqueued>>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let interval = Duration::from_secs(PROJECT_STATUS_TICK_INTERVAL_SECONDS);
@@ -107,7 +110,11 @@ async fn run_project_status_task(
                 .await;
 
                 match result {
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(_)) => {
+                        if let Some(ref tx) = publish_enqueued_tx {
+                            let _ = tx.send(PublishEnqueued);
+                        }
+                    }
                     Ok(Err(error)) => {
                         tracing::warn!(
                             project_owner = %project_owner_pubkey,

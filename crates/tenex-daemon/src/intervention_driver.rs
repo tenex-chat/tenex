@@ -25,11 +25,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Notify, mpsc, watch};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::Instant;
 
 use crate::backend_config::read_backend_config;
 use crate::DAEMON_WRITER_VERSION;
-use crate::daemon_signals::RalCompletion;
+use crate::daemon_signals::{PublishEnqueued, RalCompletion};
 use crate::intervention::{arm_from_journal, fire_due_reviews_now, next_intervention_wakeup_at};
 use crate::project_event_index::ProjectEventIndex;
 
@@ -37,6 +38,7 @@ pub struct InterventionDriverDeps {
     pub tenex_base_dir: PathBuf,
     pub daemon_dir: PathBuf,
     pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
+    pub publish_enqueued_tx: Option<UnboundedSender<PublishEnqueued>>,
 }
 
 /// Arm driver: catches up at startup, then re-arms on `RalCompletion` signals
@@ -133,11 +135,18 @@ pub async fn run_intervention_fire_driver(
                 next_at = compute_next_fire_instant(&deps.daemon_dir);
             }
             _ = sleep_until_optional(next_at) => {
-                if let Err(error) = run_fire_pass(&deps) {
-                    tracing::warn!(
-                        error = %error,
-                        "intervention fire driver: fire pass failed",
-                    );
+                match run_fire_pass(&deps) {
+                    Ok(()) => {
+                        if let Some(ref tx) = deps.publish_enqueued_tx {
+                            let _ = tx.send(PublishEnqueued);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            error = %error,
+                            "intervention fire driver: fire pass failed",
+                        );
+                    }
                 }
                 next_at = compute_next_fire_instant(&deps.daemon_dir);
             }
