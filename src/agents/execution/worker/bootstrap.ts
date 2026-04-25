@@ -15,6 +15,7 @@ import { config } from "@/services/ConfigService";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { ProjectContext, projectContextStore } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
+import { DelegationJournalReader } from "@/services/ral/DelegationJournalReader";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { NDKPrivateKeySigner, NDKProject, type NDKEvent } from "@nostr-dev-kit/ndk";
 import {
@@ -167,6 +168,7 @@ export async function runOneExecution(
     return await projectContextStore.run(scope.projectContext, async () => {
         await ensureTriggeringEnvelopeStored(message);
         const workerRalClaim = seedWorkerRalBridge(message);
+        seedDelegationSnapshotOverlay(message);
 
         await emit({
             type: "execution_started",
@@ -282,6 +284,53 @@ async function ensureTriggeringEnvelopeStored(message: ExecuteMessage): Promise<
     }
 
     await ConversationStore.addEnvelope(message.conversationId, message.triggeringEnvelope);
+}
+
+/**
+ * Push the daemon-supplied delegationSnapshot into the in-process
+ * DelegationJournalReader overlay so the system reminder builder sees
+ * pending and completed delegations for the resuming agent. Without this,
+ * a parent agent that resumes after a delegation completes has empty
+ * delegation state — the `<delegations>` system reminder never fires —
+ * and the agent re-runs its initial logic instead of producing a final
+ * answer.
+ *
+ * The Rust daemon ships the authoritative snapshot in every execute
+ * message; the worker journal reader consumes it as a session-local
+ * overlay (it is not persisted to the file-backed journal because the
+ * daemon already owns that).
+ */
+function seedDelegationSnapshotOverlay(message: ExecuteMessage): void {
+    const snapshot = message.delegationSnapshot;
+    if (!snapshot) {
+        return;
+    }
+    const reader = DelegationJournalReader.getInstance();
+    const projectId = message.projectId;
+    const agentPubkey = message.agentPubkey;
+    const conversationId = message.conversationId;
+    const ralNumber = message.ralNumber;
+
+    for (const pending of snapshot.pendingDelegations ?? []) {
+        reader.appendOverlay({
+            event: "delegation_registered",
+            projectId,
+            agentPubkey,
+            conversationId,
+            ralNumber,
+            pendingDelegation: pending,
+        });
+    }
+    for (const completed of snapshot.completedDelegations ?? []) {
+        reader.appendOverlay({
+            event: "delegation_completed",
+            projectId,
+            agentPubkey,
+            conversationId,
+            ralNumber,
+            completion: completed,
+        });
+    }
 }
 
 function buildWorkerProjectFromInventory(

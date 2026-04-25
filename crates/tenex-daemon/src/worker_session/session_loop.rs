@@ -178,13 +178,37 @@ where
                 if let WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error } =
                     &outcome.result_delivery
                 {
-                    return finish_terminal_publish_after_closed_worker_pipe(
-                        worker,
-                        &mut input,
-                        frame_count,
-                        &outcome,
-                        error,
+                    let runtime_event_class = outcome
+                        .message_plan
+                        .message
+                        .get("runtimeEventClass")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<missing>");
+                    if runtime_event_class == "complete" {
+                        return finish_terminal_publish_after_closed_worker_pipe(
+                            worker,
+                            &mut input,
+                            frame_count,
+                            &outcome,
+                            error,
+                        );
+                    }
+                    // Worker is fire-and-forget for non-terminal classes (per
+                    // commit 22ee6bcc): the worker may publish a stream_text_delta,
+                    // a conversation update, an error event, etc. and exit before
+                    // the daemon sends back publish_result. That's not a session
+                    // failure — the daemon already accepted the event and routed
+                    // it to the relay. Skip the unsendable send-back and continue
+                    // reading any frames the worker queued before exit; the loop
+                    // exits cleanly when receive_worker_frame returns EOF or the
+                    // terminal frame arrives.
+                    tracing::debug!(
+                        worker_id = %input.worker_id,
+                        runtime_event_class = %runtime_event_class,
+                        error = %error,
+                        "worker pipe closed after fire-and-forget publish acceptance; continuing to drain remaining frames"
                     );
+                    continue;
                 }
                 send_pending_worker_injections(worker, &input)?;
                 send_pending_stop_request(worker, &input)?;

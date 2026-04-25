@@ -80,6 +80,14 @@ class AgentWorkerSession {
                 if (shutdownRequested) {
                     this.nip46Results.rejectAll(new Error("worker shutdown requested"));
                 }
+                // Before returning we MUST drain the stdout writable buffer.
+                // Without this, the terminal frame (or any tail-end emit) can
+                // sit in Node's writable queue while process.exit cuts off the
+                // pipe mid-frame. The daemon then sees
+                // "worker frame receive failed: failed to fill whole buffer"
+                // and marks the session failed even though the worker did
+                // its job correctly.
+                await drainProcessStdoutInline();
                 return;
             }
 
@@ -476,7 +484,77 @@ async function exitWithTelemetryFlush(code: number): Promise<never> {
     } catch {
         // Swallow shutdown errors so the worker always exits with the intended code.
     }
+    // Drain stdout before exiting. process.exit terminates immediately and the
+    // daemon reads stdout until EOF; without an explicit drain a partially
+    // buffered protocol frame can be cut mid-byte, manifesting daemon-side as
+    // "worker frame receive failed: failed to fill whole buffer". The
+    // daemon's frame decoder cannot recover from a half-frame.
+    await drainProcessStdout();
     process.exit(code);
+}
+
+// Capture the *real* process.stdout.write before installProcessStdoutSuppressor
+// replaces it with a no-op. We need this to drain the underlying pipe before
+// process.exit; the suppressed write only queues a microtask callback and does
+// not actually wait for the pipe to flush.
+const realStdoutWrite = process.stdout.write.bind(process.stdout);
+
+async function drainProcessStdoutInline(): Promise<void> {
+    // Wait for the writable stream's internal queue to fully drain into the
+    // underlying pipe. Used at end-of-run before returning so the terminal
+    // frame is in the kernel pipe buffer before process.exit closes the FD.
+    //
+    // The process.exit() docs warn it "may not flush pending writes to
+    // process.stdout", which manifests daemon-side as
+    // "worker frame receive failed: failed to fill whole buffer" when the
+    // tail of a frame gets cut off. We use a small Buffer write whose
+    // callback only fires after libuv has accepted the write into the
+    // kernel pipe, which guarantees the prior queued frames are also flushed
+    // (Node serializes pipe writes).
+    const stdout = process.stdout as unknown as {
+        writableLength?: number;
+        writableNeedDrain?: boolean;
+    };
+    if ((stdout.writableLength ?? 0) > 0 || stdout.writableNeedDrain === true) {
+        await new Promise<void>((resolve) => {
+            realStdoutWrite(Buffer.alloc(0), () => resolve());
+        });
+    }
+    // After the userland buffer is empty, the libuv write to the OS pipe is
+    // complete. Wait one tick to allow any followup writes (e.g. fsync hooks)
+    // to settle before returning.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function drainProcessStdout(): Promise<void> {
+    // process.exit() force-terminates; per the Node docs it "may not flush
+    // pending writes to process.stdout". The worker emits its terminal frame
+    // (waiting_for_delegation, complete, no_response, error) just before
+    // returning from run(); a partial flush would manifest daemon-side as
+    // "worker frame receive failed: failed to fill whole buffer". To prevent
+    // that we (1) wait for the stdout writable buffer to fully drain, then
+    // (2) end the stream so the OS sees a clean EOF instead of a kill.
+    return new Promise<void>((resolve) => {
+        const stdout = process.stdout;
+        const finish = () => {
+            // End signals EOF to the parent's read end. After end, process.exit
+            // is safe — there is nothing left to flush.
+            try {
+                stdout.end(() => resolve());
+            } catch {
+                resolve();
+            }
+        };
+        if (stdout.writableLength === 0) {
+            finish();
+            return;
+        }
+        // Empty write with a callback fires after the current write queue
+        // drains; the callback runs when the kernel pipe has accepted the
+        // bytes (not when the daemon has read them, but that's OK — the OS
+        // pipe buffer carries them across).
+        realStdoutWrite("", () => finish());
+    });
 }
 
 new AgentWorkerSession()
