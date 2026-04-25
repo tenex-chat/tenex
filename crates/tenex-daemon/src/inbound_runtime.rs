@@ -19,6 +19,7 @@ use crate::inbound_routing::{
     InboundRoutingCatalogError, InboundRoutingInput, build_inbound_routing_catalog,
     resolve_inbound_route,
 };
+use crate::project_boot_state::{ProjectBootState, is_project_booted};
 use crate::project_event_index::ProjectEventIndex;
 use crate::ral_journal::{RalCompletedDelegation, RalJournalError, RalReplayStatus};
 use crate::ral_scheduler::{
@@ -39,6 +40,7 @@ pub struct InboundRuntimeInput<'a> {
     pub timestamp: u64,
     pub writer_version: &'a str,
     pub project_event_index: &'a Arc<Mutex<ProjectEventIndex>>,
+    pub project_boot_state: Option<&'a Arc<Mutex<ProjectBootState>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -130,6 +132,34 @@ pub fn resolve_and_enqueue_inbound_dispatch(
     match resolution {
         InboundRouteResolution::Ignored { reason } => Ok(InboundRuntimeOutcome::Ignored { reason }),
         InboundRouteResolution::Routed { route } => {
+            if let Some(boot_state) = input.project_boot_state {
+                let owner_pubkey = catalog
+                    .projects
+                    .iter()
+                    .find(|project| project.project_id == route.project_id)
+                    .map(|project| project.owner_pubkey.clone())
+                    .unwrap_or_default();
+                let snapshot = boot_state
+                    .lock()
+                    .expect("project boot state mutex must not be poisoned")
+                    .snapshot();
+                if !is_project_booted(&snapshot, &owner_pubkey, &route.project_id) {
+                    tracing::info!(
+                        project_id = %route.project_id,
+                        triggering_event_id = %input.envelope.message.native_id,
+                        "inbound dispatch ignored: project not booted"
+                    );
+                    return Ok(InboundRuntimeOutcome::Ignored {
+                        reason: InboundRouteIgnoredReason {
+                            code: "project_not_booted".to_string(),
+                            project_id: Some(route.project_id),
+                            pubkeys: vec![route.agent_pubkey],
+                            detail: "project has not received a kind:24000 boot event; inbound dispatch suppressed until booted".to_string(),
+                        },
+                    });
+                }
+            }
+
             let dispatch = enqueue_inbound_dispatch(InboundDispatchEnqueueInput {
                 daemon_dir: input.daemon_dir,
                 project: route.dispatch_project(),
@@ -359,6 +389,7 @@ mod tests {
             timestamp: 1_710_000_700_000,
             writer_version: "inbound-runtime-test@0",
             project_event_index: &project_event_index,
+            project_boot_state: None,
         })
         .expect("inbound runtime must enqueue");
 
@@ -426,6 +457,7 @@ mod tests {
             timestamp: 1_710_000_700_001,
             writer_version: "inbound-runtime-test@0",
             project_event_index: &project_event_index,
+            project_boot_state: None,
         })
         .expect("inbound runtime must resolve");
 
@@ -438,6 +470,46 @@ mod tests {
         let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert!(queue.queued.is_empty());
         assert!(!daemon_dir.join("workers").exists());
+    }
+
+    #[test]
+    fn inbound_dispatch_ignored_when_project_not_booted() {
+        let temp_dir = tempdir().expect("temp dir must create");
+        let base_dir = temp_dir.path();
+        let daemon_dir = base_dir.join("daemon");
+        let owner = pubkey_hex(0x15);
+        let agent = pubkey_hex(0x25);
+        let project_event_index = fresh_project_event_index();
+
+        write_backend_config(base_dir, "/repo");
+        write_project(base_dir, &project_event_index, "project-epsilon", &owner);
+        write_agent_index(base_dir, "project-epsilon", &[&agent]);
+        write_agent(base_dir, &agent, "epsilon-agent");
+
+        // project_boot_state provided but empty — project is known but not booted
+        let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
+
+        let envelope = nostr_envelope(&agent, "event-epsilon");
+        let outcome = resolve_and_enqueue_inbound_dispatch(InboundRuntimeInput {
+            daemon_dir: &daemon_dir,
+            tenex_base_dir: base_dir,
+            envelope: &envelope,
+            timestamp: 1_710_000_700_002,
+            writer_version: "inbound-runtime-test@0",
+            project_event_index: &project_event_index,
+            project_boot_state: Some(&project_boot_state),
+        })
+        .expect("inbound runtime must resolve");
+
+        let InboundRuntimeOutcome::Ignored { reason } = outcome else {
+            panic!("expected ignored outcome; project not booted must suppress dispatch");
+        };
+        assert_eq!(reason.code, "project_not_booted");
+        assert_eq!(reason.project_id.as_deref(), Some("project-epsilon"));
+        assert_eq!(reason.pubkeys, vec![agent]);
+
+        let queue = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert!(queue.queued.is_empty(), "unbooted project must not produce a queued dispatch");
     }
 
     #[test]
@@ -491,6 +563,7 @@ mod tests {
             timestamp: 1_710_000_900_000,
             writer_version: "inbound-runtime-test@0",
             project_event_index: &project_event_index,
+            project_boot_state: None,
         })
         .expect("delegation completion must route");
 
@@ -617,6 +690,7 @@ mod tests {
             timestamp: 1_710_000_901_000,
             writer_version: "inbound-runtime-test@0",
             project_event_index: &project_event_index,
+            project_boot_state: None,
         })
         .expect("delegation completion must route");
 

@@ -264,6 +264,7 @@ pub fn process_verified_nostr_event(
         timestamp: input.timestamp,
         writer_version: input.writer_version,
         project_event_index: input.project_event_index,
+        project_boot_state: input.project_boot_state,
     })?;
 
     // Signal the admission driver that a new dispatch may be ready.

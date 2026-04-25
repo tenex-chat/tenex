@@ -11,23 +11,6 @@
 #
 # Expected (per docs/E2E_TEST_SCENARIOS.md §1.1):
 #   - Inbound is ignored with reason `project_not_booted`; no dispatch queued.
-#
-# Observed reality in this daemon build:
-#   - The daemon has a `ProjectBootState` but the inbound dispatch path does NOT
-#     consult it. Boot state only gates kind 24010 project-status publishing
-#     (see daemon_maintenance.rs::filter_booted_project_descriptors). The
-#     `no_project_match` / `no_project_agent_recipient` codes exist, but no
-#     `project_not_booted` code exists anywhere in the tree.
-#
-# This scenario therefore asserts on observable facts:
-#   1. The daemon does NOT publish kind 24010 for the unbooted project
-#      (the only enforced boot gate we have).
-#   2. Whether a kind:1 dispatch is queued is recorded but is not an assertion
-#      — either outcome is documented in the scenario log.
-#
-# When the daemon grows a boot gate on dispatch, strengthen this test by
-# asserting `assert_no_dispatch` and an `inbound nostr event ignored` log line
-# carrying `code=project_not_booted`.
 
 set -euo pipefail
 
@@ -113,25 +96,28 @@ if [[ -n "$events_24010" ]] && [[ "$events_24010" != "[]" ]]; then
 fi
 echo "[scenario]   no 24010 published for unbooted project ✓"
 
-# Assertion 2: whatever the dispatch path did, we observe + log it honestly.
+# Assertion 2: the daemon log must contain a project_not_booted ignored entry
+# for our message id — this is the real boot gate check.
+log="$DAEMON_DIR/daemon.log"
+if [[ ! -f "$log" ]]; then
+  _die "ASSERT: daemon.log does not exist"
+fi
+if ! grep -q "project_not_booted" "$log"; then
+  echo "[scenario] daemon log (last 40 lines):"
+  tail -40 "$log" >&2 || true
+  _die "ASSERT: daemon log does not contain project_not_booted — boot gate not enforced"
+fi
+echo "[scenario]   daemon log contains project_not_booted ignored entry ✓"
+
+# Assertion 3: no dispatch must be queued for the unbooted project's message.
 queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
 if [[ -f "$queue" ]] && jq -e --arg e "$user_msg_id" \
      '(.triggeringEventId // .triggering_event_id) == $e' "$queue" >/dev/null 2>&1; then
-  echo "[scenario]   NOTE: dispatch queued despite project being unbooted."
-  echo "[scenario]         (daemon does not currently gate dispatch on boot state;"
-  echo "[scenario]          the docs project_not_booted code is not implemented.)"
-else
-  echo "[scenario]   dispatch not queued for unbooted project ✓"
+  echo "[scenario] dispatch-queue.jsonl content:"
+  cat "$queue" >&2 || true
+  _die "ASSERT: dispatch was queued for an unbooted project"
 fi
-
-# For full transparency, pull every `inbound nostr event ignored` log line
-# referencing our message id. This is the forward-compatible hook: once the
-# daemon grows a `project_not_booted` gate, this block becomes an assertion.
-log="$DAEMON_DIR/daemon.log"
-if [[ -f "$log" ]]; then
-  echo "[scenario]   ingress log lines referencing message id:"
-  grep "$user_msg_id" "$log" | sed -n 's/^/[scenario]     /p' | head -10 || true
-fi
+echo "[scenario]   no dispatch queued for unbooted project ✓"
 
 echo ""
-echo "[scenario] PASS — scenario 1.1 Boot gates dispatch (observable-state assertions)"
+echo "[scenario] PASS — scenario 1.1 Boot gates dispatch (boot gate enforced by daemon)"

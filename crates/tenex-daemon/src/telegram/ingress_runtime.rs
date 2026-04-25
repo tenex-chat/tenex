@@ -174,6 +174,7 @@ pub fn process_telegram_update(
         timestamp: input.timestamp,
         writer_version: input.writer_version,
         project_event_index: input.project_event_index,
+        project_boot_state: None,
     })?;
 
     if inbound.produced_queued_dispatch() {
