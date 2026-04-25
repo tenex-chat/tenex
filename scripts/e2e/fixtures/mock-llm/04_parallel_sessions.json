@@ -1,0 +1,26 @@
+{
+  "expectedModelId": "mock/parallel-04",
+  "label": "e2e/04_parallel_sessions",
+  "responses": [
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent1",
+        "messageContains": "SESSION-ALPHA"
+      },
+      "response": {
+        "content": "agent1 session-alpha result: 100"
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent2",
+        "messageContains": "SESSION-BETA"
+      },
+      "response": {
+        "content": "agent2 session-beta result: 200"
+      }
+    }
+  ]
+}
