@@ -9,8 +9,12 @@
 //! no sane fallback (the event has already been persisted, so dropping the
 //! wake produces silent data loss).
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
+use notify::{EventKind, RecursiveMode, Watcher};
 use tokio::sync::{Notify, mpsc};
 
 /// Sent when a new project is booted (i.e. a 24000 boot event is recorded).
@@ -48,6 +52,10 @@ pub struct RalCompletion {
 pub struct DaemonSignals {
     /// Notified when the project event index gains a new entry.
     pub project_index_changed: Arc<Notify>,
+    /// Notified when any project's `schedules.json` changes on disk. Shared
+    /// by all per-project scheduled-task driver tasks; an over-wake costs only
+    /// a cheap re-read of the unchanged project's schedule file.
+    pub project_schedules_changed: Arc<Notify>,
     pub project_booted_tx: mpsc::UnboundedSender<BootedProject>,
     pub dispatch_enqueued_tx: mpsc::UnboundedSender<DispatchEnqueued>,
     pub session_completed_tx: mpsc::UnboundedSender<SessionCompletion>,
@@ -64,6 +72,82 @@ pub struct DaemonSignalReceivers {
     pub ral_completed_rx: mpsc::UnboundedReceiver<RalCompletion>,
 }
 
+/// Handle for the schedules-file watcher OS thread. Held by `run_cli`; on
+/// shutdown the receiver is dropped and the watcher thread exits.
+pub struct ScheduleWatcherHandle {
+    pub stop_tx: crossbeam_channel::Sender<()>,
+    pub join_handle: thread::JoinHandle<()>,
+}
+
+/// Spawn a background OS thread that watches `<tenex_base_dir>/projects/`
+/// recursively. When any path matching `*/schedules.json` is created,
+/// modified, or renamed, `project_schedules_changed` is fired so all
+/// per-project scheduled-task driver tasks re-read their schedule files.
+///
+/// Uses an OS-level file watcher via the `notify` crate (kqueue on macOS,
+/// inotify on Linux) so there's no polling.
+pub fn spawn_schedule_watcher(
+    tenex_base_dir: PathBuf,
+    project_schedules_changed: Arc<Notify>,
+) -> ScheduleWatcherHandle {
+    let (stop_tx, stop_rx) = crossbeam_channel::bounded::<()>(0);
+    let join_handle = thread::spawn(move || {
+        let projects_dir = tenex_base_dir.join("projects");
+        // Create the directory if missing so the watcher has something to bind
+        // to. The first booted project would otherwise create a parent dir
+        // mkdir race.
+        let _ = std::fs::create_dir_all(&projects_dir);
+
+        let notify_clone = Arc::clone(&project_schedules_changed);
+        let mut watcher = match notify::recommended_watcher(
+            move |event: notify::Result<notify::Event>| {
+                let Ok(event) = event else {
+                    return;
+                };
+                let relevant = matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                );
+                if !relevant {
+                    return;
+                }
+                let any_schedule = event
+                    .paths
+                    .iter()
+                    .any(|path| path.file_name().and_then(|n| n.to_str()) == Some("schedules.json"));
+                if any_schedule {
+                    notify_clone.notify_waiters();
+                }
+            },
+        ) {
+            Ok(w) => w,
+            Err(error) => {
+                tracing::warn!(error = %error, "schedule watcher failed to start; scheduled tasks will only fire on restart");
+                return;
+            }
+        };
+
+        if let Err(error) = watcher.watch(&projects_dir, RecursiveMode::Recursive) {
+            tracing::warn!(error = %error, path = %projects_dir.display(), "schedule watcher failed to bind to projects dir; scheduled tasks will only fire on restart");
+            return;
+        }
+
+        // Block until shutdown. The notify watcher runs in its own internal
+        // thread; this thread just keeps the watcher alive.
+        loop {
+            match stop_rx.recv_timeout(Duration::from_secs(60)) {
+                Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+            }
+        }
+        drop(watcher);
+    });
+    ScheduleWatcherHandle {
+        stop_tx,
+        join_handle,
+    }
+}
+
 /// Create all signal channels. Returns (senders, receivers) to be distributed
 /// in `run_cli`.
 pub fn create_daemon_signals() -> (DaemonSignals, DaemonSignalReceivers) {
@@ -76,6 +160,7 @@ pub fn create_daemon_signals() -> (DaemonSignals, DaemonSignalReceivers) {
     (
         DaemonSignals {
             project_index_changed: Arc::new(Notify::new()),
+            project_schedules_changed: Arc::new(Notify::new()),
             project_booted_tx,
             dispatch_enqueued_tx,
             session_completed_tx,

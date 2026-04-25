@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Notify, mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
@@ -29,6 +29,11 @@ pub struct ScheduledTaskDriverDeps {
     pub tenex_base_dir: PathBuf,
     pub daemon_dir: PathBuf,
     pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
+    /// Notified when any project's `schedules.json` changes on disk; per-project
+    /// driver tasks select on this to wake out of `sleep_until` so they re-read
+    /// the schedule file immediately instead of waiting for the previously-
+    /// computed due time.
+    pub schedules_changed: Arc<Notify>,
 }
 
 /// Outer supervisor. Awaits `project_booted_rx` and spawns/replaces a
@@ -92,10 +97,12 @@ async fn run_scheduled_task_project_driver(
         let next_due_seconds = match next_due {
             Ok(Ok(Some(t))) => t,
             Ok(Ok(None)) => {
-                // No schedulable tasks — wait for shutdown only. The supervisor
-                // will re-spawn this task when the project boots again.
+                // No schedulable tasks — wait for either shutdown or a
+                // schedules.json change (e.g. the user just added a one-off
+                // task to this project). On the latter, loop and recompute.
                 tokio::select! {
                     _ = shutdown_rx.changed() => return,
+                    _ = deps.schedules_changed.notified() => continue,
                 }
             }
             Ok(Err(error)) => {
@@ -103,11 +110,11 @@ async fn run_scheduled_task_project_driver(
                     project_owner = %project_owner_pubkey,
                     project_d_tag = %project_d_tag,
                     error = %error,
-                    "scheduled-task driver: failed to compute next due time; will retry in 30s"
+                    "scheduled-task driver: failed to compute next due time; will retry on schedules-change or shutdown"
                 );
                 tokio::select! {
                     _ = shutdown_rx.changed() => return,
-                    _ = tokio::time::sleep(Duration::from_secs(30)) => continue,
+                    _ = deps.schedules_changed.notified() => continue,
                 }
             }
             Err(join_error) => {
@@ -115,22 +122,23 @@ async fn run_scheduled_task_project_driver(
                     project_owner = %project_owner_pubkey,
                     project_d_tag = %project_d_tag,
                     error = %join_error,
-                    "scheduled-task driver: spawn_blocking panicked computing next due; will retry in 30s"
+                    "scheduled-task driver: spawn_blocking panicked computing next due; will retry on schedules-change or shutdown"
                 );
                 tokio::select! {
                     _ = shutdown_rx.changed() => return,
-                    _ = tokio::time::sleep(Duration::from_secs(30)) => continue,
+                    _ = deps.schedules_changed.notified() => continue,
                 }
             }
         };
 
-        // Sleep until the next due time.
+        // Sleep until the next due time, OR wake early on schedules-change.
         let now_seconds_now = current_unix_time_seconds();
         let sleep_secs = next_due_seconds.saturating_sub(now_seconds_now);
         let wake_at = Instant::now() + Duration::from_secs(sleep_secs);
 
         tokio::select! {
             _ = shutdown_rx.changed() => return,
+            _ = deps.schedules_changed.notified() => continue,
             _ = tokio::time::sleep_until(wake_at) => {}
         }
 

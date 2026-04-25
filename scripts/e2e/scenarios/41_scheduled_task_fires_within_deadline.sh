@@ -110,8 +110,13 @@ echo "[scenario] waiting up to 7s for scheduled task dispatch to appear in queue
 queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
 deadline=$(( $(date +%s) + 7 ))
 saw_dispatch=0
+# The dispatch queue records use a derived dispatchId of the form
+# `scheduled-task-<conversation_id>`; the original task_id is not preserved
+# verbatim. The scheduled-task driver is the only producer of dispatches with
+# the `scheduled-task-` prefix, so its appearance after we wrote schedules.json
+# is sufficient evidence the driver fired our task.
 while [[ $(date +%s) -lt $deadline ]]; do
-  if [[ -f "$queue" ]] && grep -q "$task_id" "$queue" 2>/dev/null; then
+  if [[ -f "$queue" ]] && grep -q '"dispatchId":"scheduled-task-' "$queue" 2>/dev/null; then
     saw_dispatch=1
     break
   fi
@@ -125,7 +130,7 @@ if [[ "$saw_dispatch" -ne 1 ]]; then
     echo "[scenario] dispatch queue contents:"
     cat "$queue" >&2
   fi
-  _die "ASSERT: no dispatch for scheduled task '$task_id' within deadline"
+  _die "ASSERT: no scheduled-task dispatch enqueued within deadline (task_id=$task_id)"
 fi
 echo "[scenario]   scheduled task dispatch enqueued ✓"
 

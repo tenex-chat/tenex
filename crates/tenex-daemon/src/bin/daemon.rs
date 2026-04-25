@@ -300,10 +300,20 @@ where
             tenex_base_dir: tenex_base_dir.clone(),
             daemon_dir: daemon_dir.clone(),
             project_event_index: Arc::clone(&project_event_index),
+            schedules_changed: signals.project_schedules_changed.clone(),
         },
         scheduled_task_boot_rx,
         scheduled_task_shutdown_rx,
     ));
+
+    // Spawn the OS-level file watcher that fires `project_schedules_changed`
+    // when any project's `schedules.json` is created, modified, or removed.
+    // The supervisor's per-project tasks select on the same Notify so a write
+    // wakes them out of `sleep_until` immediately.
+    let schedule_watcher = tenex_daemon::daemon_signals::spawn_schedule_watcher(
+        tenex_base_dir.clone(),
+        signals.project_schedules_changed.clone(),
+    );
 
     tenex_daemon::stdout_status::print_daemon_ready(
         nostr_supervisor.is_some(),
@@ -402,6 +412,10 @@ where
         let _ = project_status_supervisor_handle.await;
         let _ = scheduled_task_supervisor_handle.await;
     });
+
+    // Stop the schedule file watcher OS thread.
+    let _ = schedule_watcher.stop_tx.send(());
+    let _ = schedule_watcher.join_handle.join();
 
     diagnostics_result?;
     SHUTDOWN_PHASE.store(SHUTDOWN_PHASE_COMPLETE, Ordering::SeqCst);
