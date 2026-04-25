@@ -6,32 +6,19 @@
  *
  * Responsibilities:
  * - Event Correlation: Matches tool results with their initial execution events
- * - Nostr Publishing: Publishes tool execution announcements
  * - Persistence: Stores tool messages for conversation history
+ *
+ * Note: tool_use Nostr publishing is handled entirely by ToolUsePublishingWrapper,
+ * which runs inside the AI SDK's awaited execute() call. This tracker is not in
+ * the publishing critical path.
  */
 
-import { formatMcpToolName, isDelegateToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
-import type {
-    AgentRuntimePublisher,
-    PublishedMessageRef,
-} from "@/events/runtime/AgentRuntimePublisher";
-import type { EventContext } from "@/nostr/types";
-import { PendingDelegationsRegistry } from "@/services/ral";
 import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { extractErrorDetails } from "./ToolResultUtils";
 import type { FullResultStash } from "./ToolOutputTruncation";
-
-/**
- * Delegation tools need delayed tool use event publishing so the delegation
- * event IDs can be attached as q-tags after the tool finishes.
- */
-
-function needsDelayedPublishing(toolName: string): boolean {
-    return isDelegateToolName(toolName);
-}
 
 /**
  * Represents a tracked tool execution
@@ -43,7 +30,7 @@ interface TrackedExecution {
     toolName: string;
     /** Conversation ID used to scope persisted tool results */
     conversationId?: string;
-    /** Nostr event ID published when tool started (empty string for delegation tools with delayed publishing) */
+    /** Nostr event ID published by ToolUsePublishingWrapper (set via setToolEventId) */
     toolEventId: string;
     /** Input arguments passed to the tool */
     input: unknown;
@@ -53,12 +40,6 @@ interface TrackedExecution {
     error?: boolean;
     /** Whether the tool has completed execution */
     completed: boolean;
-    /** Human-readable content for the tool event (stored for delayed publishing) */
-    humanContent?: string;
-    /** Event context for publishing (stored for delayed publishing) */
-    eventContext?: EventContext;
-    /** Agent publisher instance (stored for delayed publishing) */
-    agentPublisher?: AgentRuntimePublisher;
 }
 
 /**
@@ -71,12 +52,8 @@ export interface TrackExecutionOptions {
     toolName: string;
     /** Arguments passed to the tool */
     args: unknown;
-    /** Publisher for Nostr events */
-    agentPublisher: AgentRuntimePublisher;
-    /** Context for event publishing */
-    eventContext: EventContext;
-    /** Cumulative usage from previous steps (if available) */
-    usage?: import("@/llm/types").LanguageModelUsageWithCostUsd;
+    /** Conversation ID that scopes persisted tool results */
+    conversationId: string;
 }
 
 /**
@@ -115,23 +92,13 @@ export class ToolExecutionTracker {
     }
 
     /**
-     * Track a new tool execution when it starts
+     * Track a new tool execution when it starts.
      *
-     * This method is called when the LLM decides to execute a tool. It:
-     * 1. Generates human-readable content for the tool execution
-     * 2. Publishes a Nostr event announcing the tool execution (unless delegation tool)
-     * 3. Stores the execution state for later correlation with results
-     *
-     * For delegation tools (delegate, delegate_followup, ask, delegate_crossproject),
-     * publishing is delayed until completeExecution so the delegation event IDs can be included.
-     *
-     * @param options - Configuration for tracking the execution
-     * @returns Promise that resolves with the published Nostr event, or null for delegation tools
-     *
-     * @throws Will throw if Nostr event publishing fails
+     * Called when the LLM decides to execute a tool. Records the execution
+     * for later correlation with results and persistence.
      */
-    async trackExecution(options: TrackExecutionOptions): Promise<PublishedMessageRef | null> {
-        const { toolCallId, toolName, args, agentPublisher, eventContext, usage } = options;
+    trackExecution(options: TrackExecutionOptions): void {
+        const { toolCallId, toolName, args, conversationId } = options;
 
         logger.debug("[ToolExecutionTracker] Tracking new tool execution", {
             toolName,
@@ -141,7 +108,6 @@ export class ToolExecutionTracker {
 
         const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
-            // Truncate args for telemetry to prevent huge span attributes
             const argsPreview =
                 typeof args === "object" && args !== null
                     ? JSON.stringify(args).substring(0, 200)
@@ -154,78 +120,35 @@ export class ToolExecutionTracker {
             });
         }
 
-        // Generate human-readable content for the tool execution
-        const humanContent = toolName.startsWith("mcp__")
-            ? `Executing ${formatMcpToolName(toolName)}`
-            : `Executing ${toolName}`;
-
-        // Store the execution state BEFORE async operations to prevent race conditions
-        const execution: TrackedExecution = {
+        this.executions.set(toolCallId, {
             toolCallId,
             toolName,
-            conversationId: eventContext.conversationId,
-            toolEventId: "", // Will be updated after publish (empty for delayed delegation tools)
+            conversationId,
+            toolEventId: "",
             input: args,
             completed: false,
-        };
-
-        this.executions.set(toolCallId, execution);
-
-        // For delegation tools, delay publishing until completion so we have
-        // the delegation event IDs to reference.
-        if (needsDelayedPublishing(toolName)) {
-            // Store context for delayed publishing in completeExecution
-            execution.humanContent = humanContent;
-            execution.eventContext = eventContext;
-            execution.agentPublisher = agentPublisher;
-
-            logger.debug("[ToolExecutionTracker] Delegation tool tracked (delayed publishing)", {
-                toolCallId,
-                toolName,
-                totalTracked: this.executions.size,
-            });
-
-            return null;
-        }
-
-        // Publish the tool execution event to Nostr (async operation)
-        const toolEvent = await agentPublisher.toolUse(
-            {
-                toolName,
-                content: humanContent,
-                args,
-                usage,
-            },
-            eventContext
-        );
-
-        // Update the execution with the actual event ID
-        execution.toolEventId = toolEvent.id;
-
-        logger.debug("[ToolExecutionTracker] Tool execution tracked", {
-            toolCallId,
-            toolName,
-            toolEventId: toolEvent.id,
-            totalTracked: this.executions.size,
         });
-
-        return toolEvent;
     }
 
     /**
-     * Complete a tracked tool execution with its result
+     * Record the Nostr event ID published for this tool call.
      *
-     * This method is called when a tool finishes executing. It:
-     * 1. Retrieves the original execution metadata
-     * 2. Updates the execution state with results
-     * 3. Persists the complete tool message to filesystem
+     * Called by ToolUsePublishingWrapper after it publishes the tool_use event,
+     * inside the AI SDK's awaited execute() call — so this always runs before
+     * the tool-did-execute listener fires.
+     */
+    setToolEventId(toolCallId: string, toolEventId: string): void {
+        const execution = this.executions.get(toolCallId);
+        if (execution) {
+            execution.toolEventId = toolEventId;
+        }
+    }
+
+    /**
+     * Complete a tracked tool execution with its result.
      *
-     * @param options - Configuration for completing the execution
-     * @returns Promise that resolves with the tool event ID (for linking to ConversationStore messages)
-     *
-     * @remarks
-     * If the toolCallId is not found (e.g., due to a race condition or error),
-     * this method logs a warning but does not throw an error
+     * Persists the complete tool message to filesystem and returns the
+     * tool event ID so callers can link it to ConversationStore messages.
      */
     async completeExecution(options: CompleteExecutionOptions): Promise<string | undefined> {
         const { toolCallId, result, error, agentPubkey } = options;
@@ -236,7 +159,6 @@ export class ToolExecutionTracker {
             hasResult: result !== undefined,
         });
 
-        // Retrieve the tracked execution
         const execution = this.executions.get(toolCallId);
 
         if (!execution) {
@@ -245,29 +167,23 @@ export class ToolExecutionTracker {
                 availableExecutions: Array.from(this.executions.keys()),
             });
 
-            const activeSpan = trace.getActiveSpan();
-            if (activeSpan) {
-                activeSpan.addEvent("tool.execution_unknown", {
-                    "tool.call_id": toolCallId,
-                });
-            }
+            trace.getActiveSpan()?.addEvent("tool.execution_unknown", {
+                "tool.call_id": toolCallId,
+            });
 
             return undefined;
         }
 
         const conversationId =
             options.conversationId
-            ?? execution.conversationId
-            ?? execution.eventContext?.conversationId;
+            ?? execution.conversationId;
         if (!conversationId) {
             throw new Error(
                 `[ToolExecutionTracker] Missing conversation ID for tool ${execution.toolName} (${toolCallId}).`
             );
         }
 
-        // Log errors explicitly for visibility
         if (error) {
-            // Extract error details for better logging
             const errorDetails = extractErrorDetails(result);
 
             if (!errorDetails?.type || !errorDetails.message) {
@@ -285,9 +201,7 @@ export class ToolExecutionTracker {
                 result,
             });
 
-            // IMPORTANT: Log error event in telemetry for trace analysis
-            const activeSpan = trace.getActiveSpan();
-            activeSpan?.addEvent("tool.execution_error", {
+            trace.getActiveSpan()?.addEvent("tool.execution_error", {
                 "tool.name": execution.toolName,
                 "tool.call_id": toolCallId,
                 "tool.error": true,
@@ -296,69 +210,24 @@ export class ToolExecutionTracker {
             });
         }
 
-        // Update execution state
         execution.output = result;
         execution.error = error;
         execution.completed = true;
 
-        // For tools with delayed publishing, publish the tool use event now with references
-        if (execution.toolEventId === "" && execution.agentPublisher && execution.eventContext) {
-            let referencedEventIds: string[] = [];
-
-            const conversationId = execution.eventContext?.conversationId;
-            if (conversationId && isDelegateToolName(execution.toolName)) {
-                // Consume delegation event IDs from registry (registered in AgentPublisher.ask/delegate)
-                referencedEventIds = PendingDelegationsRegistry.consume(agentPubkey, conversationId);
-            }
-
-            // Publish the delayed tool use event with references
-            const toolEvent = await execution.agentPublisher.toolUse(
-                {
-                    toolName: execution.toolName,
-                    content: execution.humanContent || `Executed ${execution.toolName}`,
-                    args: execution.input,
-                    referencedEventIds,
-                },
-                execution.eventContext
-            );
-
-            execution.toolEventId = toolEvent.id;
-
-            const logDetails: Record<string, unknown> = {
-                toolCallId,
-                toolName: execution.toolName,
-                toolEventId: toolEvent.id,
-            };
-            if (referencedEventIds.length > 0) {
-                logDetails.referencedEventIds = referencedEventIds;
-            }
-
-            logger.debug("[ToolExecutionTracker] Tool event published with references", logDetails);
-        }
-
-        // Add telemetry for tool completion
-        const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
-            // Truncate result for telemetry
-            const resultPreview =
+        trace.getActiveSpan()?.addEvent("tool.execution_complete", {
+            "tool.name": execution.toolName,
+            "tool.call_id": toolCallId,
+            "tool.error": error,
+            "tool.result_preview":
                 typeof result === "object" && result !== null
                     ? JSON.stringify(result).substring(0, 200)
-                    : String(result).substring(0, 200);
-
-            activeSpan.addEvent("tool.execution_complete", {
-                "tool.name": execution.toolName,
-                "tool.call_id": toolCallId,
-                "tool.error": error,
-                "tool.result_preview": resultPreview,
-            });
-        }
+                    : String(result).substring(0, 200),
+        });
 
         // If the tool output was truncated, recover the full result from the stash
         // so ToolMessageStorage persists the complete output (retrievable via fs_read).
         const persistedResult = this.fullResultStash?.consume(toolCallId) ?? result;
 
-        // Persist the complete tool message to filesystem
-        // This enables conversation reconstruction and audit trails
         await toolMessageStorage.store(
             conversationId,
             {
@@ -382,15 +251,11 @@ export class ToolExecutionTracker {
             error,
         });
 
-        // Return the tool event ID so callers can link it to ConversationStore messages
         return execution.toolEventId;
     }
 
     /**
      * Get the current state of a tracked execution
-     *
-     * @param toolCallId - Unique identifier of the tool call
-     * @returns The tracked execution or undefined if not found
      */
     getExecution(toolCallId: string): TrackedExecution | undefined {
         return this.executions.get(toolCallId);
@@ -398,8 +263,6 @@ export class ToolExecutionTracker {
 
     /**
      * Get all tracked executions
-     *
-     * @returns Map of all tracked executions
      */
     getAllExecutions(): Map<string, TrackedExecution> {
         return new Map(this.executions);
@@ -407,9 +270,6 @@ export class ToolExecutionTracker {
 
     /**
      * Check if a tool execution is being tracked
-     *
-     * @param toolCallId - Unique identifier of the tool call
-     * @returns True if the execution is being tracked
      */
     isTracking(toolCallId: string): boolean {
         return this.executions.has(toolCallId);
@@ -417,8 +277,6 @@ export class ToolExecutionTracker {
 
     /**
      * Get statistics about tracked executions
-     *
-     * @returns Object containing execution statistics
      */
     getStats(): {
         total: number;
@@ -450,10 +308,6 @@ export class ToolExecutionTracker {
 
     /**
      * Clear all tracked executions
-     *
-     * @remarks
-     * This should typically only be called between independent agent executions
-     * to prevent memory leaks from accumulating execution records
      */
     clear(): void {
         const previousSize = this.executions.size;
@@ -467,8 +321,6 @@ export class ToolExecutionTracker {
 
     /**
      * Get a summary of pending executions for debugging
-     *
-     * @returns Array of pending execution summaries
      */
     getPendingExecutions(): Array<{
         toolCallId: string;
@@ -486,7 +338,7 @@ export class ToolExecutionTracker {
                 pending.push({
                     toolCallId,
                     toolName: execution.toolName,
-                    startedAt: shortenEventId(execution.toolEventId), // Standard short event ID
+                    startedAt: shortenEventId(execution.toolEventId),
                 });
             }
         }
@@ -497,18 +349,14 @@ export class ToolExecutionTracker {
     /**
      * Get the names of recently executed tools.
      * Returns the most recent tool names (up to 10) for diagnostics/context.
-     *
-     * @returns Array of tool names that have been executed
      */
     getRecentToolNames(): string[] {
         const toolNames: string[] = [];
 
-        // Get all tool names from tracked executions
         for (const execution of this.executions.values()) {
             toolNames.push(execution.toolName);
         }
 
-        // Return the most recent 10 (map preserves insertion order)
         return toolNames.slice(-10);
     }
 }

@@ -59,6 +59,8 @@ interface DelegateOutput {
   message: string;
   /** Truncated delegation conversation ID (prefix for compact display) */
   delegationConversationId: string;
+  /** Full event ID of the published delegation event, used for q-tags in tool_use events */
+  delegationEventId: string;
   circularDelegationWarning?: CircularDelegationWarning;
 }
 
@@ -226,6 +228,7 @@ async function executeDelegate(
     success: true,
     message,
     delegationConversationId,
+    delegationEventId: eventId,
     ...(circularWarnings.length > 0 && {
       circularDelegationWarning: circularWarnings[0],
     }),

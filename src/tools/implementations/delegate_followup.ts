@@ -100,6 +100,8 @@ interface DelegateFollowupOutput {
   success: boolean;
   message: string;
   delegationConversationId: string;
+  /** Full event ID of the published follow-up event, used for q-tags in tool_use events */
+  delegationEventId: string;
 }
 
 async function executeDelegateFollowup(
@@ -194,6 +196,7 @@ async function executeDelegateFollowup(
     success: true,
     message: "Follow-up sent. The agent will respond when ready.",
     delegationConversationId: shortenConversationId(delegation_conversation_id),
+    delegationEventId: followupEventId,
   };
 }
 

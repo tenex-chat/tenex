@@ -18,6 +18,8 @@ interface SelfDelegateOutput {
     success: boolean;
     message: string;
     delegationConversationId?: string;
+    /** Full event ID of the published delegation event, used for q-tags in tool_use events */
+    delegationEventId?: string;
     selectedVariant?: string;
 }
 
@@ -158,6 +160,7 @@ async function executeSelfDelegate(
         success: true,
         message,
         delegationConversationId,
+        delegationEventId: eventId,
         selectedVariant: input.model,
     };
 }

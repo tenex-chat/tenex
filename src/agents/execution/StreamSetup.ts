@@ -19,6 +19,7 @@ import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
 import { FullResultStash, wrapToolsWithOutputTruncation } from "./ToolOutputTruncation";
+import { wrapToolsWithToolUsePublishing } from "./ToolUsePublishingWrapper";
 import {
     buildExpandedBlockedSet,
     buildSkillAliasMap,
@@ -315,6 +316,7 @@ export async function setupStreamExecution(
     toolTracker.setFullResultStash(fullResultStash);
     toolsObject = wrapToolsWithOutputTruncation(toolsObject, fullResultStash);
     toolsObject = wrapToolsWithSupervision(toolsObject, context);
+    toolsObject = wrapToolsWithToolUsePublishing(toolsObject, context, toolTracker);
 
     const messageCompiler = new MessageCompiler(conversationStore);
 

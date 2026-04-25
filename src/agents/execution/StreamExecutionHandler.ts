@@ -482,7 +482,6 @@ export class StreamExecutionHandler {
             llmService,
             toolTracker,
             toolsObject,
-            eventContext,
             ralNumber,
             onNoResponseRequested: () => {
                 this.requestSilentTermination();

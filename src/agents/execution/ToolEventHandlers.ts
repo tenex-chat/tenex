@@ -5,7 +5,6 @@
  * that manage RAL state, conversation store updates, and delegation tracking.
  */
 
-import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -14,7 +13,6 @@ import type { ToolCallPart, ToolResultPart } from "ai";
 import chalk from "chalk";
 import type { ToolWillExecuteEvent, ToolDidExecuteEvent } from "@/llm/types";
 import type { LLMService } from "@/llm/service";
-import type { EventContext } from "@/nostr/types";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import type { FullRuntimeContext } from "./types";
 import { getHeuristicEngine } from "@/services/heuristics";
@@ -128,7 +126,6 @@ export interface ToolEventHandlersConfig {
     llmService: LLMService;
     toolTracker: ToolExecutionTracker;
     toolsObject: Record<string, AISdkTool>;
-    eventContext: EventContext;
     ralNumber: number;
     onNoResponseRequested?: () => void;
 }
@@ -146,12 +143,10 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): ToolEve
         llmService,
         toolTracker,
         toolsObject,
-        eventContext,
         ralNumber,
         onNoResponseRequested,
     } = config;
     const conversationStore = context.conversationStore;
-    const agentPublisher = context.agentPublisher;
     const ralRegistry = RALRegistry.getInstance();
     const pendingSideEffects = new Set<Promise<void>>();
 
@@ -232,18 +227,12 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): ToolEve
             ...(transcriptToolAttributes ? { transcriptToolAttributes } : {}),
         });
 
-        const toolEvent = await toolTracker.trackExecution({
+        toolTracker.trackExecution({
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             args: event.args,
-            agentPublisher,
-            eventContext,
-            usage: event.usage,
+            conversationId: context.conversationId,
         });
-
-        if (toolEvent) {
-            await ConversationStore.addEnvelope(context.conversationId, toolEvent.envelope);
-        }
     }));
 
     llmService.on("tool-did-execute", trackSideEffect("tool-did-execute", async (event: ToolDidExecuteEvent) => {

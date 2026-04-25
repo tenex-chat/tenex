@@ -70,6 +70,8 @@ type AskInput = z.infer<typeof askSchema>;
 interface AskOutput {
   success: boolean;
   delegationConversationId: string;
+  /** Full event ID of the published ask/delegation event, used for q-tags in tool_use events */
+  delegationEventId: string;
 }
 
 /**
@@ -244,6 +246,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
           return {
             success: true,
             delegationConversationId: eventId,
+            delegationEventId: eventId,
           };
         }
       }
@@ -302,6 +305,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   return {
     success: true,
     delegationConversationId: eventId,
+    delegationEventId: eventId,
   };
 }
 
