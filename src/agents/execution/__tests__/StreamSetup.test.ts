@@ -9,15 +9,6 @@ import {
 } from "@/test-utils";
 import { ToolExecutionTracker } from "../ToolExecutionTracker";
 import type { FullRuntimeContext } from "../types";
-import { MessageCompiler } from "../MessageCompiler";
-import * as supervisionModule from "../ToolSupervisionWrapper";
-import * as toolUsePublishingModule from "../ToolUsePublishingWrapper";
-import * as contextManagementModule from "../context-management";
-import * as contextManagementRuntimeModule from "../context-management/runtime";
-import * as promptHistoryModule from "../prompt-history";
-import * as requestPreparationModule from "../request-preparation";
-import * as systemReminderContextModule from "@/llm/system-reminder-context";
-import * as toolsRegistryModule from "@/tools/registry";
 
 const fetchSkillsMock = mock(async () => ({ skills: [], content: "", toolPermissions: {} }));
 const listAvailableSkillsMock = mock(async () => []);
@@ -244,57 +235,6 @@ describe("StreamSetup", () => {
     const mockedConfigService = configService as unknown as MockedConfigService;
 
     beforeEach(() => {
-        // Mock relative/shared module exports via spyOn so mock.restore() cleans them up
-        // and downstream test files are not contaminated.
-        spyOn(toolsRegistryModule, "getToolsObject").mockReturnValue({} as any);
-        spyOn(systemReminderContextModule, "getSystemReminderContext").mockReturnValue({
-            advance: () => undefined,
-            queue: () => undefined,
-            collect: async () => [],
-            clear: () => undefined,
-        } as ReturnType<typeof systemReminderContextModule.getSystemReminderContext>);
-        spyOn(supervisionModule, "wrapToolsWithSupervision").mockImplementation(
-            (tools: Record<string, unknown>) => tools as ReturnType<typeof supervisionModule.wrapToolsWithSupervision>
-        );
-        spyOn(toolUsePublishingModule, "wrapToolsWithToolUsePublishing").mockImplementation(
-            (tools: Record<string, unknown>) => tools as ReturnType<typeof toolUsePublishingModule.wrapToolsWithToolUsePublishing>
-        );
-        spyOn(contextManagementModule, "createExecutionContextManagement").mockReturnValue(
-            undefined as any
-        );
-        spyOn(contextManagementRuntimeModule, "createExecutionContextManagement").mockReturnValue(
-            undefined as any
-        );
-        spyOn(promptHistoryModule, "buildPromptHistoryMessages").mockImplementation(
-            ({ compiled }: { compiled: { messages: unknown[] } }) =>
-                ({ messages: compiled.messages, didMutateHistory: false }) as ReturnType<typeof promptHistoryModule.buildPromptHistoryMessages>
-        );
-        spyOn(promptHistoryModule, "syncPreparedPromptHistoryMessages").mockReturnValue(false);
-        spyOn(requestPreparationModule, "prepareLLMRequest").mockResolvedValue({
-            messages: [],
-            runtimeOverlays: [],
-        } as any);
-        spyOn(MessageCompiler.prototype, "compile").mockResolvedValue({
-            systemPrompt: "system",
-            counts: { total: 0, systemPrompt: 0, conversation: 0 },
-            messages: [],
-        } as any);
-
-        spyOn(RALRegistry, "getInstance").mockReturnValue({
-            getAndConsumeInjections: () => [],
-            getConversationPendingDelegations: () => [],
-            getConversationCompletedDelegations: () => [],
-        } as any);
-        spyOn(llmOpsRegistry, "registerOperation").mockReturnValue(
-            new AbortController().signal as any
-        );
-        spyOn(llmOpsRegistry, "setMessageInjector").mockReturnValue(false);
-        spyOn(configService, "isMetaModelConfig").mockReturnValue(false);
-        spyOn(configService, "resolveMetaModel").mockReturnValue({ isMetaModel: false } as any);
-        spyOn(SkillService, "getInstance").mockReturnValue({
-            fetchSkills: fetchSkillsMock,
-            listAvailableSkills: listAvailableSkillsMock,
-        } as any);
         whitelistService.setInstalledSkills([]);
         fetchSkillsMock.mockClear();
         listAvailableSkillsMock.mockClear();

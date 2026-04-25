@@ -183,7 +183,7 @@ async function executeDelegateFollowup(
   });
 
   const eventContext = createEventContext(context);
-  await context.agentPublisher.delegateFollowup({
+  const followupEventId = await context.agentPublisher.delegateFollowup({
     recipient: recipientPubkey,
     content: message,
     delegationEventId: delegation_conversation_id,

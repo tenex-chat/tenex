@@ -19,7 +19,7 @@ import type {
     StreamTextDeltaIntent,
     ToolUseIntent,
 } from "@/nostr/types";
-import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import { RALRegistry } from "@/services/ral";
 import { DelegationJournalReader } from "@/services/ral/DelegationJournalReader";
 import type { ProjectContext } from "@/services/projects/ProjectContext";
 import type { AgentWorkerProtocolMessage } from "@/events/runtime/AgentWorkerProtocol";
@@ -154,12 +154,6 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
 
         const ref = await this.signAndEmit(event, "delegation");
 
-        PendingDelegationsRegistry.register(
-            this.options.agent.pubkey,
-            context.conversationId,
-            ref.id
-        );
-
         await this.registerPendingDelegation({
             context,
             delegationConversationId: ref.id,
@@ -207,12 +201,6 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         event.tags.push(["delegation", context.conversationId]);
 
         const ref = await this.signAndEmit(event, "ask");
-
-        PendingDelegationsRegistry.register(
-            this.options.agent.pubkey,
-            context.conversationId,
-            ref.id
-        );
 
         await this.registerPendingDelegation({
             context,

@@ -185,7 +185,7 @@ describe("wrapToolsWithToolUsePublishing — parallel delegate calls", () => {
                     delegationEventId: delegationIdA,
                 }),
             },
-            delegate_crossproject: {
+            ask: {
                 execute: async (_input: unknown) => ({
                     success: true,
                     delegationEventId: delegationIdB,
@@ -200,7 +200,7 @@ describe("wrapToolsWithToolUsePublishing — parallel delegate calls", () => {
                 { recipient: "agent2", prompt: "task A" },
                 { toolCallId: "call-A", messages: [], abortSignal: new AbortController().signal } as any
             ),
-            wrapped.delegate_crossproject.execute?.(
+            wrapped.ask.execute?.(
                 { recipient: "agent3", prompt: "task B" },
                 { toolCallId: "call-B", messages: [], abortSignal: new AbortController().signal } as any
             ),

@@ -66,6 +66,7 @@ describe("ToolEventHandlers no_response callback", () => {
                 completeExecution: mock(async () => undefined),
             } as any,
             toolsObject: {},
+            eventContext: {} as any,
             ralNumber,
             onNoResponseRequested,
         });
