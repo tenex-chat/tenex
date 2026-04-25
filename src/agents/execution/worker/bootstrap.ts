@@ -3,15 +3,20 @@ import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
+import { resolveCategory } from "@/agents/role-categories";
+import { processAgentTools } from "@/agents/tool-normalization";
+import type { AgentInstance } from "@/agents/types";
 import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AgentWorkerProtocolMessage } from "@/events/runtime/AgentWorkerProtocol";
+import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
+import { AgentMetadataStore } from "@/services/agents";
 import { config } from "@/services/ConfigService";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { ProjectContext, projectContextStore } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
-import { NDKProject } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner, NDKProject, type NDKEvent } from "@nostr-dev-kit/ndk";
 import {
     createWorkerProtocolPublisherFactory,
     type WorkerProtocolPublisherExecutionState,
@@ -122,13 +127,31 @@ export async function runOneExecution(
     emit: AgentWorkerProtocolEmit,
     dependencies: AgentWorkerBootstrapDependencies = {}
 ): Promise<AgentWorkerExecutionResult> {
-    const agent = scope.agentRegistry.getAgentByPubkey(message.agentPubkey);
+    // Reconcile project agent inventory if the daemon supplied one.
+    // This makes ProjectContext.agents reflect the daemon's authoritative
+    // view at dispatch time without requiring the worker to read agent
+    // storage from disk.
+    if (message.projectAgentInventory && message.projectAgentInventory.length > 0) {
+        reconcileProjectAgentInventory(scope, message.projectAgentInventory);
+    }
+
+    // Materialize the executing agent. Prefer the inline payload (no disk
+    // reads); fall back to the registry path for messages still produced
+    // by the legacy emitter. The fallback is removed in C8.
+    const agent = message.agent
+        ? materializeInlineAgent(message.agent, scope, scope.projectDTag)
+        : scope.agentRegistry.getAgentByPubkey(message.agentPubkey);
     if (!agent) {
         throw new AgentWorkerExecutionFailure(
             "missing_agent",
-            "Agent was not found in shared filesystem state",
+            "Agent was not found in inline payload or shared filesystem state",
             false
         );
+    }
+    // Ensure the executing agent is in the registry so PM resolution and
+    // delegation lookups can find it.
+    if (message.agent && !scope.agentRegistry.getAgentByPubkey(agent.pubkey)) {
+        scope.agentRegistry.addAgent(agent);
     }
 
     const publisherExecutionState: WorkerProtocolPublisherExecutionState = {
@@ -335,4 +358,116 @@ function executionIdentity(message: ExecuteMessage): {
         conversationId: message.conversationId,
         ralNumber: message.ralNumber,
     };
+}
+
+type InlineAgent = NonNullable<ExecuteMessage["agent"]>;
+type ProjectAgentInventoryEntry = NonNullable<ExecuteMessage["projectAgentInventory"]>[number];
+
+/**
+ * Materialize an executing AgentInstance from the inline payload that the
+ * Rust daemon ships on `execute`. Bypasses the disk-backed AgentRegistry
+ * load path so the worker stays stateless w.r.t. agent config.
+ */
+function materializeInlineAgent(
+    inline: InlineAgent,
+    scope: ProjectScope,
+    projectDTag: string | undefined
+): AgentInstance {
+    const signer = new NDKPrivateKeySigner(inline.signingPrivateKey);
+    const pubkey = signer.pubkey;
+    const resolvedCategory = resolveCategory(inline.category);
+    const tools = processAgentTools(inline.tools ?? [], resolvedCategory);
+    const llmConfigName = inline.llmConfig ?? DEFAULT_AGENT_LLM_CONFIG;
+    const metadataPath = scope.agentRegistry.getMetadataPath();
+    const projectBasePath = scope.agentRegistry.getBasePath();
+
+    const agent: AgentInstance = {
+        name: inline.name,
+        pubkey,
+        signer,
+        role: inline.role,
+        category: resolvedCategory,
+        description: inline.description,
+        instructions: inline.instructions,
+        customInstructions: inline.customInstructions,
+        useCriteria: inline.useCriteria,
+        llmConfig: llmConfigName,
+        tools,
+        eventId: inline.eventId,
+        slug: inline.slug,
+        mcpServers: inline.mcpServers as AgentInstance["mcpServers"],
+        pmOverrides: inline.pmOverrides,
+        isPM: inline.isPM,
+        alwaysSkills:
+            inline.alwaysSkills && inline.alwaysSkills.length > 0
+                ? inline.alwaysSkills
+                : undefined,
+        blockedSkills: inline.blockedSkills,
+        mcpAccess: inline.mcpAccess ?? [],
+        createMetadataStore: (conversationId: string) =>
+            new AgentMetadataStore(conversationId, inline.slug, metadataPath),
+        createLLMService: (options) =>
+            config.createLLMService(options?.resolvedConfigName ?? llmConfigName, {
+                tools: options?.tools ?? {},
+                agentName: inline.name,
+                agentSlug: inline.slug,
+                agentId: pubkey,
+                workingDirectory: options?.workingDirectory ?? projectBasePath,
+                mcpConfig: options?.mcpConfig,
+                conversationId: options?.conversationId,
+                projectId: projectDTag,
+                onStreamStart: options?.onStreamStart,
+            }),
+        sign: async (event: NDKEvent) => {
+            await event.sign(signer, { pTags: false });
+        },
+    };
+
+    return agent;
+}
+
+/**
+ * Reconcile ProjectContext.agents against the daemon's authoritative
+ * inventory. Adds discovery-only placeholders for inventory entries not
+ * already known to the registry; existing entries (including the
+ * executing agent's full record) are kept intact.
+ */
+function reconcileProjectAgentInventory(
+    scope: ProjectScope,
+    inventory: readonly ProjectAgentInventoryEntry[]
+): void {
+    for (const entry of inventory) {
+        if (scope.agentRegistry.getAgentByPubkey(entry.pubkey)) {
+            continue;
+        }
+        const placeholderSigner = NDKPrivateKeySigner.generate();
+        const metadataPath = scope.agentRegistry.getMetadataPath();
+        const placeholder: AgentInstance = {
+            name: entry.name,
+            pubkey: entry.pubkey,
+            // Placeholder signer — never used because placeholder agents are
+            // never the executing agent (the executing agent always arrives
+            // via execute.agent with its real signer).
+            signer: placeholderSigner,
+            role: entry.role ?? entry.slug,
+            slug: entry.slug,
+            isPM: entry.isPM,
+            llmConfig: DEFAULT_AGENT_LLM_CONFIG,
+            tools: [],
+            mcpAccess: [],
+            createMetadataStore: (conversationId: string) =>
+                new AgentMetadataStore(conversationId, entry.slug, metadataPath),
+            createLLMService: () => {
+                throw new Error(
+                    `placeholder agent ${entry.slug} has no LLM service; only the executing agent should run an LLM`
+                );
+            },
+            sign: async () => {
+                throw new Error(
+                    `placeholder agent ${entry.slug} cannot sign events; only the executing agent has a real signer`
+                );
+            },
+        };
+        scope.agentRegistry.addAgent(placeholder);
+    }
 }
