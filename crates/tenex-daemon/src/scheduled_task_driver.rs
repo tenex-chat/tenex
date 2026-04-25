@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::backend_config::read_backend_config;
-use crate::daemon_maintenance::DAEMON_MAINTENANCE_WRITER_VERSION;
+use crate::DAEMON_WRITER_VERSION;
 use crate::daemon_signals::BootedProject;
 use crate::project_event_index::ProjectEventIndex;
 use crate::scheduled_task_due_planner::{
@@ -238,7 +238,7 @@ fn fire_due_scheduled_tasks(
             project: &descriptor,
             plan,
             timestamp: now_ms,
-            writer_version: DAEMON_MAINTENANCE_WRITER_VERSION.to_string(),
+            writer_version: DAEMON_WRITER_VERSION.to_string(),
         });
         match enqueue_result {
             Ok(enqueue) => {

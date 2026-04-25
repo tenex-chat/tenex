@@ -5,6 +5,10 @@
     clippy::type_complexity
 )]
 
+/// Writer version string stamped on records produced by daemon driver tasks.
+pub const DAEMON_WRITER_VERSION: &str =
+    concat!("tenex-daemon@", env!("CARGO_PKG_VERSION"));
+
 pub mod agent_config_publish_cache;
 pub mod agent_config_update;
 pub mod agent_definition_watcher;
@@ -26,9 +30,6 @@ pub mod cli;
 pub mod conversation_store_files;
 pub mod daemon_control;
 pub mod daemon_diagnostics;
-pub mod daemon_foreground;
-pub mod daemon_loop;
-pub mod daemon_maintenance;
 pub mod daemon_signals;
 pub mod daemon_readiness;
 pub mod daemon_shell;
@@ -75,7 +76,6 @@ pub mod project_status_sources;
 pub mod project_worktrees;
 pub mod providers_config;
 pub mod publish_outbox;
-pub mod publish_outbox_driver;
 pub mod publish_runtime;
 pub mod ral_journal;
 pub mod ral_lock;

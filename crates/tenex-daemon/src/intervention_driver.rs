@@ -28,7 +28,7 @@ use tokio::sync::{Notify, mpsc, watch};
 use tokio::time::Instant;
 
 use crate::backend_config::read_backend_config;
-use crate::daemon_maintenance::DAEMON_MAINTENANCE_WRITER_VERSION;
+use crate::DAEMON_WRITER_VERSION;
 use crate::daemon_signals::RalCompletion;
 use crate::intervention::{arm_from_journal, fire_due_reviews_now, next_intervention_wakeup_at};
 use crate::project_event_index::ProjectEventIndex;
@@ -111,7 +111,7 @@ fn run_arm_pass(deps: &InterventionDriverDeps) -> Result<(), String> {
         &deps.tenex_base_dir,
         &descriptors,
         now_ms,
-        DAEMON_MAINTENANCE_WRITER_VERSION,
+        DAEMON_WRITER_VERSION,
     )
     .map(|_| ())
     .map_err(|e| e.to_string())
@@ -160,7 +160,7 @@ fn run_fire_pass(deps: &InterventionDriverDeps) -> Result<(), String> {
         &deps.tenex_base_dir,
         &descriptors,
         now_ms,
-        DAEMON_MAINTENANCE_WRITER_VERSION,
+        DAEMON_WRITER_VERSION,
     )
     .map_err(|e| e.to_string())
 }

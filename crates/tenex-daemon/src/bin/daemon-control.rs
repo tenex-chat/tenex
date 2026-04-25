@@ -2,7 +2,7 @@ use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tenex_daemon::agent_inventory::read_installed_agent_inventory;
@@ -23,15 +23,6 @@ use tenex_daemon::daemon_control::{
     read_daemon_restart_state_compatibility,
 };
 use tenex_daemon::daemon_diagnostics::{DaemonDiagnosticsInput, inspect_daemon_diagnostics};
-use tenex_daemon::daemon_foreground::{
-    DaemonForegroundInput, run_daemon_foreground_from_filesystem,
-};
-use tenex_daemon::daemon_loop::{
-    SystemDaemonMaintenanceLoopClock, ThreadDaemonMaintenanceLoopSleeper,
-};
-use tenex_daemon::daemon_maintenance::{
-    DaemonMaintenanceInput, DaemonMaintenanceOutcome, run_daemon_maintenance_once_from_filesystem,
-};
 use tenex_daemon::daemon_readiness::inspect_daemon_readiness;
 use tenex_daemon::daemon_shell::DaemonShell;
 use tenex_daemon::project_event_index::ProjectEventIndex;
@@ -40,18 +31,14 @@ use tenex_daemon::project_status_runtime::{
     ProjectStatusRuntimeInput, publish_project_status_from_filesystem,
 };
 use tenex_daemon::publish_outbox::{
-    PublishOutboxDiagnostics, PublishOutboxMaintenanceReport, PublishOutboxRetryPolicy,
-    inspect_publish_outbox,
+    PublishOutboxDiagnostics, inspect_publish_outbox,
 };
-use tenex_daemon::relay_publisher::{NostrRelayPublisher, RelayPublisherConfig};
 use tenex_daemon::scheduler_wakeups::{inspect_scheduler_wakeups, run_scheduler_maintenance};
 use tenex_daemon::subscription_runtime::{
     NostrSubscriptionPlan, NostrSubscriptionPlanInput, build_nostr_subscription_plan,
 };
 
 const CACHES_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
-const DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
-const DEFAULT_FOREGROUND_RELAY_TIMEOUT_MS: u64 = 10_000;
 const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
 
@@ -63,8 +50,6 @@ enum DaemonControlCommand {
     BackendEventsEnqueueStatus,
     BackendEventsEnqueueProjectStatus,
     BackendEventsPeriodicTick,
-    DaemonMaintenance,
-    DaemonForeground,
     NostrSubscriptionPlan,
     Readiness,
     SchedulerWakeups,
@@ -85,8 +70,6 @@ struct DaemonControlCliOptions {
     accepted_at: Option<u64>,
     request_timestamp: Option<u64>,
     first_due_at: Option<u64>,
-    iterations: Option<u64>,
-    sleep_ms: u64,
     project_owner_pubkey: Option<String>,
     project_d_tag: Option<String>,
     project_manager_pubkey: Option<String>,
@@ -180,43 +163,6 @@ struct BackendEventsPeriodicTickDiagnostics {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DaemonMaintenanceDiagnostics {
-    schema_version: u32,
-    #[serde(flatten)]
-    maintenance: DaemonMaintenanceOutcome,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DaemonForegroundDiagnostics {
-    schema_version: u32,
-    tenex_base_dir: PathBuf,
-    daemon_dir: PathBuf,
-    started_at: u64,
-    stopped_at: u64,
-    iterations: u64,
-    sleep_ms: u64,
-    steps: Vec<DaemonForegroundStepDiagnostics>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DaemonForegroundStepDiagnostics {
-    iteration_index: u64,
-    now_ms: u64,
-    tick: DaemonForegroundTickDiagnostics,
-    sleep_after_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DaemonForegroundTickDiagnostics {
-    maintenance: DaemonMaintenanceOutcome,
-    publish_outbox: PublishOutboxMaintenanceReport,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct NostrSubscriptionPlanDiagnostics {
     schema_version: u32,
     inspected_at: u64,
@@ -241,9 +187,8 @@ impl std::error::Error for CliError {}
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    let runtime_handle = tokio::runtime::Handle::current();
     let result =
-        match tokio::task::spawn_blocking(move || run_cli_with_runtime(args, runtime_handle)).await
+        match tokio::task::spawn_blocking(move || run_cli_with_runtime(args)).await
         {
             Ok(result) => result,
             Err(error) => Err(runtime_error(format!(
@@ -260,23 +205,17 @@ async fn main() {
     }
 }
 
+#[cfg(test)]
 fn run_cli<I, S>(args: I) -> Result<String, CliError>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
     let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| runtime_error(error.to_string()))?;
-    run_cli_with_runtime(args, runtime.handle().clone())
+    run_cli_with_runtime(args)
 }
 
-fn run_cli_with_runtime(
-    args: Vec<String>,
-    runtime_handle: tokio::runtime::Handle,
-) -> Result<String, CliError> {
+fn run_cli_with_runtime(args: Vec<String>) -> Result<String, CliError> {
     let options = parse_daemon_control_args(&args)?;
 
     match options.command {
@@ -312,16 +251,6 @@ fn run_cli_with_runtime(
         }
         DaemonControlCommand::BackendEventsPeriodicTick => {
             let diagnostics = run_backend_events_periodic_tick(&options)?;
-            serde_json::to_string_pretty(&diagnostics)
-                .map_err(|error| runtime_error(error.to_string()))
-        }
-        DaemonControlCommand::DaemonMaintenance => {
-            let diagnostics = run_daemon_maintenance(&options)?;
-            serde_json::to_string_pretty(&diagnostics)
-                .map_err(|error| runtime_error(error.to_string()))
-        }
-        DaemonControlCommand::DaemonForeground => {
-            let diagnostics = run_daemon_foreground(&options, &runtime_handle)?;
             serde_json::to_string_pretty(&diagnostics)
                 .map_err(|error| runtime_error(error.to_string()))
         }
@@ -504,99 +433,6 @@ fn run_backend_events_periodic_tick(
         schema_version: 1,
         maintenance,
         project_descriptor_report,
-    })
-}
-
-fn run_daemon_maintenance(
-    options: &DaemonControlCliOptions,
-) -> Result<DaemonMaintenanceDiagnostics, CliError> {
-    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
-    let diagnostics = run_daemon_maintenance_once_from_filesystem(DaemonMaintenanceInput {
-        tenex_base_dir: &options.tenex_base_dir,
-        daemon_dir: &options.daemon_dir,
-        now_ms: options.inspected_at,
-        project_boot_state: tenex_daemon::project_boot_state::empty_booted_projects_state(),
-        project_event_index,
-        heartbeat_latch: None,
-        dispatch_enqueued_tx: None,
-    })
-    .map_err(|error| runtime_error(error.to_string()))?;
-
-    Ok(DaemonMaintenanceDiagnostics {
-        schema_version: 1,
-        maintenance: diagnostics,
-    })
-}
-
-fn run_daemon_foreground(
-    options: &DaemonControlCliOptions,
-    runtime_handle: &tokio::runtime::Handle,
-) -> Result<DaemonForegroundDiagnostics, CliError> {
-    let iterations = options
-        .iterations
-        .ok_or_else(|| usage_error("--iterations is required"))?;
-    if iterations == 0 {
-        return Err(usage_error("--iterations must be greater than 0"));
-    }
-
-    let config = read_backend_config(&options.tenex_base_dir)
-        .map_err(|error| runtime_error(error.to_string()))?;
-    let relay_config = RelayPublisherConfig::new(
-        config.effective_relay_urls(),
-        Duration::from_millis(DEFAULT_FOREGROUND_RELAY_TIMEOUT_MS),
-    )
-    .map_err(|error| runtime_error(error.to_string()))?;
-    let publisher = std::sync::Arc::new(std::sync::Mutex::new(
-        NostrRelayPublisher::spawn_on_runtime(relay_config, runtime_handle.clone())
-            .map_err(|error| runtime_error(error.to_string()))?,
-    ));
-    let shell = DaemonShell::new(&options.daemon_dir);
-    let mut clock = SystemDaemonMaintenanceLoopClock;
-    let mut sleeper = ThreadDaemonMaintenanceLoopSleeper;
-    let project_event_index = std::sync::Arc::new(std::sync::Mutex::new(ProjectEventIndex::new()));
-    let report = run_daemon_foreground_from_filesystem(
-        &shell,
-        DaemonForegroundInput {
-            tenex_base_dir: &options.tenex_base_dir,
-            max_iterations: iterations,
-            sleep_ms: options.sleep_ms,
-            retry_policy: PublishOutboxRetryPolicy::default(),
-            project_boot_state: std::sync::Arc::new(std::sync::Mutex::new(
-                tenex_daemon::project_boot_state::ProjectBootState::new(),
-            )),
-            project_event_index,
-            heartbeat_latch: None,
-        },
-        &mut clock,
-        &mut sleeper,
-        &publisher,
-    )
-    .map_err(|error| runtime_error(error.to_string()))?;
-    let stopped_at = current_unix_time_ms();
-    let steps = report
-        .tick_loop
-        .steps
-        .into_iter()
-        .map(|step| DaemonForegroundStepDiagnostics {
-            iteration_index: step.iteration_index,
-            now_ms: step.now_ms,
-            tick: DaemonForegroundTickDiagnostics {
-                maintenance: step.maintenance_outcome.maintenance,
-                publish_outbox: step.maintenance_outcome.publish_outbox,
-            },
-            sleep_after_ms: step.sleep_after_ms,
-        })
-        .collect();
-
-    Ok(DaemonForegroundDiagnostics {
-        schema_version: DAEMON_FOREGROUND_DIAGNOSTICS_SCHEMA_VERSION,
-        tenex_base_dir: report.tenex_base_dir,
-        daemon_dir: report.daemon_dir,
-        started_at: report.started_at_ms,
-        stopped_at,
-        iterations,
-        sleep_ms: options.sleep_ms,
-        steps,
     })
 }
 
@@ -813,8 +649,6 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
             DaemonControlCommand::BackendEventsEnqueueProjectStatus
         }
         Some("backend-events-periodic-tick") => DaemonControlCommand::BackendEventsPeriodicTick,
-        Some("daemon-maintenance") => DaemonControlCommand::DaemonMaintenance,
-        Some("daemon-foreground") => DaemonControlCommand::DaemonForeground,
         Some("nostr-subscription-plan") => DaemonControlCommand::NostrSubscriptionPlan,
         Some("readiness") => DaemonControlCommand::Readiness,
         Some("scheduler-wakeups") => DaemonControlCommand::SchedulerWakeups,
@@ -839,8 +673,6 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let mut accepted_at = None;
     let mut request_timestamp = None;
     let mut first_due_at = None;
-    let mut iterations = None;
-    let mut sleep_ms = 0;
     let mut project_owner_pubkey = None;
     let mut project_d_tag = None;
     let mut project_manager_pubkey = None;
@@ -901,20 +733,6 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
                     .ok_or_else(|| usage_error("--first-due-at requires a value"))?;
                 first_due_at = Some(parse_u64_arg("--first-due-at", value)?);
             }
-            "--iterations" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or_else(|| usage_error("--iterations requires a value"))?;
-                iterations = Some(parse_u64_arg("--iterations", value)?);
-            }
-            "--sleep-ms" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or_else(|| usage_error("--sleep-ms requires a value"))?;
-                sleep_ms = parse_u64_arg("--sleep-ms", value)?;
-            }
             "--project-owner-pubkey" => {
                 index += 1;
                 let value = args
@@ -974,8 +792,6 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
     let daemon_dir = match daemon_dir {
         Some(daemon_dir) => daemon_dir,
         None if command == DaemonControlCommand::Readiness
-            || command == DaemonControlCommand::DaemonMaintenance
-            || command == DaemonControlCommand::DaemonForeground
             || command == DaemonControlCommand::NostrSubscriptionPlan =>
         {
             tenex_base_dir
@@ -996,8 +812,6 @@ fn parse_daemon_control_args(args: &[String]) -> Result<DaemonControlCliOptions,
         accepted_at,
         request_timestamp,
         first_due_at,
-        iterations,
-        sleep_ms,
         project_owner_pubkey,
         project_d_tag,
         project_manager_pubkey,
@@ -1042,8 +856,6 @@ fn usage() -> String {
         "  daemon-control backend-events-enqueue-status --daemon-dir <path> [--tenex-base-dir <path>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control backend-events-enqueue-project-status --daemon-dir <path> [--tenex-base-dir <path>] --project-owner-pubkey <hex> --project-d-tag <d> [--project-manager-pubkey <hex>] [--worktree <branch>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
         "  daemon-control backend-events-periodic-tick --daemon-dir <path> [--tenex-base-dir <path>] [--discover-projects | --project-owner-pubkey <hex> --project-d-tag <d>] [--project-manager-pubkey <hex>] [--worktree <branch>] [--first-due-at <s>] [--created-at <s>] [--accepted-at <ms>] [--request-timestamp <ms>]",
-        "  daemon-control daemon-maintenance [--daemon-dir <path> | --tenex-base-dir <path>] [--inspected-at <ms>]",
-        "  daemon-control daemon-foreground [--daemon-dir <path> | --tenex-base-dir <path>] --iterations <count> [--sleep-ms <ms>]",
         "  daemon-control nostr-subscription-plan [--daemon-dir <path> | --tenex-base-dir <path>] [--since <s>] [--lesson-definition-id <event-id>]...",
         "  daemon-control readiness [--daemon-dir <path> | --tenex-base-dir <path>]",
         "  daemon-control scheduler-wakeups --daemon-dir <path> [--inspected-at <ms>]",
@@ -1280,43 +1092,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_daemon_maintenance_args_with_tenex_base_dir_only() {
-        let options = parse_daemon_control_args(&[
-            "daemon-maintenance".to_string(),
-            "--tenex-base-dir".to_string(),
-            "/tmp/tenex".to_string(),
-            "--inspected-at".to_string(),
-            "1710001000000".to_string(),
-        ])
-        .expect("daemon-maintenance args must parse");
-
-        assert_eq!(options.command, DaemonControlCommand::DaemonMaintenance);
-        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
-        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex/daemon"));
-        assert_eq!(options.inspected_at, 1710001000000);
-    }
-
-    #[test]
-    fn parses_daemon_foreground_args_with_tenex_base_dir_only() {
-        let options = parse_daemon_control_args(&[
-            "daemon-foreground".to_string(),
-            "--tenex-base-dir".to_string(),
-            "/tmp/tenex".to_string(),
-            "--iterations".to_string(),
-            "2".to_string(),
-            "--sleep-ms".to_string(),
-            "50".to_string(),
-        ])
-        .expect("daemon-foreground args must parse");
-
-        assert_eq!(options.command, DaemonControlCommand::DaemonForeground);
-        assert_eq!(options.tenex_base_dir, PathBuf::from("/tmp/tenex"));
-        assert_eq!(options.daemon_dir, PathBuf::from("/tmp/tenex/daemon"));
-        assert_eq!(options.iterations, Some(2));
-        assert_eq!(options.sleep_ms, 50);
-    }
-
-    #[test]
     fn parses_nostr_subscription_plan_args_with_tenex_base_dir_only() {
         let options = parse_daemon_control_args(&[
             "nostr-subscription-plan".to_string(),
@@ -1440,23 +1215,9 @@ mod tests {
     }
 
     #[test]
-    fn foreground_command_rejects_missing_iterations() {
-        let error = run_cli(["daemon-foreground", "--daemon-dir", "/tmp/tenex-daemon"])
-            .expect_err("daemon-foreground without iterations must fail");
-
-        assert_eq!(error.to_string(), "--iterations is required");
-        assert_eq!(error.exit_code, USAGE_EXIT_CODE);
-    }
-
-    #[test]
-    fn help_usage_includes_daemon_foreground_command() {
+    fn help_usage_includes_nostr_subscription_plan_command() {
         let error = run_cli(["help"]).expect_err("help must return usage");
 
-        assert!(
-            error
-                .to_string()
-                .contains("daemon-control daemon-foreground")
-        );
         assert!(
             error
                 .to_string()
@@ -1684,77 +1445,6 @@ mod tests {
         assert_eq!(value["diagnosticsAfter"]["duePendingCount"], json!(1));
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
-    }
-
-    #[test]
-    fn daemon_maintenance_outputs_maintenance_json() {
-        let tenex_base_dir = unique_temp_base_dir();
-        let daemon_dir = tenex_base_dir.join("daemon");
-        let agents_dir = tenex_base_dir.join("agents");
-        let project_dir = tenex_base_dir.join("projects").join("demo-project");
-        fs::create_dir_all(&daemon_dir).expect("daemon dir must create");
-        fs::create_dir_all(&agents_dir).expect("agents dir must create");
-        fs::create_dir_all(&project_dir).expect("project dir must create");
-
-        let owner = xonly_pubkey_hex(0x02);
-        fs::write(
-            tenex_base_dir.join("config.json"),
-            format!(
-                r#"{{
-                    "whitelistedPubkeys": ["{owner}"],
-                    "tenexPrivateKey": "{TEST_SECRET_KEY_HEX}",
-                    "relays": ["wss://relay.one"]
-                }}"#
-            ),
-        )
-        .expect("config must write");
-        fs::write(
-            project_dir.join("project.json"),
-            format!(
-                r#"{{
-                    "schemaVersion": 1,
-                    "status": "running",
-                    "projectOwnerPubkey": "{owner}",
-                    "projectDTag": "demo-project",
-                    "worktrees": ["main"]
-                }}"#
-            ),
-        )
-        .expect("project descriptor must write");
-        let output = run_cli([
-            "daemon-maintenance",
-            "--daemon-dir",
-            daemon_dir.to_str().expect("temp path must be utf-8"),
-            "--inspected-at",
-            "1710001000000",
-        ])
-        .expect("daemon maintenance command must succeed");
-
-        let value: Value = serde_json::from_str(&output).expect("output must be json");
-        assert_eq!(value["schemaVersion"], json!(1));
-        assert_eq!(value["tenexBaseDir"], json!(tenex_base_dir));
-        assert_eq!(value["daemonDir"], json!(daemon_dir));
-        assert_eq!(value["nowMs"], json!(1_710_001_000_000u64));
-        assert_eq!(value["nowSeconds"], json!(1_710_001_000u64));
-        // daemon-control starts with an empty ProjectEventIndex; project descriptors are only
-        // populated from live kind:31933 events fed by the running daemon.
-        assert_eq!(
-            value["projectDescriptorReport"]["descriptors"],
-            json!([])
-        );
-        assert_eq!(
-            value["bootedProjectDescriptorReport"]["descriptors"],
-            json!([])
-        );
-        // backend_events was removed from DaemonMaintenanceOutcome; backend-status
-        // and project-status publishing now run as dedicated async driver tasks.
-        assert!(value["backendEvents"].is_null());
-        assert_eq!(
-            value["schedulerWakeups"]["diagnosticsAfter"]["pendingCount"],
-            json!(0)
-        );
-
-        fs::remove_dir_all(tenex_base_dir).expect("temp tenex base dir cleanup must succeed");
     }
 
     #[test]

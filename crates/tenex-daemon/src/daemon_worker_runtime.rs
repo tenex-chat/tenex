@@ -961,7 +961,10 @@ where
             &started.runtime_started.identity.project_id,
             &started.runtime_started.identity.conversation_id,
         );
-    let active_now_ms = crate::daemon_loop::current_unix_time_ms();
+    let active_now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0);
     publish_worker_operations_status(
         daemon_dir,
         active_now_ms,
@@ -1033,7 +1036,10 @@ where
             &started.runtime_started.identity.conversation_id,
         )
     };
-    let cleanup_now_ms = crate::daemon_loop::current_unix_time_ms();
+    let cleanup_now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0);
     let (cleanup_variant, cleanup_pubkeys): (&str, &[String]) = if remaining_pubkeys.is_empty() {
         ("cleanup", &[])
     } else {
