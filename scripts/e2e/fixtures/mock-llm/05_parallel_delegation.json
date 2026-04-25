@@ -1,0 +1,62 @@
+{
+  "expectedModelId": "mock/parallel-delegation-05",
+  "label": "e2e/05_parallel_delegation_q_tags",
+  "responses": [
+    {
+      "priority": 120,
+      "trigger": {
+        "agentName": "agent1",
+        "messageContains": "<delegations>"
+      },
+      "response": {
+        "content": "Parallel delegations complete: got alpha and beta responses."
+      }
+    },
+    {
+      "priority": 80,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/parallel/"
+      },
+      "response": {
+        "content": "Delegating alpha and beta tasks in parallel.",
+        "toolCalls": [
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent2",
+              "prompt": "Alpha task: respond with exactly the word alpha."
+            }
+          },
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent2",
+              "prompt": "Beta task: respond with exactly the word beta."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "priority": 60,
+      "trigger": {
+        "agentName": "agent2",
+        "userMessage": "/[Aa]lpha/"
+      },
+      "response": {
+        "content": "parallel-delegation-alpha-response"
+      }
+    },
+    {
+      "priority": 60,
+      "trigger": {
+        "agentName": "agent2",
+        "userMessage": "/[Bb]eta/"
+      },
+      "response": {
+        "content": "parallel-delegation-beta-response"
+      }
+    }
+  ]
+}
