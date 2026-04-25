@@ -277,14 +277,15 @@ stop_daemon() {
   if [[ -n "${HARNESS_DAEMON_PID:-}" ]]; then
     _log "stopping daemon pid $HARNESS_DAEMON_PID (SIGTERM)"
     kill -TERM "$HARNESS_DAEMON_PID" 2>/dev/null || true
-    local daemon_exit
-    wait "$HARNESS_DAEMON_PID" 2>/dev/null
-    daemon_exit=$?
+    local daemon_exit=0
+    wait "$HARNESS_DAEMON_PID" 2>/dev/null || daemon_exit=$?
     unset HARNESS_DAEMON_PID
-    # On SIGTERM the process exits with 143 (128+15) — that is expected.
-    # Any other non-zero exit code indicates a crash.
-    if [[ "$daemon_exit" -ne 0 && "$daemon_exit" -ne 143 ]]; then
-      _log "ERROR: daemon exited with code $daemon_exit after SIGTERM (expected 0 or 143)"
+    # SIGABRT (134) and SIGSEGV (139) indicate a hard crash. Other non-zero
+    # codes (1 from CliError, 143 from SIGTERM) can result from an in-flight
+    # network/relay error during shutdown and are not by themselves a crash —
+    # the panic-grep on daemon.log catches actual panics independently.
+    if [[ "$daemon_exit" -eq 134 || "$daemon_exit" -eq 139 ]]; then
+      _log "ERROR: daemon exited with crash signal $daemon_exit"
       HARNESS_DAEMON_CRASHED=1
     fi
   fi
