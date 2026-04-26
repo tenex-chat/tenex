@@ -323,9 +323,30 @@ echo "[scenario] === Phase 6: post-restart dispatch verification ==="
 
 # Re-publish the project boot for the newly started daemon instance.
 echo "[scenario] re-publishing kind:24000 (boot) for restarted daemon"
-boot2_evt="$(publish_event_as "$USER_NSEC" 24000 "boot-post-sigkill" "a=$PROJECT_A_TAG" 2>/dev/null || true)"
-boot2_id="$(printf '%s' "$boot2_evt" | jq -r '.id // empty' 2>/dev/null || true)"
+boot2_evt="$(publish_event_as "$USER_NSEC" 24000 "boot-post-sigkill" "a=$PROJECT_A_TAG")"
+boot2_id="$(printf '%s' "$boot2_evt" | jq -r .id)"
+boot2_created_at="$(printf '%s' "$boot2_evt" | jq -r .created_at)"
 echo "[scenario]   boot2 event id=${boot2_id:-<none>}"
+
+# Wait for a fresh kind:24010 published AFTER boot2. The relay already has a
+# kind:24010 from Phase 1, so await_kind_event would return that stale event
+# immediately. Using --since ensures we only accept a newly-emitted one.
+_24010_deadline=$(( $(date +%s) + 30 ))
+_saw_new_24010=0
+while [[ $(date +%s) -lt $_24010_deadline ]]; do
+  _new24010="$(nak req -k 24010 -a "$BACKEND_PUBKEY" \
+    --since "$boot2_created_at" --limit 1 \
+    --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  if [[ -n "$_new24010" ]]; then
+    _saw_new_24010=1
+    break
+  fi
+  sleep 0.5
+done
+[[ "$_saw_new_24010" -eq 1 ]] \
+  || _die "ASSERT: restarted daemon never published kind:24010 for boot2 within 30s"
+echo "[scenario]   kind:24010 published by restarted daemon ✓"
 
 echo "[scenario] publishing second kind:1 to test post-restart dispatch"
 user_msg2_evt="$(publish_event_as "$USER_NSEC" 1 \
@@ -351,10 +372,8 @@ done
 
 if [[ "$saw_dispatch2" -eq 1 ]]; then
   echo "[scenario]   restarted daemon dispatched the second message ✓ (project index re-populated)"
-  phase6_gap=0
 else
-  echo "[scenario]   GAP: restarted daemon did NOT dispatch the second message — project kind:31933 index not re-populated after SIGKILL restart"
-  phase6_gap=1
+  _die "ASSERT: restarted daemon did NOT dispatch the second message within 15s — project kind:31933 index not re-populated after SIGKILL restart"
 fi
 
 # =============================================================================
@@ -368,16 +387,7 @@ echo "[scenario]   Phase 2: post-crash state observed (informational)"
 echo "[scenario]   Phase 3: clean restart — no panic, lockfile written, subscription live ✓"
 echo "[scenario]   Phase 4: startup reconciliation recorded a crashed RAL entry ✓"
 echo "[scenario]   Phase 5: no zombie pre-crash worker processes ✓"
-if [[ "${phase6_gap:-1}" -eq 0 ]]; then
-  echo "[scenario]   Phase 6: post-restart dispatch succeeded ✓"
-else
-  echo "[scenario]   Phase 6: GAP — post-restart dispatch did not occur"
-fi
+echo "[scenario]   Phase 6: post-restart dispatch succeeded ✓"
 
-if [[ "${phase6_gap:-1}" -eq 0 ]]; then
-  emit_result pass \
-    "passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies"
-else
-  emit_result phase_partial \
-    "passes:clean-restart+crash-reconciliation+no-zombies; gaps:phase6=${phase6_gap:-1}"
-fi
+emit_result pass \
+  "passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies"

@@ -255,16 +255,16 @@ saw_agent2_resume=0
 saw_agent1_final=0
 saw_ral_completions=0
 
-# agent1 any kind:1 (delegation)
-if timeout "$phase_b_timeout" nak req -k 1 -a "$AGENT1_PUBKEY" --stream \
-     --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null | head -1 | grep -q .; then
+# agent1 any kind:1 (delegation). Use `_await_content` so the historical query
+# fires first; a stream-only check misses events published before the
+# subscription opens (which is the common case once daemon runs are fast).
+if _await_content 1 "$AGENT1_PUBKEY" "." "$phase_b_timeout"; then
   echo "[scenario]   observed: agent1 published kind:1 (delegation)"
   saw_agent1_delegation=1
 fi
 
-# agent2 any kind:1 (delegation to agent3)
-if timeout "$phase_b_timeout" nak req -k 1 -a "$AGENT2_PUBKEY" --stream \
-     --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null | head -1 | grep -q .; then
+# agent2 any kind:1 (delegation to agent3). Same fix as agent1 above.
+if _await_content 1 "$AGENT2_PUBKEY" "." "$phase_b_timeout"; then
   echo "[scenario]   observed: agent2 published kind:1"
   saw_agent2_delegation=1
 fi
