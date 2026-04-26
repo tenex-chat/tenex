@@ -212,7 +212,7 @@ if [[ "$E2E_USE_OLLAMA" == "1" ]]; then
   phase_b_timeout=60
 else
   echo "[scenario] === Phase B: asserting mock-driven delegation ==="
-  phase_b_timeout=15
+  phase_b_timeout=45
 fi
 
 # Stream-wait helper for relay events: exits as soon as the first matching event

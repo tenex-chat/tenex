@@ -21,10 +21,14 @@ use crate::worker_protocol::{
     AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolError, decode_agent_worker_protocol_frame,
     validate_agent_worker_protocol_message,
 };
+use crate::ral_journal::{
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalEvent, RalJournalIdentity,
+    RalJournalRecord, RalPendingDelegation, append_ral_journal_record_with_resequence,
+};
+use crate::ral_scheduler::RalScheduler;
 use crate::worker_publish::flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
-use crate::ral_scheduler::RalScheduler;
 
 pub struct WorkerSessionLoopInput<'a> {
     pub daemon_dir: &'a Path,
@@ -352,28 +356,137 @@ where
         });
     };
 
-    // Read pending delegation IDs from the RAL journal so we can build the
-    // synthetic terminal. The worker published its delegation event and exited
-    // before sending the `waiting_for_delegation` terminal frame; we infer the
-    // same state from the journal entries written by `delegation_registered`.
-    let pending_delegation_ids: Vec<String> = RalScheduler::from_daemon_dir(input.daemon_dir)
-        .ok()
-        .and_then(|scheduler| {
-            // Find the active execution slot for this worker so we can look up
-            // the right RAL identity.
-            let guard = input.runtime_state.lock().expect("runtime state mutex poisoned");
-            let worker_snapshot = guard.get_worker(input.worker_id)?;
-            let slot = worker_snapshot.primary_execution()?;
-            let entry = scheduler.entry(&slot.identity)?;
-            Some(
-                entry
-                    .pending_delegations
-                    .iter()
-                    .map(|d| d.delegation_conversation_id.clone())
-                    .collect(),
-            )
+    // The bun worker publishes the delegation Nostr event via `publish_request`
+    // and then exits before sending `delegation_registered`. Extract the
+    // pending delegation directly from the accepted event so we can write the
+    // `DelegationRegistered` journal entry ourselves before synthesizing the
+    // `waiting_for_delegation` terminal.
+    let publish_request = &publish_outcome.message_plan.message;
+    let event = &publish_request["event"];
+
+    let delegation_conversation_id = event
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let sender_pubkey = event
+        .get("pubkey")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let prompt = event
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let recipient_pubkey = event
+        .get("tags")
+        .and_then(Value::as_array)
+        .and_then(|tags| {
+            tags.iter().find(|tag| {
+                tag.as_array()
+                    .and_then(|t| t.first())
+                    .and_then(Value::as_str)
+                    == Some("p")
+            })
         })
-        .unwrap_or_default();
+        .and_then(Value::as_array)
+        .and_then(|t| t.get(1))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+
+    let identity = RalJournalIdentity {
+        project_id: publish_request
+            .get("projectId")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        agent_pubkey: publish_request
+            .get("agentPubkey")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        conversation_id: publish_request
+            .get("conversationId")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        ral_number: publish_request
+            .get("ralNumber")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+    };
+
+    let (worker_id_str, claim_token) = {
+        let guard = input.runtime_state.lock().expect("runtime state mutex poisoned");
+        let worker_snapshot = guard.get_worker(input.worker_id).cloned();
+        match worker_snapshot.and_then(|w| {
+            let slot = w.primary_execution().cloned()?;
+            Some((w.worker_id.clone(), slot.claim_token.clone()))
+        }) {
+            Some(pair) => pair,
+            None => (input.worker_id.to_string(), String::new()),
+        }
+    };
+
+    let pending_delegation = RalPendingDelegation {
+        delegation_conversation_id: delegation_conversation_id.clone(),
+        recipient_pubkey,
+        sender_pubkey,
+        prompt,
+        delegation_type: RalDelegationType::Standard,
+        ral_number: identity.ral_number,
+        parent_delegation_conversation_id: None,
+        pending_sub_delegations: None,
+        deferred_completion: None,
+        followup_event_id: None,
+        project_id: None,
+        suggestions: None,
+        killed: None,
+        killed_at: None,
+    };
+
+    let correlation_id = publish_request
+        .get("correlationId")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let mut delegation_record = RalJournalRecord::new(
+        RAL_JOURNAL_WRITER_RUST_DAEMON,
+        env!("CARGO_PKG_VERSION"),
+        0, // resequenced under lock
+        input.observed_at,
+        format!("{correlation_id}:delegation_registered:synthetic"),
+        RalJournalEvent::DelegationRegistered {
+            identity: identity.clone(),
+            worker_id: worker_id_str,
+            claim_token,
+            pending_delegation,
+        },
+    );
+    append_ral_journal_record_with_resequence(input.daemon_dir, &mut delegation_record).map_err(
+        |source| WorkerSessionLoopError::MessageFlow {
+            source: WorkerMessageFlowError::RalJournal {
+                source: Box::new(source),
+            },
+        },
+    )?;
+
+    let pending_delegation_ids: Vec<String> =
+        RalScheduler::from_daemon_dir(input.daemon_dir)
+            .ok()
+            .and_then(|scheduler| {
+                let entry = scheduler.entry(&identity)?;
+                Some(
+                    entry
+                        .pending_delegations
+                        .iter()
+                        .map(|d| d.delegation_conversation_id.clone())
+                        .collect(),
+                )
+            })
+            .unwrap_or_else(|| vec![delegation_conversation_id.clone()]);
 
     let terminal_message = terminal_waiting_for_delegation_message_from_publish(
         publish_outcome,

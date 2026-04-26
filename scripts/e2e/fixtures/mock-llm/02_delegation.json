@@ -13,6 +13,16 @@
       }
     },
     {
+      "priority": 95,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/DELEGATION COMPLETED/"
+      },
+      "response": {
+        "content": "Final answer: agent2 says 4."
+      }
+    },
+    {
       "priority": 50,
       "trigger": {
         "agentName": "agent1",

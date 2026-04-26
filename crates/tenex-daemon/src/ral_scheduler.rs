@@ -11,10 +11,10 @@ use crate::dispatch_queue::{
     build_dispatch_queue_record,
 };
 use crate::ral_journal::{
-    RAL_JOURNAL_WRITER_RUST_DAEMON, RalCompletedDelegation, RalDelegationSnapshot, RalJournalEvent,
-    RalJournalIdentity, RalJournalRecord, RalJournalReplay, RalJournalResult, RalJournalSnapshot,
-    RalPendingDelegation, RalReplayEntry, RalReplayStatus, RalTerminalSummary, RalWorkerError,
-    replay_ral_journal, write_ral_snapshot,
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalCompletedDelegation, RalDelegationSnapshot,
+    RalDelegationType, RalJournalEvent, RalJournalIdentity, RalJournalRecord, RalJournalReplay,
+    RalJournalResult, RalJournalSnapshot, RalPendingDelegation, RalReplayEntry, RalReplayStatus,
+    RalTerminalSummary, RalWorkerError, replay_ral_journal, write_ral_snapshot,
 };
 
 static CLAIM_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -241,6 +241,31 @@ impl RalScheduler {
             snapshot
                 .pending_delegations
                 .extend(entry.pending_delegations.iter().cloned());
+            // For each completed delegation, include a synthetic pending entry
+            // alongside the completion. The TS worker overlay applies them in
+            // registration order — it first sees the pending, then resolves it
+            // via the completion — so the `<delegations>` system reminder fires
+            // correctly on the resumed session. Without the synthetic pending the
+            // overlay's `applyDelegationCompletion` cannot find a match and the
+            // completed delegation is silently dropped.
+            for completed in &entry.completed_delegations {
+                snapshot.pending_delegations.push(RalPendingDelegation {
+                    delegation_conversation_id: completed.delegation_conversation_id.clone(),
+                    recipient_pubkey: completed.sender_pubkey.clone(),
+                    sender_pubkey: completed.recipient_pubkey.clone(),
+                    prompt: String::new(),
+                    delegation_type: RalDelegationType::Standard,
+                    ral_number: entry.identity.ral_number,
+                    parent_delegation_conversation_id: None,
+                    pending_sub_delegations: None,
+                    deferred_completion: None,
+                    followup_event_id: None,
+                    project_id: None,
+                    suggestions: None,
+                    killed: None,
+                    killed_at: None,
+                });
+            }
             snapshot
                 .completed_delegations
                 .extend(entry.completed_delegations.iter().cloned());
