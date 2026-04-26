@@ -233,7 +233,7 @@ export async function runOneExecution(
             finalEventIds: response ? [response.id] : [],
             pendingDelegations,
             pendingDelegationsRemain,
-            keepWorkerWarm: false,
+            keepWorkerWarm: true,
         };
     });
 }

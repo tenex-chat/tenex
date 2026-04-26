@@ -329,7 +329,7 @@ describe("agent worker protocol process smoke test", () => {
                     finalRalState: "completed",
                     publishedUserVisibleEvent: true,
                     pendingDelegationsRemain: false,
-                    keepWorkerWarm: false,
+                    keepWorkerWarm: true,
                 });
                 expect("finalEventIds" in complete && complete.finalEventIds).toHaveLength(1);
                 expect("finalEventIds" in complete && complete.finalEventIds).toContain(
@@ -478,7 +478,7 @@ describe("agent worker protocol process smoke test", () => {
                     finalRalState: "completed",
                     publishedUserVisibleEvent: true,
                     pendingDelegationsRemain: false,
-                    keepWorkerWarm: false,
+                    keepWorkerWarm: true,
                 });
                 expect(complete && "finalEventIds" in complete && complete.finalEventIds).toHaveLength(1);
 
@@ -678,7 +678,7 @@ describe("agent worker protocol process smoke test", () => {
                     finalRalState: "waiting_for_delegation",
                     publishedUserVisibleEvent: true,
                     pendingDelegationsRemain: true,
-                    keepWorkerWarm: false,
+                    keepWorkerWarm: true,
                 });
                 expect(
                     waiting &&
@@ -826,7 +826,7 @@ describe("agent worker protocol process smoke test", () => {
                     publishedUserVisibleEvent: false,
                     pendingDelegationsRemain: false,
                     finalEventIds: [],
-                    keepWorkerWarm: false,
+                    keepWorkerWarm: true,
                 });
                 expect(observed.some((message) => message.type === "complete")).toBe(false);
 
@@ -956,7 +956,7 @@ describe("agent worker protocol process smoke test", () => {
                     finalRalState: "completed",
                     publishedUserVisibleEvent: true,
                     pendingDelegationsRemain: false,
-                    keepWorkerWarm: false,
+                    keepWorkerWarm: true,
                 });
 
                 requestWorkerShutdown(worker, fixture.executeMessage.correlationId);

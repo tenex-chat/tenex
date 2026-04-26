@@ -15,7 +15,12 @@ import {
     type AgentWorkerProtocolFrameSink,
     writeAgentWorkerProtocolFrame,
 } from "./protocol";
-import { AgentWorkerExecutionFailure, executeAgentWorkerRequest } from "./bootstrap";
+import {
+    AgentWorkerExecutionFailure,
+    bootstrapProjectScope,
+    runOneExecution,
+    type ProjectScopeBootstrapResult,
+} from "./bootstrap";
 import { Nip46PublishCoordinator, Nip46WorkerBridge } from "./nip46-bridge";
 import { PublishResultCoordinator } from "./publisher-bridge";
 import type {
@@ -46,6 +51,7 @@ class AgentWorkerSession {
     private readonly activeExecutions = new Set<Promise<void>>();
     private executionSettled: Deferred<void> = createDeferred<void>();
     private exitWhenDrained = false;
+    private projectScope?: ProjectScopeBootstrapResult;
 
     constructor() {
         installProcessStdoutSuppressor();
@@ -82,6 +88,7 @@ class AgentWorkerSession {
                 if (shutdownRequested) {
                     this.nip46Results.rejectAll(new Error("worker shutdown requested"));
                 }
+                await this.disposeProjectScope();
                 // Before returning we MUST drain the stdout writable buffer.
                 // Without this, the terminal frame (or any tail-end emit) can
                 // sit in Node's writable queue while process.exit cuts off the
@@ -296,7 +303,13 @@ class AgentWorkerSession {
 
         if (engine === "agent") {
             try {
-                const result = await executeAgentWorkerRequest(message, this.emit, this.publishResults);
+                const scope = await this.getOrCreateProjectScope(message);
+                const result = await runOneExecution(
+                    message,
+                    scope.scope,
+                    this.emit,
+                    this.publishResults
+                );
 
                 const terminalBase = {
                     correlationId: message.correlationId,
@@ -331,6 +344,7 @@ class AgentWorkerSession {
 
                 return result.keepWorkerWarm;
             } catch (error) {
+                await this.disposeProjectScope();
                 const executionError =
                     error instanceof AgentWorkerExecutionFailure
                         ? {
@@ -409,6 +423,34 @@ class AgentWorkerSession {
 
     private async write(value: AgentWorkerOutboundProtocolMessage): Promise<void> {
         await writeAgentWorkerProtocolFrame(this.protocolSink, value);
+    }
+
+    private async getOrCreateProjectScope(
+        message: ExecuteMessage
+    ): Promise<ProjectScopeBootstrapResult> {
+        const existing = this.projectScope;
+        if (existing) {
+            const sameProject =
+                existing.scope.projectId === message.projectId &&
+                existing.scope.projectBasePath === message.projectBasePath &&
+                existing.scope.metadataPath === message.metadataPath;
+            if (sameProject) {
+                return existing;
+            }
+            await this.disposeProjectScope();
+        }
+
+        const bootstrapped = await bootstrapProjectScope(message);
+        this.projectScope = bootstrapped;
+        return bootstrapped;
+    }
+
+    private async disposeProjectScope(): Promise<void> {
+        const scope = this.projectScope;
+        this.projectScope = undefined;
+        if (scope) {
+            await scope.cleanup();
+        }
     }
 
     private nextSequence(): number {
