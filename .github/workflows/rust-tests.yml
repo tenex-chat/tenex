@@ -1,0 +1,43 @@
+name: Rust daemon tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  cargo-build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: cargo build (release)
+        run: cargo build --release -p tenex-daemon
+
+      - name: cargo test (lib)
+        run: cargo test --release -p tenex-daemon --lib --no-fail-fast
+
+      - name: cargo clippy
+        run: cargo clippy --release -p tenex-daemon -- -D warnings
+
+  ts-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+      - run: bun --bun x tsc --noEmit
