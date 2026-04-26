@@ -39,6 +39,14 @@ point_daemon_config_at_local_relay
 
 seed_whitelist_file "$USER_PUBKEY" "$BACKEND_PUBKEY"
 
+# Register agent2 in the agents index so the reconciler detects a diff vs the
+# pre-seeded 14199 (which has only agent1+backend). Without this, byProject is
+# empty and the reconciler sees no local agents, producing no change.
+agents_index="$TENEX_BASE_DIR/agents/index.json"
+jq --arg pk1 "$AGENT1_PUBKEY" --arg pk2 "$AGENT2_PUBKEY" --arg proj "$PROJECT_D_TAG" \
+   '.byProject[$proj] = [$pk1, $pk2]' \
+   "$agents_index" > "$agents_index.tmp" && mv "$agents_index.tmp" "$agents_index"
+
 cfg="$TENEX_BASE_DIR/config.json"
 jq \
   --arg owner "$USER_PUBKEY" \

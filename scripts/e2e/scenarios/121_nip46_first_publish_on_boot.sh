@@ -40,6 +40,14 @@ point_daemon_config_at_local_relay
 # before any kind:14199 is published.
 seed_whitelist_file "$USER_PUBKEY" "$BACKEND_PUBKEY"
 
+# Register agent1 in the agents index so read_project_index_agent_pubkeys
+# returns it. The fixture writes byProject:{} (empty) by default; we must
+# populate it so the reconciler includes AGENT1_PUBKEY in the desired p-tag set.
+agents_index="$TENEX_BASE_DIR/agents/index.json"
+jq --arg pk "$AGENT1_PUBKEY" --arg proj "$PROJECT_D_TAG" \
+   '.byProject[$proj] = [$pk]' \
+   "$agents_index" > "$agents_index.tmp" && mv "$agents_index.tmp" "$agents_index"
+
 # Configure daemon: USER_PUBKEY is the sole whitelisted owner; bunker URI
 # targets the local relay. The backend pubkey is the authorized NIP-46 requester.
 cfg="$TENEX_BASE_DIR/config.json"
@@ -73,8 +81,26 @@ await_daemon_subscribed 45 || { kill "$BUNKER_PID" 2>/dev/null; _die "daemon sub
 # The agent-inventory poller fires every 2s and triggers the reconciler.
 # The reconciler debounces for 5s then fires, sending a NIP-46 connect + sign_event.
 # nak bunker responds immediately. Total expected: ~8-12s.
-echo "[scenario] waiting up to 25s for kind:14199 from owner ($USER_PUBKEY)"
-event_json="$(await_kind_event 14199 "" "$USER_PUBKEY" 25 || true)"
+# We loop explicitly because await_kind_event would also match harness probe
+# events (which have only USER_PUBKEY as a p-tag, no AGENT1_PUBKEY).
+echo "[scenario] waiting up to 25s for kind:14199 from owner with agent1 p-tag"
+deadline=$(( $(date +%s) + 25 ))
+event_json=""
+lim=20
+while [[ $(date +%s) -lt $deadline ]]; do
+  candidates="$(nak req -k 14199 --limit "$lim" --auth --sec "$BACKEND_NSEC" \
+    -a "$USER_PUBKEY" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  event_json="$(printf '%s\n' "$candidates" | \
+    jq -s --arg pk "$AGENT1_PUBKEY" \
+      '[.[] | select(.tags[] | select(.[0]=="p" and .[1]==$pk))] | last' \
+    2>/dev/null || true)"
+  if [[ -n "$event_json" ]] && [[ "$event_json" != "null" ]]; then
+    break
+  fi
+  event_json=""
+  lim=$(( lim + 1 ))
+  sleep 1
+done
 
 kill "$BUNKER_PID" 2>/dev/null || true
 
@@ -83,7 +109,7 @@ if [[ -z "$event_json" ]]; then
   tail -60 "$DAEMON_DIR/daemon.log" >&2 || true
   echo "[scenario] bunker log:"
   cat "$bunker_log" >&2 || true
-  emit_result fail "no kind:14199 from owner within 25s"
+  emit_result fail "no kind:14199 from owner with agent1 p-tag within 25s"
   _die "ASSERT: kind:14199 never published by reconciler"
 fi
 

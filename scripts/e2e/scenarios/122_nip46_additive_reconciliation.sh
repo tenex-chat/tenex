@@ -38,6 +38,14 @@ point_daemon_config_at_local_relay
 
 seed_whitelist_file "$USER_PUBKEY" "$BACKEND_PUBKEY"
 
+# Register agent1 in the agents index (byProject is empty by default in the fixture).
+# The reconciler reads byProject to build the desired p-tag set; without this
+# agent1 and agent2 are invisible to the reconciler.
+agents_index="$TENEX_BASE_DIR/agents/index.json"
+jq --arg pk1 "$AGENT1_PUBKEY" --arg pk2 "$AGENT2_PUBKEY" --arg proj "$PROJECT_D_TAG" \
+   '.byProject[$proj] = [$pk1, $pk2]' \
+   "$agents_index" > "$agents_index.tmp" && mv "$agents_index.tmp" "$agents_index"
+
 # Configure daemon with USER_PUBKEY as whitelisted owner.
 cfg="$TENEX_BASE_DIR/config.json"
 jq \

@@ -46,6 +46,14 @@ point_daemon_config_at_local_relay
 # Pre-seed the whitelist so nak bunker (USER_PUBKEY) and the daemon can subscribe.
 seed_whitelist_file "$USER_PUBKEY" "$BACKEND_PUBKEY"
 
+# Register agent1 in the agents index so the reconciler sees a non-empty agent
+# set after SIGHUP and fires. Without this byProject is empty and the
+# reconciler has no agents to include, so it skips (backend-only guard).
+agents_index="$TENEX_BASE_DIR/agents/index.json"
+jq --arg pk "$AGENT1_PUBKEY" --arg proj "$PROJECT_D_TAG" \
+   '.byProject[$proj] = [$pk]' \
+   "$agents_index" > "$agents_index.tmp" && mv "$agents_index.tmp" "$agents_index"
+
 # Start daemon with bunker A: unreachable endpoint, 2s timeout.
 cfg="$TENEX_BASE_DIR/config.json"
 jq \
@@ -96,9 +104,17 @@ jq \
    .nip46.owners[($owner)].bunkerUri = ("bunker://" + $owner + "?relay=" + $relay)' \
   "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
 
-# Send SIGHUP to trigger config reload.
-echo "[scenario] sending SIGHUP to daemon pid=$HARNESS_DAEMON_PID"
-kill -HUP "$HARNESS_DAEMON_PID"
+# Send SIGHUP to the actual daemon PID from the lockfile. HARNESS_DAEMON_PID
+# is the cargo-run subshell wrapper; SIGHUP to the subshell kills the process
+# group rather than being caught by the daemon's signal handler. The lockfile
+# always contains the daemon's own PID.
+daemon_pid="$(jq -r .pid "$DAEMON_DIR/tenex.lock" 2>/dev/null || echo "")"
+if [[ -z "$daemon_pid" ]]; then
+  kill "$BUNKER_PID" 2>/dev/null || true
+  _die "could not read daemon PID from lockfile"
+fi
+echo "[scenario] sending SIGHUP to daemon pid=$daemon_pid (lockfile PID)"
+kill -HUP "$daemon_pid"
 
 # Wait for "SIGHUP reload complete" in daemon log.
 reload_deadline=$(( $(date +%s) + 10 ))
@@ -121,24 +137,40 @@ if [[ "$saw_reload" -ne 1 ]]; then
 fi
 echo "[scenario]   SIGHUP reload complete logged ✓"
 
-# The agent-inventory poller fires on inventory changes. Add a temporary agent
-# file to force the poller to detect a change and send a trigger to the
-# reconciler. Without a change the poller won't fire for 300s (idle_retry).
-agents_dir="$TENEX_BASE_DIR/agents"
-dummy_pubkey="$(printf '%064x' 99)"
-dummy_agent="$agents_dir/${dummy_pubkey}.json"
-jq -n '{"slug":"dummy-sighup-probe","status":"active"}' > "$dummy_agent"
-echo "[scenario]   dummy agent written to force poller trigger"
+# The agent-inventory poller fires on inventory changes. The poller reads from
+# byProject in index.json (individual agent files are ignored when index.json
+# exists). Add AGENT2_PUBKEY to byProject to force a detectable inventory
+# change, which triggers the reconciler via the poller. Without a change the
+# poller won't fire for 300s (idle_retry after bunker-A timeout).
+agents_index="$TENEX_BASE_DIR/agents/index.json"
+jq --arg pk1 "$AGENT1_PUBKEY" --arg pk2 "$AGENT2_PUBKEY" --arg proj "$PROJECT_D_TAG" \
+   '.byProject[$proj] = [$pk1, $pk2]' \
+   "$agents_index" > "$agents_index.tmp" && mv "$agents_index.tmp" "$agents_index"
+echo "[scenario]   agent2 added to byProject to force poller trigger"
 
-# Now wait for a successful kind:14199 (bunker B responds).
-# Flow: poller detects inventory change (~2s) → trigger sent → debounce 5s →
-#       reconcile → client_for_owner (fresh, bunker B) → connect+sign (~1-2s)
-#       → 14199 published. Budget: ~10s.
-echo "[scenario] waiting up to 20s for kind:14199 via bunker B"
-event_json="$(await_kind_event 14199 "" "$USER_PUBKEY" 20 || true)"
+# Now wait for a successful kind:14199 (bunker B responds) that contains
+# AGENT1_PUBKEY in p-tags, confirming the reconciler fired via bunker B.
+# Flow: poller detects inventory change (~2s) → trigger → debounce 5s →
+#       reconcile → client_for_owner (fresh, bunker B) → connect+sign → publish.
+echo "[scenario] waiting up to 20s for kind:14199 via bunker B with agent1 p-tag"
+deadline=$(( $(date +%s) + 20 ))
+event_json=""
+lim=20
+while [[ $(date +%s) -lt $deadline ]]; do
+  candidates="$(nak req -k 14199 --limit "$lim" --auth --sec "$BACKEND_NSEC" \
+    -a "$USER_PUBKEY" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+  event_json="$(printf '%s\n' "$candidates" | \
+    jq -s --arg pk "$AGENT1_PUBKEY" \
+      '[.[] | select(.tags[] | select(.[0]=="p" and .[1]==$pk))] | last' \
+    2>/dev/null || true)"
+  if [[ -n "$event_json" ]] && [[ "$event_json" != "null" ]]; then
+    break
+  fi
+  event_json=""
+  lim=$(( lim + 1 ))
+  sleep 1
+done
 
-# Clean up dummy agent.
-rm -f "$dummy_agent"
 kill "$BUNKER_PID" 2>/dev/null || true
 
 if [[ -z "$event_json" ]]; then
