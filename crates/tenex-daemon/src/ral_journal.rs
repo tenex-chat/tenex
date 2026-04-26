@@ -721,7 +721,6 @@ fn apply_record(
             entry.worker_id = Some(worker_id.clone());
             entry.active_claim_token = None;
             entry.pending_delegations = pending_delegations.clone();
-            entry.completed_delegations.clear();
             apply_terminal_summary(entry, terminal);
             entry.error = None;
             entry.abort_reason = None;
