@@ -11,7 +11,7 @@ import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import type { EventContext } from "@/nostr/types";
 import type { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
-import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import { RALRegistry } from "@/services/ral";
 import type {
     AgentWorkerOutboundProtocolMessage,
     AgentWorkerProtocolEmit,
@@ -153,7 +153,6 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
         registry.consumeUnreportedRuntime = (() => 0) as ConsumeUnreportedRuntime;
         registry.getAccumulatedRuntime = (() => 0) as GetAccumulatedRuntime;
         registry.clearAll();
-        PendingDelegationsRegistry.clear();
     });
 
     afterEach(() => {
@@ -165,7 +164,6 @@ describe("WorkerProtocolPublisher publish_request metadata", () => {
             registry.getAccumulatedRuntime = originalGetAccumulatedRuntime;
         }
         registry.clearAll();
-        PendingDelegationsRegistry.clear();
     });
 
     for (const testCase of publishRequestCases) {
