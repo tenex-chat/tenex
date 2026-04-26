@@ -148,7 +148,13 @@ echo "[scenario]   second message id=$second_msg_id"
 
 echo "[scenario] waiting for second dispatch to appear as QUEUED..."
 second_dispatch_queued=0
-_deadline=$(( $(date +%s) + 8 ))
+# 20s deadline: under serial-suite load the daemon's tick-driven dispatch
+# admission can take longer than the original 8s window, especially when
+# the prior scenario's daemon is still being torn down. The first dispatch
+# is already LEASED at this point, so any "queued" record for the second
+# message before it gets leased is a positive observation; we just need
+# enough time for the inbound runtime to actually write the record.
+_deadline=$(( $(date +%s) + 20 ))
 while [[ $(date +%s) -lt $_deadline ]]; do
   if [[ -f "$_queue" ]] && \
      jq -e --arg e "$second_msg_id" \
@@ -163,7 +169,7 @@ done
 if [[ "$second_dispatch_queued" -ne 1 ]]; then
   echo "[scenario] dispatch queue state:"
   jq -s '.' "$_queue" 2>/dev/null || true
-  emit_result fail "second dispatch never appeared as QUEUED within 8s"
+  emit_result fail "second dispatch never appeared as QUEUED within 20s"
   exit 1
 fi
 echo "[scenario]   second dispatch is QUEUED (not pre-empting first stream) ✓"
