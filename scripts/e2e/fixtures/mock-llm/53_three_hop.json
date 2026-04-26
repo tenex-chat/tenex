@@ -23,6 +23,28 @@
       }
     },
     {
+      "priority": 105,
+      "trigger": {
+        "agentName": "agent1",
+        "previousToolCalls": ["delegate"],
+        "iterationCount": 1
+      },
+      "response": {
+        "content": "Final answer: agent2 confirmed that agent3 says result is 42."
+      }
+    },
+    {
+      "priority": 105,
+      "trigger": {
+        "agentName": "agent2",
+        "previousToolCalls": ["delegate"],
+        "iterationCount": 1
+      },
+      "response": {
+        "content": "agent2 relays: agent3 says result is 42"
+      }
+    },
+    {
       "priority": 80,
       "trigger": {
         "agentName": "agent1",

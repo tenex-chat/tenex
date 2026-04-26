@@ -209,7 +209,8 @@ export class MockLLMService implements MockLLMServiceContract {
         const systemMessage = messages.find((m) => m.role === "system");
         const lastUserMessage = messages.filter((m) => m.role === "user").pop();
 
-        // Extract tool calls from messages that have them
+        // Extract tool call names from messages. Handles both legacy {tool_calls: [{function}]}
+        // format and the AI SDK format where content is ToolCallPart[] with {type:"tool-call", toolName}.
         interface MessageWithToolCalls extends MockMessage {
             tool_calls?: Array<{
                 function: string | { name: string };
@@ -217,16 +218,21 @@ export class MockLLMService implements MockLLMServiceContract {
         }
 
         const toolCalls = messages
-            .filter((m): m is MessageWithToolCalls => {
-                const msg = m as MessageWithToolCalls;
-                return Boolean(
-                    msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0
-                );
-            })
             .flatMap((m) => {
-                return (m.tool_calls || []).map((tc) => {
-                    return typeof tc.function === "string" ? tc.function : tc.function?.name;
-                });
+                const withToolCalls = m as MessageWithToolCalls;
+                // Legacy format: msg.tool_calls
+                if (withToolCalls.tool_calls && Array.isArray(withToolCalls.tool_calls)) {
+                    return withToolCalls.tool_calls.map((tc) =>
+                        typeof tc.function === "string" ? tc.function : tc.function?.name
+                    );
+                }
+                // AI SDK format: content as ToolCallPart[] array
+                if (Array.isArray(m.content)) {
+                    return (m.content as Array<{ type?: string; toolName?: string }>)
+                        .filter((part) => part?.type === "tool-call" && typeof part.toolName === "string")
+                        .map((part) => part.toolName as string);
+                }
+                return [];
             })
             .filter((name): name is string => typeof name === "string");
 
