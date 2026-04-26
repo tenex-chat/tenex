@@ -3,24 +3,13 @@
   "label": "e2e/63_message_during_streaming",
   "responses": [
     {
-      "priority": 60,
-      "trigger": {
-        "agentName": "agent1",
-        "userMessage": "/first message/"
-      },
-      "response": {
-        "content": "This is a long streaming response that takes several seconds to complete because the words trickle out slowly.",
-        "streamDelay": 3000
-      }
-    },
-    {
       "priority": 50,
       "trigger": {
-        "agentName": "agent1",
-        "userMessage": "/second message/"
+        "agentName": "agent1"
       },
       "response": {
-        "content": "Second message processed after streaming completed."
+        "content": "Agent1 stream response.",
+        "streamDelay": 3000
       }
     }
   ]

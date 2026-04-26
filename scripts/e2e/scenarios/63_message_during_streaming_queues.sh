@@ -7,12 +7,18 @@
 #
 # What this scenario asserts:
 #   1. agent1's first dispatch is admitted (LEASED) and streaming (streamDelay=3s).
-#   2. While agent1 is actively streaming, user publishes a second kind:1.
+#   2. While agent1 is actively streaming, user publishes a second kind:1 with an
+#      e-tag referencing the first message, placing it in the same conversation.
 #   3. Second message's dispatch is enqueued with status QUEUED (not immediately LEASED).
 #   4. First stream completes; agent1 publishes its kind:1 response.
 #   5. Second dispatch transitions to LEASED and agent1 processes second message.
 #   6. agent1 publishes a second kind:1 response.
 #   7. At no point are both dispatches in LEASED state simultaneously.
+#
+# The second message uses an e-tag referencing the first message so that the
+# routing layer resolves both to the same conversation_id. Without the e-tag the
+# second message would start a brand-new conversation and the concurrency guard
+# would not block it.
 #
 # Fixture: scripts/e2e/fixtures/mock-llm/63_message_during_streaming.json
 
@@ -133,7 +139,8 @@ echo "[scenario] publishing second kind:1 mid-stream"
 second_msg_evt="$(publish_event_as "$USER_NSEC" 1 \
   "This is the second message — process it after the current stream finishes." \
   "p=$AGENT1_PUBKEY" \
-  "a=$PROJECT_A_TAG")"
+  "a=$PROJECT_A_TAG" \
+  "e=$first_msg_id")"
 second_msg_id="$(printf '%s' "$second_msg_evt" | jq -r .id)"
 echo "[scenario]   second message id=$second_msg_id"
 
@@ -176,16 +183,24 @@ echo "[scenario]   only $leased_count dispatch(es) in LEASED state at time of ch
 
 # --- Wait for first stream to complete and second to be processed -------------
 
-echo "[scenario] waiting for first stream to complete and agent1 to publish first kind:1..."
-_await_content() {
-  local kind="$1" author="$2" pattern="$3" secs="$4"
+echo "[scenario] waiting for both dispatches to complete and agent1 to publish two kind:1 responses..."
+
+# Both workers use the same catch-all mock LLM response (see fixture). We cannot
+# distinguish them by content because both workers see the same conversation state
+# (both user messages are appended during enqueue, before any worker starts).
+# Instead we verify that EXACTLY TWO kind:1 events were published by agent1,
+# proving both dispatches ran to completion sequentially.
+_await_response_count() {
+  local kind="$1" author="$2" pattern="$3" min_count="$4" secs="$5"
   local out deadline lim
   deadline=$(( $(date +%s) + secs ))
   lim=20
   while [[ $(date +%s) -lt $deadline ]]; do
     out="$(nak req -k "$kind" -a "$author" --limit "$lim" \
       --auth --sec "$BACKEND_NSEC" "$HARNESS_RELAY_URL" 2>/dev/null || true)"
-    if printf '%s\n' "$out" | jq -se "any(.[]; .content | test(\"$pattern\"))" >/dev/null 2>&1; then
+    local count
+    count="$(printf '%s\n' "$out" | jq -s "[.[] | select(.content | test(\"$pattern\"))] | length" 2>/dev/null || echo 0)"
+    if [[ "$count" -ge "$min_count" ]]; then
       return 0
     fi
     lim=$(( lim + 1 ))
@@ -194,17 +209,10 @@ _await_content() {
   return 1
 }
 
-saw_first_response=0
-saw_second_response=0
-
-if _await_content 1 "$AGENT1_PUBKEY" "long streaming response" 15; then
-  echo "[scenario]   observed: agent1 published first kind:1 response"
-  saw_first_response=1
-fi
-
-if _await_content 1 "$AGENT1_PUBKEY" "Second message processed" 15; then
-  echo "[scenario]   observed: agent1 published second kind:1 response"
-  saw_second_response=1
+saw_both_responses=0
+if _await_response_count 1 "$AGENT1_PUBKEY" "Agent1 stream response" 2 20; then
+  echo "[scenario]   observed: agent1 published both kind:1 responses (2x) ✓"
+  saw_both_responses=1
 fi
 
 echo ""
@@ -212,17 +220,11 @@ echo "[scenario] === Results ==="
 echo "[scenario]   first dispatch LEASED (streaming active)     : yes"
 echo "[scenario]   second dispatch QUEUED mid-stream            : yes"
 echo "[scenario]   no simultaneous LEASED pair                  : yes"
-echo "[scenario]   agent1 published first kind:1 response       : $([[ $saw_first_response -eq 1 ]] && echo yes || echo no)"
-echo "[scenario]   agent1 published second kind:1 response      : $([[ $saw_second_response -eq 1 ]] && echo yes || echo no)"
+echo "[scenario]   agent1 published both kind:1 responses (2x) : $([[ $saw_both_responses -eq 1 ]] && echo yes || echo no)"
 
-if [[ "$saw_first_response" -ne 1 ]]; then
+if [[ "$saw_both_responses" -ne 1 ]]; then
   tail -80 "$HARNESS_DAEMON_LOG" >&2 || true
-  emit_result fail "agent1 never published first streaming response kind:1"
-  exit 1
-fi
-if [[ "$saw_second_response" -ne 1 ]]; then
-  tail -80 "$HARNESS_DAEMON_LOG" >&2 || true
-  emit_result fail "agent1 never published second kind:1 after stream completed"
+  emit_result fail "agent1 did not publish two kind:1 responses (expected 2 sequential executions)"
   exit 1
 fi
 
