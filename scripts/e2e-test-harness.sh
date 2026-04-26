@@ -172,20 +172,29 @@ point_daemon_config_at_local_relay() {
 # start_daemon
 # Starts the daemon with TENEX_BASE_DIR, waits for the lockfile to appear.
 # Sets HARNESS_DAEMON_PID.
+#
+# Prefers the pre-built release binary at target/release/daemon when it exists
+# (HARNESS_DAEMON_PID is then the direct daemon PID, not a cargo wrapper).
+# Falls back to `cargo run --release` when no binary is found.
 start_daemon() {
   HARNESS_DAEMON_LOG="$FIXTURE_ROOT/daemon.log"
-  _log "starting daemon (TENEX_BASE_DIR=$TENEX_BASE_DIR)"
+  local daemon_bin="$HARNESS_REPO_ROOT/target/release/daemon"
 
-  # Append rather than truncate: scenarios that stop+restart the daemon
-  # rely on byte-offset tailing to differentiate pre-restart vs post-restart
-  # log lines (see scripts/e2e/scenarios/37_dispatch_input_mismatch.sh).
-  # Truncating on each start makes those offsets meaningless.
-  ( cd "$HARNESS_REPO_ROOT" && \
+  if [[ -x "$daemon_bin" ]]; then
+    _log "starting daemon (TENEX_BASE_DIR=$TENEX_BASE_DIR, binary=$daemon_bin)"
     TENEX_BASE_DIR="$TENEX_BASE_DIR" \
-    cargo run --release -p tenex-daemon --bin daemon -- \
-      --tenex-base-dir "$TENEX_BASE_DIR" \
-      >>"$HARNESS_DAEMON_LOG" 2>&1 ) &
-  HARNESS_DAEMON_PID=$!
+      "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" \
+      >>"$HARNESS_DAEMON_LOG" 2>&1 &
+    HARNESS_DAEMON_PID=$!
+  else
+    _log "starting daemon via cargo run (no pre-built binary at $daemon_bin)"
+    ( cd "$HARNESS_REPO_ROOT" && \
+      TENEX_BASE_DIR="$TENEX_BASE_DIR" \
+      cargo run --release -p tenex-daemon --bin daemon -- \
+        --tenex-base-dir "$TENEX_BASE_DIR" \
+        >>"$HARNESS_DAEMON_LOG" 2>&1 ) &
+    HARNESS_DAEMON_PID=$!
+  fi
 
   if ! _await_file "$DAEMON_DIR/tenex.lock" 60; then
     _log "daemon log tail:"; tail -30 "$HARNESS_DAEMON_LOG" >&2 || true
