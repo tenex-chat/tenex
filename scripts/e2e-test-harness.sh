@@ -203,6 +203,22 @@ start_daemon() {
   _log "daemon ready (pid $HARNESS_DAEMON_PID, lock at $DAEMON_DIR/tenex.lock)"
 }
 
+_relay_contains_event_id() {
+  local kind="${1:?kind required}"
+  local author="${2:?author required}"
+  local event_id="${3:?event_id required}"
+
+  [[ -n "${BACKEND_NSEC:-}" ]] || return 1
+  [[ -n "${HARNESS_RELAY_URL:-}" ]] || return 1
+
+  nak req -k "$kind" -a "$author" \
+    --limit 20 \
+    --auth --sec "$BACKEND_NSEC" \
+    "$HARNESS_RELAY_URL" 2>/dev/null \
+    | jq -e -s --arg id "$event_id" \
+      'map(select(.id == $id)) | length > 0' >/dev/null
+}
+
 # await_daemon_subscribed [timeout_seconds]
 # Waits for proof that the daemon's relay listener is registered for EACH
 # distinct REQ filter and will receive live broadcasts.
@@ -272,6 +288,23 @@ await_daemon_subscribed() {
         "$HARNESS_RELAY_URL" 2>/dev/null || true)"
       probe_id="$(printf '%s' "$probe_evt" | jq -r '.id // empty' 2>/dev/null)"
       [[ -z "$probe_id" ]] && { sleep 1; continue; }
+
+      local relay_seen=0
+      local relay_poll
+      for relay_poll in 1 2 3 4 5 6 7 8 9 10; do
+        if _relay_contains_event_id "$kind" "$USER_PUBKEY" "$probe_id"; then
+          relay_seen=1
+          break
+        fi
+        sleep 0.2
+        [[ $(date +%s) -ge $deadline ]] && break
+      done
+      if [[ "$relay_seen" -ne 1 ]]; then
+        _log "kind:$kind probe #$attempt was signed locally but never became readable on the relay; retrying"
+        [[ $(date +%s) -ge $deadline ]] && break
+        sleep 0.5
+        continue
+      fi
 
       local poll
       for poll in 1 2 3 4 5 6 7 8 9 10 12 14 16 18 20; do
