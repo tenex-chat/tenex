@@ -1,0 +1,62 @@
+{
+  "expectedModelId": "mock/partial-delegation-56",
+  "label": "e2e/56_partial_delegation_completion",
+  "responses": [
+    {
+      "priority": 120,
+      "trigger": {
+        "agentName": "agent1",
+        "messageContains": "<delegations>"
+      },
+      "response": {
+        "content": "agent1 final: received result from agent2, still waiting for agent3"
+      }
+    },
+    {
+      "priority": 60,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/parallel task/"
+      },
+      "response": {
+        "content": "Delegating to agent2 and agent3 in parallel.",
+        "toolCalls": [
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent2",
+              "prompt": "Complete task B immediately."
+            }
+          },
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent3",
+              "prompt": "Complete task C (slower)."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent2",
+        "userMessage": "/task B/"
+      },
+      "response": {
+        "content": "agent2-task-B-done"
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent3",
+        "userMessage": "/task C/"
+      },
+      "response": {
+        "content": "agent3-task-C-done"
+      }
+    }
+  ]
+}
