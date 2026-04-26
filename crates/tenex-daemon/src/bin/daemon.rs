@@ -62,6 +62,7 @@ const USAGE_EXIT_CODE: i32 = 2;
 const RUNTIME_EXIT_CODE: i32 = 1;
 const WORKER_ENGINE_ENV: &str = "TENEX_AGENT_WORKER_ENGINE";
 const AGENT_WORKER_ENGINE: &str = "agent";
+const WORKER_BOOT_TIMEOUT_MS_ENV: &str = "TENEX_WORKER_BOOT_TIMEOUT_MS";
 const RELOAD_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const SHUTDOWN_REQUESTED_MESSAGE: &[u8] =
     b"\nTENEX daemon: shutdown requested; finishing current work and stopping gateways.\n";
@@ -402,7 +403,7 @@ where
     // session_completed signals and owns worker session lifecycle.
     let shell = DaemonShell::new(&daemon_dir);
     let worker_command = build_agent_worker_command()?;
-    let worker_config = AgentWorkerProcessConfig::default();
+    let worker_config = build_worker_process_config();
     let worker_runtime_state = new_shared_worker_runtime_state();
     let publish_result_sequence = Arc::new(AtomicU64::new(1));
     let started_at = current_unix_time_ms();
@@ -946,6 +947,15 @@ fn telegram_data_dir(tenex_base_dir: &Path) -> PathBuf {
 fn build_agent_worker_command() -> Result<AgentWorkerCommand, CliError> {
     Ok(bun_agent_worker_command(&repository_root()?, bun_program())
         .env(WORKER_ENGINE_ENV, AGENT_WORKER_ENGINE))
+}
+
+fn build_worker_process_config() -> AgentWorkerProcessConfig {
+    let boot_timeout = env::var(WORKER_BOOT_TIMEOUT_MS_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| Duration::from_secs(30));
+    AgentWorkerProcessConfig { boot_timeout }
 }
 
 fn repository_root() -> Result<PathBuf, CliError> {
