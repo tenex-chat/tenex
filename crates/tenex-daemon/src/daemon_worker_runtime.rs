@@ -2216,6 +2216,9 @@ mod tests {
             DaemonWorkerRuntimeError::LivePublishMaintenance { message } => {
                 format!("live publish maintenance: {message}")
             }
+            DaemonWorkerRuntimeError::PreCompletedDelegationResume { source } => {
+                format!("pre-completed delegation resume: {source}")
+            }
         }
     }
 
