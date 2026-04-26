@@ -44,8 +44,13 @@ use crate::worker_dispatch::start::{WorkerDispatchStartInput, start_lock_scoped_
 use crate::worker_dispatch::tick::{
     WorkerDispatchTickError, WorkerDispatchTickInput, apply_worker_dispatch_tick,
 };
+use crate::warm_worker_runtime::{
+    OwnedTerminalContext, OwnedWarmWorkerCommand, WarmWorkerHandle, WarmWorkerRegistry,
+};
 use crate::worker_lifecycle::launch::{WorkerLaunchPlanInput, plan_worker_launch};
+use crate::worker_lifecycle::launch_lock::acquire_worker_launch_locks;
 use crate::worker_message_flow::{WorkerMessagePublishContext, WorkerMessageTerminalContext};
+use crate::worker_reuse::{DEFAULT_WORKER_CONCURRENCY_CAP, select_warm_worker_for_dispatch};
 use crate::worker_process::{AgentWorkerCommand, AgentWorkerProcessConfig};
 use crate::worker_protocol::AgentWorkerExecutionFlags;
 use crate::worker_runtime_state::{
@@ -232,6 +237,8 @@ where
         #[source]
         source: Box<InboundDispatchEnqueueError>,
     },
+    #[error("warm worker dispatch injection failed: {message}")]
+    WarmInjection { message: String },
 }
 
 /// Returned by [`admit_one_worker_dispatch_from_filesystem`]: either an
@@ -240,16 +247,23 @@ where
 #[derive(Debug)]
 pub enum AdmitWorkerDispatchOutcome<S> {
     Admitted(StartedWorkerDispatchAdmission<S>),
+    /// The dispatch was leased and registered on an existing warm worker rather
+    /// than spawning a fresh process. The execute message has been sent to the
+    /// warm worker's command channel; no new session task is needed.
+    InjectedIntoWarmWorker {
+        dispatch_id: String,
+        worker_id: String,
+    },
     NotAdmitted {
         reason: WorkerDispatchAdmissionBlockedReason,
         blocked_candidates: Vec<WorkerDispatchAdmissionBlockedCandidate>,
     },
 }
 
-/// Admits one queued dispatch and spawns its worker subprocess, returning a
-/// ready-to-run [`StartedWorkerDispatchAdmission`]. Holds the dispatch-queue
-/// lock across the read/plan/lease-write cycle; the lock is released before
-/// this function returns, so running the session happens without holding it.
+/// Admits one queued dispatch: either injects it into an existing warm worker
+/// or spawns a fresh subprocess. Holds the dispatch-queue lock across the
+/// read/plan/lease-write cycle; the lock is released before this function
+/// returns, so running the session happens without holding it.
 pub fn admit_one_worker_dispatch_from_filesystem<S>(
     spawner: &mut S,
     daemon_dir: &Path,
@@ -259,6 +273,8 @@ pub fn admit_one_worker_dispatch_from_filesystem<S>(
     lock_owner: RalLockInfo,
     command: AgentWorkerCommand,
     worker_config: &AgentWorkerProcessConfig,
+    warm_registry: &WarmWorkerRegistry,
+    writer_version: &str,
 ) -> Result<
     AdmitWorkerDispatchOutcome<S::Session>,
     DaemonWorkerRuntimeError<S::Session, <S::Session as WorkerFrameReceiver>::Error>,
@@ -328,9 +344,123 @@ where
     tracing::info!(
         dispatch_id = %admitted.selected_dispatch.dispatch_id,
         agent_pubkey = %admitted.selected_dispatch.ral.agent_pubkey,
-        "worker dispatch admitted, spawning"
+        "worker dispatch admitted"
     );
     let launch_input = read_worker_dispatch_launch_input(daemon_dir, &admitted.selected_dispatch)?;
+
+    // Route to an existing warm worker if one is available for this project.
+    let warm_candidate = {
+        let guard = runtime_state.lock().expect("runtime state mutex poisoned");
+        select_warm_worker_for_dispatch(
+            &guard,
+            &admitted.selected_dispatch.ral.project_id,
+            DEFAULT_WORKER_CONCURRENCY_CAP,
+        )
+        .and_then(|worker_id| {
+            guard.get_worker(&worker_id).map(|w| (worker_id, w.pid))
+        })
+    };
+    if let Some((warm_worker_id, warm_pid)) = warm_candidate {
+        if let Some(handle) = warm_registry.get(&warm_worker_id) {
+            let identity = ral_identity_from_dispatch(&admitted.leased_record);
+            let dispatch_id = admitted.leased_record.dispatch_id.clone();
+            let claim_token = admitted.leased_record.claim_token.clone();
+
+            let delegation_snapshot =
+                RalScheduler::from_daemon_dir(daemon_dir).map(|scheduler| {
+                    scheduler.delegation_snapshot_for(
+                        &identity.project_id,
+                        &identity.agent_pubkey,
+                        &identity.conversation_id,
+                    )
+                })
+                .map_err(|source| DaemonWorkerRuntimeError::RalScheduler {
+                    source: Box::new(source),
+                })?;
+            let (agent, project_agent_inventory) = build_agent_payloads(
+                &launch_input.metadata_path,
+                &identity.project_id,
+                &identity.agent_pubkey,
+            );
+            let launch_plan = plan_worker_launch(WorkerLaunchPlanInput {
+                dispatch: &admitted.leased_record,
+                identity: &identity,
+                sequence: 1,
+                timestamp: now_ms,
+                project_base_path: launch_input.project_base_path.clone(),
+                metadata_path: launch_input.metadata_path.clone(),
+                triggering_envelope: launch_input.triggering_envelope.clone(),
+                execution_flags: launch_input.execution_flags.clone(),
+                delegation_snapshot,
+                agent,
+                project_agent_inventory,
+            })
+            .map_err(|e| DaemonWorkerRuntimeError::WarmInjection {
+                message: format!("launch plan failed: {e}"),
+            })?;
+
+            let locks = acquire_worker_launch_locks(daemon_dir, &launch_plan, &lock_owner)
+                .map_err(|e| DaemonWorkerRuntimeError::WarmInjection {
+                    message: format!("launch lock acquisition failed: {e}"),
+                })?;
+
+            append_dispatch_queue_record(daemon_dir, &admitted.leased_record).map_err(|e| {
+                DaemonWorkerRuntimeError::WarmInjection {
+                    message: format!("lease append failed: {e}"),
+                }
+            })?;
+
+            {
+                let mut guard = runtime_state.lock().expect("runtime state mutex poisoned");
+                guard
+                    .register_started_dispatch(WorkerRuntimeStartedDispatch {
+                        worker_id: warm_worker_id.clone(),
+                        pid: warm_pid,
+                        dispatch_id: dispatch_id.clone(),
+                        identity: identity.clone(),
+                        claim_token: claim_token.clone(),
+                        started_at: now_ms,
+                    })
+                    .map_err(|e| DaemonWorkerRuntimeError::WarmInjection {
+                        message: format!("runtime register failed: {e}"),
+                    })?;
+            }
+
+            let dispatch_correlation_id = format!("{correlation_id}:complete");
+            // The ral_worker_id is the worker_id registered in the RAL Claimed
+            // event (computed from dispatch IDs). The warm worker's physical
+            // process ID differs, so we carry the expected RAL ID here for use
+            // in the terminal context.
+            let ral_worker_id = launch_input
+                .worker_id
+                .clone()
+                .unwrap_or_else(|| warm_worker_id.clone());
+            let _ = handle.command_tx.send(OwnedWarmWorkerCommand::NewExecute {
+                execute_message: launch_plan.execute_message,
+                correlation_id: dispatch_correlation_id.clone(),
+                terminal: OwnedTerminalContext {
+                    dispatch_id: dispatch_id.clone(),
+                    claim_token,
+                    ral_worker_id,
+                    journal_timestamp: now_ms,
+                    writer_version: writer_version.to_string(),
+                    dispatch_correlation_id,
+                    identity,
+                },
+                locks,
+            });
+
+            tracing::info!(
+                dispatch_id = %dispatch_id,
+                worker_id = %warm_worker_id,
+                "worker dispatch injected into warm worker"
+            );
+            return Ok(AdmitWorkerDispatchOutcome::InjectedIntoWarmWorker {
+                dispatch_id,
+                worker_id: warm_worker_id,
+            });
+        }
+    }
 
     let started = {
         let mut runtime_guard = runtime_state.lock().expect("runtime state mutex poisoned");
@@ -357,7 +487,23 @@ where
     };
 
     match started {
-        StartAdmittedWorkerDispatchOutcome::Started(started) => {
+        StartAdmittedWorkerDispatchOutcome::Started(mut started) => {
+            // Create a warm-worker command channel. The receiver travels with the
+            // session so the loop can accept future dispatches without spawning;
+            // the sender is registered so the next admission can find it.
+            let (tx, rx) = crossbeam_channel::unbounded();
+            warm_registry.insert(WarmWorkerHandle {
+                worker_id: started.runtime_started.worker_id.clone(),
+                project_id: started
+                    .context
+                    .admission
+                    .selected_dispatch
+                    .ral
+                    .project_id
+                    .clone(),
+                command_tx: tx,
+            });
+            started.warm_command_rx = Some(rx);
             Ok(AdmitWorkerDispatchOutcome::Admitted(started))
         }
         StartAdmittedWorkerDispatchOutcome::DeferredByLaunchLock => {
@@ -411,8 +557,13 @@ where
         lock_owner,
         command,
         worker_config,
+        &WarmWorkerRegistry::new(),
+        &writer_version,
     )? {
         AdmitWorkerDispatchOutcome::Admitted(started) => started,
+        AdmitWorkerDispatchOutcome::InjectedIntoWarmWorker { dispatch_id, worker_id } => {
+            return Ok(DaemonWorkerRuntimeOutcome::SessionAdmitted { dispatch_id, worker_id });
+        }
         AdmitWorkerDispatchOutcome::NotAdmitted {
             reason,
             blocked_candidates,
@@ -680,6 +831,7 @@ where
                 context,
                 runtime_started,
                 started,
+                warm_command_rx: None,
             },
         )),
         Err(source) => Err(WorkerDispatchAdmissionStartError::RuntimeRegister {
@@ -687,6 +839,7 @@ where
                 context,
                 runtime_started,
                 started,
+                warm_command_rx: None,
             }),
             source: Box::new(source),
         }),
@@ -856,8 +1009,8 @@ where
         live_publish_maintenance,
         terminal,
         started,
-        &scheduler,
-        &dispatch_state,
+        scheduler,
+        dispatch_state,
     )
 }
 
@@ -911,8 +1064,8 @@ where
         live_publish_maintenance,
         terminal,
         started,
-        &scheduler,
-        &dispatch_state,
+        scheduler,
+        dispatch_state,
     )
 }
 
@@ -926,8 +1079,8 @@ fn run_started_worker_session_with_state<S>(
     mut live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerTerminalRuntimeInput,
     started: StartedWorkerDispatchAdmission<S>,
-    scheduler: &RalScheduler,
-    dispatch_state: &crate::dispatch_queue::DispatchQueueState,
+    scheduler: RalScheduler,
+    dispatch_state: crate::dispatch_queue::DispatchQueueState,
 ) -> Result<
     DaemonWorkerRuntimeOutcome,
     DaemonWorkerRuntimeError<S, <S as WorkerFrameReceiver>::Error>,
@@ -1015,6 +1168,7 @@ where
             live_publish_maintenance: live_publish_maintenance
                 .as_mut()
                 .map(|maintenance| &mut *maintenance.maintain as _),
+            warm_command_rx: started.warm_command_rx,
             terminal: Some(WorkerMessageTerminalContext {
                 scheduler,
                 dispatch_state,
@@ -1888,6 +2042,8 @@ mod tests {
             build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
             worker_command(),
             &worker_config,
+            &WarmWorkerRegistry::new(),
+            "test-writer",
         )
         .expect("active conversation must defer without error");
 
@@ -1915,6 +2071,9 @@ mod tests {
             }
             AdmitWorkerDispatchOutcome::Admitted(_) => {
                 panic!("expected same-conversation dispatch to remain blocked")
+            }
+            AdmitWorkerDispatchOutcome::InjectedIntoWarmWorker { .. } => {
+                panic!("unexpected warm injection in concurrency-blocked test")
             }
         }
         assert!(sent_messages.lock().expect("sent message lock").is_empty());
@@ -1956,6 +2115,8 @@ mod tests {
             build_ral_lock_info(100, "host-alpha", 1_710_000_700_000),
             worker_command(),
             &worker_config,
+            &WarmWorkerRegistry::new(),
+            "test-writer",
         )
         .expect("launch lock conflict should defer, not fail");
 
@@ -1972,6 +2133,9 @@ mod tests {
             }
             AdmitWorkerDispatchOutcome::Admitted(_) => {
                 panic!("expected launch-lock deferral, got admitted dispatch")
+            }
+            AdmitWorkerDispatchOutcome::InjectedIntoWarmWorker { .. } => {
+                panic!("unexpected warm injection in launch-lock test")
             }
         }
         assert!(sent_messages.lock().expect("sent message lock").is_empty());
@@ -2218,6 +2382,9 @@ mod tests {
             }
             DaemonWorkerRuntimeError::PreCompletedDelegationResume { source } => {
                 format!("pre-completed delegation resume: {source}")
+            }
+            DaemonWorkerRuntimeError::WarmInjection { message } => {
+                format!("warm injection: {message}")
             }
         }
     }

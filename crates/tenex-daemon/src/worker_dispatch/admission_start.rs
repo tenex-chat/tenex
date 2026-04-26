@@ -81,6 +81,11 @@ pub struct StartedWorkerDispatchAdmission<S> {
     pub context: WorkerDispatchAdmissionLaunchContext,
     pub runtime_started: WorkerRuntimeStartedDispatch,
     pub started: LockScopedStartedWorkerDispatch<S>,
+    /// Warm-worker command receiver. When `Some`, the session loop keeps the
+    /// worker process alive after each terminal and waits for the next execute
+    /// from this channel instead of exiting.
+    pub warm_command_rx:
+        Option<crossbeam_channel::Receiver<crate::warm_worker_runtime::OwnedWarmWorkerCommand>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,6 +339,7 @@ where
                 context,
                 runtime_started,
                 started,
+                warm_command_rx: None,
             },
         ))),
         Err(source) => Err(WorkerDispatchAdmissionStartError::RuntimeRegister {
@@ -341,6 +347,7 @@ where
                 context,
                 runtime_started,
                 started,
+                warm_command_rx: None,
             }),
             source: Box::new(source),
         }),

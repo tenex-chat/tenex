@@ -1,10 +1,21 @@
 use std::error::Error;
 use std::path::Path;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::dispatch_queue::{DispatchQueueError, replay_dispatch_queue};
+use crate::ral_journal::{
+    RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalError, RalJournalEvent,
+    RalJournalIdentity, RalJournalRecord, RalPendingDelegation,
+    append_ral_journal_record_with_resequence,
+};
+use crate::ral_scheduler::RalScheduler;
+use crate::warm_worker_runtime::OwnedWarmWorkerCommand;
+use crate::worker_completion::plan::WorkerCompletionDispatchInput;
+use crate::worker_completion::result::WorkerResultTransitionContext;
 use crate::worker_dispatch::execution::WorkerDispatchSession;
 use crate::worker_injection_queue::{
     WorkerInjectionMarkSentInput, WorkerInjectionQueueError, WorkerInjectionQueueRecord,
@@ -21,11 +32,6 @@ use crate::worker_protocol::{
     AGENT_WORKER_PROTOCOL_VERSION, WorkerProtocolError, decode_agent_worker_protocol_frame,
     validate_agent_worker_protocol_message,
 };
-use crate::ral_journal::{
-    RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalEvent, RalJournalIdentity,
-    RalJournalRecord, RalPendingDelegation, append_ral_journal_record_with_resequence,
-};
-use crate::ral_scheduler::RalScheduler;
 use crate::worker_publish::flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
@@ -38,7 +44,11 @@ pub struct WorkerSessionLoopInput<'a> {
     pub publish: Option<WorkerMessagePublishContext<'a>>,
     pub nip46_publish: Option<WorkerMessageNip46PublishContext<'a>>,
     pub live_publish_maintenance: Option<&'a mut dyn FnMut(&Path, u64) -> Result<(), String>>,
-    pub terminal: Option<WorkerMessageTerminalContext<'a>>,
+    pub terminal: Option<WorkerMessageTerminalContext>,
+    /// When present the session loop does not exit after a terminal result.
+    /// Instead it waits for the next command from this channel (up to the
+    /// idle TTL) and sends the new execute to the worker process.
+    pub warm_command_rx: Option<crossbeam_channel::Receiver<OwnedWarmWorkerCommand>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +122,21 @@ where
         runtime_event_class: String,
         error: String,
     },
+    #[error("warm session next-execution RAL journal reload failed: {source}")]
+    WarmRalJournalReload {
+        #[source]
+        source: Box<RalJournalError>,
+    },
+    #[error("warm session next-execution dispatch queue reload failed: {source}")]
+    WarmDispatchQueueReload {
+        #[source]
+        source: Box<DispatchQueueError>,
+    },
+    #[error("warm session send execute to worker failed: {source}")]
+    WarmSendExecute {
+        #[source]
+        source: E,
+    },
 }
 
 pub fn run_worker_session_loop<S>(
@@ -157,6 +182,9 @@ where
 
         match outcome {
             WorkerMessageFlowOutcome::TerminalResultHandled { .. } => {
+                if advance_warm_execution(worker, &mut input)? {
+                    continue;
+                }
                 return Ok(WorkerSessionLoopOutcome {
                     frame_count,
                     final_reason: WorkerSessionLoopFinalReason::TerminalResultHandled,
@@ -824,6 +852,83 @@ where
     Ok(())
 }
 
+/// Called after `TerminalResultHandled` in the session loop. If a warm command
+/// channel is present, this waits up to the idle TTL for the next execute.
+/// Returns `true` when the next execution was successfully set up (caller
+/// should `continue` the frame-reading loop), or `false` when the session
+/// should end (no warm channel, idle TTL expired, or shutdown requested).
+fn advance_warm_execution<S>(
+    worker: &mut S,
+    input: &mut WorkerSessionLoopInput<'_>,
+) -> Result<bool, WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
+where
+    S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
+{
+    let rx = match input.warm_command_rx.as_ref() {
+        Some(rx) => rx,
+        None => return Ok(false),
+    };
+
+    match rx.recv_timeout(Duration::from_millis(
+        crate::warm_worker_runtime::WARM_WORKER_IDLE_TTL_MS,
+    )) {
+        Ok(OwnedWarmWorkerCommand::NewExecute {
+            execute_message,
+            terminal: owned,
+            locks,
+            ..
+        }) => {
+            let scheduler =
+                RalScheduler::from_daemon_dir(input.daemon_dir).map_err(|source| {
+                    WorkerSessionLoopError::WarmRalJournalReload {
+                        source: Box::new(source),
+                    }
+                })?;
+            let dispatch_state =
+                replay_dispatch_queue(input.daemon_dir).map_err(|source| {
+                    WorkerSessionLoopError::WarmDispatchQueueReload {
+                        source: Box::new(source),
+                    }
+                })?;
+            let resolved_pending_delegations = scheduler
+                .entry(&owned.identity)
+                .map(|e| e.pending_delegations.clone())
+                .filter(|p| !p.is_empty())
+                .unwrap_or_default();
+            let journal_sequence = scheduler.state().last_sequence.saturating_add(1);
+            let dispatch_sequence = dispatch_state.last_sequence.saturating_add(1);
+
+            input.terminal = Some(WorkerMessageTerminalContext {
+                scheduler,
+                dispatch_state,
+                result_context: WorkerResultTransitionContext {
+                    worker_id: owned.ral_worker_id,
+                    claim_token: owned.claim_token,
+                    journal_sequence,
+                    journal_timestamp: owned.journal_timestamp,
+                    writer_version: owned.writer_version,
+                    resolved_pending_delegations,
+                    already_completed_delegation_ids: std::collections::HashSet::new(),
+                },
+                dispatch: Some(WorkerCompletionDispatchInput {
+                    dispatch_id: owned.dispatch_id,
+                    sequence: dispatch_sequence,
+                    timestamp: owned.journal_timestamp,
+                    correlation_id: owned.dispatch_correlation_id,
+                }),
+                locks,
+            });
+
+            worker
+                .send_worker_message(&execute_message)
+                .map_err(|source| WorkerSessionLoopError::WarmSendExecute { source })?;
+
+            Ok(true)
+        }
+        Ok(OwnedWarmWorkerCommand::Shutdown { .. }) | Err(_) => Ok(false),
+    }
+}
+
 fn worker_injection_protocol_message(record: &WorkerInjectionQueueRecord, timestamp: u64) -> Value {
     let role = match record.role {
         WorkerInjectionRole::User => "user",
@@ -995,12 +1100,13 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
-                    scheduler: &scheduler,
-                    dispatch_state: &dispatch_state,
+                    scheduler,
+                    dispatch_state,
                     result_context: result_context(),
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
+                warm_command_rx: None,
             },
         )
         .expect("session loop must stop on terminal frame");
@@ -1062,6 +1168,7 @@ mod tests {
                 }),
                 nip46_publish: None,
                 live_publish_maintenance: Some(&mut live_publish_maintenance),
+                warm_command_rx: None,
                 terminal: None,
             },
         )
@@ -1128,12 +1235,13 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
-                    scheduler: &scheduler,
-                    dispatch_state: &dispatch_state,
+                    scheduler,
+                    dispatch_state,
                     result_context: result_context(),
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
+                warm_command_rx: None,
             },
         )
         .expect("closed worker pipe after accepted terminal publish must complete");
@@ -1312,12 +1420,13 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
-                    scheduler: &scheduler,
-                    dispatch_state: &dispatch_state,
+                    scheduler,
+                    dispatch_state,
                     result_context: result_context(),
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
+                warm_command_rx: None,
             },
         )
         .expect("injection pipe-closed after delegation publish must synthesize terminal");
@@ -1371,6 +1480,7 @@ mod tests {
                 publish: None,
                 nip46_publish: None,
                 live_publish_maintenance: None,
+                warm_command_rx: None,
                 terminal: None,
             },
         )
@@ -1405,6 +1515,7 @@ mod tests {
                 publish: None,
                 nip46_publish: None,
                 live_publish_maintenance: None,
+                warm_command_rx: None,
                 terminal: None,
             },
         )
@@ -1455,6 +1566,7 @@ mod tests {
                 publish: None,
                 nip46_publish: None,
                 live_publish_maintenance: None,
+                warm_command_rx: None,
                 terminal: None,
             },
         )
@@ -1525,12 +1637,13 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 terminal: Some(WorkerMessageTerminalContext {
-                    scheduler: &scheduler,
-                    dispatch_state: &dispatch_state,
+                    scheduler,
+                    dispatch_state,
                     result_context: result_context_for(&worker_id),
                     dispatch: Some(dispatch_input()),
                     locks,
                 }),
+                warm_command_rx: None,
             },
         )
         .expect("session loop must stop on terminal frame");

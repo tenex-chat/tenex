@@ -54,7 +54,7 @@ pub struct WorkerMessageFlowInput<'a> {
     pub observed_at: u64,
     pub publish: Option<WorkerMessagePublishContext<'a>>,
     pub nip46_publish: Option<WorkerMessageNip46PublishContext<'a>>,
-    pub terminal: Option<WorkerMessageTerminalContext<'a>>,
+    pub terminal: Option<WorkerMessageTerminalContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,9 +77,9 @@ pub struct WorkerMessagePublishContext<'a> {
 }
 
 #[derive(Debug)]
-pub struct WorkerMessageTerminalContext<'a> {
-    pub scheduler: &'a RalScheduler,
-    pub dispatch_state: &'a DispatchQueueState,
+pub struct WorkerMessageTerminalContext {
+    pub scheduler: RalScheduler,
+    pub dispatch_state: DispatchQueueState,
     pub result_context: WorkerResultTransitionContext,
     pub dispatch: Option<WorkerCompletionDispatchInput>,
     pub locks: WorkerLaunchLocks,
@@ -155,13 +155,6 @@ pub enum WorkerMessageFlowError {
         worker_id: String,
         expected: Box<RalJournalIdentity>,
         actual: Box<RalJournalIdentity>,
-    },
-    #[error(
-        "terminal context worker {actual_worker_id} does not match active worker {expected_worker_id}"
-    )]
-    TerminalContextWorkerMismatch {
-        expected_worker_id: String,
-        actual_worker_id: String,
     },
     #[error("terminal context claim token does not match active worker {worker_id}")]
     TerminalContextClaimTokenMismatch {
@@ -332,7 +325,7 @@ where
 
             let outcome = handle_worker_terminal_result(
                 &terminal_scheduler,
-                terminal.dispatch_state,
+                &terminal.dispatch_state,
                 WorkerTerminalFlowInput {
                     daemon_dir: input.daemon_dir,
                     message: &message_plan.message,
@@ -461,13 +454,12 @@ fn ensure_terminal_context_matches_worker(
     slot: &crate::worker_runtime_state::ActiveExecutionSlot,
     context: &WorkerResultTransitionContext,
 ) -> Result<(), WorkerMessageFlowError> {
-    if context.worker_id != worker.worker_id {
-        return Err(WorkerMessageFlowError::TerminalContextWorkerMismatch {
-            expected_worker_id: worker.worker_id.clone(),
-            actual_worker_id: context.worker_id.clone(),
-        });
-    }
-
+    // In the warm injection path the terminal context carries the RAL-registered
+    // worker_id for the resume dispatch, which differs from the physical process's
+    // worker_id. Comparing context.worker_id against the physical worker here would
+    // incorrectly reject valid warm executions. The claim_token check below is the
+    // correct dispatch-level validation; the RAL's plan_worker_transition validates
+    // the worker_id against the registered claim.
     if context.claim_token != slot.claim_token {
         return Err(WorkerMessageFlowError::TerminalContextClaimTokenMismatch {
             worker_id: worker.worker_id.clone(),
@@ -984,8 +976,8 @@ mod tests {
                 publish: None,
                 nip46_publish: None,
                 terminal: Some(WorkerMessageTerminalContext {
-                    scheduler: &scheduler,
-                    dispatch_state: &dispatch_state,
+                    scheduler,
+                    dispatch_state,
                     result_context: result_context(),
                     dispatch: Some(dispatch_input()),
                     locks,

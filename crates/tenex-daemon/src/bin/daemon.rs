@@ -458,6 +458,7 @@ where
                 publish_result_sequence,
                 project_event_index: Arc::clone(&project_event_index),
                 publish_enqueued_tx: Some(signals.publish_enqueued_tx.clone()),
+                warm_registry: tenex_daemon::warm_worker_runtime::WarmWorkerRegistry::new(),
             },
             dispatch_enqueued_rx,
             session_completed_rx,

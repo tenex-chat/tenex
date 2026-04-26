@@ -31,6 +31,7 @@ use crate::daemon_worker_runtime::{
     DaemonWorkerTelegramEgressRuntimeInput,
     admit_one_worker_dispatch_from_filesystem, run_started_worker_session_from_filesystem,
 };
+use crate::warm_worker_runtime::WarmWorkerRegistry;
 use crate::dispatch_queue::{
     DispatchQueueLifecycleInput, DispatchQueueStatus, acquire_dispatch_queue_lock,
     append_dispatch_queue_record, plan_dispatch_queue_terminal, replay_dispatch_queue,
@@ -61,6 +62,7 @@ pub struct WorkerAdmissionDriverDeps<P> {
     pub publish_result_sequence: Arc<AtomicU64>,
     pub project_event_index: Arc<Mutex<ProjectEventIndex>>,
     pub publish_enqueued_tx: Option<mpsc::UnboundedSender<PublishEnqueued>>,
+    pub warm_registry: WarmWorkerRegistry,
 }
 
 pub async fn run_worker_admission_driver<P>(
@@ -125,6 +127,8 @@ async fn drain_admit_loop<P>(
         let worker_config = deps.worker_config.clone();
         let correlation_id_cloned = correlation_id.clone();
 
+        let warm_registry_admit = deps.warm_registry.clone();
+        let writer_version_admit = deps.writer_version.clone();
         let admit_result = tokio::task::spawn_blocking(move || {
             let mut spawner = AgentWorkerProcessDispatchSpawner;
             admit_one_worker_dispatch_from_filesystem(
@@ -136,6 +140,8 @@ async fn drain_admit_loop<P>(
                 lock_owner,
                 worker_command,
                 &worker_config,
+                &warm_registry_admit,
+                &writer_version_admit,
             )
         })
         .await;
@@ -166,6 +172,18 @@ async fn drain_admit_loop<P>(
                 );
                 return;
             }
+            Ok(AdmitWorkerDispatchOutcome::InjectedIntoWarmWorker {
+                dispatch_id,
+                worker_id,
+            }) => {
+                tracing::info!(
+                    dispatch_id = %dispatch_id,
+                    worker_id = %worker_id,
+                    "worker-admission-driver: dispatch injected into warm worker"
+                );
+                admitted_count += 1;
+                continue;
+            }
             Ok(AdmitWorkerDispatchOutcome::Admitted(started)) => {
                 let dispatch_id = started.runtime_started.dispatch_id.clone();
                 let worker_id = started.runtime_started.worker_id.clone();
@@ -191,6 +209,7 @@ async fn drain_admit_loop<P>(
                     format!("worker-admission-driver:{}:complete-{}", now_ms, admitted_count);
                 let tx = completion_tx.clone();
                 let publish_enqueued_tx_s = deps.publish_enqueued_tx.clone();
+                let warm_registry_s = deps.warm_registry.clone();
 
                 join_set.spawn(async move {
                     let handle = tokio::task::spawn_blocking(move || {
@@ -267,6 +286,10 @@ async fn drain_admit_loop<P>(
                             );
                         }
                     }
+                    // The session task has ended; remove this worker from the warm
+                    // registry so future admissions don't attempt to inject into a
+                    // dead channel.
+                    warm_registry_s.remove(&worker_id);
                     let _ = tx.send(SessionCompletion);
                 });
 

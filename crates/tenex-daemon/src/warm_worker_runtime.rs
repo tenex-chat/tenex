@@ -24,38 +24,29 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
-use crate::worker_message_flow::WorkerMessageTerminalContext;
+use crate::ral_journal::RalJournalIdentity;
+use crate::worker_lifecycle::launch_lock::WorkerLaunchLocks;
 
-/// Commands the daemon admission tick sends to a warm worker session task.
-#[derive(Debug)]
-pub enum WarmWorkerCommand<'a> {
-    /// Send a new `execute` frame to the worker and register a terminal
-    /// context to handle the resulting terminal frame. The daemon's
-    /// session-loop multiplexes terminal contexts by correlation_id.
-    NewExecute {
-        execute_message: Value,
-        correlation_id: String,
-        terminal: WorkerMessageTerminalContext<'a>,
-    },
-    /// Ask the session task to exit gracefully after current executes
-    /// complete. Used when the registry's idle TTL expires or operator
-    /// shuts the daemon down.
-    Shutdown { reason: String },
-}
+/// Idle TTL before a warm worker session exits without a new execute command.
+pub const WARM_WORKER_IDLE_TTL_MS: u64 = 60_000;
 
-/// Owned variant for cross-thread shipping. The terminal context's
-/// borrowed scheduler/dispatch_state references can't survive the
-/// admission tick boundary, so the warm path stores the bits it needs to
-/// re-create them per terminal.
+/// Owned terminal context for a warm-worker new-execute command. Carries
+/// all the fields needed by the session loop to rebuild a
+/// `WorkerMessageTerminalContext` without needing borrowed scheduler /
+/// dispatch_state references.
 #[derive(Debug, Clone)]
 pub struct OwnedTerminalContext {
-    pub correlation_id: String,
     pub dispatch_id: String,
     pub claim_token: String,
-    pub journal_sequence_hint: u64,
+    /// The worker_id registered in the RAL Claimed event for this dispatch.
+    /// May differ from the warm worker's physical process ID.
+    pub ral_worker_id: String,
     pub journal_timestamp: u64,
     pub writer_version: String,
     pub dispatch_correlation_id: String,
+    /// RAL identity for this dispatch; used to look up pending delegations
+    /// in the freshly-loaded scheduler.
+    pub identity: RalJournalIdentity,
 }
 
 /// Owned variant of WarmWorkerCommand suitable for crossing the admission
@@ -66,6 +57,7 @@ pub enum OwnedWarmWorkerCommand {
         execute_message: Value,
         correlation_id: String,
         terminal: OwnedTerminalContext,
+        locks: WorkerLaunchLocks,
     },
     Shutdown {
         reason: String,
