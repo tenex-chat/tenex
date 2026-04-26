@@ -272,16 +272,30 @@ describe("agent worker protocol process smoke test", () => {
                     ralNumber: 1,
                 });
 
-                const streamDelta = await nextWorkerMessage(messages, "stream_delta");
-                expect(streamDelta).toMatchObject({
-                    type: "stream_delta",
+                const streamTextDelta = await nextWorkerMessage(
+                    messages,
+                    "stream_text_delta publish_request"
+                );
+                expect(streamTextDelta).toMatchObject({
+                    type: "publish_request",
                     projectId: fixture.projectId,
                     agentPubkey: fixture.agentPubkey,
                     conversationId: fixture.conversationId,
                     ralNumber: 1,
-                    batchSequence: 1,
+                    runtimeEventClass: "stream_text_delta",
+                    waitForRelayOk: false,
                 });
-                expect("delta" in streamDelta && streamDelta.delta).toContain("Default mock response");
+                if (streamTextDelta.type !== "publish_request") {
+                    throw new Error("expected stream_text_delta publish_request frame");
+                }
+                expectSignedPublishEvent(streamTextDelta);
+                expect(streamTextDelta.event.content).toContain("Default mock response");
+                expect(
+                    streamTextDelta.event.tags.some(
+                        (tag) => tag[0] === "stream-seq" && tag[1] === "1"
+                    )
+                ).toBe(true);
+                ackPublishRequest(worker, streamTextDelta);
 
                 const publishRequest = await nextWorkerMessage(messages, "publish_request");
                 expect(publishRequest).toMatchObject({
@@ -290,6 +304,7 @@ describe("agent worker protocol process smoke test", () => {
                     agentPubkey: fixture.agentPubkey,
                     conversationId: fixture.conversationId,
                     ralNumber: 1,
+                    runtimeEventClass: "complete",
                     waitForRelayOk: true,
                     event: {
                         kind: 1,
@@ -321,11 +336,7 @@ describe("agent worker protocol process smoke test", () => {
                     publishRequest.event.id
                 );
 
-                const [code, signal] = (await withTimeout(
-                    once(worker, "exit"),
-                    "real agent worker exit"
-                )) as [number | null, NodeJS.Signals | null];
-                expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: "" });
+                requestWorkerShutdown(worker, fixture.executeMessage.correlationId);
             } finally {
                 stopWorker(worker);
             }
@@ -446,6 +457,13 @@ describe("agent worker protocol process smoke test", () => {
                 ).toBe(true);
                 expect(
                     publishRequests.some(
+                        (message) =>
+                            message.runtimeEventClass === "stream_text_delta" &&
+                            message.event.content.includes("Todo tool path complete.")
+                    )
+                ).toBe(true);
+                expect(
+                    publishRequests.some(
                         (message) => message.event.content.trim() === "Todo tool path complete."
                     )
                 ).toBe(true);
@@ -464,11 +482,7 @@ describe("agent worker protocol process smoke test", () => {
                 });
                 expect(complete && "finalEventIds" in complete && complete.finalEventIds).toHaveLength(1);
 
-                const [code, signal] = (await withTimeout(
-                    once(worker, "exit"),
-                    "real tool worker exit"
-                )) as [number | null, NodeJS.Signals | null];
-                expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: "" });
+                requestWorkerShutdown(worker, fixture.executeMessage.correlationId);
 
                 const conversationPath = join(
                     fixture.tenexBasePath,
@@ -646,6 +660,13 @@ describe("agent worker protocol process smoke test", () => {
                             message.event.content.trim() === "Waiting for worker-agent to finish."
                     )
                 ).toBe(true);
+                expect(
+                    publishRequests.some(
+                        (message) =>
+                            message.runtimeEventClass === "stream_text_delta" &&
+                            message.event.content.includes("Waiting for worker-agent to finish.")
+                    )
+                ).toBe(true);
 
                 const waiting = observed.find((message) => message.type === "waiting_for_delegation");
                 expect(waiting).toMatchObject({
@@ -667,11 +688,7 @@ describe("agent worker protocol process smoke test", () => {
                 expect(waiting && "finalEventIds" in waiting && waiting.finalEventIds).toHaveLength(1);
                 expect(observed.some((message) => message.type === "complete")).toBe(false);
 
-                const [code, signal] = (await withTimeout(
-                    once(worker, "exit"),
-                    "delegation worker exit"
-                )) as [number | null, NodeJS.Signals | null];
-                expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: "" });
+                requestWorkerShutdown(worker, fixture.executeMessage.correlationId);
 
                 const conversationPath = join(
                     fixture.tenexBasePath,
@@ -813,11 +830,7 @@ describe("agent worker protocol process smoke test", () => {
                 });
                 expect(observed.some((message) => message.type === "complete")).toBe(false);
 
-                const [code, signal] = (await withTimeout(
-                    once(worker, "exit"),
-                    "no_response worker exit"
-                )) as [number | null, NodeJS.Signals | null];
-                expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: "" });
+                requestWorkerShutdown(worker, fixture.executeMessage.correlationId);
 
                 const conversationPath = join(
                     fixture.tenexBasePath,
@@ -925,6 +938,13 @@ describe("agent worker protocol process smoke test", () => {
                         (message) => message.event.content.trim() === "Continuation handled from RAL 2."
                     )
                 ).toBe(true);
+                expect(
+                    publishRequests.some(
+                        (message) =>
+                            message.runtimeEventClass === "stream_text_delta" &&
+                            message.event.content.includes("Continuation handled from RAL 2.")
+                    )
+                ).toBe(true);
 
                 const complete = observed.find((message) => message.type === "complete");
                 expect(complete).toMatchObject({
@@ -939,11 +959,7 @@ describe("agent worker protocol process smoke test", () => {
                     keepWorkerWarm: false,
                 });
 
-                const [code, signal] = (await withTimeout(
-                    once(worker, "exit"),
-                    "RAL 2 worker exit"
-                )) as [number | null, NodeJS.Signals | null];
-                expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: "" });
+                requestWorkerShutdown(worker, fixture.executeMessage.correlationId);
 
                 const conversationPath = join(
                     fixture.tenexBasePath,
@@ -1028,6 +1044,27 @@ function ackPublishRequest(
             eventIds: [message.event.id],
         })
     );
+}
+
+function requestWorkerShutdown(
+    worker: ChildProcessWithoutNullStreams,
+    correlationId: string
+): void {
+    if (worker.stdin.destroyed || worker.stdin.writableEnded) {
+        return;
+    }
+    worker.stdin.write(
+        encodeAgentWorkerProtocolFrame({
+            version: AGENT_WORKER_PROTOCOL_VERSION,
+            type: "shutdown",
+            correlationId,
+            sequence: 90_000,
+            timestamp: Date.now(),
+            reason: "worker smoke test complete",
+            forceKillTimeoutMs: 5000,
+        })
+    );
+    worker.stdin.end();
 }
 
 async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
