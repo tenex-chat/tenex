@@ -162,6 +162,17 @@ run_one() {
   t1="$(date +%s)"
   duration=$(( t1 - t0 ))
 
+  # Aggressive between-scenario cleanup. Scenarios that fail mid-run can
+  # leak their daemon process (harness cleanup runs on EXIT but interrupted
+  # subshells sometimes miss it), and accumulated daemons compete for ports
+  # and file descriptors with the next scenario's relay/daemon. Without
+  # this, a long suite run sees harness-probe timeouts in scenarios that
+  # individually pass — visible as "daemon subscription never became live"
+  # failures clustered toward the end of a run. Killing here only affects
+  # daemons whose owning scenario has already terminated; live scenarios
+  # in --jobs > 1 mode share fixture roots only with themselves.
+  pkill -KILL -f "target/release/daemon" 2>/dev/null || true
+
   # Parse the LAST RESULT line; fall back to exit-code classification.
   local parsed_status=""
   local parsed_detail=""
