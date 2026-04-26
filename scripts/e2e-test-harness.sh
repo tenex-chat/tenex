@@ -282,8 +282,16 @@ await_daemon_subscribed() {
     fi
   done
 
-  # Agent-mentions filter probe (only when an agent pubkey is exported).
-  if [[ -n "${AGENT1_PUBKEY:-}" ]]; then
+  # Agent-mentions filter probe is OPT-IN (set HARNESS_AGENT_MENTIONS_PROBE=1
+  # before calling). Most scenarios call `await_daemon_subscribed` before any
+  # kind:31933 has been published, at which point the agent-mentions filter
+  # has no pubkeys and the probe will time out. Boot/dispatch scenarios that
+  # need the agent-mentions guarantee should set the env var AFTER they have
+  # caused the daemon to load a project that includes AGENT1_PUBKEY (i.e.
+  # call `await_daemon_subscribed` again post-boot, or wrap their kind:1
+  # publish in their own probe). Default-off keeps the harness compatible
+  # with scenarios that never publish kind:1 to a live agent at all.
+  if [[ "${HARNESS_AGENT_MENTIONS_PROBE:-0}" == "1" && -n "${AGENT1_PUBKEY:-}" ]]; then
     local got=0
     local attempt
     for attempt in 1 2 3 4 5 6; do
