@@ -137,26 +137,26 @@ jq -n \
   --arg agent_pubkey "$AGENT1_PUBKEY" \
   --argjson chat_id -100123 \
   '{
-    schema_version: $schema_version,
+    schemaVersion: $schema_version,
     writer: $writer,
-    writer_version: $writer_version,
-    record_id: $record_id,
+    writerVersion: $writer_version,
+    recordId: $record_id,
     status: "pending",
-    created_at: $created_at,
-    updated_at: $updated_at,
-    nostr_event_id: $nostr_event_id,
-    correlation_id: ("corr-" + $record_id),
-    project_binding: {
-      project_d_tag: $project_d_tag,
-      backend_pubkey: $backend_pubkey
+    createdAt: $created_at,
+    updatedAt: $updated_at,
+    nostrEventId: $nostr_event_id,
+    correlationId: ("corr-" + $record_id),
+    projectBinding: {
+      projectDTag: $project_d_tag,
+      backendPubkey: $backend_pubkey
     },
-    channel_binding: {
-      chat_id: $chat_id
+    channelBinding: {
+      chatId: $chat_id
     },
-    sender_identity: {
-      agent_pubkey: $agent_pubkey
+    senderIdentity: {
+      agentPubkey: $agent_pubkey
     },
-    delivery_reason: "proactive_send",
+    deliveryReason: "proactive_send",
     payload: {kind: "plain_text", text: "hello from e2e scenario 14.4"},
     attempts: []
   }' > "$pending_dir/${record_id}.json"

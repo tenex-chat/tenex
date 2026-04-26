@@ -116,12 +116,14 @@ fi
 echo "[scenario] sending SIGHUP to daemon pid=$daemon_pid (lockfile PID)"
 kill -HUP "$daemon_pid"
 
-# Wait for "SIGHUP reload complete" in daemon log.
+# Wait for the whitelist reload log message. The inner reload function
+# (tenex_daemon::whitelist_wiring) logs "whitelist wiring reloaded after SIGHUP"
+# which is captured at INFO level under the tenex_daemon filter.
 reload_deadline=$(( $(date +%s) + 10 ))
 saw_reload=0
 while [[ $(date +%s) -lt $reload_deadline ]]; do
   if [[ -f "$DAEMON_DIR/daemon.log" ]] && \
-     grep -q "SIGHUP reload complete" "$DAEMON_DIR/daemon.log" 2>/dev/null; then
+     grep -q "whitelist wiring reloaded after SIGHUP" "$DAEMON_DIR/daemon.log" 2>/dev/null; then
     saw_reload=1
     break
   fi
@@ -132,10 +134,10 @@ if [[ "$saw_reload" -ne 1 ]]; then
   echo "[scenario] daemon log (last 40 lines):"
   tail -40 "$DAEMON_DIR/daemon.log" >&2 || true
   kill "$BUNKER_PID" 2>/dev/null || true
-  emit_result fail "SIGHUP reload complete not logged within 10s"
+  emit_result fail "SIGHUP whitelist reload not logged within 10s"
   _die "ASSERT: SIGHUP did not trigger whitelist reload"
 fi
-echo "[scenario]   SIGHUP reload complete logged ✓"
+echo "[scenario]   SIGHUP whitelist reload logged ✓"
 
 # The agent-inventory poller fires on inventory changes. The poller reads from
 # byProject in index.json (individual agent files are ignored when index.json

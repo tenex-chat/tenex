@@ -36,9 +36,10 @@ pub async fn run_telegram_outbox_driver(
     mut telegram_enqueued_rx: mpsc::UnboundedReceiver<TelegramEnqueued>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
-    // Compute the earliest pending retry from disk at startup so existing
-    // failures are not stuck until the next enqueue signal arrives.
-    let mut retry_at: Option<Instant> = compute_next_retry_instant(&deps.daemon_dir);
+    // On startup: drain immediately if there are pending records (written
+    // before the daemon started, e.g. by a worker process that exited) or if
+    // there are retryable failed records whose retry deadline has passed.
+    let mut retry_at: Option<Instant> = compute_startup_retry_instant(&deps.daemon_dir);
 
     loop {
         tokio::select! {
@@ -133,9 +134,16 @@ async fn sleep_until_optional(instant: Option<Instant>) {
     }
 }
 
-fn compute_next_retry_instant(daemon_dir: &PathBuf) -> Option<Instant> {
+/// On startup, returns `Some(Instant::now())` if there are pending records
+/// pre-written before the daemon started (e.g. by a worker process), so the
+/// driver drains them immediately. Falls back to the failed-record retry
+/// instant (same as `compute_next_retry_instant`).
+fn compute_startup_retry_instant(daemon_dir: &PathBuf) -> Option<Instant> {
     let now_ms = current_unix_time_ms();
     let diagnostics = inspect_telegram_outbox(daemon_dir, now_ms).ok()?;
+    if diagnostics.pending_count > 0 {
+        return Some(Instant::now());
+    }
     diagnostics.next_retry_at.map(ms_to_instant)
 }
 
