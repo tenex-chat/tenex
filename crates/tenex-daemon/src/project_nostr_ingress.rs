@@ -92,10 +92,17 @@ pub fn handle_project_nostr_event(
         .collect();
     let repo_url = optional_tag_value(event, "repo");
 
-    let is_new_project = project_event_index
-        .lock()
-        .expect("project event index mutex must not be poisoned")
-        .upsert(event.clone());
+    let is_new_project = {
+        let mut index = project_event_index
+            .lock()
+            .expect("project event index mutex must not be poisoned");
+        let changed = index.upsert(event.clone());
+        let cache_path = tenex_base_dir.join("project_event_cache.json");
+        if let Err(error) = index.persist(&cache_path) {
+            tracing::warn!(%error, "failed to persist project event cache");
+        }
+        changed
+    };
 
     let agents_dir = tenex_base_dir.join("agents");
     fs::create_dir_all(&agents_dir).map_err(ProjectNostrIngressError::CreateDir)?;

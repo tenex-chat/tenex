@@ -1,4 +1,7 @@
 use std::collections::BTreeMap;
+use std::fs;
+use std::io;
+use std::path::Path;
 
 use crate::nostr_classification::KIND_PROJECT;
 use crate::nostr_event::SignedNostrEvent;
@@ -55,6 +58,44 @@ impl ProjectEventIndex {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Writes all indexed events to `path` as a JSON array, atomically (via a
+    /// sibling `.tmp` file + rename). Callers should hold no lock when calling
+    /// this; serialization is done from `self` which the caller must have
+    /// exclusive access to (e.g. via a MutexGuard snapshot).
+    pub fn persist(&self, path: &Path) -> io::Result<()> {
+        let events: Vec<&SignedNostrEvent> = self.entries.values().collect();
+        let json = serde_json::to_vec_pretty(&events)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+        let temp_path = parent.join(format!("{file_name}.tmp.{}", std::process::id()));
+        fs::write(&temp_path, &json)?;
+        fs::rename(&temp_path, path)?;
+        Ok(())
+    }
+
+    /// Loads a project event index from a JSON array previously written by
+    /// [`persist`]. Returns an empty index if the file does not exist.
+    pub fn load_from_file(path: &Path) -> io::Result<Self> {
+        let content = match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::new()),
+            Err(error) => return Err(error),
+        };
+        let events: Vec<SignedNostrEvent> = serde_json::from_str(&content)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let mut index = Self::new();
+        for event in events {
+            index.upsert(event);
+        }
+        Ok(index)
     }
 
     /// Projects every indexed 31933 event into the descriptor struct every

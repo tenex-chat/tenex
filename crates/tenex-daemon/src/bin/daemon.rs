@@ -172,9 +172,21 @@ where
         tenex_daemon::daemon_whitelist_store::write_daemon_whitelist(&daemon_dir, &owners);
     }
     let project_boot_state = Arc::new(Mutex::new(ProjectBootState::new()));
-    let project_event_index = Arc::new(Mutex::new(
-        tenex_daemon::project_event_index::ProjectEventIndex::new(),
-    ));
+    let project_event_index = Arc::new(Mutex::new({
+        let cache_path = tenex_base_dir.join("project_event_cache.json");
+        match tenex_daemon::project_event_index::ProjectEventIndex::load_from_file(&cache_path) {
+            Ok(index) => {
+                if !index.is_empty() {
+                    tracing::info!(count = index.len(), "restored project event index from cache");
+                }
+                index
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to load project event cache; starting with empty index");
+                tenex_daemon::project_event_index::ProjectEventIndex::new()
+            }
+        }
+    }));
     run_worker_startup_recovery(&daemon_dir)?;
 
     let project_booted_rx = receivers.project_booted_rx;
