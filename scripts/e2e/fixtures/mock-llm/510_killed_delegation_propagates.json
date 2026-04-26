@@ -1,0 +1,36 @@
+{
+  "expectedModelId": "mock/killed-delegation-510",
+  "label": "e2e/510_killed_delegation_propagates",
+  "responses": [
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/long task/"
+      },
+      "response": {
+        "content": "Delegating long task to agent2.",
+        "toolCalls": [
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent2",
+              "prompt": "Run a long task."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent2",
+        "userMessage": "/long task/"
+      },
+      "response": {
+        "content": "agent2-processing",
+        "streamDelay": 2000
+      }
+    }
+  ]
+}
