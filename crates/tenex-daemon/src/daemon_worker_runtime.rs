@@ -11,11 +11,15 @@ use crate::dispatch_queue::{
     DispatchQueueError, DispatchQueueRecord, acquire_dispatch_queue_lock,
     append_dispatch_queue_record, replay_dispatch_queue,
 };
+use crate::inbound_dispatch::{
+    InboundDispatchEnqueueError, PreCompletedDelegationResumeInput,
+    enqueue_pre_completed_delegation_resume,
+};
 use crate::operations_status_runtime::{
     OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE, OperationsStatusPublishConversationInput,
     OperationsStatusRuntimeError, publish_operations_status_conversation,
 };
-use crate::ral_journal::{RalJournalError, RalPendingDelegation};
+use crate::ral_journal::{RalJournalError, RalPendingDelegation, RalReplayStatus};
 use crate::ral_lock::RalLockInfo;
 use crate::ral_scheduler::RalScheduler;
 use crate::worker_completion::plan::WorkerCompletionDispatchInput;
@@ -33,7 +37,8 @@ use crate::worker_dispatch::admission_start::{
 };
 use crate::worker_dispatch::execution::{WorkerDispatchSession, WorkerDispatchSpawner};
 use crate::worker_dispatch::input::{
-    WorkerDispatchInputError, read_optional as read_optional_worker_dispatch_input,
+    WorkerDispatchInputError, WorkerDispatchInputSourceType,
+    read_optional as read_optional_worker_dispatch_input,
 };
 use crate::worker_dispatch::start::{WorkerDispatchStartInput, start_lock_scoped_worker_dispatch};
 use crate::worker_dispatch::tick::{
@@ -222,6 +227,11 @@ where
     },
     #[error("worker live publish maintenance failed: {message}")]
     LivePublishMaintenance { message: String },
+    #[error("pre-completed delegation resume failed: {source}")]
+    PreCompletedDelegationResume {
+        #[source]
+        source: Box<InboundDispatchEnqueueError>,
+    },
 }
 
 /// Returned by [`admit_one_worker_dispatch_from_filesystem`]: either an
@@ -932,6 +942,7 @@ where
     let claim_token = started.context.admission.leased_record.claim_token.clone();
     let project_id = started.runtime_started.identity.project_id.clone();
     let agent_pubkey = started.runtime_started.identity.agent_pubkey.clone();
+    let terminal_writer_version = terminal.writer_version.clone();
     let resolved_pending_delegations = scheduler
         .entry(&started.runtime_started.identity)
         .map(|entry| entry.pending_delegations.clone())
@@ -1064,6 +1075,48 @@ where
     })?;
     run_live_publish_maintenance(&mut live_publish_maintenance, daemon_dir, frame_observed_at)
         .map_err(|message| DaemonWorkerRuntimeError::LivePublishMaintenance { message })?;
+
+    // If the session ended with WaitingForDelegation(empty pending) it means all delegations
+    // were already recorded as completed before the terminal frame arrived. The normal
+    // delegation-completion path couldn't create a resume dispatch at that point because the
+    // parent was `Claimed` (running), not `WaitingForDelegation`. Create the resume dispatch now
+    // so the admission driver picks it up after this SessionCompleted signal.
+    {
+        let post_terminal_scheduler = RalScheduler::from_daemon_dir(daemon_dir)
+            .map_err(|source| DaemonWorkerRuntimeError::RalScheduler {
+                source: Box::new(source),
+            })?;
+        if let Some(entry) = post_terminal_scheduler.entry(&started.runtime_started.identity) {
+            if entry.status == RalReplayStatus::WaitingForDelegation
+                && entry.pending_delegations.is_empty()
+            {
+                let original_sidecar =
+                    read_optional_worker_dispatch_input(daemon_dir, &dispatch_id)
+                        .map_err(|source| DaemonWorkerRuntimeError::DispatchInput {
+                            dispatch_id: dispatch_id.clone(),
+                            source: Box::new(source),
+                        })?;
+                let source_type = original_sidecar
+                    .map(|s| s.source_type)
+                    .unwrap_or(WorkerDispatchInputSourceType::Nostr);
+                let resume_now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+                    .unwrap_or(0);
+                enqueue_pre_completed_delegation_resume(PreCompletedDelegationResumeInput {
+                    daemon_dir,
+                    identity: started.runtime_started.identity.clone(),
+                    execute_message: &started.context.launch_plan.execute_message,
+                    source_type,
+                    writer_version: &terminal_writer_version,
+                    timestamp: resume_now_ms,
+                })
+                .map_err(|source| DaemonWorkerRuntimeError::PreCompletedDelegationResume {
+                    source: Box::new(source),
+                })?;
+            }
+        }
+    }
 
     tracing::info!(dispatch_id = %dispatch_id, worker_id = %worker_id, "worker session completed");
     crate::stdout_status::print_agent_stopped(

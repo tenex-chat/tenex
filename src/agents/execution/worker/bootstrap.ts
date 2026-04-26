@@ -208,10 +208,16 @@ export async function runOneExecution(
                 message.ralNumber
             )
             .map((delegation) => delegation.delegationConversationId);
+        // delegationSnapshot is loaded at worker-admission time, so it reflects completions
+        // that arrived between dispatch creation and startup. pendingDelegationIds in the flags
+        // is stale (set at dispatch-creation time); using it as a fallback when the snapshot
+        // is present would keep the worker in waiting_for_delegation for already-completed delegations.
         const pendingDelegations =
             registryPendingDelegations.length > 0
                 ? registryPendingDelegations
-                : (message.executionFlags.pendingDelegationIds ?? []);
+                : message.delegationSnapshot
+                  ? []
+                  : (message.executionFlags.pendingDelegationIds ?? []);
         const pendingDelegationsRemain =
             outstandingWork.details.pendingDelegations > 0 || pendingDelegations.length > 0;
 

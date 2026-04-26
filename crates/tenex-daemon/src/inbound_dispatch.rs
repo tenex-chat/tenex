@@ -36,6 +36,9 @@ const INBOUND_DISPATCH_ID_PREFIX: &str = "inbound";
 const DELEGATION_RESUME_WORKER_ID_PREFIX: &str = "delegation-resume-worker";
 const DELEGATION_RESUME_CLAIM_TOKEN_PREFIX: &str = "delegation-resume-claim";
 const DELEGATION_RESUME_DISPATCH_ID_PREFIX: &str = "delegation-resume";
+const PRE_COMPLETED_RESUME_WORKER_ID_PREFIX: &str = "pre-completed-resume-worker";
+const PRE_COMPLETED_RESUME_CLAIM_TOKEN_PREFIX: &str = "pre-completed-resume-claim";
+const PRE_COMPLETED_RESUME_DISPATCH_ID_PREFIX: &str = "pre-completed-resume";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InboundDispatchProject<'a> {
@@ -131,6 +134,18 @@ pub enum InboundDispatchEnqueueError {
     DispatchQueue(#[from] DispatchQueueError),
     #[error("inbound dispatch conversation store write failed: {0}")]
     ConversationStore(#[from] ConversationStoreFilesError),
+    #[error("execute message missing required field: {field}")]
+    MissingExecuteMessageField { field: &'static str },
+}
+
+#[derive(Debug)]
+pub struct PreCompletedDelegationResumeInput<'a> {
+    pub daemon_dir: &'a Path,
+    pub identity: RalJournalIdentity,
+    pub execute_message: &'a Value,
+    pub source_type: WorkerDispatchInputSourceType,
+    pub writer_version: &'a str,
+    pub timestamp: u64,
 }
 
 pub fn enqueue_inbound_dispatch(
@@ -375,6 +390,104 @@ pub fn enqueue_delegation_completion_dispatch(
         completion_record: Some(completion_plan.record),
         dispatch_record: resume_preparation.dispatch_record,
     })
+}
+
+pub fn enqueue_pre_completed_delegation_resume(
+    input: PreCompletedDelegationResumeInput<'_>,
+) -> Result<(), InboundDispatchEnqueueError> {
+    let ral_number = input.identity.ral_number.to_string();
+    let digest = stable_digest(&[
+        "pre-completed-delegation-resume",
+        &input.identity.project_id,
+        &input.identity.agent_pubkey,
+        &input.identity.conversation_id,
+        ral_number.as_str(),
+    ]);
+    let dispatch_id = format!("{PRE_COMPLETED_RESUME_DISPATCH_ID_PREFIX}-{digest}");
+    let worker_id = format!("{PRE_COMPLETED_RESUME_WORKER_ID_PREFIX}-{digest}");
+    let claim_token = format!("{PRE_COMPLETED_RESUME_CLAIM_TOKEN_PREFIX}-{digest}");
+    let correlation_id = format!("pre-completed-delegation-resume-{digest}");
+
+    let project_base_path = input.execute_message["projectBasePath"]
+        .as_str()
+        .ok_or(InboundDispatchEnqueueError::MissingExecuteMessageField {
+            field: "projectBasePath",
+        })?
+        .to_string();
+    let metadata_path = input.execute_message["metadataPath"]
+        .as_str()
+        .ok_or(InboundDispatchEnqueueError::MissingExecuteMessageField {
+            field: "metadataPath",
+        })?
+        .to_string();
+    let triggering_envelope = input.execute_message["triggeringEnvelope"].clone();
+    let triggering_event_id = input.execute_message["triggeringEnvelope"]["message"]["nativeId"]
+        .as_str()
+        .ok_or(InboundDispatchEnqueueError::MissingExecuteMessageField {
+            field: "triggeringEnvelope.message.nativeId",
+        })?
+        .to_string();
+
+    let sidecar = WorkerDispatchInput::from_execute_fields(WorkerDispatchInputFromExecuteFields {
+        dispatch_id: dispatch_id.clone(),
+        source_type: input.source_type,
+        writer: WorkerDispatchInputWriterMetadata {
+            writer: "daemon_worker_runtime".to_string(),
+            writer_version: input.writer_version.to_string(),
+            timestamp: input.timestamp,
+        },
+        execute_fields: WorkerDispatchExecuteFields {
+            worker_id: Some(worker_id.clone()),
+            triggering_event_id: triggering_event_id.clone(),
+            project_base_path,
+            metadata_path,
+            triggering_envelope,
+            execution_flags: AgentWorkerExecutionFlags {
+                is_delegation_completion: true,
+                has_pending_delegations: false,
+                pending_delegation_ids: vec![],
+                debug: false,
+            },
+        },
+        source_metadata: None,
+    });
+    write_create_or_compare_equal(input.daemon_dir, &sidecar)?;
+
+    let _dispatch_lock = acquire_dispatch_queue_lock(input.daemon_dir)?;
+    let dispatch_state = replay_dispatch_queue(input.daemon_dir)?;
+    let scheduler = RalScheduler::from_daemon_dir(input.daemon_dir)?;
+
+    let mut resume_preparation =
+        scheduler.plan_resume_dispatch_preparation(RalResumeDispatchPreparationInput {
+            identity: input.identity.clone(),
+            worker_id,
+            claim_token,
+            journal_sequence: next_sequence(scheduler.state().last_sequence, "RAL journal")?,
+            dispatch_sequence: next_sequence(dispatch_state.last_sequence, "dispatch queue")?,
+            last_dispatch_sequence: dispatch_state.last_sequence,
+            timestamp: input.timestamp,
+            correlation_id,
+            dispatch_id,
+            triggering_event_id,
+            writer_version: input.writer_version.to_string(),
+        })?;
+
+    append_ral_journal_record_with_resequence(
+        input.daemon_dir,
+        &mut resume_preparation.claim_record,
+    )?;
+    append_dispatch_queue_record(input.daemon_dir, &resume_preparation.dispatch_record)?;
+
+    tracing::info!(
+        dispatch_id = %resume_preparation.dispatch_record.dispatch_id,
+        agent_pubkey = %input.identity.agent_pubkey,
+        project_id = %input.identity.project_id,
+        conversation_id = %input.identity.conversation_id,
+        ral_number = input.identity.ral_number,
+        "pre-completed delegation resume dispatch queued"
+    );
+
+    Ok(())
 }
 
 fn append_dispatch_preparation(
