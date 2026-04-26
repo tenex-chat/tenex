@@ -364,52 +364,12 @@ mod tests {
     use super::*;
     use crate::backend_events::installed_agent_list::InstalledAgentListAgent;
     use bech32::{ToBase32, Variant};
-    use secp256k1::{Keypair, Secp256k1, SecretKey, Signing};
+    use secp256k1::{Keypair, Secp256k1, SecretKey};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    const TEST_SECRET_KEY_HEX: &str =
-        "0101010101010101010101010101010101010101010101010101010101010101";
-
-    struct Secp256k1Signer<C: Signing> {
-        secp: Secp256k1<C>,
-        keypair: Keypair,
-        xonly_hex: String,
-    }
-
-    impl<C: Signing> Secp256k1Signer<C> {
-        fn new(secp: Secp256k1<C>, secret_hex: &str) -> Self {
-            let secret = SecretKey::from_str(secret_hex).expect("valid secret key hex");
-            let keypair = Keypair::from_secret_key(&secp, &secret);
-            let (xonly, _) = keypair.x_only_public_key();
-            let xonly_hex = hex::encode(xonly.serialize());
-            Self {
-                secp,
-                keypair,
-                xonly_hex,
-            }
-        }
-    }
-
-    impl<C: Signing> crate::backend_events::heartbeat::BackendSigner for Secp256k1Signer<C> {
-        fn xonly_pubkey_hex(&self) -> String {
-            self.xonly_hex.clone()
-        }
-
-        fn sign_schnorr(&self, digest: &[u8; 32]) -> Result<String, secp256k1::Error> {
-            let sig = self
-                .secp
-                .sign_schnorr_no_aux_rand(digest.as_slice(), &self.keypair);
-            Ok(hex::encode(sig.to_byte_array()))
-        }
-    }
-
-    fn test_signer() -> Secp256k1Signer<secp256k1::All> {
-        Secp256k1Signer::new(Secp256k1::new(), TEST_SECRET_KEY_HEX)
-    }
 
     fn pubkey_hex(fill_byte: u8) -> String {
         let secret_bytes = [fill_byte; 32];
