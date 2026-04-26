@@ -1,0 +1,27 @@
+{
+  "expectedModelId": "mock/streaming-63",
+  "label": "e2e/63_message_during_streaming",
+  "responses": [
+    {
+      "priority": 60,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/first message/"
+      },
+      "response": {
+        "content": "This is a long streaming response that takes several seconds to complete because the words trickle out slowly.",
+        "streamDelay": 3000
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/second message/"
+      },
+      "response": {
+        "content": "Second message processed after streaming completed."
+      }
+    }
+  ]
+}
