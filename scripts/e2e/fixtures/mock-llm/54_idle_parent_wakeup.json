@@ -1,0 +1,45 @@
+{
+  "expectedModelId": "mock/idle-parent-54",
+  "label": "e2e/54_idle_parent_wakeup",
+  "responses": [
+    {
+      "priority": 110,
+      "trigger": {
+        "agentName": "agent1",
+        "messageContains": "<delegations>"
+      },
+      "response": {
+        "content": "agent1 resumed: delegation complete, child said hello-from-agent2"
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent1",
+        "userMessage": "/hello/"
+      },
+      "response": {
+        "content": "Delegating greeting to agent2.",
+        "toolCalls": [
+          {
+            "name": "delegate",
+            "params": {
+              "recipient": "agent2",
+              "prompt": "Please say hello back."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "priority": 50,
+      "trigger": {
+        "agentName": "agent2",
+        "userMessage": "/say hello/"
+      },
+      "response": {
+        "content": "hello-from-agent2"
+      }
+    }
+  ]
+}
