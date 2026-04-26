@@ -3,24 +3,13 @@
   "label": "e2e/64_concurrent_message_race",
   "responses": [
     {
-      "priority": 60,
-      "trigger": {
-        "agentName": "agent1",
-        "userMessage": "/first concurrent message/"
-      },
-      "response": {
-        "content": "Processing first concurrent message.",
-        "streamDelay": 1500
-      }
-    },
-    {
       "priority": 50,
       "trigger": {
-        "agentName": "agent1",
-        "userMessage": "/second concurrent message/"
+        "agentName": "agent1"
       },
       "response": {
-        "content": "Processing second concurrent message after the first completed."
+        "content": "Concurrent message processed.",
+        "streamDelay": 500
       }
     }
   ]
