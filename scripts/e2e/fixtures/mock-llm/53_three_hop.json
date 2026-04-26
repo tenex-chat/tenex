@@ -6,7 +6,7 @@
       "priority": 110,
       "trigger": {
         "agentName": "agent1",
-        "messageContains": "<delegations>"
+        "messageContains": "DELEGATION COMPLETED"
       },
       "response": {
         "content": "Final answer: agent2 confirmed that agent3 says result is 42."
@@ -16,10 +16,30 @@
       "priority": 110,
       "trigger": {
         "agentName": "agent2",
-        "messageContains": "<delegations>"
+        "messageContains": "DELEGATION COMPLETED"
       },
       "response": {
         "content": "agent2 relays: agent3 says result is 42"
+      }
+    },
+    {
+      "priority": 80,
+      "trigger": {
+        "agentName": "agent1",
+        "iterationCount": 2
+      },
+      "response": {
+        "content": ""
+      }
+    },
+    {
+      "priority": 80,
+      "trigger": {
+        "agentName": "agent2",
+        "iterationCount": 2
+      },
+      "response": {
+        "content": ""
       }
     },
     {

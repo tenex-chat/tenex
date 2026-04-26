@@ -6,7 +6,7 @@
       "priority": 120,
       "trigger": {
         "agentName": "agent1",
-        "messageContains": "<delegations>"
+        "messageContains": "DELEGATION COMPLETED"
       },
       "response": {
         "content": "agent1 final: received result from agent2, still waiting for agent3"
