@@ -54,6 +54,13 @@ pub enum TelegramOutboxStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TelegramDeliveryAttemptStatus {
+    /// The daemon has decided to attempt delivery and persisted the
+    /// intent on disk before issuing the Bot API request. If the daemon
+    /// crashes between this marker and the success/failure write, the
+    /// pending record's last attempt remains `Attempted` on disk.
+    /// Restart recovery treats such records as best-effort delivered to
+    /// avoid duplicating an HTTP send Bot API may have processed.
+    Attempted,
     Delivered,
     Failed,
 }
@@ -534,7 +541,30 @@ pub fn drain_pending_telegram_outbox_with_retry_policy<P: TelegramDeliveryPublis
             });
         }
 
+        // Before issuing the Bot API request, persist an `Attempted`
+        // attempt to the pending record. If the daemon crashes between
+        // this write and the success/failure transition, restart
+        // recovery (recover_inflight_telegram_records) sees the
+        // Attempted marker and moves the record to delivered/ to avoid
+        // duplicating a Bot API send the daemon may have already issued.
+        record.attempts.push(TelegramDeliveryAttempt {
+            attempted_at,
+            status: TelegramDeliveryAttemptStatus::Attempted,
+            telegram_message_id: None,
+            error_class: None,
+            error_detail: None,
+            retry_after: None,
+            retryable: false,
+            next_attempt_at: None,
+        });
+        record.updated_at = attempted_at;
+        rewrite_record_in_place(daemon_dir, &source_path, &record)?;
+
         let outcome = publisher.deliver(&record);
+        // Replace the speculative `Attempted` attempt with the actual
+        // Bot API outcome so the on-disk attempts log only carries
+        // terminal statuses after a clean exit.
+        record.attempts.pop();
         record.updated_at = attempted_at;
         match outcome {
             TelegramDeliveryResult::Delivered {
@@ -1171,6 +1201,84 @@ fn write_record_file(path: &Path, record: &TelegramOutboxRecord) -> TelegramOutb
     Ok(())
 }
 
+/// Atomically rewrites the record at `path` (which must be in pending/) so
+/// the on-disk content matches `record`. Used to persist an `Attempted`
+/// marker before the Bot API request so a daemon crash mid-call is
+/// recoverable. Implementation: write `<path>.tmp.<pid>.<nanos>` then rename
+/// over `path`. fs::rename is atomic on the same filesystem on macOS+Linux.
+fn rewrite_record_in_place(
+    daemon_dir: &Path,
+    path: &Path,
+    record: &TelegramOutboxRecord,
+) -> TelegramOutboxResult<()> {
+    let tmp_dir = tmp_telegram_outbox_dir(daemon_dir);
+    fs::create_dir_all(&tmp_dir)?;
+    let tmp_path = tmp_dir.join(format!(
+        "{}.{}.{}.rewrite.tmp",
+        record.record_id,
+        std::process::id(),
+        now_nanos()
+    ));
+    write_record_file(&tmp_path, record)?;
+    fs::rename(&tmp_path, path)?;
+    sync_parent_dir(path)?;
+    Ok(())
+}
+
+/// Restart-time recovery. Scans pending/ for records whose last attempt is
+/// `Attempted` (meaning the prior daemon incarnation crashed between
+/// persisting its delivery intent and writing the Bot API outcome). Such
+/// records are moved to delivered/ with `telegram_message_id: None` to
+/// avoid issuing a duplicate Bot API request for a message Bot API may
+/// already have processed.
+///
+/// Returns the count of records reconciled. Idempotent — safe to call
+/// repeatedly. Errors abort the scan; caller decides whether to retry.
+pub fn recover_inflight_telegram_records(
+    daemon_dir: impl AsRef<Path>,
+) -> TelegramOutboxResult<usize> {
+    let daemon_dir = daemon_dir.as_ref();
+    let paths = list_pending_telegram_outbox_record_paths(daemon_dir)?;
+    let mut recovered = 0_usize;
+    for source_path in paths {
+        let Some(mut record) = read_optional_record(&source_path)? else {
+            continue;
+        };
+        let last_attempt = record.attempts.last();
+        if last_attempt.map(|a| a.status) != Some(TelegramDeliveryAttemptStatus::Attempted) {
+            continue;
+        }
+        record.status = TelegramOutboxStatus::Delivered;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        record.updated_at = now;
+        record.attempts.push(TelegramDeliveryAttempt {
+            attempted_at: now,
+            status: TelegramDeliveryAttemptStatus::Delivered,
+            telegram_message_id: None,
+            error_class: None,
+            error_detail: Some(
+                "recovered from in-flight state on daemon restart; assumed delivered to avoid duplicate Bot API send"
+                    .to_string(),
+            ),
+            retry_after: None,
+            retryable: false,
+            next_attempt_at: None,
+        });
+        transition_record(
+            daemon_dir,
+            &source_path,
+            delivered_telegram_outbox_record_path(daemon_dir, &record.record_id),
+            &record,
+            None,
+        )?;
+        recovered += 1;
+    }
+    Ok(recovered)
+}
+
 fn sync_parent_dir(path: &Path) -> TelegramOutboxResult<()> {
     if let Some(parent) = path.parent() {
         File::open(parent)?.sync_all()?;
@@ -1549,6 +1657,125 @@ mod tests {
         assert_eq!(delivered.attempts.len(), 1);
         assert_eq!(delivered.attempts[0].telegram_message_id, Some(5001));
         assert_eq!(delivered.updated_at, 1710001000200);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn recovers_inflight_pending_record_to_delivered_with_no_message_id() {
+        // Simulate a daemon crash mid-Bot-API-call: the pending record has
+        // an `Attempted` last attempt and was never transitioned. Restart
+        // recovery must move it to delivered/ with telegram_message_id=None
+        // so subsequent drains do not issue a duplicate Bot API request.
+        let daemon_dir = unique_temp_daemon_dir();
+        let request = sample_request("event-inflight-recover-01", "plain");
+        accept_telegram_delivery_request(&daemon_dir, request, 1710001000100)
+            .expect("publish request must be accepted");
+
+        // Manually inject an `Attempted` attempt into the pending record
+        // and rewrite it (this is what drain_pending_telegram_outbox does
+        // before calling publisher.deliver()).
+        let pending_paths = list_pending_telegram_outbox_record_paths(&daemon_dir)
+            .expect("list pending must succeed");
+        assert_eq!(pending_paths.len(), 1);
+        let pending_path = pending_paths[0].clone();
+        let mut record =
+            read_optional_record(&pending_path).expect("read pending must succeed").unwrap();
+        record.attempts.push(TelegramDeliveryAttempt {
+            attempted_at: 1710001000150,
+            status: TelegramDeliveryAttemptStatus::Attempted,
+            telegram_message_id: None,
+            error_class: None,
+            error_detail: None,
+            retry_after: None,
+            retryable: false,
+            next_attempt_at: None,
+        });
+        record.updated_at = 1710001000150;
+        rewrite_record_in_place(&daemon_dir, &pending_path, &record)
+            .expect("rewrite must succeed");
+
+        let recovered = recover_inflight_telegram_records(&daemon_dir)
+            .expect("recovery must succeed");
+        assert_eq!(recovered, 1);
+
+        // Pending must be empty now.
+        let pending_after = list_pending_telegram_outbox_record_paths(&daemon_dir)
+            .expect("list pending must succeed after recovery");
+        assert!(pending_after.is_empty());
+
+        // Delivered must contain the record with telegram_message_id None
+        // and a final Delivered attempt with the recovery error_detail.
+        let delivered = read_delivered_telegram_outbox_record(&daemon_dir, &record.record_id)
+            .expect("delivered read must succeed")
+            .expect("delivered record must exist after recovery");
+        assert_eq!(delivered.status, TelegramOutboxStatus::Delivered);
+        let last = delivered.attempts.last().expect("at least one attempt");
+        assert_eq!(last.status, TelegramDeliveryAttemptStatus::Delivered);
+        assert_eq!(last.telegram_message_id, None);
+        assert!(last
+            .error_detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("recovered from in-flight state"));
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn recover_inflight_is_no_op_when_no_attempted_records() {
+        // Pending record without an Attempted last attempt must not be
+        // touched by recovery.
+        let daemon_dir = unique_temp_daemon_dir();
+        let request = sample_request("event-no-recover-01", "plain");
+        accept_telegram_delivery_request(&daemon_dir, request, 1710001000100)
+            .expect("publish request must be accepted");
+
+        let recovered = recover_inflight_telegram_records(&daemon_dir)
+            .expect("recovery must succeed on clean pending");
+        assert_eq!(recovered, 0);
+
+        // Pending must still hold the record.
+        let pending_after = list_pending_telegram_outbox_record_paths(&daemon_dir)
+            .expect("list pending must succeed after recovery");
+        assert_eq!(pending_after.len(), 1);
+
+        fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
+    }
+
+    #[test]
+    fn drain_writes_attempted_marker_and_replaces_with_terminal_attempt() {
+        // After drain succeeds, the on-disk record must NOT carry the
+        // intermediate Attempted marker — it must be replaced by the
+        // terminal Delivered/Failed attempt.
+        let daemon_dir = unique_temp_daemon_dir();
+        let request = sample_request("event-attempted-replaced-01", "plain");
+        accept_telegram_delivery_request(&daemon_dir, request, 1710001000100)
+            .expect("publish request must be accepted");
+        let mut publisher = MockDeliveryPublisher::new(vec![TelegramDeliveryResult::Delivered {
+            telegram_message_id: 7001,
+            delivered_at: 1710001000200,
+        }]);
+
+        let outcomes = drain_pending_telegram_outbox(&daemon_dir, &mut publisher, 1710001000200)
+            .expect("drain must succeed");
+        assert_eq!(outcomes.len(), 1);
+
+        let delivered = read_delivered_telegram_outbox_record(&daemon_dir, &outcomes[0].record_id)
+            .expect("delivered read must succeed")
+            .expect("delivered record must exist");
+        // No Attempted attempts should remain after a clean drain — the
+        // pop+push pattern in drain_pending_telegram_outbox replaces the
+        // intermediate marker with the actual terminal attempt.
+        for attempt in &delivered.attempts {
+            assert_ne!(
+                attempt.status,
+                TelegramDeliveryAttemptStatus::Attempted,
+                "Attempted marker should not remain after successful drain"
+            );
+        }
+        assert_eq!(delivered.attempts.len(), 1);
+        assert_eq!(delivered.attempts[0].status, TelegramDeliveryAttemptStatus::Delivered);
 
         fs::remove_dir_all(daemon_dir).expect("temp daemon dir cleanup must succeed");
     }

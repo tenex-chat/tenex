@@ -189,6 +189,22 @@ where
     }));
     run_worker_startup_recovery(&daemon_dir)?;
 
+    // Telegram outbox recovery: any pending record whose last attempt is
+    // `Attempted` indicates the prior daemon crashed mid-Bot-API-send. Move
+    // those to delivered/ so we do not issue a duplicate Bot API request.
+    match tenex_daemon::telegram_outbox::recover_inflight_telegram_records(&daemon_dir) {
+        Ok(0) => {}
+        Ok(count) => {
+            tracing::info!(
+                count,
+                "recovered in-flight Telegram outbox records to delivered (avoided potential duplicate Bot API sends)"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to recover in-flight Telegram outbox records");
+        }
+    }
+
     let project_booted_rx = receivers.project_booted_rx;
     let ral_completed_rx = receivers.ral_completed_rx;
     let telegram_enqueued_rx = receivers.telegram_enqueued_rx;
