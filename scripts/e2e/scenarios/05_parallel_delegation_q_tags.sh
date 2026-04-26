@@ -245,7 +245,12 @@ while [[ $(date +%s) -lt $phase_b_deadline ]]; do
 
   # agent1 final summary
   if [[ "$saw_agent1_final" -eq 0 ]]; then
-    if [[ -n "${a1_events:-}" ]] && printf '%s\n' "$a1_events" | \
+    # Re-fetch agent1's recent kind:1 events; do not rely on the cached
+    # `a1_events` from the first delegation observation, since the final
+    # summary is published only after the resume worker runs.
+    a1_events="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 --auth --sec "$BACKEND_NSEC" \
+      "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+    if [[ -n "$a1_events" ]] && printf '%s\n' "$a1_events" | \
        jq -se 'any(.[]; .content | test("Parallel delegations complete"))' >/dev/null 2>&1; then
       echo "[scenario]   observed: agent1 published its final kind:1 with summary"
       saw_agent1_final=1
