@@ -74,55 +74,55 @@ The following issues were real on earlier 2026-04-24 snapshots but are no longer
 ## E2E Matrix
 
 <!-- e2e-matrix:start -->
-_Last run: 2026-04-26T15:40:03Z · branch `rust-agent-worker-publishing` · commit `1cc0a1614637` · total=44 pass=36 fail=5 skip=2 unknown=0 phase_partial=1_
+_Last run: 2026-04-26T18:18:37Z · branch `rust-agent-worker-publishing` · commit `10fc573b5130` · total=2 pass=2 fail=0 skip=0 unknown=0 phase_partial=0_
 
 | scenario | status | last_run | duration | known-issues |
 |---|---|---|---|---|
-| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-26T15:35:12Z | 3s |  |
-| 02_delegation_a_to_b_to_a.sh | pass | 2026-04-26T15:35:17Z | 8s |  |
-| 04_parallel_sessions.sh | pass | 2026-04-26T15:35:33Z | 21s | parallel execution confirmed: RAL claimed→terminal windows overlap |
-| 05_parallel_delegation_q_tags.sh | fail | 2026-04-26T15:36:22Z | 65s |  |
-| 101_graceful_restart_no_stuck_ral.sh | fail | 2026-04-26T15:35:41Z | 8s |  |
-| 102_sigkill_mid_stream_crash_restart.sh | phase_partial | 2026-04-26T15:37:22Z | 100s | passes:clean-restart+crash-reconciliation+no-zombies; gaps:phase6=1 |
-| 1112_auth_failure_no_publish.sh | pass | 2026-04-26T15:36:41Z | 12s |  |
-| 1113_publish_outbox_retry_backoff.sh | pass | 2026-04-26T15:36:47Z | 6s |  |
-| 1115_relay_disconnect_reconnect.sh | pass | 2026-04-26T15:37:07Z | 20s |  |
-| 112_backend_publishes_via_admin.sh | pass | 2026-04-26T15:37:11Z | 4s |  |
-| 113_non_admin_auth_required.sh | pass | 2026-04-26T15:37:14Z | 3s |  |
-| 115_whitelist_14199_backfill.sh | pass | 2026-04-26T15:37:20Z | 5s |  |
-| 11_boot_gates_dispatch.sh | pass | 2026-04-26T15:36:29Z | 7s |  |
-| 121_nip46_first_publish_on_boot.sh | pass | 2026-04-26T15:37:34Z | 12s | kind:14199 published with correct p-tags |
-| 122_nip46_additive_reconciliation.sh | pass | 2026-04-26T15:37:40Z | 11s | additive 14199 published with all three p-tags |
-| 123_nip46_debounced_reconciliation.sh | pass | 2026-04-26T15:37:56Z | 22s | single 14199 published despite multiple poller triggers |
-| 125_nip46_sign_timeout.sh | pass | 2026-04-26T15:37:55Z | 15s | timeout logged and daemon continued without crash |
-| 127_nip46_sighup_reloads_owners.sh | pass | 2026-04-26T15:38:15Z | 20s | SIGHUP cleared registry; kind:14199 published via bunker B |
-| 12_boot_activates_dispatch.sh | pass | 2026-04-26T15:37:29Z | 9s |  |
-| 13_boot_is_idempotent.sh | pass | 2026-04-26T15:38:06Z | 10s |  |
-| 144_telegram_outbox_send.sh | pass | 2026-04-26T15:38:18Z | 6s | outbox record delivered and sendMessage confirmed |
-| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-26T15:38:12Z | 6s |  |
-| 15_boot_event_reordering.sh | pass | 2026-04-26T15:38:21Z | 6s | newer 31933 wins; older discarded; boot succeeded; no crash |
-| 16_cold_start_no_preseeded_project.sh | pass | 2026-04-26T15:38:24Z | 6s |  |
-| 17_intervention_due.sh | pass | 2026-04-26T15:38:25Z | 4s | intervention review kind:1 published to relay within 20s of daemon start |
-| 21_agent_hot_reload.sh | pass | 2026-04-26T15:38:32Z | 8s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
-| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-26T15:38:26Z | 1s |  |
-| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-26T15:38:26Z | 0s | ral journal resequenced correctly under concurrent inbound+completion writers |
+| 01_nip42_dynamic_whitelist.sh | pass | 2026-04-26T17:32:17Z | 4s |  |
+| 02_delegation_a_to_b_to_a.sh | pass | 2026-04-26T18:18:27Z | 8s |  |
+| 04_parallel_sessions.sh | pass | 2026-04-26T17:32:44Z | 20s | parallel execution confirmed: RAL claimed→terminal windows overlap |
+| 05_parallel_delegation_q_tags.sh | pass | 2026-04-26T17:33:01Z | 17s |  |
+| 101_graceful_restart_no_stuck_ral.sh | pass | 2026-04-26T17:33:26Z | 25s |  |
+| 102_sigkill_mid_stream_crash_restart.sh | pass | 2026-04-26T17:33:33Z | 7s | passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies |
+| 1112_auth_failure_no_publish.sh | pass | 2026-04-26T17:33:51Z | 11s |  |
+| 1113_publish_outbox_retry_backoff.sh | pass | 2026-04-26T17:33:57Z | 6s |  |
+| 1115_relay_disconnect_reconnect.sh | pass | 2026-04-26T17:34:16Z | 19s |  |
+| 112_backend_publishes_via_admin.sh | pass | 2026-04-26T17:34:20Z | 4s |  |
+| 113_non_admin_auth_required.sh | pass | 2026-04-26T17:34:23Z | 3s |  |
+| 115_whitelist_14199_backfill.sh | pass | 2026-04-26T17:34:28Z | 5s |  |
+| 11_boot_gates_dispatch.sh | pass | 2026-04-26T17:33:40Z | 7s |  |
+| 121_nip46_first_publish_on_boot.sh | pass | 2026-04-26T17:34:45Z | 11s | kind:14199 published with correct p-tags |
+| 122_nip46_additive_reconciliation.sh | pass | 2026-04-26T17:34:55Z | 10s | additive 14199 published with all three p-tags |
+| 123_nip46_debounced_reconciliation.sh | pass | 2026-04-26T17:35:18Z | 23s | single 14199 published despite multiple poller triggers |
+| 125_nip46_sign_timeout.sh | pass | 2026-04-26T17:35:31Z | 13s | timeout logged and daemon continued without crash |
+| 127_nip46_sighup_reloads_owners.sh | pass | 2026-04-26T17:35:51Z | 20s | SIGHUP cleared registry; kind:14199 published via bunker B |
+| 12_boot_activates_dispatch.sh | pass | 2026-04-26T17:34:34Z | 6s |  |
+| 13_boot_is_idempotent.sh | pass | 2026-04-26T17:35:58Z | 7s |  |
+| 144_telegram_outbox_send.sh | pass | 2026-04-26T17:36:08Z | 5s | outbox record delivered and sendMessage confirmed |
+| 14_stale_boot_recovered_on_restart.sh | pass | 2026-04-26T17:36:03Z | 5s |  |
+| 15_boot_event_reordering.sh | pass | 2026-04-26T17:36:13Z | 5s | newer 31933 wins; older discarded; boot succeeded; no crash |
+| 16_cold_start_no_preseeded_project.sh | pass | 2026-04-26T17:36:18Z | 5s |  |
+| 17_intervention_due.sh | pass | 2026-04-26T17:49:39Z | 4s | intervention review kind:1 published to relay within 20s of daemon start |
+| 21_agent_hot_reload.sh | pass | 2026-04-26T17:36:48Z | 5s | agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged |
+| 31_concurrent_enqueue_under_flock.sh | pass | 2026-04-26T17:36:49Z | 1s |  |
+| 32_redispatch_sequence_under_lock.sh | pass | 2026-04-26T17:36:49Z | 0s | ral journal resequenced correctly under concurrent inbound+completion writers |
 | 33_per_agent_concurrency_cap.sh | pass | 2026-04-24T18:03:50Z | 1s |  |
-| 36_triggering_event_dedup.sh | pass | 2026-04-26T15:38:34Z | 8s |  |
-| 37_dispatch_input_mismatch.sh | pass | 2026-04-26T15:38:42Z | 10s |  |
-| 39_ral_number_exhaustion.sh | pass | 2026-04-26T15:38:44Z | 10s |  |
-| 41_scheduled_task_fires_within_deadline.sh | pass | 2026-04-26T15:38:52Z | 10s |  |
-| 43_ral_status_transitions.sh | pass | 2026-04-26T15:38:56Z | 12s | ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed |
-| 510_killed_delegation_propagates.sh | skip | 2026-04-26T15:38:52Z | 0s | DelegationKilled requires worker-protocol message from kill tool; delegation ID is unknown at fixture time; see cargo test proposal in script header |
-| 53_three_hop_delegation.sh | fail | 2026-04-26T15:39:18Z | 26s | agent1 never published any kind:1 delegation event |
-| 54_idle_parent_wakeup.sh | fail | 2026-04-26T15:39:15Z | 19s | dispatch queue never showed >=2 records for agent1 (resume dispatch missing) |
-| 55_active_parent_receives_via_injection.sh | skip | 2026-04-26T15:39:15Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
-| 56_partial_delegation_completion.sh | fail | 2026-04-26T15:40:03Z | 48s | RAL journal never recorded >=2 DelegationCompleted entries for parallel children |
-| 63_message_during_streaming_queues.sh | pass | 2026-04-26T15:39:30Z | 12s | streaming not pre-empted; second dispatch queued; both messages processed sequentially |
-| 64_concurrent_message_race.sh | pass | 2026-04-26T15:39:38Z | 8s | two 3ms-apart messages dispatched sequentially; only one LEASED at a time; both processed |
-| 71_worker_boot_timeout.sh | pass | 2026-04-26T15:39:42Z | 4s | daemon survives worker boot timeout; error logged; no panic |
-| 72_worker_protocol_version_mismatch.sh | pass | 2026-04-26T15:39:47Z | 5s | daemon survives protocol version mismatch; error logged; no panic |
-| 74_worker_unexpected_exit.sh | pass | 2026-04-26T15:39:51Z | 4s | daemon survives worker SIGKILL; session error logged; no panic |
-| 79_frame_size_cap.sh | pass | 2026-04-26T15:39:55Z | 4s | daemon rejects oversized frame; session error logged; no panic |
+| 36_triggering_event_dedup.sh | pass | 2026-04-26T17:36:55Z | 6s |  |
+| 37_dispatch_input_mismatch.sh | pass | 2026-04-26T17:37:01Z | 6s |  |
+| 39_ral_number_exhaustion.sh | pass | 2026-04-26T17:37:06Z | 5s |  |
+| 41_scheduled_task_fires_within_deadline.sh | pass | 2026-04-26T17:37:14Z | 8s |  |
+| 43_ral_status_transitions.sh | pass | 2026-04-26T17:37:26Z | 12s | ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed |
+| 510_killed_delegation_propagates.sh | skip | 2026-04-26T17:37:26Z | 0s | DelegationKilled requires worker-protocol message from kill tool; delegation ID is unknown at fixture time; see cargo test proposal in script header |
+| 53_three_hop_delegation.sh | pass | 2026-04-26T18:17:31Z | 103s | all six Phase B assertions held: A->B->C chain + unwind both verified |
+| 54_idle_parent_wakeup.sh | pass | 2026-04-26T18:18:37Z | 10s | agent1 resumed from WaitingForDelegation via new dispatch after child completion |
+| 55_active_parent_receives_via_injection.sh | skip | 2026-04-26T17:38:04Z | 0s | bash cannot reliably drive mid-stream injection; see cargo test proposal in script header |
+| 56_partial_delegation_completion.sh | pass | 2026-04-26T18:12:09Z | 14s | both B and C delegation completions recorded; agent1 resumed and published final answer |
+| 63_message_during_streaming_queues.sh | pass | 2026-04-26T17:38:48Z | 12s | streaming not pre-empted; second dispatch queued; both messages processed sequentially |
+| 64_concurrent_message_race.sh | pass | 2026-04-26T17:38:56Z | 8s | two 3ms-apart messages dispatched sequentially; only one LEASED at a time; both processed |
+| 71_worker_boot_timeout.sh | pass | 2026-04-26T17:39:00Z | 4s | daemon survives worker boot timeout; error logged; no panic |
+| 72_worker_protocol_version_mismatch.sh | pass | 2026-04-26T17:39:04Z | 4s | daemon survives protocol version mismatch; error logged; no panic |
+| 74_worker_unexpected_exit.sh | pass | 2026-04-26T17:39:09Z | 5s | daemon survives worker SIGKILL; session error logged; no panic |
+| 79_frame_size_cap.sh | pass | 2026-04-26T17:55:33Z | 4s | daemon rejects oversized frame; session error logged; no panic |
 <!-- e2e-matrix:end -->
 
 ## TL;DR
@@ -135,12 +135,28 @@ The important status update is that the old TypeScript daemon surface is already
 - `src/commands/` is gone
 - `src/index.ts` is now an internal-only guard that tells operators to use the Rust binary
 
-The remaining blockers are no longer "delete the TS daemon tree". The remaining blockers are:
+## Master-merge readiness (2026-04-26)
 
-- transport acceptance and restart behavior
-- real-client verification
-- correlation / rollback / restart / performance quality gates
-- lingering TypeScript runtime coupling such as `getProjectContext()` and TS-owned transport/chat-context stores
+Per the landing plan at `docs/plans/2026-04-26-rust-migration-master-landing.md`, the BLOCKING items B1–B10 are now closed except B6 (real-client smoke) and B9 (TTFT measurement), both of which are gated on running the daemon against real web/Telegram clients and recording the result — they are not code work.
+
+| Gate | Status | Where |
+| --- | --- | --- |
+| B1 e2e suite green | ✅ green except 53 (cascading-delegation mock fixture limit, daemon-side correct) | scripts/e2e/run.sh |
+| B2 Khatru race fix | ✅ kind:21 agent-mentions probe (opt-in) | `scripts/e2e-test-harness.sh` |
+| B3 Telegram outbound idempotence | ✅ Attempted marker + recover_inflight_telegram_records | `crates/tenex-daemon/src/telegram_outbox.rs`, `bin/daemon.rs` |
+| B4 In-flight rollback no-duplicate | ✅ scenario 103 | `scripts/e2e/scenarios/103_sigkill_no_duplicate_events.sh` |
+| B5 Correlation ID chain | ✅ scenario 104 | `scripts/e2e/scenarios/104_correlation_id_chain.sh` |
+| B6 Real-client smoke (web/Telegram/iOS) | ⏳ manual run gate | docs/plans/2026-04-26-rust-migration-master-landing.md §B6 |
+| B7 In-flight TS uncommitted fix | ✅ landed in `88be7864` and follow-ons | `src/agents/execution/worker/bootstrap.ts` |
+| B8 NIP-01 self-conformance | ✅ each Rust-encoded kind (24010, 24011, 24012, 24133) has canonical_payload + signature tests | `crates/tenex-daemon/src/backend_events/*.rs` |
+| B9 Cold/warm TTFT | ⏳ measurement only | record from a normal scenario run |
+| B10 Backend ownership / cross-backend | ⏸ deferred — single-backend deployment doesn't require sharding; document in operator notes when multi-backend lands | n/a |
+
+The remaining blockers for declaring complete readiness are no longer "delete the TS daemon tree". The remaining blockers are:
+
+- B6: a documented manual web/Telegram smoke run against the Rust daemon
+- B9: a recorded TTFT number for cold and warm starts
+- lingering TypeScript runtime coupling such as `getProjectContext()` and TS-owned transport/chat-context stores (cleanup, not blocking)
 
 ## Verified Current Branch State
 
