@@ -254,8 +254,9 @@ pub fn enqueue_delegation_completion_dispatch(
         input.identity.ral_number,
         &input.completion.completion_event_id,
     );
-    let should_resume =
-        input.resume_if_waiting && input.parent_status == RalReplayStatus::WaitingForDelegation;
+    let should_resume = input.resume_if_waiting
+        && input.parent_status == RalReplayStatus::WaitingForDelegation
+        && input.remaining_pending_delegation_ids.is_empty();
 
     if should_resume {
         let sidecar_input =
@@ -736,15 +737,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn delegation_completion_resume_reclaims_waiting_ral_without_allocating_new_one() {
-        let daemon_dir = unique_temp_dir("delegation-completion-resume");
-        let identity = RalJournalIdentity {
-            project_id: "TENEX-demo".to_string(),
-            agent_pubkey: "agent-pubkey".to_string(),
-            conversation_id: "conversation-alpha".to_string(),
-            ral_number: 1,
-        };
+    fn seed_waiting_ral_journal(daemon_dir: &Path, identity: &RalJournalIdentity) {
         for record in [
             RalJournalRecord::new(
                 RAL_JOURNAL_WRITER_RUST_DAEMON,
@@ -787,8 +780,20 @@ mod tests {
                 },
             ),
         ] {
-            append_ral_journal_record(&daemon_dir, &record).expect("seed journal must append");
+            append_ral_journal_record(daemon_dir, &record).expect("seed journal must append");
         }
+    }
+
+    #[test]
+    fn delegation_completion_with_remaining_pending_records_but_does_not_resume() {
+        let daemon_dir = unique_temp_dir("delegation-completion-partial");
+        let identity = RalJournalIdentity {
+            project_id: "TENEX-demo".to_string(),
+            agent_pubkey: "agent-pubkey".to_string(),
+            conversation_id: "conversation-alpha".to_string(),
+            ral_number: 1,
+        };
+        seed_waiting_ral_journal(&daemon_dir, &identity);
         let parent_trigger = nostr_envelope();
         let completion = RalCompletedDelegation {
             delegation_conversation_id: "delegation-a".to_string(),
@@ -800,6 +805,7 @@ mod tests {
             full_transcript: None,
         };
 
+        // delegation-b is still pending — parent must NOT resume yet
         let outcome = enqueue_delegation_completion_dispatch(DelegationCompletionDispatchInput {
             daemon_dir: &daemon_dir,
             project: InboundDispatchProject {
@@ -816,6 +822,109 @@ mod tests {
             timestamp: 1_710_000_900_000,
             writer_version: "inbound-dispatch-test@0",
         })
+        .expect("delegation completion must record");
+
+        assert!(
+            matches!(outcome, DelegationCompletionDispatchOutcome::Recorded { .. }),
+            "expected Recorded (delegation-b still pending), got {:?}",
+            outcome
+        );
+
+        // journal grows by exactly one DelegationCompleted record; no Claimed appended
+        let journal = read_ral_journal_records(&daemon_dir).expect("journal must read");
+        assert_eq!(journal.len(), 4);
+        assert!(matches!(
+            journal[3].event,
+            RalJournalEvent::DelegationCompleted { .. }
+        ));
+        // dispatch queue must remain empty
+        let dispatch = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert!(dispatch.queued.is_empty());
+
+        if daemon_dir.exists() {
+            fs::remove_dir_all(daemon_dir).expect("temp dir cleanup must succeed");
+        }
+    }
+
+    #[test]
+    fn delegation_completion_resumes_parent_when_all_delegations_complete() {
+        let daemon_dir = unique_temp_dir("delegation-completion-resume");
+        let identity = RalJournalIdentity {
+            project_id: "TENEX-demo".to_string(),
+            agent_pubkey: "agent-pubkey".to_string(),
+            conversation_id: "conversation-alpha".to_string(),
+            ral_number: 1,
+        };
+        // Seed journal with only delegation-a pending (sole pending delegation)
+        for record in [
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-dispatch-test@0",
+                1,
+                1_710_000_700_000,
+                "seed",
+                RalJournalEvent::Allocated {
+                    identity: identity.clone(),
+                    triggering_event_id: Some("event-alpha".to_string()),
+                },
+            ),
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-dispatch-test@0",
+                2,
+                1_710_000_700_001,
+                "seed",
+                RalJournalEvent::Claimed {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                },
+            ),
+            RalJournalRecord::new(
+                RAL_JOURNAL_WRITER_RUST_DAEMON,
+                "inbound-dispatch-test@0",
+                3,
+                1_710_000_700_002,
+                "seed",
+                RalJournalEvent::WaitingForDelegation {
+                    identity: identity.clone(),
+                    worker_id: "worker-a".to_string(),
+                    claim_token: "claim-a".to_string(),
+                    pending_delegations: vec![pending_delegation("delegation-a")],
+                    terminal: terminal_summary(),
+                },
+            ),
+        ] {
+            append_ral_journal_record(&daemon_dir, &record).expect("seed journal must append");
+        }
+        let parent_trigger = nostr_envelope();
+        let completion = RalCompletedDelegation {
+            delegation_conversation_id: "delegation-a".to_string(),
+            sender_pubkey: "recipient-a".to_string(),
+            recipient_pubkey: "agent-pubkey".to_string(),
+            response: "done".to_string(),
+            completed_at: 1_710_000_900,
+            completion_event_id: "completion-a".to_string(),
+            full_transcript: None,
+        };
+
+        // empty remaining list → all delegations done → parent should resume
+        let outcome = enqueue_delegation_completion_dispatch(DelegationCompletionDispatchInput {
+            daemon_dir: &daemon_dir,
+            project: InboundDispatchProject {
+                project_id: "TENEX-demo",
+                project_base_path: "/repo/demo",
+                metadata_path: "/repo/demo/.tenex/project.json",
+            },
+            identity: &identity,
+            parent_status: RalReplayStatus::WaitingForDelegation,
+            completion: &completion,
+            triggering_envelope: &parent_trigger,
+            remaining_pending_delegation_ids: &[],
+            resume_if_waiting: true,
+            timestamp: 1_710_000_900_000,
+            writer_version: "inbound-dispatch-test@0",
+        })
         .expect("delegation completion must enqueue resume");
 
         let DelegationCompletionDispatchOutcome::Resumed {
@@ -824,7 +933,7 @@ mod tests {
             ..
         } = outcome
         else {
-            panic!("expected resumed dispatch");
+            panic!("expected Resumed (all delegations complete)");
         };
         let sidecar = read_worker_dispatch_input(&daemon_dir, &dispatch_id)
             .expect("sidecar must read")
@@ -833,11 +942,8 @@ mod tests {
             .resolved_execute_fields()
             .expect("sidecar execute fields must resolve");
         assert!(fields.execution_flags.is_delegation_completion);
-        assert!(fields.execution_flags.has_pending_delegations);
-        assert_eq!(
-            fields.execution_flags.pending_delegation_ids,
-            vec!["delegation-b".to_string()]
-        );
+        assert!(!fields.execution_flags.has_pending_delegations);
+        assert!(fields.execution_flags.pending_delegation_ids.is_empty());
 
         let journal = read_ral_journal_records(&daemon_dir).expect("journal must read");
         assert_eq!(journal.len(), 5);
@@ -849,14 +955,7 @@ mod tests {
         let replay = replay_ral_journal(&daemon_dir).expect("journal must replay");
         let entry = replay.states.get(&identity).expect("identity must exist");
         assert_eq!(entry.status, RalReplayStatus::Claimed);
-        assert_eq!(
-            entry
-                .pending_delegations
-                .iter()
-                .map(|pending| pending.delegation_conversation_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["delegation-b"]
-        );
+        assert!(entry.pending_delegations.is_empty());
         assert_eq!(entry.completed_delegations, vec![completion]);
         let dispatch = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
         assert_eq!(dispatch.queued, vec![dispatch_record]);
