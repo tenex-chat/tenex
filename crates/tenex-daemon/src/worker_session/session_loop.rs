@@ -24,6 +24,7 @@ use crate::worker_protocol::{
 use crate::worker_publish::flow::{WorkerPublishFlowOutcome, WorkerPublishResultDelivery};
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
+use crate::ral_scheduler::RalScheduler;
 
 pub struct WorkerSessionLoopInput<'a> {
     pub daemon_dir: &'a Path,
@@ -183,6 +184,15 @@ where
                             error,
                         );
                     }
+                    if runtime_event_class == "delegation" {
+                        return finish_waiting_for_delegation_after_closed_worker_pipe(
+                            worker,
+                            &mut input,
+                            frame_count,
+                            &outcome,
+                            error,
+                        );
+                    }
                     // Worker is fire-and-forget for non-terminal classes (per
                     // commit 22ee6bcc): the worker may publish a stream_text_delta,
                     // a conversation update, an error event, etc. and exit before
@@ -318,6 +328,116 @@ fn terminal_complete_message_from_publish(publish_outcome: &WorkerPublishFlowOut
         "finalRalState": "completed",
         "publishedUserVisibleEvent": true,
         "pendingDelegationsRemain": false,
+        "accumulatedRuntimeMs": 0_u64,
+        "finalEventIds": publish_outcome.acceptance.publish_result["eventIds"].clone(),
+        "keepWorkerWarm": false,
+    })
+}
+
+fn finish_waiting_for_delegation_after_closed_worker_pipe<S>(
+    worker: &mut S,
+    input: &mut WorkerSessionLoopInput<'_>,
+    frame_count: u64,
+    publish_outcome: &WorkerPublishFlowOutcome,
+    pipe_error: &str,
+) -> Result<WorkerSessionLoopOutcome, WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
+where
+    S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
+{
+    let Some(terminal) = input.terminal.take() else {
+        return Err(WorkerSessionLoopError::MessageFlow {
+            source: WorkerMessageFlowError::MissingTerminalContext {
+                message_type: "waiting_for_delegation".to_string(),
+            },
+        });
+    };
+
+    // Read pending delegation IDs from the RAL journal so we can build the
+    // synthetic terminal. The worker published its delegation event and exited
+    // before sending the `waiting_for_delegation` terminal frame; we infer the
+    // same state from the journal entries written by `delegation_registered`.
+    let pending_delegation_ids: Vec<String> = RalScheduler::from_daemon_dir(input.daemon_dir)
+        .ok()
+        .and_then(|scheduler| {
+            // Find the active execution slot for this worker so we can look up
+            // the right RAL identity.
+            let guard = input.runtime_state.lock().expect("runtime state mutex poisoned");
+            let worker_snapshot = guard.get_worker(input.worker_id)?;
+            let slot = worker_snapshot.primary_execution()?;
+            let entry = scheduler.entry(&slot.identity)?;
+            Some(
+                entry
+                    .pending_delegations
+                    .iter()
+                    .map(|d| d.delegation_conversation_id.clone())
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+
+    let terminal_message = terminal_waiting_for_delegation_message_from_publish(
+        publish_outcome,
+        &pending_delegation_ids,
+    );
+
+    tracing::warn!(
+        worker_id = %input.worker_id,
+        pending_delegations = ?pending_delegation_ids,
+        error = %pipe_error,
+        "synthesizing waiting_for_delegation terminal because worker pipe closed after delegation publish acceptance"
+    );
+
+    let outcome = handle_worker_message_flow(
+        worker,
+        input.runtime_state,
+        WorkerMessageFlowInput {
+            daemon_dir: input.daemon_dir,
+            worker_id: input.worker_id,
+            message: &terminal_message,
+            observed_at: input.observed_at,
+            publish: input.publish.clone(),
+            nip46_publish: input.nip46_publish.clone(),
+            terminal: Some(terminal),
+        },
+    )
+    .map_err(|source| WorkerSessionLoopError::MessageFlow { source })?;
+
+    match outcome {
+        WorkerMessageFlowOutcome::TerminalResultHandled { .. } => Ok(WorkerSessionLoopOutcome {
+            frame_count,
+            final_reason: WorkerSessionLoopFinalReason::PublishAcceptedWorkerPipeClosed,
+        }),
+        other => Err(WorkerSessionLoopError::MessageFlow {
+            source: WorkerMessageFlowError::MissingTerminalContext {
+                message_type: format!("synthetic waiting_for_delegation produced {other:?}"),
+            },
+        }),
+    }
+}
+
+fn terminal_waiting_for_delegation_message_from_publish(
+    publish_outcome: &WorkerPublishFlowOutcome,
+    pending_delegation_ids: &[String],
+) -> Value {
+    let publish_request = &publish_outcome.message_plan.message;
+    let pending_delegations: Vec<Value> = pending_delegation_ids
+        .iter()
+        .map(|id| Value::String(id.clone()))
+        .collect();
+    serde_json::json!({
+        "version": publish_request["version"].clone(),
+        "type": "waiting_for_delegation",
+        "correlationId": publish_request["correlationId"].clone(),
+        "sequence": publish_request["sequence"].clone(),
+        "timestamp": publish_request["timestamp"].clone(),
+        "projectId": publish_request["projectId"].clone(),
+        "agentPubkey": publish_request["agentPubkey"].clone(),
+        "conversationId": publish_request["conversationId"].clone(),
+        "ralNumber": publish_request["ralNumber"].clone(),
+        "finalRalState": "waiting_for_delegation",
+        "publishedUserVisibleEvent": true,
+        "pendingDelegationsRemain": !pending_delegation_ids.is_empty(),
+        "pendingDelegations": pending_delegations,
         "accumulatedRuntimeMs": 0_u64,
         "finalEventIds": publish_outcome.acceptance.publish_result["eventIds"].clone(),
         "keepWorkerWarm": false,
