@@ -31,28 +31,6 @@ source "$repo_root/scripts/e2e/_bootstrap.sh"
 # shellcheck source=../../e2e-test-harness.sh
 source "$repo_root/scripts/e2e-test-harness.sh"
 
-# Override start_daemon to use the pre-built release binary directly.
-# The default harness implementation uses `cargo run --release` which
-# triggers a rebuild; on the rust-agent-worker-publishing branch the
-# workspace has in-progress changes that break compilation. The binary at
-# target/release/daemon was already compiled from a clean state and is fully
-# functional for this test.
-start_daemon() {
-  local daemon_bin="$repo_root/target/release/daemon"
-  [[ -x "$daemon_bin" ]] || _die "pre-built daemon binary not found at $daemon_bin"
-  HARNESS_DAEMON_LOG="$FIXTURE_ROOT/daemon.log"
-  _log "starting daemon via pre-built binary (TENEX_BASE_DIR=$TENEX_BASE_DIR)"
-  TENEX_BASE_DIR="$TENEX_BASE_DIR" \
-    "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" \
-    >"$HARNESS_DAEMON_LOG" 2>&1 &
-  HARNESS_DAEMON_PID=$!
-  if ! _await_file "$DAEMON_DIR/tenex.lock" 60; then
-    _log "daemon log tail:"; tail -30 "$HARNESS_DAEMON_LOG" >&2 || true
-    _die "daemon never wrote lockfile"
-  fi
-  _log "daemon ready (pid $HARNESS_DAEMON_PID, lock at $DAEMON_DIR/tenex.lock)"
-}
-
 MOCK_FIXTURE_PATH="$repo_root/scripts/e2e/fixtures/mock-llm/53_three_hop.json"
 MOCK_MODEL_ID="mock/three-hop-53"
 
