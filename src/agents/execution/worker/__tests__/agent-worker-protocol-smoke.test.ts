@@ -20,6 +20,7 @@ import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { getEventHash, verifyEvent, type Event as NostrEvent } from "nostr-tools";
 import { executeAgentWorkerRequest } from "../bootstrap";
 import { decodeAgentWorkerProtocolChunks } from "../protocol";
+import { PublishResultCoordinator } from "../publisher-bridge";
 import type { AgentWorkerOutboundProtocolMessage } from "../protocol-emitter";
 
 const PROBE_WORKER_ENTRYPOINT = "tools/rust-migration/protocol-probe-worker.ts";
@@ -212,6 +213,7 @@ describe("agent worker protocol process smoke test", () => {
                             timestamp: 0,
                             ...message,
                         }) as AgentWorkerOutboundProtocolMessage,
+                    new PublishResultCoordinator(),
                     {
                         createAgentRegistry: () => fakeAgentRegistry,
                         createMcpManager: () => fakeMcpManager,

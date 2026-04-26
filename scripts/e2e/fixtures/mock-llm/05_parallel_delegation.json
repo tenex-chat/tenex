@@ -6,17 +6,28 @@
       "priority": 120,
       "trigger": {
         "agentName": "agent1",
-        "messageContains": "<delegations>"
+        "userMessage": "/DELEGATION COMPLETED/"
       },
       "response": {
         "content": "Parallel delegations complete: got alpha and beta responses."
       }
     },
     {
+      "priority": 100,
+      "trigger": {
+        "agentName": "agent1",
+        "iterationCount": 2
+      },
+      "response": {
+        "content": "Both delegate tasks have been submitted. Awaiting delegation responses."
+      }
+    },
+    {
       "priority": 80,
       "trigger": {
         "agentName": "agent1",
-        "userMessage": "/parallel/"
+        "userMessage": "/parallel/",
+        "iterationCount": 1
       },
       "response": {
         "content": "Delegating alpha and beta tasks in parallel.",

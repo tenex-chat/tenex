@@ -686,15 +686,36 @@ export async function buildMessagesFromEntries(
 
         if (!shouldInclude()) continue;
 
-        // TOOL-CALL: Add to result and register as pending
+        // TOOL-CALL: Merge all consecutive tool-call entries from the same
+        // agent+RAL into one assistant message. The AI SDK requires that all
+        // tool calls issued in a single generation step appear in exactly one
+        // assistant message. Two parallel delegate() calls produce two separate
+        // ConversationRecord entries (each with toolData:[part]); emitting each
+        // as its own assistant message triggers invalid-tool-order in the
+        // message sanitizer, which strips the second call entirely.
         if (entry.messageType === "tool-call" && entry.toolData) {
-            const resultIndex = result.length;
-            result.push(await buildEntryMessage(entry, absoluteIndex, true));
+            const mergedParts: ToolCallPart[] = [...(entry.toolData as ToolCallPart[])];
+            let lastMergedIndex = i;
 
-            for (const part of entry.toolData as ToolCallPart[]) {
+            for (let j = i + 1; j < entries.length; j++) {
+                const next = entries[j];
+                if (next.messageType !== "tool-call" || !next.toolData) break;
+                if (next.pubkey !== entry.pubkey || next.ral !== entry.ral) break;
+                mergedParts.push(...(next.toolData as ToolCallPart[]));
+                lastMergedIndex = j;
+            }
+
+            i = lastMergedIndex;
+
+            const resultIndex = result.length;
+            const firstMessage = await buildEntryMessage(entry, absoluteIndex, true);
+            const mergedMessage: ModelMessage = { ...firstMessage, content: mergedParts } as ModelMessage;
+            result.push(mergedMessage);
+
+            for (const part of mergedParts) {
                 pendingToolCalls.set(part.toolCallId, {
                     toolName: part.toolName,
-                    // Result should be inserted right after the tool-call message
+                    // Result should be inserted right after the combined tool-call message
                     resultIndex: resultIndex + 1,
                 });
             }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
@@ -1014,6 +1014,7 @@ where
                     journal_timestamp: terminal.journal_timestamp,
                     writer_version: terminal.writer_version,
                     resolved_pending_delegations,
+                    already_completed_delegation_ids: HashSet::new(),
                 },
                 dispatch: Some(WorkerCompletionDispatchInput {
                     dispatch_id: dispatch_id.clone(),

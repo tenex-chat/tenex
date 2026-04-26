@@ -28,6 +28,66 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { getEventHash } from "nostr-tools";
 import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
 
+type PublishResultMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_result" }>;
+
+/**
+ * Coordinates `publish_result` frames from the Rust daemon with callers that
+ * need to await daemon acceptance before proceeding.
+ *
+ * For delegation events the worker must not exit until the Rust daemon has
+ * acknowledged each `publish_request` frame — otherwise the daemon's session
+ * loop detects a closed pipe and exits after the first delegation, dropping
+ * subsequent ones.
+ */
+export class PublishResultCoordinator {
+    private readonly buffered = new Map<string, PublishResultMessage>();
+    private readonly waiters = new Map<
+        string,
+        {
+            resolve: (message: PublishResultMessage) => void;
+            reject: (error: Error) => void;
+            timeout: ReturnType<typeof setTimeout>;
+        }
+    >();
+
+    waitForResult(requestId: string, timeoutMs: number): Promise<PublishResultMessage> {
+        const buffered = this.buffered.get(requestId);
+        if (buffered) {
+            this.buffered.delete(requestId);
+            return Promise.resolve(buffered);
+        }
+
+        return new Promise<PublishResultMessage>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                this.waiters.delete(requestId);
+                reject(new Error(`Timed out waiting for publish_result ${requestId}`));
+            }, timeoutMs);
+
+            this.waiters.set(requestId, { resolve, reject, timeout });
+        });
+    }
+
+    resolve(message: PublishResultMessage): void {
+        const waiter = this.waiters.get(message.requestId);
+        if (!waiter) {
+            this.buffered.set(message.requestId, message);
+            return;
+        }
+
+        clearTimeout(waiter.timeout);
+        this.waiters.delete(message.requestId);
+        waiter.resolve(message);
+    }
+
+    rejectAll(error: Error): void {
+        for (const [requestId, waiter] of this.waiters) {
+            clearTimeout(waiter.timeout);
+            this.waiters.delete(requestId);
+            waiter.reject(error);
+        }
+    }
+}
+
 type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type PublishRequestMessage = Extract<AgentWorkerProtocolMessage, { type: "publish_request" }>;
 
@@ -37,6 +97,7 @@ interface WorkerProtocolPublisherOptions {
     emit: AgentWorkerProtocolEmit;
     execution: ExecuteMessage;
     executionState?: WorkerProtocolPublisherExecutionState;
+    publishResultCoordinator?: PublishResultCoordinator;
 }
 
 export interface WorkerProtocolPublisherExecutionState {
@@ -458,6 +519,7 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
         await this.options.agent.sign(event);
         const signedEvent = requireSignedPublishEvent(event, this.options.agent.pubkey);
         const requestId = `publish-${signedEvent.id}`;
+        const timeoutMs = options?.timeoutMs ?? 30_000;
 
         await this.options.emit({
             type: "publish_request",
@@ -465,13 +527,22 @@ class WorkerProtocolPublisher implements AgentRuntimePublisher {
             ...this.identity(),
             requestId,
             waitForRelayOk: options?.waitForRelayOk ?? true,
-            timeoutMs: options?.timeoutMs ?? 30_000,
+            timeoutMs,
             runtimeEventClass,
             ...(options?.conversationVariant
                 ? { conversationVariant: options.conversationVariant }
                 : {}),
             event: signedEvent,
         });
+
+        // Delegation publish_requests must be acknowledged by the Rust daemon
+        // before returning. Without this await the worker can exit immediately
+        // after emitting parallel delegation frames, causing the daemon's
+        // session loop to see a closed worker pipe after the first acceptance
+        // and drop all remaining delegation frames.
+        if (runtimeEventClass === "delegation" && this.options.publishResultCoordinator) {
+            await this.options.publishResultCoordinator.waitForResult(requestId, timeoutMs);
+        }
 
         return this.toPublishedMessageRef(event, options?.outputTransport);
     }

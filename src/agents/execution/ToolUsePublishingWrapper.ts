@@ -86,7 +86,6 @@ export function wrapToolsWithToolUsePublishing(
                     },
                     eventContext
                 );
-
                 toolTracker.setToolEventId(options.toolCallId, publishedRef.id);
                 await ConversationStore.addEnvelope(context.conversationId, publishedRef.envelope);
 

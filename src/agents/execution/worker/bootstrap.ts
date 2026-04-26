@@ -20,6 +20,7 @@ import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { NDKPrivateKeySigner, NDKProject, type NDKEvent } from "@nostr-dev-kit/ndk";
 import {
     createWorkerProtocolPublisherFactory,
+    PublishResultCoordinator,
     type WorkerProtocolPublisherExecutionState,
 } from "./publisher-bridge";
 import type { AgentWorkerProtocolEmit } from "./protocol-emitter";
@@ -129,6 +130,7 @@ export async function runOneExecution(
     message: ExecuteMessage,
     scope: ProjectScope,
     emit: AgentWorkerProtocolEmit,
+    publishResultCoordinator: PublishResultCoordinator,
     dependencies: AgentWorkerBootstrapDependencies = {}
 ): Promise<AgentWorkerExecutionResult> {
     // Reconcile project agent inventory if the daemon supplied one.
@@ -160,6 +162,7 @@ export async function runOneExecution(
             execution: message,
             executionState: publisherExecutionState,
             projectContext: scope.projectContext,
+            publishResultCoordinator,
         }),
     };
     const executor =
@@ -232,11 +235,12 @@ export async function runOneExecution(
 export async function executeAgentWorkerRequest(
     message: ExecuteMessage,
     emit: AgentWorkerProtocolEmit,
+    publishResultCoordinator: PublishResultCoordinator,
     dependencies: AgentWorkerBootstrapDependencies = {}
 ): Promise<AgentWorkerExecutionResult> {
     const { scope, cleanup } = await bootstrapProjectScope(message, dependencies);
     try {
-        return await runOneExecution(message, scope, emit, dependencies);
+        return await runOneExecution(message, scope, emit, publishResultCoordinator, dependencies);
     } finally {
         await cleanup();
     }

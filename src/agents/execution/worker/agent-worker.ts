@@ -17,6 +17,7 @@ import {
 } from "./protocol";
 import { AgentWorkerExecutionFailure, executeAgentWorkerRequest } from "./bootstrap";
 import { Nip46PublishCoordinator, Nip46WorkerBridge } from "./nip46-bridge";
+import { PublishResultCoordinator } from "./publisher-bridge";
 import type {
     AgentWorkerOutboundProtocolMessage,
     AgentWorkerProtocolEmit,
@@ -29,6 +30,7 @@ type InjectMessage = Extract<AgentWorkerProtocolMessage, { type: "inject" }>;
 class AgentWorkerSession {
     private sequence = 0;
     private readonly nip46Results = new Nip46PublishCoordinator();
+    private readonly publishResults = new PublishResultCoordinator();
     private readonly protocolSink = createProtocolStdoutSink();
     private readonly emit: AgentWorkerProtocolEmit = async (message) => {
         const framedMessage = {
@@ -180,13 +182,12 @@ class AgentWorkerSession {
             return undefined;
         }
 
-        if (message.type === "publish_result" || message.type === "ack") {
-            // Worker is fire-and-forget for publishes (commit 22ee6bcc removed
-            // the publish-result coordinator). The daemon still sends these
-            // frames after every publish_request acceptance; the worker simply
-            // acknowledges them by ignoring. Throwing here would kill the
-            // worker mid-stream and cascade into "failed to fill whole buffer"
-            // on the daemon side.
+        if (message.type === "publish_result") {
+            this.publishResults.resolve(message);
+            return undefined;
+        }
+
+        if (message.type === "ack") {
             return undefined;
         }
 
@@ -295,7 +296,7 @@ class AgentWorkerSession {
 
         if (engine === "agent") {
             try {
-                const result = await executeAgentWorkerRequest(message, this.emit);
+                const result = await executeAgentWorkerRequest(message, this.emit, this.publishResults);
 
                 const terminalBase = {
                     correlationId: message.correlationId,

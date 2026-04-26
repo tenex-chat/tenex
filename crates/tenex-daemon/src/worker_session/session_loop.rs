@@ -170,15 +170,16 @@ where
             }
             WorkerMessageFlowOutcome::PublishRequestHandled { outcome } => {
                 run_live_publish_maintenance(&mut input)?;
+                let runtime_event_class = outcome
+                    .message_plan
+                    .message
+                    .get("runtimeEventClass")
+                    .and_then(Value::as_str)
+                    .unwrap_or("<missing>")
+                    .to_string();
                 if let WorkerPublishResultDelivery::WorkerPipeClosedAfterAcceptance { error } =
                     &outcome.result_delivery
                 {
-                    let runtime_event_class = outcome
-                        .message_plan
-                        .message
-                        .get("runtimeEventClass")
-                        .and_then(Value::as_str)
-                        .unwrap_or("<missing>");
                     if runtime_event_class == "complete" {
                         return finish_terminal_publish_after_closed_worker_pipe(
                             worker,
@@ -214,7 +215,38 @@ where
                     );
                     continue;
                 }
-                send_pending_worker_injections(worker, &input)?;
+                // publish_result was delivered successfully; now send any
+                // injections that arrived while the publish was in-flight.
+                // If the worker closed its stdin between receiving
+                // publish_result and this injection send (which happens when
+                // the worker published a "delegation" event and exited before
+                // the nostr handler queued the completion injection), treat it
+                // as a synthetic pipe-closed-after-acceptance and run the
+                // appropriate terminal synthesis path.
+                if let Some(error) = pending_injection_pipe_closed_error(worker, &input)? {
+                    if runtime_event_class == "complete" {
+                        return finish_terminal_publish_after_closed_worker_pipe(
+                            worker,
+                            &mut input,
+                            frame_count,
+                            &outcome,
+                            &error,
+                        );
+                    }
+                    if runtime_event_class == "delegation" {
+                        return finish_waiting_for_delegation_after_closed_worker_pipe(
+                            worker,
+                            &mut input,
+                            frame_count,
+                            &outcome,
+                            &error,
+                        );
+                    }
+                    return Err(WorkerSessionLoopError::PublishResultPipeClosedAfterNonTerminalAcceptance {
+                        runtime_event_class,
+                        error,
+                    });
+                }
                 send_pending_stop_request(worker, &input)?;
             }
             WorkerMessageFlowOutcome::Nip46PublishRequestHandled { .. } => {
@@ -616,9 +648,24 @@ where
             let message = worker_injection_protocol_message(&record, input.observed_at);
             validate_agent_worker_protocol_message(&message)
                 .map_err(|source| WorkerSessionLoopError::InjectionProtocol { source })?;
-            worker
-                .send_worker_message(&message)
-                .map_err(|source| WorkerSessionLoopError::SendInjection { source })?;
+            if let Err(source) = worker.send_worker_message(&message) {
+                if S::is_worker_pipe_closed_error(&source) {
+                    // Worker stdin is closed; skip this injection and return.
+                    // The worker is expected to send a terminal frame next
+                    // (waiting_for_delegation, complete, etc.) which the
+                    // session loop will read on the next receive_worker_frame
+                    // call. The injection remains queued and will be handled
+                    // when the session completes or a new worker is dispatched.
+                    tracing::warn!(
+                        worker_id = %input.worker_id,
+                        injection_id = %record.injection_id,
+                        error = %source,
+                        "worker pipe closed before injection delivery at loop top; skipping to read terminal frame"
+                    );
+                    return Ok(());
+                }
+                return Err(WorkerSessionLoopError::SendInjection { source });
+            }
             mark_worker_injection_sent(WorkerInjectionMarkSentInput {
                 daemon_dir: input.daemon_dir.to_path_buf(),
                 timestamp: input.observed_at,
@@ -631,6 +678,80 @@ where
     }
 
     Ok(())
+}
+
+/// Sends all pending injections, but if the worker's stdin pipe is closed,
+/// returns `Ok(Some(error_string))` instead of propagating the error.
+///
+/// Used after a `publish_result` was delivered successfully for a terminal
+/// event class ("delegation" or "complete"): the worker may have closed its
+/// stdin immediately after receiving `publish_result`, and a concurrent nostr
+/// handler may have queued an injection in the window between the publish and
+/// this call.  When that happens the session must synthesize the terminal
+/// rather than failing with "broken pipe".
+fn pending_injection_pipe_closed_error<S>(
+    worker: &mut S,
+    input: &WorkerSessionLoopInput<'_>,
+) -> Result<Option<String>, WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
+where
+    S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
+{
+    let Some(active_worker) = input
+        .runtime_state
+        .lock()
+        .expect("runtime state mutex poisoned")
+        .get_worker(input.worker_id)
+        .cloned()
+    else {
+        return Ok(None);
+    };
+
+    for slot in &active_worker.executions {
+        let pending =
+            pending_worker_injections_for(input.daemon_dir, input.worker_id, &slot.identity)
+                .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
+
+        for record in pending {
+            if record.lease_token != slot.claim_token {
+                tracing::warn!(
+                    worker_id = %record.worker_id,
+                    injection_id = %record.injection_id,
+                    "skipping worker injection with stale lease token"
+                );
+                crate::stdout_status::print_stale_injection_skipped(
+                    &record.worker_id,
+                    &record.injection_id,
+                );
+                continue;
+            }
+
+            let message = worker_injection_protocol_message(&record, input.observed_at);
+            validate_agent_worker_protocol_message(&message)
+                .map_err(|source| WorkerSessionLoopError::InjectionProtocol { source })?;
+            if let Err(source) = worker.send_worker_message(&message) {
+                if S::is_worker_pipe_closed_error(&source) {
+                    tracing::warn!(
+                        worker_id = %input.worker_id,
+                        injection_id = %record.injection_id,
+                        error = %source,
+                        "worker pipe closed before injection delivery after accepted publish; synthesizing terminal"
+                    );
+                    return Ok(Some(source.to_string()));
+                }
+                return Err(WorkerSessionLoopError::SendInjection { source });
+            }
+            mark_worker_injection_sent(WorkerInjectionMarkSentInput {
+                daemon_dir: input.daemon_dir.to_path_buf(),
+                timestamp: input.observed_at,
+                correlation_id: format!("{}:sent", record.correlation_id),
+                worker_id: record.worker_id,
+                injection_id: record.injection_id,
+            })
+            .map_err(|source| WorkerSessionLoopError::InjectionQueue { source })?;
+        }
+    }
+
+    Ok(None)
 }
 
 fn send_pending_stop_request<S>(
@@ -1062,6 +1183,176 @@ mod tests {
     }
 
     #[test]
+    fn delegation_publish_with_injection_arriving_after_publish_result_completes_session() {
+        // Regression: when a delegation event is published and the worker closes its
+        // stdin pipe right after receiving publish_result, but a concurrent nostr
+        // handler queued an injection in that window, the session must synthesize the
+        // waiting_for_delegation terminal rather than failing with "broken pipe".
+        //
+        // The race: no injection is queued when the loop starts (position #1 sends
+        // nothing). During publish handling the injection arrives. At position #2
+        // the injection is found but the pipe is already closed.
+        //
+        // Simulated by an InjectingOnPublishResultWorker that enqueues an injection
+        // into the filesystem when it delivers publish_result, then fails all
+        // subsequent sends with broken pipe.
+        let daemon_dir = unique_temp_daemon_dir();
+        let fixture = signed_event_fixture();
+        let identity = identity_with_agent(&fixture.pubkey);
+        append_initial_ral_records_for(&daemon_dir, "worker-alpha", identity.clone());
+        append_initial_dispatch_records_for(&daemon_dir, identity.clone());
+        let scheduler = scheduler_from_records_for_identity("worker-alpha", identity.clone());
+        let dispatch_state = dispatch_state_from_records_for_identity(identity.clone());
+        let owner = build_ral_lock_info(100, "host-a", 1_000);
+        let locks = acquire_worker_launch_locks(&daemon_dir, &launch_plan_for(&identity), &owner)
+            .expect("launch locks must acquire");
+
+        // Use the signed fixture event with runtimeEventClass = "delegation".
+        let delegation_publish_request = json!({
+            "version": crate::worker_protocol::AGENT_WORKER_PROTOCOL_VERSION,
+            "type": "publish_request",
+            "correlationId": "delegation-publish-corr-1",
+            "sequence": 42_u64,
+            "timestamp": 1_710_001_000_000_u64,
+            "projectId": "project-alpha",
+            "agentPubkey": fixture.pubkey,
+            "conversationId": "conversation-alpha",
+            "ralNumber": 3_u64,
+            "requestId": "publish-delegation-01",
+            "waitForRelayOk": true,
+            "timeoutMs": 30_000_u64,
+            "runtimeEventClass": "delegation",
+            "event": fixture.signed,
+        });
+
+        // A worker that, upon successfully sending publish_result, enqueues a
+        // delegation-completion injection into the filesystem (simulating the
+        // concurrent nostr handler), then returns broken-pipe on all further sends.
+        struct InjectingOnPublishResultWorker {
+            frames: VecDeque<Vec<u8>>,
+            sent: Vec<Value>,
+            daemon_dir: PathBuf,
+            identity: RalJournalIdentity,
+            pipe_closed: bool,
+        }
+
+        impl WorkerFrameReceiver for InjectingOnPublishResultWorker {
+            type Error = FakeWorkerError;
+
+            fn receive_worker_frame(&mut self) -> Result<Vec<u8>, Self::Error> {
+                self.frames
+                    .pop_front()
+                    .ok_or(FakeWorkerError("missing frame"))
+            }
+        }
+
+        impl WorkerDispatchSession for InjectingOnPublishResultWorker {
+            type Error = FakeWorkerError;
+
+            fn send_worker_message(&mut self, message: &Value) -> Result<(), Self::Error> {
+                self.sent.push(message.clone());
+                if self.pipe_closed {
+                    return Err(FakeWorkerError("broken pipe"));
+                }
+                if message.get("type").and_then(Value::as_str) == Some("publish_result") {
+                    // Simulate concurrent nostr handler queuing an injection
+                    enqueue_worker_injection(WorkerInjectionEnqueueInput {
+                        daemon_dir: self.daemon_dir.clone(),
+                        timestamp: 1_710_000_403_001,
+                        correlation_id: "delegation-completion-inject:event-b".to_string(),
+                        worker_id: "worker-alpha".to_string(),
+                        identity: self.identity.clone(),
+                        injection_id: "delegation-completion:event-b".to_string(),
+                        lease_token: "claim-alpha".to_string(),
+                        role: WorkerInjectionRole::System,
+                        content: "agent2 responded".to_string(),
+                        delegation_completion: Some(WorkerDelegationCompletionInjection {
+                            delegation_conversation_id: "delegation-conv-1".to_string(),
+                            recipient_pubkey: self.identity.agent_pubkey.clone(),
+                            completed_at: 1_710_000_402,
+                            completion_event_id: "event-b".to_string(),
+                        }),
+                    })
+                    .expect("injection must queue");
+                    self.pipe_closed = true;
+                }
+                Ok(())
+            }
+
+            fn is_worker_pipe_closed_error(error: &Self::Error) -> bool {
+                error.0 == "broken pipe"
+            }
+        }
+
+        let mut worker = InjectingOnPublishResultWorker {
+            frames: VecDeque::from([frame_for(&delegation_publish_request)]),
+            sent: Vec::new(),
+            daemon_dir: daemon_dir.clone(),
+            identity: identity.clone(),
+            pipe_closed: false,
+        };
+        let runtime_state = runtime_state_for("worker-alpha", identity.clone());
+
+        let outcome = run_worker_session_loop(
+            &mut worker,
+            WorkerSessionLoopInput {
+                daemon_dir: &daemon_dir,
+                runtime_state: &runtime_state,
+                worker_id: "worker-alpha",
+                observed_at: 1_710_000_403_000,
+                publish: Some(WorkerMessagePublishContext {
+                    accepted_at: 1_710_001_000_100,
+                    result_sequence_source: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+                        900,
+                    )),
+                    result_timestamp: 1_710_001_000_200,
+                    telegram_egress: None,
+                    publish_enqueued_tx: None,
+                }),
+                nip46_publish: None,
+                live_publish_maintenance: None,
+                terminal: Some(WorkerMessageTerminalContext {
+                    scheduler: &scheduler,
+                    dispatch_state: &dispatch_state,
+                    result_context: result_context(),
+                    dispatch: Some(dispatch_input()),
+                    locks,
+                }),
+            },
+        )
+        .expect("injection pipe-closed after delegation publish must synthesize terminal");
+
+        assert_eq!(outcome.frame_count, 1);
+        assert_eq!(
+            outcome.final_reason,
+            WorkerSessionLoopFinalReason::PublishAcceptedWorkerPipeClosed
+        );
+        // publish_result was sent (1st), then inject was attempted and found the pipe
+        // closed (2nd, recorded before broken-pipe error).
+        assert_eq!(worker.sent[0]["type"], "publish_result");
+        assert_eq!(worker.sent[1]["type"], "inject");
+        assert!(
+            runtime_state
+                .lock()
+                .unwrap()
+                .get_worker("worker-alpha")
+                .is_none()
+        );
+
+        let ral = replay_ral_journal(&daemon_dir).expect("RAL journal must replay");
+        let entry = ral
+            .states
+            .get(&identity)
+            .expect("delegation RAL must replay");
+        assert_eq!(entry.status, RalReplayStatus::WaitingForDelegation);
+        let dispatch = replay_dispatch_queue(&daemon_dir).expect("dispatch queue must replay");
+        assert!(dispatch.leased.is_empty());
+        assert_eq!(dispatch.terminal.len(), 1);
+
+        cleanup_temp_dir(daemon_dir);
+    }
+
+    #[test]
     fn boot_failure_candidate_stops_the_session_loop() {
         let daemon_dir = unique_temp_daemon_dir();
         let mut worker = RecordingWorker {
@@ -1408,6 +1699,7 @@ mod tests {
             journal_timestamp: 1_710_000_500_000,
             writer_version: "test-version".to_string(),
             resolved_pending_delegations: Vec::new(),
+            already_completed_delegation_ids: std::collections::HashSet::new(),
         }
     }
 

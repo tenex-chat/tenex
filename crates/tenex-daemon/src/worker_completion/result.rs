@@ -18,7 +18,15 @@ pub struct WorkerResultTransitionContext {
     pub journal_sequence: u64,
     pub journal_timestamp: u64,
     pub writer_version: String,
+    /// Delegations that are still pending (not yet completed) when the
+    /// terminal frame arrives. Delegations that have already completed before
+    /// the terminal are carried in `already_completed_delegation_ids`.
     pub resolved_pending_delegations: Vec<RalPendingDelegation>,
+    /// Conversation IDs of delegations that completed before the terminal
+    /// frame arrived. These are valid registrations but no longer pending;
+    /// the `waiting_for_delegation` journal event will record an empty (or
+    /// reduced) pending list, and a resume will be dispatched immediately.
+    pub already_completed_delegation_ids: HashSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +69,7 @@ pub fn plan_worker_result_transition(
             pending_delegations: resolved_pending_delegations(
                 required_string_array(message, "pendingDelegations")?,
                 context.resolved_pending_delegations,
+                &context.already_completed_delegation_ids,
             )?,
             terminal: terminal_summary(message)?,
         },
@@ -138,6 +147,7 @@ fn worker_error(message: &Value) -> Result<RalWorkerError, WorkerResultError> {
 fn resolved_pending_delegations(
     worker_delegation_ids: Vec<&str>,
     resolved_pending_delegations: Vec<RalPendingDelegation>,
+    already_completed_ids: &HashSet<String>,
 ) -> Result<Vec<RalPendingDelegation>, WorkerResultError> {
     let mut resolved_by_id = HashMap::with_capacity(resolved_pending_delegations.len());
     for delegation in resolved_pending_delegations {
@@ -153,6 +163,12 @@ fn resolved_pending_delegations(
     let mut pending_delegations = Vec::with_capacity(worker_delegation_ids.len());
     for id in worker_delegation_ids {
         reported_ids.insert(id.to_string());
+        if already_completed_ids.contains(id) {
+            // This delegation completed before the terminal frame arrived.
+            // It is a valid registration; skip it from the pending list since
+            // the journal already has the completion event.
+            continue;
+        }
         let delegation = resolved_by_id.remove(id).ok_or_else(|| {
             WorkerResultError::UnresolvedPendingDelegation {
                 delegation_conversation_id: id.to_string(),
@@ -410,6 +426,7 @@ mod tests {
             journal_timestamp: 1710000500000,
             writer_version: "test-version".to_string(),
             resolved_pending_delegations,
+            already_completed_delegation_ids: HashSet::new(),
         }
     }
 

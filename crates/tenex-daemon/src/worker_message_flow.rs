@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -322,6 +323,11 @@ where
                 .unwrap_or(result_context.journal_timestamp);
             if let Some(entry) = terminal_scheduler.entry(&active_slot.identity) {
                 result_context.resolved_pending_delegations = entry.pending_delegations.clone();
+                result_context.already_completed_delegation_ids = entry
+                    .completed_delegations
+                    .iter()
+                    .map(|c| c.delegation_conversation_id.clone())
+                    .collect::<HashSet<_>>();
             }
 
             let outcome = handle_worker_terminal_result(
@@ -1184,6 +1190,7 @@ mod tests {
             journal_timestamp: 1_710_000_500_000,
             writer_version: "test-version".to_string(),
             resolved_pending_delegations: Vec::new(),
+            already_completed_delegation_ids: HashSet::new(),
         }
     }
 

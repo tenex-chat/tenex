@@ -500,6 +500,7 @@ mod tests {
             journal_timestamp: 1_710_000_500_000,
             writer_version: "test-version".to_string(),
             resolved_pending_delegations,
+            already_completed_delegation_ids: std::collections::HashSet::new(),
         }
     }
 
