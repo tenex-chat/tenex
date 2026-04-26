@@ -225,7 +225,7 @@ while [[ $(date +%s) -lt $ral_deadline ]]; do
   if [[ -f "$DAEMON_DIR/ral/journal.jsonl" ]]; then
     completed_count="$(jq -s '
       [.[] | select(
-        (.event // .kind) | tostring | test("DelegationCompleted"; "i")
+        (.event // .kind) | tostring | test("delegation.completed"; "i")
       )] | length
     ' "$DAEMON_DIR/ral/journal.jsonl" 2>/dev/null || echo 0)"
     if [[ "$completed_count" -ge 2 ]]; then

@@ -203,7 +203,7 @@ echo "[scenario]   daemon killed ✓"
 echo ""
 echo "[scenario] === Phase 2: post-crash state observation ==="
 
-sleep 1  # brief pause so any still-running workers can die
+sleep 1
 
 if [[ -f "$_queue" ]]; then
   leased_count="$(jq -s '[.[] | select((.status // .lifecycle_status) == "leased")] | length' \
@@ -232,6 +232,12 @@ fi
 
 echo ""
 echo "[scenario] === Phase 3: restart daemon against same fixture ==="
+# Capture log line count before restart so we can detect NEW log lines from the
+# second daemon instance (the same file is shared by both incarnations).
+_log_lines_before_restart=0
+if [[ -f "$DAEMON_DIR/daemon.log" ]]; then
+  _log_lines_before_restart="$(wc -l < "$DAEMON_DIR/daemon.log" | tr -d '[:space:]')"
+fi
 start_daemon
 
 await_daemon_subscribed 45 || {
@@ -263,10 +269,9 @@ echo "[scenario]   no panic in restarted daemon log ✓"
 # Phase 4 — Orphan reconciliation: assert crashed RAL entry written on restart
 # =============================================================================
 #
-# run_worker_startup_recovery() is called from bin/daemon.rs immediately after
-# hydrate_project_event_index_from_filesystem, so every interrupted
-# Claimed/Allocated RAL must get a terminal "crashed" entry written before the
-# gateway loop starts.
+# run_worker_startup_recovery() is called from bin/daemon.rs before the
+# gateway loop starts, so every interrupted Claimed/Allocated RAL must
+# get a terminal "crashed" entry written before any events are processed.
 
 echo ""
 echo "[scenario] === Phase 4: orphan reconciliation assertion ==="
@@ -347,6 +352,10 @@ done
 [[ "$_saw_new_24010" -eq 1 ]] \
   || _die "ASSERT: restarted daemon never published kind:24010 for boot2 within 30s"
 echo "[scenario]   kind:24010 published by restarted daemon ✓"
+
+# The restarted daemon loads project_event_cache.json at startup, so it already
+# has the agent_mentions filter active from the initial subscription. No refresh
+# wait is needed — the filter is live immediately after the daemon connects.
 
 echo "[scenario] publishing second kind:1 to test post-restart dispatch"
 user_msg2_evt="$(publish_event_as "$USER_NSEC" 1 \

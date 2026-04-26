@@ -204,7 +204,7 @@ dispatch_deadline=$(( $(date +%s) + 10 ))
 while [[ $(date +%s) -lt $dispatch_deadline ]]; do
   if [[ -f "$_queue" ]]; then
     agent1_dispatch_count="$(jq -s --arg p "$AGENT1_PUBKEY" \
-      '[.[] | select((.agentPubkey // .agent_pubkey) == $p)] | length' \
+      '[.[] | select((.ral.agentPubkey // .agentPubkey // .agent_pubkey) == $p)] | length' \
       "$_queue" 2>/dev/null || echo 0)"
     if [[ "$agent1_dispatch_count" -ge 2 ]]; then
       echo "[scenario]   observed: dispatch queue has $agent1_dispatch_count records for agent1 (initial + resume)"
