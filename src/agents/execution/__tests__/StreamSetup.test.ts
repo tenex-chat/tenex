@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { config as configService } from "@/services/ConfigService";
 import { SkillWhitelistService } from "@/services/skill";
 import {
@@ -249,6 +249,9 @@ describe("StreamSetup", () => {
 
     afterEach(() => {
         whitelistService.setInstalledSkills([]);
+    });
+
+    afterAll(() => {
         mock.restore();
     });
 

@@ -60,8 +60,6 @@ pub enum AgentConfigSnapshotError {
 #[serde(rename_all = "camelCase")]
 struct RawStoredAgent {
     slug: Option<String>,
-    #[serde(default)]
-    status: Option<String>,
     #[serde(default, rename = "default")]
     default_config: RawAgentConfig,
 }
