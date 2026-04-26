@@ -238,6 +238,19 @@ await_daemon_subscribed() {
   # Probe each kind and watch for the daemon to log receipt. Retry up to N
   # times per kind because the first probe can land in the (REQ-sent,
   # addListener-pending) window.
+  #
+  # Filter coverage by probe (matches subscription_runtime.rs ordering):
+  #   - kind:14199 + p-tag → project_agent_snapshot filter (index 3)
+  #   - kind:24030          → static BOOT/AGENT filter group (index 1)
+  #   - kind:21    + p-tag  → agent-mentions filter (index 2). This is the
+  #     critical filter for routing kind:1 user messages to agents and is
+  #     what produced the ~18% scenario flake before this probe was added
+  #     (see docs/plans/2026-04-24-khatru-race-fix-design.md). kind:21 is
+  #     classified `Other` by the daemon ingress and produces a log entry
+  #     without side effects; the p-tag is required to make the agent
+  #     mentions filter (#p) match. The probe target is AGENT1_PUBKEY when
+  #     the scenario has set it; otherwise the agent-mentions probe is
+  #     skipped (callers without agents do not exercise that filter).
   local kind
   for kind in 14199 24030; do
     local got=0
@@ -268,6 +281,37 @@ await_daemon_subscribed() {
       return 1
     fi
   done
+
+  # Agent-mentions filter probe (only when an agent pubkey is exported).
+  if [[ -n "${AGENT1_PUBKEY:-}" ]]; then
+    local got=0
+    local attempt
+    for attempt in 1 2 3 4 5 6; do
+      local probe_evt probe_id
+      probe_evt="$(nak event --sec "$USER_NSEC" -k 21 \
+        -c "harness agent-mentions probe a=$attempt t=$(date +%s%N)" \
+        --tag "p=$AGENT1_PUBKEY" \
+        "$HARNESS_RELAY_URL" 2>/dev/null || true)"
+      probe_id="$(printf '%s' "$probe_evt" | jq -r '.id // empty' 2>/dev/null)"
+      [[ -z "$probe_id" ]] && { sleep 1; continue; }
+
+      local poll
+      for poll in 1 2 3 4 5 6 7 8 9 10 12 14 16 18 20; do
+        if [[ -f "$log" ]] && grep -q "$probe_id" "$log"; then
+          _log "kind:21 agent-mentions listener confirmed (probe #$attempt round-tripped after $((poll*200))ms)"
+          got=1
+          break 2
+        fi
+        sleep 0.2
+        [[ $(date +%s) -ge $deadline ]] && break
+      done
+      [[ $(date +%s) -ge $deadline ]] && break
+    done
+    if [[ "$got" -ne 1 ]]; then
+      _log "TIMEOUT: kind:21 agent-mentions probe never round-tripped within ${timeout}s"
+      return 1
+    fi
+  fi
 
   _log "daemon subscription confirmed live (all probed listener filters registered)"
   return 0
