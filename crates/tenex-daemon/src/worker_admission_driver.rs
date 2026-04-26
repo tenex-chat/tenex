@@ -83,7 +83,15 @@ pub async fn run_worker_admission_driver<P>(
 
         // Wait for any signal that could change admission eligibility.
         tokio::select! {
-            _ = dispatch_enqueued_rx.recv() => {}
+            _ = dispatch_enqueued_rx.recv() => {
+                // Yield once so any other tasks that are already ready (e.g. a
+                // second inbound dispatch arriving on the same relay batch) can
+                // run and append their own queue entries before we call
+                // drain_admit_loop.  This batches concurrent arrivals into a
+                // single drain pass and gives both workers a chance to be
+                // admitted together instead of sequentially.
+                tokio::task::yield_now().await;
+            }
             _ = session_completed_rx.recv() => {}
             _ = internal_rx.recv() => {}
             _ = shutdown_rx.changed() => break,

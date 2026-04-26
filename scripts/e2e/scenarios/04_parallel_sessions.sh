@@ -137,22 +137,37 @@ if ! printf '%s\n' "$events_24010" | jq -se --arg a "$PROJECT_A_TAG" \
 fi
 echo "[scenario]   24010 status published for our project ✓"
 
-# Publish both user messages in quick succession before either agent completes.
-echo "[scenario] publishing kind:1 SESSION-ALPHA → agent1"
-msg1_evt="$(publish_event_as "$USER_NSEC" 1 \
+# Publish both user messages in parallel so they arrive at the relay
+# simultaneously. This ensures both dispatch-queue entries exist before the
+# daemon's drain_admit_loop has a chance to run the first admission,
+# giving the daemon the opportunity to admit both workers concurrently.
+_msg1_tmp="$(mktemp)"
+_msg2_tmp="$(mktemp)"
+
+echo "[scenario] publishing kind:1 SESSION-ALPHA → agent1 and SESSION-BETA → agent2 in parallel"
+publish_event_as "$USER_NSEC" 1 \
   "Hello SESSION-ALPHA: please compute result alpha for me." \
   "p=$AGENT1_PUBKEY" \
-  "a=$PROJECT_A_TAG")"
-msg1_id="$(printf '%s' "$msg1_evt" | jq -r .id)"
-echo "[scenario]   msg1 id=$msg1_id"
+  "a=$PROJECT_A_TAG" > "$_msg1_tmp" &
+_msg1_pid=$!
 
-echo "[scenario] publishing kind:1 SESSION-BETA → agent2"
-msg2_evt="$(publish_event_as "$USER_NSEC" 1 \
+publish_event_as "$USER_NSEC" 1 \
   "Hello SESSION-BETA: please compute result beta for me." \
   "p=$AGENT2_PUBKEY" \
-  "a=$PROJECT_A_TAG")"
+  "a=$PROJECT_A_TAG" > "$_msg2_tmp" &
+_msg2_pid=$!
+
+wait "$_msg1_pid" || _die "SESSION-ALPHA publish failed"
+wait "$_msg2_pid" || _die "SESSION-BETA publish failed"
+
+msg1_evt="$(cat "$_msg1_tmp")"
+msg2_evt="$(cat "$_msg2_tmp")"
+rm -f "$_msg1_tmp" "$_msg2_tmp"
+
+msg1_id="$(printf '%s' "$msg1_evt" | jq -r .id)"
 msg2_id="$(printf '%s' "$msg2_evt" | jq -r .id)"
-echo "[scenario]   msg2 id=$msg2_id"
+echo "[scenario]   msg1 (SESSION-ALPHA) id=$msg1_id"
+echo "[scenario]   msg2 (SESSION-BETA)  id=$msg2_id"
 
 # Wait for both dispatches to appear in the queue.
 _queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"

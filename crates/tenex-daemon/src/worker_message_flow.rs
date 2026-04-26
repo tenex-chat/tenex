@@ -311,6 +311,15 @@ where
                 .ok_or(WorkerMessageFlowError::RalJournalSequenceExhausted {
                     last_sequence: terminal_scheduler.state().last_sequence,
                 })?;
+            // Stamp the terminal record with the actual wall-clock time at the
+            // moment of writing, not the dispatch-admission time captured
+            // earlier.  This ensures the journal reflects when the session
+            // actually finished so RAL-based concurrency checks (e.g. the
+            // temporal-overlap proof in scenario 04) see accurate windows.
+            result_context.journal_timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+                .unwrap_or(result_context.journal_timestamp);
             if let Some(entry) = terminal_scheduler.entry(&active_slot.identity) {
                 result_context.resolved_pending_delegations = entry.pending_delegations.clone();
             }
