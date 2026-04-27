@@ -32,6 +32,9 @@ type ExecuteMessage = Extract<AgentWorkerProtocolMessage, { type: "execute" }>;
 type PingMessage = Extract<AgentWorkerProtocolMessage, { type: "ping" }>;
 type InjectMessage = Extract<AgentWorkerProtocolMessage, { type: "inject" }>;
 
+const PROJECT_SCOPE_BUSY_CODE = "project_scope_busy";
+type ProjectScopeAdmission = "reuse" | "replace";
+
 class AgentWorkerSession {
     private sequence = 0;
     private readonly nip46Results = new Nip46PublishCoordinator();
@@ -344,7 +347,15 @@ class AgentWorkerSession {
 
                 return result.keepWorkerWarm;
             } catch (error) {
-                await this.disposeProjectScope();
+                const keepWorkerWarm = isProjectScopeBusyFailure(error);
+                if (
+                    shouldDisposeProjectScopeAfterExecutionFailure(
+                        error,
+                        this.activeExecutions.size
+                    )
+                ) {
+                    await this.disposeProjectScope();
+                }
                 const executionError =
                     error instanceof AgentWorkerExecutionFailure
                         ? {
@@ -357,8 +368,8 @@ class AgentWorkerSession {
                               message: error instanceof Error ? error.message : String(error),
                               retryable: false,
                           };
-                await this.writeTerminalError(message, startedAt, executionError);
-                return false;
+                await this.writeTerminalError(message, startedAt, executionError, keepWorkerWarm);
+                return keepWorkerWarm;
             }
         }
 
@@ -404,7 +415,8 @@ class AgentWorkerSession {
     private async writeTerminalError(
         message: ExecuteMessage,
         startedAt: number,
-        error: { code: string; message: string; retryable: boolean }
+        error: { code: string; message: string; retryable: boolean },
+        keepWorkerWarm = false
     ): Promise<void> {
         await this.emit({
             type: "error",
@@ -417,7 +429,7 @@ class AgentWorkerSession {
             pendingDelegationsRemain: false,
             accumulatedRuntimeMs: Date.now() - startedAt,
             finalEventIds: [],
-            keepWorkerWarm: false,
+            keepWorkerWarm,
         });
     }
 
@@ -430,11 +442,10 @@ class AgentWorkerSession {
     ): Promise<ProjectScopeBootstrapResult> {
         const existing = this.projectScope;
         if (existing) {
-            const sameProject =
-                existing.scope.projectId === message.projectId &&
-                existing.scope.projectBasePath === message.projectBasePath &&
-                existing.scope.metadataPath === message.metadataPath;
-            if (sameProject) {
+            if (
+                getProjectScopeAdmission(existing, message, this.activeExecutions.size) ===
+                "reuse"
+            ) {
                 return existing;
             }
             await this.disposeProjectScope();
@@ -457,6 +468,50 @@ class AgentWorkerSession {
         this.sequence += 1;
         return this.sequence;
     }
+}
+
+export function getProjectScopeAdmission(
+    existing: ProjectScopeBootstrapResult,
+    message: ExecuteMessage,
+    activeExecutionCount: number
+): ProjectScopeAdmission {
+    const sameProject =
+        existing.scope.projectId === message.projectId &&
+        existing.scope.projectBasePath === message.projectBasePath &&
+        existing.scope.metadataPath === message.metadataPath;
+    if (sameProject) {
+        return "reuse";
+    }
+    if (activeExecutionCount > 0) {
+        throw new AgentWorkerExecutionFailure(
+            PROJECT_SCOPE_BUSY_CODE,
+            `worker is executing project ${existing.scope.projectId} at ${existing.scope.projectBasePath}; ` +
+                `cannot accept project ${message.projectId} at ${message.projectBasePath} until the active executions drain`,
+            true
+        );
+    }
+    return "replace";
+}
+
+export function isProjectScopeBusyFailure(error: unknown): boolean {
+    return (
+        error instanceof AgentWorkerExecutionFailure &&
+        error.code === PROJECT_SCOPE_BUSY_CODE
+    );
+}
+
+export function shouldDisposeProjectScopeAfterExecutionFailure(
+    error: unknown,
+    activeExecutionCount: number
+): boolean {
+    if (isProjectScopeBusyFailure(error)) {
+        return false;
+    }
+
+    // The current execution remains in activeExecutions until handleExecute
+    // resolves. A count greater than one means a sibling execution is still
+    // using the shared project scope.
+    return activeExecutionCount <= 1;
 }
 
 function createProtocolStdoutSink(): AgentWorkerProtocolFrameSink {
@@ -528,8 +583,6 @@ function createDeferred<T>(): Deferred<T> {
     });
     return { promise, resolve, reject };
 }
-
-initializeTelemetry(true, "tenex-agent-worker");
 
 async function exitWithTelemetryFlush(code: number): Promise<never> {
     try {
@@ -610,17 +663,21 @@ function drainProcessStdout(): Promise<void> {
     });
 }
 
-new AgentWorkerSession()
-    .run()
-    .then(() => {
-        process.exitCode = 0;
-        setImmediate(() => {
-            const code = typeof process.exitCode === "number" ? process.exitCode : 0;
-            void exitWithTelemetryFlush(code);
+if (import.meta.main) {
+    initializeTelemetry(true, "tenex-agent-worker");
+
+    new AgentWorkerSession()
+        .run()
+        .then(() => {
+            process.exitCode = 0;
+            setImmediate(() => {
+                const code = typeof process.exitCode === "number" ? process.exitCode : 0;
+                void exitWithTelemetryFlush(code);
+            });
+        })
+        .catch((error: unknown) => {
+            const message = error instanceof Error ? error.stack ?? error.message : String(error);
+            process.stderr.write(`${message}\n`);
+            void exitWithTelemetryFlush(1);
         });
-    })
-    .catch((error: unknown) => {
-        const message = error instanceof Error ? error.stack ?? error.message : String(error);
-        process.stderr.write(`${message}\n`);
-        void exitWithTelemetryFlush(1);
-    });
+}

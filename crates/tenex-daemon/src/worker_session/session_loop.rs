@@ -38,6 +38,17 @@ use crate::worker_publish::flow::{WorkerPublishFlowOutcome, WorkerPublishResultD
 use crate::worker_runtime_state::SharedWorkerRuntimeState;
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
 
+pub struct WarmExecutionBoundaryCallbacks {
+    /// Called when a warm worker finishes one execution, before blocking on the next command.
+    /// Receives (daemon_dir, finished identity, remaining pubkeys for that conversation).
+    pub on_execution_finished:
+        Box<dyn FnMut(&Path, &RalJournalIdentity, &[String]) + Send>,
+    /// Called when a warm worker receives and is about to start a new execution.
+    /// Receives (daemon_dir, new execution identity, pubkeys active in that conversation).
+    pub on_execution_started:
+        Box<dyn FnMut(&Path, &RalJournalIdentity, &[String]) + Send>,
+}
+
 pub struct WorkerSessionLoopInput<'a> {
     pub daemon_dir: &'a Path,
     pub runtime_state: &'a SharedWorkerRuntimeState,
@@ -56,6 +67,9 @@ pub struct WorkerSessionLoopInput<'a> {
     /// execution (e.g. a second message to the same conversation that was QUEUED
     /// while this execution held the LEASED slot).
     pub warm_execution_completed_tx: Option<mpsc::UnboundedSender<SessionCompletion>>,
+    /// Callbacks invoked at warm-execution boundaries (one execution finished,
+    /// next one starting). Only called when `warm_command_rx` is present.
+    pub warm_boundary_callbacks: Option<WarmExecutionBoundaryCallbacks>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,8 +202,9 @@ where
         frame_count += 1;
 
         match outcome {
-            WorkerMessageFlowOutcome::TerminalResultHandled { .. } => {
-                if advance_warm_execution(worker, &mut input)? {
+            WorkerMessageFlowOutcome::TerminalResultHandled { removed_worker, .. } => {
+                let finished_identity = removed_worker.executions.into_iter().next().map(|slot| slot.identity);
+                if advance_warm_execution(worker, &mut input, finished_identity.as_ref())? {
                     continue;
                 }
                 return Ok(WorkerSessionLoopOutcome {
@@ -867,6 +882,7 @@ where
 fn advance_warm_execution<S>(
     worker: &mut S,
     input: &mut WorkerSessionLoopInput<'_>,
+    finished_identity: Option<&RalJournalIdentity>,
 ) -> Result<bool, WorkerSessionLoopError<<S as WorkerFrameReceiver>::Error>>
 where
     S: WorkerFrameReceiver + WorkerDispatchSession<Error = <S as WorkerFrameReceiver>::Error>,
@@ -875,6 +891,17 @@ where
         Some(rx) => rx,
         None => return Ok(false),
     };
+
+    if let (Some(callbacks), Some(identity)) =
+        (input.warm_boundary_callbacks.as_mut(), finished_identity)
+    {
+        let remaining = input
+            .runtime_state
+            .lock()
+            .expect("runtime state mutex poisoned")
+            .agent_pubkeys_for_conversation(&identity.project_id, &identity.conversation_id);
+        (callbacks.on_execution_finished)(input.daemon_dir, identity, &remaining);
+    }
 
     if let Some(tx) = &input.warm_execution_completed_tx {
         let _ = tx.send(SessionCompletion);
@@ -889,6 +916,18 @@ where
             locks,
             ..
         }) => {
+            if let Some(callbacks) = input.warm_boundary_callbacks.as_mut() {
+                let new_pubkeys = input
+                    .runtime_state
+                    .lock()
+                    .expect("runtime state mutex poisoned")
+                    .agent_pubkeys_for_conversation(
+                        &owned.identity.project_id,
+                        &owned.identity.conversation_id,
+                    );
+                (callbacks.on_execution_started)(input.daemon_dir, &owned.identity, &new_pubkeys);
+            }
+
             let scheduler =
                 RalScheduler::from_daemon_dir(input.daemon_dir).map_err(|source| {
                     WorkerSessionLoopError::WarmRalJournalReload {
@@ -1119,6 +1158,7 @@ mod tests {
                 }),
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
             },
         )
         .expect("session loop must stop on terminal frame");
@@ -1182,6 +1222,7 @@ mod tests {
                 live_publish_maintenance: Some(&mut live_publish_maintenance),
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
                 terminal: None,
             },
         )
@@ -1256,6 +1297,7 @@ mod tests {
                 }),
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
             },
         )
         .expect("closed worker pipe after accepted terminal publish must complete");
@@ -1442,6 +1484,7 @@ mod tests {
                 }),
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
             },
         )
         .expect("injection pipe-closed after delegation publish must synthesize terminal");
@@ -1497,6 +1540,7 @@ mod tests {
                 live_publish_maintenance: None,
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
                 terminal: None,
             },
         )
@@ -1533,6 +1577,7 @@ mod tests {
                 live_publish_maintenance: None,
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
                 terminal: None,
             },
         )
@@ -1585,6 +1630,7 @@ mod tests {
                 live_publish_maintenance: None,
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
                 terminal: None,
             },
         )
@@ -1663,6 +1709,7 @@ mod tests {
                 }),
                 warm_command_rx: None,
                 warm_execution_completed_tx: None,
+                warm_boundary_callbacks: None,
             },
         )
         .expect("session loop must stop on terminal frame");

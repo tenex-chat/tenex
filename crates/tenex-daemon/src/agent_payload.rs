@@ -109,9 +109,17 @@ pub fn read_agent_payload(
         payload.insert(required.to_string(), value);
     }
 
+    // Resolve effective category: explicit category wins over inferred.
+    // This mirrors createAgentInstance in the TS disk-load path.
+    let effective_category = object
+        .remove("category")
+        .or_else(|| object.remove("inferredCategory"));
+    if let Some(cat) = effective_category {
+        payload.insert("category".to_string(), cat);
+    }
+
     // Optional pass-through fields the schema accepts at the top level.
     for optional in [
-        "category",
         "description",
         "instructions",
         "customInstructions",
@@ -209,7 +217,7 @@ pub fn read_project_agent_inventory_payload(
             .and_then(Value::as_str)
             .unwrap_or(slug);
 
-        let mut entry = Map::with_capacity(4);
+        let mut entry = Map::with_capacity(5);
         entry.insert("pubkey".to_string(), Value::String(pubkey));
         entry.insert("slug".to_string(), Value::String(slug.to_string()));
         entry.insert("name".to_string(), Value::String(name.to_string()));
@@ -218,6 +226,14 @@ pub fn read_project_agent_inventory_payload(
         }
         if let Some(is_pm) = object.get("isPM").and_then(Value::as_bool) {
             entry.insert("isPM".to_string(), Value::Bool(is_pm));
+        }
+        // Resolve effective category: explicit wins over inferred.
+        let effective_cat = object
+            .get("category")
+            .or_else(|| object.get("inferredCategory"))
+            .and_then(Value::as_str);
+        if let Some(cat) = effective_cat {
+            entry.insert("category".to_string(), Value::String(cat.to_string()));
         }
         inventory.push(Value::Object(entry));
     }

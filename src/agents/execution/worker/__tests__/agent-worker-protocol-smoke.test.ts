@@ -226,6 +226,149 @@ describe("agent worker protocol process smoke test", () => {
         }
     });
 
+    it("keeps the executing inventory agent materialized in the project registry", async () => {
+        const fixture = await createFilesystemBackedAgentFixture({
+            conversationId: "2".repeat(64),
+            correlationId: "inventory_materialized_exec_01",
+        });
+        try {
+            if (fixture.executeMessage.type !== "execute") {
+                throw new Error("fixture execute message must be an execute frame");
+            }
+
+            const dependencies = createBootstrapOnlyDependencies();
+            const { scope, cleanup } = await bootstrapProjectScope(
+                fixture.executeMessage,
+                dependencies
+            );
+            try {
+                await runOneExecution(
+                    fixture.executeMessage,
+                    scope,
+                    noopEmit,
+                    new PublishResultCoordinator(),
+                    dependencies
+                );
+
+                const registeredAgent = scope.agentRegistry.getAgentByPubkey(fixture.agentPubkey);
+                expect(registeredAgent).toBeDefined();
+                expect(registeredAgent?.slug).toBe("project-manager");
+                expect(registeredAgent?.instructions).toContain(
+                    "You are the project-manager agent"
+                );
+                expect(scope.projectContext.getAgentByPubkey(fixture.agentPubkey)).toBe(
+                    registeredAgent
+                );
+            } finally {
+                await cleanup();
+            }
+        } finally {
+            await rm(fixture.rootPath, { recursive: true, force: true });
+        }
+    });
+
+    it("authoritatively removes stale inventory agents and updates placeholders", async () => {
+        const fixture = await createFilesystemBackedAgentFixture({
+            conversationId: "3".repeat(64),
+            correlationId: "inventory_reconcile_01",
+            includeDelegateAgent: true,
+        });
+        const staleSigner = NDKPrivateKeySigner.generate();
+        try {
+            if (fixture.executeMessage.type !== "execute" || !fixture.delegateAgentPubkey) {
+                throw new Error("fixture execute message must include a delegate agent");
+            }
+
+            const firstMessage = structuredClone(fixture.executeMessage);
+            firstMessage.projectAgentInventory = [
+                ...(firstMessage.projectAgentInventory ?? []),
+                {
+                    pubkey: staleSigner.pubkey,
+                    slug: "stale-agent",
+                    name: "stale-agent",
+                    role: "stale-agent",
+                },
+            ];
+
+            const dependencies = createBootstrapOnlyDependencies();
+            const { scope, cleanup } = await bootstrapProjectScope(firstMessage, dependencies);
+            try {
+                await runOneExecution(
+                    firstMessage,
+                    scope,
+                    noopEmit,
+                    new PublishResultCoordinator(),
+                    dependencies
+                );
+                expect(scope.agentRegistry.getAgentByPubkey(staleSigner.pubkey)?.slug).toBe(
+                    "stale-agent"
+                );
+                expect(
+                    scope.agentRegistry.getAgentByPubkey(fixture.delegateAgentPubkey)?.slug
+                ).toBe("worker-agent");
+
+                const secondMessage = structuredClone(firstMessage);
+                secondMessage.correlationId = "inventory_reconcile_02";
+                secondMessage.projectAgentInventory = [
+                    {
+                        pubkey: fixture.agentPubkey,
+                        slug: "project-manager",
+                        name: "project-manager",
+                        role: "project-manager",
+                        isPM: true,
+                    },
+                    {
+                        pubkey: fixture.delegateAgentPubkey,
+                        slug: "renamed-worker",
+                        name: "Renamed Worker",
+                        role: "renamed-role",
+                    },
+                ];
+
+                await runOneExecution(
+                    secondMessage,
+                    scope,
+                    noopEmit,
+                    new PublishResultCoordinator(),
+                    dependencies
+                );
+
+                expect(scope.agentRegistry.getAgentByPubkey(staleSigner.pubkey)).toBeUndefined();
+                expect(scope.agentRegistry.getAgent("stale-agent")).toBeUndefined();
+                expect(scope.agentRegistry.getAgent("worker-agent")).toBeUndefined();
+
+                const updatedPlaceholder = scope.agentRegistry.getAgentByPubkey(
+                    fixture.delegateAgentPubkey
+                );
+                expect(updatedPlaceholder).toMatchObject({
+                    slug: "renamed-worker",
+                    name: "Renamed Worker",
+                    role: "renamed-role",
+                });
+                expect(
+                    scope.agentRegistry.getProjectAgentByPubkey(staleSigner.pubkey)
+                ).toBeUndefined();
+                expect(
+                    scope.agentRegistry.getProjectAgentByPubkey(fixture.delegateAgentPubkey)
+                ).toMatchObject({
+                    slug: "renamed-worker",
+                    name: "Renamed Worker",
+                    role: "renamed-role",
+                });
+                expect(
+                    scope.projectContext.project.tags.filter((tag) => tag[0] === "p")
+                ).toEqual([
+                    ["p", fixture.agentPubkey, "pm"],
+                    ["p", fixture.delegateAgentPubkey, "agent"],
+                ]);
+            } finally {
+                await cleanup();
+            }
+        } finally {
+            await rm(fixture.rootPath, { recursive: true, force: true });
+        }
+    });
+
     it("boots the real executor path with a filesystem-backed mock agent", async () => {
         const fixture = await createFilesystemBackedAgentFixture();
         try {
@@ -1101,6 +1244,32 @@ function expectSignedPublishEvent(
         })
     );
     expect(verifyEvent(event as NostrEvent)).toBe(true);
+}
+
+const noopEmit = async (
+    message: AgentWorkerProtocolMessage
+): Promise<AgentWorkerOutboundProtocolMessage> =>
+    ({
+        version: AGENT_WORKER_PROTOCOL_VERSION,
+        sequence: 0,
+        timestamp: 0,
+        ...message,
+    }) as AgentWorkerOutboundProtocolMessage;
+
+function createBootstrapOnlyDependencies(): {
+    createMcpManager: () => MCPManager;
+    createExecutor: () => { execute: () => Promise<undefined> };
+} {
+    return {
+        createMcpManager: () =>
+            ({
+                initialize: async () => undefined,
+                shutdown: async () => undefined,
+            }) as unknown as MCPManager,
+        createExecutor: () => ({
+            execute: async () => undefined,
+        }),
+    };
 }
 
 async function createFilesystemBackedAgentFixture(options: {

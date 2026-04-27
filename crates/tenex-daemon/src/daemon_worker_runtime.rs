@@ -58,8 +58,8 @@ use crate::worker_runtime_state::{
 };
 use crate::worker_session::frame_pump::WorkerFrameReceiver;
 use crate::worker_session::session_loop::{
-    WorkerSessionLoopError, WorkerSessionLoopInput, WorkerSessionLoopOutcome,
-    run_worker_session_loop,
+    WarmExecutionBoundaryCallbacks, WorkerSessionLoopError, WorkerSessionLoopInput,
+    WorkerSessionLoopOutcome, run_worker_session_loop,
 };
 use crate::worker_telegram_egress::WorkerTelegramEgressContext;
 
@@ -1165,6 +1165,68 @@ where
         publish
     });
 
+    let warm_boundary_callbacks = operations_status.as_ref().map(|ops| {
+        let worker_id_finished = worker_id.clone();
+        let worker_id_started = worker_id.clone();
+        let tenex_base_dir_finished = ops.tenex_base_dir.to_path_buf();
+        let pubkeys_finished = ops.project_owner_pubkeys.clone();
+        let tenex_base_dir_started = ops.tenex_base_dir.to_path_buf();
+        let pubkeys_started = ops.project_owner_pubkeys.clone();
+        WarmExecutionBoundaryCallbacks {
+            on_execution_finished: Box::new(move |daemon_dir, identity, remaining| {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+                    .unwrap_or(0);
+                crate::stdout_status::print_agent_stopped(
+                    &identity.project_id,
+                    &identity.agent_pubkey,
+                    &worker_id_finished,
+                    Some(&tenex_base_dir_finished),
+                );
+                let ops = DaemonWorkerOperationsStatusRuntimeInput {
+                    tenex_base_dir: &tenex_base_dir_finished,
+                    project_owner_pubkeys: &pubkeys_finished,
+                };
+                let variant = if remaining.is_empty() { "cleanup" } else { "active" };
+                let _ = publish_worker_operations_status(
+                    daemon_dir,
+                    now_ms,
+                    identity,
+                    Some(&ops),
+                    variant,
+                    OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE,
+                    remaining,
+                );
+            }),
+            on_execution_started: Box::new(move |daemon_dir, identity, new_pubkeys| {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+                    .unwrap_or(0);
+                crate::stdout_status::print_agent_started(
+                    &identity.project_id,
+                    &identity.agent_pubkey,
+                    &worker_id_started,
+                    Some(&tenex_base_dir_started),
+                );
+                let ops = DaemonWorkerOperationsStatusRuntimeInput {
+                    tenex_base_dir: &tenex_base_dir_started,
+                    project_owner_pubkeys: &pubkeys_started,
+                };
+                let _ = publish_worker_operations_status(
+                    daemon_dir,
+                    now_ms,
+                    identity,
+                    Some(&ops),
+                    "active",
+                    OPERATIONS_STATUS_REQUEST_SEQUENCE_BASE,
+                    new_pubkeys,
+                );
+            }),
+        }
+    });
+
     let session_result = run_worker_session_loop(
         &mut session,
         WorkerSessionLoopInput {
@@ -1179,6 +1241,7 @@ where
                 .map(|maintenance| &mut *maintenance.maintain as _),
             warm_command_rx: started.warm_command_rx,
             warm_execution_completed_tx,
+            warm_boundary_callbacks,
             terminal: Some(WorkerMessageTerminalContext {
                 scheduler,
                 dispatch_state,

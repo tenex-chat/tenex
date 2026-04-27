@@ -216,6 +216,7 @@ const agentExecuteSchema = z
         name: z.string().min(1),
         role: z.string().min(1),
         category: z.string().optional(),
+        inferredCategory: z.string().optional(),
         description: z.string().optional(),
         instructions: z.string().optional(),
         customInstructions: z.string().optional(),
@@ -242,6 +243,7 @@ const projectAgentMetadataSchema = z
         name: z.string().min(1),
         role: z.string().min(1).optional(),
         isPM: z.boolean().optional(),
+        category: z.string().optional(),
     })
     .passthrough();
 

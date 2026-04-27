@@ -1,5 +1,6 @@
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
+import type { AgentCategory } from "@/agents/role-categories";
 import type { LessonComment } from "@/events/LessonComment";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
@@ -137,6 +138,7 @@ export interface ProjectAgentRuntimeInfo {
     slug: string;
     name: string;
     role: string;
+    category?: AgentCategory;
     description?: string;
     useCriteria?: string;
     runtimeStatus: "local-online" | "remote-online" | "offline";
@@ -281,6 +283,7 @@ export class ProjectContext {
                 slug: this.projectManager.slug,
                 name: this.projectManager.name,
                 role: this.projectManager.role,
+                category: this.projectManager.category,
                 description: this.projectManager.description,
                 useCriteria: this.projectManager.useCriteria,
                 runtimeStatus: "local-online",
@@ -342,6 +345,7 @@ export class ProjectContext {
                 slug: localAgent.slug,
                 name: localAgent.name,
                 role: localAgent.role,
+                category: localAgent.category,
                 description: localAgent.description,
                 useCriteria: localAgent.useCriteria,
                 runtimeStatus: "local-online",

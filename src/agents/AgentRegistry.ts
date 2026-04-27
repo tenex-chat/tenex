@@ -1,5 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
+import type { AgentCategory } from "@/agents/role-categories";
 import { publishAgentProfile } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { agentRuntimePolicyService } from "@/services/AgentRuntimePolicyService";
@@ -13,6 +14,7 @@ export interface ProjectAgentInfo {
     slug: string;
     name: string;
     role: string;
+    category?: AgentCategory;
     description?: string;
     useCriteria?: string;
 }
@@ -23,6 +25,7 @@ function toProjectAgentInfo(pubkey: string, storedAgent: StoredAgent): ProjectAg
         slug: storedAgent.slug,
         name: storedAgent.name,
         role: storedAgent.role,
+        category: storedAgent.category ?? storedAgent.inferredCategory,
         description: storedAgent.description,
         useCriteria: storedAgent.useCriteria,
     };
@@ -387,10 +390,59 @@ export class AgentRegistry {
                 slug: agent.slug,
                 name: agent.name,
                 role: agent.role,
+                category: agent.category,
                 description: agent.description,
                 useCriteria: agent.useCriteria,
             });
         }
+    }
+
+    /**
+     * Replace or insert a runtime agent while keeping slug/pubkey indexes
+     * consistent. Used by the Rust worker path where agent instances arrive
+     * from the daemon instead of disk-backed storage.
+     */
+    upsertAgent(agent: AgentInstance): void {
+        const existingByPubkey = this.agentsByPubkey.get(agent.pubkey);
+        if (existingByPubkey && existingByPubkey.slug !== agent.slug) {
+            this.agents.delete(existingByPubkey.slug);
+        }
+
+        const existingBySlug = this.agents.get(agent.slug);
+        if (existingBySlug && existingBySlug.pubkey !== agent.pubkey) {
+            this.agentsByPubkey.delete(existingBySlug.pubkey);
+            this.projectAgentsByPubkey.delete(existingBySlug.pubkey);
+        }
+
+        this.agents.set(agent.slug, agent);
+        this.agentsByPubkey.set(agent.pubkey, agent);
+        this.projectAgentsByPubkey.set(agent.pubkey, {
+            pubkey: agent.pubkey,
+            slug: agent.slug,
+            name: agent.name,
+            role: agent.role,
+            category: agent.category,
+            description: agent.description,
+            useCriteria: agent.useCriteria,
+        });
+    }
+
+    /**
+     * Remove an in-memory runtime agent without mutating disk storage.
+     */
+    removeAgentFromMemory(pubkey: string): void {
+        const agent = this.agentsByPubkey.get(pubkey);
+        if (!agent) {
+            return;
+        }
+
+        this.agents.delete(agent.slug);
+        this.agentsByPubkey.delete(pubkey);
+        this.projectAgentsByPubkey.delete(pubkey);
+    }
+
+    setProjectAgentInfo(info: ProjectAgentInfo): void {
+        this.projectAgentsByPubkey.set(info.pubkey, info);
     }
 
     /**
