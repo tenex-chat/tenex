@@ -1,6 +1,6 @@
 # Project-warm Bun worker — concurrent executions, inline agent config
 
-Status: commits 1–5 landed; commits 6–8 pending. See "Migration sequence
+Status: commits 1–6 and 8 landed; commit 7 pending. See "Migration sequence
 (commit-by-commit)" below for current per-commit status markers.
 
 This document supersedes the per-`(project, agent)` reuse model described in
@@ -369,51 +369,37 @@ process.
 
 Each commit must be independently revertable.
 
-### Commit status (2026-04-25)
+### Commit status (2026-04-27)
 
 | # | Title | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | TS: split bootstrap into project-scope vs per-execute | landed | `bootstrap.ts` exports `bootstrapProjectScope` + `runOneExecution`; `executeAgentWorkerRequest` is the wrapper |
 | 2 | TS: drop serialization guard, support concurrent executions | landed | `agent-worker.ts:run()` uses `Set<Promise>` for `activeExecutions`; serialization throw removed |
 | 3 | Protocol: add `agent`, `projectAgentInventory`, `project_boot`, `project_ready` | landed | `AgentWorkerProtocol.ts:298,305` defines the new frames; `worker_protocol.rs` mirrors |
-| 4 | TS: consume inline `agent` config; remove `AgentRegistry` from worker boot | mostly landed | Executing agent materialized via `materializeAgent` from inline payload; `AgentRegistry` still constructed as a placeholder receiver in `bootstrap.ts:88` (no `loadFromProject` call) |
+| 4 | TS: consume inline `agent` config; remove `AgentRegistry` from worker boot | landed | Executing agent materialized via `materializeAgent` from inline payload; `AgentRegistry` constructed as an empty in-memory container, no `loadFromProject` call |
 | 5 | Rust: extend reuse and runtime state to many-per-worker | landed | `ActiveWorkerRuntimeSnapshot.executions: Vec<ActiveExecutionSlot>`; `select_warm_worker_for_dispatch` defined; `worker_concurrency` updated |
-| 6 | Rust: dispatch routing prefers warm same-project workers | **pending** | `select_warm_worker_for_dispatch` exists in `worker_reuse.rs:224` but **no production code path calls it**; admission still spawns a fresh worker per dispatch |
-| 7 | Rust: emit `project_boot` after `ready`; record `project_warm_at` | **pending** | `project_boot`/`project_ready` defined in protocol but never sent; depends on commit 6 |
-| 8 | Delete dead code | **pending** | `AgentRegistry` import in `bootstrap.ts:3` still required by the placeholder construction; deletion gated on commit 6 actually wiring inventory-only `ProjectContext.agents` |
-
-### Pending work — commit 6 (warm-reuse session multiplexing)
-
-This is the architectural payoff. Foundation is laid but the wire-up is the
-remaining work:
-
-- `crates/tenex-daemon/src/warm_worker_runtime.rs` defines `WarmWorkerRegistry`,
-  `OwnedWarmWorkerCommand`, `WarmWorkerHandle`. None are referenced from
-  production code paths today.
-- The session loop (`crates/tenex-daemon/src/worker_session/session_loop.rs`)
-  exits after the first terminal frame. To support multiplexing it must:
-  1. Replace `terminal: Option<WorkerMessageTerminalContext>` with a
-     `HashMap<correlation_id, WorkerMessageTerminalContext>`.
-  2. Select between worker-frame reads and `OwnedWarmWorkerCommand` channel
-     receives. On `NewExecute`, send the execute frame and register the
-     terminal context. On `Shutdown`, drain in-flight, exit.
-  3. On a terminal frame, look up the correlation_id's terminal context,
-     complete it, and *continue* reading instead of returning.
-- The daemon admission tick
-  (`crates/tenex-daemon/src/daemon_loop.rs:425` — `admit_one_worker_dispatch_from_filesystem`)
-  must, before spawning, consult `WarmWorkerRegistry` via
-  `select_warm_worker_for_dispatch`. If a warm worker is selected, push
-  `NewExecute` on its channel; if not, spawn a fresh long-lived session task
-  that registers itself in the registry.
-- The TS worker already supports multi-execute (`agent-worker.ts:44`,
-  `activeExecutions`). It currently emits `keepWorkerWarm: false`
-  (`bootstrap.ts:227`); flip to `true` when the daemon signals warm intent.
+| 6 | Rust: dispatch routing prefers warm same-project workers | landed | `select_warm_worker_for_dispatch` called in `daemon_worker_runtime.rs:354`; warm injection path wired via `WarmWorkerHandle.command_tx` |
+| 7 | Rust: emit `project_boot` after `ready`; record `project_warm_at` | **pending** | `project_boot`/`project_ready` defined in protocol but never sent; observability improvement, system correct without it |
+| 8 | Delete dead code | landed | `createAgentRegistry` injection removed from `AgentWorkerBootstrapDependencies`; `bootstrapProjectScope` uses `new AgentRegistry(...)` directly |
 
 ### Pending work — commit 7 (project_boot handshake)
 
-Depends on commit 6. The first message after a warm-worker spawn becomes
-`project_boot`; admission is gated on `project_ready`. This makes the warm
-state observable to the daemon for diagnostics and reuse decisions.
+Send `project_boot` as the first daemon→worker message after `ready` so the
+worker can bootstrap project state (MCPManager, ConversationStore) eagerly,
+before the first `execute` arrives. The worker responds with `project_ready`;
+the daemon records `project_warm_at` for diagnostics.
+
+Implementation sketch:
+- In `worker_dispatch/execution.rs:start_worker_dispatch`, after receiving
+  `ready`, build a `project_boot` message (projectId, projectBasePath,
+  metadataPath, projectEvent.{ownerPubkey, dTag}) and send it before the
+  execute message. Read the `project_ready` response and record the timestamp.
+- `project_owner_pubkey` must be threaded from the admit context (where
+  `project_owner_pubkeys` is available) down to `start_worker_dispatch` via
+  `WorkerDispatchSpawnPlan`.
+- On the TS side: handle `project_boot` in `agent-worker.ts`'s
+  `handleIncomingMessage`, call `getOrCreateProjectScope`, and emit
+  `project_ready`. This lets `handleExecute` skip the bootstrap cost entirely.
 
 ### Original commit list
 
