@@ -16,7 +16,7 @@ import {
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { getEventHash, verifyEvent, type Event as NostrEvent } from "nostr-tools";
-import { executeAgentWorkerRequest } from "../bootstrap";
+import { bootstrapProjectScope, runOneExecution } from "../bootstrap";
 import { decodeAgentWorkerProtocolChunks } from "../protocol";
 import { PublishResultCoordinator } from "../publisher-bridge";
 import type { AgentWorkerOutboundProtocolMessage } from "../protocol-emitter";
@@ -186,27 +186,39 @@ describe("agent worker protocol process smoke test", () => {
                 throw new Error("fixture execute message must be an execute frame");
             }
 
-            await expect(
-                executeAgentWorkerRequest(
-                    fixture.executeMessage,
-                    async (message) =>
-                        ({
-                            version: AGENT_WORKER_PROTOCOL_VERSION,
-                            sequence: 0,
-                            timestamp: 0,
-                            ...message,
-                        }) as AgentWorkerOutboundProtocolMessage,
-                    new PublishResultCoordinator(),
-                    {
-                        createMcpManager: () => fakeMcpManager,
-                        createExecutor: () => ({
-                            execute: async () => {
-                                throw new Error("executor failed after MCP initialize");
-                            },
-                        }),
-                    }
-                )
-            ).rejects.toThrow("executor failed after MCP initialize");
+            const dependencies = {
+                createMcpManager: () => fakeMcpManager,
+                createExecutor: () => ({
+                    execute: async () => {
+                        throw new Error("executor failed after MCP initialize");
+                    },
+                }),
+            };
+            const emit = async (message: AgentWorkerProtocolMessage) =>
+                ({
+                    version: AGENT_WORKER_PROTOCOL_VERSION,
+                    sequence: 0,
+                    timestamp: 0,
+                    ...message,
+                }) as AgentWorkerOutboundProtocolMessage;
+
+            const { scope, cleanup } = await bootstrapProjectScope(
+                fixture.executeMessage,
+                dependencies
+            );
+            try {
+                await expect(
+                    runOneExecution(
+                        fixture.executeMessage,
+                        scope,
+                        emit,
+                        new PublishResultCoordinator(),
+                        dependencies
+                    )
+                ).rejects.toThrow("executor failed after MCP initialize");
+            } finally {
+                await cleanup();
+            }
 
             expect(lifecycle).toEqual(["initialize", "shutdown"]);
         } finally {

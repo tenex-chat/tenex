@@ -235,20 +235,6 @@ export async function runOneExecution(
     });
 }
 
-export async function executeAgentWorkerRequest(
-    message: ExecuteMessage,
-    emit: AgentWorkerProtocolEmit,
-    publishResultCoordinator: PublishResultCoordinator,
-    dependencies: AgentWorkerBootstrapDependencies = {}
-): Promise<AgentWorkerExecutionResult> {
-    const { scope, cleanup } = await bootstrapProjectScope(message, dependencies);
-    try {
-        return await runOneExecution(message, scope, emit, publishResultCoordinator, dependencies);
-    } finally {
-        await cleanup();
-    }
-}
-
 function seedWorkerRalBridge(
     message: ExecuteMessage
 ): { ralNumber: number; claimToken: string } | undefined {
