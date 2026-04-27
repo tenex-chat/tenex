@@ -5,7 +5,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use tokio::sync::mpsc;
 
+use crate::daemon_signals::SessionCompletion;
 use crate::dispatch_queue::{DispatchQueueError, replay_dispatch_queue};
 use crate::ral_journal::{
     RAL_JOURNAL_WRITER_RUST_DAEMON, RalDelegationType, RalJournalError, RalJournalEvent,
@@ -49,6 +51,11 @@ pub struct WorkerSessionLoopInput<'a> {
     /// Instead it waits for the next command from this channel (up to the
     /// idle TTL) and sends the new execute to the worker process.
     pub warm_command_rx: Option<crossbeam_channel::Receiver<OwnedWarmWorkerCommand>>,
+    /// Signalled before blocking on `warm_command_rx` so the admission driver
+    /// can immediately retry any dispatch that was blocked by the just-completed
+    /// execution (e.g. a second message to the same conversation that was QUEUED
+    /// while this execution held the LEASED slot).
+    pub warm_execution_completed_tx: Option<mpsc::UnboundedSender<SessionCompletion>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -869,6 +876,10 @@ where
         None => return Ok(false),
     };
 
+    if let Some(tx) = &input.warm_execution_completed_tx {
+        let _ = tx.send(SessionCompletion);
+    }
+
     match rx.recv_timeout(Duration::from_millis(
         crate::warm_worker_runtime::WARM_WORKER_IDLE_TTL_MS,
     )) {
@@ -1107,6 +1118,7 @@ mod tests {
                     locks,
                 }),
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
             },
         )
         .expect("session loop must stop on terminal frame");
@@ -1169,6 +1181,7 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: Some(&mut live_publish_maintenance),
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
                 terminal: None,
             },
         )
@@ -1242,6 +1255,7 @@ mod tests {
                     locks,
                 }),
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
             },
         )
         .expect("closed worker pipe after accepted terminal publish must complete");
@@ -1427,6 +1441,7 @@ mod tests {
                     locks,
                 }),
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
             },
         )
         .expect("injection pipe-closed after delegation publish must synthesize terminal");
@@ -1481,6 +1496,7 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
                 terminal: None,
             },
         )
@@ -1516,6 +1532,7 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
                 terminal: None,
             },
         )
@@ -1567,6 +1584,7 @@ mod tests {
                 nip46_publish: None,
                 live_publish_maintenance: None,
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
                 terminal: None,
             },
         )
@@ -1644,6 +1662,7 @@ mod tests {
                     locks,
                 }),
                 warm_command_rx: None,
+                warm_execution_completed_tx: None,
             },
         )
         .expect("session loop must stop on terminal frame");

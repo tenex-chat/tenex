@@ -590,6 +590,7 @@ where
             dispatch_correlation_id: format!("{correlation_id}:complete"),
         },
         started,
+        None,
     )
 }
 
@@ -1011,6 +1012,7 @@ where
         started,
         scheduler,
         dispatch_state,
+        None,
     )
 }
 
@@ -1024,6 +1026,9 @@ pub fn run_started_worker_session_from_filesystem<S>(
     live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
     terminal: DaemonWorkerFilesystemTerminalInput,
     started: StartedWorkerDispatchAdmission<S>,
+    warm_execution_completed_tx: Option<
+        tokio::sync::mpsc::UnboundedSender<crate::daemon_signals::SessionCompletion>,
+    >,
 ) -> Result<
     DaemonWorkerRuntimeOutcome,
     DaemonWorkerRuntimeError<S, <S as WorkerFrameReceiver>::Error>,
@@ -1066,6 +1071,7 @@ where
         started,
         scheduler,
         dispatch_state,
+        warm_execution_completed_tx,
     )
 }
 
@@ -1081,6 +1087,9 @@ fn run_started_worker_session_with_state<S>(
     started: StartedWorkerDispatchAdmission<S>,
     scheduler: RalScheduler,
     dispatch_state: crate::dispatch_queue::DispatchQueueState,
+    warm_execution_completed_tx: Option<
+        tokio::sync::mpsc::UnboundedSender<crate::daemon_signals::SessionCompletion>,
+    >,
 ) -> Result<
     DaemonWorkerRuntimeOutcome,
     DaemonWorkerRuntimeError<S, <S as WorkerFrameReceiver>::Error>,
@@ -1169,6 +1178,7 @@ where
                 .as_mut()
                 .map(|maintenance| &mut *maintenance.maintain as _),
             warm_command_rx: started.warm_command_rx,
+            warm_execution_completed_tx,
             terminal: Some(WorkerMessageTerminalContext {
                 scheduler,
                 dispatch_state,

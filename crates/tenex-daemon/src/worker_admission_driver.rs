@@ -208,6 +208,7 @@ async fn drain_admit_loop<P>(
                 let dispatch_correlation_id =
                     format!("worker-admission-driver:{}:complete-{}", now_ms, admitted_count);
                 let tx = completion_tx.clone();
+                let warm_exec_tx = completion_tx.clone();
                 let publish_enqueued_tx_s = deps.publish_enqueued_tx.clone();
                 let warm_registry_s = deps.warm_registry.clone();
 
@@ -257,6 +258,7 @@ async fn drain_admit_loop<P>(
                                 dispatch_correlation_id,
                             },
                             started,
+                            Some(warm_exec_tx),
                         );
 
                         if let Err(ref error) = result {
