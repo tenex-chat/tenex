@@ -66,8 +66,10 @@ await_daemon_subscribed 45 || _die "daemon subscription never became live"
 
 # The reconciler will attempt to connect/sign via the unreachable relay and
 # time out after signingTimeoutMs. We wait for the timeout log.
-echo "[scenario] waiting up to 15s for NIP-46 timeout log entry"
-timeout_deadline=$(( $(date +%s) + 15 ))
+# The reconciler debounces ~5-10s after startup, plus the 3s sign timeout,
+# so total expected time is 8-13s; use 25s to avoid sporadic flakes.
+echo "[scenario] waiting up to 25s for NIP-46 timeout log entry"
+timeout_deadline=$(( $(date +%s) + 25 ))
 saw_timeout=0
 while [[ $(date +%s) -lt $timeout_deadline ]]; do
   if [[ -f "$DAEMON_DIR/daemon.log" ]] && \

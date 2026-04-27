@@ -153,14 +153,21 @@ with open(path, "w") as f:
 PY
 echo "[scenario] sidecar corrupted: triggeringEventId $orig_trigger -> $bogus_event_id"
 
+# The admission driver runs almost instantly after enqueue, so by the time
+# stop_daemon returns the dispatch is typically already leased or completed.
+# Reset the queue to only the initial "queued" record so the restarted daemon
+# sees a queued dispatch to validate against the (now-corrupted) sidecar.
+head -1 "$queue" > "${queue}.tmp" && mv "${queue}.tmp" "$queue"
+echo "[scenario] dispatch queue reset to queued-only state"
+
 # Record log size for post-restart grep.
 log_bytes_before="$(wc -c < "$HARNESS_DAEMON_LOG" 2>/dev/null || echo 0)"
 
 echo "[scenario] restarting daemon"
 start_daemon
 
-# The dispatch is still queued; on the next tick the daemon will replay the
-# queue, attempt admission, try to load the sidecar, and hit the mismatch.
+# The startup sidecar validator scans queued entries, finds the mismatch, and
+# appends a "cancelled" record before the admission driver ever runs.
 # Poll the daemon log for the expected failure phrase (up to 10s).
 echo "[scenario] polling for dispatch admission failure in daemon log (up to 10s)"
 mismatch_deadline=$(( $(date +%s) + 10 ))

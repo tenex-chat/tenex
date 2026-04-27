@@ -227,6 +227,15 @@ while [[ $(date +%s) -lt $rehydrate_deadline ]]; do
   sleep 0.2
 done
 
+# Project boot state is in-memory only and lost across daemon restarts.
+# Publish a fresh kind:24000 boot event so the restarted daemon will accept
+# inbound dispatches for this project.
+echo "[scenario] re-booting project for restarted daemon"
+publish_event_as "$USER_NSEC" 24000 "boot-post-restart" "a=$PROJECT_A_TAG" >/dev/null
+await_kind_event 24010 "" "$BACKEND_PUBKEY" 15 >/dev/null \
+  || _die "ASSERT: restarted daemon never published kind:24010 within 15s"
+echo "[scenario]   project re-booted (kind:24010 published) ✓"
+
 # The routing derives conversation_id from the inbound envelope's identity.
 # For a top-level event (no reply), conversation_id = the event's own id. For a
 # reply event (e-tag referencing a known event), the daemon looks up which
