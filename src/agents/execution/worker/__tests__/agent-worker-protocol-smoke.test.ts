@@ -5,8 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "bun:test";
-import type { AgentRegistry } from "@/agents/AgentRegistry";
-import type { AgentInstance } from "@/agents/types";
 import workerProtocolFixture from "@/test-utils/fixtures/worker-protocol/agent-execution.compat.json";
 import {
     AGENT_WORKER_PROTOCOL_VERSION,
@@ -183,21 +181,6 @@ describe("agent worker protocol process smoke test", () => {
                 lifecycle.push("shutdown");
             },
         } as unknown as MCPManager;
-        const fakeAgent = {
-            pubkey: fixture.agentPubkey,
-            slug: "project-manager",
-            name: "project-manager",
-            role: "project-manager",
-            category: "orchestrator",
-        } as unknown as AgentInstance;
-        const fakeAgents = new Map<string, AgentInstance>([[fakeAgent.slug, fakeAgent]]);
-        const fakeAgentRegistry = {
-            loadFromProject: async () => {},
-            getAgentByPubkey: (pubkey: string) =>
-                pubkey === fakeAgent.pubkey ? fakeAgent : undefined,
-            getAllAgentsMap: () => fakeAgents,
-        } as unknown as AgentRegistry;
-
         try {
             if (fixture.executeMessage.type !== "execute") {
                 throw new Error("fixture execute message must be an execute frame");
@@ -215,7 +198,6 @@ describe("agent worker protocol process smoke test", () => {
                         }) as AgentWorkerOutboundProtocolMessage,
                     new PublishResultCoordinator(),
                     {
-                        createAgentRegistry: () => fakeAgentRegistry,
                         createMcpManager: () => fakeMcpManager,
                         createExecutor: () => ({
                             execute: async () => {

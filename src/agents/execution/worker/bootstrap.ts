@@ -65,7 +65,6 @@ export interface AgentWorkerExecutionResult {
 }
 
 export interface AgentWorkerBootstrapDependencies {
-    createAgentRegistry?: (projectBasePath: string, metadataPath: string) => AgentRegistry;
     createMcpManager?: () => MCPManager;
     createExecutor?: (
         options: ConstructorParameters<typeof AgentExecutor>[0]
@@ -85,9 +84,7 @@ export async function bootstrapProjectScope(
         ? message.projectAgentInventory.map((entry) => entry.pubkey)
         : [message.agentPubkey];
     const project = buildWorkerProjectFromInventory(message, projectAgentPubkeys);
-    const agentRegistry =
-        dependencies.createAgentRegistry?.(message.projectBasePath, message.metadataPath) ??
-        new AgentRegistry(message.projectBasePath, message.metadataPath);
+    const agentRegistry = new AgentRegistry(message.projectBasePath, message.metadataPath);
     // Project context is built from the inventory only — no agent storage
     // disk reads. The executing AgentInstance is materialized in
     // runOneExecution from the `agent` payload; placeholder
