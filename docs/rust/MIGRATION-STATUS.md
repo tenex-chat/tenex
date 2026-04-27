@@ -144,12 +144,12 @@ These are the blockers that still matter for this branch.
 | Blocker | Why it still matters |
 | --- | --- |
 | Telegram inbound acceptance | The Rust Telegram inbound path exists in-tree, but the milestone quality gates still require full inbound behavior coverage before calling the migration complete |
-| Telegram outbound idempotence across restart | `docs/rust/implementation-milestones-and-quality-gates.md` explicitly requires durable, idempotent Telegram delivery across daemon restarts |
+| Telegram outbound idempotence across restart | `docs/plans/2026-04-24-implementation-milestones-and-quality-gates.md` explicitly requires durable, idempotent Telegram delivery across daemon restarts |
 | Real-client verification | The milestone plan explicitly requires web, iOS, CLI, and Telegram to keep working against the Rust daemon, including restart recovery |
 
 ### Cross-cutting quality gates
 
-These come directly from `docs/rust/implementation-milestones-and-quality-gates.md` and remain the right bar for completion:
+These come directly from `docs/plans/2026-04-24-implementation-milestones-and-quality-gates.md` and remain the right bar for completion:
 
 - correlation-ID chain across Rust logs, worker protocol messages, RAL journal entries, worker state files, and telemetry spans
 - rollback tests with in-flight state, not only idle-state rollback
