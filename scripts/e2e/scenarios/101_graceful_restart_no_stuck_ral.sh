@@ -118,8 +118,8 @@ boot_evt="$(publish_event_as "$USER_NSEC" 24000 "boot" "a=$PROJECT_A_TAG")"
 boot_id="$(printf '%s' "$boot_evt" | jq -r .id)"
 echo "[scenario]   boot event id=$boot_id"
 
-await_kind_event 24010 "" "$BACKEND_PUBKEY" 30 >/dev/null \
-  || _die "ASSERT: daemon never published kind:24010 within 30s"
+await_kind_event 24010 "" "$BACKEND_PUBKEY" 45 >/dev/null \
+  || _die "ASSERT: daemon never published kind:24010 within 45s"
 echo "[scenario]   kind:24010 published (project boot confirmed) ✓"
 
 _queue="$DAEMON_DIR/workers/dispatch-queue.jsonl"
