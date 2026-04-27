@@ -701,6 +701,21 @@ fn process_one<A>(
     });
 
     match result {
+        Ok(TelegramIngressRuntimeOutcome::Ignored { reason }) => {
+            tracing::warn!(
+                bot = %bot.label,
+                code = %reason.code,
+                detail = %reason.detail,
+                channel_id = ?reason.channel_id,
+                principal_id = ?reason.principal_id,
+                project_id = ?reason.project_id,
+                "telegram update ignored"
+            );
+            observer.on_processed(
+                &bot.label,
+                TelegramIngressRuntimeOutcome::Ignored { reason },
+            );
+        }
         Ok(outcome) => observer.on_processed(&bot.label, outcome),
         Err(error) => {
             log_bot_warning(

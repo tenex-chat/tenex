@@ -5,6 +5,7 @@ import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { llmServiceFactory } from "@/llm";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { NDKKind } from "@/nostr/kinds";
+import { getNDK } from "@/nostr/ndkClient";
 import { enqueueSignedEventForRustPublish } from "@/nostr/RustPublishOutbox";
 import { config } from "@/services/ConfigService";
 import { getIdentityService } from "@/services/identity";
@@ -194,7 +195,8 @@ export class ConversationSummarizer {
                 }
 
                 try {
-                    const event = new NDKEventMetadata();
+                    const ndk = getNDK();
+                    const event = new NDKEventMetadata(ndk);
                     event.kind = NDKKind.EventMetadata;
                     event.setConversationId(conversation.id);
 

@@ -12,10 +12,12 @@ use crate::agent_config_update::{
 };
 use crate::agent_install::{AgentInstallError, AgentInstallOutcome, install_agent_from_nostr};
 use crate::backend_config::{BackendConfigError, read_backend_config};
+use crate::agent_inventory::read_installed_agent_inventory;
 use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_agent_config,
+    publish_backend_agent_list,
 };
-use crate::backend_events::installed_agent_list::AgentConfigInputs;
+use crate::backend_events::installed_agent_list::{AgentConfigInputs, AgentListInputs};
 use crate::daemon_signals::{BootedProject, DispatchEnqueued, PublishEnqueued};
 use crate::inbound_runtime::{
     InboundRuntimeError, InboundRuntimeInput, InboundRuntimeOutcome,
@@ -215,6 +217,7 @@ pub fn process_verified_nostr_event(
             input.writer_version,
             input.timestamp,
         )?;
+        publish_agent_list_after_change(&input);
         crate::stdout_status::print_agent_installed(
             &install.slug,
             &install.agent_pubkey,
@@ -407,6 +410,62 @@ fn republish_agent_config_after_update(
         );
     }
     Ok(Some(outcome.record.event.id))
+}
+
+fn publish_agent_list_after_change(input: &NostrIngressInput<'_>) {
+    let config = match read_backend_config(input.tenex_base_dir) {
+        Ok(c) => c,
+        Err(error) => {
+            tracing::warn!(%error, "agent-list: failed to read backend config after agent change");
+            return;
+        }
+    };
+    let signer = match config.backend_signer() {
+        Ok(s) => s,
+        Err(error) => {
+            tracing::warn!(%error, "agent-list: failed to get backend signer after agent change");
+            return;
+        }
+    };
+    let agents_dir = input.tenex_base_dir.join("agents");
+    let inventory = match read_installed_agent_inventory(&agents_dir) {
+        Ok(inv) => inv,
+        Err(error) => {
+            tracing::warn!(%error, "agent-list: failed to read agent inventory after agent change");
+            return;
+        }
+    };
+    let created_at = input.timestamp / 1_000;
+    let request_id = format!("nostr-ingress:agent-list:{created_at}");
+    match publish_backend_agent_list(
+        BackendEventPublishContext {
+            daemon_dir: input.daemon_dir,
+            accepted_at: input.timestamp,
+            request_id: &request_id,
+            request_sequence: 1,
+            request_timestamp: input.timestamp,
+            correlation_id: &request_id,
+            project_id: "agent-list",
+            conversation_id: "agent-list",
+            ral_number: 0,
+            wait_for_relay_ok: false,
+            timeout_ms: 30_000,
+        },
+        AgentListInputs {
+            created_at,
+            agents: &inventory.active_agents,
+        },
+        &signer,
+    ) {
+        Ok(_) => {
+            if let Some(ref tx) = input.publish_enqueued_tx {
+                let _ = tx.send(PublishEnqueued);
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "agent-list: failed to publish after agent change");
+        }
+    }
 }
 
 fn handle_stop_command(

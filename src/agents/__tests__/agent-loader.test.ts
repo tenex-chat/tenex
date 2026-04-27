@@ -76,12 +76,13 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
         const signer = NDKPrivateKeySigner.generate();
         const storedAgent = createStoredAgent({
             nsec: signer.nsec,
-            slug: "sync-categorized",
-            name: "Sync Categorized",
+            slug: "categorization-test",
+            name: "Categorization Test",
             role: "assistant",
         });
 
         const loadAgentSpy = spyOn(agentStorage, "loadAgent").mockResolvedValue(storedAgent);
+        const updateSpy = spyOn(agentStorage, "updateInferredCategory").mockResolvedValue(true);
         const skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
             listAvailableSkills: mock(async () => []),
         } as never);
@@ -99,6 +100,7 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
         expect(instance.tools).toContain("ask");
 
         loadAgentSpy.mockRestore();
+        updateSpy.mockRestore();
         skillServiceSpy.mockRestore();
         categorizeAgentMock.mockReset();
     });

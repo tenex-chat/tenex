@@ -13,6 +13,7 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentMetadataStore } from "@/services/agents";
 import { config } from "@/services/ConfigService";
 import { MCPManager } from "@/services/mcp/MCPManager";
+import { initNDK } from "@/nostr/ndkClient";
 import { ProjectContext, projectContextStore } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { DelegationJournalReader } from "@/services/ral/DelegationJournalReader";
@@ -79,6 +80,7 @@ export async function bootstrapProjectScope(
     dependencies: AgentWorkerBootstrapDependencies = {}
 ): Promise<ProjectScopeBootstrapResult> {
     await config.loadConfig(message.metadataPath);
+    await initNDK();
     await fs.mkdir(config.getConfigPath("daemon"), { recursive: true });
     await fs.mkdir(path.join(message.metadataPath, "conversations"), { recursive: true });
     await fs.mkdir(path.join(message.metadataPath, "logs"), { recursive: true });

@@ -6,7 +6,8 @@ use crate::backend_events::heartbeat::{
     BackendSigner, HeartbeatEncodeError, HeartbeatInputs, encode_heartbeat,
 };
 use crate::backend_events::installed_agent_list::{
-    AgentConfigEncodeError, AgentConfigInputs, encode_agent_config,
+    AgentConfigEncodeError, AgentConfigInputs, AgentListEncodeError, AgentListInputs,
+    encode_agent_config, encode_agent_list,
 };
 use crate::backend_events::operations_status::{
     OperationsStatusEncodeError, OperationsStatusInputs, encode_operations_status,
@@ -46,6 +47,8 @@ pub enum BackendEventPublishError {
     ProjectStatus(#[from] ProjectStatusEncodeError),
     #[error("agent-config encode failed: {0}")]
     AgentConfig(#[from] AgentConfigEncodeError),
+    #[error("agent-list encode failed: {0}")]
+    AgentList(#[from] AgentListEncodeError),
     #[error("operations-status encode failed: {0}")]
     OperationsStatus(#[from] OperationsStatusEncodeError),
     #[error("backend-profile encode failed: {0}")]
@@ -69,6 +72,15 @@ pub fn publish_backend_project_status<S: BackendSigner>(
     signer: &S,
 ) -> Result<BackendPublishRuntimeOutcome, BackendEventPublishError> {
     let event = encode_project_status(&inputs, signer)?;
+    enqueue_backend_signed_event(context, event, signer).map_err(BackendEventPublishError::from)
+}
+
+pub fn publish_backend_agent_list<S: BackendSigner>(
+    context: BackendEventPublishContext<'_>,
+    inputs: AgentListInputs<'_>,
+    signer: &S,
+) -> Result<BackendPublishRuntimeOutcome, BackendEventPublishError> {
+    let event = encode_agent_list(&inputs, signer)?;
     enqueue_backend_signed_event(context, event, signer).map_err(BackendEventPublishError::from)
 }
 

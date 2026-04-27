@@ -4,3 +4,4 @@
 //! interval constant in one place.
 
 pub const BACKEND_STATUS_TICK_INTERVAL_SECONDS: u64 = 30;
+pub const AGENT_LIST_PUBLISH_INTERVAL_SECONDS: u64 = 60;

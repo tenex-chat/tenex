@@ -9,10 +9,10 @@ use crate::agent_inventory::{
 use crate::backend_config::{BackendConfigError, BackendConfigSnapshot, read_backend_config};
 use crate::backend_event_publish::{
     BackendEventPublishContext, BackendEventPublishError, publish_backend_agent_config,
-    publish_backend_heartbeat, publish_backend_profile,
+    publish_backend_agent_list, publish_backend_heartbeat, publish_backend_profile,
 };
 use crate::backend_events::heartbeat::HeartbeatInputs;
-use crate::backend_events::installed_agent_list::AgentConfigInputs;
+use crate::backend_events::installed_agent_list::{AgentConfigInputs, AgentListInputs};
 use crate::backend_heartbeat_latch::BackendHeartbeatLatchPlanner;
 use crate::backend_profile::BackendProfileInputs;
 use crate::per_agent_config_snapshot::{AgentConfigSnapshot, build_agent_config_snapshot};
@@ -211,6 +211,24 @@ pub fn publish_backend_agent_configs_from_filesystem(
         skipped_agents,
         agent_inventory,
     })
+}
+
+pub fn publish_backend_agent_list_from_filesystem(
+    input: BackendStatusRuntimeInput<'_>,
+) -> Result<BackendPublishRuntimeOutcome, BackendStatusRuntimeError> {
+    let config = read_backend_config(input.tenex_base_dir)?;
+    let signer = config.backend_signer()?;
+    let agent_inventory = read_installed_agent_inventory(agents_dir(input.tenex_base_dir))?;
+    let request_id = backend_status_request_id("agent-list", input.created_at);
+    let outcome = publish_backend_agent_list(
+        backend_status_context(&input, &request_id, 1),
+        AgentListInputs {
+            created_at: input.created_at,
+            agents: &agent_inventory.active_agents,
+        },
+        &signer,
+    )?;
+    Ok(outcome)
 }
 
 fn publish_agent_configs<S: crate::backend_events::heartbeat::BackendSigner>(

@@ -148,6 +148,8 @@ pub fn amber_theme() -> ColorfulTheme {
         unchecked_item_prefix: style("⬚".to_string()).for_stderr().dim(),
         picked_item_prefix: style("❯".to_string()).for_stderr().color256(214).bold(),
         unpicked_item_prefix: style(" ".to_string()).for_stderr(),
+        fuzzy_cursor_style: Style::new().for_stderr().color256(214).bold(),
+        fuzzy_match_highlight_style: Style::new().for_stderr().color256(214).bold(),
     }
 }
 

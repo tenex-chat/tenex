@@ -19,10 +19,10 @@ use crate::nostr_event::{
 /// (content hash diff). See `agent_config_publish_cache`.
 pub const AGENT_CONFIG_KIND: u64 = 34011;
 
-/// Legacy symbolic name kept for two commits while TS consumers migrate to
-/// the 34011 kind constant. Points at `AGENT_CONFIG_KIND`; remove once no
-/// caller references it.
-pub const INSTALLED_AGENT_LIST_KIND: u64 = AGENT_CONFIG_KIND;
+/// Kind 24011 is a full installed-agent list event. One event lists all
+/// currently installed agents. Republished every 60 seconds and immediately
+/// whenever an agent is installed or deleted.
+pub const AGENT_LIST_KIND: u64 = 24011;
 
 /// A `(pubkey, slug)` pair describing one installed agent. Lives here for
 /// historical reasons — callers across the daemon (agent inventory,
@@ -179,6 +179,51 @@ fn emit_slug_block(
         }
         tags.push(tag);
     }
+}
+
+pub struct AgentListInputs<'a> {
+    pub created_at: u64,
+    pub agents: &'a [InstalledAgentListAgent],
+}
+
+#[derive(Debug, Error)]
+pub enum AgentListEncodeError {
+    #[error("agent-list canonicalization failed: {0}")]
+    Canonicalize(#[from] NostrEventError),
+    #[error("agent-list signing failed: {0}")]
+    Sign(#[from] secp256k1::Error),
+}
+
+pub fn encode_agent_list<S: BackendSigner>(
+    inputs: &AgentListInputs<'_>,
+    signer: &S,
+) -> Result<SignedNostrEvent, AgentListEncodeError> {
+    let signer_pubkey = signer.xonly_pubkey_hex();
+    let tags: Vec<Vec<String>> = inputs
+        .agents
+        .iter()
+        .map(|agent| vec!["agent".to_string(), agent.pubkey.clone(), agent.slug.clone()])
+        .collect();
+    let normalized = NormalizedNostrEvent {
+        kind: AGENT_LIST_KIND,
+        content: String::new(),
+        tags: tags.clone(),
+        pubkey: Some(signer_pubkey.clone()),
+        created_at: Some(inputs.created_at),
+    };
+    let canonical = canonical_payload(&normalized)?;
+    let id = event_hash_hex(&canonical);
+    let digest = decode_event_id(&id)?;
+    let sig = signer.sign_schnorr(&digest)?;
+    Ok(SignedNostrEvent {
+        id,
+        pubkey: signer_pubkey,
+        created_at: inputs.created_at,
+        kind: AGENT_LIST_KIND,
+        tags,
+        content: String::new(),
+        sig,
+    })
 }
 
 fn validate_xonly_pubkey_hex(value: &str) -> Result<(), secp256k1::Error> {
