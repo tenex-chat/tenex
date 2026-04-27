@@ -46,7 +46,6 @@ import { SkillService } from "@/services/skill";
 import { RestartState } from "./RestartState";
 import { StatusFile } from "./StatusFile";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
-import { APNsService } from "@/services/apns";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
 import { BackendHeartbeatService } from "@/services/status/BackendHeartbeatService";
@@ -450,10 +449,6 @@ export class Daemon {
             interventionService.setAgentResolver(this.createAgentResolver());
             interventionService.setActiveDelegationChecker(this.createActiveDelegationChecker());
             await interventionService.initialize();
-
-            // 11b. Initialize APNs push notification service
-            logger.debug("Initializing APNs service");
-            await APNsService.getInstance().initialize();
 
             // 12. Initialize restart state manager
             logger.debug("Initializing restart state manager");

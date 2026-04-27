@@ -1,4 +1,3 @@
-import { apnsCommand } from "@/commands/config/apns";
 import { contextManagementCommand } from "@/commands/config/context-management";
 import { embedCommand } from "@/commands/config/embed";
 import { escalationCommand } from "@/commands/config/escalation";
@@ -68,7 +67,6 @@ const MENU_SECTIONS: MenuSection[] = [
             { label: "Identity", description: "Authorized pubkeys", command: identityCommand },
             { label: "System Prompt", description: "Global prompt for all projects", command: systemPromptCommand },
             { label: "Paths", description: "File paths and storage", command: pathsCommand },
-            { label: "APNs", description: "Apple push notifications", command: apnsCommand },
             { label: "NIP-46", description: "Remote signing", command: nip46Command },
             { label: "Logging", description: "Log level and file path", command: loggingCommand },
             { label: "Telemetry", description: "OpenTelemetry tracing", command: telemetryCommand },
@@ -151,7 +149,6 @@ export const configCommand = new Command("config")
     .addCommand(identityCommand)
     .addCommand(systemPromptCommand)
     .addCommand(pathsCommand)
-    .addCommand(apnsCommand)
     .addCommand(nip46Command)
     .addCommand(loggingCommand)
     .addCommand(telemetryCommand);

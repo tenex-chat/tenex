@@ -13,7 +13,6 @@ import { SearchProviderRegistry } from "@/services/search/SearchProviderRegistry
 import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { ConversationEmbeddingService } from "@/conversations/search/embeddings/ConversationEmbeddingService";
 import { ConversationIndexingJob } from "@/conversations/search/embeddings/ConversationIndexingJob";
-import { APNsService } from "@/services/apns/APNsService";
 import { TransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { ChannelSessionStore } from "@/services/ingress/ChannelSessionStoreService";
 import { TelegramGatewayService } from "@/services/telegram/TelegramGatewayService";
@@ -88,10 +87,6 @@ function resetSingletons(): void {
 
     if (typeof ConversationIndexingJob.resetInstance === "function") {
         ConversationIndexingJob.resetInstance();
-    }
-
-    if (typeof APNsService.resetInstance === "function") {
-        APNsService.resetInstance();
     }
 
     if (typeof TransportBindingStore.resetInstance === "function") {

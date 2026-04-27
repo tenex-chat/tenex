@@ -8,6 +8,7 @@ import {
     installMCPServerFromEvent,
     removeMCPServerByEventId,
 } from "../services/mcp/mcpInstaller";
+import { config } from "@/services/ConfigService";
 import { logger } from "../utils/logger";
 import { trace } from "@opentelemetry/api";
 
@@ -91,10 +92,18 @@ export async function handleProjectEvent(event: NDKEvent): Promise<void> {
             }
         }
 
-        // Reload MCP service if there were any MCP tool changes
         const hasMCPChanges = newMCPEventIds.length > 0 || mcpToolsToRemove.length > 0;
-        if (hasMCPChanges && currentContext.mcpManager) {
-            await currentContext.mcpManager.reload(metadataPath);
+        if (currentContext.mcpManager) {
+            let shouldReload = hasMCPChanges;
+            if (!shouldReload && mcpEventIds.length > 0) {
+                const mcpFileConfig = await config.loadTenexMCP(metadataPath);
+                const fileServerNames = Object.keys(mcpFileConfig.servers);
+                const managerServerNames = new Set(currentContext.mcpManager.getConfiguredServers());
+                shouldReload = fileServerNames.some((name) => !managerServerNames.has(name));
+            }
+            if (shouldReload) {
+                await currentContext.mcpManager.reload(metadataPath);
+            }
         }
 
         // Update the existing project context atomically
