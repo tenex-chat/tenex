@@ -117,16 +117,28 @@ conv_id="$(printf '%s' "$user_msg_evt" | jq -r .id)"
 echo "[scenario]   conv_id=$conv_id"
 
 # Wait for agent1 to publish final reply.
+phase1_ok=false
 deadline=$(( $(date +%s) + 30 ))
 while [[ $(date +%s) -lt $deadline ]]; do
   out="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 20 --auth --sec "$BACKEND_NSEC" \
     "$HARNESS_RELAY_URL" 2>/dev/null || true)"
   if printf '%s\n' "$out" | jq -se 'any(.[]; .content | test("Final answer: agent2 says 4"))' >/dev/null 2>&1; then
     echo "[scenario]   agent1 published final reply ✓"
+    phase1_ok=true
     break
   fi
   sleep 0.5
 done
+
+# Guard: daemon must still be alive and Phase 1 must have succeeded.
+if ! kill -0 "${HARNESS_DAEMON_PID:-}" 2>/dev/null; then
+  emit_result fail "harness-flake: daemon died unexpectedly during Phase 1 before SIGKILL test"
+  exit 1
+fi
+if [[ "$phase1_ok" != true ]]; then
+  emit_result fail "harness-flake: agent1 never published final reply within 30s"
+  exit 1
+fi
 
 # Snapshot the count of kind:1 events from agent1 BEFORE crash.
 agent1_pre_crash="$(nak req -k 1 -a "$AGENT1_PUBKEY" --limit 50 \
@@ -137,10 +149,7 @@ echo "[scenario]   pre-crash agent1 kind:1 count: $agent1_pre_count"
 # === Phase 2 — SIGKILL daemon ================================================
 echo ""
 echo "[scenario] === Phase 2: SIGKILL daemon mid-flight ==="
-[[ -n "${HARNESS_DAEMON_PID:-}" ]] || _die "ASSERT: daemon pid unset"
-kill -KILL "$HARNESS_DAEMON_PID"
-wait "$HARNESS_DAEMON_PID" 2>/dev/null || true
-unset HARNESS_DAEMON_PID
+crash_daemon
 sleep 1
 
 # === Phase 3 — restart daemon ================================================
