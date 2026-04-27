@@ -476,7 +476,7 @@ fn handle_delegation_registered(
     input: &WorkerMessageFlowInput<'_>,
     message_plan: &WorkerMessagePlan,
 ) -> Result<(), WorkerMessageFlowError> {
-    let (active_worker, active_slot) =
+    let (_active_worker, active_slot) =
         ensure_active_worker_matches_message(runtime_state, input.worker_id, message_plan)?;
     let pending_delegation =
         pending_delegation_from_message(&message_plan.message, &active_slot.identity)?;
@@ -485,6 +485,21 @@ fn handle_delegation_registered(
             source: Box::new(source),
         }
     })?;
+    // Use the RAL-registered worker_id, not the physical process worker_id.
+    // In the warm injection path the physical process runs multiple dispatches; its
+    // worker_id belongs to the first execution, not this one.
+    let ral_worker_id = scheduler
+        .entry(&active_slot.identity)
+        .and_then(|entry| entry.worker_id.clone())
+        .ok_or_else(|| WorkerMessageFlowError::RalJournal {
+            source: Box::new(RalJournalError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "no active worker_id in RAL for slot identity {:?}",
+                    active_slot.identity
+                ),
+            ))),
+        })?;
     let sequence = scheduler.state().last_sequence.checked_add(1).ok_or(
         WorkerMessageFlowError::RalJournalSequenceExhausted {
             last_sequence: scheduler.state().last_sequence,
@@ -501,7 +516,7 @@ fn handle_delegation_registered(
         ),
         RalJournalEvent::DelegationRegistered {
             identity: active_slot.identity,
-            worker_id: active_worker.worker_id,
+            worker_id: ral_worker_id,
             claim_token: active_slot.claim_token,
             pending_delegation,
         },
