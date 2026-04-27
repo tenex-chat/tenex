@@ -29,19 +29,12 @@ export function _testClearPendingTimers(): void {
 /**
  * Handle a kind 24030 agent deletion event.
  *
- * Supported scopes:
- * - "project": Remove agent from a specific project (requires `a` tag with 31933 reference)
- * - "global": Remove agent from all projects owned by the event author
- *
- * Processing order:
- * 1. Parse & validate tags (p, r, a)
- * 2. Authorize the event author (must be whitelisted project owner)
- * 3. Remove agent from local state (storage + in-memory registry)
- * 4. Debounced NIP-46-signed 31933 update (non-blocking side effect)
+ * Deletes the agent from storage globally. Project membership is managed
+ * exclusively via 31933 p-tags — removing an agent from a project means
+ * publishing an updated 31933 without that agent's pubkey.
  */
 export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
     try {
-        // 1. Parse required tags
         const agentPubkey = event.tagValue("p");
         if (!agentPubkey) {
             logger.warn("[AgentDeletion] Event missing required p tag (agent pubkey)", {
@@ -50,16 +43,6 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
             return;
         }
 
-        const scope = event.tagValue("r");
-        if (!scope || (scope !== "project" && scope !== "global")) {
-            logger.warn("[AgentDeletion] Event missing or invalid r tag (scope)", {
-                eventId: shortenOptionalEventId(event.id),
-                scope,
-            });
-            return;
-        }
-
-        // 2. Authorization: event author must be a whitelisted pubkey
         const whitelistedPubkeys = config.getWhitelistedPubkeys();
         if (!whitelistedPubkeys.includes(event.pubkey)) {
             logger.warn("[AgentDeletion] Unauthorized — event author not whitelisted", {
@@ -71,23 +54,10 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
 
         trace.getActiveSpan()?.addEvent("agent_deletion.received", {
             "deletion.agent_pubkey": shortenPubkey(agentPubkey),
-            "deletion.scope": scope,
             "deletion.author": shortenPubkey(event.pubkey),
         });
 
-        // 3. Dispatch by scope
-        if (scope === "project") {
-            const aTag = event.tagValue("a");
-            if (!aTag) {
-                logger.warn("[AgentDeletion] Project-scoped deletion missing required a tag", {
-                    eventId: shortenOptionalEventId(event.id),
-                });
-                return;
-            }
-            await handleProjectScopedDeletion(event, agentPubkey, aTag);
-        } else {
-            await handleGlobalDeletion(event, agentPubkey);
-        }
+        await handleGlobalDeletion(event, agentPubkey);
     } catch (error) {
         logger.error("[AgentDeletion] Failed to handle agent deletion event", {
             eventId: shortenOptionalEventId(event.id),
@@ -96,92 +66,10 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
     }
 }
 
-/**
- * Remove an agent from a single project.
- */
-async function handleProjectScopedDeletion(
-    event: NDKEvent,
-    agentPubkey: string,
-    aTag: string,
-): Promise<void> {
-    // Parse the a-tag: "31933:<pubkey>:<d-tag>"
-    const parts = aTag.split(":");
-    if (parts.length < 3) {
-        logger.warn("[AgentDeletion] Invalid a-tag format", {
-            eventId: shortenOptionalEventId(event.id),
-            aTag,
-        });
-        return;
-    }
-    const projectDTag = parts.slice(2).join(":");
-
-    // Verify the a-tag references the currently loaded project
-    const projectContext = getProjectContext();
-    const currentProjectDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
-    if (projectDTag !== currentProjectDTag) {
-        logger.debug("[AgentDeletion] Ignoring deletion for different project", {
-            eventId: shortenOptionalEventId(event.id),
-            targetProject: projectDTag,
-            currentProject: currentProjectDTag,
-        });
-        return;
-    }
-
-    // Verify event author matches the project owner
-    if (event.pubkey !== projectContext.project.pubkey) {
-        logger.warn("[AgentDeletion] Event author does not match project owner", {
-            eventId: shortenOptionalEventId(event.id),
-            eventAuthor: shortenPubkey(event.pubkey),
-            projectOwner: shortenPubkey(projectContext.project.pubkey),
-        });
-        return;
-    }
-
-    // Find the agent in the registry
-    const agent = projectContext.getAgentByPubkey(agentPubkey);
-    if (!agent) {
-        logger.warn("[AgentDeletion] Agent not found in project, no-op", {
-            agentPubkey: shortenPubkey(agentPubkey),
-            projectDTag,
-        });
-        return;
-    }
-
-    // Remove from local state (storage + in-memory + 14199 snapshot)
-    const removed = await projectContext.agentRegistry.removeAgentFromProject(agent.slug);
-
-    if (removed) {
-        logger.info("[AgentDeletion] Removed agent from project", {
-            agentSlug: agent.slug,
-            agentPubkey: shortenPubkey(agentPubkey),
-            projectDTag,
-            reason: event.content || undefined,
-        });
-
-        trace.getActiveSpan()?.addEvent("agent_deletion.removed", {
-            "deletion.agent_slug": agent.slug,
-            "deletion.project": projectDTag,
-            "deletion.scope": "project",
-        });
-
-        // Publish updated project status if available
-        if (projectContext.statusPublisher) {
-            await projectContext.statusPublisher.publishImmediately();
-        }
-
-        // Schedule debounced 31933 update
-        scheduleProjectEventUpdate(projectDTag, event.pubkey, agentPubkey);
-    }
-}
-
-/**
- * Remove an agent from all projects owned by the event author.
- */
 async function handleGlobalDeletion(
     event: NDKEvent,
     agentPubkey: string,
 ): Promise<void> {
-    // Find all projects this agent belongs to
     const projects = await agentStorage.getAgentProjects(agentPubkey);
 
     if (projects.length === 0) {
@@ -197,7 +85,6 @@ async function handleGlobalDeletion(
     let removedCount = 0;
 
     for (const projectDTag of projects) {
-        // Only process if this is the currently loaded project
         if (projectDTag !== currentProjectDTag) {
             logger.debug("[AgentDeletion] Skipping deletion for non-loaded project", {
                 projectDTag,
@@ -206,7 +93,6 @@ async function handleGlobalDeletion(
             continue;
         }
 
-        // Verify event author matches the project owner
         if (event.pubkey !== projectContext.project.pubkey) {
             logger.warn("[AgentDeletion] Event author does not match project owner, skipping", {
                 projectDTag,
@@ -218,7 +104,6 @@ async function handleGlobalDeletion(
 
         const agent = projectContext.getAgentByPubkey(agentPubkey);
         if (!agent) {
-            // Agent may have already been removed — handle gracefully
             logger.debug("[AgentDeletion] Agent already absent from project registry", {
                 agentPubkey: shortenPubkey(agentPubkey),
                 projectDTag,
@@ -229,44 +114,33 @@ async function handleGlobalDeletion(
         const removed = await projectContext.agentRegistry.removeAgentFromProject(agent.slug);
         if (removed) {
             removedCount++;
-            scheduleProjectEventUpdate(projectDTag, event.pubkey, agentPubkey);
+            scheduleProjectEventUpdate(projectDTag, event.pubkey);
         }
     }
 
     if (removedCount > 0) {
-        logger.info("[AgentDeletion] Global deletion complete", {
+        logger.info("[AgentDeletion] Deletion complete", {
             agentPubkey: shortenPubkey(agentPubkey),
             projectsAffected: removedCount,
             totalProjects: projects.length,
             reason: event.content || undefined,
         });
 
-        trace.getActiveSpan()?.addEvent("agent_deletion.global_complete", {
+        trace.getActiveSpan()?.addEvent("agent_deletion.complete", {
             "deletion.agent_pubkey": shortenPubkey(agentPubkey),
             "deletion.projects_affected": removedCount,
             "deletion.total_projects": projects.length,
         });
 
-        // Publish updated project status if available
         if (projectContext.statusPublisher) {
             await projectContext.statusPublisher.publishImmediately();
         }
     }
 }
 
-/**
- * Schedule a debounced NIP-46-signed 31933 project event update.
- *
- * After local state is updated, we must publish an updated 31933 event
- * with the deleted agent's tag removed. Without this, a daemon restart
- * would reload agents from the stale 31933 event on relays.
- *
- * Debouncing batches rapid deletions into a single publish per project.
- */
 function scheduleProjectEventUpdate(
     projectDTag: string,
     ownerPubkey: string,
-    _removedAgentPubkey: string,
 ): void {
     const existing = projectUpdateTimers.get(projectDTag);
     if (existing) {
@@ -286,14 +160,6 @@ function scheduleProjectEventUpdate(
     projectUpdateTimers.set(projectDTag, timer);
 }
 
-/**
- * Publish an updated kind 31933 project event with deleted agent pubkeys removed.
- *
- * Follows the NIP-46 signing pattern from OwnerAgentListService:
- * 1. Build updated event from current project state
- * 2. Sign via NIP-46 if enabled
- * 3. Publish to relays
- */
 async function publishUpdatedProjectEvent(
     projectDTag: string,
     ownerPubkey: string,
