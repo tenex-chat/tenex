@@ -131,6 +131,14 @@ export interface ToolEventHandlersConfig {
     eventContext: EventContext;
     ralNumber: number;
     onNoResponseRequested?: () => void;
+    /**
+     * Fired when this RAL's tool finishes after the driver slot has been
+     * taken by a concurrently-spawned RAL (lock-handoff preemption). The
+     * stream should silently exit: the tool-result is already in the
+     * conversation store and will be picked up by future RALs once this
+     * one is cleared from the active set.
+     */
+    onPreemptRequested?: () => void;
 }
 
 /**
@@ -145,6 +153,7 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
         eventContext,
         ralNumber,
         onNoResponseRequested,
+        onPreemptRequested,
     } = config;
     const conversationStore = context.conversationStore;
     const agentPublisher = context.agentPublisher;
@@ -157,12 +166,11 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             chalk.yellow(`\n\u{1F527} ${event.toolName}(${argsPreview}${argsStr.length > 50 ? "..." : ""})`)
         );
 
-        ralRegistry.setToolActive(
+        ralRegistry.startTool(
             context.agent.pubkey,
             context.conversationId,
             ralNumber,
             event.toolCallId,
-            true,
             event.toolName
         );
 
@@ -332,14 +340,38 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             });
         }
 
-        ralRegistry.setToolActive(
+        const finishOutcome = ralRegistry.finishTool(
             context.agent.pubkey,
             context.conversationId,
             ralNumber,
-            event.toolCallId,
-            false,
-            event.toolName
+            event.toolCallId
         );
+
+        if (finishOutcome === "preempted") {
+            trace.getActiveSpan()?.addEvent("executor.preempted_by_concurrent_ral", {
+                "ral.number": ralNumber,
+                "tool.call_id": event.toolCallId,
+                "tool.name": event.toolName,
+                "agent.slug": context.agent.slug,
+            });
+            logger.info("[ToolEventHandlers] RAL preempted by concurrent RAL after tool finished", {
+                agent: context.agent.slug,
+                ralNumber,
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+            });
+            // Set the registry-level silent-completion flag so AgentExecutor
+            // honors the silent exit on the post-stream path. Without this,
+            // the empty completion event from `ensureSilentCompletionResult`
+            // would be published as a normal (empty) completion — noise that
+            // also confuses delegation completion handlers.
+            ralRegistry.requestSilentCompletion(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+            onPreemptRequested?.();
+        }
 
         if (event.toolName === "no_response") {
             trace.getActiveSpan()?.addEvent("executor.no_response_tool_result_received", {

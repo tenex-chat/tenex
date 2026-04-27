@@ -855,6 +855,16 @@ export async function buildMessagesFromEntries(
             .sort((a, b) => b[1].resultIndex - a[1].resultIndex);
 
         for (const [toolCallId, info] of orphans) {
+            // Two reasons we'd inject a synthetic tool-result here:
+            //  1. The tool is intentionally still running — e.g. a parallel-tool
+            //     supervision check rebuilds messages while siblings are
+            //     mid-flight. Caller signals this via inFlightToolCallIds.
+            //  2. The tool-call is genuinely orphaned — its result was lost
+            //     (process crash, disk write failure, etc.).
+            const isInFlight = inFlightToolCallIds?.has(toolCallId) ?? false;
+            const placeholderText = isInFlight
+                ? "Tool execution is still in progress; act on the conversation as it currently stands."
+                : "[Error: Tool execution was interrupted - result unavailable]";
             const syntheticResult: ModelMessage = {
                 role: "tool",
                 content: [{
@@ -863,7 +873,7 @@ export async function buildMessagesFromEntries(
                     toolName: info.toolName,
                     output: {
                         type: "text" as const,
-                        value: "[Error: Tool execution was interrupted - result unavailable]",
+                        value: placeholderText,
                     },
                 }] as ToolResultPart[],
             };

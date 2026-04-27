@@ -32,6 +32,16 @@ export class RALStateRegistry {
   private readonly nextRalNumber: Map<string, number> = new Map();
   private readonly ralIdToLocation: Map<string, { key: string; ralNumber: number }> = new Map();
   private readonly abortControllers: Map<string, AbortController> = new Map();
+  /**
+   * Per-(agent, conversation) driver slot: which RAL is currently making LLM
+   * calls. Distinct from per-RAL `isStreaming`, which only tracks "this RAL's
+   * streamText is in flight". A RAL can be streaming but NOT the driver if it
+   * has released the slot for a tool execution. At most one RAL per (agent,
+   * conversation) holds the driver at any moment.
+   */
+  private readonly currentDriverByKey: Map<string, number> = new Map();
+  /** One-shot listeners fired exactly once on the next driver release. */
+  private readonly driverReleaseListenersByKey: Map<string, Array<() => void>> = new Map();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly deps: RALStateRegistryDeps) {}
@@ -166,6 +176,17 @@ export class RALStateRegistry {
 
     ral.isStreaming = isStreaming;
     ral.lastActivityAt = Date.now();
+
+    // Driver slot follows the streamText lifecycle: acquired when streaming
+    // starts, released when streaming ends. Tool-call boundaries within the
+    // stream release/re-acquire the driver via a separate code path
+    // (experimental_onToolCallStart / onStepFinish).
+    if (isStreaming) {
+      this.tryAcquireDriver(agentPubkey, conversationId, ralNumber);
+    } else {
+      this.releaseDriver(agentPubkey, conversationId, ralNumber);
+    }
+
     const newState: "STREAMING" | "ACTING" | "REASONING" = isStreaming
       ? "STREAMING"
       : ral.activeTools.size > 0
@@ -174,6 +195,74 @@ export class RALStateRegistry {
 
     llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
     this.deps.emitUpdated(ral.projectId, conversationId);
+  }
+
+  /**
+   * Returns which RAL currently holds the driver slot for this (agent,
+   * conversation), or `undefined` if no RAL is driving (either idle or all
+   * pending RALs are inside tool execution).
+   */
+  getDriver(agentPubkey: string, conversationId: string): number | undefined {
+    return this.currentDriverByKey.get(this.makeKey(agentPubkey, conversationId));
+  }
+
+  /**
+   * Atomically acquire the driver slot for `ralNumber`. Returns true if the
+   * slot is now held by `ralNumber`. Idempotent: a RAL re-acquiring its own
+   * slot returns true. Returns false if a different RAL holds the slot.
+   *
+   * Synchronous and atomic w.r.t. the JS event loop, so two concurrent
+   * dispatchers calling this between awaits cannot both win.
+   */
+  tryAcquireDriver(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const current = this.currentDriverByKey.get(key);
+    if (current === undefined) {
+      this.currentDriverByKey.set(key, ralNumber);
+      return true;
+    }
+    return current === ralNumber;
+  }
+
+  /**
+   * Release the driver slot if held by `ralNumber`. Fires any one-shot
+   * listeners registered via `onceDriverReleased`. No-op if a different RAL
+   * holds the slot or if the slot is already empty.
+   */
+  releaseDriver(agentPubkey: string, conversationId: string, ralNumber: number): void {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const current = this.currentDriverByKey.get(key);
+    if (current !== ralNumber) return;
+    this.currentDriverByKey.delete(key);
+
+    const listeners = this.driverReleaseListenersByKey.get(key);
+    if (listeners && listeners.length > 0) {
+      this.driverReleaseListenersByKey.delete(key);
+      for (const fn of listeners) {
+        try {
+          fn();
+        } catch (e) {
+          logger.error("[RALStateRegistry] driver-release listener threw", { error: e });
+        }
+      }
+    }
+  }
+
+  /**
+   * Register a one-shot listener that fires exactly once the next time the
+   * driver slot for this (agent, conversation) transitions from held to
+   * released. Used by deferred wakeups: a late-tool-result that lands while
+   * a different RAL is driver registers here so the wakeup retries when the
+   * current driver finishes.
+   */
+  onceDriverReleased(agentPubkey: string, conversationId: string, fn: () => void): void {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const existing = this.driverReleaseListenersByKey.get(key);
+    if (existing) {
+      existing.push(fn);
+    } else {
+      this.driverReleaseListenersByKey.set(key, [fn]);
+    }
   }
 
   /**
@@ -201,7 +290,12 @@ export class RALStateRegistry {
   ): string | undefined {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) return undefined;
+    // A streaming RAL with no driver is mid-tool (driver released for tool
+    // execution). Resuming such a RAL would inject the user message into a
+    // RAL that's about to be silently exited via lock-handoff. Refuse the
+    // claim — the dispatcher should spawn a fresh concurrent RAL instead.
     if (ral.isStreaming) return undefined;
+    if (this.getDriver(agentPubkey, conversationId) !== undefined) return undefined;
     if (ral.executionClaimToken !== undefined) return undefined;
 
     const token = crypto.randomUUID();
@@ -248,6 +342,64 @@ export class RALStateRegistry {
     });
 
     return true;
+  }
+
+  /**
+   * Synchronously create a fresh concurrent RAL and atomically reserve the
+   * driver slot for it. Used by the dispatcher in the lock-handoff path: when
+   * an existing RAL is mid-tool (driver released, isStreaming=true) and a
+   * new user message arrives, the dispatcher spawns a concurrent RAL that
+   * takes over driver duties.
+   *
+   * The check-create-claim block is fully synchronous, so two concurrent
+   * dispatches calling this method between awaits cannot both succeed: the
+   * first to run claims the driver slot, the second observes
+   * `getDriver !== undefined` and returns `undefined`.
+   *
+   * Returns `undefined` if the driver slot is already held (race lost). The
+   * caller should fall back to queueing the message and skipping execution.
+   *
+   * On success, the caller MUST pass the returned `ralNumber` and
+   * `claimToken` to AgentExecutor via `preferredRalNumber` /
+   * `preferredRalClaimToken`. The token will be handed off to the live
+   * `isStreaming` flag inside `StreamExecutionHandler.execute()`.
+   */
+  tryCreateConcurrentRAL(
+    agentPubkey: string,
+    conversationId: string,
+    projectId: ProjectDTag,
+    triggeringEventId?: string,
+    traceContext?: { traceId: string; spanId: string }
+  ): { ralNumber: number; claimToken: string } | undefined {
+    if (this.getDriver(agentPubkey, conversationId) !== undefined) return undefined;
+
+    const ralNumber = this.create(
+      agentPubkey,
+      conversationId,
+      projectId,
+      triggeringEventId,
+      traceContext,
+    );
+
+    // Driver is unheld (verified above) and no awaits separate that check
+    // from this acquire — the JS event loop guarantees atomicity, so this
+    // always succeeds. The non-null assertion below mirrors that invariant.
+    this.tryAcquireDriver(agentPubkey, conversationId, ralNumber);
+
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber)!;
+    const claimToken = crypto.randomUUID();
+    ral.executionClaimToken = claimToken;
+    ral.lastActivityAt = Date.now();
+
+    trace.getActiveSpan()?.addEvent("ral.concurrent_ral_created", {
+      "ral.number": ralNumber,
+      "ral.id": ral.id,
+      "claim.token": claimToken,
+      "agent.pubkey": shortenPubkey(agentPubkey),
+      "conversation.id": shortenConversationId(conversationId),
+    });
+
+    return { ralNumber, claimToken };
   }
 
   /**
@@ -323,58 +475,110 @@ export class RALStateRegistry {
     return true;
   }
 
-  setToolActive(
+  /**
+   * Mark a tool as starting execution within `ralNumber`'s current step.
+   *
+   * Side-effect: releases the driver slot if `ralNumber` currently holds it,
+   * so that a user message arriving while this tool runs can spawn a fresh
+   * concurrent RAL via `tryAcquireDriver`. Idempotent across parallel-tool
+   * starts in the same step (the second start finds driver already null and
+   * is a no-op).
+   */
+  startTool(
     agentPubkey: string,
     conversationId: string,
     ralNumber: number,
     toolCallId: string,
-    isActive: boolean,
-    toolName?: string
+    toolName: string
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) return;
 
-    if (isActive) {
-      if (!toolName) {
-        throw new Error(`[RALRegistry] Missing tool name for toolCallId ${toolCallId} in conversation ${shortenConversationId(conversationId)}.`);
-      }
-      const now = Date.now();
-      ral.activeTools.set(toolCallId, { name: toolName, startedAt: now });
-      ral.toolStartedAt = now;
-      ral.currentTool = toolName;
-    } else {
-      ral.activeTools.delete(toolCallId);
-      if (ral.activeTools.size === 0) {
-        ral.currentTool = undefined;
-        ral.toolStartedAt = undefined;
-      } else {
-        const remainingToolInfo = ral.activeTools.values().next().value;
-        if (remainingToolInfo) {
-          ral.currentTool = remainingToolInfo.name;
-          ral.toolStartedAt = remainingToolInfo.startedAt;
-        } else {
-          ral.currentTool = undefined;
-          ral.toolStartedAt = undefined;
-        }
-      }
+    const now = Date.now();
+    ral.activeTools.set(toolCallId, { name: toolName, startedAt: now });
+    ral.toolStartedAt = now;
+    ral.currentTool = toolName;
+    ral.lastActivityAt = now;
+
+    // Release the driver slot for the duration of the tool execution. If
+    // another RAL is already driver (shouldn't happen at start-of-tool from
+    // a healthy stream), this is a no-op.
+    if (this.currentDriverByKey.get(this.makeKey(agentPubkey, conversationId)) === ralNumber) {
+      this.releaseDriver(agentPubkey, conversationId, ralNumber);
     }
 
-    ral.lastActivityAt = Date.now();
-    const newState: "ACTING" | "STREAMING" | "REASONING" = ral.activeTools.size > 0
-      ? "ACTING"
-      : ral.isStreaming
-        ? "STREAMING"
-        : "REASONING";
-
+    const newState: "ACTING" | "STREAMING" | "REASONING" =
+      ral.activeTools.size > 0 ? "ACTING" : ral.isStreaming ? "STREAMING" : "REASONING";
     llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
     this.deps.emitUpdated(ral.projectId, conversationId);
 
-    trace.getActiveSpan()?.addEvent(isActive ? "ral.tool_started" : "ral.tool_completed", {
+    trace.getActiveSpan()?.addEvent("ral.tool_started", {
       "ral.number": ralNumber,
       "tool.call_id": toolCallId,
       "tool.name": toolName,
       "ral.active_tools_count": ral.activeTools.size,
     });
+  }
+
+  /**
+   * Mark a tool as finished within `ralNumber`. Returns the resulting
+   * lock-handoff state:
+   *
+   * - `"still-pending"` — `ralNumber` still has other tools in flight (parallel
+   *   tools); caller waits for siblings to finish before deciding.
+   * - `"reacquired"` — all of `ralNumber`'s tools have finished and the driver
+   *   slot is now held by `ralNumber` again. Caller continues normally.
+   * - `"preempted"` — all of `ralNumber`'s tools have finished, but a different
+   *   RAL holds the driver slot. Caller should silently exit and surface the
+   *   tool result via a late-tool-result entry.
+   */
+  finishTool(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    toolCallId: string
+  ): "still-pending" | "reacquired" | "preempted" {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return "preempted";
+
+    ral.activeTools.delete(toolCallId);
+    if (ral.activeTools.size === 0) {
+      ral.currentTool = undefined;
+      ral.toolStartedAt = undefined;
+    } else {
+      const remainingToolInfo = ral.activeTools.values().next().value;
+      if (remainingToolInfo) {
+        ral.currentTool = remainingToolInfo.name;
+        ral.toolStartedAt = remainingToolInfo.startedAt;
+      } else {
+        ral.currentTool = undefined;
+        ral.toolStartedAt = undefined;
+      }
+    }
+    ral.lastActivityAt = Date.now();
+
+    let outcome: "still-pending" | "reacquired" | "preempted";
+    if (ral.activeTools.size > 0) {
+      outcome = "still-pending";
+    } else {
+      outcome = this.tryAcquireDriver(agentPubkey, conversationId, ralNumber)
+        ? "reacquired"
+        : "preempted";
+    }
+
+    const newState: "ACTING" | "STREAMING" | "REASONING" =
+      ral.activeTools.size > 0 ? "ACTING" : ral.isStreaming ? "STREAMING" : "REASONING";
+    llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
+    this.deps.emitUpdated(ral.projectId, conversationId);
+
+    trace.getActiveSpan()?.addEvent("ral.tool_completed", {
+      "ral.number": ralNumber,
+      "tool.call_id": toolCallId,
+      "ral.active_tools_count": ral.activeTools.size,
+      "ral.tool_outcome": outcome,
+    });
+
+    return outcome;
   }
 
   clearToolFallback(
@@ -444,8 +648,15 @@ export class RALStateRegistry {
     rals.delete(ralNumber);
     this.abortControllers.delete(this.makeAbortKey(key, ralNumber));
 
+    // Release the driver slot if this RAL was holding it. Fires any
+    // listeners waiting on the next driver release.
+    if (this.currentDriverByKey.get(key) === ralNumber) {
+      this.releaseDriver(agentPubkey, conversationId, ralNumber);
+    }
+
     if (rals.size === 0) {
       this.states.delete(key);
+      this.driverReleaseListenersByKey.delete(key);
     }
 
     trace.getActiveSpan()?.addEvent("ral.cleared", {
@@ -480,7 +691,7 @@ export class RALStateRegistry {
   shouldWakeUpExecution(agentPubkey: string, conversationId: string): boolean {
     const ral = this.getState(agentPubkey, conversationId);
     if (!ral) return true;
-    if (ral.isStreaming) return false;
+    if (this.getDriver(agentPubkey, conversationId) !== undefined) return false;
     if (this.deps.getConversationCompletedDelegations(agentPubkey, conversationId, ral.ralNumber).length > 0) {
       return true;
     }
@@ -495,6 +706,8 @@ export class RALStateRegistry {
     this.nextRalNumber.clear();
     this.ralIdToLocation.clear();
     this.abortControllers.clear();
+    this.currentDriverByKey.clear();
+    this.driverReleaseListenersByKey.clear();
   }
 
   hasOutstandingWork(

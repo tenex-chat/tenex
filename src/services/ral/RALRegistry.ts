@@ -105,7 +105,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   getConversationPendingDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): PendingDelegation[] { return this.delegationRegistry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber); }
   getConversationCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): CompletedDelegation[] { return this.delegationRegistry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber); }
   setStreaming(agentPubkey: string, conversationId: string, ralNumber: number, isStreaming: boolean): void { this.stateRegistry.setStreaming(agentPubkey, conversationId, ralNumber, isStreaming); }
+  getDriver(agentPubkey: string, conversationId: string): number | undefined { return this.stateRegistry.getDriver(agentPubkey, conversationId); }
+  tryAcquireDriver(agentPubkey: string, conversationId: string, ralNumber: number): boolean { return this.stateRegistry.tryAcquireDriver(agentPubkey, conversationId, ralNumber); }
+  releaseDriver(agentPubkey: string, conversationId: string, ralNumber: number): void { this.stateRegistry.releaseDriver(agentPubkey, conversationId, ralNumber); }
+  onceDriverReleased(agentPubkey: string, conversationId: string, fn: () => void): void { this.stateRegistry.onceDriverReleased(agentPubkey, conversationId, fn); }
   tryAcquireResumptionClaim(agentPubkey: string, conversationId: string, ralNumber: number): string | undefined { return this.stateRegistry.tryAcquireResumptionClaim(agentPubkey, conversationId, ralNumber); }
+  tryCreateConcurrentRAL(agentPubkey: string, conversationId: string, projectId: ProjectDTag, triggeringEventId?: string, traceContext?: { traceId: string; spanId: string }): { ralNumber: number; claimToken: string } | undefined { return this.stateRegistry.tryCreateConcurrentRAL(agentPubkey, conversationId, projectId, triggeringEventId, traceContext); }
   releaseResumptionClaim(agentPubkey: string, conversationId: string, ralNumber: number, token: string): boolean { return this.stateRegistry.releaseResumptionClaim(agentPubkey, conversationId, ralNumber, token); }
   handOffResumptionClaimToStream(agentPubkey: string, conversationId: string, ralNumber: number, token: string): boolean { return this.stateRegistry.handOffResumptionClaimToStream(agentPubkey, conversationId, ralNumber, token); }
   requestSilentCompletion(agentPubkey: string, conversationId: string, ralNumber: number): boolean { return this.stateRegistry.requestSilentCompletion(agentPubkey, conversationId, ralNumber); }
@@ -150,7 +155,8 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   clearQueuedInjectionByEventId(agentPubkey: string, conversationId: string, eventId: string): number { return this.injectionQueue.clearQueuedInjectionByEventId(this.stateRegistry.getActiveRALs(agentPubkey, conversationId).values(), agentPubkey, conversationId, eventId); }
   clearQueuedInjections(agentPubkey: string, conversationId: string): void { this.injectionQueue.clearQueuedInjections(this.stateRegistry.getActiveRALs(agentPubkey, conversationId).values(), agentPubkey, conversationId); }
 
-  setToolActive(agentPubkey: string, conversationId: string, ralNumber: number, toolCallId: string, isActive: boolean, toolName?: string): void { this.stateRegistry.setToolActive(agentPubkey, conversationId, ralNumber, toolCallId, isActive, toolName); }
+  startTool(agentPubkey: string, conversationId: string, ralNumber: number, toolCallId: string, toolName: string): void { this.stateRegistry.startTool(agentPubkey, conversationId, ralNumber, toolCallId, toolName); }
+  finishTool(agentPubkey: string, conversationId: string, ralNumber: number, toolCallId: string): "still-pending" | "reacquired" | "preempted" { return this.stateRegistry.finishTool(agentPubkey, conversationId, ralNumber, toolCallId); }
   clearToolFallback(agentPubkey: string, conversationId: string, ralNumber: number, toolCallId: string): boolean { return this.stateRegistry.clearToolFallback(agentPubkey, conversationId, ralNumber, toolCallId); }
   registerAbortController(agentPubkey: string, conversationId: string, ralNumber: number, controller: AbortController): void { this.stateRegistry.registerAbortController(agentPubkey, conversationId, ralNumber, controller); }
   clearRAL(agentPubkey: string, conversationId: string, ralNumber: number): void { this.stateRegistry.clearRAL(agentPubkey, conversationId, ralNumber); }

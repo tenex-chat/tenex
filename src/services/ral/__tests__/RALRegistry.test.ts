@@ -472,13 +472,13 @@ describe("RALRegistry", () => {
     });
   });
 
-  describe("setToolActive (concurrent tool tracking)", () => {
+  describe("startTool / finishTool (concurrent tool tracking)", () => {
     it("should track multiple concurrent tools", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start two tools concurrently
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-1", "fs_read");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-2", "shell");
 
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.activeTools.size).toBe(2);
@@ -492,11 +492,11 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start two tools
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-1", "fs_read");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-2", "shell");
 
       // Complete the second tool (current one)
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+      registry.finishTool(agentPubkey, conversationId, ralNumber, "tool-call-2");
 
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.activeTools.size).toBe(1);
@@ -509,10 +509,10 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start and complete two tools
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", false);
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-1", "fs_read");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-2", "shell");
+      registry.finishTool(agentPubkey, conversationId, ralNumber, "tool-call-1");
+      registry.finishTool(agentPubkey, conversationId, ralNumber, "tool-call-2");
 
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.activeTools.size).toBe(0);
@@ -523,7 +523,7 @@ describe("RALRegistry", () => {
     it("should store tool info in activeTools map", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-1", "fs_read");
 
       const state = registry.getState(agentPubkey, conversationId);
       const toolInfo = state?.activeTools.get("tool-call-1");
@@ -535,17 +535,17 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start first tool
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-1", "fs_read");
       const state1 = registry.getState(agentPubkey, conversationId);
       const firstToolStartTime = state1?.toolStartedAt;
 
       setSystemTime(new Date((firstToolStartTime ?? Date.now()) + 2));
       try {
         // Start second tool
-        registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
+        registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-2", "shell");
 
         // Complete the second tool (current one)
-        registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+        registry.finishTool(agentPubkey, conversationId, ralNumber, "tool-call-2");
       } finally {
         setSystemTime();
       }
@@ -557,9 +557,9 @@ describe("RALRegistry", () => {
       expect(state2?.toolStartedAt).toBe(firstToolStartTime);
     });
 
-    it("should handle setToolActive for non-existent RAL gracefully", () => {
+    it("should handle startTool for non-existent RAL gracefully", () => {
       expect(() => {
-        registry.setToolActive("nonexistent", conversationId, 1, "tool-call-1", true, "fs_read");
+        registry.startTool("nonexistent", conversationId, 1, "tool-call-1", "fs_read");
       }).not.toThrow();
     });
   });
@@ -569,8 +569,8 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start two tools
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "shell");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-1", "fs_read");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tool-call-2", "shell");
 
       // Clear the second tool via fallback
       const cleared = registry.clearToolFallback(agentPubkey, conversationId, ralNumber, "tool-call-2");
@@ -2691,6 +2691,122 @@ describe("RALRegistry", () => {
       // Should be empty now
       const results = registry.getActiveEntriesForProject(projectId);
       expect(results.length).toBe(0);
+    });
+  });
+
+  describe("driver slot lock-handoff", () => {
+    it("startTool releases driver slot held by ralNumber", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
+      expect(registry.getDriver(agentPubkey, conversationId)).toBe(ralNumber);
+
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tc-1", "shell");
+      expect(registry.getDriver(agentPubkey, conversationId)).toBeUndefined();
+    });
+
+    it("finishTool returns 'still-pending' when other tools are running", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tc-1", "shell");
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tc-2", "fs_read");
+
+      const outcome = registry.finishTool(agentPubkey, conversationId, ralNumber, "tc-1");
+      expect(outcome).toBe("still-pending");
+      expect(registry.getDriver(agentPubkey, conversationId)).toBeUndefined();
+    });
+
+    it("finishTool returns 'reacquired' when last tool finishes and driver is free", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tc-1", "shell");
+
+      const outcome = registry.finishTool(agentPubkey, conversationId, ralNumber, "tc-1");
+      expect(outcome).toBe("reacquired");
+      expect(registry.getDriver(agentPubkey, conversationId)).toBe(ralNumber);
+    });
+
+    it("finishTool returns 'preempted' when a different RAL holds the driver", () => {
+      // RAL #1 is mid-tool; RAL #2 is the new driver.
+      const ral1 = registry.create(agentPubkey, conversationId, projectId);
+      registry.setStreaming(agentPubkey, conversationId, ral1, true);
+      registry.startTool(agentPubkey, conversationId, ral1, "tc-1", "shell");
+
+      // Simulate RAL #2 spawning and acquiring the driver.
+      const ral2 = registry.create(agentPubkey, conversationId, projectId);
+      expect(registry.tryAcquireDriver(agentPubkey, conversationId, ral2)).toBe(true);
+
+      // Now RAL #1's tool finishes.
+      const outcome = registry.finishTool(agentPubkey, conversationId, ral1, "tc-1");
+      expect(outcome).toBe("preempted");
+      expect(registry.getDriver(agentPubkey, conversationId)).toBe(ral2);
+    });
+
+    it("tryAcquireResumptionClaim refuses streaming RALs (lock-handoff guard)", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
+      registry.startTool(agentPubkey, conversationId, ralNumber, "tc-1", "shell");
+      // driver=undefined, isStreaming=true (mid-tool). Claim must refuse.
+
+      const token = registry.tryAcquireResumptionClaim(agentPubkey, conversationId, ralNumber);
+      expect(token).toBeUndefined();
+    });
+
+    it("tryAcquireResumptionClaim succeeds for an idle RAL", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      // Never streamed; driver=undefined, isStreaming=false.
+      const token = registry.tryAcquireResumptionClaim(agentPubkey, conversationId, ralNumber);
+      expect(token).toBeDefined();
+    });
+
+    it("tryCreateConcurrentRAL atomically creates a RAL and claims the driver", () => {
+      // Existing RAL is mid-tool.
+      const existing = registry.create(agentPubkey, conversationId, projectId);
+      registry.setStreaming(agentPubkey, conversationId, existing, true);
+      registry.startTool(agentPubkey, conversationId, existing, "tc-1", "shell");
+
+      const spawn = registry.tryCreateConcurrentRAL(
+        agentPubkey,
+        conversationId,
+        projectId,
+        "evt-trigger",
+      );
+      expect(spawn).toBeDefined();
+      expect(spawn!.ralNumber).toBe(existing + 1);
+      expect(spawn!.claimToken).toBeDefined();
+      expect(registry.getDriver(agentPubkey, conversationId)).toBe(spawn!.ralNumber);
+    });
+
+    it("tryCreateConcurrentRAL returns undefined when driver is already held", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      // RAL is currently driving (not mid-tool).
+      registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
+
+      const spawn = registry.tryCreateConcurrentRAL(
+        agentPubkey,
+        conversationId,
+        projectId,
+        "evt-trigger",
+      );
+      expect(spawn).toBeUndefined();
+      // Driver still held by original RAL.
+      expect(registry.getDriver(agentPubkey, conversationId)).toBe(ralNumber);
+    });
+
+    it("clearRAL on a fresh-spawned concurrent RAL releases the driver", () => {
+      const existing = registry.create(agentPubkey, conversationId, projectId);
+      registry.setStreaming(agentPubkey, conversationId, existing, true);
+      registry.startTool(agentPubkey, conversationId, existing, "tc-1", "shell");
+
+      const spawn = registry.tryCreateConcurrentRAL(
+        agentPubkey,
+        conversationId,
+        projectId,
+        "evt-trigger",
+      )!;
+      expect(registry.getDriver(agentPubkey, conversationId)).toBe(spawn.ralNumber);
+
+      registry.clearRAL(agentPubkey, conversationId, spawn.ralNumber);
+      expect(registry.getDriver(agentPubkey, conversationId)).toBeUndefined();
     });
   });
 

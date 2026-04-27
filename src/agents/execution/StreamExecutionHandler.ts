@@ -469,6 +469,9 @@ export class StreamExecutionHandler {
             onNoResponseRequested: () => {
                 this.requestSilentTermination();
             },
+            onPreemptRequested: () => {
+                this.requestSilentTermination();
+            },
         });
     }
 

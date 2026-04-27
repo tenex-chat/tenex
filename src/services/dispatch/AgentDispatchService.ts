@@ -23,6 +23,7 @@ import { getProjectContext, type ProjectContext } from "@/services/projects";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { RALRegistry } from "@/services/ral";
 import type { RALRegistryEntry } from "@/services/ral/types";
+import { createProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 import { ROOT_CONTEXT, SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
@@ -70,6 +71,13 @@ interface DeliveryInjectionResult {
     claim?: {
         ralNumber: number;
         token: string;
+        /**
+         * True when the RAL was created by `tryCreateConcurrentRAL` (lock-
+         * handoff fresh spawn). If the dispatch fails before the stream
+         * takes ownership, the RAL must be cleared to release the driver
+         * slot — leaving it would deadlock subsequent dispatches.
+         */
+        freshSpawn?: boolean;
     };
 }
 
@@ -865,7 +873,7 @@ export class AgentDispatchService {
         // Held at dispatchToAgent scope (not AgentExecutor scope) because
         // `createExecutionContext` can throw before `agentExecutor.execute()`
         // is even invoked, and we still need to release the claim in that case.
-        let resumptionClaim: { ralNumber: number; token: string } | undefined;
+        let resumptionClaim: { ralNumber: number; token: string; freshSpawn?: boolean } | undefined;
 
         try {
             const projectDTag = projectCtx.project.dTag;
@@ -894,6 +902,7 @@ export class AgentDispatchService {
                 activeRal,
                 agent: targetAgent,
                 conversationId,
+                projectDTag,
                 message: envelope.content,
                 senderPubkey: envelope.principal.linkedPubkey,
                 senderPrincipal: principalContext?.senderPrincipal,
@@ -983,12 +992,29 @@ export class AgentDispatchService {
             // us from clearing a claim that a subsequent dispatch may have
             // re-acquired after `cleanup()` flipped `isStreaming` back to false.
             if (resumptionClaim) {
-                ralRegistry.releaseResumptionClaim(
+                const released = ralRegistry.releaseResumptionClaim(
                     targetAgent.pubkey,
                     conversationId,
                     resumptionClaim.ralNumber,
                     resumptionClaim.token
                 );
+                // Fresh-spawn RALs that never reached the streaming flag
+                // still hold the driver slot. Releasing only the claim token
+                // would deadlock subsequent dispatches — clearRAL also
+                // releases the driver and removes the empty RAL from the
+                // registry. `released === true` means the stream never
+                // took ownership; for resumption RALs we leave the entry
+                // alone (it predates this dispatch).
+                if (released && resumptionClaim.freshSpawn) {
+                    ralRegistry.clearRAL(
+                        targetAgent.pubkey,
+                        conversationId,
+                        resumptionClaim.ralNumber
+                    );
+                    agentSpan.addEvent("dispatch.fresh_spawn_cleared_unconsumed", {
+                        "ral.number": resumptionClaim.ralNumber,
+                    });
+                }
             }
             agentSpan.end();
         }
@@ -1029,6 +1055,7 @@ export class AgentDispatchService {
         activeRal: RALRegistryEntry | undefined;
         agent: AgentInstance;
         conversationId: string;
+        projectDTag: string;
         message: string;
         senderPubkey?: string;
         senderPrincipal?: PrincipalSnapshot;
@@ -1040,6 +1067,7 @@ export class AgentDispatchService {
             activeRal,
             agent,
             conversationId,
+            projectDTag,
             message,
             senderPubkey,
             senderPrincipal,
@@ -1055,15 +1083,31 @@ export class AgentDispatchService {
         const ralRegistry = RALRegistry.getInstance();
         const messageLength = message.length;
 
-        ralRegistry.queueUserMessage(
-            agent.pubkey,
-            conversationId,
-            activeRal.ralNumber,
-            message,
-            { senderPubkey, senderPrincipal, targetedPrincipals, eventId }
-        );
+        // Decision tree for an existing RAL (`activeRal`):
+        //
+        //   driver !== undefined → existing RAL is mid-LLM-call between tool
+        //     boundaries. Queue + skip; the live stream's prepareStep injector
+        //     will drain the message before the next LLM step.
+        //
+        //   driver === undefined && activeRal.isStreaming → lock-handoff:
+        //     existing RAL released the driver for tool execution and won't
+        //     reach prepareStep until the tool returns. Spawn a fresh
+        //     concurrent RAL atomically (synchronous create + driver claim).
+        //
+        //   driver === undefined && !activeRal.isStreaming → idle RAL between
+        //     turns. Queue + try resumption claim; one concurrent dispatch
+        //     wins, the others queue and skip.
+        const driver = ralRegistry.getDriver(agent.pubkey, conversationId);
 
-        if (activeRal.isStreaming) {
+        if (driver !== undefined) {
+            ralRegistry.queueUserMessage(
+                agent.pubkey,
+                conversationId,
+                activeRal.ralNumber,
+                message,
+                { senderPubkey, senderPrincipal, targetedPrincipals, eventId }
+            );
+
             const llmConfig = config.getLLMConfig(agent.llmConfig);
             const liveInjection = await this.tryDeliverQueuedMessageToLiveStream({
                 agent,
@@ -1099,13 +1143,82 @@ export class AgentDispatchService {
             return { skipExecution: true };
         }
 
-        // The RAL is idle and potentially resumable. Two concurrent dispatches
-        // may both observe this state via `getState`; without serialization,
-        // both would proceed to execute() and both would resume the same RAL.
-        // Atomically claim the right to wake this RAL up — only one concurrent
-        // dispatch wins. The loser's message has already been queued onto the
-        // same ralNumber above and will be drained by the winner's execution
-        // via `StreamSetup.getAndConsumeInjections`.
+        if (activeRal.isStreaming) {
+            // Lock-handoff: existing RAL is mid-tool. Atomically create a
+            // fresh concurrent RAL and claim the driver slot for it.
+            const traceContext = (() => {
+                const span = trace.getActiveSpan();
+                if (!span) return undefined;
+                const ctx = span.spanContext();
+                return { traceId: ctx.traceId, spanId: ctx.spanId };
+            })();
+            const spawn = ralRegistry.tryCreateConcurrentRAL(
+                agent.pubkey,
+                conversationId,
+                createProjectDTag(projectDTag),
+                eventId,
+                traceContext
+            );
+
+            if (!spawn) {
+                // Race lost: another dispatcher created the concurrent RAL
+                // first (or it became driver before we observed). Queue onto
+                // whatever the new active RAL is and skip.
+                const refreshedActive = ralRegistry.getState(agent.pubkey, conversationId);
+                if (refreshedActive) {
+                    ralRegistry.queueUserMessage(
+                        agent.pubkey,
+                        conversationId,
+                        refreshedActive.ralNumber,
+                        message,
+                        { senderPubkey, senderPrincipal, targetedPrincipals, eventId }
+                    );
+                }
+                agentSpan.addEvent("dispatch.lock_handoff_spawn_lost", {
+                    "ral.previous_number": activeRal.ralNumber,
+                    "message.length": messageLength,
+                });
+                return { skipExecution: true };
+            }
+
+            agentSpan.addEvent("dispatch.lock_handoff_spawn_acquired", {
+                "ral.previous_number": activeRal.ralNumber,
+                "ral.new_number": spawn.ralNumber,
+                "claim.token": spawn.claimToken,
+                "message.length": messageLength,
+            });
+            logger.info("[reply] Spawned concurrent RAL for lock-handoff", {
+                agent: agent.slug,
+                previousRalNumber: activeRal.ralNumber,
+                newRalNumber: spawn.ralNumber,
+                injectionLength: messageLength,
+            });
+            return {
+                skipExecution: false,
+                claim: {
+                    ralNumber: spawn.ralNumber,
+                    token: spawn.claimToken,
+                    freshSpawn: true,
+                },
+            };
+        }
+
+        // Idle RAL — queue and try resumption claim.
+        ralRegistry.queueUserMessage(
+            agent.pubkey,
+            conversationId,
+            activeRal.ralNumber,
+            message,
+            { senderPubkey, senderPrincipal, targetedPrincipals, eventId }
+        );
+
+        // Two concurrent dispatches may both observe this state via
+        // `getState`; without serialization, both would proceed to execute()
+        // and both would resume the same RAL. Atomically claim the right to
+        // wake this RAL up — only one concurrent dispatch wins. The loser's
+        // message has already been queued onto the same ralNumber above and
+        // will be drained by the winner's execution via
+        // `StreamSetup.getAndConsumeInjections`.
         const claimToken = ralRegistry.tryAcquireResumptionClaim(
             agent.pubkey,
             conversationId,
