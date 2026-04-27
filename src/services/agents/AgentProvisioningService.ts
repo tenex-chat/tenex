@@ -20,7 +20,6 @@ export interface CreateLocalAgentInput {
     instructions?: string;
     useCriteria?: string;
     llmConfig?: string | null;
-    tools?: string[] | null;
 }
 
 async function publishInstalledAgentsInventory(): Promise<void> {
@@ -111,7 +110,6 @@ export async function createLocalAgent(
         useCriteria: input.useCriteria,
         defaultConfig: {
             model: input.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-            tools: input.tools ?? undefined,
         },
     });
 

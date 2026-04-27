@@ -5,6 +5,7 @@
  */
 
 import * as path from "node:path";
+import chalk from "chalk";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -242,6 +243,7 @@ export class MCPManager {
                 logger.warn(
                     `Skipping MCP server '${name}' due to path restrictions. Working directory '${this.workingDirectory}' is not in allowedPaths: ${validAllowedPaths.join(", ")}`
                 );
+                console.log(chalk.yellow(`   ⚠ MCP server skipped: ${chalk.bold(name)} (path restriction)`));
                 return;
             }
         }
@@ -294,7 +296,9 @@ export class MCPManager {
             try {
                 await Promise.race([client.listTools(), timeoutPromise]);
             } catch (error) {
-                logger.error(`MCP server '${name}' failed health check:`, error);
+                const errMsg = formatAnyError(error);
+                logger.error(`MCP server '${name}' failed health check:`, errMsg);
+                console.error(chalk.red(`   ✗ MCP server health check failed: ${chalk.bold(name)} — ${errMsg}`));
                 await client.close();
                 return;
             }
@@ -308,13 +312,16 @@ export class MCPManager {
             });
 
             logger.info(`MCP server '${name}' started successfully`);
+            console.log(chalk.green(`   ✓ MCP server started: ${chalk.bold(name)}`));
 
             // Emit telemetry
             trace.getActiveSpan()?.addEvent("mcp.server_started", {
                 "server.name": name,
             });
         } catch (error) {
-            logger.error(`Failed to start MCP server '${name}':`, formatAnyError(error));
+            const errMsg = formatAnyError(error);
+            logger.error(`Failed to start MCP server '${name}':`, errMsg);
+            console.error(chalk.red(`   ✗ MCP server failed: ${chalk.bold(name)} — ${errMsg}`));
             throw error;
         }
     }

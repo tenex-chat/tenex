@@ -310,16 +310,13 @@ export class EventHandler {
             }
 
             const updateResult = await this.agentConfigUpdateService.applyEvent(event);
-            const configUpdated = updateResult.configUpdated || updateResult.pmUpdated;
+            const configUpdated = updateResult.configUpdated;
 
             logger.info("Processing agent config update", {
                 agentSlug: agent.slug,
                 projectDTag,
                 hasModel: updateResult.hasModel,
-                toolCount: updateResult.toolCount,
                 skillCount: updateResult.skillCount,
-                hasPM: updateResult.hasPM,
-                hasReset: updateResult.hasReset,
             });
 
             // Reload and status publish now handled by AgentConfigWatcher.

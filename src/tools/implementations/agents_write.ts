@@ -1,5 +1,4 @@
 import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
-import { CONTEXT_INJECTED_TOOLS, CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { createLocalAgent } from "@/services/agents/AgentProvisioningService";
 
@@ -14,10 +13,6 @@ const agentsWriteSchema = z.object({
     instructions: z.string().describe("System instructions that guide agent behavior"),
     useCriteria: z.string().describe("Criteria for when this agent should be selected"),
     llmConfig: z.string().nullable().describe("LLM configuration identifier"),
-    tools: z
-        .array(z.string())
-        .nullable()
-        .describe("List of tool names to make available to this agent"),
 });
 
 type AgentsWriteInput = z.infer<typeof agentsWriteSchema>;
@@ -41,16 +36,7 @@ async function executeAgentsWrite(
     input: AgentsWriteInput,
     context?: ToolExecutionContext
 ): Promise<AgentsWriteOutput> {
-    const { slug, name, role, instructions, useCriteria, llmConfig, tools: rawTools } =
-        input;
-
-    // Normalize and filter tools
-    const autoInjectedTools = new Set<string>([...CORE_AGENT_TOOLS, ...DELEGATE_TOOLS, ...CONTEXT_INJECTED_TOOLS]);
-    const tools = rawTools === null ? null : rawTools
-        // 1. Strip mcp__tenex__ prefix
-        .map(t => t.startsWith("mcp__tenex__") ? t.slice("mcp__tenex__".length) : t)
-        // 2. Filter out auto-injected tools
-        .filter(t => !autoInjectedTools.has(t));
+    const { slug, name, role, instructions, useCriteria, llmConfig } = input;
 
     if (!slug) {
         return {
@@ -85,10 +71,9 @@ async function executeAgentsWrite(
         existingAgent.role = role;
         existingAgent.instructions = instructions;
         existingAgent.useCriteria = useCriteria;
-        if (llmConfig !== undefined || tools !== undefined) {
+        if (llmConfig !== undefined) {
             if (!existingAgent.default) existingAgent.default = {};
-            if (llmConfig !== undefined) existingAgent.default.model = llmConfig ?? undefined;
-            if (tools !== undefined) existingAgent.default.tools = tools ?? undefined;
+            existingAgent.default.model = llmConfig ?? undefined;
         }
 
         // Save to storage
@@ -120,7 +105,6 @@ async function executeAgentsWrite(
         instructions,
         useCriteria,
         llmConfig,
-        tools,
     });
 
     logger.info(`Successfully created agent "${name}" (${slug})`);
@@ -143,7 +127,7 @@ async function executeAgentsWrite(
 export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "Write or update agent configuration and tools. Creates or updates backend-local agent identities. Core tools are automatically injected (lessons, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are assigned based on agent category — worker agents receive ask and delegate_followup, while domain-expert agents receive only ask. Do not include delegation tools explicitly. Assign additional tools based on responsibilities. Telegram-triggered turns also get the context-sensitive `no_response` tool automatically. Newly created agents are installed in the backend, but they are not assigned to the current project until the user publishes a 31933 event that p-tags the agent pubkey.",
+            "Write or update agent configuration. Creates or updates backend-local agent identities. Core tools are automatically injected (lessons, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are assigned based on agent category — worker agents receive ask and delegate_followup, while domain-expert agents receive only ask. Newly created agents are installed in the backend, but they are not assigned to the current project until the user publishes a 31933 event that p-tags the agent pubkey.",
         inputSchema: agentsWriteSchema,
         execute: async (input: AgentsWriteInput) => {
             try {
@@ -157,4 +141,4 @@ export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool 
             }
         },
     }) as AISdkTool;
-} 
+}

@@ -90,7 +90,6 @@ export type ToolAgentInfo = Pick<
     | "tools"
     | "telegram"
     | "mcpAccess"
-    | "blockedSkills"
 >;
 
 /**

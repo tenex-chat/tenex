@@ -456,9 +456,8 @@ export class EventHandlerRegistry {
         }
 
         const updateResult = await this.agentConfigUpdateService.applyEvent(event);
-        const configUpdated = updateResult.configUpdated || updateResult.pmUpdated;
 
-        if (!configUpdated) {
+        if (!updateResult.configUpdated) {
             logger.info("No config changes for global agent config update", {
                 agentSlug: storedAgent.slug,
                 agentPubkey: agentPubkey.substring(0, 8),
@@ -470,9 +469,7 @@ export class EventHandlerRegistry {
             agentSlug: storedAgent.slug,
             agentPubkey: agentPubkey.substring(0, 8),
             hasModel: updateResult.hasModel,
-            toolCount: updateResult.toolCount,
             skillCount: updateResult.skillCount,
-            hasPM: updateResult.hasPM,
         });
 
         // Reload and status publish now handled by each runtime's AgentConfigWatcher.

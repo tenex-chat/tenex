@@ -63,7 +63,6 @@ interface AgentDefinitionStorage {
  * The following fields are NEVER overwritten during an upgrade:
  * - nsec (agent's private key / identity)
  * - slug (agent's identifier in projects)
- * - isPM (global PM flag)
  * - status (active/inactive)
  *
  * ## Backward Compatibility
@@ -610,20 +609,6 @@ export class AgentDefinitionMonitor {
         if (newUseCriteria !== storedAgent.useCriteria) {
             storedAgent.useCriteria = newUseCriteria;
             changedFields.push("useCriteria");
-        }
-
-        // Update tool requirements
-        const toolTags = event.tags
-            .filter((tag) => tag[0] === "tool" && tag[1])
-            .map((tag) => tag[1]);
-        const newTools = toolTags.length > 0 ? toolTags : undefined;
-        const currentTools = storedAgent.default?.tools;
-        if (JSON.stringify(newTools) !== JSON.stringify(currentTools)) {
-            if (!storedAgent.default) {
-                storedAgent.default = {};
-            }
-            storedAgent.default.tools = newTools;
-            changedFields.push("default.tools");
         }
 
         const skillEventIds = agentDef.getSkillEventIds();

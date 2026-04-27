@@ -22,12 +22,8 @@ export interface TelegramAgentConfig {
 export interface AgentDefaultConfig {
     /** Default LLM model configuration string (e.g., "anthropic:claude-sonnet-4") */
     model?: string;
-    /** Default tools list for this agent */
-    tools?: string[];
     /** Skill IDs that are always active for this agent across all conversations. Local skill directory IDs are authoritative. */
     skills?: string[];
-    /** Skill IDs that are blocked from activation for this agent. */
-    blockedSkills?: string[];
     /** MCP server slugs (from mcp.json) this agent can access. */
     mcpAccess?: string[];
 }

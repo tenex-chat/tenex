@@ -85,12 +85,6 @@ export interface StoredAgent extends StoredAgentData {
      * 'inactive' and retain their pubkey/nsec for potential reactivation.
      */
     status?: "active" | "inactive";
-    /**
-     * Global PM designation flag.
-     * When true, this agent is designated as PM for ALL projects where it exists.
-     * Set via kind 24020 TenexAgentConfigUpdate event with ["pm"] tag (without a-tag).
-     */
-    isPM?: boolean;
 }
 
 /**
@@ -999,61 +993,6 @@ export class AgentStorage {
     }
 
     /**
-     * Update an agent's global PM designation flag.
-     *
-     * When isPM is true, this agent becomes the PM for ALL projects where it exists.
-     * This takes precedence over project tag designations.
-     *
-     * Updates ONLY the stored data on disk. To refresh the in-memory instance,
-     * call AgentRegistry.reloadAgent() after this method.
-     *
-     * @param pubkey - Agent's public key (hex string)
-     * @param isPM - Whether this agent is designated as PM (true/false/undefined to clear)
-     * @returns true if updated successfully, false if agent not found
-     */
-    async updateAgentIsPM(pubkey: string, isPM: boolean | undefined): Promise<boolean> {
-        const agent = await this.loadAgent(pubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${pubkey} not found`);
-            return false;
-        }
-
-        if (isPM === undefined || isPM === false) {
-            // Clear the flag if it exists
-            agent.isPM = undefined;
-        } else {
-            agent.isPM = true;
-        }
-
-        await this.saveAgent(agent);
-        logger.info(`Updated isPM flag for agent ${agent.name}`, { isPM: agent.isPM });
-        return true;
-    }
-
-    /**
-     * Clear an agent's default configuration block and global isPM flag.
-     *
-     * Called when a kind:24020 event carries a ["reset"] tag.
-     *
-     * @param pubkey - Agent's public key
-     * @returns true if updated successfully, false if agent not found
-     */
-    async resetDefaultConfig(pubkey: string): Promise<boolean> {
-        const agent = await this.loadAgent(pubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${pubkey} not found`);
-            return false;
-        }
-
-        agent.default = undefined;
-        agent.isPM = undefined;
-
-        await this.saveAgent(agent);
-        logger.info(`Reset default config and isPM for agent ${agent.name}`);
-        return true;
-    }
-
-    /**
      * Update an agent's inferred category without touching the authoritative category field.
      *
      * Updates ONLY the stored data on disk. To refresh the in-memory instance,
@@ -1105,27 +1044,11 @@ export class AgentStorage {
             agent.default.model = updates.model;
         }
 
-        if (updates.tools !== undefined) {
-            if (updates.tools.length > 0) {
-                agent.default.tools = updates.tools;
-            } else {
-                agent.default.tools = undefined;
-            }
-        }
-
         if (updates.skills !== undefined) {
             if (updates.skills.length > 0) {
                 agent.default.skills = updates.skills;
             } else {
                 agent.default.skills = undefined;
-            }
-        }
-
-        if (updates.blockedSkills !== undefined) {
-            if (updates.blockedSkills.length > 0) {
-                agent.default.blockedSkills = updates.blockedSkills;
-            } else {
-                agent.default.blockedSkills = undefined;
             }
         }
 

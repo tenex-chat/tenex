@@ -11,12 +11,6 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import type { MCPConfig } from "@/llm/providers/types";
 import { publishAgentProfile } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
-import { SkillService } from "@/services/skill";
-import {
-    buildExpandedBlockedSet,
-    buildSkillAliasMap,
-    filterBlockedSkills,
-} from "@/services/skill/skill-blocking";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -51,36 +45,15 @@ export async function createAgentInstance(
     const pubkey = signer.pubkey;
 
     const effectiveLLMConfig = storedAgent.default?.model;
-    const effectiveTools = storedAgent.default?.tools;
     const effectiveAlwaysSkills = storedAgent.default?.skills;
-    const effectiveBlockedSkills = storedAgent.default?.blockedSkills;
     const effectiveMcpAccess = storedAgent.default?.mcpAccess;
-
-    const availableSkills = await SkillService.getInstance().listAvailableSkills({
-        agentPubkey: pubkey,
-        projectPath: registry.getBasePath(),
-    });
-    const availableSkillMap = buildSkillAliasMap(availableSkills);
-    const blockedSet = buildExpandedBlockedSet(effectiveBlockedSkills, availableSkillMap);
-    const { allowed, blocked } = filterBlockedSkills(
-        effectiveAlwaysSkills ?? [],
-        blockedSet,
-        availableSkillMap
-    );
-
-    if (blocked.length > 0) {
-        logger.warn("[AgentLoader] Blocked skills removed from alwaysSkills", {
-            agent: storedAgent.slug,
-            blockedSkills: blocked,
-        });
-    }
 
     // Resolve category before tool assignment so category-specific capability
     // policy applies on the first hydrated instance.
     const resolvedCategory = resolveCategory(storedAgent.category) ?? resolveCategory(storedAgent.inferredCategory);
 
     // Process tools using pure functions
-    const normalizedTools = processAgentTools(effectiveTools || [], resolvedCategory);
+    const normalizedTools = processAgentTools([], resolvedCategory);
 
     // Build agent-specific MCP config from stored mcpServers
     const agentMcpConfig: MCPConfig | undefined = storedAgent.mcpServers
@@ -104,12 +77,10 @@ export async function createAgentInstance(
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
         mcpServers: storedAgent.mcpServers,
-        isPM: storedAgent.isPM,
         telegram: storedAgent.telegram,
-        alwaysSkills: allowed.length > 0
-            ? allowed
+        alwaysSkills: effectiveAlwaysSkills && effectiveAlwaysSkills.length > 0
+            ? effectiveAlwaysSkills
             : undefined,
-        blockedSkills: effectiveBlockedSkills,
         mcpAccess: effectiveMcpAccess ?? [],
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();

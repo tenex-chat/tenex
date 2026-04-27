@@ -83,9 +83,7 @@ function agentChanged(before: StoredAgent, after: StoredAgent): boolean {
     if (before.description !== after.description) return true;
     if (before.instructions !== after.instructions) return true;
     if (before.useCriteria !== after.useCriteria) return true;
-    const oldTools = before.default?.tools?.slice().sort().join("\0") ?? "";
-    const newTools = after.default?.tools?.slice().sort().join("\0") ?? "";
-    return oldTools !== newTools;
+    return false;
 }
 
 async function repairAgents(): Promise<void> {

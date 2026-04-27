@@ -598,6 +598,12 @@ export class ProjectRuntime {
 
             const configuredServers = this.mcpManager.getConfiguredServers();
 
+            if (configuredServers.length > 0) {
+                console.log(
+                    chalk.cyan(`   MCP: ${configuredServers.length} server(s) configured: ${configuredServers.join(", ")}`)
+                );
+            }
+
             trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
                 "mcp.configured_servers": configuredServers.length,
                 "mcp.installed_from_events": installedCount.success,

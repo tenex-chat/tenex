@@ -3,11 +3,6 @@ import { tool } from "ai";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { SkillService } from "@/services/skill/SkillService";
 import type { SkillStoreScope } from "@/services/skill/types";
-import {
-    buildExpandedBlockedSet,
-    buildSkillAliasMap,
-    isSkillBlocked,
-} from "@/services/skill/skill-blocking";
 
 const MAX_DESCRIPTION_LENGTH = 150;
 
@@ -64,18 +59,9 @@ export function createSkillListTool(context: ToolExecutionContext): AISdkTool {
         inputSchema: z.object({}),
         execute: async () => {
             const skillService = SkillService.getInstance();
-            const availableSkills = await skillService.listAvailableSkills({
+            const filteredSkills = await skillService.listAvailableSkills({
                 agentPubkey: agent.pubkey,
                 projectPath: projectBasePath || undefined,
-            });
-
-            const skillAliasMap = buildSkillAliasMap(availableSkills);
-            const blockedSet = buildExpandedBlockedSet(agent.blockedSkills ?? [], skillAliasMap);
-
-            const filteredSkills = availableSkills.filter((skill) => {
-                if (isSkillBlocked(skill.identifier, blockedSet, skillAliasMap)) return false;
-                if (skill.eventId && isSkillBlocked(skill.eventId, blockedSet, skillAliasMap)) return false;
-                return true;
             });
 
             const result: SkillListResult = {
