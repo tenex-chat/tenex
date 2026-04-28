@@ -358,13 +358,13 @@ Ask the project owner a structured question and pause execution. Stop after call
 | `questions[].options` | string[] | Available choices |
 
 ### `learn`
-Persist a lesson learned. Publishes a Nostr lesson event and indexes the content in the `lessons` RAG collection for retrieval.
+Persist a lesson learned. Publishes a Nostr lesson event and calls the current LLM to update `+INDEX.md` in the agent's home directory with a categorized summary. The `+INDEX.md` file is auto-injected into the system prompt on future invocations so lessons accumulate in the agent's working memory. Note: the Rust implementation intentionally diverges from the TypeScript version — TS stores lessons in a `lessons` RAG collection, Rust uses an LLM-maintained index file.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `title` | string | Short title for the lesson |
 | `lesson` | string | What was learned and why it matters |
-| `category` | string? | Optional category tag (e.g. `debugging`, `architecture`) |
+| `category` | string? | Category for organization (e.g. `debugging`, `architecture`, `workflow`) |
 | `hashtags` | string[]? | Optional hashtags without the `#` prefix |
 
 ### `project_list`
@@ -373,25 +373,15 @@ List all TENEX projects available on this system. Returns project IDs, titles, r
 No parameters.
 
 ### `rag_add_documents`
-Embed and store a document in a named RAG collection for later semantic retrieval.
+Embed and store a document for later semantic retrieval. The target collection is determined by `audience` rather than an explicit name — agents cannot create or address arbitrary collections.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `content` | string | Text to embed and store |
-| `collection` | string | Collection name — e.g. `lessons`, `agent_<pubkey>`, `project_<id>`, or custom |
+| `audience` | string | `'self'` → `agent_{pubkey}` collection; `'project'` → `project_{id}` collection |
 | `title` | string? | Short descriptive title |
 
-Disabled (returns error message) when embedding is not configured (`~/.tenex/embed.json` absent).
-
-### `rag_collection_list`
-List all RAG collections in the current project's knowledge base. No parameters. Returns one collection name per line, or an error if RAG is not configured.
-
-### `rag_collection_delete`
-Delete a named RAG collection and all its documents.
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `collection` | string | Collection name to delete |
+Disabled (returns error message) when embedding is not configured (`~/.tenex/embed.json` absent). Note: the Rust implementation diverges from TypeScript — TS accepts a free-form `collection` name; Rust enforces `'self'` or `'project'` and resolves the collection internally.
 
 ### `rag_search`
 Search the RAG vector store for relevant content. Always searches across all three fixed collections: `conversations`, `project_{id}`, and `agent_{pubkey}`.

@@ -71,7 +71,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - **Delegation tools**: `delegate` (emit delegation intent), `delegate_crossproject` (cross-project delegation), `delegate_followup` (follow up on existing delegation), `self_delegate` (re-queue self with different context)
 - **Interaction tools**: `ask` (request clarification from user), `learn` (persist new fact to agent home)
 - **Project tools**: `project_list` (enumerate projects from base dir)
-- **RAG tools**: `rag_add_documents` (add docs to collection), `rag_search` (vector search), `rag_collection_list`, `rag_collection_delete` — all optional if embed not configured
+- **RAG tools**: `rag_add_documents` (audience=self→agent collection, audience=project→project collection), `rag_search` (vector search) — all optional if embed not configured; `rag_collection_list` and `rag_collection_delete` removed (agents don't manage collections directly)
 - **Skills tools**: `skill_list` (discover skills by scope) + `skills_set` (apply/remove per-conversation)
 - **Todo tool**: `todo_write` (create/update task list)
 - **Conversation tools**: `conversation_get` (retrieve message transcript by ID from SQLite store), `conversation_list` (list conversations with date range filter)
