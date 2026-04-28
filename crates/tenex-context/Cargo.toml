@@ -1,0 +1,20 @@
+[package]
+name = "tenex-context"
+version = "0.1.0"
+edition = "2021"
+description = "Projection of conversation history into LLM messages[], with composable context-management strategies."
+
+[lib]
+name = "tenex_context"
+path = "src/lib.rs"
+
+[dependencies]
+tenex-conversations = { path = "../tenex-conversations" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

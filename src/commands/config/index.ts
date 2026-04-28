@@ -5,7 +5,6 @@ import { identityCommand } from "@/commands/config/identity";
 import { interventionCommand } from "@/commands/config/intervention";
 import { llmCommand } from "@/commands/config/llm";
 import { loggingCommand } from "@/commands/config/logging";
-import { nip46Command } from "@/commands/config/nip46";
 import { pathsCommand } from "@/commands/config/paths";
 import { providersCommand } from "@/commands/config/providers";
 import { relaysCommand } from "@/commands/config/relays";
@@ -67,7 +66,6 @@ const MENU_SECTIONS: MenuSection[] = [
             { label: "Identity", description: "Authorized pubkeys", command: identityCommand },
             { label: "System Prompt", description: "Global prompt for all projects", command: systemPromptCommand },
             { label: "Paths", description: "File paths and storage", command: pathsCommand },
-            { label: "NIP-46", description: "Remote signing", command: nip46Command },
             { label: "Logging", description: "Log level and file path", command: loggingCommand },
             { label: "Telemetry", description: "OpenTelemetry tracing", command: telemetryCommand },
         ],
@@ -149,6 +147,5 @@ export const configCommand = new Command("config")
     .addCommand(identityCommand)
     .addCommand(systemPromptCommand)
     .addCommand(pathsCommand)
-    .addCommand(nip46Command)
     .addCommand(loggingCommand)
     .addCommand(telemetryCommand);

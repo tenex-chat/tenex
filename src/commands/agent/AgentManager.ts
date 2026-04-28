@@ -14,11 +14,13 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { agentStorage, deriveAgentPubkeyFromNsec, type StoredAgent } from "@/agents/AgentStorage";
 import * as display from "@/commands/config/display";
+import { resolveOwnerSigner } from "@/commands/agent/ownerSigner";
 import { deleteStoredAgent } from "@/services/agents/AgentProvisioningService";
 import { projectMembershipPublishService } from "@/services/agents/ProjectMembershipPublishService";
 import { config } from "@/services/ConfigService";
 import { listProjectsForAgent } from "@/services/projects/ProjectMembersReader";
 import { inquirerTheme } from "@/utils/cli-theme";
+import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 type ManagedAgent = {
     storedAgent: StoredAgent;
@@ -245,6 +247,14 @@ export function findDuplicateSlugGroups(agents: ManagedAgent[]): ManagedAgent[][
 
 export class AgentManager {
     private duplicateMergePromptDismissed = false;
+    private ownerSigner: NDKPrivateKeySigner | null = null;
+
+    private async getOwnerSigner(): Promise<NDKPrivateKeySigner> {
+        if (!this.ownerSigner) {
+            this.ownerSigner = await resolveOwnerSigner();
+        }
+        return this.ownerSigner;
+    }
 
     async showMainMenu(): Promise<void> {
         await config.loadConfig();
@@ -432,10 +442,11 @@ export class AgentManager {
             await agentStorage.removeAgentFromProject(pubkey, projectId);
         }
 
-        await projectMembershipPublishService.syncManyProjectMemberships([
-            ...projectIdsToAdd,
-            ...projectIdsToRemove,
-        ]);
+        const signer = await this.getOwnerSigner();
+        await projectMembershipPublishService.syncManyProjectMemberships(
+            [...projectIdsToAdd, ...projectIdsToRemove],
+            signer,
+        );
 
         display.blank();
         display.success(`Updated projects for ${entry.storedAgent.slug}`);
@@ -471,7 +482,8 @@ export class AgentManager {
             }
         }
 
-        await projectMembershipPublishService.syncManyProjectMemberships(affectedProjectIds);
+        const signer = await this.getOwnerSigner();
+        await projectMembershipPublishService.syncManyProjectMemberships(affectedProjectIds, signer);
 
         display.blank();
         display.success(`Deleted ${deletedCount} agent${deletedCount === 1 ? "" : "s"}`);
@@ -558,7 +570,8 @@ export class AgentManager {
             });
         }
 
-        await projectMembershipPublishService.syncManyProjectMemberships(mergedProjectIds);
+        const signer = await this.getOwnerSigner();
+        await projectMembershipPublishService.syncManyProjectMemberships(mergedProjectIds, signer);
 
         if (confirm) {
             display.blank();
@@ -589,7 +602,8 @@ export class AgentManager {
 
         const affectedProjectIds = [...entry.projects];
         await deleteStoredAgent(pubkey, { quiet: true });
-        await projectMembershipPublishService.syncManyProjectMemberships(affectedProjectIds);
+        const signer = await this.getOwnerSigner();
+        await projectMembershipPublishService.syncManyProjectMemberships(affectedProjectIds, signer);
         display.blank();
         display.success(`Deleted "${entry.storedAgent.name}" (${entry.storedAgent.slug})`);
     }

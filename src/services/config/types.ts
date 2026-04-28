@@ -15,6 +15,7 @@ export interface TenexConfig {
     whitelistedPubkeys?: string[];
     whitelistedIdentities?: string[];
     tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
+    ownerNsec?: string; // Owner private key (hex or bech32) used by `tenex agent manage` to sign 31933 mutations
     backendName?: string; // Name for the TENEX backend profile (default: "tenex backend")
     projectsBase?: string; // Base directory for all projects (default: ~/tenex)
     relays?: string[]; // Nostr relay URLs
@@ -114,16 +115,6 @@ export interface TenexConfig {
         timeoutSeconds?: number; // Seconds to wait for user response (default: 300 = 5 minutes)
     };
 
-    // NIP-46 remote signing configuration
-    nip46?: {
-        enabled?: boolean;                    // Master switch (default: false)
-        signingTimeoutMs?: number;            // Per-request timeout (default: 30000)
-        maxRetries?: number;                  // Per-request retries (default: 2)
-        owners?: Record<string, {             // Per-owner config, keyed by hex pubkey
-            bunkerUri?: string;               // bunker://pubkey?relay=wss://...
-        }>;
-    };
-
     // Project fields (optional for global config)
     description?: string;
     repoUrl?: string;
@@ -135,6 +126,7 @@ export const TenexConfigSchema = z.object({
     whitelistedPubkeys: z.array(z.string()).optional(),
     whitelistedIdentities: z.array(z.string()).optional(),
     tenexPrivateKey: z.string().optional(),
+    ownerNsec: z.string().optional(),
     backendName: z.string().optional(),
     projectsBase: z.string().optional(),
     relays: z.array(z.string()).optional(),
@@ -232,21 +224,6 @@ export const TenexConfigSchema = z.object({
             enabled: z.boolean().optional(),
             agent: z.string().optional(),
             timeoutSeconds: z.number().optional(),
-        })
-        .optional(),
-    nip46: z
-        .object({
-            enabled: z.boolean().optional(),
-            signingTimeoutMs: z.number().optional(),
-            maxRetries: z.number().optional(),
-            owners: z
-                .record(
-                    z.string(),
-                    z.object({
-                        bunkerUri: z.string().optional(),
-                    })
-                )
-                .optional(),
         })
         .optional(),
     description: z.string().optional(),

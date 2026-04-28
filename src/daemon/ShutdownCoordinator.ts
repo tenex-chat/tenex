@@ -4,7 +4,6 @@ import { shutdownTelemetry } from "@/telemetry/setup";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { RAGService } from "@/services/rag/RAGService";
 import { InterventionService } from "@/services/intervention";
-import { Nip46SigningService } from "@/services/nip46";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { prefixKVStore } from "@/services/storage";
 import type { Lockfile } from "@/utils/lockfile";
@@ -102,10 +101,6 @@ export class ShutdownCoordinator {
                     installedAgentListPublisher.stopPublishing();
                     this.deps.setInstalledAgentListPublisher(null);
                 }
-
-                // Stop NIP-46 signing service
-                logger.info("Stopping NIP-46 signing service...");
-                await Nip46SigningService.getInstance().shutdown();
 
                 const subscriptionManager = this.deps.getSubscriptionManager();
                 if (subscriptionManager) {

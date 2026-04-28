@@ -1,0 +1,11 @@
+[package]
+name = "tenex-system-prompt"
+version = "0.1.0"
+edition = "2021"
+description = "Pure assembly of an agent system prompt from identity, project context, and available skills."
+
+[lib]
+name = "tenex_system_prompt"
+path = "src/lib.rs"
+
+[dependencies]

@@ -235,7 +235,7 @@ export class AgentRegistry {
         logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
 
         // Republish kind:0 profiles for all agents now that the project has booted
-        // Fire-and-forget: don't block boot waiting for profile publishes (especially NIP-46 signing)
+        // Fire-and-forget: don't block boot waiting for profile publishes
         if (ndkProject) {
             this.republishAgentProfiles(ndkProject).catch((error) => {
                 logger.warn("Background agent profile republishing failed", {

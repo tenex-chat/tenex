@@ -1,10 +1,9 @@
 import { collectEvents } from "@/nostr/collectEvents";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
-import { Nip46SigningLog, Nip46SigningService } from "@/services/nip46";
 import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { NDKProject, type NDKEvent, type NDKFilter } from "@nostr-dev-kit/ndk";
+import { NDKProject, type NDKEvent, type NDKFilter, type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 export type ProjectMetadataKey = "image" | "repo" | "title" | "description";
 
@@ -16,6 +15,11 @@ export interface FetchLatestProjectEventParams {
 
 export interface PublishProjectMutationParams {
     ownerPubkey: string;
+    /**
+     * Private-key signer that must match `ownerPubkey`. The mutation is rejected
+     * with `signing_failed` when the signer's pubkey does not match.
+     */
+    ownerSigner: NDKPrivateKeySigner;
     projectDTag: string;
     trigger: string;
     addAgentPubkeys?: string[];
@@ -29,7 +33,6 @@ export type ProjectEventPublishOutcome =
     | "project_not_found"
     | "signing_failed"
     | "publish_failed"
-    | "signing_disabled"
     | "no_changes";
 
 export interface ProjectEventPublishResult {
@@ -144,25 +147,16 @@ export class ProjectEventPublishService {
             };
         }
 
-        const ndk = getNDK();
-        const updatedEvent = new NDKProject(ndk);
-        updatedEvent.kind = NDKKind.Project;
-        updatedEvent.content = applied.content;
-        updatedEvent.tags = applied.tags;
-        (updatedEvent as { created_at?: number }).created_at = undefined;
-        (updatedEvent as { id?: string }).id = undefined;
-        (updatedEvent as { sig?: string }).sig = undefined;
-
-        const nip46Service = Nip46SigningService.getInstance();
-
-        if (!nip46Service.isEnabled()) {
-            logger.warn("[ProjectEventPublishService] NIP-46 not enabled — 31933 update skipped", {
+        if (params.ownerSigner.pubkey !== params.ownerPubkey) {
+            logger.warn("[ProjectEventPublishService] Owner signer pubkey mismatch — 31933 update skipped", {
                 ownerPubkey: shortenPubkey(params.ownerPubkey),
+                signerPubkey: shortenPubkey(params.ownerSigner.pubkey),
                 projectDTag: params.projectDTag,
             });
             return {
                 projectDTag: params.projectDTag,
-                outcome: "signing_disabled",
+                outcome: "signing_failed",
+                reason: `Owner nsec does not match project owner ${params.ownerPubkey}`,
                 addedPubkeys: applied.addedPubkeys,
                 removedPubkeys: applied.removedPubkeys,
                 updatedFields: applied.updatedFields,
@@ -170,23 +164,29 @@ export class ProjectEventPublishService {
             };
         }
 
-        const signResult = await nip46Service.signEvent(
-            params.ownerPubkey,
-            updatedEvent,
-            params.trigger,
-        );
+        const ndk = getNDK();
+        const updatedEvent = new NDKProject(ndk);
+        updatedEvent.kind = NDKKind.Project;
+        updatedEvent.content = applied.content;
+        updatedEvent.tags = applied.tags;
+        updatedEvent.pubkey = params.ownerPubkey;
+        (updatedEvent as { created_at?: number }).created_at = undefined;
+        (updatedEvent as { id?: string }).id = undefined;
+        (updatedEvent as { sig?: string }).sig = undefined;
 
-        if (signResult.outcome !== "signed") {
+        try {
+            await updatedEvent.sign(params.ownerSigner);
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
             logger.warn("[ProjectEventPublishService] Skipping 31933 publish — signing failed", {
                 ownerPubkey: shortenPubkey(params.ownerPubkey),
                 projectDTag: params.projectDTag,
-                outcome: signResult.outcome,
-                reason: "reason" in signResult ? signResult.reason : undefined,
+                error: reason,
             });
             return {
                 projectDTag: params.projectDTag,
                 outcome: "signing_failed",
-                reason: "reason" in signResult ? signResult.reason : undefined,
+                reason,
                 addedPubkeys: applied.addedPubkeys,
                 removedPubkeys: applied.removedPubkeys,
                 updatedFields: applied.updatedFields,
@@ -196,13 +196,6 @@ export class ProjectEventPublishService {
 
         try {
             await updatedEvent.publish();
-            Nip46SigningLog.getInstance().log({
-                op: "event_published",
-                ownerPubkey: Nip46SigningLog.truncatePubkey(params.ownerPubkey),
-                eventKind: NDKKind.Project as number,
-                signerType: "nip46",
-                eventId: updatedEvent.id,
-            });
             logger.info("[ProjectEventPublishService] Published owner-signed 31933 update", {
                 ownerPubkey: shortenPubkey(params.ownerPubkey),
                 projectDTag: params.projectDTag,
@@ -210,6 +203,7 @@ export class ProjectEventPublishService {
                 addedPubkeys: applied.addedPubkeys.length,
                 removedPubkeys: applied.removedPubkeys.length,
                 updatedFields: applied.updatedFields,
+                trigger: params.trigger,
             });
             return {
                 projectDTag: params.projectDTag,

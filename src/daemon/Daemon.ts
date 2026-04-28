@@ -37,7 +37,6 @@ import {
     type AgentResolutionResult,
     type ActiveDelegationCheckerFn,
 } from "@/services/intervention";
-import { Nip46SigningService } from "@/services/nip46";
 import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
@@ -328,11 +327,6 @@ export class Daemon {
             this.backendPubkey = backendSigner.pubkey;
             const backendName = loadedConfig.backendName || "tenex backend";
             await publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
-
-            // 6b. Initialize NIP-46 signing service (lazy — signers created on first use)
-            if (loadedConfig.nip46?.enabled) {
-                logger.info("NIP-46 remote signing enabled");
-            }
 
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
@@ -1029,8 +1023,6 @@ export class Daemon {
         getConversationIndexingJob().stop();
         RAGService.closeInstance();
         InterventionService.getInstance().shutdown();
-
-        await Nip46SigningService.getInstance().shutdown();
 
         if (this.subscriptionManager) {
             this.subscriptionManager.stop();

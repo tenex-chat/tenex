@@ -1,4 +1,4 @@
-import { type NDKEvent, type NDKFilter } from "@nostr-dev-kit/ndk";
+import { type NDKEvent, type NDKFilter, type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "@/agents/AgentStorage";
 import { collectEvents } from "@/nostr/collectEvents";
 import { NDKKind } from "@/nostr/kinds";
@@ -17,10 +17,7 @@ import { logger } from "@/utils/logger";
 
 type ProjectMembershipSyncResult = {
     projectDTag: string;
-    outcome: Extract<
-        ProjectEventPublishOutcome,
-        "published" | "project_not_found" | "signing_failed" | "publish_failed" | "signing_disabled" | "no_changes"
-    >;
+    outcome: ProjectEventPublishOutcome;
 };
 
 export type ProjectVisibilityStatus = "active" | "deleted" | "unknown";
@@ -87,7 +84,10 @@ export class ProjectMembershipPublishService {
         return isDeletedProjectEvent(projectEvent) ? "deleted" : "active";
     }
 
-    async syncProjectMembership(projectDTag: string): Promise<ProjectMembershipSyncResult> {
+    async syncProjectMembership(
+        projectDTag: string,
+        ownerSigner: NDKPrivateKeySigner,
+    ): Promise<ProjectMembershipSyncResult> {
         await initNDK();
         await agentStorage.initialize();
 
@@ -105,6 +105,7 @@ export class ProjectMembershipPublishService {
         const assignedPubkeys = await readProjectAgentPubkeys(projectDTag);
         const result = await projectEventPublishService.publishMutation({
             ownerPubkey: projectEvent.pubkey,
+            ownerSigner,
             projectDTag,
             trigger: "agent_manager_31933",
             retainAgentPubkeys: assignedPubkeys,
@@ -116,12 +117,15 @@ export class ProjectMembershipPublishService {
         };
     }
 
-    async syncManyProjectMemberships(projectDTags: string[]): Promise<ProjectMembershipSyncResult[]> {
+    async syncManyProjectMemberships(
+        projectDTags: string[],
+        ownerSigner: NDKPrivateKeySigner,
+    ): Promise<ProjectMembershipSyncResult[]> {
         const uniqueProjectIds = Array.from(new Set(projectDTags.filter(Boolean)));
         const results: ProjectMembershipSyncResult[] = [];
 
         for (const projectDTag of uniqueProjectIds) {
-            results.push(await this.syncProjectMembership(projectDTag));
+            results.push(await this.syncProjectMembership(projectDTag, ownerSigner));
         }
 
         return results;
