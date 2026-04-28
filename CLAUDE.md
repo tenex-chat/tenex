@@ -122,6 +122,7 @@ import { config } from "../../../services/ConfigService";
 2. Follow existing patterns in that file
 3. Don't "improve" unrelated code
 4. Don't add comments to code you didn't change
+5. Keep `AGENTS.md` up to date — if you add, rename, or restructure modules, commands, or conventions, update the relevant `AGENTS.md`
 
 ---
 
@@ -196,6 +197,16 @@ export const rag_search = tool({
   }
 });
 ```
+
+---
+
+## Multi-Agent Environment
+
+This project runs multiple agents concurrently. Follow these rules to avoid interfering with parallel work:
+
+- **Never stash, reset, or otherwise touch uncommitted working-tree changes.** Other agents or the user may have in-progress work; stashing or reverting it causes data loss.
+- **Never assume the working tree is clean before starting work.** Baseline your diff by capturing `git diff HEAD` to a temp file, then compare after your own changes to isolate what you did.
+- **Commit only your own changes.** Do not commit files you did not touch; the user or another agent may have left them in a deliberate intermediate state.
 
 ---
 
