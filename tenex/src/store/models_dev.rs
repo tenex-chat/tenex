@@ -256,6 +256,68 @@ pub fn context_window(
     data.limit.as_ref().map(|l| l.context)
 }
 
+/// Mirror the inline label builder in `selectModelsDevModel`
+/// (`src/llm/utils/ModelSelector.ts:188-203`).
+///
+/// Builds the visible label shown for one row in the model picker:
+///
+/// ```text
+/// {name} ({id}) - {ctx}k ctx, ${input}/${output}/M
+/// ```
+///
+/// The `(id)` and trailing `- {meta}` segments render in `chalk.gray`
+/// in the TS source. This function returns the **raw** strings (no ANSI
+/// styling) — callers wrap individual segments with the muted-gray
+/// style at render time. Splitting it this way keeps the formatter
+/// pure / testable while letting the renderer apply the right palette
+/// (`crate::tui::theme::muted_gray`).
+///
+/// Returned tuple shape:
+/// `(human_name, id_segment, meta_segment_or_empty)`
+///
+/// where `meta_segment` is `"<ctx>k ctx, $<input>/$<output>/M"` (joined
+/// with `", "` only when both sides are present); empty when neither
+/// `limit.context` nor `cost` is available. The TS source filters
+/// empty strings before joining, so absence of one collapses the
+/// separator.
+pub fn picker_label_segments(model: &ModelsDevModel) -> (String, String, String) {
+    let id_segment = format!("({})", model.id);
+    let ctx_str = model
+        .limit
+        .as_ref()
+        .map(|l| format!("{}k ctx", (l.context as f64 / 1000.0).round() as u64));
+    let pricing_str = model
+        .cost
+        .as_ref()
+        .map(|c| format!("${}/${}/M", c.input, c.output));
+    let meta_pieces: Vec<String> = [ctx_str, pricing_str].into_iter().flatten().collect();
+    let meta_segment = if meta_pieces.is_empty() {
+        String::new()
+    } else {
+        format!("- {}", meta_pieces.join(", "))
+    };
+    (model.name.clone(), id_segment, meta_segment)
+}
+
+/// Mirror `getDefaultModelForProvider` (`ConfigurationManager.ts:260-270`).
+///
+/// Returns the canned default model ID for each TENEX provider. Used by
+/// the add-configuration flow as the initial `default` value of the
+/// model picker. Returns `""` for unknown providers and for
+/// `claude-code` (which has no concept of a model in the TS source —
+/// the `defaults` table maps it to the empty string).
+pub fn default_model_for_provider(provider: &str) -> &'static str {
+    match provider {
+        "openrouter" => "openai/gpt-4",
+        "anthropic" => "claude-3-5-sonnet-latest",
+        "openai" => "gpt-4",
+        "ollama" => "llama3.1:8b",
+        "codex" => "gpt-5.1-codex-max",
+        "claude-code" => "",
+        _ => "",
+    }
+}
+
 /// Mirror `getProviderModels` (`models-dev-cache.ts:319-337`).
 ///
 /// Returns every model under the mapped provider's section, sorted by
@@ -749,6 +811,87 @@ mod tests {
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "the-key");
         assert_eq!(models[0].name, "the-key");
+    }
+
+    // ── picker_label_segments ──────────────────────────────────────────
+
+    #[test]
+    fn picker_label_segments_full_with_ctx_and_cost() {
+        let m = ModelsDevModel {
+            id: "claude-sonnet-4-6".into(),
+            name: "Claude Sonnet 4.6".into(),
+            cost: Some(ModelCost {
+                input: 3.0,
+                output: 15.0,
+            }),
+            limit: Some(ModelLimits {
+                context: 200_000,
+                output: 8192,
+            }),
+            last_updated: None,
+        };
+        let (name, id_seg, meta) = picker_label_segments(&m);
+        assert_eq!(name, "Claude Sonnet 4.6");
+        assert_eq!(id_seg, "(claude-sonnet-4-6)");
+        // 200_000 / 1000 = 200; "200k ctx, $3/$15/M".
+        assert_eq!(meta, "- 200k ctx, $3/$15/M");
+    }
+
+    #[test]
+    fn picker_label_segments_rounds_ctx_to_nearest_thousand() {
+        // The TS uses `Math.round(context / 1000)` — 199_999 rounds to
+        // 200, not 199.
+        let mut m = model("x", 199_999, 1.0);
+        m.cost = None;
+        let (_, _, meta) = picker_label_segments(&m);
+        assert_eq!(meta, "- 200k ctx");
+    }
+
+    #[test]
+    fn picker_label_segments_no_meta_when_both_fields_absent() {
+        let mut m = model("x", 0, 1.0);
+        m.limit = None;
+        m.cost = None;
+        let (_, _, meta) = picker_label_segments(&m);
+        assert_eq!(meta, "");
+    }
+
+    #[test]
+    fn picker_label_segments_only_ctx_when_cost_absent() {
+        let mut m = model("x", 100_000, 1.0);
+        m.cost = None;
+        let (_, _, meta) = picker_label_segments(&m);
+        assert_eq!(meta, "- 100k ctx");
+    }
+
+    #[test]
+    fn picker_label_segments_only_cost_when_limit_absent() {
+        let mut m = model("x", 0, 2.5);
+        m.limit = None;
+        let (_, _, meta) = picker_label_segments(&m);
+        // input 2.5, output computed as 2.5 * 5 = 12.5
+        assert_eq!(meta, "- $2.5/$12.5/M");
+    }
+
+    // ── default_model_for_provider ─────────────────────────────────────
+
+    #[test]
+    fn default_model_for_each_canonical_provider_matches_ts_table() {
+        // Mirror the `defaults` table at ConfigurationManager.ts:261-268.
+        assert_eq!(default_model_for_provider("openrouter"), "openai/gpt-4");
+        assert_eq!(default_model_for_provider("anthropic"), "claude-3-5-sonnet-latest");
+        assert_eq!(default_model_for_provider("openai"), "gpt-4");
+        assert_eq!(default_model_for_provider("ollama"), "llama3.1:8b");
+        assert_eq!(default_model_for_provider("codex"), "gpt-5.1-codex-max");
+        assert_eq!(default_model_for_provider("claude-code"), "");
+    }
+
+    #[test]
+    fn default_model_for_unknown_provider_is_empty_string() {
+        // TS uses `defaults[provider] || ""` — falsy lookup falls
+        // through to "". Matches the unknown-provider branch.
+        assert_eq!(default_model_for_provider("totally-made-up"), "");
+        assert_eq!(default_model_for_provider(""), "");
     }
 
     #[test]
