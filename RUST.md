@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28. Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (second pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -15,7 +15,7 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | Crate | Kind | Binary | Description |
 |-------|------|--------|-------------|
 | `tenex` | bin | `tenex` | Main CLI + daemon supervisor + cron TUI + per-project runtime |
-| `tenex-agent` | bin | `tenex-agent` | Per-conversation agent runtime (spawned by TS boot.ts) |
+| `tenex-agent` | bin | `tenex-agent` | Per-conversation agent runtime (spawned by `tenex runtime`) |
 | `tenex-identity` | bin+lib | `tenex-identity` | Host-wide kind:0 identity cache daemon (Unix socket) |
 | `tenex-scheduler` | bin | `tenex-scheduler` | Scheduled task daemon — fires kind:1 Nostr events |
 | `tenex-intervention` | bin | `tenex-intervention` | Monitors agent completions, requests reviews on user silence |
@@ -40,9 +40,9 @@ The Rust supervisor (`tenex daemon`) is the **sole entry point**. On startup it:
 3. Boots `tenex-identity` daemon (non-fatal fallback if absent)
 4. Starts `tenex-llm-config` IPC server (in-process tokio task)
 5. Supervises `tenex-summarizer`, `tenex-scheduler`, `tenex-intervention` as child processes (auto-restart with exponential backoff)
-6. Subscribes to Nostr and boots per-project `bun run src/boot.ts --boot <d-tag>` on triggers
+6. Subscribes to Nostr and spawns `tenex runtime <d-tag>` for each project trigger (default; overridable with `--boot-command`)
 
-All six companion binaries are looked up next to the `tenex` executable at runtime.
+All companion binaries are looked up next to the `tenex` executable at runtime.
 
 ### `whitelist` daemon
 Fully wired. Watches `~/.tenex/whitelist/pubkeys.txt` for changes, exposes a Unix socket that `PubkeyGateService` (TS) queries. The daemon supervisor writes the backend pubkey into the file on start.
@@ -63,7 +63,7 @@ Wired and supervised. Monitors agent completions; publishes review-request event
 Wired and supervised. Generates kind:513 metadata events. TS in-process summarization was already removed in favor of this daemon.
 
 ### `tenex-agent` binary
-Exists and builds. The TS `boot.ts` spawns it per conversation via `tenex-agent <agent.json>` with the triggering event on stdin. Currently includes:
+Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` with the triggering Nostr event on stdin. Currently includes:
 - All filesystem tools (read, write, edit, glob, grep)
 - Shell tool
 - Delegate tool (reads project DB, emits delegation intents)
@@ -71,6 +71,7 @@ Exists and builds. The TS `boot.ts` spawns it per conversation via `tenex-agent 
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
 - Completion event emission over Nostr (stdout NDJSON)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
+- Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
 
 ### `tenex-protocol`
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
@@ -90,7 +91,7 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 - Pipes the raw Nostr event JSON to `tenex-agent` stdin, relays signed event output back to the relay
 - Has a per-project lockfile to prevent duplicate instances (`projects/<dTag>/runtime.lock`)
 
-This is the key piece that makes a **full Rust-native project runtime possible** — `tenex daemon` could be changed to spawn `tenex runtime` instead of `bun run src/boot.ts --boot` once this is validated.
+**`tenex daemon` now defaults to `tenex runtime` as its boot command** — the TypeScript boot layer is no longer the primary path. The Rust runtime is live. Missing pieces before full TS retirement: RAL, conversation persistence, context management (see roadmap).
 
 ---
 
@@ -106,11 +107,13 @@ This is the key piece that makes a **full Rust-native project runtime possible**
 
 ## Compilation Status
 
-**As of 2026-04-28 debt check:**
+**As of 2026-04-28 (second debt check pass): workspace compiles clean — zero errors.**
 
-- Most crates: **clean**
-- `tenex-agent`: 2 errors being fixed (ProvidersConfig rename, run_agent! macro arg count after RAG tools wired in)
-- `tenex-summarizer`: 2 errors auto-fixed by linter hooks (schemars 0.8→1, nostr::types::Kind→nostr::Kind)
+Issues found and resolved this pass:
+- `tenex-summarizer`: schemars 0.8→1, `nostr::types::Kind`→`nostr::Kind`
+- `tenex-agent`: `ProvidersConfig` removed (→ `load_providers_config()`), RAG tools + teams wired into agent
+- `tenex runtime`: `client.disconnect().await?` — returns `()`, `?` removed
+- `tenex-daemon`: switched default boot from `bun run src/boot.ts` to `tenex runtime <d-tag>`
 
 ---
 
@@ -124,23 +127,30 @@ tenex daemon (Rust)
     └── tenex-summarizer (Rust, supervised)
     └── tenex-scheduler (Rust, supervised)
     └── tenex-intervention (Rust, supervised)
-    └── bun run src/boot.ts --boot <d-tag>  (TypeScript, per project)
+    └── tenex runtime <d-tag>  (Rust, per project — DEFAULT)
             └── tenex-agent (Rust, spawned per conversation turn)
 ```
 
-The TypeScript boot layer still handles:
-- Nostr event routing for incoming messages
-- RAL (Resource Acquisition Lock) orchestration
-- Agent lifecycle within a project session
-- Most services: dispatch, prompt-compiler, RAG (TS), embedding
+**TypeScript (`bun run src/boot.ts`) is still available via `--boot-command` but is no longer the default.**
+
+The Rust runtime (`tenex runtime`) currently handles:
+- Nostr subscription and event routing (kind:1 #a-tag and #p-tag)
+- Agent selection (direct @mention → PM fallback)
+- Event dispatch and stdout relay back to relays
+
+Still missing from `tenex runtime` before full TS retirement:
+- RAL (Resource Acquisition Lock) — prevents concurrent agents in same conversation
+- Conversation persistence — `tenex-conversations` not yet wired in
+- Context management — `tenex-context` strategies not yet applied
 
 ---
 
 ## Migration Roadmap (observed direction)
 
 1. ~~**Immediate**: Fix compilation errors in `tenex-agent` and `tenex-summarizer`~~ ✓ Done 2026-04-28
-2. **Near-term**: Validate `tenex runtime` and switch daemon supervisor from `bun run src/boot.ts` to `tenex runtime`
-3. **Near-term**: Wire `tenex-context` into `tenex-agent` for proper context window management (currently no compaction)
-4. **Near-term**: Wire `tenex-system-prompt` into `tenex-agent` (replace inline `prompt.rs`)
-5. **Medium-term**: Wire `tenex-conversations` into `tenex-agent` so conversation history persists and context strategies can run
-6. **Longer-term**: Retire TypeScript boot layer entirely
+2. ~~**Near-term**: Switch daemon supervisor from `bun run src/boot.ts` to `tenex runtime`~~ ✓ Done 2026-04-28
+3. **Now**: Add RAL to `tenex runtime` — single-writer lock per conversation, queue or reject concurrent triggers
+4. **Now**: Wire `tenex-conversations` into `tenex runtime` so conversation history is available across turns
+5. **Near-term**: Wire `tenex-context` into `tenex-agent` for context window management (compaction/decay)
+6. **Near-term**: Wire `tenex-system-prompt` into `tenex-agent` (replace inline `prompt.rs`)
+7. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
