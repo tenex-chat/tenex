@@ -24,6 +24,17 @@ pub fn build_system_prompt(
             .unwrap_or_default(),
     ));
 
+    // Fragment 03: System reminders explanation
+    parts.push(
+        "<system-reminders-explanation>\
+Messages may include <system-reminder> tags. These are system-injected informational \
+context — not user speech. They contain dynamic state such as your current todo list, \
+behavioral guidance, or context updates. Absorb them silently; do not acknowledge or \
+respond to them directly.\
+</system-reminders-explanation>"
+            .to_string(),
+    );
+
     if let Some(instructions) = &config.instructions {
         parts.push(format!(
             "<agent-instructions>\n{instructions}\n</agent-instructions>"

@@ -1,14 +1,20 @@
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodoItem {
     pub id: String,
     pub title: String,
+    pub description: String,
     pub status: TodoStatus,
     pub skip_reason: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -24,6 +30,7 @@ pub enum TodoStatus {
 pub struct TodoWriteItem {
     pub id: Option<String>,
     pub title: String,
+    pub description: Option<String>,
     pub status: TodoStatus,
     pub skip_reason: Option<String>,
 }
@@ -65,6 +72,64 @@ fn slug_from_title(title: &str) -> String {
     }
 }
 
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+pub fn format_todos_reminder(todos: &[TodoItem]) -> String {
+    if todos.is_empty() {
+        return String::new();
+    }
+
+    let pending = todos.iter().filter(|t| t.status == TodoStatus::Pending).count();
+    let in_progress = todos.iter().filter(|t| t.status == TodoStatus::InProgress).count();
+    let done = todos.iter().filter(|t| t.status == TodoStatus::Done).count();
+    let skipped = todos.iter().filter(|t| t.status == TodoStatus::Skipped).count();
+
+    let mut lines = vec![
+        "<system-reminder>".to_string(),
+        "<agent-todos>".to_string(),
+        String::new(),
+        format!(
+            "Status: {} pending, {} in progress, {} done, {} skipped",
+            pending, in_progress, done, skipped
+        ),
+        String::new(),
+    ];
+
+    for t in todos {
+        let marker = match t.status {
+            TodoStatus::Pending => "[ ]",
+            TodoStatus::InProgress => "[~]",
+            TodoStatus::Done => "[x]",
+            TodoStatus::Skipped => "[-]",
+        };
+        lines.push(format!("{} {} (id: {})", marker, t.title, t.id));
+    }
+
+    lines.push(String::new());
+    lines.push(
+        "Use `todo_write` to update statuses. Mark items in_progress when starting, done when complete."
+            .to_string(),
+    );
+
+    if pending > 0 {
+        lines.push(String::new());
+        lines.push(format!(
+            "**ATTENTION:** You have {} pending todo item(s) that need to be addressed.",
+            pending
+        ));
+    }
+
+    lines.push("</agent-todos>".to_string());
+    lines.push("</system-reminder>".to_string());
+
+    lines.join("\n")
+}
+
 impl Tool for TodoWriteTool {
     const NAME: &'static str = "todo_write";
     type Error = TodoError;
@@ -90,6 +155,7 @@ impl Tool for TodoWriteTool {
                             "properties": {
                                 "id": { "type": "string", "description": "Unique ID (auto-generated from title if omitted)" },
                                 "title": { "type": "string", "description": "Short description" },
+                                "description": { "type": "string", "description": "Detailed description (omit to preserve existing value on updates)" },
                                 "status": {
                                     "type": "string",
                                     "enum": ["pending", "in_progress", "done", "skipped"]
@@ -111,6 +177,7 @@ impl Tool for TodoWriteTool {
 
     async fn call(&self, args: TodoWriteArgs) -> Result<Self::Output, TodoError> {
         let force = args.force.unwrap_or(false);
+        let now = now_ms();
 
         // Validate skip_reason presence
         for item in &args.todos {
@@ -122,6 +189,18 @@ impl Tool for TodoWriteTool {
             }
         }
 
+        // Validate no duplicate IDs in input
+        let mut seen_ids = std::collections::HashSet::new();
+        for item in &args.todos {
+            let id = item
+                .id
+                .clone()
+                .unwrap_or_else(|| slug_from_title(&item.title));
+            if !seen_ids.insert(id.clone()) {
+                return Ok(format!("Error: duplicate id '{id}' in input"));
+            }
+        }
+
         let mut todos = self
             .todos
             .lock()
@@ -129,14 +208,17 @@ impl Tool for TodoWriteTool {
 
         // Safety check: detect removals
         if !force {
-            let new_ids: std::collections::HashSet<&str> = args
+            let new_ids: std::collections::HashSet<String> = args
                 .todos
                 .iter()
-                .map(|t| t.id.as_deref().unwrap_or(t.title.as_str()))
+                .map(|t| {
+                    t.id.clone()
+                        .unwrap_or_else(|| slug_from_title(&t.title))
+                })
                 .collect();
             let missing: Vec<&str> = todos
                 .iter()
-                .filter(|t| !new_ids.contains(t.id.as_str()))
+                .filter(|t| !new_ids.contains(&t.id))
                 .map(|t| t.id.as_str())
                 .collect();
             if !missing.is_empty() {
@@ -148,17 +230,28 @@ impl Tool for TodoWriteTool {
             }
         }
 
-        // Build new list
+        // Build new list, preserving created_at/description from existing items
         let new_todos: Vec<TodoItem> = args
             .todos
             .into_iter()
             .map(|item| {
                 let id = item.id.unwrap_or_else(|| slug_from_title(&item.title));
+                let existing = todos.iter().find(|t| t.id == id);
+                let created_at = existing.map(|e| e.created_at).unwrap_or(now);
+                let description = item
+                    .description
+                    .or_else(|| existing.map(|e| e.description.clone()))
+                    .unwrap_or_default();
+                let status_changed = existing.map(|e| e.status != item.status).unwrap_or(true);
+                let updated_at = if status_changed { now } else { existing.map(|e| e.updated_at).unwrap_or(now) };
                 TodoItem {
                     id,
                     title: item.title,
+                    description,
                     status: item.status,
                     skip_reason: item.skip_reason,
+                    created_at,
+                    updated_at,
                 }
             })
             .collect();

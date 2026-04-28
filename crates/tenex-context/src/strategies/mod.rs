@@ -22,6 +22,9 @@ pub struct ProjectionContext<'a> {
     pub telemetry: ProjectionTelemetry,
     pub model_profile: &'a ModelProfile,
     pub tool_defs: &'a [ToolDef],
+    /// Agent todos from `agent_context_state.todos_json`, used by the
+    /// reminders strategy to inject the `<agent-todos>` block.
+    pub agent_todos: Option<serde_json::Value>,
 }
 
 pub trait Strategy {

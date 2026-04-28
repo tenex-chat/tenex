@@ -57,12 +57,18 @@ pub fn project(
 
     let messages = projection::project_messages(store, conversation_id, system_prompt)?;
     let telemetry = ProjectionTelemetry::default();
+    let agent_todos = store
+        .get_agent_context_state(conversation_id, agent_pubkey)
+        .ok()
+        .flatten()
+        .and_then(|s| s.todos);
 
     let mut ctx = ProjectionContext {
         messages,
         telemetry,
         model_profile,
         tool_defs,
+        agent_todos,
     };
 
     for strat in default_stack() {

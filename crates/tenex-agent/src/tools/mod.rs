@@ -10,4 +10,4 @@ pub use fs::{FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool};
 pub use rag_index::RagIndexTool;
 pub use rag_search::RagSearchTool;
 pub use shell::ShellTool;
-pub use todo::{TodoItem, TodoWriteTool};
+pub use todo::{format_todos_reminder, TodoItem, TodoWriteTool};

@@ -12,6 +12,7 @@ use rig::client::{CompletionClient, Nothing};
 use rig::completion::Prompt;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use std::sync::{Arc, Mutex};
+use tenex_conversations::{AgentContextState, ConversationStore};
 use tenex_project::Project;
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_protocol::{
@@ -50,6 +51,69 @@ macro_rules! run_agent {
             .with_hook($hook)
             .await?
     }};
+}
+
+fn load_todos_from_store(
+    store: &ConversationStore,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) -> Vec<TodoItem> {
+    let Ok(Some(state)) = store.get_agent_context_state(conversation_id, agent_pubkey) else {
+        return Vec::new();
+    };
+    let Some(todos_val) = state.todos else {
+        return Vec::new();
+    };
+    serde_json::from_value(todos_val).unwrap_or_default()
+}
+
+fn save_todos_to_store(
+    store: &ConversationStore,
+    conversation_id: &str,
+    agent_pubkey: &str,
+    todos: &[TodoItem],
+) {
+    let todos_json = match serde_json::to_value(todos) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[tenex-agent] Failed to serialize todos: {e}");
+            return;
+        }
+    };
+
+    let existing = store
+        .get_agent_context_state(conversation_id, agent_pubkey)
+        .ok()
+        .flatten();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let state = AgentContextState {
+        conversation_id: conversation_id.to_string(),
+        agent_pubkey: agent_pubkey.to_string(),
+        next_prompt_sequence: existing.as_ref().map(|s| s.next_prompt_sequence).unwrap_or(0),
+        cache_anchored: existing.as_ref().map(|s| s.cache_anchored).unwrap_or(false),
+        seen_message_ids: existing
+            .as_ref()
+            .map(|s| s.seen_message_ids.clone())
+            .unwrap_or_default(),
+        compaction_state: existing.as_ref().and_then(|s| s.compaction_state.clone()),
+        reminder_state: existing.as_ref().and_then(|s| s.reminder_state.clone()),
+        reminder_delta_state: existing.as_ref().and_then(|s| s.reminder_delta_state.clone()),
+        todos: Some(todos_json),
+        self_applied_skills: existing.as_ref().and_then(|s| s.self_applied_skills.clone()),
+        meta_model_variant: existing.as_ref().and_then(|s| s.meta_model_variant.clone()),
+        is_blocked: existing.as_ref().map(|s| s.is_blocked).unwrap_or(false),
+        todo_nudged: existing.as_ref().map(|s| s.todo_nudged).unwrap_or(false),
+        updated_at: now,
+    };
+
+    if let Err(e) = store.upsert_agent_context_state(&state) {
+        eprintln!("[tenex-agent] Failed to save todos: {e}");
+    }
 }
 
 #[tokio::main]
@@ -111,6 +175,23 @@ async fn main() -> Result<()> {
         d_tag: project_meta.d_tag.clone(),
     };
 
+    // Open the conversation store for todo persistence.
+    let conversation_id = match &envelope.root {
+        MessageRef::Nostr { event_id } => event_id.to_hex(),
+    };
+    let conv_store = (|| -> Option<ConversationStore> {
+        let base_dir = tenex_conversations::paths::default_base_dir();
+        let d_tag = tenex_conversations::normalize_project_id(&project_id).ok()?;
+        let db_path = tenex_conversations::paths::conversation_db_path(&base_dir, &d_tag);
+        match ConversationStore::open(&db_path) {
+            Ok(store) => Some(store),
+            Err(e) => {
+                eprintln!("[tenex-agent] Conversation store unavailable: {e}");
+                None
+            }
+        }
+    })();
+
     // Load TENEX configuration files for model/key resolution
     let llms = LlmsConfig::load();
     let providers = config::load_providers_config();
@@ -159,8 +240,20 @@ async fn main() -> Result<()> {
         &teams_fragment,
     );
 
-    // Shared todo state across tool calls
-    let todos: Arc<Mutex<Vec<TodoItem>>> = Arc::new(Mutex::new(Vec::new()));
+    // Load persisted todos and inject them as a system reminder into the user message.
+    let initial_todos: Vec<TodoItem> = conv_store
+        .as_ref()
+        .map(|s| load_todos_from_store(s, &conversation_id, &pubkey_hex))
+        .unwrap_or_default();
+    let todo_reminder = tools::format_todos_reminder(&initial_todos);
+    let user_message = if todo_reminder.is_empty() {
+        envelope.content.clone()
+    } else {
+        format!("{}\n\n{}", envelope.content, todo_reminder)
+    };
+
+    // Shared todo state across tool calls (pre-seeded from persistence).
+    let todos: Arc<Mutex<Vec<TodoItem>>> = Arc::new(Mutex::new(initial_todos));
 
     let model_string = format!("{}:{}", resolved.provider, resolved.model);
     let conversation_root = match &envelope.root {
@@ -249,7 +342,7 @@ async fn main() -> Result<()> {
                 client,
                 &resolved.model,
                 &system_prompt,
-                &envelope.content,
+                &user_message,
                 working_dir,
                 todos,
                 hook.clone(),
@@ -267,7 +360,7 @@ async fn main() -> Result<()> {
                 client,
                 &resolved.model,
                 &system_prompt,
-                &envelope.content,
+                &user_message,
                 working_dir,
                 todos,
                 hook.clone(),
@@ -286,7 +379,7 @@ async fn main() -> Result<()> {
                 client,
                 &resolved.model,
                 &system_prompt,
-                &envelope.content,
+                &user_message,
                 working_dir,
                 todos,
                 hook.clone(),
@@ -309,7 +402,7 @@ async fn main() -> Result<()> {
                 client,
                 &resolved.model,
                 &system_prompt,
-                &envelope.content,
+                &user_message,
                 working_dir,
                 todos,
                 hook,
@@ -319,6 +412,12 @@ async fn main() -> Result<()> {
             )
         }
     };
+
+    // Persist final todo state back to the conversation store.
+    if let Some(ref store) = conv_store {
+        let final_todos = todos.lock().unwrap();
+        save_todos_to_store(store, &conversation_id, &pubkey_hex, &final_todos);
+    }
 
     eprintln!("[tenex-agent] Agent completed. Emitting completion event.");
 
