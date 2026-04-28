@@ -67,8 +67,29 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     tenex_whitelist::ensure_running().context("bootstrapping whitelist daemon")?;
     info!("whitelist daemon ready");
 
+    // Bootstrap the identity daemon. Non-fatal: PubkeyService falls back to
+    // NDK if the daemon is absent.
+    if let Err(e) = tenex_identity::ensure_running() {
+        tracing::warn!(error = %e, "identity daemon failed to start; name resolution will use NDK fallback");
+    } else {
+        info!("identity daemon ready");
+    }
+
     whitelist_export::write_backend_pubkey(&base_dir, cfg.tenex_private_key.as_deref())
         .context("publish backend pubkey for whitelist daemon")?;
+
+    // Start the LLM config IPC server. TypeScript runtimes resolve config
+    // names and report key failures through this socket rather than reading
+    // providers.json / llms.json directly.
+    {
+        let llm_base = base_dir.clone();
+        tokio::spawn(async move {
+            if let Err(e) = tenex_llm_config::Server::start(llm_base).await {
+                error!(error = %e, "llm-config IPC server failed");
+            }
+        });
+    }
+    info!("llm-config IPC server started");
 
     let boot_command = match args.boot_command.clone() {
         Some(cmd) => cmd,

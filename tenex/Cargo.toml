@@ -24,4 +24,9 @@ inquire = "0.7"
 indexmap = { version = "2", features = ["serde"] }
 url = "2"
 crossterm = "0.25"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+dirs-next = "2"
 tenex-whitelist = { path = "../whitelist" }
+tenex-llm-config = { path = "../crates/tenex-llm-config" }
+tenex-identity = { path = "../crates/tenex-identity" }

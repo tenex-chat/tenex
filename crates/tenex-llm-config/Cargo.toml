@@ -1,0 +1,13 @@
+[package]
+name = "tenex-llm-config"
+version = "0.1.0"
+edition = "2021"
+description = "LLM configuration resolver: loads providers.json + llms.json, resolves aliases, tracks key health, and serves an NDJSON Unix-socket IPC."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1.40", features = ["net", "sync", "io-util", "rt", "time"] }
+indexmap = { version = "2", features = ["serde"] }
+anyhow = "1"
+tracing = "0.1"
