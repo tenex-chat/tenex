@@ -149,11 +149,14 @@ pub fn format_preview_text(previews: &[AgentPreview]) -> String {
     let green = console::Style::new().green();
     let gray = console::Style::new().color256(8); // chalk's default gray
 
-    let plural = if previews.len() == 1 { "" } else { "s" };
+    // TS at openclaw.ts:204 uses the LITERAL 'agent(s)' string —
+    // no real pluralisation, the parenthetical is in the template:
+    //   `Would import ${previews.length} agent(s):\n`
+    // Match that verbatim; do NOT introduce singular/plural variants.
     let mut out = format!(
         "{}\n",
         blue.apply_to(format!(
-            "Would import {} agent{plural}:\n",
+            "Would import {} agent(s):\n",
             previews.len()
         ))
     );
@@ -373,7 +376,10 @@ mod tests {
     // ── format_preview_text ────────────────────────────────────────────
 
     #[test]
-    fn format_preview_text_singular_plural_toggles() {
+    fn format_preview_text_uses_literal_agent_s_template() {
+        // TS at openclaw.ts:204 emits the literal 'agent(s)' regardless
+        // of count — `Would import ${N} agent(s):`. Pin that semantics
+        // so a future cleanup doesn't introduce singular/plural variants.
         let a = agent("ag", "p/m");
         let one = build_preview(&a, &identity("Alpha"));
         let multi = vec![one.clone(), one.clone()];
@@ -381,8 +387,8 @@ mod tests {
         let many = format_preview_text(&multi);
         let single_plain = console::strip_ansi_codes(&single);
         let many_plain = console::strip_ansi_codes(&many);
-        assert!(single_plain.contains("Would import 1 agent:"));
-        assert!(many_plain.contains("Would import 2 agents:"));
+        assert!(single_plain.contains("Would import 1 agent(s):"));
+        assert!(many_plain.contains("Would import 2 agent(s):"));
     }
 
     #[test]
