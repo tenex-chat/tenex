@@ -8,7 +8,6 @@
 //! - [`escalation`] — `tenex config escalation`.
 //! - [`summarization`] — `tenex config summarization`.
 //! - [`intervention`] — `tenex config intervention`.
-//! - [`nip46`] — `tenex config nip46`.
 //! - [`telemetry`] — `tenex config telemetry`.
 //! - [`system_prompt`] — `tenex config system-prompt`.
 //! - [`context_management`] — `tenex config context-management`.
@@ -36,7 +35,6 @@ pub mod escalation;
 pub mod identity;
 pub mod intervention;
 pub mod logging;
-pub mod nip46;
 pub mod paths;
 pub mod relays;
 pub mod summarization;
@@ -89,7 +87,6 @@ async fn dispatch(base_dir: &std::path::Path, value: &str) -> Result<()> {
         "escalation" => escalation::run(base_dir),
         "summarization" => summarization::run(base_dir),
         "intervention" => intervention::run(base_dir),
-        "nip46" => nip46::run(base_dir),
         "telemetry" => telemetry::run(base_dir),
         "system-prompt" => system_prompt::run(base_dir),
         "context-management" => context_management::run(base_dir),
@@ -178,7 +175,6 @@ pub fn build_menu_sections() -> Vec<MenuSection> {
                 ("Identity", "identity", "Authorized pubkeys"),
                 ("System Prompt", "system-prompt", "Global prompt for all projects"),
                 ("Paths", "paths", "File paths and storage"),
-                ("NIP-46", "nip46", "Remote signing"),
                 ("Logging", "logging", "Log level and file path"),
                 ("Telemetry", "telemetry", "OpenTelemetry tracing"),
             ][..],
@@ -242,10 +238,12 @@ mod tests {
     }
 
     #[test]
-    fn menu_total_entry_count_is_16() {
+    fn menu_total_entry_count_is_15() {
+        // Was 16 in spec 02; the `nip46` entry was dropped along with the
+        // NIP-46 cutover. Now 15 entries across the 5 sections.
         let s = build_menu_sections();
         let total: usize = s.iter().map(|sec| sec.entries.len()).sum();
-        assert_eq!(total, 16);
+        assert_eq!(total, 15);
     }
 
     #[test]
@@ -270,7 +268,6 @@ mod tests {
                 "identity",
                 "system-prompt",
                 "paths",
-                "nip46",
                 "logging",
                 "telemetry",
             ]
@@ -314,8 +311,6 @@ mod tests {
         assert!(llms.label.contains("Model configurations"));
         let identity = &s[4].entries[0];
         assert!(identity.label.contains("Authorized pubkeys"));
-        let nip46 = &s[4].entries[3];
-        assert!(nip46.label.contains("Remote signing"));
     }
 
     #[test]

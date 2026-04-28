@@ -35,6 +35,22 @@ Nostr-event-driven agent definitions, there's nothing to refetch. The
 live TS source at `src/commands/doctor.ts:43-46` registers only `orphans`
 and `categorize` under `tenex doctor agents`. The Rust port now matches.
 
+### Spec 02 / spec docs broadly — NIP-46 is gone
+
+Removed in TS commits `28791660` (nostr_publish_as_user tool),
+`af37bf33` (modify_project tool), and `a42db124` (NIP-46 service +
+`tenex config nip46` submenu + Daemon init/shutdown). kind:31933
+project mutations are now signed directly with the project owner's
+nsec via `src/commands/agent/ownerSigner.ts` (env `TENEX_NSEC` →
+config `ownerNsec` → password prompt). Spec 02 §3.3 listed a "NIP-46 —
+Remote signing" entry in the **Advanced** section; that entry is gone
+and the menu is now 15 items, not 16.
+
+The Rust port matches: `tenex/src/config_cmd/nip46.rs` deleted, dispatch
++ menu entry stripped from `config_cmd/mod.rs`, all `nip46_*` accessors
+removed from `store/tenex_config.rs`, shared validators relocated to
+`tui/prompts/validators.rs`.
+
 ### Spec 11 — kind:24030 (TenexAgentDelete) is gone
 
 Removed per user directive in commit `0f8a7668`. The `event-handler`
