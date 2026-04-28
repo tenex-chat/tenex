@@ -56,13 +56,13 @@ pub struct AgentsArgs {
 pub enum AgentsCommand {
     /// List agents not assigned to any project
     Orphans {
-        /// Delete the orphaned agents found
+        /// Delete orphaned agents
         #[arg(long)]
         purge: bool,
     },
     /// Auto-categorize agents that lack an explicit or inferred category
     Categorize {
-        /// Show what would be done without writing changes
+        /// Show what would be categorized without making changes
         #[arg(long = "dry-run")]
         dry_run: bool,
     },
@@ -80,7 +80,7 @@ pub enum ConversationsCommand {
     Status,
     /// Force full re-index of all conversations
     Reindex {
-        /// Skip the confirmation prompt
+        /// Skip confirmation prompt
         #[arg(long)]
         confirm: bool,
     },
@@ -243,14 +243,21 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
         "{}",
         blue.apply_to(format!("Purging {} orphaned agent(s)...", orphans.len()))
     );
-    let mut deleted = 0usize;
+    // TS source (`doctor.ts:101-105`) prints "  ✓ deleted <slug>" inside
+    // the loop unconditionally and reports `orphans.length` on the final
+    // line — even if a delete is a no-op. Match that exactly: the per-agent
+    // line always fires, the final count is `orphans.len()`. (The
+    // delete_agent return value indicates whether anything was on disk —
+    // for orphans we just enumerated from the same storage, it's always
+    // `Ok(true)` in practice; the `?` propagates real I/O errors.)
     for (slug, pubkey, _, _) in &orphans {
-        if storage.delete_agent(pubkey)? {
-            println!("{}", green.apply_to(format!("  ✓ deleted {slug}")));
-            deleted += 1;
-        }
+        storage.delete_agent(pubkey)?;
+        println!("{}", green.apply_to(format!("  ✓ deleted {slug}")));
     }
-    println!("{}", blue.apply_to(format!("Done: {deleted} deleted")));
+    println!(
+        "{}",
+        blue.apply_to(format!("Done: {} deleted", orphans.len()))
+    );
     Ok(())
 }
 

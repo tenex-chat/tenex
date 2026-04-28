@@ -25,16 +25,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Configure TENEX backend settings.
+    /// Configure TENEX backend settings
     Config(config_cmd::ConfigArgs),
 
-    /// Initial setup wizard for TENEX.
+    /// Initial setup wizard for TENEX
     Onboard(onboard::OnboardArgs),
 
-    /// Diagnose and repair TENEX state.
+    /// Diagnose and repair TENEX state
     Doctor(doctor::DoctorArgs),
 
-    /// Manage TENEX agents.
+    /// Manage TENEX agents
     Agent(agent_cmd::AgentArgs),
 
     /// Manage project-level MCP servers (.mcp.json).

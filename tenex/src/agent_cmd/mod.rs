@@ -36,14 +36,14 @@ pub struct AgentArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum AgentCommand {
-    /// Permanently delete a stored agent.
+    /// Permanently delete a stored agent
     Delete {
-        /// Agent public key.
+        /// Agent public key
         pubkey: String,
     },
-    /// Open the interactive agent manager.
+    /// Open the interactive agent manager
     Manage,
-    /// Import agents from external sources.
+    /// Import agents from external sources
     Import(ImportArgs),
 }
 
@@ -55,18 +55,18 @@ pub struct ImportArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum ImportCommand {
-    /// Import agents from a local OpenClaw installation.
+    /// Import agents from a local OpenClaw installation
     Openclaw {
-        /// Preview what would be imported without making changes.
+        /// Preview what would be imported without making changes
         #[arg(long = "dry-run")]
         dry_run: bool,
-        /// Output as JSON array (implies --dry-run).
+        /// Output as JSON array (implies --dry-run)
         #[arg(long)]
         json: bool,
-        /// Copy workspace files instead of symlinking them.
+        /// Copy workspace files instead of symlinking them
         #[arg(long = "no-sync", action = clap::ArgAction::SetTrue)]
         no_sync: bool,
-        /// Comma-separated list of agent IDs to import (default: all).
+        /// Comma-separated list of agent IDs to import (default: all)
         #[arg(long, value_delimiter = ',')]
         slugs: Vec<String>,
     },
@@ -212,4 +212,78 @@ async fn run_openclaw_import(
          the per-agent LLM call is missing.",
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// Pin the descriptions that are visible in `--help`. They must match
+    /// the TS source verbatim — no trailing periods (Commander.js doesn't
+    /// add them; clap renders our doc comments verbatim).
+    #[test]
+    fn agent_subcommand_descriptions_match_ts_verbatim() {
+        let cmd = AgentArgs::command();
+
+        // `agent manage` — TS `agent/index.ts:39`.
+        let manage = cmd.find_subcommand("manage").unwrap();
+        assert_eq!(
+            manage.get_about().map(|s| s.to_string()).as_deref(),
+            Some("Open the interactive agent manager")
+        );
+
+        // `agent delete` — TS `agent/index.ts:45`.
+        let delete = cmd.find_subcommand("delete").unwrap();
+        assert_eq!(
+            delete.get_about().map(|s| s.to_string()).as_deref(),
+            Some("Permanently delete a stored agent")
+        );
+
+        // `agent import` parent — TS `agent/import/index.ts:5`.
+        let import = cmd.find_subcommand("import").unwrap();
+        assert_eq!(
+            import.get_about().map(|s| s.to_string()).as_deref(),
+            Some("Import agents from external sources")
+        );
+    }
+
+    /// `agent import openclaw` description + flag descriptions (TS
+    /// `agent/import/openclaw.ts:150-154`).
+    #[test]
+    fn agent_import_openclaw_descriptions_match_ts_verbatim() {
+        let cmd = AgentArgs::command();
+        let import = cmd.find_subcommand("import").unwrap();
+        let openclaw = import.find_subcommand("openclaw").unwrap();
+
+        assert_eq!(
+            openclaw.get_about().map(|s| s.to_string()).as_deref(),
+            Some("Import agents from a local OpenClaw installation")
+        );
+
+        let by_long: std::collections::HashMap<&str, String> = openclaw
+            .get_arguments()
+            .filter_map(|a| {
+                let long = a.get_long()?;
+                let help = a.get_help()?.to_string();
+                Some((long, help))
+            })
+            .collect();
+        assert_eq!(
+            by_long.get("dry-run").map(|s| s.as_str()),
+            Some("Preview what would be imported without making changes")
+        );
+        assert_eq!(
+            by_long.get("json").map(|s| s.as_str()),
+            Some("Output as JSON array (implies --dry-run)")
+        );
+        assert_eq!(
+            by_long.get("no-sync").map(|s| s.as_str()),
+            Some("Copy workspace files instead of symlinking them")
+        );
+        assert_eq!(
+            by_long.get("slugs").map(|s| s.as_str()),
+            Some("Comma-separated list of agent IDs to import (default: all)")
+        );
+    }
 }
