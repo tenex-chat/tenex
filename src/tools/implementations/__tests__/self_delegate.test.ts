@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import type { AgentInstance } from "@/agents/types";
 import { config as configService } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
-import { SkillIdentifierResolver } from "@/services/skill";
 import { createSelfDelegateTool } from "@/tools/implementations/self_delegate";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
@@ -38,7 +37,6 @@ describe("self_delegate tool", () => {
 
     function createContext(overrides?: {
         llmConfig?: string;
-        skillEventIds?: string[];
         todos?: unknown[];
         agentPublisher?: {
             delegate?: ReturnType<typeof mock>;
@@ -58,11 +56,7 @@ describe("self_delegate tool", () => {
                 llmConfig: overrides?.llmConfig ?? "default",
             } as AgentInstance,
             conversationId,
-            triggeringEnvelope: createMockInboundEnvelope({
-                metadata: {
-                    skillEventIds: overrides?.skillEventIds ?? [],
-                },
-            }),
+            triggeringEnvelope: createMockInboundEnvelope({}),
             agentPublisher: {
                 delegate,
             } as any,
@@ -110,25 +104,17 @@ describe("self_delegate tool", () => {
         expect(schemaShape.model).toBeUndefined();
     });
 
-    it("self-delegates to the current agent and forwards variant and skills", async () => {
+    it("self-delegates to the current agent with the chosen variant", async () => {
         spyOn(configService, "getRawLLMConfig").mockReturnValue(metaConfig as any);
-        const resolveSkillIdentifier = mock((identifier: string) =>
-            identifier === "be-brief" ? "resolved-skill-id" : null
-        );
-        spyOn(SkillIdentifierResolver, "getInstance").mockReturnValue({
-            resolveSkillIdentifier,
-        } as any);
 
         const { context, delegate, addDelegationMarker, save } = createContext({
             llmConfig: "meta-config",
-            skillEventIds: ["inherited-skill-id"],
         });
         const tool = createSelfDelegateTool(context);
 
         const result = await tool.execute({
             prompt: "Continue the task with fresh context",
             model: "deep",
-            skills: ["be-brief"],
         });
 
         expect(result.success).toBe(true);
@@ -138,7 +124,6 @@ describe("self_delegate tool", () => {
             recipient: "self-agent-pubkey",
             content: "Continue the task with fresh context",
             variant: "deep",
-            skills: ["inherited-skill-id", "resolved-skill-id"],
         });
         expect(addDelegationMarker).not.toHaveBeenCalled();
         expect(save).not.toHaveBeenCalled();

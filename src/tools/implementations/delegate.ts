@@ -16,7 +16,6 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
-import { SkillIdentifierResolver } from "@/services/skill";
 import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
@@ -42,10 +41,6 @@ const delegationItemSchema = z.object({
     .boolean()
     .optional()
     .describe("Set to true to proceed even if circular delegation is detected"),
-  skills: z
-    .array(z.string())
-    .optional()
-    .describe("Skill IDs to apply to this delegated agent. Use the IDs shown in the prompt; slugged IDs and short event IDs are resolved automatically."),
 });
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
@@ -91,11 +86,6 @@ async function executeDelegate(
   // Get the delegation chain from the current conversation for cycle detection
   const conversationStore = ConversationStore.get(context.conversationId);
   const delegationChain = conversationStore?.metadata?.delegationChain;
-
-  // Extract inherited skills from the triggering event
-  // Skill inheritance: any skills on the current triggering event are automatically
-  // passed forward to delegated agents unless explicitly overridden
-  const inheritedSkills = context.triggeringEnvelope.metadata.skillEventIds ?? [];
 
   const trimmedRecipient = delegation.recipient.trim();
 
@@ -188,36 +178,10 @@ async function executeDelegate(
     // Publish delegation event
     const eventContext = createEventContext(context);
 
-    // Combine inherited skills with explicitly specified skills
-    // Skill inheritance: inherited skills are always passed forward
-    // Explicit skills are added to the inherited set (not replaced)
-    const combinedSkills = [
-      ...inheritedSkills,
-      ...(delegation.skills || []),
-    ];
-    const uniqueSkills = Array.from(
-      new Set(
-        combinedSkills
-          .map((skillIdentifier) => {
-            const trimmedIdentifier = skillIdentifier.trim();
-            if (!trimmedIdentifier) {
-              return null;
-            }
-
-            return (
-              SkillIdentifierResolver.getInstance().resolveSkillIdentifier(trimmedIdentifier) ??
-              trimmedIdentifier
-            );
-          })
-          .filter((skillIdentifier): skillIdentifier is string => Boolean(skillIdentifier))
-      )
-    );
-
     const eventId = await context.agentPublisher.delegate({
       recipient: pubkey,
       content: delegation.prompt,
       branch: delegation.branch,
-      skills: uniqueSkills.length > 0 ? uniqueSkills : undefined,
       team: resolvedTeamName,
     }, eventContext);
 
@@ -248,7 +212,6 @@ async function executeDelegate(
   logger.info("[delegate] Published delegation, agent continues without blocking", {
     delegationConversationId,
     circularWarningsCount: circularWarnings.length,
-    inheritedSkillsCount: inheritedSkills.length,
   });
 
   let message = "Delegated task. The agent will wake you up when ready with the response.";

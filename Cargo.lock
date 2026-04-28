@@ -2613,6 +2613,7 @@ dependencies = [
  "anyhow",
  "clap",
  "console",
+ "crossterm",
  "indexmap",
  "inquire",
  "libc",
@@ -2620,9 +2621,11 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
+ "tenex-whitelist",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -2640,6 +2643,36 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "tenex-conversations"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs-next",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "tenex-project"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs-next",
+ "nostr",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

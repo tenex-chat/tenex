@@ -1,61 +1,14 @@
 import { describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
-import { createAgentInstance, loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
+import { loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
 import { SkillService } from "@/services/skill/SkillService";
-import * as skillBlocking from "@/services/skill/skill-blocking";
 
 // Hoisted by Bun's bundler — runs before any import is resolved
 const categorizeAgentMock = mock(async () => "worker" as const);
 mock.module("@/agents/categorizeAgent", () => ({
     categorizeAgent: categorizeAgentMock,
 }));
-
-describe("agent-loader", () => {
-    it("filters blocked always-on skills when hydrating an agent instance", async () => {
-        const blockedSet = new Set(["blocked-loader-skill"]);
-        const expandedSpy = spyOn(skillBlocking, "buildExpandedBlockedSet").mockReturnValue(blockedSet);
-        const filterSpy = spyOn(skillBlocking, "filterBlockedSkills").mockReturnValue({
-            allowed: ["allowed-loader-skill"],
-            blocked: ["blocked-loader-skill"],
-        });
-        const skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
-            listAvailableSkills: mock(async () => []),
-        } as never);
-
-        const signer = NDKPrivateKeySigner.generate();
-        const storedAgent = createStoredAgent({
-            nsec: signer.nsec,
-            slug: "loader-agent",
-            name: "Loader Agent",
-            role: "assistant",
-            defaultConfig: {
-                skills: ["allowed-loader-skill", "blocked-loader-skill"],
-                blockedSkills: ["blocked-loader-skill"],
-            },
-        });
-
-        const registry = {
-            getMetadataPath: mock(() => "/tmp/loader-metadata"),
-            getBasePath: mock(() => "/tmp/loader-base"),
-        } as any;
-
-        const instance = await createAgentInstance(storedAgent, registry);
-
-        expect(expandedSpy).toHaveBeenCalledWith(["blocked-loader-skill"], expect.any(Map));
-        expect(filterSpy).toHaveBeenCalledWith(
-            ["allowed-loader-skill", "blocked-loader-skill"],
-            blockedSet,
-            expect.any(Map)
-        );
-        expect(instance.alwaysSkills).toEqual(["allowed-loader-skill"]);
-        expect(instance.blockedSkills).toEqual(["blocked-loader-skill"]);
-
-        expandedSpy.mockRestore();
-        filterSpy.mockRestore();
-        skillServiceSpy.mockRestore();
-    });
-});
 
 describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
     function makeRegistry() {

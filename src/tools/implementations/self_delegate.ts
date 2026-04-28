@@ -3,7 +3,6 @@ import { config as configService } from "@/services/ConfigService";
 import { createEventContext } from "@/services/event-context";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
-import { SkillIdentifierResolver } from "@/services/skill";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { isMetaModelConfiguration, type MetaModelConfiguration } from "@/services/config/types";
@@ -13,7 +12,6 @@ import { z } from "zod";
 interface SelfDelegateInput {
     prompt: string;
     model?: string;
-    skills?: string[];
 }
 
 interface SelfDelegateOutput {
@@ -46,12 +44,6 @@ function createSelfDelegateSchema(metaConfig?: MetaModelConfiguration): z.ZodSch
             .string()
             .describe(
                 "The task and full context for the new instance of yourself. Self-delegated runs only see this prompt, so include everything needed."
-            ),
-        skills: z
-            .array(z.string())
-            .optional()
-            .describe(
-                "Additional skill IDs to apply to the new instance. Any currently inherited skills are forwarded automatically."
             ),
     };
 
@@ -104,35 +96,12 @@ async function executeSelfDelegate(
         };
     }
 
-    const inheritedSkills = context.triggeringEnvelope.metadata.skillEventIds ?? [];
-
-    // Same skill inheritance + identifier resolution pattern as delegate.ts.
-    const combinedSkills = [...inheritedSkills, ...(input.skills || [])];
-    const uniqueSkills = Array.from(
-        new Set(
-            combinedSkills
-                .map((skillIdentifier) => {
-                    const trimmedIdentifier = skillIdentifier.trim();
-                    if (!trimmedIdentifier) {
-                        return null;
-                    }
-
-                    return (
-                        SkillIdentifierResolver.getInstance().resolveSkillIdentifier(trimmedIdentifier) ??
-                        trimmedIdentifier
-                    );
-                })
-                .filter((skillIdentifier): skillIdentifier is string => Boolean(skillIdentifier))
-        )
-    );
-
     const eventContext = createEventContext(context);
     const eventId = await context.agentPublisher.delegate(
         {
             recipient: context.agent.pubkey,
             content: input.prompt,
             variant: input.model,
-            skills: uniqueSkills.length > 0 ? uniqueSkills : undefined,
         },
         eventContext
     );
@@ -158,7 +127,6 @@ async function executeSelfDelegate(
         delegationConversationId,
         agent: context.agent.slug,
         variant: input.model || "default",
-        inheritedSkillsCount: inheritedSkills.length,
     });
 
     let message = input.model

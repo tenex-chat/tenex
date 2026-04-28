@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { SkillService, SkillWhitelistService } from "@/services/skill";
+import { SkillService } from "@/services/skill";
 import { RALRegistry } from "@/services/ral";
 import { projectContextStore } from "@/services/projects";
 import {
@@ -84,9 +84,7 @@ type MockedConfigService = {
 
 function createTestContext(
     overrides: {
-        blockedSkills?: string[];
         llmConfig?: string;
-        skillEventIds?: string[];
         variantOverride?: string;
         conversationStoreOverrides?: Record<string, unknown>;
     } = {}
@@ -114,7 +112,6 @@ function createTestContext(
         slug: "agent-slug",
         llmConfig: overrides.llmConfig ?? "test-model",
         alwaysSkills: [],
-        blockedSkills: overrides.blockedSkills ?? [],
         mcpAccess: [],
         tools: [],
         createLLMService: createLLMServiceMock,
@@ -122,7 +119,6 @@ function createTestContext(
 
     const triggeringEnvelope = createMockInboundEnvelope({
         metadata: {
-            skillEventIds: overrides.skillEventIds ?? [],
             variantOverride: overrides.variantOverride,
         },
         principal: {
@@ -152,7 +148,6 @@ function createTestContext(
 }
 
 describe("StreamSetup", () => {
-    const whitelistService = SkillWhitelistService.getInstance();
     const mockedConfigService = configService as unknown as MockedConfigService;
 
     beforeEach(() => {
@@ -204,46 +199,13 @@ describe("StreamSetup", () => {
             fetchSkills: fetchSkillsMock,
             listAvailableSkills: listAvailableSkillsMock,
         } as any);
-        whitelistService.setInstalledSkills([]);
         fetchSkillsMock.mockClear();
         listAvailableSkillsMock.mockClear();
         createLLMServiceMock.mockClear();
     });
 
     afterEach(() => {
-        whitelistService.setInstalledSkills([]);
         mock.restore();
-    });
-
-    it("filters blocked skills before fetchSkills is called", async () => {
-        listAvailableSkillsMock.mockResolvedValue([
-            {
-                identifier: "local-skill",
-                eventId: "a".repeat(64),
-                content: "",
-                installedFiles: [],
-            },
-        ]);
-
-        const context = createTestContext({
-            blockedSkills: ["a".repeat(64)],
-            skillEventIds: ["local-skill"],
-        });
-        const toolTracker = new ToolExecutionTracker();
-
-        const result = await projectContextStore.run(mockProjectContext, () =>
-            setupStreamExecution(
-                context,
-                toolTracker,
-                1,
-                { warmSenderPubkeys: mock(() => undefined) }
-            )
-        );
-
-        expect(fetchSkillsMock).not.toHaveBeenCalled();
-        expect(result.request.runtimeOverlays).toEqual([]);
-        expect(result.llmService.provider).toBe("mock-provider");
-        expect(result.skillToolPermissions).toEqual({});
     });
 
     it("applies delegation variant overrides before meta-model resolution", async () => {

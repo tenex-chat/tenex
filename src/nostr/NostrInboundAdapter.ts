@@ -42,7 +42,6 @@ export class NostrInboundAdapter {
 
         const articleReferences = getTagValues(event, "a").filter(v => v.startsWith("30023:"));
         const replyTargets = getTagValues(event, "e");
-        const skillEventIds = getTagValues(event, "skill");
         const delegationParentConversationId = getTagValue(event, "delegation");
 
         const channel = projectBinding
@@ -96,7 +95,6 @@ export class NostrInboundAdapter {
                 articleReferences: articleReferences.length > 0 ? articleReferences : undefined,
                 replyTargets: replyTargets.length > 0 ? replyTargets : undefined,
                 delegationParentConversationId,
-                skillEventIds: skillEventIds.length > 0 ? skillEventIds : undefined,
             },
         };
     }

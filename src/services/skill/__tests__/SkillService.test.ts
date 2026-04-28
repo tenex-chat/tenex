@@ -2,18 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { homedir } from "node:os";
 import * as path from "node:path";
 import * as fsPromises from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import * as constantsModule from "@/constants";
-import * as fsLibModule from "@/lib/fs";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { NDKKind } from "@/nostr/kinds";
 import { SkillService } from "../SkillService";
-
-const mockFetchEvents = mock(() => Promise.resolve(new Set<NDKEvent>()));
-const mockFetchEvent = mock(() => Promise.resolve(null));
-
-const originalFetch = globalThis.fetch;
-let mockFetch: ReturnType<typeof mock>;
 
 const files = new Map<string, Buffer>();
 const directories = new Set<string>();
@@ -147,29 +137,8 @@ beforeEach(() => {
     statCallCount = 0;
     ensureMockDirectory(`${homedir()}/.agents/skills`);
 
-    mockFetch = mock(() =>
-        Promise.resolve(
-            new Response(Buffer.from("file content"), {
-                status: 200,
-                statusText: "OK",
-            })
-        )
-    );
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    mockFetchEvents.mockReset();
-    mockFetchEvent.mockReset();
-
-    SkillService.setNDKProviderForTesting(() => ({
-        fetchEvents: mockFetchEvents,
-        fetchEvent: mockFetchEvent,
-    } as any));
-
     spyOn(Date, "now").mockImplementation(() => mockNowMs);
     spyOn(constantsModule, "getTenexBasePath").mockReturnValue("/tmp/test-tenex");
-    spyOn(fsLibModule, "ensureDirectory").mockImplementation(async (target: string) => {
-        ensureMockDirectory(target);
-    });
     spyOn(fsPromises, "writeFile").mockImplementation(async (target: fsPromises.PathLike, data: string | ArrayBufferView) => {
         const normalized = normalizePath(String(target));
         ensureMockDirectory(path.dirname(normalized));
@@ -254,7 +223,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-    globalThis.fetch = originalFetch;
     mock.restore();
     SkillService.resetInstance();
 });
@@ -689,135 +657,5 @@ describe("SkillService", () => {
         expect(skills.map((skill) => skill.identifier)).toEqual(["shared-only"]);
         expect(result.skills).toHaveLength(1);
         expect(result.skills[0].content).toBe("Shared only skill");
-    });
-
-    it("hydrates remote skills into slugged local directories and loads them from disk", async () => {
-        const skillEvent = new NDKEvent();
-        skillEvent.id = "b".repeat(64);
-        skillEvent.kind = NDKKind.AgentSkill;
-        skillEvent.content = "Make a poster";
-        skillEvent.tags = [
-            ["title", "Make Poster"],
-            ["description", "Creates posters from structured inputs"],
-        ];
-
-        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-
-        const result = await SkillService.getInstance().fetchSkills(["b".repeat(64)]);
-
-        expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].identifier).toBe("make-poster");
-        expect(result.skills[0].name).toBe("Make Poster");
-        expect(result.skills[0].description).toBe("Creates posters from structured inputs");
-        expect(result.skills[0].content).toBe("Make a poster");
-        const storedSkillDocument = files
-            .get(normalizePath(`${homedir()}/.agents/skills/make-poster/SKILL.md`))
-            ?.toString("utf-8");
-        expect(storedSkillDocument).toContain('name: "Make Poster"');
-        expect(storedSkillDocument).toContain(
-            'description: "Creates posters from structured inputs"'
-        );
-        expect(storedSkillDocument).toContain(`tenex-event-id: "${"b".repeat(64)}"`);
-        expect(storedSkillDocument).not.toContain("tenex-title");
-        expect(storedSkillDocument).not.toContain("tenex-hydrated-at");
-        expect(storedSkillDocument).toContain("Make a poster");
-
-        const listedSkills = await SkillService.getInstance().listAvailableSkills();
-        expect(listedSkills.map((skill) => skill.identifier)).toEqual(["make-poster"]);
-    });
-
-    it("falls back to remote hydration when no scoped local match exists", async () => {
-        const skillEvent = new NDKEvent();
-        skillEvent.id = "e".repeat(64);
-        skillEvent.kind = NDKKind.AgentSkill;
-        skillEvent.content = "Remote scoped skill";
-        skillEvent.tags = [["title", "Remote Scoped"]];
-
-        seedFile(
-            `${PROJECT_PATH}/.agents/skills/local-only/SKILL.md`,
-            createSkillDocument({
-                name: "local-only",
-                description: "Project only description",
-                content: "Project only skill",
-            })
-        );
-
-        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-
-        const result = await SkillService.getInstance().fetchSkills(
-            ["e".repeat(64)],
-            LOOKUP_CONTEXT
-        );
-
-        expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].identifier).toBe("remote-scoped");
-        expect(result.skills[0].name).toBe("Remote Scoped");
-        expect(result.skills[0].content).toBe("Remote scoped skill");
-        const storedScopedSkillDocument = files
-            .get(normalizePath(`${homedir()}/.agents/skills/remote-scoped/SKILL.md`))
-            ?.toString("utf-8");
-        expect(storedScopedSkillDocument).toContain('name: "Remote Scoped"');
-        expect(storedScopedSkillDocument).toContain('description: "Remote scoped skill"');
-        expect(storedScopedSkillDocument).toContain(`tenex-event-id: "${"e".repeat(64)}"`);
-        expect(storedScopedSkillDocument).not.toContain("tenex-title");
-        expect(storedScopedSkillDocument).not.toContain("tenex-hydrated-at");
-        expect(storedScopedSkillDocument).toContain("Remote scoped skill");
-    });
-
-    it("reuses already-hydrated local skill content instead of re-fetching the remote event", async () => {
-        seedFile(
-            `${homedir()}/.agents/skills/poster-kit/SKILL.md`,
-            createSkillDocument({
-                name: "Poster Kit",
-                description: "Poster skill description",
-                content: "Locally edited content",
-                metadata: {
-                    "tenex-event-id": "c".repeat(64),
-                },
-            })
-        );
-
-        const result = await SkillService.getInstance().fetchSkills(["c".repeat(64)]);
-
-        expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].identifier).toBe("poster-kit");
-        expect(result.skills[0].name).toBe("Poster Kit");
-        expect(result.skills[0].content).toBe("Locally edited content");
-        expect(mockFetchEvents).not.toHaveBeenCalled();
-    });
-
-    it("falls back to the short event id when a remote skill has no title, name, or d-tag", async () => {
-        const skillEvent = new NDKEvent();
-        skillEvent.id = "d".repeat(64);
-        skillEvent.kind = NDKKind.AgentSkill;
-        skillEvent.content = "Unnamed remote skill";
-        skillEvent.tags = [];
-
-        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent]));
-
-        const result = await SkillService.getInstance().fetchSkills(["d".repeat(64)]);
-
-        expect(result.skills).toHaveLength(1);
-        expect(result.skills[0].identifier).toBe("dddddddddd");
-    });
-
-    it("fetchSkill returns only kind:4202 skill events", async () => {
-        const skillEvent = new NDKEvent();
-        skillEvent.id = "skill123";
-        skillEvent.kind = NDKKind.AgentSkill;
-        skillEvent.content = "Skill content";
-        skillEvent.tags = [];
-
-        const otherEvent = new NDKEvent();
-        otherEvent.id = "other123";
-        otherEvent.kind = 1;
-        otherEvent.content = "Not a skill";
-        otherEvent.tags = [];
-
-        mockFetchEvents.mockResolvedValueOnce(new Set([skillEvent, otherEvent]));
-
-        const result = await SkillService.getInstance().fetchSkill("skill123");
-
-        expect(result).toBe(skillEvent);
     });
 });

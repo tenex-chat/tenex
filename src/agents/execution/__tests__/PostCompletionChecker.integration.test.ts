@@ -20,7 +20,6 @@ import { mkdir, rm } from "node:fs/promises";
 import { checkPostCompletion, type PostCompletionCheckerConfig } from "../PostCompletionChecker";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import * as AgentEventDecoder from "@/nostr/AgentEventDecoder";
 import { supervisorOrchestrator } from "@/agents/supervision";
 import { registerDefaultHeuristics, resetRegistrationForTesting } from "@/agents/supervision/registerHeuristics";
 import type { PendingDelegation } from "@/services/ral/types";
@@ -70,7 +69,6 @@ describe("PostCompletionChecker - True Integration Test", () => {
             fetchSkills: async () => "",
         } as ReturnType<typeof SkillService.getInstance>);
         getToolsObjectSpy = spyOn(toolRegistryModule, "getToolsObject").mockReturnValue({});
-        spyOn(AgentEventDecoder, "extractSkillEventIds").mockReturnValue([]);
         await mkdir(TEST_DIR, { recursive: true });
         conversationStore = new ConversationStore(TEST_DIR);
         conversationStore.load(PROJECT_ID, CONVERSATION_ID);

@@ -7,7 +7,6 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";
 import { toKebabCase } from "@/lib/string";
-import { SkillService } from "@/services/skill/SkillService";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -85,7 +84,6 @@ interface ParsedAgentEvent {
     instructions: string;
     useCriteria: string;
     defaultConfig: { model: string };
-    skillEventIds: string[];
     definitionDTag?: string;
     definitionAuthor?: string;
     definitionCreatedAt?: number;
@@ -105,7 +103,6 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
     const category = resolveCategory(rawCategory);
     const instructions = agentDef.instructions || "";
     const useCriteria = agentDef.useCriteria || "";
-    const skillEventIds = agentDef.getSkillEventIds();
 
     // Extract definition tracking metadata for auto-upgrade monitoring
     const definitionDTag = event.tagValue("d") || undefined;
@@ -123,7 +120,6 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
         defaultConfig: {
             model: DEFAULT_AGENT_LLM_CONFIG,
         },
-        skillEventIds,
         definitionDTag,
         definitionAuthor,
         definitionCreatedAt: event.created_at,
@@ -185,30 +181,6 @@ export async function installAgentFromNostrEvent(
         }
     }
 
-    let alwaysSkillIds: string[] | undefined;
-    if (agentData.skillEventIds.length > 0) {
-        const skillResult = await SkillService.getInstance().fetchSkills(agentData.skillEventIds);
-        const resolvedSkillIds = skillResult.skills
-            .map((skill) => skill.identifier)
-            .filter((identifier): identifier is string => Boolean(identifier));
-
-        if (resolvedSkillIds.length < agentData.skillEventIds.length) {
-            const resolvedSet = new Set(skillResult.skills.map((skill) => skill.eventId).filter(Boolean));
-            const unresolvedSkillIds = agentData.skillEventIds.filter(
-                (skillEventId) => !resolvedSet.has(skillEventId)
-            );
-            logger.warn(
-                `Agent "${agentData.name}" failed to resolve some attached skills during install`,
-                {
-                    unresolvedSkillIds,
-                    resolvedSkillIds,
-                }
-            );
-        }
-
-        alwaysSkillIds = resolvedSkillIds.length > 0 ? resolvedSkillIds : undefined;
-    }
-
     const storedAgent = createStoredAgent({
         nsec: signer.nsec,
         slug: agentData.slug,
@@ -218,10 +190,7 @@ export async function installAgentFromNostrEvent(
         description: agentData.description,
         instructions: agentData.instructions,
         useCriteria: agentData.useCriteria,
-        defaultConfig: {
-            ...agentData.defaultConfig,
-            skills: alwaysSkillIds,
-        },
+        defaultConfig: agentData.defaultConfig,
         eventId: agentData.eventId,
         definitionDTag: agentData.definitionDTag,
         definitionAuthor: agentData.definitionAuthor,

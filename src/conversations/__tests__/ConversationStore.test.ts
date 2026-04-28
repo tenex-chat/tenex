@@ -1096,7 +1096,6 @@ describe("ConversationStore", () => {
                     eventTagCount: 1,
                     replyTargets: [],
                     articleReferences: [],
-                    skillEventIds: [],
                 },
                 recipients: [{
                     id: `nostr:${AGENT1_PUBKEY}`,
@@ -1148,7 +1147,6 @@ describe("ConversationStore", () => {
                     eventTagCount: 1,
                     replyTargets: [],
                     articleReferences: [],
-                    skillEventIds: [],
                 },
                 recipients: [{
                     id: `nostr:${AGENT1_PUBKEY}`,

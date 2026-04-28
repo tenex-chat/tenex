@@ -430,14 +430,6 @@ export class AgentPublisher implements AgentRuntimePublisher {
             event.tags.push(["team", config.team]);
         }
 
-        // Add skill tags for the delegated agent (deduplicated for robustness)
-        if (config.skills && config.skills.length > 0) {
-            const uniqueSkills = [...new Set(config.skills)];
-            for (const skillId of uniqueSkills) {
-                event.tags.push(["skill", skillId]);
-            }
-        }
-
         if (config.variant) {
             event.tags.push(["variant", config.variant]);
         }

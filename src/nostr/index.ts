@@ -14,7 +14,6 @@ export {
     hasTool,
     getToolTags,
     getParticipants,
-    extractSkillEventIds,
     isNeverRouteKind,
     isProjectEvent,
     isLessonEvent,

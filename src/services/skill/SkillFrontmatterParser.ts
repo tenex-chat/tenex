@@ -1,9 +1,6 @@
 export const FRONTMATTER_DELIMITER = "---";
-export const FRONTMATTER_METADATA_FIELD = "metadata";
-export const TENEX_METADATA_EVENT_ID_KEY = "tenex-event-id";
 
 export interface StoredSkillMetadata {
-    eventId?: string;
     name?: string;
     description?: string;
     /** Tools the agent is restricted to (highest priority, overrides allow/deny) */
@@ -34,7 +31,6 @@ export function normalizeStoredSkillMetadata(
     }
 
     const normalized: StoredSkillMetadata = {
-        eventId: metadata.eventId?.trim() || undefined,
         name: metadata.name?.trim() || undefined,
         description: metadata.description?.trim() || undefined,
         onlyTools: normalizeStringArray(metadata.onlyTools),
@@ -205,7 +201,6 @@ const TOOL_PERMISSION_KEYS = new Set(["only-tools", "allow-tools", "deny-tools"]
 
 export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMetadata | undefined {
     const lines = frontmatterBlock.replace(/\r\n/g, "\n").split("\n");
-    const metadataValues: Record<string, string> = {};
     let name: string | undefined;
     let description: string | undefined;
     let onlyTools: string[] | undefined;
@@ -238,37 +233,6 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
         const key = line.slice(0, separatorIndex).trim();
         const rawValue = line.slice(separatorIndex + 1);
 
-        if (key === FRONTMATTER_METADATA_FIELD && stripInlineYamlComment(rawValue).trim().length === 0) {
-            lineIndex += 1;
-            while (lineIndex < lines.length) {
-                const nestedLine = lines[lineIndex];
-                const nestedTrimmedLine = nestedLine.trim();
-
-                if (!nestedTrimmedLine || nestedTrimmedLine.startsWith("#")) {
-                    lineIndex += 1;
-                    continue;
-                }
-
-                const nestedIndent = countIndent(nestedLine);
-                if (nestedIndent <= indent) {
-                    break;
-                }
-
-                const nestedSeparatorIndex = nestedTrimmedLine.indexOf(":");
-                if (nestedSeparatorIndex <= 0) {
-                    lineIndex += 1;
-                    continue;
-                }
-
-                const nestedKey = nestedTrimmedLine.slice(0, nestedSeparatorIndex).trim();
-                const nestedRawValue = nestedTrimmedLine.slice(nestedSeparatorIndex + 1);
-                const nestedValue = readYamlValue(lines, lineIndex, nestedIndent, nestedRawValue);
-                metadataValues[nestedKey] = nestedValue.value;
-                lineIndex = nestedValue.nextIndex;
-            }
-            continue;
-        }
-
         // Handle tool permission list fields (YAML sequences)
         if (TOOL_PERMISSION_KEYS.has(key) && stripInlineYamlComment(rawValue).trim().length === 0) {
             const listResult = readYamlList(lines, lineIndex + 1, indent);
@@ -299,7 +263,6 @@ export function parseSkillFrontmatter(frontmatterBlock: string): StoredSkillMeta
     }
 
     return normalizeStoredSkillMetadata({
-        eventId: metadataValues[TENEX_METADATA_EVENT_ID_KEY],
         name,
         description,
         onlyTools,
@@ -363,17 +326,6 @@ export function serializeSkillDocument(content: string, metadata: StoredSkillMet
     serializeYamlList(lines, "allow-tools", metadata.allowTools);
     serializeYamlList(lines, "deny-tools", metadata.denyTools);
     serializeYamlList(lines, "tools", metadata.tools);
-
-    const metadataEntries = [[TENEX_METADATA_EVENT_ID_KEY, metadata.eventId]].filter(
-        (entry): entry is [string, string] => Boolean(entry[1])
-    );
-
-    if (metadataEntries.length > 0) {
-        lines.push(`${FRONTMATTER_METADATA_FIELD}:`);
-        for (const [key, value] of metadataEntries) {
-            lines.push(`  ${key}: ${formatYamlScalar(value)}`);
-        }
-    }
 
     return `${lines.join("\n")}\n${FRONTMATTER_DELIMITER}\n\n${content.trim()}`;
 }

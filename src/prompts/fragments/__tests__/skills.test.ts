@@ -43,7 +43,6 @@ describe("renderSkill", () => {
             createSkill({
                 installedFiles: [
                     {
-                        eventId: "event2",
                         relativePath: "data/missing.json",
                         absolutePath: "/home/.tenex/skills/poster-kit/data/missing.json",
                         success: false,
@@ -75,7 +74,6 @@ describe("renderSkill", () => {
                 content: "",
                 installedFiles: [
                     {
-                        eventId: "event2",
                         relativePath: "data/missing.json",
                         absolutePath: "/home/.tenex/skills/poster-kit/data/missing.json",
                         success: false,

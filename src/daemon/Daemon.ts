@@ -38,11 +38,9 @@ import {
     type ActiveDelegationCheckerFn,
 } from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
-import { SkillWhitelistService } from "@/services/skill";
 import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import { SkillService } from "@/services/skill";
 import { RestartState } from "./RestartState";
 import { StatusFile } from "./StatusFile";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
@@ -108,7 +106,6 @@ export class Daemon {
     private staticEoseReceived = false;
     private fullyInitialized = false;
     private readyFired = false;
-    private removeWhitelistCacheListener: (() => void) | null = null;
 
     // Status file for `tenex daemon status`
     private statusFile: StatusFile | null = null;
@@ -351,15 +348,6 @@ export class Daemon {
                 : [];
             OwnerAgentListService.getInstance().initialize(ownerAgentListPubkeys);
 
-            // 6d. Initialize SkillWhitelistService
-            const whitelistService = SkillWhitelistService.getInstance();
-            this.removeWhitelistCacheListener?.();
-            this.removeWhitelistCacheListener = whitelistService.onCacheUpdated(async () => {
-                await this.hydrateWhitelistedSkillsToLocalStore();
-            });
-            whitelistService.initialize([...this.whitelistedPubkeys]);
-            void this.hydrateWhitelistedSkillsToLocalStore();
-
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
             this.runtimeLifecycle = new RuntimeLifecycle(this.projectsBase);
@@ -505,22 +493,6 @@ export class Daemon {
 
             throw error;
         }
-    }
-
-    private async hydrateWhitelistedSkillsToLocalStore(): Promise<void> {
-        const whitelistedSkills = SkillWhitelistService.getInstance().getWhitelistedSkills();
-
-        if (whitelistedSkills.length === 0) {
-            return;
-        }
-
-        const requestedSkillIds = [...new Set(whitelistedSkills.map((skill) => skill.eventId))];
-        const result = await SkillService.getInstance().fetchSkills(requestedSkillIds);
-
-        logger.info("[Daemon] Synced whitelisted skills to local store", {
-            requestedCount: requestedSkillIds.length,
-            loadedCount: result.skills.length,
-        });
     }
 
     /**
@@ -1094,10 +1066,6 @@ export class Daemon {
         this.backendHeartbeat?.stop();
         this.backendHeartbeat = null;
 
-        this.removeWhitelistCacheListener?.();
-        this.removeWhitelistCacheListener = null;
-
-        SkillWhitelistService.getInstance().shutdown();
         await Nip46SigningService.getInstance().shutdown();
 
         if (this.subscriptionManager) {

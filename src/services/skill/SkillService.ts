@@ -1,38 +1,25 @@
-import * as crypto from "node:crypto";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getAgentHomeDirectory, getShortPubkey } from "@/lib/agent-home";
-import { ensureDirectory } from "@/lib/fs";
-import { slugifyIdentifier } from "@/lib/string";
-import { getNDK } from "@/nostr";
-import { NDKKind } from "@/nostr/kinds";
 import { homedir } from "node:os";
-import { SkillWhitelistService } from "./SkillWhitelistService";
 import {
     type ParsedSkillDocument,
     parseSkillDocument,
-    serializeSkillDocument,
     type StoredSkillMetadata,
 } from "./SkillFrontmatterParser";
 import type {
     SkillData,
-    SkillFileInfo,
     SkillFileInstallResult,
     SkillLookupContext,
     SkillResult,
     SkillStoreScope,
 } from "./types";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { shortenEventId } from "@/utils/conversation-id";
 import { getTenexBasePath } from "@/constants";
 
-const DOWNLOAD_TIMEOUT_MS = 30_000;
-const MAX_DOWNLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const SKILL_CONTENT_FILENAME = "SKILL.md";
 const AVAILABLE_SKILLS_CACHE_TTL_MS = 5_000;
-const FULL_EVENT_ID_REGEX = /^[0-9a-f]{64}$/;
 
 interface LocalSkillRecord {
     id: string;
@@ -40,8 +27,6 @@ interface LocalSkillRecord {
     scope: SkillStoreScope;
     metadata?: StoredSkillMetadata;
 }
-
-// SkillStoreScope imported from ./types
 
 interface SkillStoreDirectory {
     dir: string;
@@ -62,14 +47,11 @@ interface InFlightAvailableSkillsEntry {
 /**
  * Service for resolving the effective local skill set across scoped directories.
  *
- * Remote kind:4202 skills hydrate into ~/.agents/skills/<id>/SKILL.md.
- *
  * When the same local skill ID exists in multiple scopes, precedence is:
  * agent > agent-project > project > shared > built-in.
  */
 export class SkillService {
     private static instance: SkillService;
-    private static ndkProvider: typeof getNDK = getNDK;
     private availableSkillsCache = new Map<string, AvailableSkillsCacheEntry>();
     private inFlightAvailableSkills = new Map<string, InFlightAvailableSkillsEntry>();
 
@@ -83,24 +65,10 @@ export class SkillService {
     }
 
     /**
-     * Reset singleton state and restore default dependencies.
-     * Test-only hook to keep suite-level module mocks from leaking into SkillService.
+     * Reset singleton state. Test-only hook.
      */
     static resetInstance(): void {
         SkillService.instance = undefined as unknown as SkillService;
-        SkillService.ndkProvider = getNDK;
-    }
-
-    /**
-     * Override the NDK provider for tests.
-     */
-    static setNDKProviderForTesting(provider: typeof getNDK): void {
-        SkillService.ndkProvider = provider;
-        SkillService.instance = undefined as unknown as SkillService;
-    }
-
-    private getNDK(): ReturnType<typeof getNDK> {
-        return SkillService.ndkProvider();
     }
 
     private buildAvailableSkillsCacheKey(lookupContext: SkillLookupContext = {}): string {
@@ -125,10 +93,6 @@ export class SkillService {
 
     private cloneSkillDataArray(skills: SkillData[]): SkillData[] {
         return skills.map((skill) => this.cloneSkillData(skill));
-    }
-
-    private invalidateAvailableSkillsCache(): void {
-        this.availableSkillsCache.clear();
     }
 
     private async buildAvailableSkillsSignature(
@@ -180,62 +144,20 @@ export class SkillService {
         return Array.from(visibleSignatures.values()).join("|");
     }
 
-    private async getAgentSkillsBaseDir(
-        agentPubkey: string,
-        ensureExists = false
-    ): Promise<string> {
-        const skillsDir = path.join(getAgentHomeDirectory(agentPubkey), "skills");
-        if (ensureExists) {
-            await ensureDirectory(skillsDir);
-        }
-        return skillsDir;
+    private getAgentSkillsBaseDir(agentPubkey: string): string {
+        return path.join(getAgentHomeDirectory(agentPubkey), "skills");
     }
 
-    private async getAgentProjectSkillsBaseDir(
-        projectPath: string,
-        agentPubkey: string,
-        ensureExists = false
-    ): Promise<string> {
-        const skillsDir = path.join(projectPath, ".agents", getShortPubkey(agentPubkey), "skills");
-        if (ensureExists) {
-            await ensureDirectory(skillsDir);
-        }
-        return skillsDir;
+    private getAgentProjectSkillsBaseDir(projectPath: string, agentPubkey: string): string {
+        return path.join(projectPath, ".agents", getShortPubkey(agentPubkey), "skills");
     }
 
-    private async getProjectSharedSkillsBaseDir(
-        projectPath: string,
-        ensureExists = false
-    ): Promise<string> {
-        const skillsDir = path.join(projectPath, ".agents", "skills");
-        if (ensureExists) {
-            await ensureDirectory(skillsDir);
-        }
-        return skillsDir;
+    private getProjectSharedSkillsBaseDir(projectPath: string): string {
+        return path.join(projectPath, ".agents", "skills");
     }
 
-    private async getSharedSkillsBaseDir(ensureExists = false): Promise<string> {
-        const skillsDir = path.join(homedir(), ".agents", "skills");
-        if (ensureExists) {
-            await ensureDirectory(skillsDir);
-        }
-        return skillsDir;
-    }
-
-    /**
-     * Hydration target: remote skills are written to ~/.agents/skills/<id>/
-     */
-    private async getSkillsBaseDir(): Promise<string> {
-        return this.getSharedSkillsBaseDir(true);
-    }
-
-    private async getSkillDir(skillId: string, ensureExists = true): Promise<string> {
-        const baseDir = await this.getSkillsBaseDir();
-        const skillDir = path.join(baseDir, skillId);
-        if (ensureExists) {
-            await ensureDirectory(skillDir);
-        }
-        return skillDir;
+    private getSharedSkillsBaseDir(): string {
+        return path.join(homedir(), ".agents", "skills");
     }
 
     private async getLookupDirectories(
@@ -251,27 +173,27 @@ export class SkillService {
         if (lookupContext.agentPubkey) {
             directories.push({
                 scope: "agent",
-                dir: await this.getAgentSkillsBaseDir(lookupContext.agentPubkey),
+                dir: this.getAgentSkillsBaseDir(lookupContext.agentPubkey),
             });
         }
 
         if (lookupContext.projectPath && lookupContext.agentPubkey) {
             directories.push({
                 scope: "agent-project",
-                dir: await this.getAgentProjectSkillsBaseDir(lookupContext.projectPath, lookupContext.agentPubkey),
+                dir: this.getAgentProjectSkillsBaseDir(lookupContext.projectPath, lookupContext.agentPubkey),
             });
         }
 
         if (lookupContext.projectPath) {
             directories.push({
                 scope: "project",
-                dir: await this.getProjectSharedSkillsBaseDir(lookupContext.projectPath),
+                dir: this.getProjectSharedSkillsBaseDir(lookupContext.projectPath),
             });
         }
 
         directories.push({
             scope: "shared",
-            dir: await this.getSharedSkillsBaseDir(false),
+            dir: this.getSharedSkillsBaseDir(),
         });
 
         return directories;
@@ -391,28 +313,18 @@ export class SkillService {
         return records.sort((a, b) => a.id.localeCompare(b.id));
     }
 
-    private async listAllLocalSkillRecords(
-        lookupContext: SkillLookupContext = {}
-    ): Promise<LocalSkillRecord[]> {
-        const records: LocalSkillRecord[] = [];
-        const directories = await this.getLookupDirectories(lookupContext);
-
-        for (const directory of directories) {
-            records.push(...await this.listLocalSkillRecordsInDirectory(directory));
-        }
-
-        return records;
-    }
-
     private async listVisibleLocalSkillRecords(
         lookupContext: SkillLookupContext = {}
     ): Promise<LocalSkillRecord[]> {
         const visibleById = new Map<string, LocalSkillRecord>();
-        const records = await this.listAllLocalSkillRecords(lookupContext);
+        const directories = await this.getLookupDirectories(lookupContext);
 
-        for (const record of records) {
-            if (!visibleById.has(record.id)) {
-                visibleById.set(record.id, record);
+        for (const directory of directories) {
+            const records = await this.listLocalSkillRecordsInDirectory(directory);
+            for (const record of records) {
+                if (!visibleById.has(record.id)) {
+                    visibleById.set(record.id, record);
+                }
             }
         }
 
@@ -450,7 +362,6 @@ export class SkillService {
 
     private async listLocalSkillFiles(
         skillDir: string,
-        sourceEventId?: string,
         currentDir = skillDir
     ): Promise<SkillFileInstallResult[]> {
         const entries = await fs.readdir(currentDir, { withFileTypes: true });
@@ -461,18 +372,15 @@ export class SkillService {
             const relativePath = path.relative(skillDir, entryPath);
 
             if (await this.isDirectoryEntry(entry, currentDir)) {
-                files.push(...await this.listLocalSkillFiles(skillDir, sourceEventId, entryPath));
+                files.push(...await this.listLocalSkillFiles(skillDir, entryPath));
                 continue;
             }
 
-            if (
-                relativePath === SKILL_CONTENT_FILENAME
-            ) {
+            if (relativePath === SKILL_CONTENT_FILENAME) {
                 continue;
             }
 
             files.push({
-                eventId: sourceEventId,
                 relativePath,
                 absolutePath: entryPath,
                 success: true,
@@ -480,23 +388,6 @@ export class SkillService {
         }
 
         return files;
-    }
-
-    private mergeInstalledFiles(
-        localFiles: SkillFileInstallResult[],
-        hydrationFiles: SkillFileInstallResult[]
-    ): SkillFileInstallResult[] {
-        const merged = new Map<string, SkillFileInstallResult>();
-
-        for (const file of localFiles) {
-            merged.set(file.relativePath, file);
-        }
-
-        for (const file of hydrationFiles) {
-            merged.set(file.relativePath, file);
-        }
-
-        return Array.from(merged.values());
     }
 
     private async loadLocalSkillRecord(record: LocalSkillRecord): Promise<SkillData | null> {
@@ -508,16 +399,11 @@ export class SkillService {
                 return null;
             }
             const metadata = record.metadata ?? skillDocument.metadata;
-            const whitelistedDescription = metadata?.eventId
-                ? this.getWhitelistedSkillDescription(metadata.eventId)
-                : undefined;
-            const description = whitelistedDescription ?? metadata?.description;
-            const installedFiles = await this.listLocalSkillFiles(skillDir, metadata?.eventId);
+            const installedFiles = await this.listLocalSkillFiles(skillDir);
 
             return {
                 identifier: record.id,
-                eventId: metadata?.eventId,
-                description,
+                description: metadata?.description,
                 content: skillDocument.content,
                 name: metadata?.name,
                 installedFiles,
@@ -542,429 +428,12 @@ export class SkillService {
         return this.loadLocalSkillRecord(record);
     }
 
-    private async findLocalSkillBySourceIdentifier(
-        identifier: string,
-        lookupContext: SkillLookupContext = {}
-    ): Promise<SkillData | null> {
-        const normalizedIdentifier = identifier.trim().toLowerCase();
-        if (!normalizedIdentifier) {
-            return null;
-        }
-
-        const records = await this.listAllLocalSkillRecords(lookupContext);
-
-        for (const record of records) {
-            const eventId = record.metadata?.eventId?.toLowerCase();
-            const shortId = record.metadata?.eventId
-                ? shortenEventId(record.metadata.eventId).toLowerCase()
-                : undefined;
-
-            if (eventId === normalizedIdentifier || shortId === normalizedIdentifier) {
-                return this.loadLocalSkillRecord(record);
-            }
-        }
-
-        return null;
-    }
-
-    private resolveRemoteSkillEventId(identifier: string): string | null {
-        const normalizedIdentifier = identifier.trim().toLowerCase();
-        if (!normalizedIdentifier) {
-            return null;
-        }
-
-        if (FULL_EVENT_ID_REGEX.test(normalizedIdentifier)) {
-            return normalizedIdentifier;
-        }
-
-        const availableSkills = SkillWhitelistService.getInstance().getWhitelistedSkills();
-        for (const skill of availableSkills) {
-            const aliases = [skill.identifier, skill.shortId, skill.eventId];
-            if (aliases.some((alias) => alias?.toLowerCase() === normalizedIdentifier)) {
-                return skill.eventId;
-            }
-        }
-
-        return null;
-    }
-
-    private async isHydrationTargetAvailable(skillId: string, eventId: string): Promise<boolean> {
-        const skillDir = await this.getSkillDir(skillId, false);
-
-        try {
-            const stats = await fs.stat(skillDir);
-            if (!stats.isDirectory()) {
-                return false;
-            }
-        } catch {
-            return true;
-        }
-
-        const metadata = await this.readSkillMetadata(skillDir);
-        return metadata?.eventId === eventId;
-    }
-
-    private async resolveHydratedSkillId(event: NDKEvent): Promise<string> {
-        const existingSkill = await this.findLocalSkillBySourceIdentifier(event.id);
-        if (existingSkill?.identifier) {
-            return existingSkill.identifier;
-        }
-
-        const shortId = shortenEventId(event.id);
-        const preferredSlug = slugifyIdentifier(
-            event.tagValue("title") ||
-            event.tagValue("name") ||
-            event.tagValue("d") ||
-            ""
-        );
-        const baseCandidates = [
-            preferredSlug,
-            shortId,
-            preferredSlug ? `${preferredSlug}-${shortId}` : undefined,
-            `skill-${shortId}`,
-        ].filter((candidate): candidate is string => Boolean(candidate));
-
-        for (const candidate of baseCandidates) {
-            if (await this.isHydrationTargetAvailable(candidate, event.id)) {
-                return candidate;
-            }
-        }
-
-        let counter = 1;
-        const fallbackBase = preferredSlug || "skill";
-        while (true) {
-            const candidate = `${fallbackBase}-${shortId}-${counter}`;
-            if (await this.isHydrationTargetAvailable(candidate, event.id)) {
-                return candidate;
-            }
-            counter += 1;
-        }
-    }
-
-    private extractFileETags(event: NDKEvent): string[] {
-        return event.tags
-            .filter((tag) => tag[0] === "e" && tag[1])
-            .map((tag) => tag[1]);
-    }
-
-    private getHydratedSkillDescription(event: NDKEvent, content: string): string | undefined {
-        const whitelistedDescription = this.getWhitelistedSkillDescription(event.id);
-
-        if (whitelistedDescription) {
-            return whitelistedDescription;
-        }
-
-        const tagDescription = event.tagValue("description") || event.tagValue("summary") || "";
-        const trimmedTagDescription = tagDescription.trim();
-        if (trimmedTagDescription) {
-            return trimmedTagDescription;
-        }
-
-        const fallbackDescription = content
-            .split("\n")
-            .map((line) => line.trim())
-            .find((line) => line.length > 0);
-
-        return fallbackDescription?.slice(0, 1024) || undefined;
-    }
-
-    private getWhitelistedSkillDescription(eventId: string): string | undefined {
-        const description = SkillWhitelistService
-            .getInstance()
-            .getWhitelistedSkills()
-            .find((skill) => skill.eventId === eventId)
-            ?.description
-            ?.trim();
-
-        return description || undefined;
-    }
-
-    private extractFileInfo(event: NDKEvent): SkillFileInfo | null {
-        const url = event.tagValue("url");
-        const relativePath = event.tagValue("name");
-
-        if (!url || !relativePath) {
-            logger.warn(`[SkillService] Kind 1063 event ${event.id} missing required tags`, {
-                hasUrl: !!url,
-                hasName: !!relativePath,
-            });
-            return null;
-        }
-
-        return {
-            eventId: event.id,
-            url,
-            relativePath,
-            mimeType: event.tagValue("m") || undefined,
-            sha256: event.tagValue("x") || undefined,
-        };
-    }
-
-    private async installSkillFiles(
-        fileEventIds: string[],
-        skillId: string
-    ): Promise<SkillFileInstallResult[]> {
-        if (fileEventIds.length === 0) {
-            return [];
-        }
-
-        const results: SkillFileInstallResult[] = [];
-        const ndk = this.getNDK();
-        const skillDir = await this.getSkillDir(skillId);
-
-        for (const eventId of fileEventIds) {
-            try {
-                const fileEvent = await ndk.fetchEvent(eventId, { groupable: false });
-
-                if (!fileEvent) {
-                    throw new Error(`[SkillService] Could not fetch event ${eventId}`);
-                }
-
-                if (fileEvent.kind !== 1063) {
-                    throw new Error(
-                        `[SkillService] Event ${eventId} is not kind:1063 (got kind:${fileEvent.kind})`
-                    );
-                }
-
-                const fileInfo = this.extractFileInfo(fileEvent);
-                if (!fileInfo) {
-                    throw new Error(
-                        `[SkillService] Missing required tags (url, name) in kind:1063 event ${eventId}`
-                    );
-                }
-
-                const result = await this.installFile(fileInfo, skillDir);
-                results.push(result);
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                results.push({
-                    eventId,
-                    relativePath: eventId,
-                    absolutePath: path.resolve(skillDir, eventId),
-                    success: false,
-                    error: `[SkillService] Failed to install skill file ${eventId}: ${errorMessage}`,
-                });
-            }
-        }
-
-        const successCount = results.filter((result) => result.success).length;
-        const failCount = results.filter((result) => !result.success).length;
-
-        if (failCount > 0) {
-            logger.warn("[SkillService] Skill file installation completed with errors", {
-                skillId,
-                success: successCount,
-                failed: failCount,
-            });
-        } else if (successCount > 0) {
-            logger.info("[SkillService] All skill files installed successfully", {
-                skillId,
-                count: successCount,
-            });
-        }
-
-        return results;
-    }
-
-    private async installFile(
-        fileInfo: SkillFileInfo,
-        skillDir: string
-    ): Promise<SkillFileInstallResult> {
-        const resolvedSkillDir = path.resolve(skillDir);
-        const absolutePath = path.resolve(skillDir, fileInfo.relativePath);
-
-        try {
-            const relativeToBoundary = path.relative(resolvedSkillDir, absolutePath);
-            if (relativeToBoundary.startsWith("..") || path.isAbsolute(relativeToBoundary)) {
-                throw new Error(
-                    `Security violation: path "${fileInfo.relativePath}" would escape skill directory`
-                );
-            }
-
-            await ensureDirectory(path.dirname(absolutePath));
-
-            logger.debug(`[SkillService] Downloading file from ${fileInfo.url}`);
-            const content = await this.downloadFile(fileInfo.url);
-
-            if (fileInfo.sha256) {
-                const actualHash = crypto.createHash("sha256").update(content).digest("hex");
-                if (actualHash.toLowerCase() !== fileInfo.sha256.toLowerCase()) {
-                    throw new Error(
-                        `SHA-256 hash mismatch: expected ${fileInfo.sha256}, got ${actualHash}`
-                    );
-                }
-            }
-
-            await fs.writeFile(absolutePath, content);
-
-            return {
-                eventId: fileInfo.eventId,
-                relativePath: fileInfo.relativePath,
-                absolutePath,
-                success: true,
-            };
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.error(`[SkillService] Failed to install skill file: ${fileInfo.relativePath}`, {
-                eventId: fileInfo.eventId,
-                error: errorMessage,
-            });
-
-            return {
-                eventId: fileInfo.eventId,
-                relativePath: fileInfo.relativePath,
-                absolutePath,
-                success: false,
-                error: errorMessage,
-            };
-        }
-    }
-
-    private async downloadFile(url: string): Promise<Buffer> {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
-
-        try {
-            const response = await fetch(url, {
-                headers: {
-                    "User-Agent": "TENEX/1.0 (Skill Service)",
-                },
-                signal: controller.signal,
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to download: ${response.status} ${response.statusText}`);
-            }
-
-            const contentLength = response.headers.get("Content-Length");
-            if (contentLength) {
-                const declaredSize = Number.parseInt(contentLength, 10);
-                if (declaredSize > MAX_DOWNLOAD_SIZE_BYTES) {
-                    throw new Error(
-                        `File too large: ${declaredSize} bytes exceeds ${MAX_DOWNLOAD_SIZE_BYTES} byte limit`
-                    );
-                }
-            }
-
-            const reader = response.body?.getReader();
-            if (!reader) {
-                throw new Error("Response body is not readable");
-            }
-
-            const chunks: Uint8Array[] = [];
-            let totalSize = 0;
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                totalSize += value.length;
-                if (totalSize > MAX_DOWNLOAD_SIZE_BYTES) {
-                    reader.cancel();
-                    throw new Error(
-                        `File too large: exceeded ${MAX_DOWNLOAD_SIZE_BYTES} byte limit during download`
-                    );
-                }
-                chunks.push(value);
-            }
-
-            return Buffer.concat(chunks);
-        } catch (error) {
-            if (error instanceof Error && error.name === "AbortError") {
-                throw new Error(`Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms`, {
-                    cause: error,
-                });
-            }
-            throw error;
-        } finally {
-            clearTimeout(timeout);
-        }
-    }
-
-    private async hydrateSkillEvent(event: NDKEvent): Promise<SkillData | null> {
-        const skillId = await this.resolveHydratedSkillId(event);
-        const skillDir = await this.getSkillDir(skillId);
-        const content = event.content.trim();
-        const name =
-            event.tagValue("name") || event.tagValue("title") || skillId;
-        const description = this.getHydratedSkillDescription(event, content);
-
-        await fs.writeFile(
-            this.getSkillContentPath(skillDir),
-            serializeSkillDocument(content, {
-                eventId: event.id,
-                name,
-                description: description ?? skillId,
-            })
-        );
-
-        const hydrationResults = await this.installSkillFiles(
-            this.extractFileETags(event),
-            skillId
-        );
-        this.invalidateAvailableSkillsCache();
-
-        const localSkill = await this.loadLocalSkillById(skillId);
-        if (!localSkill) {
-            return null;
-        }
-
-        return {
-            ...localSkill,
-            installedFiles: this.mergeInstalledFiles(localSkill.installedFiles, hydrationResults),
-        };
-    }
-
-    private async resolveAndLoadSkill(
-        skillIdentifier: string,
-        lookupContext: SkillLookupContext = {}
-    ): Promise<SkillData | null> {
-        const trimmedIdentifier = skillIdentifier.trim();
-        if (!trimmedIdentifier) {
-            return null;
-        }
-
-        const localSkill = await this.loadLocalSkillById(trimmedIdentifier, lookupContext);
-        if (localSkill) {
-            return localSkill;
-        }
-
-        const hydratedSkill = await this.findLocalSkillBySourceIdentifier(
-            trimmedIdentifier,
-            lookupContext
-        );
-        if (hydratedSkill) {
-            return hydratedSkill;
-        }
-
-        const remoteEventId = this.resolveRemoteSkillEventId(trimmedIdentifier);
-        if (!remoteEventId) {
-            return null;
-        }
-
-        const existingHydratedSkill = await this.findLocalSkillBySourceIdentifier(
-            remoteEventId,
-            lookupContext
-        );
-        if (existingHydratedSkill) {
-            return existingHydratedSkill;
-        }
-
-        const remoteSkill = await this.fetchSkill(remoteEventId);
-        if (!remoteSkill) {
-            return null;
-        }
-
-        return this.hydrateSkillEvent(remoteSkill);
-    }
-
     async listAvailableSkills(lookupContext: SkillLookupContext = {}): Promise<SkillData[]> {
         const cacheKey = this.buildAvailableSkillsCacheKey(lookupContext);
         const cached = this.availableSkillsCache.get(cacheKey);
         const now = Date.now();
 
         if (cached && cached.expiresAt > now) {
-            SkillWhitelistService.getInstance().setInstalledSkills(cached.skills);
             return this.cloneSkillDataArray(cached.skills);
         }
 
@@ -972,14 +441,12 @@ export class SkillService {
 
         if (cached && cached.signature === signature) {
             cached.expiresAt = Date.now() + AVAILABLE_SKILLS_CACHE_TTL_MS;
-            SkillWhitelistService.getInstance().setInstalledSkills(cached.skills);
             return this.cloneSkillDataArray(cached.skills);
         }
 
         const inFlight = this.inFlightAvailableSkills.get(cacheKey);
         if (inFlight && inFlight.signature === signature) {
             const skills = await inFlight.promise;
-            SkillWhitelistService.getInstance().setInstalledSkills(skills);
             return this.cloneSkillDataArray(skills);
         }
 
@@ -1001,7 +468,6 @@ export class SkillService {
                 skills,
                 expiresAt: Date.now() + AVAILABLE_SKILLS_CACHE_TTL_MS,
             });
-            SkillWhitelistService.getInstance().setInstalledSkills(skills);
 
             return this.cloneSkillDataArray(skills);
         } finally {
@@ -1031,10 +497,12 @@ export class SkillService {
             const loadedSkillIds = new Set<string>();
 
             for (const skillIdentifier of skillIdentifiers) {
-                const skillData = await this.resolveAndLoadSkill(
-                    skillIdentifier,
-                    lookupContext
-                );
+                const trimmed = skillIdentifier.trim();
+                if (!trimmed) {
+                    continue;
+                }
+
+                const skillData = await this.loadLocalSkillById(trimmed, lookupContext);
                 if (!skillData) {
                     continue;
                 }
@@ -1060,24 +528,6 @@ export class SkillService {
         } catch (error) {
             logger.error("[SkillService] Failed to fetch skills", { error });
             return emptyResult;
-        }
-    }
-
-    /**
-     * Fetch a single skill event by canonical Nostr event ID.
-     */
-    async fetchSkill(eventId: string): Promise<NDKEvent | null> {
-        try {
-            const ndk = this.getNDK();
-            const events = await ndk.fetchEvents({
-                ids: [eventId],
-            });
-
-            const skill = Array.from(events).find((event) => event.kind === NDKKind.AgentSkill);
-            return skill || null;
-        } catch (error) {
-            logger.error("[SkillService] Failed to fetch skill", { error, eventId });
-            return null;
         }
     }
 }

@@ -75,7 +75,6 @@ export interface InboundEnvelope {
         articleReferences?: string[];
         replyTargets?: string[];
         delegationParentConversationId?: string;
-        skillEventIds?: string[];
         isKillSignal?: boolean;
         killSignalDelegationConversationId?: string;
         transport?: {

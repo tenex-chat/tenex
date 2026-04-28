@@ -181,17 +181,6 @@ export function getParticipants(event: NDKEvent): string[] {
     return participantTags.map((tag) => tag[1]).filter((pubkey) => !!pubkey);
 }
 
-/**
- * Extract skill event IDs from event tags
- * Returns an array of event IDs from all ['skill', '<id>'] tags
- */
-export function extractSkillEventIds(event: NDKEvent): string[] {
-    return event.tags
-        .filter((tag) => tag[0] === "skill")
-        .map((tag) => tag[1])
-        .filter((id): id is string => !!id);
-}
-
 // ============================================================================
 // Daemon-specific event classification methods
 // These are used by the daemon for routing and filtering decisions

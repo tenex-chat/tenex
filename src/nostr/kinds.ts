@@ -19,8 +19,6 @@ export const NDKKind = {
     Comment: 1111 as BaseNDKKind, // NIP-22 Comment - used for lesson refinements
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
     AgentDefinition: 4199 as BaseNDKKind, // Agent Definition
-    AgentSkill: 4202 as BaseNDKKind, // Agent Skill - instruction bundle injection
-    SkillWhitelist: 14202 as BaseNDKKind, // Skill Whitelist - NIP-51-like list of e-tagged skills
     ProjectAgentSnapshot: 14199 as BaseNDKKind, // Owner-agent declaration (replaceable, p-tags agents)
     Project: NDKProject.kind as BaseNDKKind, // NIP-33 Project definition
 

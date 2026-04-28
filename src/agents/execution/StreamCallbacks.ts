@@ -308,11 +308,9 @@ export function createPrepareStep(
             );
 
             // Rehydrate skills from ConversationStore to pick up mid-RAL self-applied changes
-            const delegationSkillIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
             const selfAppliedSkillIds = conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
             const agentAlwaysSkillIds = context.agent.alwaysSkills ?? [];
             const requestedSkillIds = [...new Set([
-                ...delegationSkillIds,
                 ...selfAppliedSkillIds,
                 ...agentAlwaysSkillIds,
             ])];

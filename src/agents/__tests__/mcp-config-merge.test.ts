@@ -4,7 +4,6 @@ import { createStoredAgent } from "../AgentStorage";
 import type { AgentRegistry } from "../AgentRegistry";
 import type { MCPConfig } from "@/llm/providers/types";
 import { config } from "@/services/ConfigService";
-import { SkillWhitelistService } from "@/services/skill";
 import { SkillService } from "@/services/skill/SkillService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -28,17 +27,14 @@ describe("MCP Config Merge", () => {
 
     // Track what mcpConfig was passed to createLLMService
     let capturedMcpConfig: MCPConfig | undefined;
-    let whitelistServiceSpy: ReturnType<typeof spyOn>;
     let skillServiceSpy: ReturnType<typeof spyOn>;
     let warnSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         capturedMcpConfig = undefined;
-        SkillWhitelistService.getInstance().setInstalledSkills([]);
         skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
             listAvailableSkills: mock(async () => []),
         } as never);
-        whitelistServiceSpy = spyOn(SkillWhitelistService.getInstance(), "getWhitelistedSkills").mockReturnValue([]);
         warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
 
         spyOn(config, "createLLMService").mockImplementation(
@@ -50,8 +46,6 @@ describe("MCP Config Merge", () => {
     });
 
     afterEach(() => {
-        SkillWhitelistService.getInstance().setInstalledSkills([]);
-        whitelistServiceSpy?.mockRestore();
         skillServiceSpy?.mockRestore();
         warnSpy?.mockRestore();
         mock.restore();
@@ -222,45 +216,6 @@ describe("MCP Config Merge", () => {
             instance.createLLMService({});
 
             expect(capturedMcpConfig).toBeUndefined();
-        });
-
-        it("should filter blocked alwaysSkills at load time", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-
-            skillServiceSpy.mockReturnValue({
-                listAvailableSkills: mock(async () => [
-                    {
-                        identifier: "local-skill",
-                        eventId: "a".repeat(64),
-                        content: "",
-                        installedFiles: [],
-                    },
-                ]),
-            } as never);
-
-            const storedAgent = createStoredAgent({
-                nsec: signer.nsec!,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                eventId: "test-event-id",
-                defaultConfig: {
-                    skills: ["local-skill"],
-                    blockedSkills: ["a".repeat(64)],
-                },
-            });
-
-            const instance = await createAgentInstance(storedAgent, mockRegistry);
-
-            expect(instance.alwaysSkills).toBeUndefined();
-            expect(instance.blockedSkills).toEqual(["a".repeat(64)]);
-            expect(warnSpy).toHaveBeenCalledWith(
-                "[AgentLoader] Blocked skills removed from alwaysSkills",
-                expect.objectContaining({
-                    agent: "test-agent",
-                    blockedSkills: ["local-skill"],
-                })
-            );
         });
 
         it("should respect project-level enabled:false when merging configs", async () => {

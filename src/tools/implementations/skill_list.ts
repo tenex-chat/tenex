@@ -11,7 +11,6 @@ interface SkillSummary {
     name?: string;
     description?: string;
     scope: SkillStoreScope;
-    eventId?: string;
     hasTools: boolean;
 }
 
@@ -93,7 +92,6 @@ export function createSkillListTool(context: ToolExecutionContext): AISdkTool {
                     ...(skill.description !== undefined || skill.content !== undefined
                         ? { description: truncateDescription(skill.description ?? skill.content) }
                         : {}),
-                    ...(skill.eventId !== undefined && { eventId: skill.eventId }),
                 };
                 result.scopes[key].push(summary);
                 result.counts[key]++;

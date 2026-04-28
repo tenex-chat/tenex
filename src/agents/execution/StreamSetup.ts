@@ -77,13 +77,11 @@ export async function setupStreamExecution(
     };
 
     // === FETCH SKILLS ===
-    // Must fetch skills BEFORE getToolsObject because skills can modify available tools
-    // Merge delegation-provided skills, self-applied skills from conversation state,
-    // and agent-level always-on skills from agent config
-    const delegationSkillIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
+    // Must fetch skills BEFORE getToolsObject because skills can modify available tools.
+    // Merge self-applied skills from conversation state with agent-level always-on skills.
     const selfAppliedSkillIds = context.conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
     const agentAlwaysSkillIds = context.agent.alwaysSkills ?? [];
-    const requestedSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds, ...agentAlwaysSkillIds])];
+    const requestedSkillIds = [...new Set([...selfAppliedSkillIds, ...agentAlwaysSkillIds])];
     const skillResult = requestedSkillIds.length > 0
         ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
         : { skills: [], content: "", toolPermissions: {} };

@@ -8,14 +8,11 @@ import { checkSupervisionHealth, registerDefaultHeuristics } from "@/agents/supe
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { ConversationCatalogService } from "@/conversations/ConversationCatalogService";
 import { EventHandler } from "@/event-handler";
-import { NDKMCPTool } from "@/events/NDKMCPTool";
-import { getNDK } from "@/nostr";
 import { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { deliverMcpNotification } from "@/services/mcp/McpNotificationDelivery";
-import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { PromptCompilerRegistryService } from "@/services/prompt-compiler/PromptCompilerRegistryService";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
@@ -35,7 +32,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 import chalk from "chalk";
-import { shortenEventId } from "@/utils/conversation-id";
 
 /**
  * Self-contained runtime for a single project.
@@ -174,8 +170,8 @@ export class ProjectRuntime {
                 });
             }
 
-            // Load MCP tools from project event
-            await this.initializeMCPTools();
+            // Initialize MCPManager from mcp.json (the local source of truth).
+            await this.initializeMCPManager();
 
             // Set mcpManager on context for use by tools and services
             this.context.mcpManager = this.mcpManager;
@@ -521,71 +517,8 @@ export class ProjectRuntime {
         return this.isRunning;
     }
 
-    /**
-     * Initialize MCP tools from the project event
-     * Extracts MCP tool event IDs from "mcp" tags, fetches and installs them
-     */
-    private async initializeMCPTools(): Promise<void> {
+    private async initializeMCPManager(): Promise<void> {
         try {
-            // Extract MCP tool event IDs from the project
-            const mcpEventIds = this.project.tags
-                .filter((tag) => tag[0] === "mcp" && tag[1])
-                .map((tag) => tag[1])
-                .filter((id): id is string => typeof id === "string");
-
-            trace.getActiveSpan()?.addEvent("project_runtime.mcp_tools_found", {
-                "mcp.count": mcpEventIds.length,
-            });
-
-            const ndk = getNDK();
-            const installedCount = { success: 0, failed: 0 };
-
-            // Fetch and install each MCP tool from event tags
-            for (const eventId of mcpEventIds) {
-                try {
-                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_fetching", {
-                        "mcp.event_id": shortenEventId(eventId),
-                    });
-                    const mcpEvent = await ndk.fetchEvent(eventId);
-
-                    if (!mcpEvent) {
-                        logger.warn(
-                            `[ProjectRuntime] MCP tool event not found: ${shortenEventId(eventId)}`
-                        );
-                        installedCount.failed++;
-                        continue;
-                    }
-
-                    const mcpTool = NDKMCPTool.from(mcpEvent);
-                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_installing", {
-                        "mcp.name": mcpTool.name ?? "unnamed",
-                        "mcp.event_id": shortenEventId(eventId),
-                    });
-
-                    await installMCPServerFromEvent(this.metadataPath, mcpTool);
-                    installedCount.success++;
-
-                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_installed", {
-                        "mcp.name": mcpTool.name ?? "",
-                        "mcp.slug": mcpTool.slug ?? "",
-                    });
-                } catch (error) {
-                    logger.error("[ProjectRuntime] Failed to install MCP tool", {
-                        eventId: shortenEventId(eventId),
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                    installedCount.failed++;
-                }
-            }
-
-            trace.getActiveSpan()?.addEvent("project_runtime.mcp_installation_complete", {
-                "mcp.total": mcpEventIds.length,
-                "mcp.success": installedCount.success,
-                "mcp.failed": installedCount.failed,
-            });
-
-            // Always initialize MCPManager from mcp.json (the source of truth).
-            // MCP event installation writes to mcp.json; MCPManager reads from it.
             await this.mcpManager.initialize(this.metadataPath, this.projectBasePath);
 
             const configuredServers = this.mcpManager.getConfiguredServers();
@@ -598,14 +531,12 @@ export class ProjectRuntime {
 
             trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
                 "mcp.configured_servers": configuredServers.length,
-                "mcp.installed_from_events": installedCount.success,
             });
         } catch (error) {
-            logger.error("[ProjectRuntime] Failed to initialize MCP tools", {
+            logger.error("[ProjectRuntime] Failed to initialize MCP manager", {
                 error: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : undefined,
             });
-            // Don't throw - allow project to start even if MCP initialization fails
         }
     }
 

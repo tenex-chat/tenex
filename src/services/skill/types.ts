@@ -1,40 +1,22 @@
 /**
- * Skill Event Types
+ * Skill types — local-only skill bundles installed on disk.
  *
- * Defines the structure for skill events (kind:4202 and legacy kind:4201).
- * Skills are instruction bundles that can be injected into agent system prompts,
- * with optional tool permission controls (only-tool, allow-tool, deny-tool).
+ * Skills are instruction bundles loaded from the agent/project/shared/built-in
+ * skill directories. They can be injected into agent system prompts and may
+ * declare tools via SKILL.md frontmatter.
  */
 
 /**
- * Information about a file attached to a skill via NIP-94 (kind 1063) event reference
- */
-export interface SkillFileInfo {
-    /** Event ID of the kind:1063 event */
-    eventId: string;
-    /** Blossom URL to download the file */
-    url: string;
-    /** Relative path where the file should be stored (from NIP-94 "name" tag) */
-    relativePath: string;
-    /** Optional MIME type (from NIP-94 "m" tag) */
-    mimeType?: string;
-    /** Optional SHA-256 hash for verification (from NIP-94 "x" tag) */
-    sha256?: string;
-}
-
-/**
- * Result of downloading and installing a skill file
+ * Result describing a file that lives inside a skill directory.
  */
 export interface SkillFileInstallResult {
-    /** Event ID of the source kind:1063 event, when available */
-    eventId?: string;
     /** Relative path within the skill directory */
     relativePath: string;
-    /** Absolute path where the file was installed */
+    /** Absolute path on disk */
     absolutePath: string;
-    /** Whether the installation succeeded */
+    /** Whether the file is readable / valid */
     success: boolean;
-    /** Error message if installation failed */
+    /** Error message when the file could not be loaded */
     error?: string;
 }
 
@@ -66,8 +48,6 @@ export type SkillStoreScope = "agent" | "agent-project" | "project" | "shared" |
 export interface SkillData {
     /** Local authoritative skill ID (directory name in the effective local skill set) */
     identifier: string;
-    /** Canonical Nostr event ID when the skill was hydrated from Nostr */
-    eventId?: string;
     /** Short description from SKILL.md frontmatter, when available */
     description?: string;
     /** The skill content/instructions */

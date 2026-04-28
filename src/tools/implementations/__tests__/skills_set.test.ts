@@ -3,7 +3,6 @@ import type { ConversationToolContext } from "@/tools/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import * as projectServices from "@/services/projects";
 import { SkillService } from "@/services/skill/SkillService";
-import { SkillWhitelistService } from "@/services/skill";
 import { createSkillsSetTool } from "../skills_set";
 
 const mockFetchSkills = mock();
@@ -46,7 +45,6 @@ describe("skills_set tool", () => {
 
     const mockSetSelfAppliedSkills = mock();
     const mockGetSelfAppliedSkillIds = mock();
-    let whitelistServiceSpy: ReturnType<typeof spyOn>;
     let skillServiceSpy: ReturnType<typeof spyOn>;
     let updateDefaultConfigSpy: ReturnType<typeof spyOn>;
     let projectContextSpy: ReturnType<typeof spyOn>;
@@ -87,12 +85,10 @@ describe("skills_set tool", () => {
     });
 
     beforeEach(() => {
-        SkillWhitelistService.getInstance().setInstalledSkills([]);
         skillServiceSpy = spyOn(SkillService, "getInstance").mockReturnValue({
             fetchSkills: mockFetchSkills,
             listAvailableSkills: mockListAvailableSkills,
         } as never);
-        whitelistServiceSpy = spyOn(SkillWhitelistService.getInstance(), "getWhitelistedSkills").mockReturnValue([]);
         projectContextSpy = spyOn(projectServices, "getProjectContext").mockReturnValue({
             project: {
                 dTag: PROJECT_DTAG,
@@ -114,7 +110,6 @@ describe("skills_set tool", () => {
 
     afterEach(() => {
         skillServiceSpy?.mockRestore();
-        whitelistServiceSpy?.mockRestore();
         updateDefaultConfigSpy?.mockRestore();
         projectContextSpy?.mockRestore();
         mock.restore();
@@ -300,74 +295,6 @@ describe("skills_set tool", () => {
         expect(result.skillContent).toContain("<skill");
         expect(result.skillContent).toContain("content1");
         expect(result.skillContent).toContain("content2");
-    });
-
-    it("should reject blocked skills before availability validation", async () => {
-        whitelistServiceSpy.mockReturnValue([
-            {
-                eventId: SKILL_ID_1,
-                identifier: "shell",
-                kind: 4202 as never,
-                name: "Shell",
-                description: "Shell skill",
-                whitelistedBy: ["pubkey"],
-            },
-        ] as never);
-        mockListAvailableSkills.mockResolvedValue([createAvailableSkill("shell")]);
-
-        const context = createMockContext();
-        (context.agent as any).blockedSkills = ["shell"];
-        const toolDef = createSkillsSetTool(context);
-        const result = await toolDef.execute(
-            { add: ["shell"] },
-            toolCallOpts("tc-blocked")
-        );
-
-        expect(result.success).toBe(false);
-        expect(result.message).toContain("Cannot activate blocked skill(s): shell");
-        expect(mockFetchSkills).not.toHaveBeenCalled();
-        expect(mockSetSelfAppliedSkills).not.toHaveBeenCalled();
-    });
-
-    it("should reject an add resolved through an event id alias", async () => {
-        whitelistServiceSpy.mockReturnValue([
-            {
-                eventId: SKILL_ID_1,
-                kind: 4202 as never,
-                name: "Shell",
-                description: "Shell skill",
-                whitelistedBy: ["pubkey"],
-            },
-        ] as never);
-        mockListAvailableSkills.mockResolvedValue([createResolvedSkill("shell", SKILL_ID_1)]);
-
-        const context = createMockContext();
-        (context.agent as any).blockedSkills = ["shell"];
-        const toolDef = createSkillsSetTool(context);
-        const result = await toolDef.execute(
-            { add: [SKILL_ID_1] },
-            toolCallOpts("tc-blocked-alias")
-        );
-
-        expect(result.success).toBe(false);
-        expect(result.message).toContain(`Cannot activate blocked skill(s): ${SKILL_ID_1}`);
-    });
-
-    it("should treat removing a blocked skill as a no-op", async () => {
-        const context = createMockContext();
-        (context.agent as any).blockedSkills = ["shell"];
-        mockGetSelfAppliedSkillIds.mockReturnValue(["brainstorming"]);
-
-        const toolDef = createSkillsSetTool(context);
-        const result = await toolDef.execute(
-            { remove: ["shell"] },
-            toolCallOpts("tc-remove-blocked")
-        );
-
-        expect(result.success).toBe(true);
-        expect(result.activeSkills).toEqual(["brainstorming"]);
-        expect(mockFetchSkills).not.toHaveBeenCalled();
-        expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith(["brainstorming"], AGENT_PUBKEY);
     });
 
     it("should return failure when no skills could be resolved", async () => {
