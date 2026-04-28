@@ -107,6 +107,23 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     }
 
     let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());
+
+    // Spawn host-level companion daemons. Binaries are expected alongside the
+    // tenex binary (same target/ dir for cargo builds, same bin/ for installs).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in ["tenex-summarizer", "tenex-scheduler", "tenex-intervention"] {
+                let path = dir.join(name);
+                if path.exists() {
+                    supervisor.boot_binary(name.to_string(), path).await;
+                    info!(name, "companion daemon queued");
+                } else {
+                    tracing::warn!(name, "companion binary not found; skipping");
+                }
+            }
+        }
+    }
+
     if !args.boot.is_empty() {
         info!(prefixes = ?args.boot, "queued --boot prefixes; awaiting matching project discovery");
     }

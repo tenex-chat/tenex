@@ -1,12 +1,12 @@
-//! Per-project process supervision.
+//! Process supervision for project runtimes and host-level companion daemons.
 //!
-//! `boot(d_tag)` is idempotent: if a child for that d-tag is already running
-//! or pending restart, the call is a no-op. Children run in their own process
-//! group (setsid via `process_group(0)`), so a SIGTERM to the group reaches
-//! every descendant on shutdown.
+//! `boot(d_tag)` / `boot_binary(key, path)` are idempotent: if a supervised
+//! task for that key already exists the call is a no-op. Children run in their
+//! own process group (setsid via `process_group(0)`), so a SIGTERM to the
+//! group reaches every descendant on shutdown.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -52,16 +52,46 @@ impl Supervisor {
             return;
         }
 
-        let boot_argv = self.boot_argv.clone();
+        let mut argv: Vec<String> = (*self.boot_argv).to_vec();
+        argv.push("--boot".into());
+        argv.push(d_tag.clone());
+
         let base_dir = self.base_dir.clone();
         let mut shutdown = self.shutdown_rx.clone();
-        let d_tag_owned = d_tag.clone();
+        let key = d_tag.clone();
 
         let handle = tokio::spawn(async move {
-            supervise(&d_tag_owned, &boot_argv, &base_dir, &mut shutdown).await;
+            supervise(&key, &argv, &base_dir, &mut shutdown).await;
         });
 
         children.insert(d_tag, handle);
+    }
+
+    /// Spawn and supervise a host-level companion daemon binary.
+    ///
+    /// `key` is an opaque identifier used for logging and idempotency.
+    /// `path` is the absolute path to the binary (no extra args are passed).
+    pub async fn boot_binary(&self, key: String, path: PathBuf) {
+        if *self.shutdown_rx.borrow() {
+            return;
+        }
+
+        let mut children = self.children.lock().await;
+        if children.contains_key(&key) {
+            debug!(key, "already supervised");
+            return;
+        }
+
+        let argv = vec![path.to_string_lossy().into_owned()];
+        let base_dir = self.base_dir.clone();
+        let mut shutdown = self.shutdown_rx.clone();
+        let key_owned = key.clone();
+
+        let handle = tokio::spawn(async move {
+            supervise(&key_owned, &argv, &base_dir, &mut shutdown).await;
+        });
+
+        children.insert(key, handle);
     }
 
     pub async fn shutdown(&self) {
@@ -69,20 +99,20 @@ impl Supervisor {
         let mut children = self.children.lock().await;
         let handles: Vec<_> = children.drain().collect();
         drop(children);
-        for (d_tag, handle) in handles {
+        for (key, handle) in handles {
             match handle.await {
-                Ok(()) => info!(d_tag, "child supervisor exited"),
+                Ok(()) => info!(key, "child supervisor exited"),
                 Err(e) if e.is_cancelled() => {}
-                Err(e) => warn!(d_tag, error = %e, "child supervisor join error"),
+                Err(e) => warn!(key, error = %e, "child supervisor join error"),
             }
         }
     }
 }
 
 async fn supervise(
-    d_tag: &str,
-    boot_argv: &[String],
-    base_dir: &std::path::Path,
+    key: &str,
+    argv: &[String],
+    base_dir: &Path,
     shutdown: &mut watch::Receiver<bool>,
 ) {
     let mut backoff_ms = RESTART_BACKOFF_INITIAL_MS;
@@ -92,25 +122,24 @@ async fn supervise(
             return;
         }
 
-        let Some((program, args)) = boot_argv.split_first() else {
-            error!(d_tag, "boot command is empty");
+        let Some((program, args)) = argv.split_first() else {
+            error!(key, "argv is empty");
             return;
         };
 
         let mut cmd = Command::new(program);
         cmd.args(args);
-        cmd.arg("--boot").arg(d_tag);
         cmd.env("TENEX_BASE_DIR", base_dir);
         cmd.stdin(Stdio::null());
         // Process group so SIGTERM here reaches grandchildren on shutdown.
         cmd.process_group(0);
         cmd.kill_on_drop(false);
 
-        info!(d_tag, program = %program, "spawning project runtime");
+        info!(key, program = %program, "spawning service");
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                error!(d_tag, error = %e, "spawn failed");
+                error!(key, error = %e, "spawn failed");
                 if !sleep_or_shutdown(backoff_ms, shutdown).await {
                     return;
                 }
@@ -120,24 +149,24 @@ async fn supervise(
         };
 
         let pid = child.id();
-        info!(d_tag, ?pid, "project runtime started");
+        info!(key, ?pid, "service started");
 
         let exited_cleanly = tokio::select! {
             res = child.wait() => {
                 match res {
                     Ok(status) => {
-                        warn!(d_tag, code = ?status.code(), "project exited");
+                        warn!(key, code = ?status.code(), "service exited");
                         false
                     }
                     Err(e) => {
-                        error!(d_tag, error = %e, "wait failed");
+                        error!(key, error = %e, "wait failed");
                         false
                     }
                 }
             }
             _ = shutdown.changed() => {
                 if *shutdown.borrow() {
-                    terminate(d_tag, &mut child).await;
+                    terminate(key, &mut child).await;
                     return;
                 }
                 true
@@ -163,11 +192,11 @@ async fn sleep_or_shutdown(ms: u64, shutdown: &mut watch::Receiver<bool>) -> boo
     }
 }
 
-async fn terminate(d_tag: &str, child: &mut tokio::process::Child) {
+async fn terminate(key: &str, child: &mut tokio::process::Child) {
     let Some(pid) = child.id() else {
         return;
     };
-    info!(d_tag, pid, "sending SIGTERM to process group");
+    info!(key, pid, "sending SIGTERM to process group");
     // Negative pid = process group. SAFETY: pid was provided by tokio, valid for kill().
     unsafe {
         libc::kill(-(pid as i32), libc::SIGTERM);
@@ -177,7 +206,7 @@ async fn terminate(d_tag: &str, child: &mut tokio::process::Child) {
     tokio::select! {
         _ = child.wait() => {}
         _ = grace => {
-            warn!(d_tag, pid, "child did not exit within grace period; sending SIGKILL");
+            warn!(key, pid, "child did not exit within grace period; sending SIGKILL");
             unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
             let _ = child.wait().await;
         }
