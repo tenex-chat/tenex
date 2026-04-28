@@ -20,7 +20,7 @@ use model::{ScheduledTask, TaskType};
 #[command(name = "tenex-scheduler", version, about = "TENEX scheduled-task daemon")]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let cli = Cli::parse();
-    match cli.command {
+    match cli.command.unwrap_or(Command::Run) {
         Command::Run => run_daemon().await,
         Command::Status => status(),
         Command::List { project } => list_tasks(project),
