@@ -2,8 +2,6 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
 import { backfillAgentCategories } from "@/agents/backfillAgentCategories";
-import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
-import { initNDK, getNDK } from "@/nostr/ndkClient";
 import { migrationService } from "@/services/migrations";
 import { listProjectsForAgent } from "@/services/projects/ProjectMembersReader";
 import { shortenEventId } from "@/utils/conversation-id";
@@ -14,10 +12,6 @@ import { ConversationCatalogService } from "@/conversations/ConversationCatalogS
 import { listProjectIdsFromDisk, listConversationIdsFromDiskForProject } from "@/conversations/ConversationDiskReader";
 import { getTenexBasePath } from "@/constants";
 import { join } from "node:path";
-
-const refetchCommand = new Command("refetch")
-    .description("Refetch and update all agent definitions from Nostr")
-    .action(repairAgents);
 
 const orphansCommand = new Command("orphans")
     .description("List agents not assigned to any project")
@@ -48,7 +42,6 @@ const categorizeCommand = new Command("categorize")
 
 const agentsCommand = new Command("agents")
     .description("Agent diagnostics and repair")
-    .addCommand(refetchCommand)
     .addCommand(orphansCommand)
     .addCommand(categorizeCommand);
 
@@ -77,66 +70,6 @@ export const doctorCommand = new Command("doctor")
     .addCommand(agentsCommand)
     .addCommand(migrateCommand)
     .addCommand(conversationsCommand);
-
-function agentChanged(before: StoredAgent, after: StoredAgent): boolean {
-    if (before.name !== after.name) return true;
-    if (before.role !== after.role) return true;
-    if (before.description !== after.description) return true;
-    if (before.instructions !== after.instructions) return true;
-    if (before.useCriteria !== after.useCriteria) return true;
-    return false;
-}
-
-async function repairAgents(): Promise<void> {
-    await agentStorage.initialize();
-    await initNDK();
-    const ndk = getNDK();
-
-    const agents = await agentStorage.getAllStoredAgents();
-    const nostrAgents = agents.filter((a): a is typeof a & { eventId: string } => !!a.eventId);
-    const skipped = agents.length - nostrAgents.length;
-
-    console.log(chalk.blue(`Checking ${nostrAgents.length} Nostr agent(s)...`));
-
-    let updated = 0;
-    let failed = 0;
-
-    for (const agent of nostrAgents) {
-        const pubkey = new NDKPrivateKeySigner(agent.nsec).pubkey;
-        const label = `${agent.slug} (${pubkey.substring(0, 8)}...)`;
-
-        const event = await ndk.fetchEvent(agent.eventId, { groupable: false });
-        if (!event) {
-            console.log(chalk.yellow(`  ⚠ ${label}: event not found on relays, skipping`));
-            failed++;
-            continue;
-        }
-
-        const agentDef = NDKAgentDefinition.from(event);
-        const updatedAgent = {
-            ...agent,
-            name: agentDef.title || agent.name,
-            role: agentDef.role || agent.role,
-            description: agentDef.description ?? agent.description,
-            instructions: agentDef.instructions ?? agent.instructions,
-            useCriteria: agentDef.useCriteria ?? agent.useCriteria,
-        };
-
-        if (agentChanged(agent, updatedAgent)) {
-            await agentStorage.saveAgent(updatedAgent);
-            console.log(chalk.green(`  ✓ ${label}: updated`));
-            updated++;
-        } else {
-            console.log(chalk.gray(`  ${label}: ok`));
-        }
-    }
-
-    console.log(
-        chalk.blue(
-            `\nDone: ${updated} updated, ${skipped} skipped (no eventId), ${failed} failed`
-        )
-    );
-}
 
 async function findOrphanedAgents(purge: boolean): Promise<void> {
     await agentStorage.initialize();

@@ -14,11 +14,10 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { agentStorage, deriveAgentPubkeyFromNsec, type StoredAgent } from "@/agents/AgentStorage";
 import * as display from "@/commands/config/display";
-import { deleteStoredAgent, installAgentFromDefinitionEventId } from "@/services/agents/AgentProvisioningService";
+import { deleteStoredAgent } from "@/services/agents/AgentProvisioningService";
 import { projectMembershipPublishService } from "@/services/agents/ProjectMembershipPublishService";
 import { config } from "@/services/ConfigService";
 import { listProjectsForAgent } from "@/services/projects/ProjectMembersReader";
-import { initNDK } from "@/nostr/ndkClient";
 import { inquirerTheme } from "@/utils/cli-theme";
 
 type ManagedAgent = {
@@ -254,7 +253,7 @@ export class AgentManager {
 
         display.blank();
         display.step(0, 0, "Agent Manager");
-        display.context("Install agents from kind:4199 events, inspect current memberships, or permanently delete stored agents.");
+        display.context("Inspect current agent memberships or permanently delete stored agents.");
 
         const items: ListItem[] = agents.map((entry) => ({
             name: formatManagedAgentListLine(entry),
@@ -263,7 +262,6 @@ export class AgentManager {
         }));
 
         const actions: ActionItem[] = [
-            { name: `Install from 4199 event ${chalk.dim("(a)")}`, value: "install", key: "a" },
             { name: `Delete selected ${chalk.dim("(x)")}`, value: "delete-selected", key: "x" },
             { name: `Merge selected ${chalk.dim("(m)")}`, value: "merge-selected", key: "m" },
         ];
@@ -276,12 +274,6 @@ export class AgentManager {
         const { action, selectedPubkeys } = result;
 
         if (action === "done") {
-            return;
-        }
-
-        if (action === "install") {
-            await this.installFromEvent();
-            await this.showMainMenu();
             return;
         }
 
@@ -342,35 +334,6 @@ export class AgentManager {
 
         managedAgents.sort(compareAgents);
         return managedAgents;
-    }
-
-    private async installFromEvent(): Promise<void> {
-        const { eventId } = await inquirer.prompt([{
-            type: "input",
-            name: "eventId",
-            message: "4199 event id:",
-            validate: (input: string) => input.trim().length > 0 || "Event id is required",
-            theme: inquirerTheme,
-        }]);
-
-        const { slugOverride } = await inquirer.prompt([{
-            type: "input",
-            name: "slugOverride",
-            message: "Override slug (optional):",
-            theme: inquirerTheme,
-        }]);
-
-        await initNDK();
-        const result = await installAgentFromDefinitionEventId(eventId.trim(), {
-            slugOverride: slugOverride.trim() || undefined,
-        });
-
-        display.blank();
-        if (result.created) {
-            display.success(`Installed "${result.storedAgent.name}" (${result.storedAgent.slug})`);
-        } else {
-            display.success(`Updated "${result.storedAgent.name}" (${result.storedAgent.slug})`);
-        }
     }
 
     private async showAgentDetail(pubkey: string): Promise<void> {

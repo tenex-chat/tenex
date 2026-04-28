@@ -124,9 +124,6 @@ export function createStoredAgent(config: {
     mcpServers?: Record<string, MCPServerConfig>;
     defaultConfig?: AgentDefaultConfig & { telegram?: TelegramAgentConfig };
     telegram?: TelegramAgentConfig;
-    definitionDTag?: string;
-    definitionAuthor?: string;
-    definitionCreatedAt?: number;
 }): StoredAgent {
     const legacyDefaultTelegram = sanitizeTelegramConfig(
         (config.defaultConfig as (AgentDefaultConfig & { telegram?: TelegramAgentConfig }) | undefined)?.telegram
@@ -147,9 +144,6 @@ export function createStoredAgent(config: {
         mcpServers: config.mcpServers,
         default: defaultConfig,
         telegram: sanitizeTelegramConfig(config.telegram ?? legacyDefaultTelegram),
-        definitionDTag: config.definitionDTag,
-        definitionAuthor: config.definitionAuthor,
-        definitionCreatedAt: config.definitionCreatedAt,
     };
 }
 

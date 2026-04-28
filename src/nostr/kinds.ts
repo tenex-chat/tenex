@@ -18,15 +18,12 @@ export const NDKKind = {
     EventMetadata: 513 as BaseNDKKind, // Event metadata (titles, summaries)
     Comment: 1111 as BaseNDKKind, // NIP-22 Comment - used for lesson refinements
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
-    AgentDefinition: 4199 as BaseNDKKind, // Agent Definition
-    ProjectAgentSnapshot: 14199 as BaseNDKKind, // Owner-agent declaration (replaceable, p-tags agents)
     Project: NDKProject.kind as BaseNDKKind, // NIP-33 Project definition
 
     // Tenex custom kinds (2xxxx range)
     TenexBootProject: 24000 as BaseNDKKind, // Boot project via a-tag
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexInstalledAgentList: 24011 as BaseNDKKind, // Backend inventory of installed agents
-    TenexBackendHeartbeat: 24012 as BaseNDKKind, // Backend whitelist request (ephemeral, p-tags owner)
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
     TenexAgentDelete: 24030 as BaseNDKKind, // Agent deletion from projects or globally
     TenexOperationsStatus: 24133 as BaseNDKKind,

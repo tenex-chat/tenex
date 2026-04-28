@@ -1,12 +1,7 @@
 import * as crypto from "node:crypto";
 import { agentStorage } from "@/agents/AgentStorage";
-import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { getIdentityRelayUrls, getRelayUrls } from "@/nostr/relays";
-import { config } from "@/services/ConfigService";
-import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
-import { readProjectAgentPubkeys } from "@/services/projects/ProjectMembersReader";
-import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import {
     NDKEvent,
@@ -28,10 +23,6 @@ const AVATAR_FAMILIES = [
     "avataaars",
 ];
 
-/** Per-project debounce timers for 14199 snapshot publishing */
-const snapshotDebounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-const SNAPSHOT_DEBOUNCE_MS = 5000;
-
 /**
  * In-memory cache of last published instruction hash per agent pubkey.
  * Used for deduplication to avoid publishing duplicate kind:0 events
@@ -48,185 +39,6 @@ function buildAvatarUrl(pubkey: string): string {
         Number.parseInt(pubkey.substring(0, 8), 16) % AVATAR_FAMILIES.length;
     const avatarStyle = AVATAR_FAMILIES[familyIndex];
     return `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${pubkey}`;
-}
-
-/**
- * Schedule a kind:14199 snapshot publish for a specific project.
- * Debounced per-project: each project's agents are additively merged into
- * the owner's single 14199 event without removing other projects' agents.
- */
-export function publishProjectAgentSnapshot(projectDTag: string): void {
-    const existing = snapshotDebounceTimers.get(projectDTag);
-    if (existing) {
-        clearTimeout(existing);
-    }
-
-    const timer = setTimeout(() => {
-        snapshotDebounceTimers.delete(projectDTag);
-        executeSnapshotPublish(projectDTag).catch((error) => {
-            logger.warn("Debounced 14199 snapshot publish failed", {
-                projectDTag,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        });
-    }, SNAPSHOT_DEBOUNCE_MS);
-
-    snapshotDebounceTimers.set(projectDTag, timer);
-}
-
-/**
- * Execute the actual 14199 snapshot publish for a specific project.
- * Reads agents for this project only, then additively merges their pubkeys
- * into the owner's existing 14199 event (preserving agents from other projects).
- *
- * When NIP-46 is enabled, each whitelisted owner gets their own 14199 event signed
- * by that owner via NIP-46 remote signing. If signing fails, the event is simply
- * not published — there is no fallback to backend key signing.
- *
- * When NIP-46 is disabled, 14199 publishing is skipped entirely.
- */
-async function executeSnapshotPublish(projectDTag: string): Promise<void> {
-    // Project membership lives in the persisted kind:31933 event's p-tags
-    const agentPubkeys = await readProjectAgentPubkeys(projectDTag);
-    const whitelisted = config.getWhitelistedPubkeys();
-
-    logger.info("Publishing debounced 14199 snapshot", {
-        projectDTag,
-        agentCount: agentPubkeys.length,
-    });
-
-    const nip46Service = Nip46SigningService.getInstance();
-
-    if (!nip46Service.isEnabled()) {
-        logger.info("[NIP-46] Disabled — skipping 14199 snapshot publish", {
-            projectDTag,
-            agentCount: agentPubkeys.length,
-        });
-        return;
-    }
-
-    for (const ownerPubkey of whitelisted) {
-        await publishSnapshotForOwner(
-            ownerPubkey,
-            agentPubkeys,
-            nip46Service,
-        );
-    }
-}
-
-/**
- * Publish a 14199 snapshot signed by a specific owner via NIP-46.
- * Additively merges this project's agent pubkeys into the owner's existing 14199.
- * If all project agents are already present, skips the publish entirely.
- * If signing fails for any reason, the event is not published.
- */
-async function publishSnapshotForOwner(
-    ownerPubkey: string,
-    projectAgentPubkeys: string[],
-    nip46Service: Nip46SigningService,
-): Promise<void> {
-    const existingPTags = await fetchExistingPTags(ownerPubkey);
-    const existingSet = new Set(existingPTags);
-    const newPubkeys = projectAgentPubkeys.filter((pk) => !existingSet.has(pk));
-
-    if (newPubkeys.length === 0 && existingPTags.length > 0) {
-        logger.debug("[NIP-46] All project agents already in 14199, skipping publish", {
-            ownerPubkey: shortenPubkey(ownerPubkey),
-            existingCount: existingPTags.length,
-        });
-        return;
-    }
-
-    const mergedPubkeys = [...existingPTags, ...newPubkeys];
-    const ndk = getNDK();
-    const signingLog = Nip46SigningLog.getInstance();
-    const ev = buildSnapshotEvent(ndk, mergedPubkeys);
-
-    const result = await nip46Service.signEvent(ownerPubkey, ev, "14199_snapshot");
-
-    if (result.outcome === "signed") {
-        try {
-            await ev.publish();
-            signingLog.log({
-                op: "event_published",
-                ownerPubkey: Nip46SigningLog.truncatePubkey(ownerPubkey),
-                eventKind: NDKKind.ProjectAgentSnapshot as number,
-                signerType: "nip46",
-                pTagCount: ev.tags.filter((t) => t[0] === "p").length,
-                eventId: ev.id,
-            });
-            logger.info("[NIP-46] Published owner-signed 14199", {
-                ownerPubkey: shortenPubkey(ownerPubkey),
-                eventId: shortenOptionalEventId(ev.id),
-                existingPTags: existingPTags.length,
-                newPubkeys: newPubkeys.length,
-                totalPTags: mergedPubkeys.length,
-            });
-        } catch (error) {
-            logger.warn("[NIP-46] Failed to publish owner-signed 14199", {
-                ownerPubkey: shortenPubkey(ownerPubkey),
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-        return;
-    }
-
-    logger.warn("[NIP-46] Skipping 14199 publish — signing failed", {
-        ownerPubkey: shortenPubkey(ownerPubkey),
-        outcome: result.outcome,
-        reason: result.reason,
-    });
-}
-
-/**
- * Build an unsigned 14199 snapshot event with p-tags for the given pubkeys.
- */
-function buildSnapshotEvent(
-    ndk: ReturnType<typeof getNDK>,
-    allPubkeys: string[],
-): NDKEvent {
-    const ev = new NDKEvent(ndk, {
-        kind: NDKKind.ProjectAgentSnapshot,
-    });
-
-    for (const pk of allPubkeys) {
-        ev.tag(["p", pk]);
-    }
-
-    return ev;
-}
-
-/**
- * Fetch existing p-tag pubkeys from the owner's latest 14199 event.
- * Returns an empty array on fetch failure (safe: we only add, never remove).
- */
-async function fetchExistingPTags(ownerPubkey: string): Promise<string[]> {
-    try {
-        const ndk = getNDK();
-        const events = await ndk.fetchEvents({
-            kinds: [NDKKind.ProjectAgentSnapshot as number],
-            authors: [ownerPubkey],
-        });
-
-        if (events.size === 0) {
-            return [];
-        }
-
-        // Get the latest event (highest created_at)
-        const latest = Array.from(events).sort(
-            (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0),
-        )[0];
-
-        return latest.tags
-            .filter((t) => t[0] === "p" && t[1])
-            .map((t) => t[1]);
-    } catch (error) {
-        logger.warn("Failed to fetch existing 14199 event, proceeding with empty p-tags", {
-            ownerPubkey: shortenPubkey(ownerPubkey),
-            error: error instanceof Error ? error.message : String(error),
-        });
-        return [];
-    }
 }
 
 /**
@@ -383,12 +195,6 @@ export async function publishAgentProfile(
                 pubkey: signer.pubkey.substring(0, 8),
             });
         });
-
-        // Schedule debounced 14199 snapshot publish for this project
-        const projectTag = projectEvent.dTag;
-        if (projectTag) {
-            publishProjectAgentSnapshot(projectTag);
-        }
     } catch (error) {
         logger.error("Failed to create agent profile", {
             error,

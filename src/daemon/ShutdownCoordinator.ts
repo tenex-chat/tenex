@@ -4,12 +4,10 @@ import { shutdownTelemetry } from "@/telemetry/setup";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { RAGService } from "@/services/rag/RAGService";
 import { InterventionService } from "@/services/intervention";
-import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { Nip46SigningService } from "@/services/nip46";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { prefixKVStore } from "@/services/storage";
 import type { Lockfile } from "@/utils/lockfile";
-import type { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 import type { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
 import type { RuntimeLifecycle } from "./RuntimeLifecycle";
 import type { SubscriptionManager } from "./SubscriptionManager";
@@ -20,8 +18,6 @@ export interface ShutdownCoordinatorDeps {
     setIsRunning: (running: boolean) => void;
     getRestartState: () => RestartState | null;
     getRuntimeLifecycle: () => RuntimeLifecycle | null;
-    getAgentDefinitionMonitor: () => AgentDefinitionMonitor | null;
-    setAgentDefinitionMonitor: (monitor: AgentDefinitionMonitor | null) => void;
     getInstalledAgentListPublisher: () => InstalledAgentListService | null;
     setInstalledAgentListPublisher: (publisher: InstalledAgentListService | null) => void;
     getSubscriptionManager: () => SubscriptionManager | null;
@@ -96,21 +92,9 @@ export class ShutdownCoordinator {
                 logger.info("Closing RAG service...");
                 await RAGService.closeInstance();
 
-                // Stop agent definition monitor
-                const agentDefinitionMonitor = this.deps.getAgentDefinitionMonitor();
-                if (agentDefinitionMonitor) {
-                    logger.info("Stopping agent definition monitor...");
-                    agentDefinitionMonitor.stop();
-                    this.deps.setAgentDefinitionMonitor(null);
-                }
-
                 // Stop intervention service
                 logger.info("Stopping intervention service...");
                 InterventionService.getInstance().shutdown();
-
-                // Stop owner agent list service
-                logger.info("Stopping owner agent list service...");
-                OwnerAgentListService.getInstance().shutdown();
 
                 const installedAgentListPublisher = this.deps.getInstalledAgentListPublisher();
                 if (installedAgentListPublisher) {

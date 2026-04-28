@@ -4,7 +4,6 @@ import * as path from "node:path";
 import { ensureDirectory } from "@/lib/fs";
 import { agentStorage } from "@/agents/AgentStorage";
 import { detectOpenClawStateDir, readOpenClawCredentials, readOpenClawAgents } from "@/commands/agent/import/openclaw-reader";
-import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { ensureCacheLoaded, getModelInfo } from "@/llm/utils/models-dev-cache";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
@@ -22,13 +21,11 @@ import NDK, {
     NDKPrivateKeySigner,
     NDKProject,
     NDKRelayAuthPolicies,
-    type NDKSubscription,
 } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 import { nip19 } from "nostr-tools";
-import { installAgentFromDefinitionEvent } from "@/services/agents/AgentProvisioningService";
 
 type RelayItem =
     | { type: "choice"; name: string; value: string; description?: string }
@@ -662,197 +659,25 @@ function buildProviderHints(detection: DetectionResult): Record<string, string> 
     return hints;
 }
 
-// ─── Nostr Agent Discovery Types ─────────────────────────────────────────────
-
-interface FetchedTeam {
-    id: string;
-    title: string;
-    description: string;
-    agentEventIds: string[];
-}
-
-interface FetchedAgent {
-    id: string;
-    name: string;
-    role: string;
-    description: string;
-    event: NDKEvent;
-}
-
-interface FetchResults {
-    teams: FetchedTeam[];
-    agents: FetchedAgent[];
-}
-
-function agentsForTeam(results: FetchResults, team: FetchedTeam): FetchedAgent[] {
-    const agentIndex = new Map(results.agents.map((a) => [a.id, a]));
-    return team.agentEventIds
-        .map((eid) => agentIndex.get(eid))
-        .filter((a): a is FetchedAgent => a !== undefined);
-}
-
-// ─── Streaming Agent Discovery ──────────────────────────────────────────────
-
-interface AgentDiscovery {
-    ndk: NDK;
-    subscription: NDKSubscription;
-    events: Map<string, NDKEvent>;
-    initialSync: Promise<void>;
-    startedAtMs: number | null;
-}
-
-function startAgentDiscovery(relays: string[], signer?: NDKPrivateKeySigner): AgentDiscovery {
-    const ndk = new NDK({ explicitRelayUrls: relays, enableOutboxModel: false });
-
-    if (signer) {
-        ndk.signer = signer;
-        ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk, signer });
-    }
-
-    const events = new Map<string, NDKEvent>();
-    const fetchedAgentIds = new Set<string>();
-    const TEAM_KIND = 34199;
-    let initialSyncResolved = false;
-    let resolveInitialSync: (() => void) | null = null;
-    const initialSync = new Promise<void>((resolve) => {
-        resolveInitialSync = resolve;
-    });
-
-    const markInitialSyncComplete = (): void => {
-        if (initialSyncResolved) return;
-        initialSyncResolved = true;
-        resolveInitialSync?.();
-    };
-
-    const fetchReferencedAgents = (teamEvent: NDKEvent): void => {
-        const missingIds = teamEvent.tags
-            .filter((t: string[]) => t[0] === "e" && t[1] && !fetchedAgentIds.has(t[1]))
-            .map((t: string[]) => t[1]);
-        if (missingIds.length === 0) return;
-        for (const id of missingIds) fetchedAgentIds.add(id);
-        void ndk.fetchEvents({ ids: missingIds }).then((fetched) => {
-            for (const event of fetched) events.set(event.id, event);
-        });
-    };
-
-    const subscription = ndk.subscribe(
-        { kinds: [...NDKAgentDefinition.kinds, TEAM_KIND] as number[] },
-        { closeOnEose: false },
-        {
-            onEvent: (event: NDKEvent) => {
-                events.set(event.id, event);
-                if (event.kind === TEAM_KIND) fetchReferencedAgents(event);
-            },
-            onEose: markInitialSyncComplete,
-            onClose: markInitialSyncComplete,
-        },
-    );
-
-    return { ndk, subscription, events, initialSync, startedAtMs: null };
-}
-
-function connectAgentDiscovery(discovery: AgentDiscovery): void {
-    discovery.startedAtMs = Date.now();
-    // Fire-and-forget — NDK handles reconnection and the subscription queues until connected.
-    // Swallow connection errors to avoid unhandled rejections in background setup flow.
-    void discovery.ndk.connect().catch(() => {});
-}
-
-async function waitForAgentDiscovery(discovery: AgentDiscovery, timeoutMs = 3_000): Promise<void> {
-    const startedAtMs = discovery.startedAtMs ?? Date.now();
-    const elapsedMs = Date.now() - startedAtMs;
-    const remainingMs = Math.max(0, timeoutMs - elapsedMs);
-    if (remainingMs === 0) return;
-
-    await Promise.race([
-        discovery.initialSync,
-        new Promise<void>((resolve) => setTimeout(resolve, remainingMs)),
-    ]);
-}
-
 // ─── Project & Agents Step ───────────────────────────────────────────────────
-
-/**
- * Stop the streaming subscription and resolve accumulated events into
- * typed agents and teams with deduplication.
- */
-function resolveAgentDiscovery(discovery: AgentDiscovery): FetchResults {
-    discovery.subscription.stop();
-
-    const TEAM_KIND = 34199;
-    const teams: FetchedTeam[] = [];
-    const agents: FetchedAgent[] = [];
-
-    for (const event of discovery.events.values()) {
-        const kind = event.kind;
-
-        if (kind === TEAM_KIND) {
-            const title = event.tagValue("title") || "";
-            if (!title) continue;
-            const description = event.content || event.tagValue("description") || "";
-            const agentEventIds = event.tags
-                .filter((t: string[]) => t[0] === "e" && t[1])
-                .map((t: string[]) => t[1]);
-            teams.push({ id: event.id, title, description, agentEventIds });
-        } else if (kind !== undefined && NDKAgentDefinition.kinds.includes(kind)) {
-            const name = event.tagValue("title") || "Unnamed Agent";
-            const role = event.tagValue("role") || "";
-            const description = event.tagValue("description") || event.content || "";
-            agents.push({ id: event.id, name, role, description, event });
-        }
-    }
-
-    // Dedup teams by title (keep first)
-    const seenTeamTitles = new Set<string>();
-    const dedupedTeams = teams.filter((t) => {
-        if (seenTeamTitles.has(t.title)) return false;
-        seenTeamTitles.add(t.title);
-        return true;
-    });
-
-    // Dedup agents by pubkey+d-tag (keep newest)
-    const latestAgents = new Map<string, FetchedAgent>();
-    const noDtagAgents: FetchedAgent[] = [];
-    for (const agent of agents) {
-        const dTag = agent.event.tagValue("d") || "";
-        if (!dTag) {
-            noDtagAgents.push(agent);
-            continue;
-        }
-        const key = `${agent.event.pubkey}:${dTag}`;
-        const existing = latestAgents.get(key);
-        if (!existing || (agent.event.created_at || 0) > (existing.event.created_at || 0)) {
-            latestAgents.set(key, agent);
-        }
-    }
-    const dedupedAgents = [...Array.from(latestAgents.values()), ...noDtagAgents];
-
-    return { teams: dedupedTeams, agents: dedupedAgents };
-}
 
 /**
  * Run the Project & Agents onboarding step.
  *
- * Replicates the Rust TUI's step_first_project_and_agents:
  * 1. Import OpenClaw agents (if detected)
  * 2. Ask about creating a Meta project
- * 3. Discover/select Nostr teams and individual agents
- * 4. Install selected agents locally (best-effort)
- * 5. Publish kind 31933 project event with final lowercase `p` agent pubkeys
+ * 3. Publish kind 31933 project event with final lowercase `p` agent pubkeys
  */
 async function runProjectAndAgentsStep(
-    discovery: AgentDiscovery,
+    relays: string[],
     userPrivateKeyHex: string,
     openClawStateDir: string | null,
 ): Promise<boolean> {
-    const { ndk } = discovery;
-    const discoveryReady = waitForAgentDiscovery(discovery);
 
     await agentStorage.initialize();
 
     // ── Part A: OpenClaw agents (if detected) ───────────────────────────────
     let installedCount = 0;
-    const selectedNostrAgentEventIds = new Set<string>();
     const selectedAgentPubkeys = new Set<string>();
     let openClawImportInFlight = false;
     let openClawImportPromise: Promise<{
@@ -944,7 +769,6 @@ async function runProjectAndAgentsStep(
     }]);
 
     if (!createMeta) {
-        discovery.subscription.stop();
         await waitForOpenClawImportIfNeeded();
 
         if (installedCount > 0) {
@@ -954,157 +778,6 @@ async function runProjectAndAgentsStep(
         display.blank();
         display.context("Sure thing. You can create projects anytime from the dashboard.");
         return false;
-    }
-
-    await discoveryReady;
-    const fetchResults = resolveAgentDiscovery(discovery);
-    const hasNostrAgents = fetchResults.agents.length > 0;
-
-    // ── Part C: Nostr agents (team + individual selection) ──────────────────
-    display.blank();
-    display.context("Pick a pre-built agent team or choose individual agents.");
-    display.blank();
-
-    if (!hasNostrAgents) {
-        display.context("No Nostr agents available right now.");
-        display.hint("You can browse and hire agents later from the dashboard.");
-    } else {
-        const results = fetchResults;
-
-        while (true) {
-            // Only show teams that still have unselected agents
-            const availableTeams = results.teams.filter((team) =>
-                agentsForTeam(results, team).some((a) => !selectedNostrAgentEventIds.has(a.id)),
-            );
-
-            const hasRemainingAgents = results.agents.some(
-                (a) => !selectedNostrAgentEventIds.has(a.id),
-            );
-
-            // Nothing left to offer
-            if (availableTeams.length === 0 && !hasRemainingAgents) break;
-
-            // Build menu choices
-            const menuChoices: Array<{ name: string; value: string }> = [];
-
-            // Team entries
-            for (const team of availableTeams) {
-                const agentCount = agentsForTeam(results, team)
-                    .filter((a) => !selectedNostrAgentEventIds.has(a.id)).length;
-                const label = team.description
-                    ? `${team.title} — ${team.description} (${agentCount} agents)`
-                    : `${team.title} (${agentCount} agents)`;
-                menuChoices.push({ name: label, value: `team:${team.id}` });
-            }
-
-            // "Add individual agents" entry
-            if (hasRemainingAgents) {
-                menuChoices.push({ name: "Add individual agents", value: "__individual__" });
-            }
-
-            // "Done" entry
-            menuChoices.push({ name: "Done", value: "__done__" });
-
-            const { selection } = await inquirer.prompt([{
-                type: "select",
-                name: "selection",
-                message: "Add agents",
-                choices: menuChoices,
-                theme: inquirerTheme,
-            }]);
-
-            if (selection === "__done__") break;
-
-            if (selection === "__individual__") {
-                // Individual agent multi-select
-                const remaining = results.agents.filter(
-                    (a) => !selectedNostrAgentEventIds.has(a.id),
-                );
-
-                const { selected } = await inquirer.prompt([{
-                    type: "checkbox",
-                    name: "selected",
-                    message: "Select agents (space to toggle, enter to confirm)",
-                    choices: remaining.map((a) => {
-                        const label = a.role
-                            ? `${a.name.padEnd(20)} ${a.role} — ${a.description}`
-                            : `${a.name.padEnd(20)} ${a.description}`;
-                        return { name: label, value: a.id };
-                    }),
-                    theme: inquirerTheme,
-                }]);
-
-                if ((selected as string[]).length > 0) {
-                    const selectedAgents = remaining.filter((a) => (selected as string[]).includes(a.id));
-                    for (const agent of selectedAgents) {
-                        selectedNostrAgentEventIds.add(agent.id);
-                    }
-
-                    let installedNow = 0;
-                    for (const agent of selectedAgents) {
-                        try {
-                            const result = await installAgentFromDefinitionEvent(agent.event, {
-                                ndk,
-                            });
-                            selectedAgentPubkeys.add(result.pubkey);
-                            installedNow++;
-                            installedCount++;
-                        } catch (err) {
-                            display.context(`Failed to install "${agent.name}": ${err instanceof Error ? err.message : String(err)}`);
-                        }
-                    }
-
-                    display.blank();
-                    const names = selectedAgents.map((a) => a.name).join(", ");
-                    display.success(`Added ${selectedAgents.length} agent tag(s): ${names}`);
-                    if (installedNow !== selectedAgents.length) {
-                        display.hint(`Installed ${installedNow}/${selectedAgents.length} locally. Remaining agents will load from project tags.`);
-                    }
-                }
-                continue;
-            }
-
-            // Team selected
-            const teamId = selection.replace("team:", "");
-            const team = results.teams.find((t) => t.id === teamId);
-            if (!team) continue;
-
-            const teamAgents = agentsForTeam(results, team)
-                .filter((a) => !selectedNostrAgentEventIds.has(a.id));
-
-            if (teamAgents.length === 0) continue;
-
-            display.blank();
-            display.hint(`Agents in ${team.title}:`);
-            for (const a of teamAgents) {
-                console.log(`    ${chalk.ansi256(117)("●")} ${chalk.bold(a.name.padEnd(20))} ${chalk.dim(a.role)}`);
-            }
-
-            for (const agent of teamAgents) {
-                selectedNostrAgentEventIds.add(agent.id);
-            }
-
-            let installedNow = 0;
-            for (const agent of teamAgents) {
-                try {
-                    const result = await installAgentFromDefinitionEvent(agent.event, {
-                        ndk,
-                    });
-                    selectedAgentPubkeys.add(result.pubkey);
-                    installedNow++;
-                    installedCount++;
-                } catch (err) {
-                    display.context(`Failed to install "${agent.name}": ${err instanceof Error ? err.message : String(err)}`);
-                }
-            }
-
-            display.blank();
-            const names = teamAgents.map((a) => a.name).join(", ");
-            display.success(`Team "${team.title}" added (${teamAgents.length} agent tag(s)): ${names}`);
-            if (installedNow !== teamAgents.length) {
-                display.hint(`Installed ${installedNow}/${teamAgents.length} locally. Remaining agents will load from project tags.`);
-            }
-        }
     }
 
     await waitForOpenClawImportIfNeeded();
@@ -1123,8 +796,10 @@ async function runProjectAndAgentsStep(
     // We just publish the event with authoritative agent pubkeys.
     try {
         const signer = new NDKPrivateKeySigner(userPrivateKeyHex);
+        const ndk = new NDK({ explicitRelayUrls: relays, enableOutboxModel: false });
         ndk.signer = signer;
         ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk, signer });
+        await ndk.connect();
 
         const project = new NDKProject(ndk);
         project.dTag = "meta";
@@ -1378,15 +1053,6 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
 
     const relays = [relay];
 
-    // Start agent discovery early — NDK connects and streams events in the
-    // background while the user configures providers, models, etc. (steps 3-7).
-    // By step 8, agents have already accumulated.
-    const agentDiscovery = startAgentDiscovery(
-        relays,
-        userPrivateKeyHex ? new NDKPrivateKeySigner(userPrivateKeyHex) : undefined,
-    );
-    connectAgentDiscovery(agentDiscovery);
-
     // Publish kind:0 profile for new identity (fire-and-forget)
     if (newIdentityUsername && userPrivateKeyHex) {
         const userSigner = new NDKPrivateKeySigner(userPrivateKeyHex);
@@ -1396,7 +1062,9 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         const avatarStyle = avatarFamilies[familyIndex];
         const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${pubkey}`;
 
-        const profileEvent = new NDKEvent(agentDiscovery.ndk, {
+        const profileNDK = new NDK({ explicitRelayUrls: relays, enableOutboxModel: false });
+        void profileNDK.connect().catch(() => {});
+        const profileEvent = new NDKEvent(profileNDK, {
             kind: 0,
             content: JSON.stringify({
                 name: newIdentityUsername,
@@ -1466,15 +1134,12 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         if (userPrivateKeyHex) {
             display.step(7, totalSteps, "Project & Agents");
             metaProjectCreated = await runProjectAndAgentsStep(
-                agentDiscovery,
+                relays,
                 userPrivateKeyHex,
                 detection.openClawStateDir,
             );
-        } else {
-            agentDiscovery.subscription.stop();
         }
     } else {
-        agentDiscovery.subscription.stop();
         display.blank();
         display.hint("Skipping model configuration (no providers configured)");
         display.context("Run tenex config providers and tenex config llm later to configure models.");

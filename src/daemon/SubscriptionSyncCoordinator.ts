@@ -1,5 +1,4 @@
 import { logger } from "@/utils/logger";
-import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import type { AgentInstance } from "@/agents/types";
 import type { Hexpubkey } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
@@ -189,9 +188,6 @@ export class SubscriptionSyncCoordinator {
                 this.trackedLessonDefinitionIds.add(agent.eventId);
             }
         }
-
-        // Register with global 14199 service
-        OwnerAgentListService.getInstance().registerAgents(projectId, [agent.pubkey]);
 
         logger.info("Dynamic agent added to routing", {
             projectId,

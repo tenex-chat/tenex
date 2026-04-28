@@ -39,13 +39,10 @@ import {
 } from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
 import { RemoteBackendStatusService } from "@/services/status/RemoteBackendStatusService";
-import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
 import { StatusFile } from "./StatusFile";
-import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
-import { BackendHeartbeatService } from "@/services/status/BackendHeartbeatService";
 import { ShutdownCoordinator } from "./ShutdownCoordinator";
 import { SubscriptionSyncCoordinator } from "./SubscriptionSyncCoordinator";
 import { EventHandlerRegistry } from "./EventHandlerRegistry";
@@ -88,9 +85,6 @@ export class Daemon {
     // Optional runtime boot allowlist for single-project boot wrappers
     private runtimeBootAllowlist: Set<ProjectDTag> | null = null;
 
-    // Agent definition auto-upgrade monitor
-    private agentDefinitionMonitor: AgentDefinitionMonitor | null = null;
-
     // Graceful restart state
     private pendingRestart = false;
     private restartInProgress = false;
@@ -111,7 +105,6 @@ export class Daemon {
     private statusFile: StatusFile | null = null;
     private statusInterval: NodeJS.Timeout | null = null;
     private installedAgentListPublisher: InstalledAgentListService | null = null;
-    private backendHeartbeat: BackendHeartbeatService | null = null;
 
     // Focused coordinators (initialized in start() before isRunning = true)
     private shutdownCoordinator: ShutdownCoordinator | undefined;
@@ -341,13 +334,6 @@ export class Daemon {
                 logger.info("NIP-46 remote signing enabled");
             }
 
-            // 6c. Initialize OwnerAgentListService (global 14199 management)
-            const nip46Service = Nip46SigningService.getInstance();
-            const ownerAgentListPubkeys = nip46Service.isEnabled()
-                ? [...this.whitelistedPubkeys]
-                : [];
-            OwnerAgentListService.getInstance().initialize(ownerAgentListPubkeys);
-
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
             this.runtimeLifecycle = new RuntimeLifecycle(this.projectsBase);
@@ -392,10 +378,6 @@ export class Daemon {
                 },
                 getRestartState: () => this.restartState,
                 getRuntimeLifecycle: () => this.runtimeLifecycle,
-                getAgentDefinitionMonitor: () => this.agentDefinitionMonitor,
-                setAgentDefinitionMonitor: (monitor) => {
-                    this.agentDefinitionMonitor = monitor;
-                },
                 getInstalledAgentListPublisher: () => this.installedAgentListPublisher,
                 setInstalledAgentListPublisher: (publisher) => {
                     this.installedAgentListPublisher = publisher;
@@ -435,11 +417,6 @@ export class Daemon {
             await this.installedAgentListPublisher.startPublishing();
             logger.debug("Installed-agent inventory publisher started");
 
-            // 9b. Start backend heartbeat (publishes ephemeral 24012 until
-            //     the backend's pubkey appears in an owner's 14199 snapshot)
-            this.backendHeartbeat = new BackendHeartbeatService();
-            this.backendHeartbeat.start(this.backendPubkey, this.whitelistedPubkeys);
-
             // 10. Start automatic conversation indexing job
             getConversationIndexingJob().start();
             logger.info("Automatic conversation indexing job started");
@@ -460,17 +437,7 @@ export class Daemon {
                 this.shutdownCoordinator.setupRALCompletionListener();
             }
 
-            // 14. Start agent definition monitor for auto-upgrades
-            logger.debug("Starting agent definition monitor");
-            this.agentDefinitionMonitor = new AgentDefinitionMonitor(
-                this.ndk,
-                { whitelistedPubkeys: this.whitelistedPubkeys },
-                () => this.runtimeLifecycle?.getActiveRuntimes() || new Map()
-            );
-            await this.agentDefinitionMonitor.start();
-            logger.info("Agent definition monitor started");
-
-            // 15. Setup graceful shutdown
+            // 14. Setup graceful shutdown
             this.shutdownCoordinator.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -1062,9 +1029,6 @@ export class Daemon {
         getConversationIndexingJob().stop();
         RAGService.closeInstance();
         InterventionService.getInstance().shutdown();
-        OwnerAgentListService.getInstance().shutdown();
-        this.backendHeartbeat?.stop();
-        this.backendHeartbeat = null;
 
         await Nip46SigningService.getInstance().shutdown();
 
