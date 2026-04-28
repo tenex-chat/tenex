@@ -80,6 +80,52 @@ impl ProvidersDoc {
             .unwrap_or_default()
     }
 
+    /// Iterate provider IDs that are *configured*: either have at least
+    /// one usable API key, or carry the literal `"none"` string sentinel.
+    ///
+    /// Mirrors the filter at `src/llm/utils/ConfigurationManager.ts:22-27`:
+    ///
+    /// ```ts
+    /// Object.keys(llmsConfig.providers).filter((p) => {
+    ///     const key = llmsConfig.providers[p]?.apiKey;
+    ///     return hasApiKey(key) || key === "none";
+    /// })
+    /// ```
+    ///
+    /// The `key === "none"` branch covers `claude-code` (and other
+    /// providers that don't take an API key but should still appear
+    /// configured). It uses *strict equality* on the scalar — the
+    /// `"none"` sentinel is only honoured when `apiKey` is the bare
+    /// string, never when it appears inside an array.
+    pub fn configured_provider_ids(&self) -> Vec<String> {
+        use crate::store::api_keys::{has_api_key, ApiKeyValue};
+        self.provider_ids()
+            .into_iter()
+            .filter(|id| {
+                let Some(entry) = self.get(id) else {
+                    return false;
+                };
+                match entry.raw_api_key_value() {
+                    Some(Value::String(s)) => {
+                        // Bare string: include if it's a real key OR the
+                        // literal `"none"` sentinel. `has_api_key` already
+                        // filters `"none"` out of its "real" branch.
+                        s == "none" || has_api_key(ApiKeyValue::One(s.as_str()))
+                    }
+                    Some(Value::Array(arr)) => {
+                        let owned: Vec<String> = arr
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect();
+                        has_api_key(ApiKeyValue::Many(&owned))
+                    }
+                    _ => false,
+                }
+            })
+            .collect()
+    }
+
     /// Read provider credentials. Returns None when the provider is absent.
     pub fn get(&self, provider_id: &str) -> Option<ProviderEntry<'_>> {
         let obj = self.providers_obj()?.get(provider_id)?.as_object()?;
@@ -197,6 +243,15 @@ impl ProviderEntry<'_> {
             Some(Value::Array(arr)) => arr.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
             _ => Vec::new(),
         }
+    }
+
+    /// Raw `apiKey` field from disk, before any normalisation. Lets
+    /// callers distinguish a bare-string `"none"` from an array
+    /// containing `"none"` — the TS source treats them differently in
+    /// the `configured_provider_ids` filter (only the bare string
+    /// counts as the keyless-but-configured sentinel).
+    pub fn raw_api_key_value(&self) -> Option<&Value> {
+        self.obj.get("apiKey")
     }
 
     pub fn base_url(&self) -> Option<&str> {
@@ -390,5 +445,94 @@ mod tests {
                 serialized.len()
             );
         }
+    }
+
+    // ── configured_provider_ids ────────────────────────────────────────
+
+    fn build_doc(json: &str) -> ProvidersDoc {
+        parse(json.as_bytes())
+    }
+
+    #[test]
+    fn configured_includes_provider_with_real_bare_string_key() {
+        let doc = build_doc(
+            r#"{"providers":{"anthropic":{"apiKey":"sk-real"}}}"#,
+        );
+        assert_eq!(doc.configured_provider_ids(), vec!["anthropic"]);
+    }
+
+    #[test]
+    fn configured_includes_provider_with_real_array_key() {
+        let doc = build_doc(
+            r#"{"providers":{"openai":{"apiKey":["sk-a","sk-b"]}}}"#,
+        );
+        assert_eq!(doc.configured_provider_ids(), vec!["openai"]);
+    }
+
+    #[test]
+    fn configured_includes_provider_with_none_sentinel() {
+        // `claude-code` doesn't take a real key — TS uses the literal
+        // string "none" as a configured-but-keyless marker.
+        let doc = build_doc(
+            r#"{"providers":{"claude-code":{"apiKey":"none"}}}"#,
+        );
+        assert_eq!(doc.configured_provider_ids(), vec!["claude-code"]);
+    }
+
+    #[test]
+    fn configured_excludes_provider_with_empty_string_key() {
+        let doc = build_doc(
+            r#"{"providers":{"openai":{"apiKey":""}}}"#,
+        );
+        assert!(doc.configured_provider_ids().is_empty());
+    }
+
+    #[test]
+    fn configured_excludes_provider_with_empty_array_key() {
+        let doc = build_doc(
+            r#"{"providers":{"openai":{"apiKey":[]}}}"#,
+        );
+        assert!(doc.configured_provider_ids().is_empty());
+    }
+
+    #[test]
+    fn configured_excludes_provider_with_only_none_inside_array() {
+        // TS strict-equals `key === "none"` only matches the bare
+        // string. `["none"]` is an array — has_api_key drops "none"
+        // from the entries, so the array contributes zero usable keys
+        // and the provider is excluded.
+        let doc = build_doc(
+            r#"{"providers":{"x":{"apiKey":["none"]}}}"#,
+        );
+        assert!(doc.configured_provider_ids().is_empty());
+    }
+
+    #[test]
+    fn configured_includes_provider_with_mixed_array_having_one_real_key() {
+        let doc = build_doc(
+            r#"{"providers":{"x":{"apiKey":["","none","sk-real"]}}}"#,
+        );
+        assert_eq!(doc.configured_provider_ids(), vec!["x"]);
+    }
+
+    #[test]
+    fn configured_preserves_disk_order() {
+        let doc = build_doc(
+            r#"{"providers":{"third":{"apiKey":"k3"},"first":{"apiKey":"k1"},"second":{"apiKey":"k2"}}}"#,
+        );
+        // IndexMap preserves insertion order — the filter must keep it.
+        assert_eq!(
+            doc.configured_provider_ids(),
+            vec!["third", "first", "second"],
+        );
+    }
+
+    #[test]
+    fn configured_filters_out_unconfigured_amongst_mixed_set() {
+        let doc = build_doc(
+            r#"{"providers":{"a":{"apiKey":"sk-a"},"b":{"apiKey":""},"c":{"apiKey":"none"}}}"#,
+        );
+        // a (real key) and c (none sentinel) included, b excluded.
+        assert_eq!(doc.configured_provider_ids(), vec!["a", "c"]);
     }
 }
