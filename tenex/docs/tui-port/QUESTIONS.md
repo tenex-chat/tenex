@@ -62,6 +62,32 @@ this kind. Spec 11 doesn't list it directly but
 
 (none currently)
 
+## Cross-port divergences (acknowledged, not yet aligned)
+
+### `tenex config embed` runs the onboard flow, not the config flow
+
+TS has TWO embedding flows:
+
+- `src/commands/onboard.ts:387-475` `runEmbeddingSetup` — invoked
+  during `tenex onboard`. 2 OpenAI models, 2 OpenRouter models, 3 local
+  Xenova models. No Ollama option. Always global scope.
+- `src/commands/config/embed.ts:55-269` `embedCommand` — invoked by
+  `tenex config embed`. 3 OpenAI models (incl. `ada-002` legacy), 3
+  OpenRouter models (incl. `ada-002`), 4 Ollama models (`nomic-embed-text`,
+  `mxbai-embed-large`, `all-minilm`, `snowflake-arctic-embed`). Has the
+  `--project` flag for project-scope persistence in `<project>/.tenex/`.
+
+The Rust port currently routes BOTH `tenex onboard` Step 6 AND
+`tenex config embed` through `crate::onboard::embeddings::run` (the
+runEmbeddingSetup port). This means the standalone config submenu is
+missing: the `--project` flag, the Ollama provider option, the
+`text-embedding-ada-002` legacy entries, and the 4 Ollama model rows.
+
+When the project-scope persistence + Ollama embedding adapter land,
+add a separate `config_cmd/embed.rs` that ports `embed.ts` and switch
+the `tenex config embed` dispatch to it; keep
+`onboard::embeddings::run` for the Step 6 path.
+
 ## Substrate-blocked surfaces (acknowledged, not stubs)
 
 ### `tenex doctor migrate` — only reports, doesn't migrate
