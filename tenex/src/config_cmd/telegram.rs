@@ -5,17 +5,18 @@
 //!
 //! 1. **Configure an agent Telegram bot** (`:236-307`) — operates on
 //!    per-agent `TelegramAgentConfig` records in
-//!    [`agentStorage`][TS]. This Rust port surfaces this branch with a
-//!    `display::hint` since `AgentStorage` is its own subsystem (spec doc
-//!    10) and is not yet ported. Going further would require porting the
-//!    agent registry, transport-binding store, identity-binding store,
-//!    and telegram-chat-context cache — each substantial.
+//!    [`crate::store::agent_storage::AgentStorage`]. The Rust port wires
+//!    the chooseAgent → action loop with the four mutation paths
+//!    (token, apiBaseUrl, toggle DMs, reset) plus Back. The TS version
+//!    enriches its summary with runtime-binding-store data
+//!    (`TransportBindingStore`, `IdentityBindingStore`,
+//!    `TelegramChatContextStore`); those stores are daemon-owned and
+//!    not yet ported, so the Rust summary skips the
+//!    "Remembered project bindings" lines and prints only the three
+//!    immediate-config lines (token mask, DMs status, API base URL).
 //! 2. **Configure global Telegram DM allowlist** (`:317-392`) — operates
 //!    on the `whitelistedIdentities` array in `~/.tenex/config.json`,
-//!    filtered for entries with the `telegram:` prefix. This Rust port
-//!    implements this branch fully against [`TenexConfigDoc`].
-//!
-//! [TS]: src/agents/AgentStorage.ts
+//!    filtered for entries with the `telegram:` prefix. Wired fully.
 
 use anyhow::{anyhow, Result};
 
@@ -252,6 +253,323 @@ fn allowlist_actions() -> Vec<AllowlistActionItem> {
             value: AllowlistAction::Back,
         },
     ]
+}
+
+// ─── Per-agent Telegram config flow ─────────────────────────────────────────
+
+/// Mirror `configureAgentTelegram` (`commands/config/telegram.ts:236-307`).
+///
+/// Outer loop: pick an agent (or Back); inner loop: re-load + summarise +
+/// action select, dispatch to the four mutation paths plus Back. Each
+/// successful mutation prints `✓ Telegram transport updated.` (TS green
+/// checkmark + bold suffix).
+///
+/// The runtime-binding-store enrichments (`listRememberedBindings`,
+/// `describeRememberedBinding`) used by the TS summary are not surfaced
+/// — those stores are daemon-owned and not yet ported. The three
+/// immediate config lines (bot token mask, DMs status, API base URL) are
+/// faithful.
+fn configure_agent_telegram(base_dir: &std::path::Path) -> Result<()> {
+    loop {
+        let Some(pubkey) = choose_agent(base_dir)? else {
+            return Ok(());
+        };
+        run_agent_actions(base_dir, &pubkey)?;
+    }
+}
+
+fn run_agent_actions(base_dir: &std::path::Path, pubkey: &str) -> Result<()> {
+    loop {
+        let mut storage = AgentStorage::open(base_dir)?;
+        let Some(agent) = storage.load_agent(pubkey)? else {
+            // Mirror TS: red "❌ Agent disappeared while editing."
+            // (`telegram.ts:248`).
+            let red = console::Style::new().red();
+            println!("{}", red.apply_to("❌ Agent disappeared while editing."));
+            return Ok(());
+        };
+        let current = agent.telegram_config();
+        let slug = agent.slug().unwrap_or("?").to_owned();
+
+        println!();
+        let bold = console::Style::new().bold();
+        println!("{}", bold.apply_to(format!("{slug} — Telegram transport")));
+        for line in summarise_telegram_lines(current.as_ref()) {
+            println!("{line}");
+        }
+        println!();
+
+        let action = match prompts::select(
+            "Telegram transport",
+            agent_actions(),
+        )
+        .prompt()
+        {
+            Ok(a) => a,
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
+            Err(e) => return Err(anyhow!("agent telegram action: {e}")),
+        };
+
+        match action.value {
+            AgentAction::Back => return Ok(()),
+            AgentAction::Reset => {
+                storage.update_agent_telegram_config(pubkey, None)?;
+                print_agent_transport_updated();
+                continue;
+            }
+            AgentAction::Token => {
+                let mut next = to_draft(current.as_ref()).unwrap_or_default();
+                let new_token = match prompt_for_bot_token(next.bot_token.as_deref())? {
+                    Some(t) => t,
+                    None => continue,
+                };
+                next.bot_token = Some(new_token);
+                let normalised = normalize_telegram_draft(Some(&next));
+                storage.update_agent_telegram_config(pubkey, normalised.as_ref())?;
+                print_agent_transport_updated();
+            }
+            AgentAction::ApiBaseUrl => {
+                let mut next = to_draft(current.as_ref()).unwrap_or_default();
+                if next.bot_token.is_none()
+                    || next.bot_token.as_deref().map(str::trim).unwrap_or("").is_empty()
+                {
+                    let yellow = console::Style::new().yellow();
+                    println!("{}", yellow.apply_to("  Set a bot token first."));
+                    continue;
+                }
+                let updated = match prompt_for_api_base_url(next.api_base_url.as_deref())? {
+                    Some(s) => s,
+                    None => continue,
+                };
+                next.api_base_url = updated;
+                let normalised = normalize_telegram_draft(Some(&next));
+                storage.update_agent_telegram_config(pubkey, normalised.as_ref())?;
+                print_agent_transport_updated();
+            }
+            AgentAction::ToggleDms => {
+                let mut next = to_draft(current.as_ref()).unwrap_or_default();
+                if next.bot_token.is_none()
+                    || next.bot_token.as_deref().map(str::trim).unwrap_or("").is_empty()
+                {
+                    let yellow = console::Style::new().yellow();
+                    println!("{}", yellow.apply_to("  Set a bot token first."));
+                    continue;
+                }
+                // TS at `telegram.ts:300`:
+                //   nextDraft.allowDMs = nextDraft.allowDMs === false;
+                // i.e. flip false→true; everything else (true / undefined)
+                // becomes false. We mirror that exactly.
+                next.allow_dms = Some(next.allow_dms == Some(false));
+                let normalised = normalize_telegram_draft(Some(&next));
+                storage.update_agent_telegram_config(pubkey, normalised.as_ref())?;
+                print_agent_transport_updated();
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentAction {
+    Token,
+    ApiBaseUrl,
+    ToggleDms,
+    Reset,
+    Back,
+}
+
+#[derive(Debug, Clone)]
+struct AgentActionItem {
+    label: String,
+    value: AgentAction,
+}
+
+impl std::fmt::Display for AgentActionItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+fn agent_actions() -> Vec<AgentActionItem> {
+    vec![
+        AgentActionItem {
+            label: "Set or replace bot token".into(),
+            value: AgentAction::Token,
+        },
+        AgentActionItem {
+            label: "Set or clear API base URL".into(),
+            value: AgentAction::ApiBaseUrl,
+        },
+        AgentActionItem {
+            label: "Toggle DMs".into(),
+            value: AgentAction::ToggleDms,
+        },
+        AgentActionItem {
+            label: "Disable Telegram for this agent".into(),
+            value: AgentAction::Reset,
+        },
+        AgentActionItem {
+            label: "Back".into(),
+            value: AgentAction::Back,
+        },
+    ]
+}
+
+/// Mirror `chooseAgent` (`telegram.ts:173-207`).
+///
+/// Lists canonical-active agents sorted by slug; appends a dim "Back"
+/// entry. Returns `None` for the Back path or when the prompt is
+/// cancelled. The TS version annotates each agent with project count;
+/// we mirror that via the index's project list.
+fn choose_agent(base_dir: &std::path::Path) -> Result<Option<String>> {
+    let storage = AgentStorage::open(base_dir)?;
+    let mut agents = storage.get_canonical_active_agents()?;
+    if agents.is_empty() {
+        let dim = console::Style::new().dim();
+        println!("{}", dim.apply_to("  No active agents found."));
+        return Ok(None);
+    }
+    agents.sort_by(|a, b| {
+        a.slug()
+            .unwrap_or("")
+            .cmp(b.slug().unwrap_or(""))
+    });
+
+    let mut items: Vec<AgentChoice> = Vec::with_capacity(agents.len() + 1);
+    for agent in &agents {
+        let nsec = agent.nsec().ok_or_else(|| anyhow!("agent missing nsec"))?;
+        let pubkey = crate::store::agent_storage::derive_agent_pubkey_from_nsec(nsec)?;
+        let projects = crate::store::project_members::list_projects_for_agent(
+            base_dir, &pubkey,
+        )?;
+        let n = projects.len();
+        let plural = if n == 1 { "" } else { "s" };
+        let slug = agent.slug().unwrap_or("?");
+        let name = agent.name().unwrap_or("");
+        items.push(AgentChoice {
+            label: format!("{slug} — {name} ({n} project{plural})"),
+            pubkey: Some(pubkey),
+        });
+    }
+    let dim = console::Style::new().dim();
+    items.push(AgentChoice {
+        label: dim.apply_to("Back").to_string(),
+        pubkey: None,
+    });
+
+    let chosen = match prompts::select("Choose an agent", items).prompt() {
+        Ok(a) => a,
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
+        Err(e) => return Err(anyhow!("choose agent: {e}")),
+    };
+    Ok(chosen.pubkey)
+}
+
+#[derive(Debug, Clone)]
+struct AgentChoice {
+    label: String,
+    pubkey: Option<String>,
+}
+
+impl std::fmt::Display for AgentChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+/// Mirror `summarizeTelegramConfig` (`telegram.ts:132-163`), minus the
+/// runtime-binding-store-derived "Remembered project bindings" lines
+/// (those depend on the TransportBindingStore + IdentityBindingStore +
+/// TelegramChatContextStore — daemon-owned, not yet ported).
+fn summarise_telegram_lines(config: Option<&TelegramAgentConfig>) -> Vec<String> {
+    let dim = console::Style::new().dim();
+    let bot_token = match config {
+        Some(c) => mask_token(&c.bot_token),
+        None => dim.apply_to("not configured").to_string(),
+    };
+    let dms = match config {
+        None => dim.apply_to("no bot configured").to_string(),
+        Some(c) if c.allow_dms == Some(false) => "no".to_string(),
+        Some(_) => "yes".to_string(),
+    };
+    let api = match config.and_then(|c| c.api_base_url.as_deref()) {
+        Some(u) => u.to_string(),
+        None => dim.apply_to("default").to_string(),
+    };
+    vec![
+        format!("  Bot token: {bot_token}"),
+        format!("  DMs enabled: {dms}"),
+        format!("  API base URL: {api}"),
+    ]
+}
+
+/// Mirror `promptForBotToken` (`telegram.ts:209-221`):
+/// password prompt with masked input + non-empty-trim validation
+/// (verbatim error: `"Bot token cannot be empty"`).
+/// Cancel/interrupt → `Ok(None)`.
+fn prompt_for_bot_token(_current: Option<&str>) -> Result<Option<String>> {
+    // `inquire::Password` does not honour a `default` value — entering
+    // a blank password just re-uses the prior value. The TS `default`
+    // parameter is functionally a hint; users typically want to retype.
+    // We mirror by validating non-empty trimmed input directly.
+    let validator = prompts::adapt_static_str_validator(validate_bot_token);
+    let result = prompts::password("Telegram Bot API token:")
+        .with_validator(validator)
+        .prompt();
+    match result {
+        Ok(s) => Ok(Some(s.trim().to_owned())),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("bot token prompt: {e}")),
+    }
+}
+
+fn validate_bot_token(input: &str) -> Result<(), &'static str> {
+    if input.trim().is_empty() {
+        Err("Bot token cannot be empty")
+    } else {
+        Ok(())
+    }
+}
+
+/// Mirror `promptForApiBaseUrl` (`telegram.ts:223-234`):
+/// plain text prompt, default = current; trimmed empty → `None` (clears
+/// the field).
+fn prompt_for_api_base_url(current: Option<&str>) -> Result<Option<Option<String>>> {
+    let prompt = prompts::input("Telegram API base URL (leave blank for default):");
+    let prompt = match current {
+        Some(s) => prompt.with_default(s),
+        None => prompt,
+    };
+    match prompt.prompt() {
+        Ok(s) => {
+            let trimmed = s.trim().to_owned();
+            if trimmed.is_empty() {
+                Ok(Some(None))
+            } else {
+                Ok(Some(Some(trimmed)))
+            }
+        }
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("api base url prompt: {e}")),
+    }
+}
+
+/// Reuse the existing per-line printer (`print_success_line(text)` at
+/// the top of this module) so the agent flow's `✓ Telegram transport
+/// updated.` line goes through the same green-check + bold-text path
+/// as the global allowlist's `✓ Global Telegram DM allowlist saved.`
+fn print_agent_transport_updated() {
+    print_success_line("Telegram transport updated.");
+}
+
+// Suppress the unused warning until the new types are referenced from
+// the test module too.
+#[allow(dead_code)]
+fn _telegram_draft_witness() -> TelegramDraft {
+    TelegramDraft::default()
 }
 
 #[cfg(test)]

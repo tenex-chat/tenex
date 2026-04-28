@@ -108,15 +108,67 @@ pub async fn run(args: DoctorArgs) -> Result<()> {
 async fn run_agents(args: AgentsArgs) -> Result<()> {
     match args.command {
         AgentsCommand::Orphans { purge } => find_orphaned_agents(purge),
-        AgentsCommand::Categorize { dry_run } => {
-            let _ = dry_run;
-            display::hint(
-                "doctor agents categorize — depends on AgentStorage + LLM \
-                 service (spec doc 10 + 04). Pending port.",
-            );
-            Ok(())
-        }
+        AgentsCommand::Categorize { dry_run } => preview_categorize(dry_run),
     }
+}
+
+/// Preview path for `tenex doctor agents categorize`. Mirrors the
+/// observable stdout of `backfillAgentCategories`'s discovery phase
+/// (`src/commands/doctor.ts:23-41` + `backfillAgentCategories.ts:30-39`):
+/// counts agents already-categorised vs needing classification, then
+/// surfaces an honest hint identifying the missing LLM substrate.
+///
+/// The full backfill substrate (`AgentStorage::update_inferred_category`,
+/// the [`crate::agent_cmd::categorize::Categoriser`] trait,
+/// `backfill_agent_categories`) is already in place. When the LLM service
+/// lands, a `LlmCategoriser` impl drops in and this becomes:
+///
+/// ```ignore
+/// let result = backfill_agent_categories(&mut storage, &llm_categoriser, opts)?;
+/// println!("{}", blue.apply_to(format!(
+///     "Processed: {}, Categorized: {}, Skipped: {}, Failed: {}",
+///     result.processed, result.categorized, result.skipped, result.failed
+/// )));
+/// if result.failed > 0 { … exit 1 … }
+/// ```
+fn preview_categorize(dry_run: bool) -> Result<()> {
+    use crate::store::agent_storage::AgentStorage;
+
+    let base_dir = crate::store::resolve_base_dir(None);
+    let storage = AgentStorage::open(&base_dir)?;
+
+    let agents = storage.get_canonical_active_agents()?;
+    let total = agents.len();
+    let already = agents
+        .iter()
+        .filter(|a| a.category().is_some() || a.inferred_category().is_some())
+        .count();
+    let uncategorised = total - already;
+
+    let blue = console::Style::new().blue();
+    let mode = if dry_run { " (dry run)" } else { "" };
+    println!(
+        "{}",
+        blue.apply_to(format!(
+            "Total: {total}, Already categorised: {already}, Uncategorised: {uncategorised}{mode}"
+        ))
+    );
+    if uncategorised == 0 {
+        let green = console::Style::new().green();
+        println!(
+            "{}",
+            green.apply_to("Nothing to categorise — all canonical agents already have a category.")
+        );
+        return Ok(());
+    }
+    display::hint(
+        "Agent categorisation requires the LLM service \
+         (spec doc 04 / categorizeAgent.ts) — pending port. The \
+         AgentStorage scan, the Categoriser trait, the backfill \
+         orchestrator, and the kebab-literal persistence are all wired; \
+         only the per-agent LLM call is missing.",
+    );
+    Ok(())
 }
 
 /// Mirror `findOrphanedAgents` (`src/commands/doctor.ts:74-106`).
@@ -219,22 +271,121 @@ async fn run_migrate() -> Result<()> {
 
 async fn run_conversations(args: ConversationsArgs) -> Result<()> {
     match args.command {
-        ConversationsCommand::Status => {
-            display::hint(
-                "doctor conversations status — depends on the conversation-\
-                 index DB. Pending port.",
-            );
-            Ok(())
-        }
-        ConversationsCommand::Reindex { confirm } => {
-            let _ = confirm;
-            display::hint(
-                "doctor conversations reindex — depends on the conversation-\
-                 index DB. Pending port.",
-            );
-            Ok(())
+        ConversationsCommand::Status => preview_conversations_status(),
+        ConversationsCommand::Reindex { confirm } => reindex_conversations(confirm),
+    }
+}
+
+/// Preview path for `tenex doctor conversations status`. Mirrors the
+/// observable structural-enumeration phase of `checkConversationIndexingStatus`
+/// (`src/commands/doctor.ts:174-230`) and surfaces an honest hint
+/// identifying the missing DB-backed substrates (RAG collection stats,
+/// indexing-job runtime status, embedding-state version breakdown).
+///
+/// What's wired: the local file walk (`list_project_ids_from_disk` →
+/// `list_conversation_ids_from_project`) reports project counts +
+/// per-project conversation file counts. That's the structural piece; it
+/// matches what the TS source emits in the "Tracked conversations" line
+/// when the SQLite catalog has been mirrored from disk.
+///
+/// What's gated: every line that needs the running embedding pipeline
+/// (RAG stats, IndexingJob.getStatus, content-version breakdown via
+/// `ConversationCatalogService.getEmbeddingState`).
+fn preview_conversations_status() -> Result<()> {
+    use crate::store::conversation_disk_reader::{
+        list_conversation_ids_from_project, list_project_ids_from_disk,
+    };
+
+    let blue = console::Style::new().blue();
+    let gray = console::Style::new().color256(8);
+    let bold = console::Style::new().bold();
+
+    println!("{}", blue.apply_to("Checking conversation indexing status...\n"));
+
+    let base_dir = crate::store::resolve_base_dir(None);
+    let project_ids = list_project_ids_from_disk(&base_dir);
+    let mut total_conversations: usize = 0;
+    let mut per_project: Vec<(String, usize)> = Vec::with_capacity(project_ids.len());
+    for project_id in &project_ids {
+        let convs = list_conversation_ids_from_project(&base_dir, project_id);
+        total_conversations += convs.len();
+        per_project.push((project_id.clone(), convs.len()));
+    }
+
+    println!("{}", bold.apply_to("On-disk conversation tree:"));
+    println!(
+        "{}",
+        gray.apply_to(format!("  Projects: {}", project_ids.len()))
+    );
+    println!(
+        "{}",
+        gray.apply_to(format!("  Total conversation files: {total_conversations}"))
+    );
+    if !per_project.is_empty() {
+        per_project.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        println!("{}", gray.apply_to("  Top projects by conversation count:"));
+        for (project, n) in per_project.iter().take(5) {
+            println!("{}", gray.apply_to(format!("    {project}: {n}")));
         }
     }
+
+    println!();
+    display::hint(
+        "RAG collection stats, indexing-job runtime status, and the \
+         content-version breakdown require the embedding pipeline + \
+         SQLite catalog substrates (spec doc 11 §3) — pending port. \
+         The local file enumeration above is faithful; the DB-backed \
+         lines are gated.",
+    );
+    Ok(())
+}
+
+/// Mirror `reindexConversations` (`src/commands/doctor.ts:232-273`) up to
+/// the actual `forceFullReindex()` call. The pre-flight confirmation
+/// gate, prompt phrasing, exit-on-cancel behavior, and "Cancelled." line
+/// are all wired byte-for-byte. The reindex itself surfaces the DB
+/// substrate hint.
+fn reindex_conversations(confirm: bool) -> Result<()> {
+    use crate::tui::prompts;
+
+    let yellow = console::Style::new().yellow();
+    let gray = console::Style::new().color256(8);
+
+    if !confirm {
+        println!(
+            "{}",
+            yellow.apply_to(
+                "This will clear all conversation indexing state and re-index all conversations.",
+            )
+        );
+        println!(
+            "{}",
+            yellow.apply_to("This may take several minutes depending on the number of conversations.\n")
+        );
+        println!("{}", gray.apply_to("Run with --confirm to skip this prompt.\n"));
+
+        let answer = match prompts::input("Continue? (yes/no):").prompt() {
+            Ok(s) => s.trim().to_lowercase(),
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => {
+                println!("{}", gray.apply_to("Cancelled."));
+                return Ok(());
+            }
+            Err(e) => return Err(anyhow::anyhow!("reindex confirm prompt: {e}")),
+        };
+        if answer != "yes" && answer != "y" {
+            println!("{}", gray.apply_to("Cancelled."));
+            return Ok(());
+        }
+    }
+
+    display::hint(
+        "Re-indexing requires the embedding pipeline + SQLite catalog \
+         substrates (spec doc 11 §3) — pending port. The confirmation \
+         gate above is wired; the actual `indexingJob.forceFullReindex()` \
+         call is gated.",
+    );
+    Ok(())
 }
 
 #[cfg(test)]
