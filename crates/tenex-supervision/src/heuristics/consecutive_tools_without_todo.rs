@@ -36,3 +36,51 @@ impl PostCompletionHeuristic for ConsecutiveToolsWithoutTodoHeuristic {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::TodoEntry;
+
+    fn ctx(tool_count: usize, has_todos: bool, nudged: bool) -> PostCompletionContext {
+        PostCompletionContext {
+            todos: if has_todos {
+                vec![TodoEntry {
+                    id: "t1".to_string(),
+                    status: crate::types::TodoStatus::Pending,
+                }]
+            } else {
+                vec![]
+            },
+            tool_calls_made: (0..tool_count).map(|i| format!("shell-{i}")).collect(),
+            nudged_about_todos: nudged,
+            pending_delegation_count: 0,
+            triggering_message: "do work".to_string(),
+        }
+    }
+
+    #[test]
+    fn fires_after_threshold_with_no_todos() {
+        let h = ConsecutiveToolsWithoutTodoHeuristic;
+        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD, false, false)).is_some());
+        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD + 5, false, false)).is_some());
+    }
+
+    #[test]
+    fn does_not_fire_below_threshold() {
+        let h = ConsecutiveToolsWithoutTodoHeuristic;
+        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD - 1, false, false)).is_none());
+    }
+
+    #[test]
+    fn does_not_fire_when_todos_exist() {
+        let h = ConsecutiveToolsWithoutTodoHeuristic;
+        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD + 2, true, false)).is_none());
+    }
+
+    #[test]
+    fn does_not_fire_when_already_nudged() {
+        let h = ConsecutiveToolsWithoutTodoHeuristic;
+        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD + 2, false, true)).is_none());
+    }
+}
