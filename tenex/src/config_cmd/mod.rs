@@ -94,7 +94,17 @@ pub enum ConfigCommand {
     Identity,
     /// Configure a global system prompt that is added to all projects
     #[command(name = "system-prompt")]
-    SystemPrompt,
+    SystemPrompt {
+        /// Show the current global system prompt
+        #[arg(long)]
+        show: bool,
+        /// Disable the global system prompt without deleting it
+        #[arg(long)]
+        disable: bool,
+        /// Enable the global system prompt
+        #[arg(long)]
+        enable: bool,
+    },
     /// Configure file paths and storage
     Paths,
     /// Configure logging — log level and file path
@@ -121,7 +131,7 @@ impl ConfigCommand {
             ConfigCommand::Summarization => "summarization",
             ConfigCommand::ContextManagement => "context-management",
             ConfigCommand::Identity => "identity",
-            ConfigCommand::SystemPrompt => "system-prompt",
+            ConfigCommand::SystemPrompt { .. } => "system-prompt",
             ConfigCommand::Paths => "paths",
             ConfigCommand::Logging => "logging",
             ConfigCommand::Telemetry => "telemetry",
@@ -133,11 +143,33 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
     let base_dir = crate::store::resolve_base_dir(None);
 
     if let Some(cmd) = args.command {
-        // Direct subcommand path — skip the welcome banner and section
-        // menu, dispatch straight to the submodule. Matches TS's
-        // `tenex config <name>` direct-action behaviour
-        // (`src/commands/config/index.ts:137-153` — each submodule
-        // command attaches its own action handler).
+        // Variants that carry flags need the variant itself, not just
+        // the string token — they dispatch to a different action than
+        // the menu would. Mirror TS `system-prompt.ts:88-129`: when a
+        // flag is set, skip the interactive menu and run the matching
+        // action directly.
+        if let ConfigCommand::SystemPrompt { show, disable, enable } = cmd {
+            // TS evaluates the flags in source order: --show, --disable,
+            // --enable. Each branch returns immediately, so when more
+            // than one flag is set the leftmost wins.
+            if show {
+                return system_prompt::run_show_flag(&base_dir);
+            }
+            if disable {
+                return system_prompt::run_disable_flag(&base_dir);
+            }
+            if enable {
+                return system_prompt::run_enable_flag(&base_dir);
+            }
+            // No flag → fall through to the interactive menu just like
+            // `tenex config system-prompt` with no flags does in TS.
+            return system_prompt::run(&base_dir);
+        }
+
+        // Direct subcommand path for flag-less variants — skip the
+        // welcome banner and section menu, dispatch straight to the
+        // submodule. Matches TS's `tenex config <name>` direct-action
+        // behaviour (`src/commands/config/index.ts:137-153`).
         return dispatch(&base_dir, cmd.dispatch_value()).await;
     }
 
@@ -423,6 +455,31 @@ mod tests {
     }
 
     #[test]
+    fn system_prompt_subcommand_exposes_three_flags_with_ts_help_text() {
+        // TS source: src/commands/config/system-prompt.ts:74-76 —
+        //   .option("--disable", "Disable the global system prompt without deleting it")
+        //   .option("--enable", "Enable the global system prompt")
+        //   .option("--show", "Show the current global system prompt")
+        use clap::CommandFactory;
+        let cmd = ConfigArgs::command();
+        let sp = cmd.find_subcommand("system-prompt").unwrap();
+        let help_for = |long: &str| -> String {
+            sp.get_arguments()
+                .find(|a| a.get_long() == Some(long))
+                .unwrap_or_else(|| panic!("--{long} flag missing on `tenex config system-prompt`"))
+                .get_help()
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        };
+        assert_eq!(help_for("show"), "Show the current global system prompt");
+        assert_eq!(
+            help_for("disable"),
+            "Disable the global system prompt without deleting it",
+        );
+        assert_eq!(help_for("enable"), "Enable the global system prompt");
+    }
+
+    #[test]
     fn llm_subcommand_exposes_advanced_flag_with_ts_help_text() {
         // TS source: src/commands/config/llm.ts:11 —
         //   .option("--advanced", "Show advanced options (temperature, max tokens)")
@@ -456,7 +513,14 @@ mod tests {
             (ConfigCommand::Summarization, "summarization"),
             (ConfigCommand::ContextManagement, "context-management"),
             (ConfigCommand::Identity, "identity"),
-            (ConfigCommand::SystemPrompt, "system-prompt"),
+            (
+                ConfigCommand::SystemPrompt {
+                    show: false,
+                    disable: false,
+                    enable: false,
+                },
+                "system-prompt",
+            ),
             (ConfigCommand::Paths, "paths"),
             (ConfigCommand::Logging, "logging"),
             (ConfigCommand::Telemetry, "telemetry"),

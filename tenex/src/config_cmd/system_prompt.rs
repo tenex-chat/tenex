@@ -58,6 +58,26 @@ pub fn run(base_dir: &Path) -> Result<()> {
     }
 }
 
+/// Direct entry points for the three TS flags
+/// (`system-prompt.ts:74-76`):
+/// - `tenex config system-prompt --show`     → [`run_show`]
+/// - `tenex config system-prompt --enable`   → `run_set_enabled(.., true)`
+/// - `tenex config system-prompt --disable`  → `run_set_enabled(.., false)`
+///
+/// When TS sees one of those flags it bypasses the interactive menu
+/// and runs the action directly. Mirror that here.
+pub fn run_show_flag(base_dir: &Path) -> Result<()> {
+    run_show(base_dir)
+}
+
+pub fn run_enable_flag(base_dir: &Path) -> Result<()> {
+    run_set_enabled(base_dir, true)
+}
+
+pub fn run_disable_flag(base_dir: &Path) -> Result<()> {
+    run_set_enabled(base_dir, false)
+}
+
 fn run_show(base_dir: &Path) -> Result<()> {
     let doc = TenexConfigDoc::load(base_dir)?;
     let content = doc.global_system_prompt_content().unwrap_or_default();
