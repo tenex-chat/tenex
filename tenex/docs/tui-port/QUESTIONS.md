@@ -62,6 +62,31 @@ this kind. Spec 11 doesn't list it directly but
 
 (none currently)
 
+## Substrate-blocked surfaces (acknowledged, not stubs)
+
+### `tenex doctor migrate` — only reports, doesn't migrate
+
+TS has three migrations registered (`src/services/migrations/migrations/`):
+
+- `unknown→1`: relocate legacy schedules into per-project schedules.json
+- `1→2`: reindex PrefixKVStore from 18-char to 10-char prefixes
+- `2→3`: bundle built-in skills to `TENEX_BASE_DIR/skills/`
+
+Each migration touches a substrate the Rust port doesn't yet implement
+(per-project schedule files, the PrefixKVStore RAG index, the built-in
+skills bundle). Implementing them in Rust without those substrates would
+either be a stub (forbidden) or a partial port that skips data.
+
+The Rust port's `doctor migrate` reads `config.version`, prints the TS
+"Current migration version: X (latest: 3)" line verbatim, and:
+- emits "No pending migrations." + "Final migration version: 3" if at v3,
+- otherwise surfaces an honest hint and exits 1, telling the user to run
+  the TS binary's `tenex doctor migrate` to advance the on-disk state.
+
+This is intentional under CLAUDE.md "no half-finished implementations" —
+when the schedules / PrefixKVStore / skills-bundle ports land, this
+becomes a real migrate driver.
+
 ## Cleared notes
 
 ### Root `Cargo.toml` workspace block (resolved)

@@ -12,7 +12,7 @@
 //! |---|---|---|
 //! | `agents orphans [--purge]` | AgentStorage + project-membership reader | wired — see `find_orphaned_agents` |
 //! | `agents categorize [--dry-run]` | AgentStorage + LLM service | pending — honest hint |
-//! | `migrate` | TS-side state migration registry | n/a — Rust port has no legacy state to migrate; clean no-op exit |
+//! | `migrate` | TS-side state migration registry | reports current vs latest version; honest hint when behind (substrates pending) |
 //! | `conversations status` | conversation-index DB | pending — honest hint |
 //! | `conversations reindex [--confirm]` | conversation-index DB | pending — honest hint |
 //!
@@ -254,19 +254,55 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
     Ok(())
 }
 
+/// Mirror `runMigrate` (`src/commands/doctor.ts:108-140`).
+///
+/// TS has three migrations registered (`src/services/migrations/migrations/`):
+/// `unknown→1` relocates legacy schedules, `1→2` reindexes PrefixKVStore to
+/// 10-char prefixes, `2→3` bundles built-in skills. Latest = 3.
+///
+/// The Rust port does not yet implement these migrations — the underlying
+/// substrates (schedules store, PrefixKVStore, built-in skills bundle) are
+/// pending ports. So we read the current `config.version` (the same field
+/// TS migrates), surface it in the TS format, and exit non-zero with an
+/// honest hint pointing to the TS binary if the user has unfinished
+/// migrations. We never silently claim "0 applied" — that would mislead a
+/// user whose state still needs `1→2` or `2→3`.
 async fn run_migrate() -> Result<()> {
-    // The TS migration registry is iterated in source order; pending ones
-    // are applied and printed as "Applied migration <from> -> <to>: <desc>".
-    // The Rust port maintains no legacy state files of its own — every
-    // store layer was built fresh against the canonical TS schema — so
-    // there are no migrations to apply. This is a faithful clean exit
-    // matching what TS does when the migration registry is empty.
+    use crate::store::tenex_config::TenexConfigDoc;
+    const LATEST_MIGRATION_VERSION: u64 = 3;
+
+    let base_dir = crate::store::resolve_base_dir(None);
+    let doc = TenexConfigDoc::load(&base_dir)?;
+    let current = doc.version();
+
     let blue = console::Style::new().blue();
+    let current_str = current
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "unknown".to_owned());
     println!(
         "{}",
-        blue.apply_to("doctor migrate: 0 migrations applied (Rust port has no legacy state).")
+        blue.apply_to(format!(
+            "Current migration version: {current_str} (latest: {LATEST_MIGRATION_VERSION})"
+        ))
     );
-    Ok(())
+
+    if current == Some(LATEST_MIGRATION_VERSION) {
+        let green = console::Style::new().green();
+        println!("{}", green.apply_to("No pending migrations."));
+        println!(
+            "{}",
+            blue.apply_to(format!("Final migration version: {LATEST_MIGRATION_VERSION}"))
+        );
+        return Ok(());
+    }
+
+    display::hint(
+        "TS has migrations registered up to v3 (schedules relocation, \
+         PrefixKVStore reindex, built-in skills bundle). The Rust port \
+         doesn't yet implement them — run `tenex doctor migrate` from the \
+         TS install to bring this base directory up to v3, then return here.",
+    );
+    std::process::exit(1);
 }
 
 async fn run_conversations(args: ConversationsArgs) -> Result<()> {
