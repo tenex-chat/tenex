@@ -18,6 +18,20 @@ pub struct HomeDirectoryInfo<'a> {
     pub injected_files: &'a [InjectedFile],
 }
 
+pub struct BuildSystemPromptInput<'a> {
+    pub identity_name: &'a str,
+    pub pubkey_hex: &'a str,
+    pub category_str: Option<&'a str>,
+    pub category: Option<AgentCategory>,
+    pub instructions: Option<&'a str>,
+    pub working_dir: &'a str,
+    pub project_meta: Option<&'a tenex_project::ProjectMetadata>,
+    pub agents: &'a [tenex_project::Agent],
+    pub teams_fragment: &'a str,
+    pub home: &'a HomeDirectoryInfo<'a>,
+    pub preloaded_skills_block: Option<&'a str>,
+}
+
 fn render_home_directory(info: &HomeDirectoryInfo) -> String {
     let mut parts = vec![
         "<home-directory>".to_string(),
@@ -96,19 +110,20 @@ Delegation is **asynchronous**: after you call `delegate`, stop for the turn. Th
 /// `category_str` is the raw string value from config (e.g. `"orchestrator"`) used
 /// only for display in the identity fragment. `category` is the parsed enum used for
 /// conditional fragment inclusion.
-pub fn build_system_prompt(
-    identity_name: &str,
-    pubkey_hex: &str,
-    category_str: Option<&str>,
-    category: Option<AgentCategory>,
-    instructions: Option<&str>,
-    working_dir: &str,
-    project_meta: Option<&tenex_project::ProjectMetadata>,
-    agents: &[tenex_project::Agent],
-    teams_fragment: &str,
-    home: &HomeDirectoryInfo<'_>,
-    preloaded_skills_block: Option<&str>,
-) -> String {
+pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
+    let BuildSystemPromptInput {
+        identity_name,
+        pubkey_hex,
+        category_str,
+        category,
+        instructions,
+        working_dir,
+        project_meta,
+        agents,
+        teams_fragment,
+        home,
+        preloaded_skills_block,
+    } = input;
     let mut parts: Vec<String> = Vec::new();
 
     // Fragment 01: Agent identity
