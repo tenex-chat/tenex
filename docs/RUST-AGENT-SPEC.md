@@ -403,6 +403,59 @@ Search the RAG vector store for relevant content. Always searches across all thr
 
 Disabled (returns error message) when embedding is not configured.
 
+### `kill`
+Cancel a scheduled task by its task ID. Agent conversation kills and shell task kills are not available in this context — those require in-process TypeScript state (RALRegistry, CooldownRegistry, AgentDispatchService).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `target` | string | Scheduled task ID (format: `task-{timestamp}-{random}`) |
+| `reason` | string | Reason for cancellation |
+
+Returns a success message on cancellation, or an error if the ID is not a scheduled task format or is not found.
+
+### `schedule_task`
+Schedule a task to run in the future. Writes to `schedules.json` via `tenex-scheduler`'s storage module using the canonical `ScheduledTask` format. The task is picked up by the `tenex-scheduler` daemon.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `prompt` | string | Prompt to send to the agent when the task runs |
+| `when` | string | Cron expression (e.g. `0 9 * * *`) for recurring, or relative delay (e.g. `5m`, `2h`, `1d`, `30s`) for one-off |
+| `title` | string? | Human-readable title |
+| `target_agent` | string? | Agent slug. Defaults to the current agent. |
+| `target_channel` | string? | Conversation ID or channel for task output delivery |
+
+Returns the task ID and execution time (one-off) or cron schedule (recurring).
+
+### `change_model`
+Override the LLM model for this agent in this conversation. Persists `meta_model_variant` to `AgentContextState` in the SQLite conversation store. Takes effect on the next invocation.
+
+Accepts any model format: named preset from `~/.tenex/llms.json` (e.g. `fast`), `provider:model` (e.g. `anthropic:claude-haiku-4-5`), or `provider/model` (e.g. `openai/gpt-4o`). Note: unlike the TypeScript version which only accepts meta-model variant names, the Rust version accepts the full model resolution format.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `model` | string | Model identifier: named preset, `provider:model`, or `provider/model` |
+
+### `conversation_get`
+Retrieve the message transcript for a conversation by ID. Reads from the project's SQLite conversation store.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `conversation_id` | string | Conversation ID (64-char hex event ID) |
+| `limit` | integer? | Maximum messages to return (default: all) |
+
+Returns a plain-text transcript with `[role] author8: content` lines. Note: the TS version additionally supports `untilId`, `prompt` (LLM analysis), and `includeToolCalls` — these are not yet implemented in Rust.
+
+### `conversation_list`
+List conversations in the current project, sorted by most recent activity.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `limit` | integer? | Maximum conversations to return (default: 20) |
+| `from_time` | integer? | Filter: activity after this Unix timestamp (ms) |
+| `to_time` | integer? | Filter: activity before this Unix timestamp (ms) |
+
+Returns a plain-text list with short ID, title, last activity, and preview of the last user message. Note: the TS version additionally supports `projectId` (cross-project), `with` (participant filter), and returns a hierarchical tree of delegation chains — the Rust version is single-project, flat list.
+
 ### `skill_list`
 List all available skills grouped by scope. Returns a JSON object with `total` count, per-scope `counts`, and `scopes` map (keys: `builtIn`, `agent`, `agentProject`, `project`, `shared`). Each skill entry includes `identifier`, optional `name`, optional `description` (truncated at 150 chars), `hasTools`, and `scope`.
 
@@ -485,6 +538,5 @@ API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY
 
 - **Streaming intermediate events**: `ConversationIntent` events are emitted once per LLM turn. Per-chunk streaming to the relay is not yet implemented.
 - **ToolResult in history**: Projection filters out `ToolResult` messages because assistant records currently have empty `tool_calls`. Once `record_turn` captures tool calls inline, paired tool-call/result sequences can flow to providers.
-- **Context compaction/decay**: `tenex-context` strategy pipeline (compaction → tool-result decay → reminders) is defined but the decay and compaction strategies are not yet applied — only reminders run. Full token-budget enforcement is pending.
 - **`no_response` tool**: Suppress the completion event when the agent decides no reply is needed.
-- **TS-only tools**: `conversation_get/list/search`, `kill`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `report_publish`, `schedule_task`, `change_model`, `agents_write`, RAG subscription tools.
+- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `report_publish`, `agents_write`, RAG subscription tools (`rag_subscription_create/delete/get/list`).

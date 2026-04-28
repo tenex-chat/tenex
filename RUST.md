@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (tenth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (thirteenth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -74,6 +74,9 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - **RAG tools**: `rag_add_documents` (add docs to collection), `rag_search` (vector search), `rag_collection_list`, `rag_collection_delete` — all optional if embed not configured
 - **Skills tools**: `skill_list` (discover skills by scope) + `skills_set` (apply/remove per-conversation)
 - **Todo tool**: `todo_write` (create/update task list)
+- **Conversation tools**: `conversation_get` (retrieve message transcript by ID from SQLite store), `conversation_list` (list conversations with date range filter)
+- **Scheduling tools**: `schedule_task` (write one-off or recurring tasks to `schedules.json` via `tenex-scheduler` storage API), `kill` (cancel a scheduled task by ID; agent/shell kills require TS runtime in-process state)
+- **Model override**: `change_model` (persist `meta_model_variant` to `AgentContextState`; resolved on next invocation — accepts named preset, `provider:model`, or `provider/model`)
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
@@ -159,24 +162,31 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 
 | TS Tool | Status | Notes |
 |---------|--------|-------|
-| `conversation_get` | TS-only | Fetch conversation history by ID. Not applicable in Rust (agent is invoked per-turn with injected history). |
-| `conversation_list` | TS-only | List conversations. No Rust equivalent. |
 | `conversation_search` | TS-only | Semantic search across conversations. No Rust equivalent. |
 | `no_response` | TS-only | Suppress the completion event. Not yet ported. |
-| `kill` | TS-only | Terminate a running agent. Not applicable to single-invocation Rust agent. |
 | `send_message` | TS-only | Send arbitrary Nostr message. Not yet ported. |
 | `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP protocol tools. No Rust equivalent yet. |
 | `report_publish` | TS-only | Publish a formatted report event. Not yet ported. |
-| `schedule_task` | TS-only | Schedule a future task. Not yet ported (tenex-scheduler handles scheduling externally). |
-| `change_model` | TS-only | Switch LLM mid-conversation. Not yet ported. |
 | `agents_write` | TS-only | Create/update agent records. Not yet ported. |
 | `rag_subscription_*` | TS-only | RAG subscription management. No Rust equivalent. |
+
+Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `schedule_task`, and `change_model` are now implemented in Rust. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names.
 
 ---
 
 ## Compilation Status
 
-**As of 2026-04-28 (twelfth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (thirteenth debt check pass): workspace compiles clean — zero errors.**
+
+Resolved between twelfth and thirteenth passes:
+- **`conversation_get`**: reads message transcript from SQLite conversation store by ID
+- **`conversation_list`**: lists conversations with optional date range filter
+- **`kill`**: cancels scheduled tasks via `tenex-scheduler::storage::remove_task`; scoped to scheduled tasks only (agent/shell kills are stateful and require the TS runtime)
+- **`schedule_task`**: writes one-off (relative delay) or recurring (cron) tasks via `tenex-scheduler::storage::add_task`; uses canonical `ScheduledTask` / `TaskType` from `tenex-scheduler::model`
+- **`change_model`**: persists `meta_model_variant` to `AgentContextState`; main.rs reads it before model resolution on the next invocation
+- **Scheduler storage format fixed**: both `schedule_task` and `kill` previously wrote/read a raw flat JSON array; now use the canonical `SchedulesFile { tasks: [...] }` wrapper via the scheduler's storage module
+- **conv_db_path sentinel eliminated**: tools now derive the DB path directly from `project_meta.d_tag` (always present), removing the `:none:` fallback
+- **Context compaction and decay confirmed wired**: `default_stack()` in `tenex-context` runs all three strategies (compaction → decay → reminders); previously documented as reminders-only
 
 Resolved between eleventh and twelfth passes:
 - **models.dev full library**: `resolve_model_data`, `get_model_info`, `get_provider_models`, `context_window`, `load_from_disk`, `cache_file_path`, `picker_label_segments`, `default_model_for_provider` (17+7+8 new tests)
