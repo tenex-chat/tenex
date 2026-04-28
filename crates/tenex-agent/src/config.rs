@@ -3,6 +3,8 @@ use serde::Deserialize;
 use std::fs;
 use tenex_llm_config::resolver::{load_providers, ProviderDocs};
 
+pub use tenex_supervision::types::AgentCategory;
+
 #[derive(Debug, Deserialize)]
 pub struct AgentDefault {
     pub model: Option<String>,
@@ -40,6 +42,11 @@ impl AgentConfig {
     /// Raw model string from the config, before resolution.
     pub fn raw_model(&self) -> Option<&str> {
         self.default.as_ref().and_then(|d| d.model.as_deref())
+    }
+
+    /// Parsed category. Returns None for missing or unrecognized values.
+    pub fn resolved_category(&self) -> Option<AgentCategory> {
+        self.category.as_deref().and_then(|s| s.parse().ok())
     }
 }
 

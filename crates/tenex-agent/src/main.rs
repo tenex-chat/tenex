@@ -17,7 +17,6 @@ use tenex_conversations::{AgentContextState, ConversationStore};
 use tenex_project::Project;
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
-use tenex_supervision::types::AgentCategory as SupervisionCategory;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
@@ -252,7 +251,7 @@ async fn main() -> Result<()> {
     let mut shell_env: Vec<(String, String)> =
         home::parse_dotenv(&agent_home.join(".env"))
             .into_iter()
-            .filter(|(k, _)| k != "HOME")  // never override the real HOME
+            .filter(|(k, _)| k != "HOME") // never override the real HOME
             .collect();
     shell_env.push(("AGENT_HOME".to_string(), agent_home.display().to_string()));
     shell_env.push(("PUBKEY".to_string(), pubkey_hex.clone()));
@@ -315,19 +314,13 @@ async fn main() -> Result<()> {
         meta: Arc::new(Mutex::new(AgentMeta::new())),
     });
 
-    let category = agent_config.resolved_category();
-    let supervision_category = category.map(|c| match c {
-        config::AgentCategory::Orchestrator => SupervisionCategory::Orchestrator,
-        config::AgentCategory::Worker => SupervisionCategory::Worker,
-        config::AgentCategory::DomainExpert => SupervisionCategory::DomainExpert,
-        config::AgentCategory::Reviewer => SupervisionCategory::Reviewer,
-        config::AgentCategory::Principal => SupervisionCategory::Orchestrator,
-        config::AgentCategory::Generalist => SupervisionCategory::Worker,
-    });
+    // Parse category as supervision type (used by both hook and delegation check).
+    let sup_category: Option<tenex_supervision::types::AgentCategory> =
+        agent_config.category.as_deref().and_then(|s| s.parse().ok());
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
-    let hook = EmitHook::new(emit_state.clone(), supervisor, todos.clone(), supervision_category);
+    let hook = EmitHook::new(emit_state.clone(), supervisor, todos.clone(), sup_category);
     let delegate_tool: Option<DelegateTool> =
-        if category.map(|c| c.allows_delegation()).unwrap_or(true) {
+        if sup_category.map(|c| c.allows_delegation()).unwrap_or(true) {
             Some(DelegateTool::new(emit_state.clone(), project_agents, teams))
         } else {
             None

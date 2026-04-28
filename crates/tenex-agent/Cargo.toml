@@ -13,6 +13,7 @@ tenex-conversations = { path = "../tenex-conversations" }
 tenex-protocol = { path = "../tenex-protocol", default-features = false }
 tenex-llm-config = { path = "../tenex-llm-config" }
 tenex-rag = { path = "../tenex-rag" }
+tenex-supervision = { path = "../tenex-supervision" }
 rig-core = "0.35"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,5 +1,4 @@
 use std::path::Path;
-
 use crate::config::{AgentCategory, AgentConfig};
 use crate::home::InjectedFile;
 use tenex_project::{Agent, ProjectMetadata};

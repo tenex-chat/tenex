@@ -1,0 +1,9 @@
+[package]
+name = "tenex-supervision"
+version = "0.1.0"
+edition = "2021"
+description = "Agent supervision heuristics for the TENEX agent runner."
+
+[lib]
+name = "tenex_supervision"
+path = "src/lib.rs"

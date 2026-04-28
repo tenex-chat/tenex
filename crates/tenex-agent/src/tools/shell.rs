@@ -17,11 +17,12 @@ pub struct ShellError(String);
 
 pub struct ShellTool {
     working_dir: String,
+    extra_env: Vec<(String, String)>,
 }
 
 impl ShellTool {
-    pub fn new(working_dir: String) -> Self {
-        Self { working_dir }
+    pub fn new(working_dir: String, extra_env: Vec<(String, String)>) -> Self {
+        Self { working_dir, extra_env }
     }
 }
 
@@ -86,14 +87,18 @@ Commands run with a timeout in seconds (default 30, max 600)."
         let cwd = args.cwd.as_deref().unwrap_or(&self.working_dir);
         let timeout_secs = args.timeout.unwrap_or(30).min(600);
 
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c")
+            .arg(&args.command)
+            .current_dir(cwd)
+            .stdin(std::process::Stdio::null());
+        for (k, v) in &self.extra_env {
+            cmd.env(k, v);
+        }
+
         let result = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
-            tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(&args.command)
-                .current_dir(cwd)
-                .stdin(std::process::Stdio::null())
-                .output(),
+            cmd.output(),
         )
         .await;
 

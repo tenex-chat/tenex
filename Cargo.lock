@@ -2885,6 +2885,7 @@ dependencies = [
  "tenex-project",
  "tenex-protocol",
  "tenex-rag",
+ "tenex-supervision",
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
@@ -3062,6 +3063,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "tenex-supervision"
+version = "0.1.0"
 
 [[package]]
 name = "tenex-system-prompt"

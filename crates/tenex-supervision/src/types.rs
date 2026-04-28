@@ -1,0 +1,90 @@
+use std::fmt;
+use std::str::FromStr;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AgentCategory {
+    Principal,
+    Orchestrator,
+    Worker,
+    Reviewer,
+    DomainExpert,
+    Generalist,
+}
+
+impl AgentCategory {
+    /// Orchestrators, reviewers, generalists, and principals can delegate.
+    /// Workers and domain-experts cannot.
+    pub fn allows_delegation(self) -> bool {
+        !matches!(self, Self::DomainExpert | Self::Worker)
+    }
+}
+
+impl FromStr for AgentCategory {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s {
+            "principal" => Ok(Self::Principal),
+            "orchestrator" => Ok(Self::Orchestrator),
+            "worker" => Ok(Self::Worker),
+            "reviewer" => Ok(Self::Reviewer),
+            "domain-expert" => Ok(Self::DomainExpert),
+            "generalist" => Ok(Self::Generalist),
+            _ => Err(()),
+        }
+    }
+}
+
+impl fmt::Display for AgentCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Principal => "principal",
+            Self::Orchestrator => "orchestrator",
+            Self::Worker => "worker",
+            Self::Reviewer => "reviewer",
+            Self::DomainExpert => "domain-expert",
+            Self::Generalist => "generalist",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TodoStatus {
+    Pending,
+    InProgress,
+    Done,
+    Skipped,
+}
+
+#[derive(Debug, Clone)]
+pub struct TodoEntry {
+    pub id: String,
+    pub status: TodoStatus,
+}
+
+pub struct PostCompletionContext {
+    pub todos: Vec<TodoEntry>,
+    pub tool_calls_made: Vec<String>,
+    pub nudged_about_todos: bool,
+    pub pending_delegation_count: usize,
+    pub triggering_message: String,
+}
+
+pub struct PreToolContext<'a> {
+    pub tool_name: &'a str,
+    pub todos: &'a [TodoEntry],
+    pub agent_category: &'a AgentCategory,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnforcementMode {
+    OncePerExecution,
+    RepeatUntilResolved,
+}
+
+pub struct Detection {
+    pub heuristic_name: &'static str,
+    pub message: String,
+    pub enforcement: EnforcementMode,
+    pub re_engage: bool,
+}
