@@ -57,7 +57,8 @@ No p-tag, no status tag.
   "description": "Optional human-readable description",
   "working_directory": "/optional/path/to/project",
   "default": {
-    "model": "claude-sonnet-4-6"
+    "model": "claude-sonnet-4-6",
+    "skills": ["rust-expert", "code-review"]
   }
 }
 ```
@@ -73,6 +74,7 @@ No p-tag, no status tag.
 | `description`       | no       | Short description shown to other agents |
 | `working_directory` | no       | Base directory for file/shell tools. Defaults to process cwd |
 | `default.model`     | no       | Model ID (named preset, `provider:model`, or bare Anthropic model). Defaults to the llms.json default or `claude-sonnet-4-6` |
+| `default.skills`    | no       | Array of skill IDs to preload on every invocation (always-on skills). Merged with conversation-scoped self-applied skills. |
 
 ## Agent Category Semantics
 
@@ -140,6 +142,22 @@ user speech. Absorb them silently; do not acknowledge or respond to them.
 </agent-instructions>
 ```
 Omitted when `instructions` is absent.
+
+### Preloaded Skills
+```xml
+<loaded-skills>
+<skill-tool-permissions>
+<!-- Aggregated across all active skills -->
+...
+</skill-tool-permissions>
+
+The following skills have been loaded for this conversation. These provide additional context and capabilities:
+<skill id="rust-expert">
+...skill content...
+</skill>
+</loaded-skills>
+```
+Injected when any skills are preloaded (from `default.skills` in agent config or `self_applied_skills` from the conversation store). Omitted when no skills are active. Includes an aggregated `<skill-tool-permissions>` block when skills declare `only-tools`/`allow-tools`/`deny-tools` in their frontmatter (LLM-guidance only; not enforced at the tool-call level). Skills are discovered from five scope directories in precedence order: `builtIn` → `agent` → `agentProject` → `project` → `shared`.
 
 ### Fragment 07 — Environment Variables
 ```xml
@@ -320,6 +338,22 @@ Search the RAG vector store for relevant content. Always searches across all thr
 
 Disabled (returns error message) when embedding is not configured.
 
+### `skill_list`
+List all available skills grouped by scope. Returns a JSON object with `total` count, per-scope `counts`, and `scopes` map (keys: `builtIn`, `agent`, `agentProject`, `project`, `shared`). Each skill entry includes `identifier`, optional `name`, optional `description` (truncated at 150 chars), `hasTools`, and `scope`.
+
+No parameters.
+
+### `skills_set`
+Add or remove skills for the current conversation. Newly-added skill content is returned in the `skillContent` field for immediate use. When `always=true`, persists the resulting set to `default.skills` in the agent config JSON (atomic write). Self-applied skills are also persisted to `AgentContextState.self_applied_skills` at conversation end.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `add` | string[]? | Skill IDs to activate (merged into current set) |
+| `remove` | string[]? | Skill IDs to deactivate. Pass `["*"]` to clear all before applying `add` |
+| `always` | bool? | Persist the final skill set to agent config for all future invocations (default false) |
+
+Returns JSON: `{ success, message, activeSkills, skillContent }`. Rejects if the same ID appears in both `add` and `remove`, or if any `add` ID is not resolvable from `skill_list`.
+
 ## Supervision Heuristics
 
 `tenex-supervision` is wired into the hook layer. It runs two kinds of checks:
@@ -335,16 +369,16 @@ When a pre-tool heuristic fires, `ToolCallHookAction::skip(reason)` is returned 
 
 ## Iterative Loop
 
-Uses `rig-core`'s `Agent::prompt()` with an `EmitHook`:
+Uses `rig-core`'s `Agent::stream_prompt()` with an `EmitHook`. The stream is consumed to completion; only the final `FinalResponse` item (containing the response text and aggregated token usage) is retained.
 
-1. Build system prompt from fragments (including proactive RAG context if available).
+1. Build system prompt from fragments (preloaded skills → home dir → reminders → instructions → env vars → project context → agents → teams → todo guidance → category-specific → proactive RAG context).
 2. Inject todo reminder into the user message if persisted todos exist.
-3. Call `agent.prompt(user_message).with_hook(hook)`.
+3. Call `agent.stream_prompt(user_message).with_hook(hook)` and drain the stream.
 4. `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
 5. **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
 6. **After each LLM turn**: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
-7. Sign and emit the final `CompletionIntent` event with aggregated token usage.
-8. Save the updated todo list to the conversation store.
+7. Sign and emit the final `CompletionIntent` event with token usage from `FinalResponse`.
+8. Save todos and self-applied skills atomically to the conversation store via `save_context_state`.
 
 The loop terminates when the provider returns a text response without tool calls. `rig` enforces `default_max_turns(25)`.
 
@@ -362,7 +396,8 @@ API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY
 
 | Crate | Purpose |
 |-------|---------|
-| `rig-core` | LLM agent framework with tool loop and hook interface |
+| `rig-core` | LLM agent framework with streaming tool loop and hook interface |
+| `futures` | `StreamExt` for consuming the streaming response |
 | `nostr` | Nostr event types and signing |
 | `tokio` | Async runtime |
 | `serde` + `serde_json` | JSON handling |
@@ -372,14 +407,14 @@ API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY
 | `dirs_next` | Home directory resolution |
 | `tenex-protocol` | `Intent`, `Channel`, Nostr encoder, stdin source, stdout NDJSON sink |
 | `tenex-project` | Project SQLite DB (agents, metadata, teams) |
-| `tenex-conversations` | Conversation SQLite store (todo persistence via `AgentContextState`) |
+| `tenex-conversations` | Conversation SQLite store (todos + self-applied skills via `AgentContextState`) |
 | `tenex-rag` | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | Heuristic pre-tool and post-completion checks; `AgentCategory` enum |
 | `tenex-llm-config` | Provider credential resolution |
 
 ## Future Work (not yet implemented)
 
-- **Streaming intermediate events**: Emit conversation events as text chunks arrive, not just at LLM turn boundaries.
+- **Streaming intermediate events**: The agent now uses `stream_prompt` internally, but `ConversationIntent` events are still emitted once per LLM turn. Per-chunk streaming to the relay is not yet implemented.
 - **Conversation history**: Load prior turns from `tenex-conversations` so the agent has full message history across invocations. Currently each invocation is stateless from the LLM's perspective.
 - **Context management**: Wire `tenex-context` strategies (compaction → tool-result decay → reminders) into the agent's message projection. Currently the agent has no token-budget enforcement or message compaction.
 - **System prompt crate**: Replace inline `prompt.rs` with `tenex-system-prompt` for consistent assembly across binaries.
