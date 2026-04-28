@@ -68,15 +68,40 @@ No p-tag, no status tag.
 | `slug`              | no       | Identifier used in identity prompt and team resolution. Falls back to `name` |
 | `nsec`              | yes      | bech32 private key for signing events |
 | `role`              | no       | Human-readable role label |
-| `category`          | no       | `worker` \| `orchestrator` \| `reviewer` \| `domain-expert` \| `generalist` |
+| `category`          | no       | `principal` \| `orchestrator` \| `worker` \| `reviewer` \| `domain-expert` \| `generalist` |
 | `instructions`      | no       | Agent-specific system prompt fragment |
 | `description`       | no       | Short description shown to other agents |
 | `working_directory` | no       | Base directory for file/shell tools. Defaults to process cwd |
 | `default.model`     | no       | Model ID (named preset, `provider:model`, or bare Anthropic model). Defaults to the llms.json default or `claude-sonnet-4-6` |
 
+## Agent Category Semantics
+
+Category affects both delegation capability and system prompt guidance injected.
+
+| Category | Can delegate | Prompt guidance |
+|----------|-------------|-----------------|
+| `principal` | yes | Delegation tips, todo-before-delegation, monitoring |
+| `orchestrator` | yes | Orchestrator guidance, delegation tips, todo-before-delegation, monitoring |
+| `worker` | no | Todo guidance only |
+| `reviewer` | yes | Delegation tips, todo-before-delegation, monitoring |
+| `domain-expert` | no | Domain-expert guidance (hard refuse on out-of-domain) |
+| `generalist` | yes | Delegation tips, todo-before-delegation, monitoring |
+
+Unrecognized or absent `category` is treated as "can delegate" for backwards compatibility.
+
+## Agent Home Directory
+
+Each agent gets a persistent private directory at `~/.tenex/home/<pubkey8>/`. On every invocation:
+
+1. The directory is created if absent.
+2. A `.env` file is written (if not already present, mode 0600) with `NSEC`, `PUBKEY`, and `NPUB`.
+3. Files starting with `+` (e.g., `+NOTES.md`) are read and injected into the system prompt as `<memorized-files>` (up to 10 files, 1500 chars each, truncated with `truncated="true"` attribute).
+
+Shell commands automatically see environment variables from the `.env` file plus computed vars (see Fragment 07 below). `~` in shell expands to the real `$HOME`; agents should use `$AGENT_HOME` to reference their home.
+
 ## System Prompt
 
-Built from fragments assembled inline by `prompt.rs`:
+Built from fragments assembled by `prompt.rs`:
 
 ### Fragment 01 — Agent Identity
 ```xml
@@ -86,11 +111,25 @@ Your category: {category}
 </agent-identity>
 ```
 
+### Fragment 02 — Home Directory
+```xml
+<home-directory>
+You have a personal home directory at: `{agent_home}`. ...
+Current contents: {file_count}
+...
+<memorized-files>
+  <file name="+NOTES.md">...</file>   ← injected from + files
+</memorized-files>
+</home-directory>
+```
+Describes the agent home dir, `.env` semantics, `+` file auto-injection rules, and `$AGENT_HOME` vs `~` distinction.
+
 ### Fragment 03 — System Reminders Explanation
 ```xml
 <system-reminders-explanation>
-Messages may include <system-reminder> tags. These are system-injected informational
-context — not user speech. Absorb them silently; do not acknowledge or respond to them directly.
+System messages may include `<system-reminders>` blocks, and tool results or user messages
+may include `<system-reminder>` tags. These are system-injected informational context — not
+user speech. Absorb them silently; do not acknowledge or respond to them.
 </system-reminders-explanation>
 ```
 
@@ -100,6 +139,19 @@ context — not user speech. Absorb them silently; do not acknowledge or respond
 {instructions}
 </agent-instructions>
 ```
+Omitted when `instructions` is absent.
+
+### Fragment 07 — Environment Variables
+```xml
+<environment-variables>
+These variables are available in shell commands and file tool path arguments.
+- $USER_HOME, $AGENT_HOME, $PUBKEY, $NPUB
+- $PROJECT_BASE, $PROJECT_ID
+- $TENEX_BASE_DIR
+...
+</environment-variables>
+```
+Omitted for `orchestrator` category (adds noise with no benefit).
 
 ### Fragment 08 — Project/Workspace Context
 ```xml
@@ -109,8 +161,13 @@ context — not user speech. Absorb them silently; do not acknowledge or respond
     project: {project_title}
     owner: {owner_pubkey_short}
   </workspace>
+
+  <agents.md>
+    {contents of AGENTS.md if ≤2000 chars}
+  </agents.md>
 </project-context>
 ```
+`agents.md` block is omitted when `AGENTS.md` is absent or larger than 2000 chars.
 
 ### Available Agents
 ```xml
@@ -123,19 +180,23 @@ Emitted only when the project has registered agents. Read from project SQLite DB
 
 ### Teams Context
 ```xml
-<teams-context>
-  ...
-</teams-context>
+<teams-context>...</teams-context>
 ```
-Emitted when the agent belongs to one or more teams or the triggering event carries a `["team", ...]` tag. Read from `~/.tenex/teams.json` and `~/.tenex/projects/<id>/teams.json`.
+Emitted when the agent belongs to teams or the triggering event carries a `["team", ...]` tag. Loaded from `~/.tenex/teams.json` and `~/.tenex/projects/<id>/teams.json`.
 
 ### Fragment 06 — Todo Guidance
-Instructs the agent to use `todo_write` proactively. Explains status lifecycle and the one-in-progress rule.
+Instructs the agent to use `todo_write` proactively, explains status lifecycle and the one-in-progress rule. Present for all categories.
 
 ### Fragment 14 — Tool Description Guidance
 ```
-When tools have a `description` parameter, write 5-10 words in active voice describing *what* and *why*.
+When tools have a `description` parameter, write 5-10 words in active voice.
 ```
+
+### Category-Specific Fragments
+
+- **Orchestrator**: Orchestrator guidance (coordinate, don't do everything yourself).
+- **Domain expert**: Hard-refuse on out-of-domain requests; no delegation.
+- **Non-worker, non-domain-expert**: Delegation tips, todo-before-delegation, and agent-directed monitoring guidance (how to use `conversation_get` + sleep to poll delegatees).
 
 ### Proactive Context (dynamic)
 If RAG is configured and the vector search returns results with score ≥ 0.65, a `<proactive-context>` block is appended to the system prompt with up to 5 relevant snippets (collections searched: `conversations`, `project_<id>`, `agent_<pubkey>`).
@@ -145,7 +206,7 @@ If RAG is configured and the vector search returns results with score ≥ 0.65, 
 Implemented in Rust; semantics match the TypeScript originals.
 
 ### `shell`
-Execute a shell command in the working directory.
+Execute a shell command in the working directory. Shell sessions auto-load the agent `.env` file and have access to computed env vars (`$AGENT_HOME`, `$PUBKEY`, `$NPUB`, `$PROJECT_BASE`, `$PROJECT_ID`, `$TENEX_BASE_DIR`, `$USER_HOME`).
 
 | Param | Type | Description |
 |-------|------|-------------|
@@ -212,7 +273,7 @@ Replace the agent's in-memory todo list. Full state replacement on every call.
 Todos are persisted to the conversation SQLite store (`AgentContextState.todos`) and reloaded on the next invocation. A `<system-reminder>` with the current todo state is prepended to the user message when todos exist.
 
 ### `delegate`
-Delegate a task to another agent by slug, or to a whole team by team name.
+Delegate a task to another agent by slug, or to a whole team by team name. **Only available to categories that allow delegation** (`principal`, `orchestrator`, `reviewer`, `generalist`). Absent for `worker` and `domain-expert`.
 
 | Param | Type | Description |
 |-------|------|-------------|
@@ -243,16 +304,29 @@ Search the RAG vector store for relevant content.
 
 Disabled (returns error message) when embedding is not configured.
 
+## Supervision Heuristics
+
+`tenex-supervision` is wired into the hook layer. It runs two kinds of checks:
+
+**Pre-tool (blocks tool calls):**
+- `WorkerTodoHeuristic` — blocks non-todo tool calls for `worker` category agents when they have pending todos and haven't created a todo list yet.
+
+**Post-completion (can re-engage the agent):**
+- `PendingTodosHeuristic` — detects completions with unresolved pending todos.
+- `ConsecutiveToolsWithoutTodoHeuristic` — detects agents making many tool calls without a todo list.
+
+When a pre-tool heuristic fires, `ToolCallHookAction::skip(reason)` is returned and the tool call is cancelled with the reason injected as a system reminder. Post-completion detections are tracked but re-engagement is currently surfaced through the hook return value.
+
 ## Iterative Loop
 
-Uses `rig-core`'s `Agent::prompt()` with a `PromptHook` (`EmitHook`):
+Uses `rig-core`'s `Agent::prompt()` with an `EmitHook`:
 
 1. Build system prompt from fragments (including proactive RAG context if available).
 2. Inject todo reminder into the user message if persisted todos exist.
 3. Call `agent.prompt(user_message).with_hook(hook)`.
 4. `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
-5. After each LLM turn: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
-6. Before each tool call: `EmitHook::on_tool_call` emits a `ToolUseIntent` event (except `delegate`, which emits its own after the call with a reference to the delegation event).
+5. **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
+6. **After each LLM turn**: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
 7. Sign and emit the final `CompletionIntent` event with aggregated token usage.
 8. Save the updated todo list to the conversation store.
 
@@ -285,6 +359,7 @@ API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY
 | `tenex-project` | Project SQLite DB (agents, metadata, teams) |
 | `tenex-conversations` | Conversation SQLite store (todo persistence via `AgentContextState`) |
 | `tenex-rag` | RAG: SQLite vector store + embedding client |
+| `tenex-supervision` | Heuristic pre-tool and post-completion checks; `AgentCategory` enum |
 | `tenex-llm-config` | Provider credential resolution |
 
 ## Future Work (not yet implemented)
@@ -295,4 +370,3 @@ API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY
 - **System prompt crate**: Replace inline `prompt.rs` with `tenex-system-prompt` for consistent assembly across binaries.
 - **`no_response` tool**: Suppress the completion event when the agent decides no reply is needed.
 - **`ask` tool**: Pause execution and emit an ask event; wait for a reply on stdin.
-- **AGENTS.md injection**: Include the project's `AGENTS.md` in the project context fragment.
