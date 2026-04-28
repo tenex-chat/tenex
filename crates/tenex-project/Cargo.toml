@@ -1,0 +1,23 @@
+[package]
+name = "tenex-project"
+version = "0.1.0"
+edition = "2021"
+description = "Per-project SQLite-backed view of TENEX project state: agents, skills, transport allowlists, MCP config."
+
+[lib]
+name = "tenex_project"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs-next = "2"
+nostr = "0.44"
+
+[dev-dependencies]
+tempfile = "3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
