@@ -68,7 +68,11 @@ pub enum ConfigCommand {
     /// Configure global provider credentials
     Providers,
     /// Manage LLM configurations (global only)
-    Llm,
+    Llm {
+        /// Show advanced options (temperature, max tokens)
+        #[arg(long)]
+        advanced: bool,
+    },
     /// Configure which model handles what task
     Roles,
     /// Configure embedding model for RAG (global by default, --project for current project)
@@ -107,7 +111,7 @@ impl ConfigCommand {
     fn dispatch_value(&self) -> &'static str {
         match self {
             ConfigCommand::Providers => "providers",
-            ConfigCommand::Llm => "llm",
+            ConfigCommand::Llm { .. } => "llm",
             ConfigCommand::Roles => "roles",
             ConfigCommand::Embed => "embed",
             ConfigCommand::Escalation => "escalation",
@@ -196,6 +200,25 @@ async fn run_providers_submenu(base_dir: &std::path::Path) -> Result<()> {
 }
 
 fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
+    // Mirror the no-providers guard at TS `commands/config/llm.ts:23-29`.
+    // Two-line error: red "❌ No providers configured." then an amber `→`
+    // hint pointing at `tenex config providers`. TS calls process.exit(1)
+    // when the providers map is empty; we mirror with an early return + a
+    // non-zero exit via std::process::exit so the surrounding menu loop
+    // doesn't recurse into a broken editor.
+    let providers = ProvidersDoc::load(base_dir)?;
+    if providers.provider_ids().is_empty() {
+        let red = console::Style::new().red();
+        let amber = crate::tui::theme::display_accent();
+        let bold = console::Style::new().bold();
+        eprintln!("{}", red.apply_to("❌ No providers configured."));
+        eprintln!(
+            "{}{}",
+            amber.apply_to("→"),
+            bold.apply_to(" Run tenex config providers first"),
+        );
+        std::process::exit(1);
+    }
     let _ = crate::onboard::llm_editor::run(base_dir)?;
     Ok(())
 }
@@ -382,13 +405,30 @@ mod tests {
     }
 
     #[test]
+    fn llm_subcommand_exposes_advanced_flag_with_ts_help_text() {
+        // TS source: src/commands/config/llm.ts:11 —
+        //   .option("--advanced", "Show advanced options (temperature, max tokens)")
+        use clap::CommandFactory;
+        let cmd = ConfigArgs::command();
+        let llm = cmd.find_subcommand("llm").unwrap();
+        let advanced = llm
+            .get_arguments()
+            .find(|a| a.get_long() == Some("advanced"))
+            .expect("--advanced flag missing on `tenex config llm`");
+        assert_eq!(
+            advanced.get_help().map(|s| s.to_string()).as_deref(),
+            Some("Show advanced options (temperature, max tokens)"),
+        );
+    }
+
+    #[test]
     fn config_dispatch_value_for_each_variant_matches_ts_subcommand_name() {
         // For every variant, dispatch_value() must equal the same name
         // clap registers so `tenex config <name>` and the section-menu
         // dispatch path use the exact same dispatcher branch.
         let cases = [
             (ConfigCommand::Providers, "providers"),
-            (ConfigCommand::Llm, "llm"),
+            (ConfigCommand::Llm { advanced: false }, "llm"),
             (ConfigCommand::Roles, "roles"),
             (ConfigCommand::Embed, "embed"),
             (ConfigCommand::Escalation, "escalation"),
