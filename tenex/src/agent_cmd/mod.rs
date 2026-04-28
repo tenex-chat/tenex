@@ -19,8 +19,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+pub mod categorize;
 pub mod manager_actions;
 pub mod manager_logic;
+pub mod openclaw_home;
+pub mod openclaw_preview;
+pub mod openclaw_reader;
 pub mod provisioning;
 
 #[derive(Parser, Clone)]
@@ -76,11 +80,8 @@ pub async fn run(args: AgentArgs) -> Result<()> {
 }
 
 async fn run_manage() -> Result<()> {
-    crate::tui::display::hint(
-        "tenex agent (manage) — interactive manager depends on NDK + the bespoke \
-         agentSelect prompt (spec doc 10 §4). Pending port.",
-    );
-    Ok(())
+    let base_dir = crate::store::resolve_base_dir(None);
+    manager_actions::show_main_menu(&base_dir).await
 }
 
 /// Mirror `tenex agent delete <pubkey>` (`src/commands/agent/index.ts:75-83,

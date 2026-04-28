@@ -30,13 +30,17 @@ use anyhow::{anyhow, Result};
 use nostr_sdk::Keys;
 
 use crate::agent_cmd::manager_logic::{
-    find_duplicate_slug_groups, format_projects, load_agents, pick_merge_survivor,
-    ManagedAgent,
+    find_duplicate_slug_groups, format_managed_agent_list_line, format_projects,
+    load_agents, pick_merge_survivor, ManagedAgent,
 };
 use crate::agent_cmd::provisioning::{delete_stored_agent, DeleteOptions};
+use crate::nostr_pub::owner_signer::resolve_owner_signer;
 use crate::nostr_pub::project_mutation::sync_many_project_memberships;
 use crate::store::agent_storage::AgentStorage;
 use crate::store::project_members::list_assignable_project_dtags;
+use crate::tui::custom_prompts::agent_select_prompt::{
+    agent_select_prompt, get_agent_list_height, ActionItem, AgentItem,
+};
 use crate::tui::display;
 use crate::tui::prompts;
 
@@ -578,6 +582,139 @@ pub async fn show_agent_detail(
             }
         }
     }
+}
+
+/// Top-level interactive entry point — `tenex agent manage` (and the
+/// default `tenex agent` invocation) hand off to this. Mirrors
+/// `AgentManager.showMainMenu` (`AgentManager.ts:259-311`) end-to-end.
+///
+/// Iterates a loop:
+/// 1. `load_agents` — read storage + project visibility
+/// 2. `offer_auto_merge_for_duplicate_slugs` — opportunistic clean-up
+/// 3. Print step header `(0/0  Agent Manager)` plus context line
+/// 4. Build `agent_select_prompt` items from `format_managed_agent_list_line`
+///    plus two action rows: `Delete selected (x)`, `Merge selected (m)`
+///    (the `(x)` / `(m)` shortcut hints are dim-styled per TS at
+///    `:265-267`)
+/// 5. Run the prompt with message `Agents (N)` (count dim)
+/// 6. Dispatch:
+///    - `done` (Enter on the `Done` row, or Cancel) → return
+///    - `delete-selected` → [`bulk_delete_agents`], loop
+///    - `merge-selected` → [`bulk_merge_agents`], loop
+///    - `agent:<pubkey>` → [`show_agent_detail`], loop
+///    - `delete:<pubkey>` → [`confirm_and_delete`], loop (TS supports
+///      this even though the live menu doesn't currently emit it)
+///
+/// Owner signer is resolved lazily on the first mutating action so that a
+/// session that just wants to read can skip the nsec prompt. The
+/// `duplicate_merge_dismissed` flag is session-scope: once the user
+/// declines the auto-merge suggestion, we stop offering it for the rest
+/// of the session.
+pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
+    use console::Style;
+    let dim = Style::new().dim();
+
+    let mut owner_keys: Option<Keys> = None;
+    let mut duplicate_merge_dismissed = false;
+    let page_size = get_agent_list_height();
+
+    loop {
+        let mut agents = load_agents(base_dir)?;
+
+        // Auto-merge pass — may need the signer (because mergeAgents calls
+        // syncManyProjectMemberships). Resolve lazily here only if a
+        // duplicate group is actually present.
+        if !duplicate_merge_dismissed && !find_duplicate_slug_groups(&agents).is_empty() {
+            let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
+            let outcome = offer_auto_merge_for_duplicate_slugs(
+                base_dir,
+                &keys,
+                agents,
+                duplicate_merge_dismissed,
+            )
+            .await?;
+            agents = outcome.agents;
+            duplicate_merge_dismissed = outcome.dismissed;
+        }
+
+        display::blank();
+        display::step(0, 0, "Agent Manager");
+        display::context(
+            "Inspect current agent memberships or permanently delete stored agents.",
+        );
+
+        let items: Vec<AgentItem> = agents
+            .iter()
+            .map(|entry| AgentItem {
+                name: format_managed_agent_list_line(entry),
+                value: format!("agent:{}", entry.pubkey),
+                pubkey: Some(entry.pubkey.clone()),
+            })
+            .collect();
+
+        let actions: Vec<ActionItem> = vec![
+            ActionItem {
+                name: format!("Delete selected {}", dim.apply_to("(x)")),
+                value: "delete-selected".to_owned(),
+                key: 'x',
+            },
+            ActionItem {
+                name: format!("Merge selected {}", dim.apply_to("(m)")),
+                value: "merge-selected".to_owned(),
+                key: 'm',
+            },
+        ];
+
+        let message = format!("Agents {}", dim.apply_to(format!("({})", agents.len())));
+        let result = match agent_select_prompt(&message, &actions, &items)? {
+            Some(r) => r,
+            None => return Ok(()), // Esc / Ctrl-C → done
+        };
+
+        match result.action.as_str() {
+            "done" => return Ok(()),
+            "delete-selected" => {
+                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
+                bulk_delete_agents(base_dir, &keys, &agents, &result.selected_pubkeys).await?;
+                continue;
+            }
+            "merge-selected" => {
+                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
+                bulk_merge_agents(base_dir, &keys, &agents, &result.selected_pubkeys).await?;
+                continue;
+            }
+            other if other.starts_with("agent:") => {
+                let pubkey = &other["agent:".len()..];
+                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
+                show_agent_detail(base_dir, &keys, pubkey, page_size).await?;
+                continue;
+            }
+            other if other.starts_with("delete:") => {
+                let pubkey = &other["delete:".len()..];
+                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
+                let entry_clone = agents.iter().find(|a| a.pubkey == pubkey).cloned();
+                confirm_and_delete(base_dir, &keys, entry_clone.as_ref()).await?;
+                continue;
+            }
+            other => {
+                return Err(anyhow!(
+                    "show_main_menu: unexpected action {other:?}"
+                ));
+            }
+        }
+    }
+}
+
+/// Resolve the owner signer once per session, then return cached keys.
+/// Mirrors `AgentManager.getOwnerSigner` (`AgentManager.ts:252-257`).
+fn ensure_owner_signer(
+    cache: &mut Option<Keys>,
+    base_dir: &std::path::Path,
+) -> Result<Keys> {
+    if cache.is_none() {
+        *cache = Some(resolve_owner_signer(base_dir)?);
+    }
+    Ok(cache.clone().expect("just populated"))
 }
 
 /// Union of every agent's `projects` field, deduped while preserving

@@ -135,6 +135,36 @@ impl AgentDoc {
     pub fn is_active(&self) -> bool {
         self.status() != Some("inactive")
     }
+
+    /// Operator-authoritative category. Resolves through
+    /// [`crate::store::role_categories::resolve_category`] so unknown /
+    /// legacy values silently become `None`. Source field: `category`
+    /// (`storage.ts:43`).
+    pub fn category(&self) -> Option<crate::store::role_categories::AgentCategory> {
+        let raw = self.raw.get("category").and_then(Value::as_str);
+        crate::store::role_categories::resolve_category(raw)
+    }
+
+    /// Auto-inferred category (set by the categorize backfill). Distinct
+    /// from `category` so explicit operator provenance is preserved.
+    /// Source field: `inferredCategory` (`storage.ts:48`).
+    pub fn inferred_category(
+        &self,
+    ) -> Option<crate::store::role_categories::AgentCategory> {
+        let raw = self.raw.get("inferredCategory").and_then(Value::as_str);
+        crate::store::role_categories::resolve_category(raw)
+    }
+
+    /// Convenience: read `description`, `instructions`, and `useCriteria`.
+    pub fn description(&self) -> Option<&str> {
+        self.raw.get("description").and_then(Value::as_str)
+    }
+    pub fn instructions(&self) -> Option<&str> {
+        self.raw.get("instructions").and_then(Value::as_str)
+    }
+    pub fn use_criteria(&self) -> Option<&str> {
+        self.raw.get("useCriteria").and_then(Value::as_str)
+    }
 }
 
 // ───────────────────────── index file ─────────────────────────────────────
@@ -1038,6 +1068,34 @@ impl AgentStorage {
         Ok(out)
     }
 
+    /// Mirror `updateInferredCategory` (`AgentStorage.ts:920-934`).
+    ///
+    /// Loads the agent, sets the `inferredCategory` field to the
+    /// canonical kebab-case literal, and calls [`Self::save_agent`] (which
+    /// applies the persistence sanitiser + index updates). Returns
+    /// `Ok(false)` when the agent file is missing — matches TS
+    /// `if (!agent) { logger.warn(...); return false; }` at `:921-925`.
+    ///
+    /// The TS API stores the category as a string literal. Taking
+    /// [`crate::store::role_categories::AgentCategory`] here makes it
+    /// impossible for the caller to write a stale literal — the enum is
+    /// the only spelling on disk.
+    pub fn update_inferred_category(
+        &mut self,
+        pubkey: &str,
+        inferred: crate::store::role_categories::AgentCategory,
+    ) -> Result<bool> {
+        let Some(mut agent) = AgentDoc::load(&self.base_dir, pubkey)? else {
+            return Ok(false);
+        };
+        agent.raw_mut().insert(
+            "inferredCategory".into(),
+            Value::String(inferred.as_str().to_owned()),
+        );
+        self.save_agent(&agent)?;
+        Ok(true)
+    }
+
     /// `rebuildIndex` (`AgentStorage.ts:374-422`).
     ///
     /// Rebuilds `bySlug` and `byEventId` by scanning every agent file.
@@ -1518,6 +1576,53 @@ mod tests {
         assert_eq!(doc.event_id(), Some("evt1"));
         assert_eq!(doc.status(), Some("active"));
         assert!(doc.is_active());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn agent_category_accessors_resolve_through_role_categories() {
+        use crate::store::role_categories::AgentCategory;
+        let base = unique_temp();
+        let pubkey = "categorised";
+        let canonical = br#"{
+  "nsec": "nsec1foo",
+  "slug": "alpha",
+  "name": "Alpha",
+  "role": "thinker",
+  "category": "domain-expert",
+  "inferredCategory": "worker",
+  "description": "small philosopher",
+  "instructions": "be careful",
+  "useCriteria": "always"
+}"#;
+        write_file(&agent_file_path(&base, pubkey), canonical);
+        let doc = AgentDoc::load(&base, pubkey).unwrap().unwrap();
+        assert_eq!(doc.category(), Some(AgentCategory::DomainExpert));
+        assert_eq!(doc.inferred_category(), Some(AgentCategory::Worker));
+        assert_eq!(doc.description(), Some("small philosopher"));
+        assert_eq!(doc.instructions(), Some("be careful"));
+        assert_eq!(doc.use_criteria(), Some("always"));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn agent_category_unknown_resolves_to_none() {
+        // Legacy values like "executor" / "expert" / "advisor" are
+        // mentioned in storage.ts as auto-migrated. The strict resolver
+        // returns None for them; the caller decides whether to migrate
+        // or leave the on-disk value alone.
+        let base = unique_temp();
+        let pubkey = "legacy";
+        let canonical = br#"{
+  "nsec": "nsec1foo",
+  "slug": "alpha",
+  "name": "Alpha",
+  "role": "thinker",
+  "category": "executor"
+}"#;
+        write_file(&agent_file_path(&base, pubkey), canonical);
+        let doc = AgentDoc::load(&base, pubkey).unwrap().unwrap();
+        assert_eq!(doc.category(), None);
         std::fs::remove_dir_all(&base).ok();
     }
 

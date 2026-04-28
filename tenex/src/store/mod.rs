@@ -25,6 +25,7 @@ pub mod mcp;
 pub mod project_members;
 pub mod project_mutation;
 pub mod providers;
+pub mod role_categories;
 pub mod tenex_config;
 
 /// Resolve the TENEX base directory. Precedence:
