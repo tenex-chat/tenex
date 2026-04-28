@@ -67,10 +67,13 @@ Wired and supervised. Generates kind:513 metadata events. TS in-process summariz
 Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` with the triggering Nostr event on stdin. Currently includes:
 - **Streaming LLM output**: `stream_prompt` via rig-core, accumulating text deltas; final `ConversationIntent` emitted with real token usage from `FinalResponse`
 - **FS tools (permission-gated)**: full-project tools (`fs_read`, `fs_write`, `fs_edit`, `fs_glob`, `fs_grep`) when granted; otherwise home-sandboxed variants (`HomeFsReadTool` etc.) restricted to `~/.tenex/home/<pubkey8>/` with path traversal guard
-- Shell tool
-- Delegate tool (reads project DB, emits delegation intents)
-- RAG index + search tools (via `tenex-rag`, optional — disabled if embed not configured)
+- Shell tool (`shell`)
+- **Delegation tools**: `delegate` (emit delegation intent), `delegate_crossproject` (cross-project delegation), `delegate_followup` (follow up on existing delegation), `self_delegate` (re-queue self with different context)
+- **Interaction tools**: `ask` (request clarification from user), `learn` (persist new fact to agent home)
+- **Project tools**: `project_list` (enumerate projects from base dir)
+- **RAG tools**: `rag_add_documents` (add docs to collection), `rag_search` (vector search), `rag_collection_list`, `rag_collection_delete` — all optional if embed not configured
 - **Skills tools**: `skill_list` (discover skills by scope) + `skills_set` (apply/remove per-conversation)
+- **Todo tool**: `todo_write` (create/update task list)
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
@@ -78,6 +81,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - Supervision heuristics: `tenex-supervision` drives post-completion re-engagement, todo nudging, delegation gating by category
 - **Skills persistence**: loads `self_applied_skills` + todos from conversation store on startup; saves both atomically via `save_context_state` on completion
 - **Preloaded skills block**: agent config `default.skills` + conversation-scoped self-applied skills injected into system prompt
+- **NOTE**: Conversation history is NOT loaded — each invocation is stateless from the LLM's perspective. `tenex-context` is built but not yet wired.
 
 ### `tenex-protocol`
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
@@ -128,6 +132,18 @@ The `tenex` binary now includes:
 - **Provider ID constants** (`store/provider_ids.rs`): canonical string IDs for all 7 providers — eliminates magic strings
 - **Codex LLM config options** (`store/llm_config_options.rs`): effort/summary/personality/approvalPolicy/sandboxPolicy enums
 - **Utils library ports**: `utils/error_formatter.rs` (ToolError + format_tool_error), `utils/parse_dotenv.rs` (strict .env parser), `utils/time.rs` (format_time_ago, format_relative_time_short, format_uptime_ms)
+- **Store utilities**: `store/agent_home_env.rs` (agent home .env helpers), `store/agent_home_files.rs` (agent home file listing), `store/event_ids.rs` (event ID types + shortening), `store/path_safety.rs` (path traversal guard), `store/project_ids.rs` (project ID normalization/validation)
+- **Utils**: `utils/path_expand.rs` (tilde expansion, $AGENT_HOME resolution)
+
+---
+
+## Architecture Observations (ninth pass drift check)
+
+- **TS `ProjectRuntime.ts` is dead code in the default path**: `tenex daemon` uses `tenex runtime` (Rust) by default. TS ProjectRuntime is only invoked via `--ts` / `--boot-command`. Safe to remove on full TS retirement.
+- **No dual-publish**: Since TS ProjectRuntime is not the default, status events (24010/24133) are only published by Rust. No conflict.
+- **`PubkeyService.ts`** correctly delegates to `identityDaemonClient` (Rust daemon) — no drift.
+- **`LlmConfigClient.ts`** correctly uses the Rust Unix-socket IPC — no drift.
+- **Conversation history gap**: `tenex-context` has a full `project()` function that loads history from `ConversationStore`. Not yet called from `tenex-agent` — each invocation is stateless. This is the top remaining gap.
 
 ---
 
@@ -142,9 +158,17 @@ The `tenex` binary now includes:
 
 ## Compilation Status
 
-**As of 2026-04-28 (eighth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (ninth debt check pass): workspace compiles clean — zero errors.**
 
-Resolved this pass (no compilation errors, all new work committed):
+Resolved between eighth and ninth passes (automated hourly check + committed):
+- **New tools**: `ask`, `delegate_crossproject`, `delegate_followup`, `learn`, `project_list`, `self_delegate`
+- **RAG refactor**: `rag_index` replaced by `rag_add_documents` + `rag_collection_list` + `rag_collection_delete`
+- **Protocol extensions**: new delegation and followup intents in `intent.rs` + `encoder.rs`
+- **Store utilities**: agent_home_env, agent_home_files, event_ids, path_safety, project_ids
+- **Prompt fix**: removed unavailable `conversation_get` from monitoring guidance (P1 fix)
+- **Delegate fix**: returns delegation event ID for use by `delegate_followup` (P2 fix)
+
+Resolved in eighth pass:
 - **Streaming LLM responses**: `stream_prompt` + `StreamExt` loop in `run_agent!` macro; real token usage from `FinalResponse`
 - **Home-sandboxed FS tools**: five `HomeFsXxxTool` variants with path traversal guard; `build_fs_tools()` dispatches per `granted_tools`
 - **Skills bug fixes**: char-boundary truncation, atomic snapshot/restore on remove+add failure
