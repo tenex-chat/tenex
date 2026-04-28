@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (thirteenth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (fifteenth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -81,6 +81,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
 - Agent home directory: per-agent `~/.tenex/home/<pubkey8>/` with `.env` auto-loading and `+filename` injection
+- **Post-completion re-engagement loop**: `tenex-agent` runs an `'agent_loop` — after each LLM turn, `Supervisor::check_post_completion` inspects pending todos. If unfinished work remains, supervision injects a nudge and the agent re-runs with the extended history rather than terminating. Loop is guarded by `MAX_RETRIES = 3`.
 - Supervision heuristics: `tenex-supervision` drives post-completion re-engagement, todo nudging, delegation gating by category
 - **Skills persistence**: loads `self_applied_skills` + todos from conversation store on startup; saves both atomically via `save_context_state` on completion
 - **Preloaded skills block**: agent config `default.skills` + conversation-scoped self-applied skills injected into system prompt
@@ -176,7 +177,7 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-28 (fourteenth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (fifteenth debt check pass): workspace compiles clean — zero errors.**
 
 **MILESTONE: tenex-agent is live-tested end-to-end (see `RUST_REPORT.md`)**:
 - Basic completion ✅, streaming (kind:24135 deltas) ✅, final ConversationIntent ✅
@@ -185,6 +186,10 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between fourteenth and fifteenth passes:
+- **Post-completion re-engagement loop**: `'agent_loop` in `tenex-agent/src/main.rs`; `Supervisor::check_post_completion` called after each LLM turn; `PostCompletionOutcome::ReEngage` pushes the prior exchange into history and loops with a supervision nudge; `Accept` breaks the loop; `MAX_RETRIES = 3` prevents runaway re-engagement
+- **Supervision heuristic unit tests**: 13 tests across `consecutive_tools_without_todo.rs`, `pending_todos.rs`, and `worker_todo.rs` — threshold/below-threshold, done/skipped/delegation suppression, category bypass, tool allow-list
 
 Resolved between thirteenth and fourteenth passes:
 - **New tools**: conversation_get, conversation_list, change_model, kill (scheduled tasks), schedule_task
