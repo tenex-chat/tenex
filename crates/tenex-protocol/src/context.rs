@@ -4,7 +4,7 @@
 //! registry) populate this struct. The encoder consumes it as plain data — it
 //! never reaches into globals.
 
-use crate::refs::{ConversationRef, PrincipalRef, ProjectRef};
+use crate::refs::{ConversationRef, MessageRef, PrincipalRef, ProjectRef};
 
 #[derive(Debug, Clone)]
 pub struct EncodingContext {
@@ -13,6 +13,11 @@ pub struct EncodingContext {
     /// Root of the conversation thread. `None` for delegation/ask/intervention
     /// (those events start fresh threads).
     pub conversation_root: Option<ConversationRef>,
+    /// The event our reply should thread directly to. Emitted as an
+    /// `["e", id, "", "reply"]` tag whenever `conversation_root` is present.
+    /// May equal the root (when replying to the first message in a thread);
+    /// the encoder emits the reply tag regardless.
+    pub triggering_message: Option<MessageRef>,
     /// Pre-resolved completion p-tag recipient. The delegation chain may
     /// override the trigger when completions need to route up the stack.
     pub completion_recipient: Option<PrincipalRef>,

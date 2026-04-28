@@ -19,6 +19,11 @@ pub fn e_root_tag(root_id: &EventId) -> Result<Tag, EncodeError> {
     Tag::parse(["e", &root_id.to_hex(), "", "root"]).map_err(|e| EncodeError::Tag(e.to_string()))
 }
 
+pub fn e_reply_tag(event_id: &EventId) -> Result<Tag, EncodeError> {
+    Tag::parse(["e", &event_id.to_hex(), "", "reply"])
+        .map_err(|e| EncodeError::Tag(e.to_string()))
+}
+
 pub fn p_tag(principal: &PrincipalRef) -> Result<Tag, EncodeError> {
     let PrincipalRef::Nostr { pubkey, .. } = principal;
     Tag::parse(["p", &pubkey.to_hex()]).map_err(|e| EncodeError::Tag(e.to_string()))

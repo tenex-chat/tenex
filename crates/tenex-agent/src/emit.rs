@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 use tenex_protocol::{
-    Channel, ConversationRef, EncodingContext, PrincipalRef, ProjectRef,
+    Channel, ConversationRef, EncodingContext, MessageRef, PrincipalRef, ProjectRef,
 };
 
 /// Token-and-RAL accumulator across all turns of a single agent invocation.
@@ -29,6 +29,7 @@ pub struct EmitState {
     pub channel: Arc<dyn Channel>,
     pub project: ProjectRef,
     pub triggering_principal: PrincipalRef,
+    pub triggering_message: Option<MessageRef>,
     pub conversation_root: Option<ConversationRef>,
     pub model: String,
     pub meta: Arc<Mutex<AgentMeta>>,
@@ -39,6 +40,7 @@ impl EmitState {
         EncodingContext {
             project: self.project.clone(),
             conversation_root: self.conversation_root.clone(),
+            triggering_message: self.triggering_message.clone(),
             completion_recipient: None,
             triggering_principal: self.triggering_principal.clone(),
             ral,

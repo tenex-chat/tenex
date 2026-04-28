@@ -11,12 +11,12 @@ use crate::intent::{
     AskIntent, AskQuestion, CompletionIntent, ConversationIntent, DelegationIntent, ErrorIntent,
     Intent, InterventionReviewIntent, LessonIntent, StreamTextDeltaIntent, ToolUseIntent,
 };
-use crate::refs::ConversationRef;
+use crate::refs::{ConversationRef, MessageRef};
 
 use super::kinds;
 use super::tags::{
     add_llm_metadata_tags, add_llm_usage_tags, add_standard_tags, e_agent_definition_tag,
-    e_root_tag, forward_branch_team, p_tag, project_a_tag, q_tag,
+    e_reply_tag, e_root_tag, forward_branch_team, p_tag, project_a_tag, q_tag,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -57,6 +57,9 @@ fn add_conversation_tags(
 ) -> Result<EventBuilder, EncodeError> {
     if let Some(ConversationRef::Nostr { root_event_id }) = ctx.conversation_root.as_ref() {
         builder = builder.tag(e_root_tag(root_event_id)?);
+        if let Some(MessageRef::Nostr { event_id }) = ctx.triggering_message.as_ref() {
+            builder = builder.tag(e_reply_tag(event_id)?);
+        }
     }
     Ok(builder)
 }
@@ -342,6 +345,7 @@ mod tests {
             conversation_root: Some(ConversationRef::Nostr {
                 root_event_id: EventId::all_zeros(),
             }),
+            triggering_message: Some(MessageRef::Nostr { event_id: EventId::all_zeros() }),
             completion_recipient: None,
             triggering_principal: PrincipalRef::Nostr {
                 pubkey: keys.public_key(),
@@ -428,9 +432,28 @@ mod tests {
     }
 
     #[test]
+    fn threaded_events_emit_root_and_reply_tags() {
+        let ctx = test_ctx();
+        let intent = ConversationIntent {
+            content: "hi".into(),
+            is_reasoning: false,
+            usage: None,
+            metadata: None,
+        };
+        let builders =
+            NostrEncoder::encode(&Intent::Conversation(intent), &ctx).expect("encode");
+        let tags = signed_tags(builders.into_iter().next().unwrap());
+        let e_tags: Vec<&Vec<String>> = tags.iter().filter(|t| t[0] == "e").collect();
+        assert_eq!(e_tags.len(), 2, "expected one root and one reply e-tag");
+        assert!(e_tags.iter().any(|t| t.len() >= 4 && t[3] == "root"));
+        assert!(e_tags.iter().any(|t| t.len() >= 4 && t[3] == "reply"));
+    }
+
+    #[test]
     fn delegation_omits_e_root_and_prepends_label() {
         let mut ctx = test_ctx();
         ctx.conversation_root = None;
+        ctx.triggering_message = None;
         let recipient_keys = Keys::generate();
         let intent = DelegationIntent {
             items: vec![crate::intent::DelegationRequest {

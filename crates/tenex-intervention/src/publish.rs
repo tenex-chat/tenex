@@ -66,6 +66,7 @@ impl Publisher {
         let ctx = EncodingContext {
             project: project_ref,
             conversation_root: None,
+            triggering_message: None,
             completion_recipient: None,
             triggering_principal: target,
             ral: 0,

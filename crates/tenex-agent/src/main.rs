@@ -161,6 +161,7 @@ async fn main() -> Result<()> {
         channel: channel.clone(),
         project: project_ref,
         triggering_principal: envelope.principal.clone(),
+        triggering_message: Some(envelope.message.clone()),
         conversation_root,
         model: model_string.clone(),
         meta: Arc::new(Mutex::new(AgentMeta::new())),
